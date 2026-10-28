@@ -56,6 +56,7 @@ class ContextMediaRepository(Protocol):
         workspace_id: UUID,
         *,
         viewer: ActorIdentity | None = None,
+        viewer_role: str | None = None,
         created_by: ActorIdentity | None = None,
         page_id: UUID | None = None,
         orphan_only: bool = False,
@@ -128,8 +129,7 @@ class ContextMediaUnitOfWork(Protocol):
 
 
 class ContextMediaUnitOfWorkFactory(Protocol):
-    # D-7 (doc/design/workspace-database-separation-plan.md): Context media is
-    # workspace-owned data (workspace_id is part of every table's primary
+    # Context media is workspace-owned data (workspace_id is part of every primary
     # key), so the factory routes per call instead of pinning one session
     # source at construction -- there is no single "the" plane to bind ahead
     # of time.

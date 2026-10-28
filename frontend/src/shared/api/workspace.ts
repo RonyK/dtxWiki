@@ -1,8 +1,10 @@
 import { apiRequest } from "./client";
 import { translate } from "../i18n";
+import { beginTreeFavoriteRead, clearTreeFavoriteCache, reconcileTreeFavorites } from "./treeFavorites";
 
 const SELECTED_WORKSPACE_ID_KEY = "dtxwiki.selectedWorkspaceId";
 const SELECTED_WORKSPACE_SLUG_KEY = "dtxwiki.selectedWorkspaceSlug";
+const WORKSPACE_LIST_REQUEST_TIMEOUT_MS = 30_000;
 
 export type WorkspaceSummary = {
   id: string;
@@ -15,8 +17,8 @@ export type WorkspaceSummary = {
   join_policy?: string;
   role?: string | null;
   member_count?: number | null;
-  // WS-09: distinguishes two shared Personal workspaces (same default
-  // title, same initials) in the switcher when viewing someone else's.
+  // WS-09: distinguishes workspaces with the same title (and initials) in
+  // the switcher by naming who owns each one.
   owner_display_name?: string | null;
 };
 
@@ -24,7 +26,6 @@ export type WorkspaceListData = {
   workspaces: WorkspaceSummary[];
   current_workspace_id: string | null;
   default_workspace_id?: string | null;
-  personal_workspace_id?: string | null;
 };
 
 export type WorkspaceListResponse = {
@@ -84,6 +85,10 @@ export type TreeNodePayload = {
   visibility_status: string;
   children_count: number;
   has_children?: boolean;
+  content_changed_at?: string | null;
+  review_status?: "pending" | "changes_requested" | null;
+  review_requested_at?: string | null;
+  is_favorite?: boolean;
   breadcrumb: Array<{
     id: string;
     section: string;
@@ -129,10 +134,28 @@ export type TreeNodeReorderInput = {
   direction: "up" | "down";
 };
 
+async function requestWorkspaceList() {
+  // This shared GET owns its cancellation: a caller must not abort another
+  // caller's deduplicated request. Keep the deadline through JSON body reading,
+  // so receiving headers alone cannot leave workspace hydration pending.
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    WORKSPACE_LIST_REQUEST_TIMEOUT_MS,
+  );
+  try {
+    return await apiRequest<WorkspaceListResponse>("/api/v1/workspaces", {
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function listWorkspaces() {
   const generation = workspaceSessionGeneration;
   if (!workspaceListRequest || workspaceListRequest.generation !== generation) {
-    const promise = apiRequest<WorkspaceListResponse>("/api/v1/workspaces")
+    const promise = requestWorkspaceList()
       .then((response) => {
         if (workspaceSessionGeneration === generation) {
           cacheWorkspaceSelection(response.data);
@@ -330,15 +353,6 @@ export function resolveSelectedWorkspaceId(data: WorkspaceListData) {
     setSelectedWorkspace(defaultWorkspace);
     return defaultWorkspace.id;
   }
-  const personalWorkspace = data.personal_workspace_id
-    ? data.workspaces.find(
-        (workspace) => workspace.id === data.personal_workspace_id,
-      )
-    : null;
-  if (personalWorkspace) {
-    setSelectedWorkspace(personalWorkspace);
-    return personalWorkspace.id;
-  }
   const fallback = data.workspaces.length === 1 ? data.workspaces[0] : null;
   setSelectedWorkspace(fallback);
   return fallback?.id ?? null;
@@ -368,6 +382,7 @@ export function currentWorkspaceSelection() {
 }
 
 export function clearPersistedWorkspaceId() {
+  clearTreeFavoriteCache();
   // Fence both the selection snapshot and any request started under the prior
   // authenticated identity. Fetch cannot be cancelled reliably here, but a
   // late completion must neither repopulate this session's cache nor dedupe a
@@ -425,16 +440,16 @@ export async function listTreeData(
   workspaceId: string,
   section?: string,
 ): Promise<TreeListData> {
+  const favoriteRead = beginTreeFavoriteRead();
   const query = section
     ? `?${new URLSearchParams({ section }).toString()}`
     : "";
   const response = await apiRequest<{ data: TreeNodePayload[] | TreeListData }>(
     `/api/v1/workspaces/${workspaceId}/tree${query}`,
   );
-  if (Array.isArray(response.data)) {
-    return { nodes: response.data, policies: {} };
-  }
-  return response.data;
+  const data = Array.isArray(response.data) ? { nodes: response.data, policies: {} } : response.data;
+  reconcileTreeFavorites(workspaceId, data.nodes, favoriteRead);
+  return data;
 }
 
 export async function createTreeFolder(

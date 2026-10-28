@@ -14,7 +14,11 @@ from backend.models.context_media import ContextMediaAsset
 from backend.models.library import LibraryItem
 from backend.models.user import User
 from backend.models.workspace_join import WorkspaceJoinRequest
-from backend.repositories.workspace_scoped import get_in_workspace
+from backend.repositories.workspace_scoped import (
+    get_in_workspace,
+    select_in_workspace,
+    select_in_workspace_by_ids,
+)
 from backend.scripts.seed_dev import seed_default_workspace
 
 
@@ -84,6 +88,73 @@ def test_get_in_workspace_returns_none_for_a_nonexistent_id():
             )
             is None
         )
+
+
+def test_scoped_batch_excludes_other_workspaces_and_handles_empty_ids():
+    factory = _session_factory()
+    with factory() as session:
+        home = seed_default_workspace(session, slug="batch-home")
+        other = seed_default_workspace(session, slug="batch-other")
+        items = [
+            LibraryItem(
+                workspace_id=workspace.id,
+                connector_type="manual",
+                format_hint="unknown",
+                uri=f"file:///{index}",
+                metadata_json={},
+                trust_level="unknown",
+                lifecycle_status="registered",
+            )
+            for index, workspace in enumerate([home, other])
+        ]
+        session.add_all(items)
+        session.flush()
+        statement = select_in_workspace_by_ids(
+            LibraryItem, workspace_id=home.id, resource_ids=[item.id for item in items]
+        )
+        assert list(session.scalars(statement)) == [items[0]]
+        assert list(
+            session.scalars(
+                select_in_workspace(
+                    LibraryItem,
+                    workspace_id=home.id,
+                    criteria=[LibraryItem.id.in_([item.id for item in items])],
+                )
+            )
+        ) == [items[0]]
+        # Caller-provided predicates can narrow the scope, never replace it.
+        assert (
+            list(
+                session.scalars(
+                    select_in_workspace(
+                        LibraryItem,
+                        workspace_id=home.id,
+                        criteria=[LibraryItem.workspace_id == other.id],
+                    )
+                )
+            )
+            == []
+        )
+        assert (
+            list(
+                session.scalars(
+                    select_in_workspace_by_ids(
+                        LibraryItem, workspace_id=home.id, resource_ids=[]
+                    )
+                )
+            )
+            == []
+        )
+
+
+@pytest.mark.parametrize(
+    "model", [ApiToken, WorkspaceJoinRequest, AuditEvent, User, ContextMediaAsset]
+)
+def test_scoped_batch_rejects_unsupported_model_shapes(model):
+    with pytest.raises(TypeError):
+        select_in_workspace_by_ids(model, workspace_id=uuid4(), resource_ids=[uuid4()])
+    with pytest.raises(TypeError):
+        select_in_workspace(model, workspace_id=uuid4())
 
 
 def test_get_in_workspace_rejects_workspace_plane_composite_identity():
@@ -164,3 +235,75 @@ def test_get_in_workspace_rejects_nullable_workspace_scope(monkeypatch):
                 workspace_id=workspace.id,
                 resource_id=uuid4(),
             )
+
+
+def test_scoped_batch_and_statement_helpers_always_constrain_foreign_id_candidates():
+    from sqlalchemy import or_, select
+
+    from backend.repositories.workspace_scoped import (
+        list_in_workspace,
+        select_in_workspace,
+        where_in_workspace,
+    )
+
+    factory = _session_factory()
+    with factory() as session:
+        home = seed_default_workspace(session, slug="batch-home")
+        other = seed_default_workspace(session, slug="batch-other")
+        own = LibraryItem(
+            workspace_id=home.id,
+            connector_type="manual",
+            format_hint="unknown",
+            uri="file:///own",
+            metadata_json={},
+            trust_level="unknown",
+            lifecycle_status="registered",
+        )
+        foreign = LibraryItem(
+            workspace_id=other.id,
+            connector_type="manual",
+            format_hint="unknown",
+            uri="file:///foreign",
+            metadata_json={},
+            trust_level="unknown",
+            lifecycle_status="registered",
+        )
+        session.add_all([own, foreign])
+        session.flush()
+        candidate_ids = (or_(LibraryItem.id == own.id, LibraryItem.id == foreign.id),)
+        assert list_in_workspace(
+            session, LibraryItem, workspace_id=home.id, conditions=candidate_ids
+        ) == [own]
+        statement = select_in_workspace(
+            LibraryItem,
+            workspace_id=home.id,
+            conditions=(LibraryItem.id == foreign.id,),
+        )
+        assert session.scalars(statement).all() == []
+        # The adapter also scopes an existing projection that began unbounded.
+        narrowed = where_in_workspace(
+            select(LibraryItem),
+            LibraryItem,
+            workspace_id=home.id,
+            conditions=candidate_ids,
+        )
+        assert session.scalars(narrowed).all() == [own]
+        with pytest.raises(TypeError, match="selected workspace model"):
+            where_in_workspace(select(User), LibraryItem, workspace_id=home.id)
+        for unsupported in (User, AuditEvent, ContextMediaAsset):
+            with pytest.raises(TypeError):
+                list_in_workspace(session, unsupported, workspace_id=home.id)
+
+
+def test_statement_adapter_rejects_an_unbounded_first_entity_or_scalar_projection():
+    from sqlalchemy import select
+
+    from backend.repositories.workspace_scoped import where_in_workspace
+
+    for statement in [
+        select(User, LibraryItem),
+        select(LibraryItem.id, User),
+        select(LibraryItem.id, LibraryItem),
+    ]:
+        with pytest.raises(TypeError, match="first selected workspace model"):
+            where_in_workspace(statement, LibraryItem, workspace_id=uuid4())

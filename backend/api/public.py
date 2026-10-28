@@ -70,7 +70,7 @@ def _apply_unlisted_headers(response: Response) -> None:
 )
 def read_public_workspace(
     request: Request,
-    workspace_slug: str = Path(min_length=1, max_length=64, pattern=SLUG_PATTERN),
+    workspace_slug: str = Path(min_length=1, max_length=80, pattern=SLUG_PATTERN),
 ):
     session_factory = get_container_from_app(request).db.control_session_factory()
     try:
@@ -94,7 +94,7 @@ def read_public_workspace(
 )
 def read_public_workspace_llms_txt(
     request: Request,
-    workspace_slug: str = Path(min_length=1, max_length=64, pattern=SLUG_PATTERN),
+    workspace_slug: str = Path(min_length=1, max_length=80, pattern=SLUG_PATTERN),
 ):
     container = get_container_from_app(request)
     configured = getattr(request.app.state.settings, "public_base_url", None)
@@ -127,6 +127,8 @@ def get_page_service(request: Request, workspace_slug: str) -> PageService:
     return PageService(
         container.db.session_for(workspace_id),
         job_queue=services.job_queue,
+        body_preparer=services.body_preparer,
+        lint_registry=services.lint_registry,
     )
 
 
@@ -140,7 +142,7 @@ def read_public_page(
     response: Response,
     # Bounded like the authenticated by-slug route (max_length=64): the regex
     # alone is unbounded, and this endpoint is unauthenticated + unthrottled.
-    workspace_slug: str = Path(min_length=1, max_length=64, pattern=SLUG_PATTERN),
+    workspace_slug: str = Path(min_length=1, max_length=80, pattern=SLUG_PATTERN),
     slug: str = Path(min_length=1, max_length=64, pattern=PAGE_SLUG_PATTERN),
 ):
     try:
@@ -173,7 +175,7 @@ def read_public_page(
 def read_public_context_media(
     request: Request,
     asset_id: UUID,
-    workspace_slug: str = Path(min_length=1, max_length=64, pattern=SLUG_PATTERN),
+    workspace_slug: str = Path(min_length=1, max_length=80, pattern=SLUG_PATTERN),
     slug: str = Path(min_length=1, max_length=64, pattern=PAGE_SLUG_PATTERN),
 ):
     container = get_container_from_app(request)

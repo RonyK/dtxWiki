@@ -139,12 +139,13 @@ test.describe("CSS cascade regressions @cross-browser", () => {
  *
  * jsdom applies no author stylesheets and implements no grid layout, so a
  * unit test asserting the JSX shape (or even the DOM class list) would pass
- * whether or not this regresses. Every assertion below reads real computed
- * geometry from a browser with the app's own stylesheets loaded, exactly
- * like the CSS cascade regressions above.
+ * whether or not this regresses. U-1 and U-5 read real computed geometry
+ * from a browser with the app's own stylesheets loaded, exactly like the CSS
+ * cascade regressions above, so they run on every engine. U-7 checks only
+ * which badge text renders and stays on Chromium.
  */
-test.describe("U-1/U-5/U-7: entity-row badge grid overflow @cross-browser", () => {
-  test("U-1: two badges in one Context row share a grid cell instead of overflowing it", async ({
+test.describe("U-1/U-5/U-7: entity-row badge grid overflow", () => {
+  test("U-1: two badges in one Context row share a grid cell instead of overflowing it @cross-browser", async ({
     page,
   }, testInfo) => {
     // DEV-05 was reported on the phone layout: at 390px the fifth grid child
@@ -358,64 +359,88 @@ test.describe("U-1/U-5/U-7: entity-row badge grid overflow @cross-browser", () =
     await expect(row.locator(".status-pill")).toHaveText(["Draft"]);
   });
 
-  test("U-5: SearchResultRow's joined chip keeps both segments the same height", async ({
+  test("U-5: C2 search cards keep desktop titles inline and mobile titles below the kind @cross-browser", async ({
     page,
   }, testInfo) => {
-    // Search cannot currently reach the stale/archived/no-citation
-    // combination organically in this build (search_service.py hardcodes
-    // citation_available=True and archived=False; stale is unreachable under
-    // the lifecycle DB check constraint). This probes the actual SearchResultRow
-    // markup shape synthetically instead, the same strategy
-    // UI-02/UI-03 above use for cascade behavior jsdom cannot observe.
-    //
-    // The original U-5 guarded a grid track overflow: the row was an
-    // .operations-row grid and a 5th child spilled out of the card. The row
-    // is a block card now, so that failure mode is structurally gone. What
-    // replaced it is the drift this redesign was done to fix -- the match
-    // reason and the open action are two segments of ONE bordered box, and
-    // they must not end up at different heights the way the old separate
-    // chips did (20px against 24px).
-    await authenticatePage(page, testInfo, "u5-search-probe");
-    await page.goto("/dashboard");
-
-    const probe = await page.evaluate(() => {
-      const row = document.createElement("div");
-      row.className = "search-result-row";
-      row.innerHTML = `
-        <div class="search-result-body">
-          <p class="search-result-title">
-            <span class="search-result-kind" data-identity="context">Context page</span>
-            <span>Title</span>
-          </p>
-          <p class="search-result-snippet">snippet</p>
-          <span class="row-badges search-result-chips">
-            <span class="search-source-chip">
-              <span class="search-source-chip__reason">Keyword</span>
-              <span class="search-source-chip__open" data-identity="context">Open Context</span>
-            </span>
-            <span class="status-pill status-pill-muted compact">stale</span>
-            <span class="status-pill status-pill-muted compact">archived</span>
-            <span class="search-result-meta">No citation</span>
-          </span>
-        </div>
-      `;
-      document.body.appendChild(row);
-      const reason = row.querySelector(".search-source-chip__reason");
-      const open = row.querySelector(".search-source-chip__open");
-      const chips = row.querySelector(".search-result-chips");
-      const result = {
-        reasonHeight: Math.round(reason.getBoundingClientRect().height),
-        openHeight: Math.round(open.getBoundingClientRect().height),
-        // Every badge stays inside the card, however many apply.
-        overflows:
-          Math.round(chips.getBoundingClientRect().right) >
-          Math.round(row.getBoundingClientRect().right),
-      };
-      row.remove();
-      return result;
+    await authenticatePage(page, testInfo, "u5-search-card");
+    const workspace = await currentWorkspace(page.request);
+    const pageId = "aa123456-1111-4111-8111-111111111111";
+    const title = "261023-Search result card design and embedding policy for reviewing long document titles across workspace navigation";
+    const location = ["Product", "Research", "A long ancestor document title retained for screen readers", "Search", "Policies"];
+    // Render the actual component against the real stylesheet. The network
+    // fixture makes long paths and deprecated stale/citation flags repeatable;
+    // these measurements are browser layout evidence, not backend retrieval proof.
+    await page.route(`**/api/v1/workspaces/${workspace.id}/search`, async (route) => {
+      await route.fulfill({ json: { data: {
+        ranked_results: [{
+          id: pageId, type: "context_page", title, snippet: "",
+          summary: "**Embedding** policy explains [retrieval](https://example.com).",
+          matched_name: title, match_reason: "exact_title", location,
+          source_ref: { kind: "context_page", id: pageId },
+          concept_path: `/context/p-${pageId}.md`,
+          score: 1, stale: true, archived: false, citation_available: false,
+        }],
+        total_count: 1, supported_retrieval_modes: ["keyword"],
+      } } });
     });
 
-    expect(probe.reasonHeight).toBe(probe.openHeight);
-    expect(probe.overflows).toBe(false);
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/search?q=embedding");
+      const row = page.getByRole("link", { name: `Open ${title}`, exact: true });
+      await expect(row).toBeVisible();
+      await expect(row).toHaveAttribute("href", `/workspaces/${workspace.id}/context/pages/${pageId}`);
+      await expect(row).toHaveAccessibleDescription(`${location.join(" › ")}. Title match`);
+      await expect(row.locator(".search-result-kind")).toHaveAttribute("data-identity", "context");
+      await expect(row.locator(".search-result-chevron")).toHaveAttribute("aria-hidden", "true");
+      await expect(row.locator(".search-result-snippet")).toHaveText("Embedding policy explains retrieval.");
+      await expect(row.locator(".search-result-reason")).toHaveText("Title match");
+      await expect(row.locator(".search-source-chip, .status-pill")).toHaveCount(0);
+      await expect(row).not.toContainText("Open unavailable");
+      await expect(row).not.toContainText("No citation");
+      await expect(row).not.toContainText(`/context/p-${pageId}`);
+
+      const geometry = await row.evaluate((card) => {
+        const kind = card.querySelector<HTMLElement>(".search-result-kind")!;
+        const titleText = card.querySelector<HTMLElement>(".search-result-title-text")!;
+        const preview = card.querySelector<HTMLElement>(".search-result-snippet")!;
+        const path = card.querySelector<HTMLElement>(".search-result-location")!;
+        const reason = card.querySelector<HTMLElement>(".search-result-reason")!;
+        const rect = (element: HTMLElement) => {
+          const { x, y, width, height, right, bottom } = element.getBoundingClientRect();
+          return { x, y, width, height, right, bottom };
+        };
+        return {
+          card: rect(card), kind: rect(kind), title: rect(titleText),
+          preview: rect(preview), path: rect(path), reason: rect(reason),
+          lineHeight: Number.parseFloat(getComputedStyle(titleText).lineHeight),
+          clamp: getComputedStyle(titleText).webkitLineClamp,
+          pathColor: getComputedStyle(path).color,
+          reasonColor: getComputedStyle(reason).color,
+          horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth,
+        };
+      });
+      if (width === 1280) {
+        expect(geometry.title.x).toBeGreaterThan(geometry.kind.right);
+        expect(geometry.title.y).toBeLessThan(geometry.kind.bottom);
+        expect(geometry.kind.y).toBeLessThan(geometry.title.bottom);
+        expect(geometry.clamp).toBe("2");
+      } else {
+        expect(geometry.title.y).toBeGreaterThanOrEqual(geometry.kind.bottom);
+        expect(Math.abs(geometry.title.x - geometry.kind.x)).toBeLessThanOrEqual(1);
+        expect(geometry.clamp).toBe("3");
+      }
+      expect(geometry.title.height).toBeLessThanOrEqual(geometry.lineHeight * Number(geometry.clamp) + 1);
+      expect(geometry.preview.y).toBeGreaterThanOrEqual(geometry.title.bottom);
+      expect(geometry.path.y).toBeGreaterThanOrEqual(geometry.preview.bottom);
+      expect(geometry.reason.y).toBeGreaterThan(geometry.path.bottom);
+      expect(geometry.pathColor).not.toBe(geometry.reasonColor);
+      expect(geometry.horizontalOverflow).toBe(false);
+      expect(geometry.reason.right).toBeLessThanOrEqual(geometry.card.right);
+      await page.keyboard.press("Tab");
+      await row.focus();
+      await expect(row).toBeFocused();
+      expect(await row.evaluate((element) => getComputedStyle(element).outlineWidth)).toBe("2px");
+    }
   });
 });

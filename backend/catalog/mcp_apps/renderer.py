@@ -74,7 +74,9 @@ class SetupRenderer:
             raise SetupRenderError(
                 f"unsupported setup recipe version: {plan.recipe_version}"
             )
-        normalized_url = _validated_mcp_url(mcp_url)
+        normalized_url = _validated_mcp_url(
+            mcp_url, allow_http_private_network=plan.auth == "access-key"
+        )
         normalized_server_name = _validated_server_name(server_name)
         if shell not in {"powershell", "bash", "zsh"}:
             raise SetupRenderError("unsupported shell")
@@ -323,14 +325,18 @@ def _render_json_template(
     }
 
 
-def _validated_mcp_url(value: str) -> str:
+def _validated_mcp_url(value: str, *, allow_http_private_network: bool = False) -> str:
     # urlsplit strips tab/CR/LF before parsing, so a URL that embeds them
     # would pass the parsed checks below while the raw string this function
     # returns still carries them into rendered slot values. Reject them raw.
     if has_unsafe_control_characters(value):
         raise SetupRenderError("MCP URL contains unsafe control characters")
     try:
-        return normalize_mcp_endpoint_url(value, allow_http_loopback=True)
+        return normalize_mcp_endpoint_url(
+            value,
+            allow_http_loopback=True,
+            allow_http_private_network=allow_http_private_network,
+        )
     except ValueError as exc:
         raise SetupRenderError(str(exc)) from exc
 

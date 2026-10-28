@@ -294,7 +294,25 @@ def test_media_phase_downgrade_refuses_populated_context_media(tmp_path: Path) -
             raw_cursor.execute("PRAGMA foreign_keys=OFF")
             raw_cursor.close()
 
-            workspace_id = _create_workspace(session, "downgrade")
+            # This boundary predates later Workspace columns and ORM defaults.
+            workspace_id = uuid4()
+            session.execute(
+                text(
+                    "INSERT INTO workspace (id, slug, title, name, library_policy, "
+                    "directory_title_key, "
+                    "goal, default_language, write_policy, citation_policy, "
+                    "agent_injection_policy, review_policy, lint_policy, "
+                    "auto_fix_enabled, visibility, created_by_actor_id, "
+                    "owner_actor_id, "
+                    "created_at, updated_at) VALUES (:id, 'media-downgrade', "
+                    "'Media downgrade', 'Media downgrade', '{}', "
+                    "'media downgrade', '', 'en', "
+                    "'{}', '{}', '{}', '{}', '{}', 0, 'private', :actor, :actor, "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                ),
+                {"id": workspace_id.hex, "actor": "00000000000000000000000000000010"},
+            )
+            session.commit()
             blob, inspection_id = media_fixtures._seed_shared_image(
                 session, workspace_id
             )

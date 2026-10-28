@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from backend.api.metrics import inc_mcp_tool_call
 from backend.app.container import ToolCallContext
+from backend.domain.input_policy import InputPolicyError
 from backend.mcp.conversation import resolve_conversation_token
 from backend.mcp.envelope import (
     MCPErrorResponse,
@@ -160,6 +161,14 @@ class _ToolScopeDenied(PermissionError):
     error_code = "scope_denied"
 
 
+class _LiveGrantDenied(PermissionError):
+    """A known live-grant refusal raised only by the runtime preflight."""
+
+    def __init__(self, error_code: str, message: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+
+
 async def call_tool_async(
     name: str,
     arguments: dict[str, Any],
@@ -237,13 +246,26 @@ async def call_tool_async(
                 if db is not None
                 else fallback_session_factory
             )
-            runtime_actors[runtime_workspace_id] = await asyncio.to_thread(
-                _scope_runtime_actor_to_live_grant,
-                actor=actor,
-                workspace_id=runtime_workspace_id,
-                control_factory=control_factory,
-                workspace_session_factory=runtime_session_factory,
-            )
+            try:
+                runtime_actors[runtime_workspace_id] = await asyncio.to_thread(
+                    _scope_runtime_actor_to_live_grant,
+                    actor=actor,
+                    workspace_id=runtime_workspace_id,
+                    control_factory=control_factory,
+                    workspace_session_factory=runtime_session_factory,
+                )
+            except PermissionError as exc:
+                error_code = str(exc).split(":", 1)[0]
+                if error_code not in {
+                    "token_workspace_denied",
+                    "workspace_membership_missing",
+                }:
+                    raise
+                if name == "list_my_workspaces":
+                    # Leave the snapshot intact: lifecycle distinguishes an
+                    # empty original set from candidates that all lost access.
+                    continue
+                raise _LiveGrantDenied(error_code, str(exc)) from exc
 
         if name == "list_my_workspaces":
             lifecycle_result = await asyncio.to_thread(
@@ -475,6 +497,7 @@ async def call_tool_async(
             name=name,
             arguments=trace_arguments,
             payload=trace_payload,
+            read_projection=getattr(response, "_served_read_projection", None),
             mcp_session_id=conversation.token
             or mcp_session_id
             or str(envelope.get("request_id") or ""),
@@ -532,7 +555,7 @@ async def call_tool_async(
             structuredContent=payload,
             isError=True,
         )
-    except (MCPClientRuntimeDenied, _ToolScopeDenied) as exc:
+    except (MCPClientRuntimeDenied, _ToolScopeDenied, _LiveGrantDenied) as exc:
         metric_status = "denied"
         envelope = error_envelope(
             actor,
@@ -579,7 +602,11 @@ async def call_tool_async(
             structuredContent=payload,
             isError=True,
         )
-    except (_ConversationTokenCarrierConflict, _WorkspaceTargetValidationError) as exc:
+    except (
+        _ConversationTokenCarrierConflict,
+        _WorkspaceTargetValidationError,
+        InputPolicyError,
+    ) as exc:
         # Do not pass transport carriers to trace storage or schema validation,
         # and never reflect their values in the validation response. A missing
         # workspace target also lands here before any directory or shard lookup.
@@ -867,6 +894,7 @@ def _persist_trace(
     trace_workspace_id: UUID | None = None,
     create_chat_session: bool = True,
     fail_closed: bool = False,
+    read_projection: dict[str, Any] | None = None,
 ) -> None:
     if not mcp_session_id or trace_workspace_id is None:
         return
@@ -897,6 +925,7 @@ def _persist_trace(
                 completed_at=_utc_now(),
                 latency_ms=latency_ms,
                 create_chat_session=create_chat_session,
+                read_projection=read_projection,
             )
     except Exception:
         # Counted BEFORE the fail_closed branch: a correctness-critical trace

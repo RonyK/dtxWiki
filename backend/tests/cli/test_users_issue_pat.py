@@ -49,7 +49,7 @@ def _create_user(
             "add",
             email,
             "--password",
-            "correct-pass",
+            "correct-password",
             "--db",
             database_url,
         ],
@@ -60,7 +60,7 @@ def _create_user(
     )
     with session_factory() as session:
         user = session.query(User).filter_by(email=email).one()
-        workspace = session.get(Workspace, user.personal_workspace_id)
+        workspace = session.get(Workspace, user.default_workspace_id)
         assert workspace is not None
         return workspace.slug
 
@@ -198,7 +198,7 @@ def test_issue_pat_scope_validation_rejects_unknown(tmp_path, monkeypatch):
         "workspace-admin",
     )
 
-    assert result.exit_code == 1
+    assert result.exit_code == 2
     assert "scope" in result.stderr
 
 

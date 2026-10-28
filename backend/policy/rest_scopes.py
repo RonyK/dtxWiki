@@ -35,6 +35,7 @@ from backend.services.read_errors import RejectedByPolicyError
 
 # (HTTP method, FastAPI route path template) → required scopes (any-of).
 REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
+    ("GET", "/api/v1/context/pages/{page_id}/location"): CONTEXT_PAGE_BODY_SCOPES,
     # /api/v1/workspaces/{workspace_id}/context/pages (P9.1 canonical Context
     # route family -- replaces the old /api/v1/pages* (PageService, P8) and
     # the intermediate context-pages* (DomainReadService/ContextWriteService)
@@ -184,6 +185,10 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
     # handler's owner-role check at all.)
     ("GET", "/api/v1/workspaces/{workspace_id}/tree"): ("read",),
     (
+        "PUT",
+        "/api/v1/workspaces/{workspace_id}/favorites/{target_kind}/{target_id}",
+    ): ("read",),
+    (
         "POST",
         "/api/v1/workspaces/{workspace_id}/reviews/reconciliations/discard-bulk",
     ): ("draft-write",),
@@ -284,6 +289,9 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
     # are gated by role + a personal-queue projection in the handlers.
     ("GET", "/api/v1/workspaces/{workspace_id}/reviews"): ("review-read",),
     ("GET", "/api/v1/workspaces/{workspace_id}/reviews/counts"): ("review-read",),
+    # Captures a signed read-only selection; approval remains a separate
+    # draft-write operation with its own actor/provenance checks.
+    ("POST", "/api/v1/workspaces/{workspace_id}/reviews/selection"): ("review-read",),
     (
         "GET",
         "/api/v1/workspaces/{workspace_id}/reviews/decisions/recent",
@@ -293,6 +301,8 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
         "/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}",
     ): ("review-read",),
     ("GET", "/api/v1/workspaces/{workspace_id}/activity"): ("audit-read",),
+    ("GET", "/api/v1/workspaces/{workspace_id}/activity/feed"): ("audit-read",),
+    ("GET", "/api/v1/workspaces/{workspace_id}/activity/read-group"): ("audit-read",),
     # Same sensitivity tier as /activity (which surfaces job status and the
     # redacted error_code inline -- last_error itself never crosses either
     # API, admin included; it is a protected server-log/DB-diagnostic value
@@ -457,6 +467,8 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
 # callers still pass through workspace/role checks below. DEC-018 keeps
 # AgentPage activation out of MCP/PAT/OAuth scope surfaces entirely.
 REST_SESSION_ONLY_ROUTES: set[tuple[str, str]] = {
+    ("GET", "/api/v1/users/me/deletion-preview"),
+    ("DELETE", "/api/v1/users/me"),
     ("PATCH", "/api/v1/users/me/default-workspace"),
     # PURGE_AUTHZ_PLAN S-1: workspace deletion (and the purge it can trigger)
     # is reachable only by the owner's own browser session -- no PAT/OAuth
@@ -500,6 +512,7 @@ REST_SESSION_ONLY_ROUTES: set[tuple[str, str]] = {
         "/api/v1/workspaces/{workspace_id}/join-requests/{request_id}",
     ),
     ("GET", "/api/v1/workspaces/{workspace_id}/members"),
+    ("GET", "/api/v1/workspaces/{workspace_id}/member-candidates"),
     ("POST", "/api/v1/workspaces/{workspace_id}/members"),
     (
         "PATCH",
@@ -512,6 +525,13 @@ REST_SESSION_ONLY_ROUTES: set[tuple[str, str]] = {
     (
         "POST",
         "/api/v1/workspaces/{workspace_id}/agent/pages/{agent_page_id}/activate",
+    ),
+    # Undoing a review decision reverses a person's judgement (and may
+    # withdraw a publication); no AI-held token may do it.
+    (
+        "POST",
+        "/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decisions/"
+        "{decision_id}/undo",
     ),
 }
 
@@ -544,6 +564,7 @@ REST_SESSION_UNSCOPED_ROUTES: set[tuple[str, str]] = {
 # truth — and keep this comment in sync with the dispatcher when adding
 # new MCP tools.
 SCOPE_EXEMPT_PREFIXES: tuple[str, ...] = (
+    "/api/v1/capabilities",  # Public instance feature/login metadata.
     "/api/v1/auth",
     # Instance server-admin surface is session-only (gated by
     # require_server_admin); bearer tokens carry no session and get 401, so no
@@ -607,10 +628,7 @@ def require_token_scope(
         path=path,
         actor=actor,
     )
-    if (
-        actor.token_kind == "session"
-        and (method, path) in REST_SESSION_UNSCOPED_ROUTES
-    ):
+    if actor.token_kind == "session" and (method, path) in REST_SESSION_UNSCOPED_ROUTES:
         return actor
     if request.path_params.get("workspace_id") is not None:
         return scope_actor_to_request_workspace(request, actor)
@@ -650,8 +668,7 @@ def _require_live_consent_for_bound_workspace(
             detail={
                 "error_code": "token_workspace_denied",
                 "message": (
-                    "token_workspace_denied: OAuth credential has no allowed "
-                    "workspace"
+                    "token_workspace_denied: OAuth credential has no allowed workspace"
                 ),
             },
         )

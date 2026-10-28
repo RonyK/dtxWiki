@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createContext, useContext } from "react";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { Link, MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AskTurnDetail } from "../../../shared/api/operations";
@@ -56,9 +56,54 @@ describe("AskScreen", () => {
     expect(styles).not.toContain(".ask-composer-reserve");
   });
 
+
+  it("refreshes the session list from its menu without replacing the composer or selected session", async () => {
+    let sessionReads = 0;
+    let detailReads = 0;
+    mockFetch((url) => {
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
+        sessionReads += 1;
+        return { data: {
+          items: sessionReads === 1 ? [sessionRef()] : [
+            { ...sessionRef(), id: "new-session", title: "New Ask Probe" }, sessionRef(),
+          ], date_buckets: [], next_cursor: null,
+        } };
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`) {
+        return { data: [] };
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}`) {
+        detailReads += 1;
+        return { data: sessionDetail() };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(
+      <MemoryRouter initialEntries={[`/ask?target=${SESSION_ID}`]}>
+        <Link to="/ask">Main menu Ask</Link>
+        <AskScreen />
+      </MemoryRouter>,
+    );
+    const composer = await screen.findByRole("textbox", { name: "Message" });
+    await waitFor(() => expect(composer).toBeEnabled());
+    await userEvent.type(composer, "Unsent local question");
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Ask" }));
+    await screen.findByText("New Ask Probe");
+    expect(composer).toHaveValue("Unsent local question");
+    expect(sessionReads).toBe(2);
+    expect(detailReads).toBe(1);
+  });
+
   it("renders turns and accepts a placement proposal", async () => {
     let promotedBody: unknown = null;
     let acceptedBody: unknown = null;
+    // The default title is generated from a multi-line question: one line,
+    // at most 60 code points, never a split surrogate pair.
+    const question = `Needle\n${"x".repeat(51)}\u{1F600} tail`;
+    const title = `Needle ${"x".repeat(51)}\u{1F600}`;
     mockFetch((url, init) => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
@@ -77,7 +122,7 @@ describe("AskScreen", () => {
         };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}`) {
-        return { data: sessionDetail() };
+        return { data: sessionDetail([askTurn({ user_message: question })]) };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/turns/${TURN_ID}/promote`) {
         promotedBody = JSON.parse(String(init?.body));
@@ -138,7 +183,7 @@ describe("AskScreen", () => {
       save_mode: "create_page",
       parent_node_id: PARENT_ID,
       page_type: "comparison",
-      title: "Needle",
+      title,
       body_markdown: null,
       alternatives: [],
     });
@@ -146,7 +191,7 @@ describe("AskScreen", () => {
       final_save_mode: "create_page",
       final_parent_node_id: PARENT_ID,
       final_page_type: "comparison",
-      final_title: "Needle",
+      final_title: title,
       target_page_id: null,
       review_required: false,
     });
@@ -1274,8 +1319,10 @@ describe("AskScreen", () => {
     expect(screen.getByLabelText("Ask history")).toHaveTextContent(
       "No sessions yet",
     );
-    expect(screen.getByLabelText("Workspace setup sequence"))
-      .toHaveTextContent("Ask a question");
+    const setup = screen.getByLabelText("Workspace setup sequence");
+    expect(setup).toHaveTextContent("Write Context page");
+    expect(setup).toHaveTextContent("Save or review");
+    expect(setup).not.toHaveTextContent("Ask a question");
     expect(screen.getByRole("button", { name: "New Ask" })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Start first Ask session" }),

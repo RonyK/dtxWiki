@@ -89,14 +89,9 @@
         "description": "Turn important knowledge into durable workspace pages.",
         "action": "Write first Context page"
       },
-      "ask": {
-        "label": "Ask a question",
-        "description": "Ask a question after the workspace has usable evidence.",
-        "action": "Ask a question"
-      },
       "review": {
         "label": "Save or review",
-        "description": "Promote useful answers only after checking placement.",
+        "description": "Review proposed changes before they update the workspace.",
         "action": "Open Review queue"
       }
     }
@@ -106,20 +101,18 @@
     "eyebrow": "Setup",
     "title": "Start your first workspace",
     "next": "Next: {{label}}",
-    "progress": "{{count}} of 4 setup steps complete.",
-    "description": "Add trusted materials, organize durable pages, ask context-aware questions, then review changes before the wiki is updated.",
+    "progress": "{{count}} of {{total}} setup steps complete.",
+    "description": "Add trusted materials, organize durable pages, then review changes before the wiki is updated.",
     "progressLabel": "Workspace setup progress",
-    "personalWorkspaceTitle": "Make your Personal Workspace yours",
-    "personalWorkspaceDescription": "You can rename your Personal Workspace. For ongoing team work, create a separate collaborative workspace from the workspace switcher.",
-    "renamePersonalAction": "Rename Personal",
+    "customizeWorkspaceTitle": "Make this workspace yours",
+    "customizeWorkspaceDescription": "You can rename this workspace. For ongoing team work, create a separate collaborative workspace from the workspace switcher.",
+    "renameWorkspaceAction": "Rename workspace",
     "findWorkspaceTitle": "Looking for a shared workspace?",
     "findWorkspaceDescription": "Browse discoverable workspaces without changing your current selection.",
     "findWorkspaceAction": "Find workspaces",
-    "ask": "Ask",
     "review": "Review",
     "libraryDescription": "Collect source material that answers should cite.",
     "contextDescription": "Keep reviewed pages where the team can read and edit them.",
-    "askDescription": "Ask questions, promote useful answers, and review changes.",
     "reviewDescription": "Approve, reject, or request changes before updates become durable."
   }
 }

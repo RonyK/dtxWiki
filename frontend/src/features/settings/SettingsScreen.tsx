@@ -4,6 +4,7 @@ import {
   Building2,
   CheckCircle2,
   Copy,
+  FlaskConical,
   KeyRound,
   ListChecks,
   LockKeyhole,
@@ -104,6 +105,7 @@ import {
 } from "../../shared/api/workspace";
 import { AdvancedSection } from "../../shared/components/AdvancedSection";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
+import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
 import { CountChip } from "../../shared/components/CountChip";
 import { ListPanelHeader } from "../../shared/components/ListPanelHeader";
 import { PaginatedCredentialList } from "../../shared/components/PaginatedCredentialList";
@@ -113,16 +115,19 @@ import { SearchField } from "../../shared/components/SearchField";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { LintRulesSection } from "./LintRulesSection";
+import { LabsSection } from "./LabsSection";
+import { DeploymentUpdateCard } from "./DeploymentUpdateCard";
 import { AdminJobsSection } from "./AdminJobsSection";
 import { AdminUserRecoverySection } from "./AdminUserRecoverySection";
 import { useDocumentTitle } from "../../shared/hooks/useDocumentTitle";
 import { useMediaQuery } from "../../shared/hooks/useMediaQuery";
 
-import { AttachmentsSection } from "./AttachmentsSection";
+import { AttachmentManager } from "./AttachmentManager";
 import {
   SettingsDirtyProvider,
   useGuardedSettingsChange,
   useRegisterSettingsDirty,
+  useSettingsDirtyCheck,
 } from "./SettingsDirtyRegistry";
 import type { PolicyEditState } from "./SettingsPaneParts";
 import {
@@ -147,20 +152,22 @@ import {
   WorkspaceMembersSection,
 } from "./WorkspaceAccessSettings";
 import { StatusPill } from "../../shared/components/StatusPill";
+import { codePointLength, inputTextError, textInputLimit, trimShortText } from "../../shared/lib/inputPolicy";
 import {
   WorkspaceScopeChips,
   WorkspaceScopePicker,
+  WorkspaceScopeSelector,
   type WorkspaceScopeOption,
 } from "../../shared/components/WorkspaceScopePicker";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { useCursorPage } from "../../shared/hooks/useCursorPage";
-import { canWriteToClipboard, selectText } from "../../shared/lib/clipboard";
+import { writeTextToClipboard, selectText } from "../../shared/lib/clipboard";
 import { i18n, setLocale, translate } from "../../shared/i18n";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { humanizeEnum } from "../../shared/lib/domainLabel";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import {
-  isEditorRole,
   workspaceDeleteDisabledReason,
 } from "../../shared/workspace/permissions";
 import {
@@ -178,6 +185,7 @@ import {
   customFormatOption,
   effectiveFormatUploadLimit,
   familyExtensions,
+  normalizeCustomFormatName,
   parsePolicyBuiltinFormatOverrides,
   parsePolicyCustomFormats,
   parsePolicyFormatFamilies,
@@ -201,6 +209,7 @@ export type SettingsSection =
   | "members"
   | "policies"
   | "mcp"
+  | "labs"
   | "users"
   | "jobs"
   | "attachments"
@@ -273,7 +282,7 @@ class SettingsLocalError extends Error {
     this.name = "SettingsLocalError";
   }
 }
-const CUSTOM_APP_LABEL_MAX_LENGTH = 128;
+const CUSTOM_APP_LABEL_MAX_LENGTH = 160;
 // Loop guard only. A user's approved OAuth apps are bounded by the clients
 // they authorized by hand, so this ceiling is never reached in practice.
 const CONSENT_PAGE_DRAIN_LIMIT = 25;
@@ -413,6 +422,7 @@ export function SettingsScreen() {
 
 function SettingsScreenBody() {
   const { t } = useTranslation("settings");
+  const hasUnsavedSettings = useSettingsDirtyCheck();
   const workspaceContext = useOptionalWorkspaceContext();
   const selectedWorkspaceId =
     workspaceContext?.selectedWorkspace?.id ?? "current-workspace";
@@ -438,6 +448,8 @@ function SettingsScreenBody() {
   const [accessKeySearchDraft, setAccessKeySearchDraft] = useState("");
   const [cleanupCount, setCleanupCount] = useState<number | null>(null);
   const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [cleanupError, setCleanupError] = useState<string | null>(null);
+  const cleanupTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [tokenName, setTokenName] = useState("MCP connection access key");
   const [tokenNameTouched, setTokenNameTouched] = useState(false);
   const [selectedScopes, setSelectedScopes] = useState<string[]>([
@@ -643,6 +655,7 @@ function SettingsScreenBody() {
     error,
     reload: reloadPolicies,
     setData: setPolicies,
+    setError: setPoliciesError,
   } = useAsyncLoad<SettingsPolicies>(
     async () => {
       const workspaceId = await getCurrentWorkspaceId();
@@ -750,6 +763,48 @@ function SettingsScreenBody() {
       ),
     queryKey: `access-keys:${accessKeyFilter}:${accessKeySearch}`,
   });
+  const entryPolicyGenerationRef = useRef(0);
+  const policiesSnapshotRef = useRef(policies);
+  useEffect(() => {
+    policiesSnapshotRef.current = policies;
+  }, [policies]);
+  // Workspace is the Settings home; returning to it refreshes the shared data.
+  useScreenEntryRefresh("/settings", () => {
+    if (!hasUnsavedSettings()) {
+      const snapshot = policies;
+      const workspaceKey = selectedWorkspaceId;
+      const generation = ++entryPolicyGenerationRef.current;
+      const canApply = () =>
+        settingsMountedRef.current &&
+        generation === entryPolicyGenerationRef.current &&
+        workspaceKey === selectedWorkspaceKeyRef.current &&
+        policiesSnapshotRef.current === snapshot &&
+        !hasUnsavedSettings();
+      // Only this passive read preserves unsaved edits. Save-conflict recovery
+      // uses reloadPolicies and must adopt the server's current revision.
+      void getCurrentWorkspaceId()
+        .then((workspaceId) => {
+          if (!workspaceId) {
+            throw new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable);
+          }
+          return getSettingsPolicies(workspaceId);
+        })
+        .then((next) => {
+          if (canApply()) {
+            setPolicies(next);
+            setPoliciesError(null);
+          }
+        })
+        .catch((caught) => {
+          if (canApply()) {
+            setPoliciesError(errorMessage(caught));
+          }
+        });
+    }
+    // The key count also appears in the section navigation, including Workspace.
+    void accessKeyPages.reload();
+  }, { isHome: activeSection === "workspace" });
+
   const tokens = useMemo(
     () => accessKeyPages.page?.data ?? [],
     [accessKeyPages.page],
@@ -908,11 +963,9 @@ function SettingsScreenBody() {
   const selectedWorkspaceRole =
     workspaceContext?.selectedWorkspace?.role ?? fallbackSettingsRole ?? "";
   const canEditPolicies = selectedWorkspaceRole.toLowerCase() === "owner";
-  // Attachments is editor-and-above, not owner-only: a viewer cannot upload,
-  // so "Mine" would always be empty for them and the entry would be a dead
-  // end. Owners additionally get the whole-workspace "All" filter, which is
-  // the only part the endpoint refuses below owner.
-  const canManageAttachments = isEditorRole(selectedWorkspaceRole);
+  // All members can inspect the effective policy and their readable uploads.
+  // Only owners edit retention; each row's server capability gates deletion.
+  const canViewAttachments = isServerAdmin || ["owner", "editor", "viewer"].includes(selectedWorkspaceRole.toLowerCase());
 
   // Every allowed-workspace picker on this screen reads the same membership
   // list the shell switcher does. No second endpoint (section 3.2).
@@ -1384,7 +1437,7 @@ function SettingsScreenBody() {
     );
     const customAppLabel =
       requestSetup.owner.kind === "generic-profile"
-        ? requestSetup.customAppLabel?.trim() ?? ""
+        ? trimShortText(requestSetup.customAppLabel ?? "")
         : null;
     if (requestSetup.owner.kind === "generic-profile" && !customAppLabel) {
       setCustomAppLabelError(
@@ -1395,19 +1448,16 @@ function SettingsScreenBody() {
       customAppLabelRef.current?.focus();
       return;
     }
-    if (
-      customAppLabel != null &&
-      customAppLabel.length > CUSTOM_APP_LABEL_MAX_LENGTH
-    ) {
-      setCustomAppLabelError(
-        t("access.customAppLabelTooLong", {
-          defaultValue: "Use {{max}} characters or fewer.",
-          max: CUSTOM_APP_LABEL_MAX_LENGTH,
-        }),
-      );
+    const customLabelError = customAppLabel == null
+      ? ""
+      : inputTextError(customAppLabel, CUSTOM_APP_LABEL_MAX_LENGTH);
+    if (customLabelError) {
+      setCustomAppLabelError(customLabelError);
       customAppLabelRef.current?.focus();
       return;
     }
+    const nameError = inputTextError(tokenName, 128);
+    if (nameError) { setTokenError(nameError); return; }
     const requestWorkspaceIds = [...effectiveNewKeyWorkspaceIds];
     if (requestWorkspaceIds.length === 0) {
       setTokenError(
@@ -1442,7 +1492,7 @@ function SettingsScreenBody() {
           selectedScopesRef.current,
         );
     try {
-      const typedName = tokenName.trim();
+      const typedName = trimShortText(tokenName);
       const requestedName = uniqueTokenName(typedName, activeTokenNames(tokens));
       const issued = await createApiToken({
         workspace_grants: requestWorkspaceIds.map((workspace_id) => ({
@@ -1544,7 +1594,9 @@ function SettingsScreenBody() {
   }
 
   async function onRenameToken(token: ApiToken) {
-    const nextName = renameDraft.trim();
+    const nameError = inputTextError(renameDraft, 128);
+    if (nameError) { setTokenError(nameError); return; }
+    const nextName = trimShortText(renameDraft);
     if (!nextName) {
       setTokenError(
         t("errors.accessKeyNameRequired", {
@@ -1671,6 +1723,7 @@ function SettingsScreenBody() {
   }
 
   async function requestConnectionCleanup() {
+    setCleanupError(null);
     setCleanupBusy(true);
     clearConsentError();
     try {
@@ -1684,6 +1737,7 @@ function SettingsScreenBody() {
   }
 
   async function confirmConnectionCleanup() {
+    setCleanupError(null);
     setCleanupBusy(true);
     clearConsentError();
     try {
@@ -1691,7 +1745,7 @@ function SettingsScreenBody() {
       await Promise.all([refreshConsents(), refreshPoliciesNow()]);
       setCleanupCount(null);
     } catch (caught) {
-      reportConsentError(caught);
+      setCleanupError(errorMessage(caught));
     } finally {
       setCleanupBusy(false);
     }
@@ -1854,33 +1908,12 @@ function SettingsScreenBody() {
     success: string;
     text: string;
   }) {
-    if (!canWriteToClipboard()) {
-      if (selectText(selectTarget)) {
-        setCopyStatus(t("clipboard.selected", { label, defaultValue: "{{label}} selected" }));
-      } else {
-        setCopyStatus(
-          t("clipboard.unavailable", {
-            label,
-            defaultValue: "Copy unavailable - select the {{label}} text instead",
-          }),
-        );
-      }
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(text);
+    if (await writeTextToClipboard(text)) {
       setCopyStatus(success);
-    } catch {
-      if (selectText(selectTarget)) {
-        setCopyStatus(t("clipboard.selected", { label, defaultValue: "{{label}} selected" }));
-      } else {
-        setCopyStatus(
-          t("clipboard.failed", {
-            label,
-            defaultValue: "Copy failed - select the {{label}} text instead",
-          }),
-        );
-      }
+    } else {
+      setCopyStatus(selectText(selectTarget)
+        ? t("clipboard.selected", { label, defaultValue: "{{label}} selected" })
+        : t("clipboard.failed", { label, defaultValue: "Copy failed - select the {{label}} text instead" }));
     }
   }
 
@@ -1892,6 +1925,8 @@ function SettingsScreenBody() {
     if (updates.length === 0) {
       return false;
     }
+    const validation = policyGroupValidationMessages(group, Object.fromEntries(updates.map(({field, value}) => [field.key, value])));
+    if (Object.keys(validation).length) { setPolicySaveError(Object.values(validation)[0]); return false; }
     const busyKey = `${group}:*`;
     setPolicyBusyKey(busyKey);
     setPolicySaveError(null);
@@ -2156,12 +2191,21 @@ function SettingsScreenBody() {
             {oauthCapabilityUnknown
               ? t("access.oauthCapabilityUnknown", {
                   defaultValue:
-                    "This server's connection settings could not be read, so whether OAuth can be offered is unknown. Reload to try again, or use an Access Key below.",
+                    "This server's connection settings could not be read, so whether OAuth can be offered is unknown. Reload to try again.",
                 })
               : t("access.oauthUnavailable", {
                   defaultValue:
-                    "This server can't offer OAuth (it needs an https URL, and standards-compliant MCP clients refuse a non-https authorization server). Use an Access Key below instead.",
+                    "This server can't offer OAuth (it needs an https URL, and standards-compliant MCP clients refuse a non-https authorization server).",
                 })}
+          </p>
+          <p>
+            <a
+              className="inline-action mcp-access-key-link"
+              href="#mcp-key-setup"
+              onClick={() => mcpKeySetupHeadingRef.current?.focus({ preventScroll: true })}
+            >
+              {t("access.useAccessKey", { defaultValue: "Use an Access Key." })}
+            </a>
           </p>
           {serverOauthReason ? (
             <p className="feature-subtitle">{serverOauthReason}</p>
@@ -2273,32 +2317,6 @@ function SettingsScreenBody() {
           </div>
         </MaybeDisclosure>
       ) : null}
-      <div className="mcp-connection-controls">
-        {oauthConsentFilter === "active" && hiddenConnectionCount > 0 ? (
-          <CountChip
-            compact
-            label={t("connections.hidden", {
-              count: hiddenConnectionCount,
-              defaultValue_one: "expired or revoked connection hidden",
-              defaultValue_other: "expired or revoked connections hidden",
-            })}
-            value={hiddenConnectionCount}
-          />
-        ) : null}
-        <button
-          className="icon-button text-button"
-          disabled={cleanupBusy}
-          onClick={() => void requestConnectionCleanup()}
-          type="button"
-        >
-          <Trash2 size={15} aria-hidden="true" />
-          <span>
-            {t("connections.cleanup", {
-              defaultValue: "Clean up expired and revoked connections",
-            })}
-          </span>
-        </button>
-      </div>
       <div className="mcp-access-subsection">
         {/* Hand-rolled before, which dropped the `.panel-title` class the
             component adds. Revoking the last consent moves focus back here,
@@ -2467,14 +2485,11 @@ function SettingsScreenBody() {
                         <KeyRound size={16} aria-hidden="true" />
                       )}
                       <div className="oauth-consent-details">
-                        <strong>{presentation.label}</strong>
-                  <p>{consent.scope}</p>
-                  <p className="meta-line">
-                    {t("access.consentGrantedMeta", {
-                      defaultValue: "Granted {{granted}}",
-                      granted: formatDateTime(consent.granted_at),
-                    })}
-                  </p>
+                        <div className="mcp-credential-heading"><strong>{presentation.label}</strong><StatusPill compact status={oauthConsentConnectionState(consent)} /></div>
+                  <p className="meta-line">OAuth</p>
+                  <span className="mcp-field-label">{t("mcpCard.permissions")}</span>
+                  <div className="scope-chip-row">{consent.scope.split(/\s+/).filter(Boolean).map(scope => <span className="scope-chip" key={scope}>{scopeLabel(scope, t)}</span>)}</div>
+                  <span className="mcp-field-label">{t("mcpCard.workspaces")}</span>
                   <WorkspaceScopeChips
                     labels={workspaceChipLabels}
                     roleLabel={workspaceRoleLabel}
@@ -2483,16 +2498,10 @@ function SettingsScreenBody() {
                       title: workspace.title,
                       slug: workspace.slug,
                       role: workspace.membership_role,
+                      scopes: consent.scope.split(/\s+/).filter(Boolean),
                     }))}
                   />
-                  <p className="meta-line">
-                    {connectionTimingLabel(
-                      oauthConsentConnectionState(consent),
-                      consent.last_used_at,
-                      consent.next_expiry,
-                      t,
-                    )}
-                  </p>
+                  <McpCredentialTimes kind="oauth" state={oauthConsentConnectionState(consent)} lastUsed={consent.last_used_at} expiry={consent.next_expiry} grantedAt={consent.granted_at} />
                   <details className="oauth-consent-settings">
                     <summary
                       aria-label={t("access.sessionSettingsFor", {
@@ -2595,12 +2604,7 @@ function SettingsScreenBody() {
                       actions on the line below. Two sibling columns used to
                       stretch the chip to the button's height. */}
                   <div className="row-actions oauth-consent-actions">
-                    <div className="row-actions-status">
-                      <StatusPill
-                        compact
-                        status={oauthConsentConnectionState(consent)}
-                      />
-                    </div>
+
                     <div className="row-actions-buttons">
                       <button
                         aria-label={t("access.editWorkspacesFor", {
@@ -2660,6 +2664,33 @@ function SettingsScreenBody() {
               </div>
           </PaginatedCredentialList>
         )}
+      <div className="mcp-connection-controls">
+        <div><strong>{t("mcpCard.cleanupTitle")}</strong><p>{t("mcpCard.cleanupBody")}</p></div>
+        {oauthConsentFilter === "active" && hiddenConnectionCount > 0 ? (
+          <CountChip
+            compact
+            label={t("connections.hidden", {
+              count: hiddenConnectionCount,
+              defaultValue_one: "expired or revoked connection hidden",
+              defaultValue_other: "expired or revoked connections hidden",
+            })}
+            value={hiddenConnectionCount}
+          />
+        ) : null}
+        <button
+          className="icon-button text-button"
+          disabled={cleanupBusy}
+          ref={cleanupTriggerRef}
+          onClick={() => void requestConnectionCleanup()}
+          type="button"
+        >
+          <Trash2 size={15} aria-hidden="true" />
+          <span>
+            {t("mcpCard.cleanupPreview")}
+          </span>
+        </button>
+      </div>
+
       </div>
       </MaybeDisclosure>
       ) : (
@@ -3031,7 +3062,7 @@ function SettingsScreenBody() {
                       aria-invalid={customAppLabelError ? "true" : undefined}
                       disabled={tokenBusy}
                       id="mcp-custom-app-label"
-                      maxLength={CUSTOM_APP_LABEL_MAX_LENGTH}
+                      {...textInputLimit(CUSTOM_APP_LABEL_MAX_LENGTH)}
                       onChange={(event) => {
                         const nextLabel = event.target.value;
                         if (
@@ -3088,7 +3119,7 @@ function SettingsScreenBody() {
                   {t("access.keyName", { defaultValue: "Key name" })}
                   <input
                     disabled={tokenBusy}
-                    maxLength={128}
+                    {...textInputLimit(128)}
                     onChange={(event) => {
                       setTokenNameTouched(true);
                       setTokenName(event.target.value);
@@ -3171,7 +3202,8 @@ function SettingsScreenBody() {
                       workspace: currentWorkspaceTitle,
                     })}
                   </span>
-                  <WorkspaceScopePicker
+                  <WorkspaceScopeSelector
+                    serverPaging
                     describedBy="mcp-key-workspace-scope-hint"
                     disabled={tokenBusy}
                     labels={workspaceScopePickerLabels}
@@ -3505,7 +3537,7 @@ function SettingsScreenBody() {
   return (
     <div className="workspace-screen single-column">
       <section
-        className="feature-main feature-main--reader"
+        className="feature-main feature-main--reader settings-screen"
         ref={settingsMainRef}
       >
         {/* Two items, so this renders at all: Breadcrumbs returns null for a
@@ -3549,7 +3581,7 @@ function SettingsScreenBody() {
               activeSection={activeSection}
               consentCount={consents.length}
               onSelect={selectSection}
-              showAttachments={isServerAdmin || canManageAttachments}
+              showAttachments={canViewAttachments}
               showDeployment={isServerAdmin}
               showUsers={isServerAdmin}
               tokenCount={activeTokenCount}
@@ -3564,11 +3596,8 @@ function SettingsScreenBody() {
             // to any non-admin who followed a shared link, while `showUsers`
             // right below refused the same request. One rule for both.
             showDeployment={isServerAdmin}
-            // Attachments is editor-and-above. A server admin who is not a
-            // member of this workspace still gets the entry, but lands on the
-            // reduced orphan-only fallback (the attachment endpoint requires
-            // membership).
-            showAttachments={isServerAdmin || canManageAttachments}
+            // Listing attachments requires membership in the selected workspace.
+            showAttachments={canViewAttachments}
             showUsers={isServerAdmin}
             tokenCount={activeTokenCount}
           />
@@ -3576,6 +3605,9 @@ function SettingsScreenBody() {
           <div
             className="settings-content"
           >
+            {activeSection === "labs" ? (
+              <LabsSection labelledBy={SETTINGS_DESTINATION_HEADING_ID} />
+            ) : null}
             {activeSection === "deployment" ? (
               isServerAdmin ? (
                 <DeploymentSection />
@@ -3635,21 +3667,11 @@ function SettingsScreenBody() {
               />
             ) : null}
             {activeSection === "attachments" ? (
-              canManageAttachments ? (
-                <AttachmentsSection
+              canViewAttachments ? (
+                <AttachmentManager
+                  key={selectedWorkspaceApiId}
+                  isServerAdmin={isServerAdmin}
                   canViewEveryUpload={canEditPolicies}
-                  scope="workspace"
-                  workspaceId={selectedWorkspaceApiId}
-                />
-              ) : isServerAdmin ? (
-                // The reduced fallback, and it belongs to exactly one reader:
-                // a server admin with no editor membership here. The
-                // attachment endpoint is membership-gated, so that reader
-                // keeps the orphan-only admin endpoint rather than losing the
-                // screen entirely.
-                <AttachmentsSection
-                  canViewEveryUpload={false}
-                  scope="server"
                   workspaceId={selectedWorkspaceApiId}
                 />
               ) : (
@@ -3662,7 +3684,7 @@ function SettingsScreenBody() {
                   <StatusBanner tone="info">
                     {t("attachments.editorOnlyNotice", {
                       defaultValue:
-                        "Attachments are managed by editors and owners. You can still see the files on each page you can read.",
+                        "Attachments are available to members of this workspace.",
                     })}
                   </StatusBanner>
                 </section>
@@ -3704,7 +3726,7 @@ function SettingsScreenBody() {
                   ) : null}
                 </header>
                 <WorkspaceMembersSection />
-                <WorkspaceAccessSharingSection />
+                <WorkspaceAccessSharingSection collapsible />
               </section>
             ) : null}
             {activeSection === "workspace" ? (
@@ -3713,24 +3735,32 @@ function SettingsScreenBody() {
               // Account-level or per-user preferences — e.g. the user's default
               // workspace — live on the Account page (Workspace access panel),
               // NOT here. Do not reintroduce per-user prefs into this section.
-              <section className="feature-section">
-                <CurrentWorkspaceDefaultStatus />
-                <PolicyGroupView
-                  card={policies.workspace}
-                  fields={workspacePolicyFields(policies.workspace.policy)}
-                  group="workspace"
-                  busyKey={policyBusyKey}
-                  onFieldsSave={onPolicyFieldsSave}
-                  saveNotice={policySaved}
-                  readOnly={!canEditPolicies}
-                  summary={t("summary.workspace")}
-                />
-                <WorkspaceDangerZone
-                  currentSlug={workspaceSlugFromPolicy(policies.workspace.policy)}
-                  onPoliciesChanged={setPolicies}
-                  readOnly={!canEditPolicies}
-                />
-              </section>
+              <WorkspaceSettingsSection
+                workspace={workspaceContext?.selectedWorkspace ?? null}
+                workspaceLoading={workspaceContext?.loading ?? false}
+                defaultWorkspaceId={workspaceContext?.defaultWorkspaceId ?? null}
+                workspaces={workspaceContext?.workspaces ?? []}
+                onDefaultChanged={async (id) => {
+                  await setDefaultWorkspace(id);
+                  await workspaceContext?.refreshWorkspaces();
+                }}
+                policies={policies}
+                busyKey={policyBusyKey}
+                onFieldsSave={onPolicyFieldsSave}
+                saveNotice={policySaved}
+                readOnly={!canEditPolicies}
+                onPoliciesChanged={setPolicies}
+                onSlugChanged={async () => { await workspaceContext?.refreshWorkspaces(); }}
+                onDelete={async (workspace, options) => {
+                  if (!workspaceContext) return;
+                  const deleted = await deleteWorkspace(workspace.id, options);
+                  const remaining = workspaceContext.workspaces.filter((candidate) => candidate.id !== deleted.deleted_workspace_id);
+                  workspaceContext.removeWorkspace(deleted.deleted_workspace_id);
+                  const refreshed = await workspaceContext.refreshWorkspaces();
+                  navigate((refreshed?.workspaces ?? remaining).length === 0 ? "/workspaces/find" : "/dashboard", { replace: true });
+                }}
+                resolveWorkspaceId={getCurrentWorkspaceId}
+              />
             ) : null}
             {activeSection === "policies" ? (
               <>
@@ -3930,6 +3960,8 @@ function SettingsScreenBody() {
         <ConfirmConnectionCleanupModal
           busy={cleanupBusy}
           count={cleanupCount}
+          error={cleanupError}
+          restoreFocusFallback={() => cleanupTriggerRef.current}
           onCancel={() => setCleanupCount(null)}
           onConfirm={() => void confirmConnectionCleanup()}
         />
@@ -3987,46 +4019,15 @@ function CommandBlock({
 
   async function handleSelfCopy() {
     const node = snippetRef.current;
-    if (!canWriteToClipboard()) {
-      flashStatus(
-        selectText(node)
-          ? t("clipboard.selected", {
-              label: targetLabel,
-              defaultValue: "{{label}} selected",
-            })
-          : t("clipboard.unavailable", {
-              label: targetLabel,
-              defaultValue:
-                "Copy unavailable - select the {{label}} text instead",
-            }),
-        4000,
-      );
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(command);
-      flashStatus(
-        successMessage ??
-          t("clipboard.copied", {
-            label: targetLabel,
-            defaultValue: "{{label}} copied",
-          }),
-        1600,
-      );
-    } catch {
-      flashStatus(
-        selectText(node)
-          ? t("clipboard.selected", {
-              label: targetLabel,
-              defaultValue: "{{label}} selected",
-            })
-          : t("clipboard.failed", {
-              label: targetLabel,
-              defaultValue: "Copy failed - select the {{label}} text instead",
-            }),
-        4000,
-      );
-    }
+    const copied = await writeTextToClipboard(command);
+    flashStatus(
+      copied
+        ? successMessage ?? t("clipboard.copied", { label: targetLabel, defaultValue: "{{label}} copied" })
+        : selectText(node)
+          ? t("clipboard.selected", { label: targetLabel, defaultValue: "{{label}} selected" })
+          : t("clipboard.failed", { label: targetLabel, defaultValue: "Copy failed - select the {{label}} text instead" }),
+      copied ? 1600 : 4000,
+    );
   }
 
   const copyLabel =
@@ -4178,12 +4179,13 @@ function DeploymentSection() {
     [],
   );
   const { data, error } = useAsyncLoad<DeploymentStatus>(
-    () => getDeploymentStatus(),
+    (signal) => getDeploymentStatus(signal),
     [],
     {
       errorMessage: t("setup.loadError", {
         defaultValue: "Failed to load deployment status",
       }),
+      signalAware: true,
     },
   );
 
@@ -4201,34 +4203,15 @@ function DeploymentSection() {
     );
   }
 
-  // The async clipboard API is missing in non-secure contexts (plain HTTP) -
-  // exactly the state this tab helps fix - so fall back to selecting the
-  // command text instead of failing silently.
   async function copyCommand(
     title: string,
     target: HTMLElement | null,
     feedbackKey = title,
   ) {
     const text = target?.textContent ?? "";
-    if (!text) {
-      return;
-    }
-    if (!canWriteToClipboard()) {
-      flashCopyFeedback(
-        feedbackKey,
-        selectText(target) ? "selected" : "unavailable",
-      );
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(text);
-      flashCopyFeedback(feedbackKey, "copied");
-    } catch {
-      flashCopyFeedback(
-        feedbackKey,
-        selectText(target) ? "selected" : "unavailable",
-      );
-    }
+    if (!text) return;
+    const copied = await writeTextToClipboard(text);
+    flashCopyFeedback(feedbackKey, copied ? "copied" : selectText(target) ? "selected" : "unavailable");
   }
 
   function commandCopyLabel(title: string, feedbackKey = title) {
@@ -4405,13 +4388,16 @@ function DeploymentSection() {
 
   return (
     <section className="feature-section">
-      <StatusBanner tone="info">
-        {t("setup.systemScopeNote", {
-          defaultValue:
-            "These are dtxWiki SERVER settings — they apply to the whole instance " +
-            "(all workspaces), not just this workspace. Server admins only.",
-        })}
-      </StatusBanner>
+      <p className="deployment-instance-scope">
+        <ShieldCheck size={14} aria-hidden="true" />
+        {t("setup.systemScopeNote")}
+      </p>
+      <DeploymentUpdateCard
+        initialStatus={data}
+        renderCommand={(command, label) => (
+          <CommandBlock actionLabel={t("setup.copy")} command={command} label={label} />
+        )}
+      />
       <StatusBanner tone="info">
         {t("setup.subtitle", {
           defaultValue:
@@ -4419,17 +4405,6 @@ function DeploymentSection() {
             "on the server — the app cannot edit /etc itself.",
         })}
       </StatusBanner>
-      {data.update_available ? (
-        <StatusBanner tone="info">
-          {t("setup.updateAvailable", {
-            defaultValue:
-              "dtxWiki {{latest}} is available (current {{current}}). " +
-              "Run 'dtxwiki update' on the server to upgrade.",
-            latest: data.latest_version ?? "",
-            current: data.current_version ?? "",
-          })}
-        </StatusBanner>
-      ) : null}
       {!data.https_configured ? (
         <StatusBanner tone="warning">
           {t("setup.tlsNotReady", {
@@ -5009,7 +4984,9 @@ function McpKeyRow({
     }
   }, [isRenaming]);
   return (
-    <div className={`operations-row compact mcp-key-row ${inactive ? "is-disabled" : ""}`}>
+    <div
+      className={`operations-row compact mcp-key-row ${inactive ? "is-disabled" : ""}`}
+    >
       <KeyRound size={16} aria-hidden="true" />
       <div className="mcp-key-main">
         {isRenaming ? (
@@ -5022,7 +4999,7 @@ function McpKeyRow({
                   name: token.name,
                 })}
                 className="mcp-key-rename-input"
-                maxLength={128}
+                {...textInputLimit(128)}
                 onChange={(event) => onRenameDraftChange(event.target.value)}
                 ref={renameInputRef}
                 value={renameDraft}
@@ -5047,69 +5024,42 @@ function McpKeyRow({
           </div>
         ) : (
           <div className="mcp-key-title">
-            <strong>{token.name}</strong>
-            {token.token_preview ? (
-              <code
-                className="mcp-key-preview"
-                title={t("keyRow.previewTitle", {
-                  defaultValue:
-                    "Starts with {{prefix}}. Match this with the access key copied when it was created.",
-                  prefix: token.token_preview,
-                })}
-              >
-                {tokenPreviewLabel(token)}
-              </code>
-            ) : (
-              <span
-                className="mcp-key-preview-unavailable"
-                title={t("keyRow.prefixNotSavedTitle", {
-                  defaultValue:
-                    "This key was created before prefix previews were stored.",
-                })}
-              >
-                {t("keyRow.prefixNotSaved", { defaultValue: "Prefix not saved" })}
-              </span>
-            )}
+            <div className="mcp-credential-heading">
+              <strong>{token.name}</strong>
+              <StatusPill status={status} compact />
+            </div>
+            <div className="mcp-key-identity">
+              <span>{mcpTokenClientLabel(token)}</span>
+              {token.token_preview ? (
+                <code
+                  className="mcp-key-preview"
+                  title={t("keyRow.previewTitle", {
+                    defaultValue:
+                      "Starts with {{prefix}}. Match this with the access key copied when it was created.",
+                    prefix: token.token_preview,
+                  })}
+                >
+                  {tokenPreviewLabel(token)}
+                </code>
+              ) : (
+                <span
+                  className="mcp-key-preview-unavailable"
+                  title={t("keyRow.prefixNotSavedTitle", {
+                    defaultValue:
+                      "This key was created before prefix previews were stored.",
+                  })}
+                >
+                  {t("keyRow.prefixNotSaved", {
+                    defaultValue: "Prefix not saved",
+                  })}
+                </span>
+              )}
+            </div>
           </div>
         )}
-        <div className="mcp-key-meta">
-          <span>
-            {t("keyRow.created", {
-              defaultValue: "Created {{date}}",
-              date: formatDateTime(token.created_at),
-            })}
-          </span>
-          <span>
-            {t("keyRow.lastUsed", {
-              defaultValue: "Last used {{date}}",
-              date: token.last_used_at ? formatDateTime(token.last_used_at) : never,
-            })}
-          </span>
-          <span>
-            {t("keyRow.expires", {
-              defaultValue: "Expires {{date}}",
-              date: token.expires_at ? formatDateTime(token.expires_at) : never,
-            })}
-          </span>
-          <span>
-            {t("keyRow.client", {
-              defaultValue: "Client {{client}}",
-              client: mcpTokenClientLabel(token),
-            })}
-          </span>
-          <span
-            className="mcp-key-internal-id"
-            title={t("keyRow.uuidTitle", {
-              defaultValue: "Internal token UUID: {{id}}",
-              id: token.id,
-            })}
-          >
-            {t("keyRow.uuid", {
-              defaultValue: "UUID {{id}}",
-              id: shortTokenId(token.id),
-            })}
-          </span>
-        </div>
+        <span className="mcp-field-label">
+          {t("mcpCard.permissions")}
+        </span>
         <div className="scope-chip-row">
           {token.scopes.map((scope) => (
             <span className="scope-chip" key={scope}>
@@ -5117,6 +5067,9 @@ function McpKeyRow({
             </span>
           ))}
         </div>
+        <span className="mcp-field-label">
+          {t("mcpCard.workspaces")}
+        </span>
         <WorkspaceScopeChips
           labels={chipLabels}
           roleLabel={roleLabel}
@@ -5129,11 +5082,34 @@ function McpKeyRow({
             syncState: workspace.sync_state,
           }))}
         />
+        <dl className="mcp-card-times">
+          <div>
+            <dt>{t("mcpCard.created")}</dt>
+            <dd>{formatDateTime(token.created_at)}</dd>
+          </div>
+          <div>
+            <dt>{t("mcpCard.lastUsed")}</dt>
+            <dd>
+              {token.last_used_at ? formatDateTime(token.last_used_at) : never}
+            </dd>
+          </div>
+          <div>
+            <dt>{t("mcpCard.expires")}</dt>
+            <dd>
+              {token.expires_at
+                ? formatDateTime(token.expires_at)
+                : t("mcpCard.noExpiry")}
+            </dd>
+          </div>
+        </dl>
+        <details className="mcp-key-details">
+          <summary>{t("mcpCard.details")}</summary>
+          <p>
+            UUID <code>{token.id}</code>
+          </p>
+        </details>
       </div>
       <div className="row-actions mcp-key-actions">
-        <div className="row-actions-status">
-          <StatusPill status={status} compact />
-        </div>
         <div className="row-actions-buttons">
           {!inactive ? (
             <button
@@ -5148,7 +5124,9 @@ function McpKeyRow({
             >
               <Building2 size={15} aria-hidden="true" />
               <span>
-                {t("keyRow.editWorkspaces", { defaultValue: "Edit workspaces" })}
+                {t("keyRow.editWorkspaces", {
+                  defaultValue: "Edit workspaces",
+                })}
               </span>
             </button>
           ) : null}
@@ -5189,7 +5167,9 @@ function McpKeyRow({
               type="button"
             >
               <Trash2 size={15} aria-hidden="true" />
-              <span>{t("keyRow.deleteKey", { defaultValue: "Delete key" })}</span>
+              <span>
+                {t("keyRow.deleteKey", { defaultValue: "Delete key" })}
+              </span>
             </button>
           ) : null}
         </div>
@@ -5349,7 +5329,8 @@ function McpClientList({
               <div className="operations-row compact mcp-client-row" key={clientKey(client, index)}>
                 <KeyRound size={16} aria-hidden="true" />
                 <div>
-                  <strong>{clientName(client, index)}</strong>
+                  <div className="mcp-credential-heading"><strong>{clientName(client, index)}</strong><StatusPill status={connectionState} compact label={clientConnectionStateLabel(connectionState, t)} /></div>
+                  <p className="meta-line">{t(status === "active" ? "mcpCard.allowed" : "mcpCard.blocked")}</p>
                   <p>
                     {t("clientRow.scopes", {
                       defaultValue: "{{type}} · Scopes {{scopes}}",
@@ -5357,14 +5338,7 @@ function McpClientList({
                       scopes: clientScopesLabel(client, t),
                     })}
                   </p>
-                  <p className="meta-line">
-                    {connectionTimingLabel(
-                      connectionState,
-                      client.last_used_at,
-                      client.next_expiry,
-                      t,
-                    )}
-                  </p>
+                  <McpCredentialTimes kind={client.credential_kind === "pat" || client.credential_kind === "oauth" ? client.credential_kind : "unknown"} state={connectionState} lastUsed={client.last_used_at} expiry={client.next_expiry} />
                   <details className="mcp-client-details">
                     <summary>
                       {t("clientRow.viewDetails", { defaultValue: "View details" })}
@@ -5384,12 +5358,7 @@ function McpClientList({
                         </dt>
                         <dd>
                           {status === "active"
-                            ? t("mcpClients.filter.active", {
-                                defaultValue: "Active",
-                              })
-                            : t("mcpClients.filter.disabled", {
-                                defaultValue: "Deactivated",
-                              })}
+                            ? t("mcpCard.allowed") : t("mcpCard.blocked")}
                         </dd>
                       </div>
                       <div>
@@ -5410,9 +5379,7 @@ function McpClientList({
                   </details>
                 </div>
                 <div className="row-actions mcp-client-actions">
-                  <div className="row-actions-status">
-                    <StatusPill status={connectionState} compact />
-                  </div>
+
                   <div className="row-actions-buttons">
                   {canManage && active ? (
                     <button
@@ -5512,14 +5479,71 @@ function McpClientList({
   );
 }
 
+export function WorkspaceSettingsSection({
+  workspace, workspaceLoading, defaultWorkspaceId, workspaces, onDefaultChanged,
+  policies, busyKey, onFieldsSave, saveNotice, readOnly, onPoliciesChanged,
+  onSlugChanged, onDelete, resolveWorkspaceId,
+}: {
+  workspace: WorkspaceSummary | null;
+  workspaceLoading: boolean;
+  defaultWorkspaceId: string | null;
+  workspaces: WorkspaceSummary[];
+  onDefaultChanged: (id: string) => Promise<void>;
+  policies: SettingsPolicies;
+  busyKey: string | null;
+  onFieldsSave: (group: SettingsPolicyGroup, updates: PolicyFieldUpdate[], successLabel: string) => Promise<boolean>;
+  saveNotice: PolicySaveNotice | null;
+  readOnly: boolean;
+  onPoliciesChanged: (policies: SettingsPolicies) => void;
+  onSlugChanged: (slug: string) => Promise<void>;
+  onDelete: (workspace: WorkspaceSummary, options: { purgeContents?: boolean; purgeGrant?: string }) => Promise<void>;
+  resolveWorkspaceId?: () => Promise<string | null>;
+}) {
+  const { t } = useTranslation("settings");
+  return (
+    <section className="feature-section">
+      <CurrentWorkspaceDefaultStatus
+        workspace={workspace}
+        defaultWorkspaceId={defaultWorkspaceId}
+        workspaces={workspaces}
+        onDefaultChanged={onDefaultChanged}
+      />
+      <PolicyGroupView
+        card={policies.workspace}
+        fields={workspacePolicyFields(policies.workspace.policy)}
+        group="workspace"
+        busyKey={busyKey}
+        onFieldsSave={onFieldsSave}
+        saveNotice={saveNotice}
+        readOnly={readOnly}
+        summary={t("summary.workspace")}
+      />
+      <WorkspaceDangerZone
+        workspace={workspace}
+        workspaceLoading={workspaceLoading}
+        currentSlug={workspaceSlugFromPolicy(policies.workspace.policy)}
+        onPoliciesChanged={onPoliciesChanged}
+        readOnly={readOnly}
+        onSlugChanged={onSlugChanged}
+        onDelete={onDelete}
+        resolveWorkspaceId={resolveWorkspaceId}
+      />
+    </section>
+  );
+}
+
 // S1: Settings > Workspace is scoped to the CURRENT workspace only. It shows
 // whether this workspace is the user's default and offers a single action to
 // make it the default (with a confirm step). The full cross-workspace default
 // picker lives in Account > Workspace access — do not reintroduce a workspace
 // list here.
-function CurrentWorkspaceDefaultStatus() {
+function CurrentWorkspaceDefaultStatus({ workspace: currentWorkspace, defaultWorkspaceId, workspaces, onDefaultChanged }: {
+  workspace: WorkspaceSummary | null;
+  defaultWorkspaceId: string | null;
+  workspaces: WorkspaceSummary[];
+  onDefaultChanged: (id: string) => Promise<void>;
+}) {
   const { t } = useTranslation("settings");
-  const workspaceContext = useOptionalWorkspaceContext();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -5538,9 +5562,6 @@ function CurrentWorkspaceDefaultStatus() {
     }
   }, [confirmOpen]);
 
-  const currentWorkspace = workspaceContext?.selectedWorkspace ?? null;
-  const defaultWorkspaceId = workspaceContext?.defaultWorkspaceId ?? null;
-  const workspaces = workspaceContext?.workspaces ?? [];
   const isCurrentDefault =
     currentWorkspace != null && currentWorkspace.id === defaultWorkspaceId;
   const defaultWorkspace =
@@ -5554,8 +5575,7 @@ function CurrentWorkspaceDefaultStatus() {
     setError(null);
     setStatus(null);
     try {
-      await setDefaultWorkspace(currentWorkspace.id);
-      await workspaceContext?.refreshWorkspaces();
+      await onDefaultChanged(currentWorkspace.id);
       setStatus(
         t("workspaceDefault.statusChanged", {
           title: currentWorkspace.title,
@@ -5710,15 +5730,22 @@ export function WorkspaceDangerZone({
   currentSlug,
   onPoliciesChanged,
   readOnly,
+  workspace,
+  workspaceLoading = false,
+  onSlugChanged,
+  onDelete,
+  resolveWorkspaceId,
 }: {
   currentSlug: string;
   onPoliciesChanged: (policies: SettingsPolicies) => void;
   readOnly: boolean;
+  workspace: WorkspaceSummary | null;
+  workspaceLoading?: boolean;
+  onSlugChanged: (slug: string) => Promise<void>;
+  onDelete: (workspace: WorkspaceSummary, options: { purgeContents?: boolean; purgeGrant?: string }) => Promise<void>;
+  resolveWorkspaceId?: () => Promise<string | null>;
 }) {
   const { t } = useTranslation("settings");
-  const navigate = useNavigate();
-  const workspaceContext = useOptionalWorkspaceContext();
-  const workspace = workspaceContext?.selectedWorkspace ?? null;
   const activeSlug = workspace?.slug ?? currentSlug;
   const [slugDraft, setSlugDraft] = useState(activeSlug);
   const [slugBusy, setSlugBusy] = useState(false);
@@ -5737,7 +5764,7 @@ export function WorkspaceDangerZone({
           defaultValue: disabledReasonCode,
         })
       : null
-    : workspaceContext?.loading
+    : workspaceLoading
       ? t("dangerZone.loadingWorkspace", {
           defaultValue: "Workspace is still loading.",
         })
@@ -5746,7 +5773,7 @@ export function WorkspaceDangerZone({
             "Workspace deletion is unavailable until the workspace list is loaded.",
         });
   const canDelete = Boolean(workspace && !disabledReasonCode);
-  const normalizedSlug = slugDraft.trim();
+  const normalizedSlug = trimShortText(slugDraft);
   const slugSaveDisabled =
     readOnly || slugBusy || !normalizedSlug || normalizedSlug === activeSlug;
 
@@ -5762,11 +5789,13 @@ export function WorkspaceDangerZone({
     if (slugSaveDisabled) {
       return;
     }
+    const slugValidation = inputTextError(slugDraft, 80) || (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalizedSlug) ? t("validation.slugFormat", { defaultValue: "Use lowercase letters, numbers, and single hyphens." }) : "");
+    if (slugValidation) { setSlugError(slugValidation); return; }
     setSlugBusy(true);
     setSlugError(null);
     setSlugStatus(null);
     try {
-      const workspaceId = workspace?.id ?? (await getCurrentWorkspaceId());
+      const workspaceId = workspace?.id ?? (await resolveWorkspaceId?.());
       if (!workspaceId) {
         throw new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable);
       }
@@ -5776,7 +5805,7 @@ export function WorkspaceDangerZone({
         value: normalizedSlug,
       });
       onPoliciesChanged(updatedPolicies);
-      await workspaceContext?.refreshWorkspaces();
+      await onSlugChanged(normalizedSlug);
       setSlugStatus(
         t("dangerZone.slugUpdated", {
           defaultValue: "Workspace slug updated",
@@ -5790,7 +5819,7 @@ export function WorkspaceDangerZone({
   }
 
   async function onConfirmDelete() {
-    if (!workspace || disabledReason || !workspaceContext) {
+    if (!workspace || disabledReason) {
       return;
     }
     // `grant_expired` is deliberately excluded: it has no grant left to
@@ -5804,22 +5833,8 @@ export function WorkspaceDangerZone({
         : undefined;
     setDeleteBusy(true);
     try {
-      const deleted = await deleteWorkspace(workspace.id, {
-        purgeContents,
-        purgeGrant,
-      });
-      const localRemainingWorkspaces = workspaceContext.workspaces.filter(
-        (candidate) => candidate.id !== deleted.deleted_workspace_id,
-      );
-      workspaceContext.removeWorkspace(deleted.deleted_workspace_id);
-      const refreshed = await workspaceContext.refreshWorkspaces();
+      await onDelete(workspace, { purgeContents, purgeGrant });
       setDeleteFlow({ kind: "closed" });
-      navigate(
-        (refreshed?.workspaces ?? localRemainingWorkspaces).length === 0
-          ? "/workspaces/find"
-          : "/dashboard",
-        { replace: true },
-      );
     } catch (caught) {
       const blockers = workspaceDeleteBlockers(caught);
       const grant = workspaceDeletePurgeGrant(caught);
@@ -5911,6 +5926,7 @@ export function WorkspaceDangerZone({
                 autoComplete="off"
                 disabled={readOnly}
                 onChange={(event) => setSlugDraft(event.target.value)}
+                {...textInputLimit(80)}
                 value={slugDraft}
               />
             </label>
@@ -6208,52 +6224,28 @@ function WorkspaceScopeEditModal({
     (id) => workspaces.find((option) => option.id === id)?.title ?? id,
   );
   return (
-    <ConfirmModalFrame
-      busy={busy}
+    <Dialog
+      className="workspace-picker-dialog"
+      dismissible={!busy}
       labelledBy="workspace-scope-modal-title"
-      onCancel={onCancel}
-    >
-      <div className="modal-panel workspace-scope-modal">
-        <h2 id="workspace-scope-modal-title">
-          {t("access.workspaceScope.editTitle", {
-            defaultValue: "Workspaces for {{subject}}",
-            subject: subjectLabel,
-          })}
-        </h2>
-        <p className="meta-line">
-          {t("access.workspaceScope.editIntro", {
-            defaultValue:
-              "This connection can reach exactly the workspaces checked below. Adding one lets the existing credential reach it without re-authenticating.",
-          })}
-        </p>
-        <WorkspaceScopePicker
-          autoFocusSearch
-          disabled={busy}
-          labels={labels}
-          onChange={onSelectionChange}
-          roleLabel={roleLabel}
-          selectedIds={selectedIds}
-          workspaces={workspaces}
-        />
-        <p className="meta-line workspace-scope-diff" role="status">
-          {added.length === 0 && removed.length === 0
-            ? t("access.workspaceScope.diffNone", {
-                defaultValue: "No change yet.",
-              })
-            : removed.length > 0
-              ? t("access.workspaceScope.diffWithRemovals", {
-                  defaultValue:
-                    "{{added}} added · {{removed}} removed ({{names}} — access stops immediately). Work already in progress is kept.",
-                  added: added.length,
-                  removed: removed.length,
-                  names: removedTitles.join(", "),
-                })
-              : t("access.workspaceScope.diffAddedOnly", {
-                  defaultValue: "{{added}} added · 0 removed.",
-                  added: added.length,
-                })}
-        </p>
-        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+      onClose={onCancel}
+      header={
+        <div className="workspace-picker-heading">
+          {" "}
+          <h2 id="workspace-scope-modal-title">
+            {t("access.workspaceScope.editTitle", {
+              defaultValue: "Workspaces for {{subject}}",
+              subject: subjectLabel,
+            })}
+          </h2>
+          <DialogCloseButton
+            disabled={busy}
+            label={t("workspacePicker.close")}
+            onClick={onCancel}
+          />
+        </div>
+      }
+      footer={
         <div className="modal-actions">
           <button
             className="icon-button"
@@ -6280,8 +6272,44 @@ function WorkspaceScopeEditModal({
                 })}
           </button>
         </div>
-      </div>
-    </ConfirmModalFrame>
+      }
+    >
+      <p className="meta-line">
+        {t("access.workspaceScope.editIntro", {
+          defaultValue:
+            "This connection can reach exactly the workspaces checked below. Adding one lets the existing credential reach it without re-authenticating.",
+        })}
+      </p>
+      <WorkspaceScopePicker
+        serverPaging
+        autoFocusSearch
+        disabled={busy}
+        labels={labels}
+        onChange={onSelectionChange}
+        roleLabel={roleLabel}
+        selectedIds={selectedIds}
+        workspaces={workspaces}
+      />
+      <p className="meta-line workspace-scope-diff" role="status">
+        {added.length === 0 && removed.length === 0
+          ? t("access.workspaceScope.diffNone", {
+              defaultValue: "No change yet.",
+            })
+          : removed.length > 0
+            ? t("access.workspaceScope.diffWithRemovals", {
+                defaultValue:
+                  "{{added}} added · {{removed}} removed ({{names}} — access stops immediately). Work already in progress is kept.",
+                added: added.length,
+                removed: removed.length,
+                names: removedTitles.join(", "),
+              })
+            : t("access.workspaceScope.diffAddedOnly", {
+                defaultValue: "{{added}} added · 0 removed.",
+                added: added.length,
+              })}
+      </p>
+      {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+    </Dialog>
   );
 }
 
@@ -6349,56 +6377,60 @@ function ConfirmRevokeModal({
 function ConfirmConnectionCleanupModal({
   busy,
   count,
+  error,
+  restoreFocusFallback,
   onCancel,
   onConfirm,
 }: {
   busy: boolean;
   count: number;
+  error: string | null;
+  restoreFocusFallback: () => HTMLElement | null;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const { t } = useTranslation("settings");
   return (
-    <ConfirmModalFrame
-      busy={busy}
+    <Dialog
+      dismissible={!busy}
       labelledBy="connection-cleanup-modal-title"
-      onCancel={onCancel}
+      onClose={onCancel}
+      restoreFocusFallback={restoreFocusFallback}
     >
-      <div className="modal-panel">
-        <h2 id="connection-cleanup-modal-title">
-          {t("connections.cleanupTitle", {
-            defaultValue: "Clean up old connections",
-          })}
-        </h2>
-        <p>
-          {t("connections.cleanupBody", {
-            count,
-            defaultValue:
-              "Remove {{count}} expired or revoked consent records? MCP client identities and their traces stay in history.",
-          })}
-        </p>
-        <div className="modal-actions">
-          <button
-            className="icon-button"
-            disabled={busy}
-            onClick={onCancel}
-            type="button"
-          >
-            {t("actions.cancel", { defaultValue: "Cancel" })}
-          </button>
-          <button
-            className="icon-button primary"
-            disabled={busy || count === 0}
-            onClick={onConfirm}
-            type="button"
-          >
-            {busy
-              ? t("connections.cleaning", { defaultValue: "Cleaning up…" })
-              : t("connections.cleanupConfirm", { defaultValue: "Clean up" })}
-          </button>
-        </div>
+      <h2 id="connection-cleanup-modal-title">
+        {t("connections.cleanupTitle", {
+          defaultValue: "Clean up old connections",
+        })}
+      </h2>
+      <p>
+        {t("connections.cleanupBody", {
+          count,
+          defaultValue:
+            "Remove {{count}} expired or revoked consent records? MCP client identities and their traces stay in history.",
+        })}
+      </p>
+      {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+      <div className="modal-actions">
+        <button
+          className="icon-button"
+          disabled={busy}
+          onClick={onCancel}
+          type="button"
+        >
+          {t("actions.cancel", { defaultValue: "Cancel" })}
+        </button>
+        <button
+          className="icon-button primary"
+          disabled={busy || count === 0}
+          onClick={onConfirm}
+          type="button"
+        >
+          {busy
+            ? t("connections.cleaning", { defaultValue: "Cleaning up…" })
+            : t("connections.cleanupConfirm", { defaultValue: "Clean up" })}
+        </button>
       </div>
-    </ConfirmModalFrame>
+    </Dialog>
   );
 }
 
@@ -6876,6 +6908,13 @@ export function settingsDestinations(
         defaultValue: "{{count}} personal connections (access keys + OAuth apps)",
       }),
     },
+    {
+      id: "labs",
+      group: "account",
+      icon: FlaskConical,
+      label: t("sections.labs.label"),
+      description: t("sections.labs.description"),
+    },
   ];
 
   if (showUsers) {
@@ -7012,7 +7051,7 @@ function SettingsSectionNav({
       className="settings-subnav"
       aria-label={t("navigationLabel", { defaultValue: "Settings sections" })}
     >
-      {/* Eight destinations and five tabs behind one of them, with no way to
+      {/* Several destinations and five tabs behind one of them, with no way to
           ask where something is. The narrow-screen picker got this first
           because a modal list is where it pays most; the rail shares the
           filter rather than growing a second one. */}
@@ -7249,10 +7288,11 @@ function libraryPolicyDraftInvalid(draft: LibraryPolicyDraft) {
   const names = new Set<string>();
   const formats = new Set<string>();
   for (const family of draft.formatFamilies) {
-    const name = family.name.trim().toLocaleLowerCase();
+    const normalizedName = normalizeCustomFormatName(family.name);
+    const name = normalizedName.toLocaleLowerCase();
     if (
       !name ||
-      family.name.trim().length > MAX_LIBRARY_FAMILY_NAME_LENGTH ||
+      codePointLength(normalizedName) > MAX_LIBRARY_FAMILY_NAME_LENGTH ||
       family.format_ids.length === 0 ||
       names.has(name)
     ) return true;
@@ -8772,6 +8812,7 @@ function EditablePolicyField({
         ) : field.multiline ? (
           <div className="policy-edit-control is-multiline">
             <textarea
+              {...(group === "workspace" && field.key === "goal" ? textInputLimit(512, false) : {})}
               aria-label={field.label}
               disabled={busy}
               id={fieldId}
@@ -8784,6 +8825,7 @@ function EditablePolicyField({
         ) : (
           <div className="policy-edit-control">
             <input
+              {...(group === "workspace" && ["title", "name"].includes(field.key) ? textInputLimit(128) : {})}
               aria-label={field.label}
               disabled={busy}
               id={fieldId}
@@ -9911,6 +9953,14 @@ function policyGroupValidationMessages(
   group: SettingsPolicyGroup,
   drafts: Record<string, unknown>,
 ): Record<string, string> {
+  if (group === "workspace") {
+    const limits: Record<string, number> = { title: 128, name: 128, goal: 512, slug: 80 };
+    return Object.fromEntries(Object.entries(drafts).flatMap(([key, value]) => {
+      if (typeof value !== "string" || !(key in limits)) return [];
+      const error = inputTextError(value, limits[key], key !== "goal");
+      return error ? [[key, error]] : [];
+    }));
+  }
   if (group !== "agent_injection") {
     return {};
   }
@@ -10346,6 +10396,7 @@ function settingsSectionFromParam(section: string): SettingsRoute | null {
   }
   if (
     section === "mcp" ||
+    section === "labs" ||
     section === "users" ||
     section === "deployment" ||
     section === "jobs" ||
@@ -10435,24 +10486,29 @@ function oauthConsentConnectionState(consent: OAuthConsent): ConnectionState {
   return consent.connection_state ?? "active";
 }
 
-function mcpClientConnectionState(client: McpClientRecord): ConnectionState {
+function mcpClientConnectionState(
+  client: McpClientRecord,
+): ConnectionState | "unknown" {
   const derived = String(client.connection_state ?? "").toLowerCase();
   if (
     derived === "active" ||
     derived === "expired" ||
     derived === "revoked" ||
-    derived === "disabled"
+    derived === "disabled" ||
+    derived === "unknown"
   ) {
     return derived;
   }
-  return mcpClientStatus(client) === "active" ? "active" : "disabled";
+  return mcpClientStatus(client) === "disabled" ? "disabled" : "unknown";
 }
 
 function clientConnectionStateLabel(
-  state: ConnectionState,
+  state: ConnectionState | "unknown",
   t: TFunction<"settings">,
 ) {
   switch (state) {
+    case "unknown":
+      return t("clientRow.state.unknown");
     case "expired":
       return t("clientRow.state.expired", { defaultValue: "Expired" });
     case "revoked":
@@ -10471,21 +10527,52 @@ function connectionMatchesFilter(
   return filter === "all" || state === filter;
 }
 
-function connectionTimingLabel(
-  state: ConnectionState,
-  lastUsedAt: unknown,
-  nextExpiry: unknown,
-  t: TFunction,
-) {
-  const never = t("clientRow.never", { defaultValue: "never" });
-  const noExpiry = t("clientRow.noLiveExpiry", {
-    defaultValue: state === "active" ? "not set" : "no live token",
-  });
-  return t("clientRow.connectionTiming", {
-    defaultValue: "Last used {{lastUsed}} · Next expiry {{nextExpiry}}",
-    lastUsed: lastUsedAt ? formatDateTime(String(lastUsedAt)) : never,
-    nextExpiry: nextExpiry ? formatDateTime(String(nextExpiry)) : noExpiry,
-  });
+function McpCredentialTimes({
+  kind,
+  state,
+  lastUsed,
+  expiry,
+  grantedAt,
+}: {
+  kind: "pat" | "oauth" | "unknown";
+  state: ConnectionState | "unknown";
+  lastUsed: unknown;
+  expiry: unknown;
+  grantedAt?: string;
+}) {
+  const { t } = useTranslation("settings");
+  const expiryLabel =
+    kind === "pat"
+      ? "mcpCard.expires"
+      : kind === "oauth"
+        ? "mcpCard.sessionExpiry"
+        : "mcpCard.expiry";
+  const noExpiry =
+    kind === "pat"
+      ? t("mcpCard.noExpiry")
+      : kind === "unknown" || state === "unknown"
+        ? t("mcpCard.expiryUnknown")
+        : t("mcpCard.reapprove");
+  return (
+    <dl className="mcp-card-times">
+      {grantedAt ? (
+        <div>
+          <dt>{t("mcpCard.granted")}</dt>
+          <dd>{formatDateTime(grantedAt)}</dd>
+        </div>
+      ) : null}
+      <div>
+        <dt>{t("mcpCard.lastUsed")}</dt>
+        <dd>
+          {lastUsed ? formatDateTime(String(lastUsed)) : t("clientRow.never")}
+        </dd>
+      </div>
+      <div>
+        <dt>{t(expiryLabel)}</dt>
+        <dd>{expiry ? formatDateTime(String(expiry)) : noExpiry}</dd>
+      </div>
+    </dl>
+  );
 }
 
 function mcpClientId(client: McpClientRecord) {
@@ -10664,8 +10751,10 @@ function oauthConsentAppPresentation(
   };
 }
 
-function defaultTokenNameForApp(label?: string | null) {
-  return `${label?.trim() || "MCP connection"} access key`;
+export function defaultTokenNameForApp(label?: string | null) {
+  const suffix = " access key";
+  const base = trimShortText(label ?? "") || "MCP connection";
+  return `${trimShortText(Array.from(base).slice(0, 128 - codePointLength(suffix)).join(""))}${suffix}`;
 }
 
 function mcpOwnerValue(owner: Pick<McpAppOwner, "kind" | "id">) {
@@ -10773,15 +10862,15 @@ function activeTokenNames(tokens: ApiToken[]) {
     .map((token) => token.name);
 }
 
-function uniqueTokenName(baseName: string, existingNames: string[]) {
-  const trimmed = baseName.trim() || "MCP connection key";
+export function uniqueTokenName(baseName: string, existingNames: string[]) {
+  const trimmed = trimShortText(baseName) || "MCP connection key";
   const existing = new Set(existingNames.map((name) => name.toLowerCase()));
   if (!existing.has(trimmed.toLowerCase())) {
     return trimmed;
   }
   for (let suffix = 2; suffix < 1000; suffix += 1) {
     const suffixText = ` ${suffix}`;
-    const base = trimmed.slice(0, 128 - suffixText.length).trimEnd();
+    const base = trimShortText(Array.from(trimmed).slice(0, 128 - codePointLength(suffixText)).join(""));
     const candidate = `${base}${suffixText}`;
     if (!existing.has(candidate.toLowerCase())) {
       return candidate;
@@ -10790,9 +10879,6 @@ function uniqueTokenName(baseName: string, existingNames: string[]) {
   return trimmed;
 }
 
-function shortTokenId(tokenId: string) {
-  return tokenId.replace(/-/g, "").slice(0, 8);
-}
 
 function tokenPreviewFromPlain(token: string) {
   return token.slice(0, 9);

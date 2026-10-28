@@ -32,7 +32,7 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     const filters = section.getByRole("radiogroup", {
       name: "MCP client state",
     });
-    await filters.getByRole("radio", { name: "Deactivated 25" }).click();
+    await filters.getByRole("radio", { name: "Other states 25" }).click();
     await expect(section.getByText("Disabled UI client 01")).toBeVisible();
     await expect(section.getByRole("button", { name: /^Reactivate / }).first())
       .toBeVisible();
@@ -52,7 +52,7 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     const reactivateRow = clientRow(section, "Disabled UI client 01");
     await reactivateRow.getByRole("button", { name: /^Reactivate / }).click();
     await expect(reactivateRow).toHaveCount(0);
-    await expect(filters.getByRole("radio", { name: "Deactivated 24" }))
+    await expect(filters.getByRole("radio", { name: "Other states 24" }))
       .toBeVisible();
 
     const deleteRow = clientRow(section, "Disabled UI client 02");
@@ -66,7 +66,7 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     await deleteDialog.getByRole("button", { name: "Delete client" }).click();
     await expect(deleteDialog).toBeHidden();
     await expect(deleteRow).toHaveCount(0);
-    await expect(filters.getByRole("radio", { name: "Deactivated 23" }))
+    await expect(filters.getByRole("radio", { name: "Other states 23" }))
       .toBeVisible();
 
     await attachScreenshot(page, testInfo, "mcp-clients-desktop");
@@ -441,24 +441,21 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     // picker), .mcp-keys-section holds the list of already-issued keys.
     const createCard = page.locator("#integrations");
     const keySection = page.locator(".mcp-keys-section");
-    const picker = createCard.getByRole("listbox", {
-      name: "Allowed workspaces",
-    });
-    await expect(picker).toBeVisible();
-
-    const generate = page.getByRole("button", { name: "Generate access key" });
-
-    // Zero selected is a real, blocking state -- not a silently empty grant.
-    await createCard.getByRole("button", { name: "Clear all" }).click();
-    await expect(
-      page.getByText(/can reach no workspace at all/),
-    ).toBeVisible();
-    await expect(generate).toBeDisabled();
-
-    // Two workspaces, one credential.
-    await picker.getByRole("option", { name: /Personal Workspace/ }).click();
-    await picker.getByRole("option", { name: new RegExp(secondTitle) }).click();
-    await expect(picker.getByRole("option", { selected: true })).toHaveCount(2);
+    const opener = createCard.getByRole("button", {name: "View and select workspaces"});
+    await opener.click();
+    const dialog = page.getByRole("dialog", {name: "Allowed workspaces"});
+    const picker = dialog.getByRole("listbox", {name: "Allowed workspaces"});
+    await expect(picker.getByRole("option")).toHaveCount(2);
+    const generate = page.getByRole("button", {name: "Generate access key"});
+    await dialog.getByRole("button", {name: "Clear all selections"}).click();
+    await expect(dialog.getByText(/can reach no workspace at all/)).toBeVisible();
+    await expect(dialog.getByRole("button", {name: "Apply 0 selected"})).toBeDisabled();
+    await picker.getByRole("option", {name: /Personal Workspace/}).click();
+    await picker.getByRole("option", {name: new RegExp(secondTitle)}).click();
+    await expect(picker.getByRole("option", {selected: true})).toHaveCount(2);
+    await dialog.getByRole("button", {name: "Apply 2 selected"}).click();
+    await expect(dialog).toBeHidden();
+    await expect(opener).toBeFocused();
 
     await page.getByLabel("Key name").fill("E2E two-workspace key");
     await expect(generate).toBeEnabled();

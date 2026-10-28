@@ -12,6 +12,7 @@ def normalize_mcp_endpoint_url(
     url: str,
     *,
     allow_http_loopback: bool = False,
+    allow_http_private_network: bool = False,
 ) -> str:
     """Validate and normalize one absolute HTTP MCP endpoint URL.
 
@@ -64,14 +65,29 @@ def normalize_mcp_endpoint_url(
         raise ValueError("MCP endpoint URL path must end with the exact segment /mcp")
 
     if parsed.scheme == "http" and not (
-        allow_http_loopback and is_loopback_hostname(hostname)
+        (allow_http_loopback and is_loopback_hostname(hostname))
+        or (allow_http_private_network and is_private_network_ip(hostname))
     ):
         raise ValueError(
             "MCP endpoint URL must use https://; plaintext http:// is allowed "
-            "only for an explicitly enabled loopback endpoint"
+            "only for an explicitly enabled loopback or private-network endpoint"
         )
 
     return urlunsplit((parsed.scheme.lower(), parsed.netloc, endpoint_path, "", ""))
+
+
+def is_private_network_ip(hostname: str) -> bool:
+    """RFC1918 IPv4 or IPv6 ULA literals, without DNS resolution."""
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    networks = (
+        ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+        if address.version == 4
+        else ("fc00::/7",)
+    )
+    return any(address in ipaddress.ip_network(network) for network in networks)
 
 
 def is_loopback_hostname(hostname: str) -> bool:

@@ -1875,10 +1875,164 @@
 }
 
 .tree-row-state-dot {
+  position: relative;
   flex: 0 0 auto;
   width: 7px;
   height: 7px;
   border-radius: 999px;
+  color: var(--tree-document-state-color);
+  border: 1px solid currentColor;
+  background: transparent;
+}
+
+.tree-row-state-dot[data-target-group="context"] {
+  --tree-document-state-color: var(--lifecycle-context);
+}
+
+.tree-row-state-dot[data-target-group="library"] {
+  --tree-document-state-color: var(--lifecycle-library);
+}
+
+.tree-row-state-dot[data-target-group="agent"] {
+  --tree-document-state-color: var(--lifecycle-agent);
+}
+
+.tree-row-state-recent {
+  background: currentColor;
+}
+
+/* Artifact and legacy references retain their existing type-only filled dot. */
+.tree-row-state-dot:not([data-document-state]) {
+  border: 0;
+  background: currentColor;
+}
+
+.tree-row-state-review {
+  border: 0;
+}
+
+.tree-row-review-clock {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  left: 0;
+  top: 0;
+  /* WebKit drops the top raster row at fractional positions with SVG clipping. */
+  overflow: visible;
+}
+
+.tree-row-document-icon {
+  display: block;
+  width: 15px;
+  height: 15px;
+}
+
+.tree-row > .tree-row-description {
+  position: absolute;
+}
+
+.tree-row-favorite {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 11px;
+  height: 11px;
+  fill: var(--tree-favorite-fill);
+  stroke: var(--tree-favorite-edge);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 1px var(--tree-row-action-surface)) drop-shadow(0 0 1px var(--tree-row-action-surface));
+  pointer-events: none;
+}
+
+/* DECISION (2026-10-23, user-directed -- do not make it hoverable again):
+   the row tooltip is a read-only label that never takes the pointer, wherever
+   it opens. The inverted dark style, unlike the white menu and popover cards
+   that hold controls, is what tells users it cannot be reached.
+   - Placement: beside the rail, so it covers no other row. A drawer with no
+     room beside it falls back below or above its row (useTreeRowTooltip).
+   - Moving the pointer onto it leaves the row and closes it; a downward
+     sweep always reaches the next row, and the wheel always scrolls the rail.
+   - Accepted trade-off: pointer-magnifier users cannot move onto its text
+     (WCAG 1.4.13 hoverable, failure F95). Keyboard focus still opens it and
+     Escape closes it.
+   History: 3a001f1e made it pointer-transparent below the row; d81de271
+   moved it beside the rail for a review and briefly made it hoverable there,
+   which this decision reverses. */
+.tree-row-tooltip {
+  position: fixed;
+  z-index: 80;
+  border-radius: 5px;
+  background: var(--ink);
+  color: var(--surface);
+  box-shadow: 0 2px 8px rgb(15 23 42 / 18%);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  max-width: min(320px, calc(100vw - 16px));
+  pointer-events: none;
+}
+
+.tree-row-tooltip-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 9px;
+}
+
+/* The popup cannot be scrolled, so a long title ends in an ellipsis. The hook
+   lowers the line count when the side the popup opens on is short. */
+.tree-row-tooltip-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--tree-tooltip-title-lines, 4);
+  overflow: hidden;
+  font-weight: 600;
+}
+
+.tree-row-tooltip-status {
+  color: color-mix(in srgb, var(--surface) 78%, var(--ink));
+}
+
+/* The hook slides the arrow along the edge facing the row to the row's
+   middle; each placement pins it to that edge. */
+.tree-row-tooltip-arrow {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+  background: inherit;
+  transform: rotate(45deg);
+}
+
+.tree-row-tooltip[data-placement^="right"] .tree-row-tooltip-arrow {
+  left: -4px;
+}
+
+.tree-row-tooltip[data-placement^="left"] .tree-row-tooltip-arrow {
+  right: -4px;
+}
+
+.tree-row-tooltip[data-placement^="bottom"] .tree-row-tooltip-arrow {
+  top: -4px;
+}
+
+.tree-row-tooltip[data-placement^="top"] .tree-row-tooltip-arrow {
+  bottom: -4px;
+}
+
+body:has(.tree-node-menu) .tree-row-tooltip {
+  display: none;
+}
+
+.tree-node-menu-summary {
+  max-width: 280px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .tree-row-system-badge {
@@ -2398,6 +2552,41 @@
   align-content: start;
 }
 
+.account-deletion-panel {
+  grid-column: 1 / -1;
+}
+
+.account-deletion-panel h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.account-deletion-form {
+  display: grid;
+  gap: 12px;
+}
+
+.user-deletion-workspaces ul,
+.admin-user-held-workspaces ul,
+.admin-held-members {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.user-deletion-workspaces li,
+.admin-user-held-workspaces li,
+.admin-held-members li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .account-panel-hint {
   margin: 0;
   color: var(--ink-soft);
@@ -2564,6 +2753,17 @@
 .mcp-quickstart {
   display: grid;
   gap: 12px;
+}
+
+/* Leave room for the narrow-screen Settings section picker on anchor jumps. */
+#mcp-key-setup {
+  scroll-margin-top: 80px;
+}
+
+.mcp-access-key-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
 }
 
 .mcp-access-section {
@@ -3095,6 +3295,10 @@
   gap: 8px;
 }
 
+.workspace-scope-loading {
+  margin: 0;
+}
+
 .workspace-scope-select-all {
   display: inline-flex;
   align-items: center;
@@ -3172,8 +3376,8 @@
   border-radius: 5px;
   background: var(--paper);
   color: var(--ink);
-  width: 16px;
-  height: 16px;
+  width: var(--checkbox-size);
+  height: var(--checkbox-size);
 }
 
 .workspace-scope-option.is-selected .workspace-scope-check {
@@ -3322,6 +3526,10 @@
 .paginated-credential-list {
   display: grid;
   gap: 10px;
+  min-width: 0;
+}
+
+.credential-list-results {
   min-width: 0;
 }
 
@@ -3977,6 +4185,13 @@ details.advanced-section summary {
    on the rows below. It was bare bold text whose "available" green pointed at
    an undefined token, so both states rendered identically. */
 .mcp-app-availability {
+  box-sizing: border-box;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: start;
+  line-height: 1;
   grid-column: 1 / -1;
   width: fit-content;
   border: 1px solid var(--border);
@@ -4552,3 +4767,122 @@ details.advanced-section summary {
     border-radius: 0;
   }
 }
+
+.workspace-scope-summary {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  text-transform: none;
+}
+.workspace-scope-summary > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-scope-summary > button { justify-self: start; }
+.dialog-panel.workspace-picker-dialog {
+  width: min(720px, 100%);
+  max-height: 90dvh;
+}
+.workspace-picker-heading,
+.workspace-scope-pagination,
+.workspace-scope-view-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.workspace-picker-heading { justify-content: space-between; }
+.workspace-picker-heading h2 { min-width: 0; overflow-wrap: anywhere; }
+.workspace-scope-pagination { padding-block: 12px; }
+.workspace-scope-pagination > span { margin-inline-end: auto; }
+.workspace-grant-details { list-style: none; margin: 0; padding: 0; }
+.workspace-grant-details li { display: grid; gap: 4px; padding: 12px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.workspace-scope-select-all { min-height: 24px; }
+@media (max-width: 640px) {
+  .dialog-panel.workspace-picker-dialog {
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+}
+
+.mcp-key-row,
+.oauth-consent-row,
+.mcp-client-row { grid-template-columns: 20px minmax(0, 1fr); align-items: start; }
+.mcp-key-row > .row-actions,
+.oauth-consent-row > .row-actions,
+.mcp-client-row > .row-actions {
+  grid-column: 2 / -1;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  width: 100%;
+}
+.mcp-key-row .row-actions-buttons,
+.oauth-consent-row .row-actions-buttons,
+.mcp-client-row .row-actions-buttons { justify-content: flex-end; flex-wrap: wrap; }
+.mcp-credential-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.mcp-credential-heading > strong { min-width: 0; overflow-wrap: anywhere; }
+.mcp-credential-heading > .status-pill { flex-shrink: 0; }
+.mcp-key-title { display: block; }
+.mcp-key-identity { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 6px 12px; color: var(--ink-soft); }
+.mcp-field-label { display: block; margin-block: 10px 4px; font-size: 12px; font-weight: 700; color: var(--ink-muted); }
+.mcp-card-times { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-block: 12px; padding-block: 12px; border-block: 1px solid var(--border); }
+.mcp-card-times dt { font-size: 12px; color: var(--ink-muted); }
+.mcp-card-times dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+.mcp-key-details { margin-block: 10px; }
+.mcp-key-details code { overflow-wrap: anywhere; }
+.mcp-connection-controls { margin-block: 16px 0; padding-top: 16px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .mcp-card-times { grid-template-columns: minmax(0, 1fr); }
+  .mcp-card-times > div { display: flex; justify-content: space-between; gap: 12px; }
+  .mcp-card-times dd { margin: 0; text-align: end; }
+  .mcp-credential-heading { flex-wrap: wrap; }
+}
+.workspace-picker-dialog > .dialog-scroll-region {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+.workspace-picker-dialog .workspace-scope-picker {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 8px;
+}
+.workspace-picker-dialog .workspace-scope-list,
+.workspace-picker-dialog .workspace-grant-details {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.workspace-picker-dialog .workspace-scope-toolbar,
+.workspace-picker-dialog .workspace-scope-search,
+.workspace-picker-dialog .workspace-scope-pagination,
+.workspace-picker-dialog .workspace-scope-view-actions { flex-shrink: 0; }
+.workspace-picker-dialog .dialog-header { flex-shrink: 0; padding-bottom: 12px; }
+.dialog-panel.workspace-picker-dialog {
+  display: flex;
+  flex-direction: column;
+  height: min(760px, 90dvh);
+  overflow: hidden;
+}
+.workspace-picker-dialog > .dialog-scroll-region { flex: 1 1 auto; }
+.workspace-picker-dialog .workspace-scope-picker { flex: 1 1 auto; }
+@media (max-width: 640px) {
+  .dialog-backdrop:has(.workspace-picker-dialog) { padding: 0; }
+  .dialog-panel.workspace-picker-dialog { height: 100dvh; }
+}
+
+/* The compact summary truncates names; the full picker must reveal them. */
+.workspace-picker-dialog .workspace-picker-heading { width: 100%; }
+.workspace-picker-dialog .workspace-scope-copy strong {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+.workspace-picker-dialog .workspace-scope-option { align-items: start; }
+.workspace-picker-dialog .workspace-scope-check { margin-block-start: 2px; }

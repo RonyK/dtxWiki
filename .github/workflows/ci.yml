@@ -6,6 +6,14 @@ on:
     branches:
       - main
 
+concurrency:
+  # Superseded PR commits can stop; every main push keeps its own group,
+  # including pending runs that a shared branch group would otherwise replace.
+  # A re-run joins its PR's group too, so re-running an older commit's run
+  # cancels the run for the PR head. Re-run the latest run instead.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   leak-scan:
     runs-on: ubuntu-latest
@@ -37,7 +45,7 @@ jobs:
       # self-runners when node_modules is present, which it is not here), so
       # the job pins the same node as every other job instead of taking
       # whatever the runner image ships.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22.18"
       - name: Install Python dependencies
@@ -111,7 +119,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       # The release-gate validator tests start node (the gate script's i18n
       # coverage check), so pin it rather than inherit the runner's.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22.18"
       - name: Install Python dependencies
@@ -148,7 +156,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # Pinned, not the floating major. The "Run e2e helper self-runners"
           # step below imports tests/e2e/*.ts and is only correct on a node
@@ -184,13 +192,29 @@ jobs:
         run: |
           node tests/e2e/network_retry.test.mjs
           node tests/e2e/redact-network.test.mjs
+          node tests/e2e/page-diagnostics.test.mjs
 
   e2e:
+    name: E2E (${{ matrix.name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # Together the legs must name every project in playwright.config.ts.
+      # A renamed or removed project fails here (`--project` rejects unknown
+      # names), but a project added to the config runs in no PR leg; only the
+      # weekly exhaustive run, which passes no --project, reaches it.
+      matrix:
+        include:
+          - name: chromium
+            browsers: chromium
+            projects: --project=chromium
+          - name: firefox-webkit
+            browsers: firefox webkit
+            projects: --project=firefox --project=webkit
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22.18"
           cache: npm
@@ -199,12 +223,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium firefox webkit
+        run: npx playwright install --with-deps ${{ matrix.browsers }}
       # Standard profile: every spec on Chromium, @cross-browser specs on all
-      # three. The whole suite meets all three engines weekly, in
+      # three. Each matrix job owns its database, backend and background worker.
+      # The whole suite meets all three engines weekly, in
       # .github/workflows/e2e-browsers.yml.
       - name: Run Playwright e2e
-        run: npm run test:e2e
+        id: playwright
+        run: npm run test:e2e -- ${{ matrix.projects }}
       # The suite drives `/reset-password?token=<one-time token>`, and the HTML
       # reporter base64-inlines every step title into index.html on EVERY run,
       # green ones included -- so the upload below publishes the token for 14
@@ -216,8 +242,9 @@ jobs:
       # Deliberately NOT `|| true` (unlike the `packaging` job's per-file
       # pipe): the only non-zero exit is the break-glass hard-fail on a
       # production secret env name or a PEM private key, and by then the bytes
-      # have already been scrubbed in place. The upload is `if: always()`, so
-      # that combination turns the job red AND still publishes a safe report.
+      # have already been scrubbed in place. Existing reports still upload
+      # after a failure. A successful run must produce a report; setup/build
+      # failures before Playwright starts have no report to upload.
       - name: Redact the Playwright report before publishing it
         if: always()
         run: |
@@ -225,10 +252,10 @@ jobs:
             bash scripts/redact_evidence.sh --dir playwright-report
           fi
       - name: Upload Playwright report
-        if: always()
+        if: always() && (steps.playwright.outcome == 'success' || hashFiles('playwright-report/index.html') != '')
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-standard-${{ github.run_id }}
+          name: e2e-standard-${{ github.run_id }}-${{ matrix.name }}
           path: playwright-report
           if-no-files-found: error
           retention-days: 14

@@ -49,6 +49,110 @@ describe("ChatsDetailScreen", () => {
     return within(call).getByRole("tabpanel");
   }
 
+  it.each(["en", "ko"])("explains the conflict token by purpose in %s", async (language) => {
+    await i18n.changeLanguage(language);
+    const user = userEvent.setup();
+    const detail = chatDetail();
+    detail.timeline[0].input_summary = { expected_editing_revision: 3 };
+    renderWithDetail({
+      [`${BASE}/api/v1/workspaces`]: workspaceResponse(),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/chat-1`]: chatResponse(detail),
+    });
+    const card = await findCallCard();
+    await user.click(within(card).getByRole("tab", { name: language === "ko" ? "입력" : "Inputs" }));
+    const label = language === "ko" ? "덮어쓰기 방지 번호" : "Overwrite protection number";
+    const help = language === "ko"
+      ? "이 요청이 기준으로 삼은 초안 상태를 확인하는 내부 번호입니다. 초안 상태가 달라졌으면 변경을 적용하지 않습니다."
+      : "An internal number identifying the draft state this request was based on. If that state has changed, the change is rejected.";
+    expect(within(card).getByText(label)).not.toBeVisible();
+    expect(within(card).getByText(help)).not.toBeVisible();
+    await user.click(within(card).getByText(language === "ko" ? "원본 요청 정보" : "Raw request details", { exact: true }));
+    expect(within(card).getByText(label)).toBeVisible();
+    expect(within(card).getByText(help)).toBeVisible();
+    expect(card.textContent).not.toContain("expected_editing_revision");
+    expect(card.textContent).not.toContain("Expected editing revision");
+  });
+
+  it("shows the requested document and version while keeping raw IDs in a disclosure", async () => {
+    const user = userEvent.setup();
+    const detail = chatDetail();
+    const pageId = "12345678-1234-5678-9012-12345678abcd";
+    const versionId = "98765432-1234-5678-9012-12345678abcd";
+    detail.timeline[0] = {
+      ...detail.timeline[0], action: "edit", tool_name: "update_context_edit",
+      input_summary: { page_id: pageId, version_id: versionId, body_md: "Raw content ".repeat(30) },
+      input_display_items: [
+        { key: "requested_artifact", kind: "artifact", text: "Requested guide", resource_kind: "context_page", resource_id: pageId, navigation_path: `/context?target=${pageId}` },
+        { key: "input_version", kind: "text", text: "v12", resource_id: versionId },
+      ],
+    };
+    renderWithDetail({
+      [`${BASE}/api/v1/workspaces`]: workspaceResponse(),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/chat-1`]: chatResponse(detail),
+    });
+    const card = await findCallCard();
+    await user.click(within(card).getByRole("tab", { name: "Inputs" }));
+    expect(within(card).getByRole("link", { name: "Requested guide" })).toBeVisible();
+    expect(within(card).getByText("v12")).toBeVisible();
+    expect(within(card).getByText("98765432…abcd")).not.toBeVisible();
+    expect(within(card).getByText("12345678…abcd")).not.toBeVisible();
+    await user.click(within(card).getByText("Raw request details", { exact: true }));
+    expect(within(card).getByText("98765432…abcd")).toBeVisible();
+    expect(within(card).getByText("12345678…abcd")).toBeVisible();
+  });
+
+  it.each([false, true])("orders semantic inputs, long content, then identifiers and preserves raw metadata (reverse: %s)", async (reverse) => {
+    const user = userEvent.setup();
+    const detail = chatDetail();
+    const fullId = "12345678-1234-5678-9012-12345678abcd";
+    detail.timeline[0] = { ...detail.timeline[0], id: fullId,
+      input_summary: { id: fullId, body_markdown: "Raw CASE body ".repeat(30), type: "context_page", workspace_id: WORKSPACE_ID, target_id: "second-id" },
+      input_display_items: [{ key: "target_kind", kind: "text", text: "context_page" }],
+      headline: "Original RAW headline ".repeat(100), schema_version: "2" };
+    if (reverse) {
+      detail.timeline[0].input_summary = Object.fromEntries(Object.entries(detail.timeline[0].input_summary).reverse());
+    }
+    renderWithDetail({ [`${BASE}/api/v1/workspaces`]: workspaceResponse(),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/chat-1`]: chatResponse(detail) });
+    const card = await findCallCard();
+    await user.click(within(card).getByRole("tab", { name: "Inputs" }));
+    expect(within(card).getAllByText("Context Page")).toHaveLength(2);
+    expect(within(card).getByText("Default")).toBeVisible();
+    const technical = card.querySelector(".mcp-tool-technical-inputs")!;
+    expect([...technical.querySelectorAll(".mcp-tool-result-meta dt")].map(node => node.textContent))
+      .toEqual(reverse ? ["Workspace", "Type", "Target ID", "ID"] : ["Workspace", "Type", "ID", "Target ID"]);
+    expect(technical.querySelector(".mcp-chat-input-grid")!.lastElementChild).toHaveClass("mcp-chat-input-reference-details");
+    expect(technical.querySelector(".mcp-tool-longvalue-body")).toHaveTextContent("Raw CASE body");
+    await user.click(within(card).getByRole("tab", { name: "Metadata" }));
+    const metadata = card.querySelector(".mcp-chat-metadata-grid")!;
+    expect(metadata.lastElementChild).toHaveTextContent("12345678…abcd");
+    expect(metadata.querySelector(".mcp-chat-call-headline dd")?.textContent).toBe(detail.timeline[0].headline);
+    expect(within(card).getByText("v2")).toBeVisible();
+  });
+
+  it("renders agent-controlled field names and page types as safe text", async () => {
+    const user = userEvent.setup();
+    const detail = chatDetail();
+    detail.timeline[0].input_summary = Object.fromEntries([
+      ["constructor", "first value"],
+      ["toString", "second value"],
+      ["hasOwnProperty", "third value"],
+      ["__proto__", "fourth value"],
+      ["page_type", "__proto__"],
+    ]);
+    renderWithDetail({
+      [`${BASE}/api/v1/workspaces`]: workspaceResponse(),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/chat-1`]: chatResponse(detail),
+    });
+    const card = await findCallCard();
+    await user.click(within(card).getByRole("tab", { name: "Inputs" }));
+    const technical = card.querySelector(".mcp-tool-technical-inputs")!;
+    expect([...technical.querySelectorAll("dt")].map(node => node.textContent))
+      .toEqual(["Constructor", "ToString", "HasOwnProperty", "Proto", "Page type"]);
+    expect(technical.querySelector(".mcp-chat-type-chip")).toHaveTextContent("Proto");
+    expect(technical.textContent).not.toContain("returned an object");
+  });
+
   it("renders one title surface, session info, artifacts, and flow metadata", async () => {
     const user = userEvent.setup();
     renderWithDetail({
@@ -273,16 +377,56 @@ describe("ChatsDetailScreen", () => {
     expect(duration).toHaveTextContent("unknown");
   });
 
-  it("renders the linked-artifacts count as a chip with a pluralized unit", async () => {
+  it("shows one card per artifact: order, counts, preview limit, pill labels and spoken name", async () => {
+    const user = userEvent.setup();
+    const detail = chatDetail();
+    const [referenced] = detail.linked_artifacts;
+    // Deliberately not newest-first: the policy's newest row (edited, 09:03)
+    // comes last, after nine other artifacts last touched at 09:02, so its
+    // card leads only if grouping keeps the newest row and re-sorts.
+    detail.linked_artifacts = [
+      ...Array.from({ length: 9 }, (_, index) => ({
+        ...referenced,
+        id: `artifact-link-other-${index}`,
+        resource_id: `page-other-${index}`,
+        artifact_title: `Other policy ${index + 1}`,
+        navigation_path: `/context?target=page-other-${index}`,
+        occurrence_count: 1,
+      })),
+      referenced,
+      { ...referenced, id: "artifact-link-4", verb: "search_match", occurrence_count: 1 },
+      {
+        ...referenced,
+        id: "artifact-link-2",
+        verb: "edited",
+        occurrence_count: 3,
+        last_occurred_at: "2026-05-27T09:03:00Z",
+      },
+    ];
     renderWithDetail({
       [`${BASE}/api/v1/workspaces`]: workspaceResponse(),
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/chat-1`]:
-        chatResponse(chatDetail()),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/chat-1`]: chatResponse(detail),
     });
 
-    expect(await screen.findByText("Linked artifacts")).toBeInTheDocument();
-    // One linked artifact in the fixture -> singular unit.
-    expect(screen.getByText("1 artifact")).toBeInTheDocument();
+    // Twelve rows, ten artifacts -> the chip and the preview limit count
+    // artifacts, not rows.
+    expect(await screen.findByText("10 artifacts")).toBeInTheDocument();
+    await openSection(user, /Linked artifacts/);
+    const cards = () => document.querySelectorAll(".mcp-artifact-strip--grouped .mcp-artifact-card");
+    expect(cards()).toHaveLength(8);
+    await user.click(screen.getByRole("button", { name: "Show all 10 artifacts" }));
+    expect(cards()).toHaveLength(10);
+    const [first] = cards();
+    expect(first.querySelector("strong")).toHaveTextContent("Authentication policy");
+    // Authoring first, then reading, then search exposure; repeats as ×N,
+    // spoken as words, and a single link has no count rather than "1 links".
+    const pills = [...first.querySelectorAll(".status-pill")];
+    expect(pills.map((pill) => pill.textContent))
+      .toEqual(["Edited ×3", "Referenced ×2", "Search match"]);
+    expect(pills[2].getAttribute("title")).toMatch(/^Search match · \d{4}-\d{2}-\d{2} /);
+    expect(first).toHaveAccessibleName(
+      /^Authentication policy, Edited 3 links, Referenced 2 links, Search match, \d{4}-\d{2}-\d{2} /,
+    );
   });
 
   it("renders search matches as muted outputs without treating them as inputs", async () => {
@@ -323,7 +467,7 @@ describe("ChatsDetailScreen", () => {
     });
 
     await openSection(user, /Linked artifacts/);
-    expect(screen.getByText("Search match", { selector: ".status-pill" })).toHaveClass(
+    expect(screen.getByText("Search match ×2", { selector: ".status-pill" })).toHaveClass(
       "status-pill-muted",
     );
 
@@ -746,7 +890,8 @@ describe("ChatsDetailScreen", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the opening tab, its display items, and the raw inputs without expanding anything", async () => {
+  it("keeps meaningful inputs open and conflict tokens in raw request details", async () => {
+    const user = userEvent.setup();
     renderWithDetail({
       [`${BASE}/api/v1/workspaces`]: workspaceResponse(),
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/chat-1`]:
@@ -772,9 +917,10 @@ describe("ChatsDetailScreen", () => {
     });
 
     const call = await findCallCard();
-    // No disclosure left anywhere on the card: neither the old outer
-    // "Technical call details" nor the nested one inside Inputs.
-    expect(call.querySelector("details")).toBeNull();
+    // The content stays open; only redundant raw identifiers are disclosed.
+    const rawIds = call.querySelector(".mcp-chat-input-reference-details");
+    expect(rawIds).not.toHaveAttribute("open");
+    expect(call.querySelector(".mcp-tool-technical-details")).toBeNull();
     // A write opens on what it sent.
     expect(within(call).getByRole("tab", { name: "Inputs" })).toHaveAttribute(
       "aria-selected",
@@ -786,8 +932,11 @@ describe("ChatsDetailScreen", () => {
     expect(
       within(panel).getByRole("heading", { name: "Technical inputs" }),
     ).toBeInTheDocument();
-    expect(within(panel).getByText("Expected editing revision")).toBeInTheDocument();
-    expect(within(panel).getByText("4")).toBeInTheDocument();
+    expect(within(panel).getByText("Overwrite protection number")).not.toBeVisible();
+    expect(within(panel).getByText("4")).not.toBeVisible();
+    await user.click(within(panel).getByText("Raw request details", { exact: true }));
+    expect(within(panel).getByText("Overwrite protection number")).toBeVisible();
+    expect(within(panel).getByText("4")).toBeVisible();
     // The old per-call meta line is gone from the card; those facts live in
     // Metadata.
     expect(within(call).queryByText(/^Started /)).toBeNull();
@@ -843,6 +992,7 @@ describe("ChatsDetailScreen", () => {
             {
               ...chatDetail().timeline[0],
               input_availability: "redacted",
+              input_summary: { workspace_id: WORKSPACE_ID, type: "context_page", id: "private-identifier-1234567890" },
               result_availability: "redacted",
               // A redacted call must not leak what little was captured.
               result_summary: "Found 3 private documents.",
@@ -869,6 +1019,10 @@ describe("ChatsDetailScreen", () => {
       within(callPanel(call)).getByText("The inputs of this call are hidden from you."),
     ).toBeInTheDocument();
     expect(within(callPanel(call)).queryByText("Technical inputs")).toBeNull();
+    expect(within(callPanel(call)).queryByText("Default")).toBeNull();
+    expect(within(callPanel(call)).queryByText("Context Page")).toBeNull();
+    expect(callPanel(call).textContent).not.toContain("private-identifier");
+    expect(callPanel(call).querySelector("button")).toBeNull();
   });
 
   it("applies the returned title and focuses its heading after save", async () => {

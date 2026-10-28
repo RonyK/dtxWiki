@@ -18,6 +18,8 @@ type UseAsyncLoadOptions<T> = {
 
 type UseAsyncLoadResult<T> = {
   data: T | null;
+  /** Changes on every successful first-page load, even if its cursor is unchanged. */
+  revision: number;
   error: string | null;
   loading: boolean;
   reload: () => void;
@@ -31,6 +33,7 @@ export function useAsyncLoad<T>(
   options: UseAsyncLoadOptions<T>,
 ): UseAsyncLoadResult<T> {
   const [data, setData] = useState<T | null>(null);
+  const [revision, setRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
@@ -70,6 +73,7 @@ export function useAsyncLoad<T>(
           return;
         }
         setData(nextData);
+        setRevision((current) => current + 1);
         options.onSuccess?.(nextData);
       })
       .catch((exc) => {
@@ -118,6 +122,7 @@ export function useAsyncLoad<T>(
 
   return {
     data,
+    revision,
     error,
     loading,
     reload: () => setReloadKey((current) => current + 1),

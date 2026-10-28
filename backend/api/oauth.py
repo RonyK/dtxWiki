@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from html import escape
@@ -10,6 +11,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.routing import APIRoute
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from backend.api.auth import (
@@ -17,6 +19,7 @@ from backend.api.auth import (
     get_session_service,
     session_cookie_secure_for_request,
 )
+from backend.api.cookie_budget import set_bounded_cookie
 from backend.api.deps import SessionFactoryDep
 from backend.api.metrics import inc_oauth_token_grant
 from backend.api.middleware.security_headers import (
@@ -32,6 +35,14 @@ from backend.api.oauth_copy import (
 from backend.app.errors import build_rest_error_response
 from backend.app.state import get_container_from_app
 from backend.audit.emitter import emit_oauth_event
+from backend.domain.credential_input import (
+    OAUTH_OPAQUE_TOKEN_MAX_BYTES,
+    OAUTH_QUERY_MAX_BYTES,
+    WORKSPACE_GRANTS_MAX_COUNT,
+    ascii_token_is_valid,
+    authorization_header_is_valid,
+)
+from backend.domain.oauth_input import validate_identifier, validate_scope_input
 from backend.policy.auth import (
     authenticate_bearer_token,
     public_base_url_from_request,
@@ -59,14 +70,53 @@ from backend.services.oauth_service import (
     OAuthRateLimitError,
     OAuthService,
     UnsupportedGrantTypeError,
+    _consume_dcr_slot,
     classify_oauth_csrf_failure,
     consume_oauth_csrf_state,
     consume_token_slot,
     record_oauth_csrf_state_issued,
+    validate_code_verifier,
 )
 from backend.services.session_service import AuthenticatedUser, SessionServiceError
 
-router = APIRouter(tags=["oauth"])
+
+class OAuthRoute(APIRoute):
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+        if self.path != "/oauth/authorize" or "GET" not in self.methods:
+            return handler
+
+        async def bounded_authorize(request: Request) -> Response:
+            # APIRoute calls this before dependency resolution reads query_params.
+            if len(request.scope.get("query_string", b"")) > OAUTH_QUERY_MAX_BYTES:
+                return oauth_error_response(
+                    InvalidOAuthRequestError("authorization query exceeds 16KiB"), 400
+                )
+            return await handler(request)
+
+        return bounded_authorize
+
+
+router = APIRouter(tags=["oauth"], route_class=OAuthRoute)
+
+OAUTH_SINGLETON_PARAMETERS = frozenset(
+    {
+        "client_id",
+        "redirect_uri",
+        "response_type",
+        "state",
+        "scope",
+        "code_challenge",
+        "code_challenge_method",
+        "code",
+        "code_verifier",
+        "refresh_token",
+        "grant_type",
+        "token",
+        "token_type_hint",
+        "decision",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -100,14 +150,23 @@ def jwks(request: Request, session_factory: SessionFactoryDep):
 
 @router.post("/oauth/register", status_code=201)
 async def register_client(request: Request, session_factory: SessionFactoryDep):
-    payload = await request.json()
     try:
+        client_ip = oauth_client_ip(request)
+        if not request.app.state.settings.oauth_allow_dcr:
+            raise InvalidClientRegistrationError("dynamic client registration disabled")
+        _consume_dcr_slot(client_ip)
+        payload = await _parse_unique_json_body(request)
         client = oauth_service(request, session_factory).register_client(
             payload=payload,
-            client_ip=oauth_client_ip(request),
+            client_ip=client_ip,
+            _rate_limit_consumed=True,
         )
     except InvalidClientRegistrationError as exc:
         return oauth_error_response(exc, 400)
+    except (ValueError, UnicodeError):
+        return oauth_error_response(
+            InvalidClientRegistrationError("client metadata must be a JSON object"), 400
+        )
     return {
         "client_id": client.client_id,
         "client_id_issued_at": client.issued_at,
@@ -118,12 +177,17 @@ async def register_client(request: Request, session_factory: SessionFactoryDep):
         "response_types": ["code"],
         "scope": client.scope,
         "client_name": client.client_name,
-        "application_type": "native",
+        "application_type": client.application_type,
     }
 
 
 @router.get("/oauth/authorize", response_class=HTMLResponse)
 def authorize_form(request: Request, session_factory: SessionFactoryDep):
+    for name in OAUTH_SINGLETON_PARAMETERS:
+        if len(request.query_params.getlist(name)) > 1:
+            return oauth_error_response(
+                InvalidOAuthRequestError("duplicate OAuth parameter"), 400
+            )
     session_service = get_session_service(request, session_factory)
     service = oauth_service(request, session_factory)
     try:
@@ -216,7 +280,8 @@ def authorize_form(request: Request, session_factory: SessionFactoryDep):
     if state_value:
         settings = request.app.state.settings
         secure_flag = session_cookie_secure_for_request(settings, request)
-        response.set_cookie(
+        set_bounded_cookie(
+            response,
             key=OAUTH_CSRF_COOKIE_NAME,
             value=state_value,
             max_age=OAUTH_CSRF_COOKIE_MAX_AGE,
@@ -231,13 +296,16 @@ def authorize_form(request: Request, session_factory: SessionFactoryDep):
 
 @router.post("/oauth/authorize")
 async def authorize_submit(request: Request, session_factory: SessionFactoryDep):
-    values = await parse_request_values(request)
+    try:
+        values = await parse_request_values(request)
+        workspace_ids_raw = await parse_form_workspace_ids(request, values)
+    except InvalidOAuthRequestError as exc:
+        return oauth_error_response(exc, 400)
     # P10.3 T3 (section 2.3): the checklist submits ``workspace_ids`` as a
     # repeated form field (or a JSON array) -- parse_request_values collapses
     # a repeated field to its last value, so the full set is read separately
     # here (Starlette caches request.body()/.json(), so this is not a second
     # stream read).
-    workspace_ids_raw = await parse_form_workspace_ids(request, values)
     session_service = get_session_service(request, session_factory)
     service = oauth_service(request, session_factory)
     try:
@@ -255,7 +323,8 @@ async def authorize_submit(request: Request, session_factory: SessionFactoryDep)
     csrf_ok = bool(form_state) and cookie_state == form_state
     if not csrf_ok:
         reason = classify_oauth_csrf_failure(
-            form_state=form_state, cookie_state=cookie_state,
+            form_state=form_state,
+            cookie_state=cookie_state,
         )
         # Best-effort forensic context only (ADR A11) -- the first submitted
         # workspace_ids entry, if any parses as a UUID.
@@ -671,10 +740,15 @@ def revoke_consent(
             message="session is required",
             status_code=401,
         )
-    removed = oauth_service(request, session_factory).revoke_consent(
-        user_id=user.user_id,
-        client_id=client_id,
-    )
+    try:
+        removed = oauth_service(request, session_factory).revoke_consent(
+            user_id=user.user_id,
+            client_id=client_id,
+        )
+    except InvalidOAuthRequestError as exc:
+        return build_rest_error_response(
+            error_code=exc.error_code, message=str(exc), status_code=422
+        )
     if not removed:
         return build_rest_error_response(
             error_code="consent_not_found",
@@ -840,9 +914,13 @@ def _resolve_revoke_actor(
     family (section 2.3), so there is nothing left to restrict it by.
     """
 
+    if not authorization_header_is_valid(request.headers.get("authorization", "")):
+        return None
     # Bearer path: PAT or OAuth access JWT or session cookie.
     actor = _try_bearer_revoker(
-        request=request, session_factory=session_factory, settings=settings,
+        request=request,
+        session_factory=session_factory,
+        settings=settings,
     )
     if actor is not None:
         return actor
@@ -887,10 +965,10 @@ def _try_bearer_revoker(
     from backend.services.credential_hashing import CredentialHasher
 
     authorization = request.headers.get("authorization", "")
+    if not authorization_header_is_valid(authorization):
+        return None
     if authorization.lower().startswith("bearer "):
-        bearer = authorization.removeprefix("Bearer ").removeprefix(
-            "bearer "
-        ).strip()
+        bearer = authorization[7:].strip(" \t")
         if bearer.startswith("dtxw_"):
             try:
                 actor = ApiTokenService(
@@ -970,12 +1048,88 @@ def oauth_client_ip(request: Request) -> str:
 async def parse_request_values(request: Request) -> dict[str, object]:
     content_type = request.headers.get("content-type", "")
     if "application/json" in content_type:
-        return await request.json()
-    body = (await request.body()).decode()
+        try:
+            parsed = await _parse_unique_json_body(request)
+        except (ValueError, UnicodeError) as exc:
+            raise InvalidOAuthRequestError("request body is invalid") from exc
+        if not isinstance(parsed, dict):
+            raise InvalidOAuthRequestError("request body must be a JSON object")
+        for name in (
+            "client_id",
+            "redirect_uri",
+            "response_type",
+            "state",
+            "scope",
+            "code_challenge",
+            "code_challenge_method",
+            "code",
+            "code_verifier",
+            "refresh_token",
+            "grant_type",
+            "token",
+            "token_type_hint",
+        ):
+            if name in parsed and not isinstance(parsed[name], str):
+                raise InvalidOAuthRequestError(f"{name} must be a string")
+        _validate_parsed_client_id(parsed)
+        return parsed
+    try:
+        body = (await request.body()).decode("utf-8")
+        fields = parse_qs(body, keep_blank_values=True, errors="strict")
+    except UnicodeError as exc:
+        raise InvalidOAuthRequestError("request body must be UTF-8") from exc
     parsed = {}
-    for key, values in parse_qs(body).items():
-        parsed[key] = values[-1] if values else ""
+    for key, values in fields.items():
+        if key in OAUTH_SINGLETON_PARAMETERS and len(values) > 1:
+            raise InvalidOAuthRequestError("duplicate OAuth parameter")
+        parsed[key] = values if key == "resource" else values[-1] if values else ""
+    _validate_parsed_client_id(parsed)
     return parsed
+
+
+async def _parse_unique_json_body(request: Request) -> object:
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate OAuth parameter")
+            result[key] = value
+        return result
+
+    try:
+        return json.loads(await request.body(), object_pairs_hook=unique_object)
+    except RecursionError as exc:
+        raise ValueError("request body is too deeply nested") from exc
+
+
+def _validate_parsed_client_id(values: dict[str, object]) -> None:
+    if values.get("client_id") not in (None, ""):
+        try:
+            validate_identifier(values["client_id"])
+        except ValueError as exc:
+            raise InvalidOAuthRequestError(str(exc)) from exc
+    for name, maximum in (
+        ("code", OAUTH_OPAQUE_TOKEN_MAX_BYTES),
+        ("refresh_token", OAUTH_OPAQUE_TOKEN_MAX_BYTES),
+    ):
+        if values.get(name) not in (None, "") and not ascii_token_is_valid(
+            values[name], maximum
+        ):
+            raise InvalidOAuthRequestError(
+                f"{name} exceeds its credential input envelope"
+            )
+    # Revocation's `token` is checked by the service before hashing/decoding;
+    # an authenticated unknown or oversized token remains a successful no-op.
+    if "scope" in values:
+        try:
+            validate_scope_input(values["scope"])
+        except ValueError as exc:
+            raise InvalidOAuthRequestError(str(exc)) from exc
+    if values.get("code_verifier") not in (None, ""):
+        validate_code_verifier(values["code_verifier"])
+    state = values.get("state", "")
+    if len(state) > 512 or any(not " " <= character <= "~" for character in state):
+        raise InvalidOAuthRequestError("state exceeds its printable ASCII envelope")
 
 
 async def parse_form_request_values(request: Request) -> dict[str, object]:
@@ -1005,12 +1159,23 @@ async def parse_form_workspace_ids(
     if "application/json" in content_type:
         raw = values.get("workspace_ids")
         if isinstance(raw, list):
+            if len(raw) > WORKSPACE_GRANTS_MAX_COUNT:
+                raise InvalidOAuthRequestError(
+                    "workspace_ids must contain at most 256 entries"
+                )
+            if not all(isinstance(item, str) for item in raw):
+                raise InvalidOAuthRequestError(
+                    "workspace_ids must contain UUID strings"
+                )
             return [str(item) for item in raw]
         if raw not in (None, ""):
             return [str(raw)]
         return []
     body = (await request.body()).decode()
-    return parse_qs(body).get("workspace_ids", [])
+    workspace_ids = parse_qs(body).get("workspace_ids", [])
+    if len(workspace_ids) > WORKSPACE_GRANTS_MAX_COUNT:
+        raise InvalidOAuthRequestError("workspace_ids must contain at most 256 entries")
+    return workspace_ids
 
 
 def authorization_kwargs(values: dict[str, object]) -> dict[str, object]:

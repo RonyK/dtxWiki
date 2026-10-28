@@ -469,38 +469,17 @@ def test_ask_turn_evidence_keeps_ready_a_until_ready_b_supersedes_it(
         )
 
 
-def test_ask_does_not_persist_search_only_disambiguation_warning(session_factory):
-    with session_factory.begin() as session:
-        workspace = _ws(session)
-        page = _seed_page(session, workspace.id)
-        service = AskService(
-            search_service=FakeSemanticSearch(
-                context=[_semantic_context_result(page.id)],
-                warnings=["disambiguation_required"],
-            )
-        )
-        turn, detail = _create_turn(
-            service,
-            session,
-            workspace.id,
-            "which deployment plan?",
-        )
-
-    assert turn.warning_codes == []
-    assert detail.warning_codes == []
-
-
 def test_ask_forwards_permission_limited_but_not_search_only_warnings(session_factory):
     # permission_limited is a trust disclosure about the evidence the answer was
-    # built on, so it forwards; disambiguation_required (whose candidate list
-    # lives only on the search response) is dropped from the ask turn.
+    # built on, so it forwards; unsupported search filters do not apply to an
+    # Ask turn and remain on the search response only.
     with session_factory.begin() as session:
         workspace = _ws(session)
         page = _seed_page(session, workspace.id)
         service = AskService(
             search_service=FakeSemanticSearch(
                 context=[_semantic_context_result(page.id)],
-                warnings=["permission_limited", "disambiguation_required"],
+                warnings=["permission_limited", "unsupported_filter_tag"],
             )
         )
         turn, detail = _create_turn(

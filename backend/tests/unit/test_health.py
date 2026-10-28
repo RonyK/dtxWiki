@@ -29,9 +29,8 @@ def test_extra_lifespan_composes_with_mcp_lifespan(tmp_path):
     with TestClient(app) as client:
         assert events == ["overlay-start"]
         # Core MCP lifespan ran inside the overlay: the streamable session
-        # manager and MCP contextvars are installed.
+        # manager is installed.
         assert getattr(app.state, "mcp_session_manager", None) is not None
-        assert getattr(app.state, "mcp_actor_var", None) is not None
         response = client.get("/health/ready")
 
     assert response.status_code == 200
@@ -74,6 +73,7 @@ def test_ready_root_path_happy_200(tmp_path):
             "app_version": "ok",
             "mcp": "ok",
             "oauth_jwk": "ok",
+            "worker": "n/a",
         },
     }
 
@@ -230,7 +230,38 @@ def test_ready_response_shape_matches_adr_a7(tmp_path):
     body = response.json()
 
     assert set(body) == {"status", "components"}
-    assert set(body["components"]) == {"db", "app_version", "mcp", "oauth_jwk"}
+    assert set(body["components"]) == {
+        "db", "app_version", "mcp", "oauth_jwk", "worker"
+    }
+
+
+def test_managed_worker_must_be_ready(tmp_path):
+    app = create_app(settings=_settings(tmp_path))
+    app.state.app_version_synced = True
+    app.state.mcp_session_manager = object()
+    app.state.worker_mode = "managed"
+    client = TestClient(app)
+
+    for ready, expected_status, expected_component in (
+        (False, 503, "error"),
+        (True, 200, "ok"),
+        (False, 503, "error"),
+    ):
+        app.state.worker_ready = ready
+        response = client.get("/health/ready")
+        assert response.status_code == expected_status
+        assert response.json()["components"]["worker"] == expected_component
+
+
+def test_external_worker_is_not_claimed_as_checked(tmp_path):
+    app = create_app(settings=_settings(tmp_path))
+    app.state.app_version_synced = True
+    app.state.mcp_session_manager = object()
+    app.state.worker_mode = "external"
+    response = TestClient(app).get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.json()["components"]["worker"] == "n/a"
 
 
 def _settings(tmp_path: Path, **overrides) -> Settings:

@@ -318,6 +318,16 @@ describe("PageEditor", () => {
     Reflect.deleteProperty(window.navigator, "sendBeacon");
   });
 
+  it("rejects a save when managed frontmatter puts the final body over its limit", async () => {
+    const fetchMock = mockEditorPage("x".repeat(999_990));
+    renderWithRouter("/pages/hello/edit", <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />);
+    await screen.findByLabelText("Markdown body");
+    await setEditorTitle(await findTitleEditor(), "Changed title");
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    expect(await screen.findByText("Use 1,000,000 characters or fewer.")).toBeInTheDocument();
+    expect(writeCalls(fetchMock)).toHaveLength(0);
+  });
+
   it("localizes editor chrome in Korean: title placeholder, mode tabs, shortcuts panel, block menu (I18N-01)", async () => {
     await i18n.changeLanguage("ko");
     try {
@@ -1326,7 +1336,6 @@ describe("PageEditor", () => {
           data: {
             current_workspace_id: "workspace-personal",
             default_workspace_id: "workspace-personal",
-            personal_workspace_id: "workspace-personal",
             workspaces: [
               {
                 id: "workspace-personal",
@@ -1884,7 +1893,7 @@ describe("PageEditor", () => {
   });
 
   it("uses API metadata over stale frontmatter when loading properties", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
@@ -1902,8 +1911,8 @@ describe("PageEditor", () => {
         data: {
           ...page,
           page_type: "guide",
-          tags: ["Server Tag", "R&D"],
-          aliases: ["API Alias"],
+          tags: ["Server Tag, stable", "R&D"],
+          aliases: ["API Alias, stable"],
           body_md: [
             "---",
             "type: decision",
@@ -1931,10 +1940,19 @@ describe("PageEditor", () => {
     expect(destination).not.toBeDisabled();
     expect(destination).toHaveTextContent("Context / Inbox");
     expect(destination).toHaveAttribute("title", "Context / Inbox");
-    expect(screen.getByText("Server Tag")).toBeInTheDocument();
+    expect(screen.getByText("Server Tag, stable")).toBeInTheDocument();
     expect(screen.getByText("R&D")).toBeInTheDocument();
     await typist().click(pageProperties().getByRole("button", { name: "Advanced settings" }));
-    expect(screen.getByText("API Alias")).toBeInTheDocument();
+    expect(screen.getByText("API Alias, stable")).toBeInTheDocument();
+    await setEditorTitle(getTitleEditor(), "Changed title");
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    await waitFor(() => {
+      const request = writeCalls(fetchMock).find((call) => String(call[0]).endsWith("/autosave"));
+      expect(request).toBeDefined();
+      expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
+        aliases: ["API Alias, stable"], tags: ["Server Tag, stable", "R&D"],
+      });
+    });
   });
 
   it("omits the current page branch from destination choices", async () => {
@@ -7408,7 +7426,7 @@ describe("PageEditor", () => {
     expect(await screen.findByLabelText("Context tree")).toBeInTheDocument();
   });
 
-  it("collapses multi-line title input into single spaces and caps the length", async () => {
+  it("preserves explicit title input and rejects controls or more than 256 code points", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -7437,13 +7455,21 @@ describe("PageEditor", () => {
     );
 
     const titleInput = await findTitleEditor();
-    expect(titleInput).toHaveAttribute("maxlength", "200");
+    expect(titleInput).not.toHaveAttribute("maxlength");
 
-    await setEditorTitle(titleInput, "Line one\nLine two\r\n\tLine three");
-    expect(titleInput).toHaveValue("Line one Line two Line three");
+    const multiline = "Line one\nLine two\n\tLine three";
+    await setEditorTitle(titleInput, multiline);
+    fireEvent.input(titleInput);
+    expect(titleInput).toHaveValue(multiline);
+    expect(titleInput).toBeInvalid();
 
-    fireEvent.change(titleInput, { target: { value: `Long${"x".repeat(300)}` } });
-    expect((titleInput as HTMLTextAreaElement).value).toHaveLength(200);
+    fireEvent.change(titleInput, { target: { value: "😀".repeat(257) } });
+    fireEvent.input(titleInput);
+    expect(titleInput).toHaveValue("😀".repeat(257));
+    expect(titleInput).toBeInvalid();
+    fireEvent.change(titleInput, { target: { value: "😀".repeat(256) } });
+    fireEvent.input(titleInput);
+    expect(titleInput).toBeValid();
   });
 
   it("percent-encodes link dialog URLs and rejects unsafe schemes", async () => {

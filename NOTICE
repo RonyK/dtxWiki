@@ -43,3 +43,12 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+frontend/licenses/storybook-10.5.3.LICENSE
+
+An unmodified copy of the Storybook v10.5.3 MIT License from
+https://github.com/storybookjs/storybook/blob/9ac273930a49ad33b6a331f1f36dc472f5c36054/LICENSE
+(Copyright (c) 2024 Storybook). It supplies the license text omitted by the
+storybook, @storybook/react and @storybook/react-dom-shim 10.5.3 npm packages
+when they are included in the Storybook build. The full terms are in that
+file and in the generated Storybook THIRD_PARTY_NOTICES.txt.

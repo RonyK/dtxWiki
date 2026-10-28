@@ -5,7 +5,7 @@ import inspect
 import json
 import logging
 from collections import OrderedDict
-from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -30,6 +30,7 @@ from backend.app.state import (
     get_session_factory_from_app,
 )
 from backend.context_media.domain.policy import MAX_CONTEXT_IMAGE_UPLOAD_BYTES
+from backend.domain.credential_input import authorization_header_is_valid
 from backend.mcp.protocol.instructions import MCP_SERVER_INSTRUCTIONS
 from backend.mcp.protocol.lifecycle import enforce_actor_mcp_surface_lifecycle
 from backend.mcp.protocol.prompts_resources import (
@@ -255,9 +256,11 @@ async def mcp_http(request: Request):
     # does not drift for an MCP endpoint whose contract is JSON-RPC based.
     mode = getattr(request.app.state.settings, "mcp_http_mode", "json_stateless")
     authorization = request.headers.get("authorization", "")
-    if not authorization.startswith("Bearer "):
+    if not authorization_header_is_valid(
+        authorization
+    ) or not authorization.lower().startswith("bearer "):
         return mcp_unauthorized(request)
-    token = authorization.removeprefix("Bearer ").strip()
+    token = authorization[7:].strip(" \t")
     actor = _authenticate_mcp_actor(request, token)
     if isinstance(actor, JSONResponse):
         return actor
@@ -382,9 +385,11 @@ async def mcp_http_get(request: Request):
     # OpenAPI does not carry the MCP transport design text.
     mode = getattr(request.app.state.settings, "mcp_http_mode", "json_stateless")
     authorization = request.headers.get("authorization", "")
-    if not authorization.startswith("Bearer "):
+    if not authorization_header_is_valid(
+        authorization
+    ) or not authorization.lower().startswith("bearer "):
         return mcp_unauthorized(request)
-    token = authorization.removeprefix("Bearer ").strip()
+    token = authorization[7:].strip(" \t")
     actor = _authenticate_mcp_actor(request, token)
     if isinstance(actor, JSONResponse):
         return actor
@@ -416,7 +421,7 @@ async def mcp_http_get(request: Request):
     )
     if session_error is not None:
         return session_error
-    # Phase_2 §3.10.2 GET branch: contextvar set → SDK handshake.
+    # The authenticated HTTP request carries the actor into SDK messages.
     # resolve_and_check stays out of this path (lazy on first tool call).
     # The GET response is SSE (streaming, never completes until client
     # disconnect), so we cannot buffer the response — return an ASGI
@@ -430,9 +435,11 @@ async def mcp_http_delete(request: Request):
     # remains idempotent for missing or unknown session ids.
     mode = getattr(request.app.state.settings, "mcp_http_mode", "json_stateless")
     authorization = request.headers.get("authorization", "")
-    if not authorization.startswith("Bearer "):
+    if not authorization_header_is_valid(
+        authorization
+    ) or not authorization.lower().startswith("bearer "):
         return mcp_unauthorized(request)
-    token = authorization.removeprefix("Bearer ").strip()
+    token = authorization[7:].strip(" \t")
     actor = _authenticate_mcp_actor(request, token)
     if isinstance(actor, JSONResponse):
         return actor
@@ -476,9 +483,7 @@ async def mcp_http_delete(request: Request):
     # ``terminate()`` runs (sets ``_terminated=True`` + closes the
     # streams + removes the entry from its session pool). The SDK
     # responds 200 on success — we forward that response verbatim.
-    response = await _dispatch_via_lifespan_manager(
-        request, manager, actor, b""
-    )
+    response = await _dispatch_via_lifespan_manager(request, manager, b"")
     # Phase_2 Task 2.6 branch (4) cooperation: record the session id in
     # the terminated-ledger so a subsequent POST surfaces 410 (expired)
     # instead of 404 (unknown). The SDK removes the id immediately on
@@ -514,8 +519,8 @@ class _StreamingMCPResponse(Response):
     which also blocks the buffered handler. Both methods now flow
     through the streaming response, with body forwarded for POST.
 
-    Phase_2 §10 leak-prevention rule: contextvars bound for the
-    duration of the stream and reset in ``finally``.
+    The SDK attaches each HTTP request to its message. Dispatcher callbacks
+    read that request's authenticated actor instead of session-task state.
     """
 
     def __init__(
@@ -546,30 +551,7 @@ class _StreamingMCPResponse(Response):
         # sees the post-negotiation Accept header.
         self._scope_override = scope_override
 
-    async def __call__(
-        self, scope: Scope, receive: Receive, send: Send
-    ) -> None:
-        actor_var: ContextVar[ActorContext | None] = (
-            self._request.app.state.mcp_actor_var
-        )
-        page_service_var: ContextVar[PageService | None] = (
-            self._request.app.state.mcp_page_service_var
-        )
-        settings_var: ContextVar = self._request.app.state.mcp_settings_var
-        session_factory_var: ContextVar = (
-            self._request.app.state.mcp_session_factory_var
-        )
-        session_id_var: ContextVar = self._request.app.state.mcp_session_id_var
-
-        actor_token = actor_var.set(self._actor)
-        page_service_token = page_service_var.set(
-            get_page_service_from_app(self._request)
-        )
-        settings_token = settings_var.set(self._request.app.state.settings)
-        session_factory_token = session_factory_var.set(
-            get_session_factory_from_app(self._request)
-        )
-
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         # POST path: the framework already consumed the body via
         # ``request.body()`` (so the caller could peek the JSON-RPC
         # method for Task 2.6 validation). The original ``receive``
@@ -580,9 +562,6 @@ class _StreamingMCPResponse(Response):
         emitted_body = False
         captured_body = self._body
         method = _mcp_request_method(captured_body)
-        session_id_token = session_id_var.set(
-            _request_mcp_trace_session_id(self._request, captured_body)
-        )
 
         async def _receive() -> Message:
             nonlocal emitted_body
@@ -620,46 +599,25 @@ class _StreamingMCPResponse(Response):
             await send(message)
 
         forwarded_scope = (
-            self._scope_override
-            if self._scope_override is not None
-            else scope
+            self._scope_override if self._scope_override is not None else scope
         )
-        try:
-            with sessions_opened_during_request() as opened_session_ids:
-                try:
-                    await self._manager.handle_request(
-                        forwarded_scope, _receive, _send
-                    )
-                finally:
-                    await _discard_unowned_mcp_sessions(
-                        self._request.app.state, self._manager, opened_session_ids
-                    )
-        finally:
-            session_id_var.reset(session_id_token)
-            session_factory_var.reset(session_factory_token)
-            settings_var.reset(settings_token)
-            page_service_var.reset(page_service_token)
-            actor_var.reset(actor_token)
+        with sessions_opened_during_request() as opened_session_ids:
+            try:
+                await self._manager.handle_request(forwarded_scope, _receive, _send)
+            finally:
+                await _discard_unowned_mcp_sessions(
+                    self._request.app.state, self._manager, opened_session_ids
+                )
 
 
 async def _dispatch_via_lifespan_manager(
     request: Request,
     manager: StreamableHTTPSessionManager,
-    actor: ActorContext,
     body: bytes,
     *,
     scope: dict | None = None,
 ) -> Response:
-    """Bind actor/page_service to contextvars and delegate to SDK manager.
-
-    The lifespan-scoped manager is bound to a single dispatcher server (SDK
-    constraint 3). The dispatcher reads the actor + page_service from the
-    contextvars set here, so each request reaches a per-request actor-scoped
-    tool surface without rebinding the manager.
-
-    Phase_2 §3.10.2 canonical sequence: contextvar set → SDK dispatch.
-    contextvars MUST be reset in ``finally`` to avoid inter-request leak
-    (Phase_2 §10 "Dispatcher pattern actor context leak").
+    """Normalize the HTTP scope and delegate to the lifespan SDK manager.
 
     ``scope`` overrides ``request.scope`` when provided — used by the POST
     handler to pass the Accept-negotiated scope from Task 2.5
@@ -671,53 +629,19 @@ async def _dispatch_via_lifespan_manager(
     strict Accept validation needs a concrete ``application/json``/``*/*``
     header, not whatever the caller happened to send.
     """
-    actor_var: ContextVar[ActorContext | None] = request.app.state.mcp_actor_var
-    page_service_var: ContextVar[PageService | None] = (
-        request.app.state.mcp_page_service_var
-    )
-    settings_var: ContextVar = request.app.state.mcp_settings_var
-    session_factory_var: ContextVar = request.app.state.mcp_session_factory_var
-    session_id_var: ContextVar = request.app.state.mcp_session_id_var
-
-    actor_token = actor_var.set(actor)
-    page_service_token = page_service_var.set(get_page_service_from_app(request))
-    settings_token = settings_var.set(request.app.state.settings)
-    session_factory_token = session_factory_var.set(
-        get_session_factory_from_app(request)
-    )
-    session_id_token = session_id_var.set(_request_mcp_trace_session_id(request, body))
     resolved_scope = scope if scope is not None else _apply_compat_hack(request.scope)
-    try:
-        return await _call_streamable_http_manager(manager, body, scope=resolved_scope)
-    finally:
-        session_id_var.reset(session_id_token)
-        session_factory_var.reset(session_factory_token)
-        settings_var.reset(settings_token)
-        page_service_var.reset(page_service_token)
-        actor_var.reset(actor_token)
+    return await _call_streamable_http_manager(manager, body, scope=resolved_scope)
 
 
 def install_mcp_session_manager(app: FastAPI) -> StreamableHTTPSessionManager | None:
     """Build the lifespan-scoped dispatcher manager when mode != json_stateless.
 
-    Called from the FastAPI lifespan in ``backend/app/main.py``. Stores the
-    contextvars used by the dispatcher on ``app.state`` so the POST handler
-    and dispatcher share the same bindings.
+    Called from the FastAPI lifespan in ``backend/app/main.py``. Each app
+    owns its dispatcher, manager, and bounded session-owner ledgers.
 
     Returns the manager (or ``None`` for ``json_stateless``). The caller is
     responsible for entering the manager's ``run()`` context.
     """
-    # Always create the contextvars so dispatcher / handler can read them
-    # uniformly regardless of mode. Module-level vars would leak across
-    # ``create_app`` instances (H6 invariant 1: instance-scoped, not
-    # module-level singleton).
-    app.state.mcp_actor_var = ContextVar("mcp_actor", default=None)
-    app.state.mcp_page_service_var = ContextVar("mcp_page_service", default=None)
-    app.state.mcp_settings_var = ContextVar("mcp_settings", default=None)
-    app.state.mcp_session_factory_var = ContextVar(
-        "mcp_session_factory", default=None
-    )
-    app.state.mcp_session_id_var = ContextVar("mcp_session_id", default=None)
     # Phase_2 Task 2.6 branch (4): SDK removes terminated session ids
     # after DELETE, so we cannot distinguish
     # "terminated" from "never existed" by querying the manager alone.
@@ -749,14 +673,61 @@ def install_mcp_session_manager(app: FastAPI) -> StreamableHTTPSessionManager | 
     return manager
 
 
+@dataclass(frozen=True)
+class _MCPRequestBindings:
+    actor: ActorContext
+    page_service: PageService
+    session_factory: Any
+    mcp_session_id: str
+
+
+def _dispatcher_request_bindings(
+    dispatcher: MCPServer, app: FastAPI
+) -> _MCPRequestBindings:
+    """Resolve only the authenticated HTTP request carried by this message.
+
+    Stateful SDK tasks inherit their initialize request's ContextVars, so
+    session-task state cannot supply a later message's authorization. Missing
+    HTTP metadata is an error, including for direct dispatcher invocations.
+    """
+    try:
+        request = dispatcher.request_context.request
+    except LookupError as exc:
+        raise _request_binding_error("HTTP metadata") from exc
+    if not isinstance(request, Request) or request.scope.get("app") is not app:
+        raise _request_binding_error("this app's HTTP request")
+    actor = getattr(request.state, "actor", None)
+    if not isinstance(actor, ActorContext) or actor.token_kind not in {
+        "api_token",
+        "oauth_jwt",
+    }:
+        raise _request_binding_error("an authenticated bearer actor")
+    session_id = _request_mcp_session_id(request)
+    if not session_id:
+        raise _request_binding_error("Mcp-Session-Id")
+    return _MCPRequestBindings(
+        actor=actor,
+        page_service=get_page_service_from_app(request),
+        session_factory=get_session_factory_from_app(request),
+        mcp_session_id=session_id,
+    )
+
+
+def _request_binding_error(requirement: str) -> RuntimeError:
+    # The SDK turns a tools/call exception into an error result without
+    # logging it, so a broken binding would otherwise leave no server trace.
+    logger.error("MCP request binding rejected: missing %s", requirement)
+    return RuntimeError(f"MCP request binding requires {requirement}")
+
+
 def _build_dispatcher_server(app: FastAPI) -> MCPServer:
     """Single MCPServer bound to the lifespan-scoped manager.
 
     SDK constraint 3 (Phase_2 §6): ``manager.app`` is a single MCPServer
     instance, but dtxWiki's tool surface is actor-scoped. The dispatcher
-    server reads the actor + page_service from contextvars (set by the
-    POST handler) at the moment each ``tools/list`` / ``tools/call`` arrives
-    and delegates to the same runner used by ``create_mcp_server``.
+    server resolves each message's HTTP request bindings and delegates to
+    the same runner used by ``create_mcp_server``. The request's actor is
+    fresh even when the SDK task was initialized before a grant change.
 
     Phase_2 §3.10.2 step (5): for ``streamable`` / ``auto`` modes the
     workspace ``resolve_and_check`` happens *inside* the dispatcher's
@@ -781,29 +752,23 @@ def _build_dispatcher_server(app: FastAPI) -> MCPServer:
     async def _list_tools(request: mcp_types.ListToolsRequest):
         # Phase_2 §3.10.3: tools/list skips workspace resolution; the tool
         # surface is actor-scope (scopes/role) only.
-        actor = app.state.mcp_actor_var.get()
-        if actor is None:  # pragma: no cover - guarded by handler ordering
-            return []
-        session_factory = app.state.mcp_session_factory_var.get()
-        if session_factory is None:  # pragma: no cover - guarded by handler
-            return []
+        bindings = _dispatcher_request_bindings(dispatcher, app)
         container = getattr(app.state, "container", None)
-        visible_actor = actor
+        visible_actor = bindings.actor
         if request is not None:
             visible_actor = enforce_actor_mcp_surface_lifecycle(
-                actor=actor,
-                fallback_session_factory=session_factory,
+                actor=bindings.actor,
+                fallback_session_factory=bindings.session_factory,
                 db=container.db if container is not None else None,
             )
         return list_dtxwiki_tools(visible_tool_names(visible_actor))
 
     @dispatcher.call_tool(validate_input=False)
     async def _call_tool(name: str, arguments: dict | None):
-        actor = app.state.mcp_actor_var.get()
-        page_service = app.state.mcp_page_service_var.get()
-        session_factory = app.state.mcp_session_factory_var.get()
-        if actor is None or page_service is None:  # pragma: no cover
-            raise RuntimeError("dispatcher invoked without actor binding")
+        bindings = _dispatcher_request_bindings(dispatcher, app)
+        actor = bindings.actor
+        page_service = bindings.page_service
+        session_factory = bindings.session_factory
         container = getattr(app.state, "container", None)
         search_service = (
             container.get_search_service() if container is not None else None
@@ -815,7 +780,7 @@ def _build_dispatcher_server(app: FastAPI) -> MCPServer:
                 page_service=page_service,
                 search_service=search_service,
                 services=container.get_services(),
-                conversation_token=app.state.mcp_session_id_var.get(),
+                conversation_token=bindings.mcp_session_id,
             )
             if container is not None
             else None
@@ -843,72 +808,57 @@ def _build_dispatcher_server(app: FastAPI) -> MCPServer:
             actor=actor,
             page_service=page_service,
             session_factory=session_factory,
-            mcp_session_id=app.state.mcp_session_id_var.get(),
+            mcp_session_id=bindings.mcp_session_id,
             search_service=search_service,
             tool_context=tool_context,
         )
 
     @dispatcher.list_prompts()
     async def _list_prompts():
-        actor = app.state.mcp_actor_var.get()
-        session_factory = app.state.mcp_session_factory_var.get()
-        if actor is None or session_factory is None:  # pragma: no cover
-            return []
+        bindings = _dispatcher_request_bindings(dispatcher, app)
         return list_dtxwiki_prompts(
-            actor=actor,
-            session_factory=session_factory,
-            tool_context=_surface_tool_context(app, actor, session_factory),
+            actor=bindings.actor,
+            session_factory=bindings.session_factory,
+            tool_context=_surface_tool_context(app, bindings),
         )
 
     @dispatcher.get_prompt()
     async def _get_prompt(name: str, arguments: dict[str, str] | None):
-        actor = app.state.mcp_actor_var.get()
-        session_factory = app.state.mcp_session_factory_var.get()
-        if actor is None or session_factory is None:  # pragma: no cover
-            raise RuntimeError("dispatcher invoked without actor binding")
+        bindings = _dispatcher_request_bindings(dispatcher, app)
         return get_dtxwiki_prompt(
             name=name,
             arguments=arguments,
-            actor=actor,
-            session_factory=session_factory,
-            tool_context=_surface_tool_context(app, actor, session_factory),
+            actor=bindings.actor,
+            session_factory=bindings.session_factory,
+            tool_context=_surface_tool_context(app, bindings),
         )
 
     @dispatcher.list_resources()
     async def _list_resources():
-        actor = app.state.mcp_actor_var.get()
-        session_factory = app.state.mcp_session_factory_var.get()
-        if actor is None or session_factory is None:  # pragma: no cover
-            return []
+        bindings = _dispatcher_request_bindings(dispatcher, app)
         return list_dtxwiki_resources(
-            actor=actor,
-            session_factory=session_factory,
-            tool_context=_surface_tool_context(app, actor, session_factory),
+            actor=bindings.actor,
+            session_factory=bindings.session_factory,
+            tool_context=_surface_tool_context(app, bindings),
         )
 
     @dispatcher.list_resource_templates()
     async def _list_resource_templates():
-        actor = app.state.mcp_actor_var.get()
-        session_factory = app.state.mcp_session_factory_var.get()
-        if actor is None or session_factory is None:  # pragma: no cover
-            return []
+        bindings = _dispatcher_request_bindings(dispatcher, app)
         return list_dtxwiki_resource_templates(
-            actor=actor,
-            session_factory=session_factory,
-            tool_context=_surface_tool_context(app, actor, session_factory),
+            actor=bindings.actor,
+            session_factory=bindings.session_factory,
+            tool_context=_surface_tool_context(app, bindings),
         )
 
     @dispatcher.read_resource()
     async def _read_resource(uri):
-        actor = app.state.mcp_actor_var.get()
-        session_factory = app.state.mcp_session_factory_var.get()
-        if actor is None or session_factory is None:  # pragma: no cover
-            raise RuntimeError("dispatcher invoked without actor binding")
+        bindings = _dispatcher_request_bindings(dispatcher, app)
         return read_dtxwiki_resource(
             uri=uri,
-            actor=actor,
-            session_factory=session_factory,
-            tool_context=_surface_tool_context(app, actor, session_factory),
+            actor=bindings.actor,
+            session_factory=bindings.session_factory,
+            tool_context=_surface_tool_context(app, bindings),
         )
 
     return dispatcher
@@ -916,9 +866,8 @@ def _build_dispatcher_server(app: FastAPI) -> MCPServer:
 
 def _surface_tool_context(
     app: FastAPI,
-    actor: ActorContext,
-    session_factory,
-) -> ToolCallContext | None:
+    bindings: _MCPRequestBindings,
+) -> ToolCallContext:
     """Bind the prompt/resource surface to the app's composition.
 
     The injected container's DatabaseProvider and ServiceRegistry are
@@ -928,24 +877,21 @@ def _surface_tool_context(
     """
 
     container = getattr(app.state, "container", None)
-    page_service = app.state.mcp_page_service_var.get()
-    if page_service is None:
-        return None
     if container is not None:
         db = container.db
         services = container.get_services()
         search_service = container.get_search_service()
     else:
-        db = DatabaseProvider(None, session_factory=session_factory)
+        db = DatabaseProvider(None, session_factory=bindings.session_factory)
         services = None
         search_service = None
     return ToolCallContext(
-        actor=actor,
+        actor=bindings.actor,
         db=db,
-        page_service=page_service,
+        page_service=bindings.page_service,
         search_service=search_service,
         services=services,
-        conversation_token=app.state.mcp_session_id_var.get(),
+        conversation_token=bindings.mcp_session_id,
     )
 
 
@@ -990,8 +936,6 @@ def _resolve_and_check_mcp_workspace(
 
     requested_workspace_id = _mcp_requested_workspace_id(body)
     session_factory = get_session_factory_from_app(request)
-    # Workspace resolution may repair the user's default to their live Personal
-    # workspace, so this read-side policy boundary must commit on success.
     with session_factory.begin() as session:
         try:
             workspace = resolve_workspace_for_actor(
@@ -1357,7 +1301,6 @@ def _mcp_manager_has_session(
     return manager_has_session(manager, session_id)
 
 
-
 def _mcp_request_id(body: bytes | None):
     if not body:
         return None
@@ -1368,9 +1311,11 @@ def _mcp_request_id(body: bytes | None):
     if not isinstance(payload, dict):
         return None
     value = payload.get("id")
-    if isinstance(value, str) or (
-        isinstance(value, int) and not isinstance(value, bool)
-    ) or value is None:
+    if (
+        isinstance(value, str)
+        or (isinstance(value, int) and not isinstance(value, bool))
+        or value is None
+    ):
         return value
     return None
 
@@ -1870,9 +1815,8 @@ def _negotiate_transport(scope: dict, mode: str) -> tuple[str, dict]:
     sse_score = _score(q_map, _SSE_CANDIDATES)
     star_only = set(q_map.keys()) == {"*/*"}
     missing = accept_missing
-    unsupported = (
-        not missing
-        and (not q_map or (not star_only and json_score == 0 and sse_score == 0))
+    unsupported = not missing and (
+        not q_map or (not star_only and json_score == 0 and sse_score == 0)
     )
 
     if unsupported:

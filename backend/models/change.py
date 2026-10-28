@@ -5,6 +5,7 @@ from sqlalchemy import (
     Boolean,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Text,
     UniqueConstraint,
     Uuid,
@@ -75,6 +76,7 @@ class ChangeSet(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
 class ChangeOperation(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "change_operation"
     __table_args__ = (
+        Index("ix_change_operation_change_set_id", "change_set_id"),
         # Epic-3 D-3 final schema: workspace-scoped, not just set-scoped.
         ForeignKeyConstraint(
             ["workspace_id", "change_set_id"],

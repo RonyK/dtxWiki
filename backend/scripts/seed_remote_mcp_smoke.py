@@ -29,7 +29,7 @@ from backend.services.credential_hashing import CredentialHasher
 from backend.services.extraction_service import ExtractionService
 from backend.services.library_service import LibraryService
 from backend.services.page_service import PageNotFoundError, PageService
-from backend.services.personal_workspace_service import ensure_personal_workspace
+from backend.services.personal_workspace_service import create_personal_workspace
 from backend.services.session_service import (
     normalize_display_name,
     normalize_email,
@@ -38,8 +38,8 @@ from backend.services.session_service import (
 
 DEFAULT_ALICE_EMAIL = "alice@dtxwiki.test"
 DEFAULT_BOB_EMAIL = "bob@dtxwiki.test"
-DEFAULT_WORKSPACE_A = "wsA"
-DEFAULT_WORKSPACE_B = "wsB"
+DEFAULT_WORKSPACE_A = "wsa"
+DEFAULT_WORKSPACE_B = "wsb"
 DEFAULT_PAGE_SLUG = "phase5-remote-page"
 READ_PAT_NAME = "Phase 5 Remote Smoke Read"
 AGENT_PAT_NAME = "Phase 5 Remote Smoke Agent"
@@ -79,9 +79,7 @@ class RemoteSmokeSeedResult:
             "DTXWIKI_REMOTE_E2E_RESTRICTED_WORKSPACE_ID": (
                 self.restricted_workspace_id
             ),
-            "DTXWIKI_REMOTE_E2E_RESTRICTED_ARTIFACT_ID": (
-                self.restricted_artifact_id
-            ),
+            "DTXWIKI_REMOTE_E2E_RESTRICTED_ARTIFACT_ID": (self.restricted_artifact_id),
             "DTXWIKI_REMOTE_E2E_LOGIN_EMAIL": self.login_email,
             "DTXWIKI_REMOTE_E2E_LOGIN_PASSWORD": self.login_password,
         }
@@ -98,14 +96,20 @@ def seed_remote_mcp_smoke(
 ) -> RemoteSmokeSeedResult:
     """Prepare deterministic rows for the remote 8-scenario smoke suite."""
 
-    resolved_password = login_password or secrets.token_urlsafe(24)
+    resolved_password = (
+        secrets.token_urlsafe(24) if login_password is None else login_password
+    )
     validate_password(resolved_password)
+    alice_email = normalize_email(alice_email)
+    bob_email = normalize_email(bob_email)
+    from backend.services.workspace_write import normalize_workspace_slug
+
+    workspace_a = normalize_workspace_slug(workspace_a)
+    workspace_b = normalize_workspace_slug(workspace_b)
     ensure_app_version_synced(settings)
 
     session_factory = make_session_factory_from_settings(settings)
     hasher = CredentialHasher()
-    alice_email = normalize_email(alice_email)
-    bob_email = normalize_email(bob_email)
 
     with session_factory.begin() as session:
         ws_a = seed_default_workspace(
@@ -290,15 +294,15 @@ def _upsert_user(
             status="active",
         )
         session.add(user)
-    else:
-        user.password_hash = hasher.hash_password(password)
-        user.display_name = normalize_display_name(user.display_name, email)
-        user.status = "active"
+        session.flush()
+        # Like signup, only account creation gives a user a starter workspace;
+        # a re-run never recreates one the user has since deleted.
+        create_personal_workspace(session, user=user)
+        return user
+    user.password_hash = hasher.hash_password(password)
+    user.display_name = normalize_display_name(user.display_name, email)
+    user.status = "active"
     session.flush()
-    # The remote smoke seeder is a real user-provisioning path, not a fixture
-    # exemption. Re-running it also repairs rows created by older seeders that
-    # predate the Personal anchor invariant.
-    ensure_personal_workspace(session, user=user)
     return user
 
 

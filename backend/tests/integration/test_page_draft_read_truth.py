@@ -10,7 +10,7 @@ from backend.models.review import ReviewItem
 from backend.models.workspace import Workspace
 from backend.repositories.context_page_repo import insert_version
 from backend.tests.integration._cross_transport_helpers import make_client
-from backend.utils.content_hash import content_hash as calculate_content_hash
+from backend.tests.utils.prepared_body import prepare_context_body
 
 
 def _pages_url(client) -> str:
@@ -156,14 +156,20 @@ def test_every_draft_origin_has_a_stable_read_reason(
         session.add(change_set)
         session.flush()
         body = "# Draft\n\nNot published yet.\n"
+        fixture_actor_id = str(uuid4())
         version = insert_version(
             session,
             page_id=page.id,
             parent_version_id=None,
-            body_md=body,
-            content_hash=calculate_content_hash(body),
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md=body,
+                actor_kind="user",
+                actor_id=fixture_actor_id,
+            ),
             actor_kind="user",
-            actor_id=str(uuid4()),
+            actor_id=fixture_actor_id,
             version_status="draft",
             graph_status=graph_status,
             change_set_id=change_set.id if direct_change_set else None,
@@ -263,8 +269,13 @@ def test_unknown_draft_evidence_uses_nonempty_final_fallback(page_service):
             session,
             page_id=page.id,
             parent_version_id=None,
-            body_md=body,
-            content_hash=calculate_content_hash(body),
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md=body,
+                actor_kind="system",
+                actor_id="system",
+            ),
             actor_kind="system",
             actor_id="system",
             version_status="draft",

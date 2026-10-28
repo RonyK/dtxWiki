@@ -1,4 +1,4 @@
-"""Canonical release layout, linear graph and frozen migration code contracts."""
+"""Canonical release layout, single-head graph and frozen migration contracts."""
 
 import ast
 import hashlib
@@ -27,8 +27,14 @@ FRAGMENTS_DIR = MIGRATIONS_DIR.parent / "fragments"
 FREEZE_MANIFEST = MIGRATIONS_DIR.parent / "frozen_revisions.json"
 RELEASE_GATE = REPO_ROOT / "scripts" / "verify_wheel_artifact.py"
 INITIAL_REVISION = "bd62193d5cf6"
-# Canonical head of the 0.1 schema release group.
+# Frozen core schema boundary of the 0.1 release group.
 CORE_REVISION = "efcbcf724889"
+RELEASE_013_REVISION = "19db79d3e622"
+RELEASE_014_REVISION = "ef53a0a7061c"
+PERSONAL_POINTER_REVISION = "5c3395a75eb0"
+EXTERNAL_LOGIN_REVISION = "da94025713de"
+REVIEW_HISTORY_INDEX_REVISION = "333a67e22cd7"
+CURRENT_HEAD = "eb86fdacb1bb"
 ALEMBIC_REVISION_METADATA = {
     "revision",
     "down_revision",
@@ -65,29 +71,38 @@ def _script_directory() -> ScriptDirectory:
     return ScriptDirectory.from_config(cfg)
 
 
-def _base_first_chain(script: ScriptDirectory) -> list[tuple[str, object]]:
-    return [
-        (revision.revision, revision.down_revision)
-        for revision in reversed(list(script.walk_revisions()))
-    ]
+def _revision_graph(script: ScriptDirectory) -> dict[str, object]:
+    return {
+        revision.revision: revision.down_revision
+        for revision in script.walk_revisions()
+    }
 
 
-def test_the_chain_is_linear_and_starts_with_the_released_revisions():
-    """The shipped graph has the two canonical release boundaries only."""
+def test_graph_preserves_released_boundaries_and_appends_current_head():
+    """Unreleased changes append after immutable published schema boundaries."""
 
     script = _script_directory()
-    chain = _base_first_chain(script)
-    assert script.get_heads() == [CORE_REVISION]
-    assert code_revisions() == {revision for revision, _ in chain}
+    graph = _revision_graph(script)
+    assert script.get_heads() == [CURRENT_HEAD]
+    assert code_revisions() == set(graph)
     assert code_revisions().isdisjoint(RETIRED_REVISION_IDS)
 
-    assert chain == [
-        (INITIAL_REVISION, None),
-        (CORE_REVISION, INITIAL_REVISION),
-    ]
+    assert graph == {
+        INITIAL_REVISION: None,
+        CORE_REVISION: INITIAL_REVISION,
+        RELEASE_013_REVISION: CORE_REVISION,
+        RELEASE_014_REVISION: RELEASE_013_REVISION,
+        PERSONAL_POINTER_REVISION: RELEASE_014_REVISION,
+        EXTERNAL_LOGIN_REVISION: PERSONAL_POINTER_REVISION,
+        REVIEW_HISTORY_INDEX_REVISION: EXTERNAL_LOGIN_REVISION,
+        CURRENT_HEAD: REVIEW_HISTORY_INDEX_REVISION,
+    }
 
     manifest = json.loads((MIGRATIONS_DIR.parent / "release_manifest.json").read_text())
     assert manifest["legacy_revision_aliases"] == LEGACY_REVISION_ALIASES
+    assert manifest["schema_releases"]["0.1.2"]["head"] == CORE_REVISION
+    assert manifest["schema_releases"]["0.1.3"]["head"] == RELEASE_013_REVISION
+    assert manifest["schema_releases"]["0.1.4"]["head"] == RELEASE_014_REVISION
     for release, entry in manifest["schema_releases"].items():
         major, minor = release.split(".")[:2]
         assert entry["group"] == f"v{major}_{minor}"
@@ -95,18 +110,18 @@ def test_the_chain_is_linear_and_starts_with_the_released_revisions():
         assert Path(revision.path).parent.name == entry["group"]
 
 
-def test_versions_directory_holds_only_chain_revisions():
-    chain = {revision for revision, _ in _base_first_chain(_script_directory())}
+def test_versions_directory_holds_only_graph_revisions():
+    graph = set(_revision_graph(_script_directory()))
     migration_files = {
         path.stem.split("_", 1)[0] for path in MIGRATIONS_DIR.rglob("*.py")
     }
 
     assert {"bd62193d5cf6", "efcbcf724889"} <= migration_files
-    assert migration_files == chain
+    assert migration_files == graph
     for path in MIGRATIONS_DIR.rglob("*.py"):
         assert path.parent.parent == MIGRATIONS_DIR
         assert path.parent.name.startswith("v")
-        assert path.stem.split("_", 1)[0] in chain
+        assert path.stem.split("_", 1)[0] in graph
 
 
 def _frozen_digests() -> dict[str, str]:
@@ -139,6 +154,10 @@ def test_the_freeze_covers_every_released_migration_file():
         "revision_modules/v0_1/__init__.py",
         "versions/v0_0/bd62193d5cf6_initial_schema.py",
         "versions/v0_1/efcbcf724889_core_schema.py",
+        "versions/v0_1/19db79d3e622_release_0_1_3.py",
+        "revision_modules/v0_1/content_event_backfill_v1.py",
+        "revision_modules/v0_1/input_restrictions_v1.py",
+        "versions/v0_1/ef53a0a7061c_index_change_operation_change_set_id.py",
         *(
             f"revision_modules/v0_1/efcbcf724889_core_schema/{path.name}"
             for path in CORE_REVISION_DIR.glob("*.py")
@@ -341,7 +360,7 @@ def test_generated_revisions_group_patch_versions_and_link_in_order(tmp_path):
     )
     first = create_revision("0.2.0", "add workspace settings", root=tmp_path)
     second = create_revision("0.2.1", "add search index", root=tmp_path)
-    assert first.down_revision == CORE_REVISION
+    assert first.down_revision == CURRENT_HEAD
     assert second.down_revision == first.revision
     assert first.revision != second.revision
     assert (

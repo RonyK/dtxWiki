@@ -15,13 +15,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.models.api_token import ApiToken
+from backend.models.auth_identity import UserIdentity
 from backend.models.base import utc_now
-from backend.models.mail import PasswordRecoveryRateLimitSlot
+from backend.models.mail import EmailOutbox, PasswordRecoveryRateLimitSlot
 from backend.models.password_reset import PasswordResetToken
 from backend.models.server_admin import ServerAdmin
 from backend.models.user import User
 from backend.services.audit_service import AuditService
 from backend.services.credential_hashing import CredentialHasher
+from backend.services.db_write_intent import acquire_write_intent
 from backend.services.mail_delivery import (
     EMAIL_VERIFICATION_LINK_PATH,
     PASSWORD_RESET_LINK_PATH,
@@ -33,6 +35,7 @@ from backend.services.mail_delivery import (
 from backend.services.oauth_service import revoke_all_user_oauth_credentials
 from backend.services.session_service import (
     AuthenticatedUser,
+    VerifiedSession,
     authenticated_user,
     normalize_email,
     validate_password,
@@ -82,6 +85,10 @@ class PasswordRecoveryUserNotFoundError(PasswordRecoveryError):
 
 class InvalidPasswordResetTokenError(PasswordRecoveryError):
     error_code = "invalid_password_reset_token"
+
+
+class EmailVerificationSessionRequiredError(PasswordRecoveryError):
+    error_code = "email_verification_session_required"
 
 
 class ExpiredPasswordResetTokenError(InvalidPasswordResetTokenError):
@@ -419,9 +426,7 @@ class PasswordRecoveryService:
                 "password reset links require a canonical HTTPS public base URL"
             )
         normalized_email = normalize_email(email) if email is not None else None
-        raw_token = generate_password_reset_token(
-            revoke_api_tokens=revoke_api_tokens
-        )
+        raw_token = generate_password_reset_token(revoke_api_tokens=revoke_api_tokens)
         token_digest = password_reset_token_digest(raw_token)
         issued_at = self.now()
         expires_at = issued_at + timedelta(seconds=expires_in_seconds)
@@ -440,16 +445,13 @@ class PasswordRecoveryService:
                     {requested_by_user_id, target_user_id}, key=lambda value: value.int
                 ):
                     locked_users[locked_user_id] = session.scalar(
-                        select(User)
-                        .where(User.id == locked_user_id)
-                        .with_for_update()
+                        select(User).where(User.id == locked_user_id).with_for_update()
                     )
                 requester = locked_users[requested_by_user_id]
                 if (
                     requester is None
                     or requester.status != "active"
-                    or requester.session_generation
-                    != requested_by_session_generation
+                    or requester.session_generation != requested_by_session_generation
                 ):
                     raise PasswordRecoveryRecentReauthenticationRequiredError(
                         "recent password reauthentication is required"
@@ -466,12 +468,15 @@ class PasswordRecoveryService:
                 user = locked_users[target_user_id]
             else:
                 user = session.scalar(
-                    select(User)
-                    .where(User.email == normalized_email)
-                    .with_for_update()
+                    select(User).where(User.email == normalized_email).with_for_update()
                 )
             if user is None or user.status != "active":
                 raise PasswordRecoveryUserNotFoundError("active user not found")
+            if not user.email:
+                raise PasswordRecoveryConfigurationError(
+                    "Recover the external identity through its provider "
+                    "or identity rebind."
+                )
             if delivery == "email" and user.email_verified_at is None:
                 raise PasswordRecoveryConfigurationError(
                     "email delivery requires a verified user email"
@@ -680,9 +685,7 @@ class PasswordRecoveryService:
                 "oauth_access_tokens": 0,
                 "oauth_authorization_codes": 0,
             }
-            effective_revoke_api_tokens = (
-                model.revoke_api_tokens or revoke_api_tokens
-            )
+            effective_revoke_api_tokens = model.revoke_api_tokens or revoke_api_tokens
             if effective_revoke_api_tokens:
                 api_tokens = list(
                     session.scalars(
@@ -742,12 +745,14 @@ class PasswordRecoveryService:
         *,
         user_id: UUID,
         actor_id: str,
+        email: str | None = None,
         expires_in_seconds: int = DEFAULT_EMAIL_VERIFICATION_TTL_SECONDS,
     ) -> PasswordResetIssueResult:
         with _EMAIL_VERIFICATION_ISSUE_LOCK:
             return self._issue_email_verification_serialized(
                 user_id=user_id,
                 actor_id=actor_id,
+                email=email,
                 expires_in_seconds=expires_in_seconds,
             )
 
@@ -756,6 +761,7 @@ class PasswordRecoveryService:
         *,
         user_id: UUID,
         actor_id: str,
+        email: str | None,
         expires_in_seconds: int,
     ) -> PasswordResetIssueResult:
         if self.public_base_url is None or self.mail_delivery_service is None:
@@ -773,6 +779,22 @@ class PasswordRecoveryService:
             )
             if user is None or user.status != "active":
                 raise PasswordRecoveryUserNotFoundError("active user not found")
+            recipient = normalize_email(email) if email is not None else user.email
+            if not recipient:
+                raise InvalidPasswordResetRequestError(
+                    "A native email address is required."
+                )
+            if user.email is not None and recipient != user.email:
+                raise InvalidPasswordResetRequestError(
+                    "Native email replacement is not supported."
+                )
+            occupied = session.scalar(
+                select(User.id).where(User.email == recipient, User.id != user.id)
+            )
+            if occupied is not None:
+                raise InvalidPasswordResetRequestError(
+                    "The native email address is unavailable."
+                )
             if user.email_verified_at is not None:
                 return PasswordResetIssueResult(
                     token_id=user.id,
@@ -788,6 +810,8 @@ class PasswordRecoveryService:
                 purpose="email_verification",
                 revoked_at=issued_at,
             )
+            if user.email is None:
+                user.pending_email = recipient
             model = PasswordResetToken(
                 user_id=user.id,
                 token_digest=digest,
@@ -808,6 +832,7 @@ class PasswordRecoveryService:
                     token_model=model,
                     raw_token=raw_token,
                     message_kind="email_verification",
+                    recipient_email=recipient,
                 )
             except MailDeliveryError as exc:
                 raise PasswordRecoveryConfigurationError(str(exc)) from exc
@@ -838,10 +863,15 @@ class PasswordRecoveryService:
         self,
         *,
         token: str,
+        current_session: VerifiedSession | None = None,
     ) -> EmailVerificationConsumeResult:
         digest = recovery_token_digest(token, purpose="email_verification")
         verified_at = self.now()
         with self.session_factory.begin() as session:
+            # Without a writer lock first, pysqlite starts no transaction before
+            # the enrollment SAVEPOINT below, so its RELEASE would commit the
+            # address before the token claim can still refuse the link.
+            acquire_write_intent(session)
             user_id = session.scalar(
                 select(PasswordResetToken.user_id).where(
                     PasswordResetToken.token_digest == digest,
@@ -859,6 +889,25 @@ class PasswordRecoveryService:
                 raise InvalidPasswordResetTokenError(
                     "email verification link is invalid or unavailable"
                 )
+            if (
+                user.email_verified_at is None
+                and session.scalar(
+                    select(UserIdentity.id)
+                    .where(UserIdentity.user_id == user.id)
+                    .limit(1)
+                )
+                is not None
+            ):
+                # Mailbox possession cannot replace the native session of an
+                # externally authenticated account during native enrollment.
+                if (
+                    current_session is None
+                    or current_session.user_id != user.id
+                    or current_session.session_generation != user.session_generation
+                ):
+                    raise EmailVerificationSessionRequiredError(
+                        "Sign in to the original account before verifying its email."
+                    )
             model = session.scalar(
                 select(PasswordResetToken)
                 .where(
@@ -872,6 +921,33 @@ class PasswordRecoveryService:
                 raise InvalidPasswordResetTokenError(
                     "email verification link is invalid or unavailable"
                 )
+            if user.email is None:
+                recipient = session.scalar(
+                    select(EmailOutbox.recipient_email).where(
+                        EmailOutbox.token_id == model.id,
+                        EmailOutbox.message_kind == "email_verification",
+                    )
+                )
+                if not user.pending_email or recipient != user.pending_email:
+                    raise InvalidPasswordResetTokenError(
+                        "Native email enrollment is unavailable."
+                    )
+                if (
+                    session.scalar(select(User.id).where(User.email == recipient))
+                    is not None
+                ):
+                    raise InvalidPasswordResetTokenError(
+                        "The native email address is unavailable."
+                    )
+                try:
+                    with session.begin_nested():
+                        user.email = recipient
+                        user.pending_email = None
+                        session.flush()
+                except IntegrityError as exc:
+                    raise InvalidPasswordResetTokenError(
+                        "The native email address is unavailable."
+                    ) from exc
             claimed = session.execute(
                 update(PasswordResetToken)
                 .where(
@@ -953,15 +1029,13 @@ class PasswordRecoveryService:
         )
         return len(token_ids)
 
+
 def generate_password_reset_token(*, revoke_api_tokens: bool = False) -> str:
     revocation_flag = "1" if revoke_api_tokens else "0"
     # token_urlsafe(32) contributes 256 bits of CSPRNG entropy.  The clear flag
     # lets the reset UI describe the issue-time credential scope, while the
     # digest over the complete token makes changing that flag invalidate it.
-    return (
-        f"{PASSWORD_RESET_TOKEN_PREFIX}{revocation_flag}_"
-        f"{secrets.token_urlsafe(32)}"
-    )
+    return f"{PASSWORD_RESET_TOKEN_PREFIX}{revocation_flag}_{secrets.token_urlsafe(32)}"
 
 
 def generate_email_verification_token() -> str:
@@ -978,9 +1052,7 @@ def _raise_password_reset_token_state(
     at: datetime,
 ) -> None:
     if token.used_at is not None:
-        raise UsedPasswordResetTokenError(
-            "password reset link has already been used"
-        )
+        raise UsedPasswordResetTokenError("password reset link has already been used")
     if token.revoked_at is not None:
         raise InvalidPasswordResetTokenError(
             "password reset link is invalid or unavailable"
@@ -990,6 +1062,13 @@ def _raise_password_reset_token_state(
 
 
 def recovery_token_digest(token: str, *, purpose: str) -> str:
+    from backend.domain.credential_input import (
+        RECOVERY_TOKEN_MAX_BYTES,
+        ascii_token_is_valid,
+    )
+
+    if not ascii_token_is_valid(token, RECOVERY_TOKEN_MAX_BYTES):
+        raise InvalidPasswordResetTokenError("recovery link is invalid or unavailable")
     if purpose == "password_reset":
         prefix = PASSWORD_RESET_TOKEN_PREFIX
         namespace = PASSWORD_RESET_TOKEN_NAMESPACE
@@ -1012,8 +1091,7 @@ def recovery_token_digest(token: str, *, purpose: str) -> str:
             revocation_flag not in {"0", "1"}
             or len(random_payload) < 43
             or any(
-                character not in _TOKEN_URLSAFE_ALPHABET
-                for character in random_payload
+                character not in _TOKEN_URLSAFE_ALPHABET for character in random_payload
             )
         ):
             raise InvalidPasswordResetTokenError(invalid_message)

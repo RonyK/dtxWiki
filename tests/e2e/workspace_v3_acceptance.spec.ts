@@ -8,6 +8,7 @@ import {
   type Page,
 } from "./fixtures";
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 
 import {
   authenticatePage,
@@ -26,6 +27,10 @@ import {
   retryOnceAfterNetworkChange,
   type RequestIdentity,
 } from "./network_retry";
+import {
+  createPageLifecycleRecorder,
+  runWithCompletedResponse,
+} from "./page-diagnostics";
 
 type WorkspaceSummary = {
   id: string;
@@ -38,7 +43,6 @@ type WorkspaceListData = {
   workspaces: WorkspaceSummary[];
   current_workspace_id: string | null;
   default_workspace_id: string | null;
-  personal_workspace_id: string | null;
 };
 
 const REQUIRED_VIEWPORTS = [
@@ -91,7 +95,8 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           }
         });
         const isStatusCheck = (request: { url(): string }) =>
-          new URL(request.url()).pathname === "/api/v1/auth/password-reset/status";
+          new URL(request.url()).pathname ===
+          "/api/v1/auth/password-reset/status";
 
         for (const resetCase of cases) {
           const token = seededPasswordResetStateToken(
@@ -127,7 +132,8 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           ).toBe(true);
           await expect
             .poll(() => page.url().includes(token), {
-              message: "the reset screen must clear the token from the address bar",
+              message:
+                "the reset screen must clear the token from the address bar",
             })
             .toBe(false);
           await expectViewportFits(page);
@@ -143,7 +149,9 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
         // token -- that is what the fragment form exists to end.
         const legacyToken = seededTokens[0];
         const legacyStatusCheck = page.waitForRequest(isStatusCheck);
-        await page.goto(`/reset-password?token=${encodeURIComponent(legacyToken)}`);
+        await page.goto(
+          `/reset-password?token=${encodeURIComponent(legacyToken)}`,
+        );
         await expect(
           page.getByText(cases[0].message, { exact: true }),
         ).toBeVisible();
@@ -157,7 +165,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
         expect(pageErrors).toEqual([]);
       });
 
-      test("deletes the only Personal workspace and opens workspace discovery", async ({
+      test("deletes the only workspace and opens workspace discovery", async ({
         page,
       }, testInfo) => {
         const pageErrors: string[] = [];
@@ -172,30 +180,70 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
         );
         const before = await workspaceList(page.context());
         expect(before.workspaces).toHaveLength(1);
-        const personal = before.workspaces.find(
-          (workspace) => workspace.id === before.personal_workspace_id,
+        // Signup persists the new account's starter workspace as its default.
+        const onlyWorkspace = before.workspaces.find(
+          (workspace) => workspace.id === before.default_workspace_id,
         );
-        expect(personal).toBeTruthy();
+        expect(onlyWorkspace).toBeTruthy();
+        // Background maintenance may also leave jobs. Seed a failed job so
+        // this scenario always exercises the guarded two-step delete flow,
+        // independent of the scheduler's wall-clock bucket.
+        execFileSync(".venv/bin/python", [
+          "tests/e2e/seed_workspace_delete_job.py",
+          onlyWorkspace!.id,
+        ]);
 
         await page.goto("/settings?section=workspace");
-        await expect(page.getByText("Danger Zone", { exact: true })).toBeVisible();
-        await page
-          .getByRole("button", { name: /Delete workspace/ })
-          .click();
+        await expect(
+          page.getByText("Danger Zone", { exact: true }),
+        ).toBeVisible();
+        await page.getByRole("button", { name: /Delete workspace/ }).click();
         const dialog = page.getByRole("dialog", { name: "Delete workspace?" });
         await expect(dialog).toBeVisible();
         await dialog
-          .getByLabel(`Type "${personal?.slug}" to confirm`)
-          .fill(personal?.slug ?? "");
+          .getByLabel(`Type "${onlyWorkspace?.slug}" to confirm`)
+          .fill(onlyWorkspace?.slug ?? "");
         const deletionResponse = page.waitForResponse(
           (response) =>
-            response.url().endsWith(`/api/v1/workspaces/${personal?.id}`) &&
+            response.url().endsWith(`/api/v1/workspaces/${onlyWorkspace?.id}`) &&
             response.request().method() === "DELETE",
         );
         await dialog
           .getByRole("button", { name: "Permanently delete workspace" })
           .click();
-        expect((await deletionResponse).ok()).toBeTruthy();
+        const blocked = await deletionResponse;
+        expect(blocked.status()).toBe(409);
+        const blockers = (await blocked.json()).blockers as Array<{
+          code: string;
+          count: number;
+        }>;
+        expect(
+          blockers.find((item) => item.code === "jobs")!.count,
+        ).toBeGreaterThanOrEqual(1);
+        expect(
+          (await workspaceList(page.context())).workspaces.map(
+            (item) => item.id,
+          ),
+        ).toContain(onlyWorkspace!.id);
+        const purge = dialog.getByRole("button", {
+          name: "Delete workspace and all its data",
+        });
+        await expect(purge).toBeDisabled();
+        await dialog
+          .getByRole("checkbox", { name: /Also permanently delete these/ })
+          .check();
+        const purgedResponse = page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname.endsWith(
+              `/api/v1/workspaces/${onlyWorkspace!.id}`,
+            ) &&
+            new URL(response.url()).searchParams.get("purge") === "true" &&
+            response.request().method() === "DELETE",
+        );
+        await purge.click();
+        const purged = await purgedResponse;
+        expect(purged.status()).toBe(200);
+        expect(Boolean(purged.request().headers()["x-purge-grant"])).toBe(true);
 
         await expect(page).toHaveURL(`${frontendBaseUrl}/workspaces/find`);
         await expect(
@@ -205,7 +253,6 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
         expect(after).toMatchObject({
           current_workspace_id: null,
           default_workspace_id: null,
-          personal_workspace_id: null,
           workspaces: [],
         });
         await expectViewportFits(page);
@@ -223,6 +270,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
         const workspaceTitle = `E2E Role Refresh ${suffix}`;
         const ownerContext = await isolatedContext(browser, viewport);
         const memberContext = await isolatedContext(browser, viewport);
+        let lifecycle: ReturnType<typeof createPageLifecycleRecorder> | null = null;
 
         try {
           await signUp(ownerContext.request, ownerEmail);
@@ -233,10 +281,10 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           expect(memberMe.ok()).toBeTruthy();
           const memberUserId = (await memberMe.json()).data.user_id as string;
           const memberBefore = await workspaceList(memberContext);
-          const personalWorkspace = memberBefore.workspaces.find(
-            (workspace) => workspace.id === memberBefore.personal_workspace_id,
+          const starterWorkspace = memberBefore.workspaces.find(
+            (workspace) => workspace.id === memberBefore.default_workspace_id,
           );
-          expect(personalWorkspace).toBeTruthy();
+          expect(starterWorkspace).toBeTruthy();
 
           const defaultResponse = await ownerContext.request.post(
             `${backendBaseUrl}/api/v1/workspaces`,
@@ -288,19 +336,25 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           expect(preferenceBeforeRemoval.default_workspace_id).toBe(
             persistedDefault.id,
           );
-          expect(preferenceBeforeRemoval.personal_workspace_id).toBe(
-            personalWorkspace?.id,
-          );
 
           const memberPage = await memberContext.newPage();
+          lifecycle = createPageLifecycleRecorder(memberPage);
           const pageErrors: string[] = [];
           memberPage.on("pageerror", (error) => pageErrors.push(error.message));
           await memberPage.addInitScript(
             ({ id, slug }) => {
-              if (!window.sessionStorage.getItem("e2e.workspaceSelectionSeeded")) {
+              if (
+                !window.sessionStorage.getItem("e2e.workspaceSelectionSeeded")
+              ) {
                 window.localStorage.setItem("dtxwiki.selectedWorkspaceId", id);
-                window.localStorage.setItem("dtxwiki.selectedWorkspaceSlug", slug);
-                window.sessionStorage.setItem("e2e.workspaceSelectionSeeded", "1");
+                window.localStorage.setItem(
+                  "dtxwiki.selectedWorkspaceSlug",
+                  slug,
+                );
+                window.sessionStorage.setItem(
+                  "e2e.workspaceSelectionSeeded",
+                  "1",
+                );
               }
               const replacementCalls: string[] = [];
               const originalReplaceState = window.history.replaceState.bind(
@@ -320,7 +374,9 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
 
           await test.step("self-demotion on a trailing-slash settings route refreshes and fails closed", async () => {
             await memberPage.goto("/settings/?section=members");
-            await expect(memberPage).toHaveURL(/\/settings\/\?section=members$/);
+            await expect(memberPage).toHaveURL(
+              /\/settings\/\?section=members$/,
+            );
             // Exactly one heading carries this name, and it is the page h1.
             // A visually-hidden h2 used to repeat it verbatim so the region
             // could borrow it as a label: two same-named headings, announced
@@ -335,7 +391,10 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             await expect(membersHeading).toHaveCount(1);
             await expect(membersHeading).toBeVisible();
             await expect(
-              memberPage.getByRole("heading", { level: 1, name: "Members & access" }),
+              memberPage.getByRole("heading", {
+                level: 1,
+                name: "Members & access",
+              }),
             ).toHaveCount(1);
             await expect(
               memberPage.getByRole("region", { name: "Members & access" }),
@@ -343,18 +402,10 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             const selfRow = memberPage
               .locator(".workspace-member-row")
               .filter({ hasText: memberEmail });
-            await expect(selfRow.getByText("You", { exact: true })).toBeVisible();
+            await expect(
+              selfRow.getByText("You", { exact: true }),
+            ).toBeVisible();
 
-            const roleChanged = memberPage.waitForResponse(
-              (response) =>
-                response.url().endsWith(`/members/${memberUserId}`) &&
-                response.request().method() === "PATCH",
-            );
-            const authoritativeRefresh = memberPage.waitForResponse(
-              (response) =>
-                response.url().endsWith("/api/v1/workspaces") &&
-                response.request().method() === "GET",
-            );
             await selfRow.locator("select").selectOption("editor");
             // WS-10: self-demote (including owner self-demotion) is gated
             // behind a confirmation dialog -- selecting the option alone must
@@ -365,11 +416,26 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               name: "Give up Owner access?",
             });
             await expect(selfDemoteDialog).toBeVisible();
-            await selfDemoteDialog
-              .getByRole("button", { name: "Give up Owner access" })
-              .click();
-            expect((await roleChanged).ok()).toBeTruthy();
-            const refreshResponse = await authoritativeRefresh;
+            const refreshResponse = await test.step("confirm self-demotion and finish the authoritative refresh body", async () => {
+              return runWithCompletedResponse(
+                memberPage,
+                (request) =>
+                  new URL(request.url()).pathname === "/api/v1/workspaces" &&
+                  request.method() === "GET",
+                async () => {
+                  const roleChanged = await runWithCompletedResponse(
+                    memberPage,
+                    (request) =>
+                      new URL(request.url()).pathname.endsWith(`/members/${memberUserId}`) &&
+                      request.method() === "PATCH",
+                    () => selfDemoteDialog
+                      .getByRole("button", { name: "Give up Owner access" })
+                      .click(),
+                  );
+                  expect(roleChanged.ok()).toBeTruthy();
+                },
+              );
+            });
             expect(refreshResponse.ok()).toBeTruthy();
             const refreshed = (await refreshResponse.json())
               .data as WorkspaceListData;
@@ -386,9 +452,11 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               ),
             ).toBeVisible();
             await expect(
-              memberPage.getByRole("button", { name: "Add member" }),
+              memberPage.getByRole("button", { name: "Add a member" }),
             ).toHaveCount(0);
-            await expect(memberPage.locator(".workspace-member-row")).toHaveCount(0);
+            await expect(
+              memberPage.locator(".workspace-member-row"),
+            ).toHaveCount(0);
             expect(
               (await workspaceList(memberContext)).workspaces.find(
                 (workspace) => workspace.id === collaborative.id,
@@ -402,24 +470,28 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               { data: { role: "owner" } },
             );
             expect(repromoted.ok()).toBeTruthy();
-            await memberPage.reload();
+            await test.step("reload membership settings after owner restoration", async () => {
+              await memberPage.reload();
+            });
             const selfRow = memberPage
               .locator(".workspace-member-row")
               .filter({ hasText: memberEmail });
             await expect(selfRow.locator("select")).toHaveValue("owner");
 
-            const removalResponse = memberPage.waitForResponse(
-              (response) =>
-                response.url().endsWith(`/members/${memberUserId}`) &&
-                response.request().method() === "DELETE",
-            );
-            await selfRow.getByRole("button", { name: "Remove" }).click();
+            await selfRow.getByRole("button", { name: /^Remove / }).click();
             const dialog = memberPage.getByRole("dialog", {
               name: "Remove this member?",
             });
             await expect(dialog).toBeVisible();
-            await dialog.getByRole("button", { name: "Remove member" }).click();
-            const removal = await removalResponse;
+            const removal = await test.step("confirm self-removal and finish the DELETE response body", async () => {
+              return runWithCompletedResponse(
+                memberPage,
+                (request) =>
+                  new URL(request.url()).pathname.endsWith(`/members/${memberUserId}`) &&
+                  request.method() === "DELETE",
+                () => dialog.getByRole("button", { name: "Remove member" }).click(),
+              );
+            });
             expect(removal.ok()).toBeTruthy();
             const removalData = (await removal.json()).data as {
               default_workspace_id: string | null;
@@ -428,13 +500,17 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             expect(removalData.default_workspace_id).toBe(persistedDefault.id);
             expect(removalData.fallback_workspace_id).toBe(persistedDefault.id);
 
-            await expect(memberPage).toHaveURL(`${frontendBaseUrl}/dashboard`);
+            await test.step("navigate to the persisted fallback after self-removal", async () => {
+              await expect(memberPage).toHaveURL(`${frontendBaseUrl}/dashboard`);
+            });
             const persistedSelection = await memberPage.evaluate(() => ({
               id: window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
-              slug: window.localStorage.getItem("dtxwiki.selectedWorkspaceSlug"),
-              replacements: (
-                window as Window & { __e2eHistoryReplacements?: string[] }
-              ).__e2eHistoryReplacements ?? [],
+              slug: window.localStorage.getItem(
+                "dtxwiki.selectedWorkspaceSlug",
+              ),
+              replacements:
+                (window as Window & { __e2eHistoryReplacements?: string[] })
+                  .__e2eHistoryReplacements ?? [],
             }));
             expect(persistedSelection.id).toBe(persistedDefault.id);
             expect(persistedSelection.slug).toBe(persistedDefault.slug);
@@ -447,27 +523,32 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             const afterRemoval = await workspaceList(memberContext);
             expect(afterRemoval.current_workspace_id).toBe(persistedDefault.id);
             expect(afterRemoval.default_workspace_id).toBe(persistedDefault.id);
-            expect(afterRemoval.personal_workspace_id).toBe(personalWorkspace?.id);
             expect(
               afterRemoval.workspaces.some(
                 (workspace) => workspace.id === collaborative.id,
               ),
             ).toBeFalsy();
 
-            await memberPage.reload();
+            await test.step("reload the fallback dashboard after self-removal", async () => {
+              await memberPage.reload();
+            });
             await expect(memberPage).toHaveURL(`${frontendBaseUrl}/dashboard`);
             expect(
               await memberPage.evaluate(() => ({
                 id: window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
-                slug: window.localStorage.getItem("dtxwiki.selectedWorkspaceSlug"),
+                slug: window.localStorage.getItem(
+                  "dtxwiki.selectedWorkspaceSlug",
+                ),
               })),
             ).toEqual({
               id: persistedDefault.id,
               slug: persistedDefault.slug,
             });
-            await memberPage
-              .getByRole("button", { name: /Switch workspace, current:/ })
-              .click();
+            await test.step("open the workspace switcher after the fallback reload", async () => {
+              await memberPage
+                .getByRole("button", { name: /Switch workspace, current:/ })
+                .click();
+            });
             const picker = memberPage.getByRole("dialog", {
               name: "Workspace switcher",
             });
@@ -490,12 +571,21 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             ).toBeVisible();
             expect(pageErrors).toEqual([]);
           });
+        } catch (error) {
+          if (lifecycle) {
+            await testInfo.attach("member-page-lifecycle", {
+              body: Buffer.from(JSON.stringify(lifecycle.snapshot(), null, 2)),
+              contentType: "application/json",
+            });
+          }
+          throw error;
         } finally {
+          lifecycle?.stop();
           await Promise.all([ownerContext.close(), memberContext.close()]);
         }
       });
 
-      test("covers recovery, Personal/default membership, and System Admin recovery state", async ({
+      test("covers recovery, starter/default membership, and System Admin recovery state", async ({
         browser,
         page,
       }, testInfo) => {
@@ -505,13 +595,15 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
         const ownerEmail = `e2e-owner-${suffix}@example.com`;
         const inviteeEmail = `e2e-invitee-${suffix}@example.com`;
         const collaborativeTitle = `E2E Collaboration ${suffix}`;
-        const adminEmail = seededAdminEmail(viewport.key, testInfo.project.name);
+        const adminEmail = seededAdminEmail(
+          viewport.key,
+          testInfo.project.name,
+        );
         const recoveryEmail = seededRecoveryEmail(
           viewport.key,
           testInfo.project.name,
         );
         const resetPassword = `new-password-${viewport.key}`;
-        let initialOutboxTotal = 0;
 
         const targetContext = await isolatedContext(browser, viewport);
         const ownerContext = await isolatedContext(browser, viewport);
@@ -530,7 +622,9 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             await expect(
               page.getByRole("link", { name: "Forgot your password?" }),
             ).toBeVisible();
-            await page.getByRole("link", { name: "Forgot your password?" }).click();
+            await page
+              .getByRole("link", { name: "Forgot your password?" })
+              .click();
             await expect(
               page.getByRole("heading", { name: "Reset your password" }),
             ).toBeVisible();
@@ -600,23 +694,27 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             await expect(
               recoveryCard.getByRole("heading", { name: "Password recovery" }),
             ).toBeVisible();
-            await expect(recoveryCard.getByText("SMTP", { exact: true })).toBeVisible();
             await expect(
-              recoveryCard.getByText("Configured (value hidden)", { exact: true }),
+              recoveryCard.getByText("SMTP", { exact: true }),
+            ).toBeVisible();
+            await expect(
+              recoveryCard.getByText("Configured (value hidden)", {
+                exact: true,
+              }),
             ).toBeVisible();
             await expect(
               recoveryCard.getByText("https://e2e.dtxwiki.invalid", {
                 exact: true,
               }),
             ).toBeVisible();
-            await expect(recoveryCard.getByText("Required", { exact: true })).toBeVisible();
+            await expect(
+              recoveryCard.getByText("Required", { exact: true }),
+            ).toBeVisible();
 
             const initialOutboxRow = recoveryCard
               .locator(".deployment-status-row")
               .filter({ hasText: "Delivery outbox" });
-            initialOutboxTotal = parseOutboxTotal(
-              await initialOutboxRow.locator("dd").innerText(),
-            );
+            parseOutboxTotal(await initialOutboxRow.locator("dd").innerText());
 
             await recoveryCard
               .getByRole("button", { name: "Show setup method" })
@@ -631,7 +729,11 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await test.step("System Admin queues mail and reveals an explicit compromise link once", async () => {
             await login(targetContext.request, recoveryEmail);
             expect(
-              (await targetContext.request.get(`${backendBaseUrl}/api/v1/auth/me`)).ok(),
+              (
+                await targetContext.request.get(
+                  `${backendBaseUrl}/api/v1/auth/me`,
+                )
+              ).ok(),
             ).toBeTruthy();
 
             await page.goto("/settings?section=users");
@@ -639,31 +741,38 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             // h1 says so: it was renamed off "Users" precisely because that sat
             // beside "Members & access" and read as a second way to manage this
             // one workspace's people. Assert the level too, so the destination
-            // title and the recovery card below it stay distinguishable.
+            // title and the accessible recovery region stay distinguishable.
             await expect(
-              page.getByRole("heading", { level: 1, name: "User accounts", exact: true }),
+              page.getByRole("heading", {
+                level: 1,
+                name: "User accounts",
+                exact: true,
+              }),
             ).toBeVisible();
             await expect(
               page.getByRole("heading", { name: "Account recovery" }),
+            ).toBeAttached();
+            // The admin signed in moments ago, inside the reauthentication
+            // window, so the directory opens without a second password prompt.
+            await expect(
+              page.getByText("Your recent sign-in allows this action."),
             ).toBeVisible();
-            await page
-              .locator("#admin-user-directory-password")
-              .fill(e2ePassword);
-            await page
-              .getByRole("button", { name: "Unlock user search" })
-              .click();
-            await expect(page.getByText(/Protected user search is unlocked until/)).toBeVisible();
 
             await page.locator("#admin-user-search-query").fill(recoveryEmail);
-            await page.getByRole("button", { name: "Search", exact: true }).click();
+            await page
+              .getByRole("button", { name: "Search", exact: true })
+              .click();
             const targetCard = page
-              .locator("li.admin-user-card")
+              .locator(".admin-account-row")
               .filter({ hasText: recoveryEmail });
             await expect(targetCard).toBeVisible();
-            await expect(targetCard.getByText("Email verified", { exact: true })).toBeVisible();
+            await expect(
+              targetCard.getByText("Email verified", { exact: true }),
+            ).toBeVisible();
 
+            await targetCard.getByRole("button", { name: /^Account actions for / }).click();
             await targetCard
-              .getByRole("button", { name: "Send recovery email" })
+              .getByRole("menuitem", { name: "Send recovery email" })
               .click();
             let confirmation = page.getByRole("dialog", {
               name: "Issue a password reset?",
@@ -671,9 +780,11 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             await expect(
               confirmation.getByRole("radio", { name: "Ordinary recovery" }),
             ).toBeChecked();
-            await confirmation
-              .locator("#admin-recovery-current-password")
-              .fill(e2ePassword);
+            // The verified directory session covers the reset, so the dialog
+            // does not ask for the admin password again.
+            await expect(
+              confirmation.locator("#admin-recovery-current-password"),
+            ).toHaveCount(0);
             await confirmation
               .getByRole("button", { name: "Issue password reset" })
               .click();
@@ -681,8 +792,9 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               page.getByText(`Recovery email queued for ${recoveryEmail}.`),
             ).toBeVisible();
 
+            await targetCard.getByRole("button", { name: /^Account actions for / }).click();
             await targetCard
-              .getByRole("button", { name: "Issue one-time link" })
+              .getByRole("menuitem", { name: "Issue one-time link" })
               .click();
             confirmation = page.getByRole("dialog", {
               name: "Issue a password reset?",
@@ -695,9 +807,6 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
                 name: "Also revoke all PAT/MCP tokens",
               }),
             ).toBeChecked();
-            await confirmation
-              .locator("#admin-recovery-current-password")
-              .fill(e2ePassword);
             // Read the one-time link from the response the dialog is built
             // from, never off the screen. Playwright writes an
             // `error-context.md` for every failed test whose accessibility
@@ -766,7 +875,9 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             await oneTimeDialog
               .getByRole("button", { name: "Close and hide link" })
               .click();
-            await expect(page.locator("#admin-recovery-issued-link")).toHaveCount(0);
+            await expect(
+              page.locator("#admin-recovery-issued-link"),
+            ).toHaveCount(0);
             await expect(
               page.getByText(
                 "The one-time link was hidden. Issue a new reset if another link is needed.",
@@ -777,7 +888,9 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await test.step("the user chooses the password and every browser session is revoked", async () => {
             const resetPage = await resetContext.newPage();
             const resetErrors: string[] = [];
-            resetPage.on("pageerror", (error) => resetErrors.push(error.message));
+            resetPage.on("pageerror", (error) =>
+              resetErrors.push(error.message),
+            );
             await resetPage.goto(
               `/reset-password#token=${encodeURIComponent(resetToken)}`,
             );
@@ -788,7 +901,8 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             // reset below completes from the copy it holds in memory.
             await expect
               .poll(() => resetPage.url().includes(resetToken), {
-                message: "the reset screen must clear the token from the address bar",
+                message:
+                  "the reset screen must clear the token from the address bar",
               })
               .toBe(false);
             const forcedRevocation = resetPage.getByRole("checkbox", {
@@ -796,12 +910,16 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             });
             await expect(forcedRevocation).toBeChecked();
             await expect(forcedRevocation).toBeDisabled();
-            await resetPage.locator('input[name="newPassword"]').fill(resetPassword);
+            await resetPage
+              .locator('input[name="newPassword"]')
+              .fill(resetPassword);
             await resetPage
               .locator('input[name="confirmPassword"]')
               .fill(resetPassword);
             await expectViewportFits(resetPage);
-            await resetPage.getByRole("button", { name: "Reset password" }).click();
+            await resetPage
+              .getByRole("button", { name: "Reset password" })
+              .click();
             await expect(resetPage).toHaveURL(/\/login\?reset=complete$/);
             await expect(
               resetPage.getByText(
@@ -844,45 +962,55 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             const outboxRow = page
               .locator(".deployment-status-row")
               .filter({ hasText: "Delivery outbox" });
-            // The real worker has already been started by Playwright and will
-            // move a row from queued to failed as soon as the intentionally
-            // unreachable SMTP endpoint rejects an attempt. Both states are
-            // durable and retryable; assert that this journey added an outbox
-            // row instead of racing the worker over one transient status.
+            // Each reset revokes the previous one and a revoked token's mail
+            // leaves the count, so this journey's reset requests net to zero.
+            // The password-changed notice it queued has no token and cannot
+            // reach the intentionally unreachable SMTP endpoint, so it stays
+            // queued or failed. The real worker briefly holds a row as
+            // `sending`, outside both counters, so poll instead of reading once.
             await expect(outboxRow).toBeVisible({ timeout: 15_000 });
-            const finalOutboxTotal = parseOutboxTotal(
-              await outboxRow.locator("dd").innerText(),
-            );
-            expect(finalOutboxTotal).toBeGreaterThan(initialOutboxTotal);
+            await expect
+              .poll(
+                async () => {
+                  await page.reload();
+                  return parseOutboxTotal(
+                    await outboxRow.locator("dd").innerText(),
+                  );
+                },
+                { timeout: 15_000 },
+              )
+              .toBeGreaterThan(0);
             const recoveryCard = page
               .locator("section.deployment-configuration-card")
               .filter({ hasText: "Identity & Recovery" });
-            await expect(recoveryCard.getByText("Required", { exact: true })).toBeVisible();
+            await expect(
+              recoveryCard.getByText("Required", { exact: true }),
+            ).toBeVisible();
             await expectViewportFits(page);
           });
 
-          await test.step("Personal, picker, default, and whole-workspace member flows stay distinct", async () => {
+          await test.step("Starter workspace, picker, default, and whole-workspace member flows stay distinct", async () => {
+            // Signup persists the new account's starter workspace as its
+            // default; after that it is an ordinary private workspace.
             await signUp(inviteeContext.request, inviteeEmail);
             const inviteeBefore = await workspaceList(inviteeContext);
             expect(inviteeBefore.workspaces).toHaveLength(1);
-            expect(inviteeBefore.personal_workspace_id).toBeTruthy();
-            expect(inviteeBefore.default_workspace_id).toBe(
-              inviteeBefore.personal_workspace_id,
-            );
-            expect(inviteeBefore.current_workspace_id).toBe(
-              inviteeBefore.personal_workspace_id,
-            );
+            const inviteeStarterId = inviteeBefore.workspaces[0].id;
+            expect(inviteeBefore.default_workspace_id).toBe(inviteeStarterId);
+            expect(inviteeBefore.current_workspace_id).toBe(inviteeStarterId);
 
             await signUp(ownerContext.request, ownerEmail);
             const ownerBefore = await workspaceList(ownerContext);
             expect(ownerBefore.workspaces).toHaveLength(1);
-            expect(ownerBefore.default_workspace_id).toBe(
-              ownerBefore.personal_workspace_id,
-            );
+            const ownerStarterId = ownerBefore.workspaces[0].id;
+            const ownerStarterTitle = ownerBefore.workspaces[0].title;
+            expect(ownerBefore.default_workspace_id).toBe(ownerStarterId);
 
             const ownerPage = await ownerContext.newPage();
             const ownerErrors: string[] = [];
-            ownerPage.on("pageerror", (error) => ownerErrors.push(error.message));
+            ownerPage.on("pageerror", (error) =>
+              ownerErrors.push(error.message),
+            );
             await ownerPage.goto("/dashboard");
             await expect(
               ownerPage.getByRole("heading", { name: "Workspace Operations" }),
@@ -894,26 +1022,32 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               name: "Workspace switcher",
             });
             await expect(
-              picker.getByRole("group", {
-                name: "Personal workspace",
-                exact: true,
-              }),
+              picker
+                .locator(".workspace-menu-row")
+                .filter({ hasText: ownerStarterTitle }),
             ).toBeVisible();
-            await expect(picker.getByText("Personal", { exact: true })).toBeVisible();
-            await expect(picker.getByText("Default", { exact: true })).toBeVisible();
+            await expect(
+              picker.getByText("Default", { exact: true }),
+            ).toBeVisible();
 
-            await picker.getByRole("button", { name: "Create workspace" }).click();
+            await picker
+              .getByRole("button", { name: "Create workspace" })
+              .click();
             await picker.getByLabel("Workspace name").fill(collaborativeTitle);
             const createdResponsePromise = ownerPage.waitForResponse(
               (response) =>
                 response.url().endsWith("/api/v1/workspaces") &&
                 response.request().method() === "POST",
             );
-            await picker.getByRole("button", { name: "Create", exact: true }).click();
+            await picker
+              .getByRole("button", { name: "Create", exact: true })
+              .click();
             expect((await createdResponsePromise).ok()).toBeTruthy();
             await expect(
               ownerPage.getByRole("button", {
-                name: new RegExp(`Switch workspace, current: ${escapeRegExp(collaborativeTitle)}`),
+                name: new RegExp(
+                  `Switch workspace, current: ${escapeRegExp(collaborativeTitle)}`,
+                ),
               }),
             ).toBeVisible();
 
@@ -922,12 +1056,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               (workspace) => workspace.title === collaborativeTitle,
             );
             expect(collaborative).toBeTruthy();
-            expect(ownerAfterCreate.default_workspace_id).toBe(
-              ownerBefore.personal_workspace_id,
-            );
-            expect(ownerAfterCreate.personal_workspace_id).toBe(
-              ownerBefore.personal_workspace_id,
-            );
+            expect(ownerAfterCreate.default_workspace_id).toBe(ownerStarterId);
 
             await ownerPage.goto("/account");
             const collaborativeRow = ownerPage
@@ -937,33 +1066,40 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               .getByRole("button", { name: "Set as default" })
               .click();
             await expect(
-              ownerPage.getByText(`${collaborativeTitle} is now your default workspace.`),
+              ownerPage.getByText(
+                `${collaborativeTitle} is now your default workspace.`,
+              ),
             ).toBeVisible();
             const ownerAfterDefault = await workspaceList(ownerContext);
-            expect(ownerAfterDefault.default_workspace_id).toBe(collaborative?.id);
-            expect(ownerAfterDefault.personal_workspace_id).toBe(
-              ownerBefore.personal_workspace_id,
+            expect(ownerAfterDefault.default_workspace_id).toBe(
+              collaborative?.id,
             );
 
             await ownerPage
               .getByRole("button", { name: /Switch workspace, current:/ })
               .click();
-            picker = ownerPage.getByRole("dialog", { name: "Workspace switcher" });
-            const personalRow = picker
+            picker = ownerPage.getByRole("dialog", {
+              name: "Workspace switcher",
+            });
+            const starterRow = picker
               .locator(".workspace-menu-row")
-              .filter({ hasText: "Personal Workspace" });
-            await personalRow.locator("button.workspace-menu-item").click();
+              .filter({ hasText: ownerStarterTitle });
+            await starterRow.locator("button.workspace-menu-item").click();
             await expect(
               ownerPage.getByRole("button", {
-                name: "Switch workspace, current: Personal Workspace",
+                name: `Switch workspace, current: ${ownerStarterTitle}`,
               }),
             ).toBeVisible();
             await ownerPage.goto("/settings?section=members");
             await expect(
               ownerPage.getByRole("heading", { name: "Members & access" }),
             ).toBeVisible();
-            await ownerPage.getByLabel("Find or add members").fill(inviteeEmail);
-            await ownerPage.getByRole("button", { name: "Add member" }).click();
+            await ownerPage.getByRole("button", { name: "Add a member" }).click();
+            const addMember = ownerPage.getByRole("dialog", { name: "Add a member" });
+            await addMember
+              .getByLabel("User ID or account email")
+              .fill(inviteeEmail);
+            await addMember.getByRole("button", { name: "Add member" }).click();
 
             const firstShare = ownerPage.getByRole("dialog", {
               name: "Share the whole workspace?",
@@ -979,7 +1115,9 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               .getByRole("button", { name: "Share whole workspace" })
               .click();
             await expect(
-              ownerPage.getByText(`${inviteeEmail} was added to this workspace.`),
+              ownerPage.getByText(
+                `${inviteeEmail} was added to this workspace.`,
+              ),
             ).toBeVisible();
 
             const inviteeRow = ownerPage
@@ -995,31 +1133,15 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             expect((await roleResponsePromise).ok()).toBeTruthy();
             await expect(inviteeRow.locator("select")).toHaveValue("editor");
 
-            const ownerRow = ownerPage
-              .locator(".workspace-member-row")
-              .filter({ hasText: ownerEmail });
-            // Renamed off "Personal recovery owner": the badge marks who owns
-            // the personal workspace, which is a membership fact, not a
-            // recovery role. This step only ever ran once the User accounts
-            // heading above it stopped failing, which is why the stale wording
-            // survived.
-            await expect(ownerRow.getByText("Personal workspace owner")).toBeVisible();
-            await expect(ownerRow.locator("select")).toBeDisabled();
-
             const inviteeAfter = await workspaceList(inviteeContext);
             expect(inviteeAfter.workspaces).toHaveLength(2);
-            expect(inviteeAfter.personal_workspace_id).toBe(
-              inviteeBefore.personal_workspace_id,
-            );
             expect(inviteeAfter.default_workspace_id).toBe(
               inviteeBefore.default_workspace_id,
             );
-            expect(inviteeAfter.current_workspace_id).toBe(
-              inviteeBefore.personal_workspace_id,
-            );
+            expect(inviteeAfter.current_workspace_id).toBe(inviteeStarterId);
             expect(
               inviteeAfter.workspaces.find(
-                (workspace) => workspace.id === ownerBefore.personal_workspace_id,
+                (workspace) => workspace.id === ownerStarterId,
               )?.role,
             ).toBe("editor");
             await expectViewportFits(ownerPage);
@@ -1132,7 +1254,9 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await expectViewportFits(page);
 
           await readerTabs.getByRole("tab", { name: /^Activity/ }).click();
-          const activityPanel = page.getByRole("tabpanel", { name: /^Activity/ });
+          const activityPanel = page.getByRole("tabpanel", {
+            name: /^Activity/,
+          });
           const activityFeed = activityPanel.getByRole("list", {
             name: "Page activity",
           });
@@ -1142,19 +1266,19 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
         });
 
         const surfaces = [
-          { path: `/context?target=${encodeURIComponent(decision.id)}`, kind: "heading", name: decisionTitle },
-          { path: "/library", kind: "heading", name: "Library" },
-          { path: "/agent", kind: "heading", name: "Agent pages" },
-          { path: "/ask", kind: "textbox", name: "Message" },
+          { path: `/context?target=${encodeURIComponent(decision.id)}`, name: decisionTitle },
+          { path: "/library", name: "Library" },
+          { path: "/agent", name: "Agent pages" },
+          { path: "/ask", name: "We couldn't find that page" },
           // The Review queue rail becomes a drawer on narrow screens and
           // intentionally loses its desktop complementary landmark. The main
           // operations heading is the route-level readiness signal in both
           // responsive layouts.
-          { path: "/review", kind: "heading", name: "Review operations" },
-          { path: "/search", kind: "heading", name: "Search" },
-          { path: "/lint", kind: "heading", name: "Lint queue" },
-          { path: "/activity", kind: "heading", name: "Activity" },
-          { path: "/chats", kind: "heading", name: "Chats" },
+          { path: "/review", name: "Review operations" },
+          { path: "/search", name: "Search" },
+          { path: "/lint", name: "Lint queue" },
+          { path: "/activity", name: "Activity" },
+          { path: "/chats", name: "Chats" },
         ] as const;
 
         await test.step("all contract Web routes render against the live stack", async () => {
@@ -1177,22 +1301,13 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               networkChangeRecoveries.push({ path: surface.path, recovered });
             }
             if (surface.path === "/ask") {
-              // The composer renders only after workspace, session, Context
-              // tree, and role hydration. Use the loaded route heading as the
-              // readiness signal before asserting the permission-gated input.
-              await expect(
-                page.getByRole("heading", { name: "Ask", exact: true }),
-              ).toBeVisible({ timeout: 15_000 });
+              await expect(page).toHaveURL(/\/ask$/);
+              await expect(page.locator(".ask-composer")).toHaveCount(0);
+              await expect(page.locator('a[href^="/ask"]')).toHaveCount(0);
             }
-            if (surface.kind === "heading") {
-              await expect(
-                page.getByRole("heading", { name: surface.name, exact: true }),
-              ).toBeVisible();
-            } else {
-              await expect(
-                page.getByRole("textbox", { name: surface.name, exact: true }),
-              ).toBeVisible();
-            }
+            await expect(
+              page.getByRole("heading", { name: surface.name, exact: true }),
+            ).toBeVisible();
             await expectViewportFits(page);
           }
         });
@@ -1223,8 +1338,12 @@ async function isolatedContext(
   return browser.newContext({ baseURL: frontendBaseUrl, viewport });
 }
 
-async function workspaceList(context: BrowserContext): Promise<WorkspaceListData> {
-  const response = await context.request.get(`${backendBaseUrl}/api/v1/workspaces`);
+async function workspaceList(
+  context: BrowserContext,
+): Promise<WorkspaceListData> {
+  const response = await context.request.get(
+    `${backendBaseUrl}/api/v1/workspaces`,
+  );
   expect(response.ok()).toBeTruthy();
   return (await response.json()).data as WorkspaceListData;
 }

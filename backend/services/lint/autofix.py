@@ -12,7 +12,7 @@ verbatim — formatting is a convenience, never a way to corrupt content.
 
 Transforms applied to BODY text only:
 - normalize line endings (CRLF/CR -> LF) and guarantee one trailing newline;
-- strip trailing whitespace from each line;
+- strip trailing whitespace while retaining two-space Markdown hard breaks;
 - headings -> ``#{level} text`` (single space after #; an ATX closing ``#`` run
   is stripped only when whitespace-preceded, so ``# C#`` keeps its content hash);
 - unordered list markers ``*`` / ``+`` -> ``-`` (indent preserved), EXCEPT
@@ -32,8 +32,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
-from backend.services.lint.rules_format import _frontmatter_body_offset
 from backend.utils.markdown_fence import fence_opener, is_fence_closer
+from backend.utils.page_frontmatter import frontmatter_body_offset
 
 logger = logging.getLogger(__name__)
 
@@ -442,7 +442,13 @@ def _format_table(block: list[str]) -> list[str]:
     return out
 
 
-def _normalize_body_line(line: str) -> str:
+def _strip_trailing_whitespace(line: str, *, preserve_hard_break: bool) -> str:
+    hard_break = preserve_hard_break and line.endswith("  ")
+    return line.rstrip() + ("  " if hard_break else "")
+
+
+def _normalize_body_line(line: str, *, preserve_hard_break: bool = False) -> str:
+    hard_break = preserve_hard_break and line.endswith("  ")
     line = line.rstrip()
     if _THEMATIC_BREAK_RE.match(line):
         return line  # thematic break — never rewrite into a list item
@@ -451,8 +457,8 @@ def _normalize_body_line(line: str) -> str:
         return f"{heading.group(1)} {heading.group(2)}".rstrip()
     ul = _UL_RE.match(line)
     if ul:
-        return f"{ul.group(1)}-{ul.group(2)}{ul.group(3)}".rstrip()
-    return line
+        line = f"{ul.group(1)}-{ul.group(2)}{ul.group(3)}".rstrip()
+    return line + ("  " if hard_break else "")
 
 
 def _source_line_start_index(body: str) -> array:
@@ -483,7 +489,9 @@ def _ordinary_line_kind(line: str) -> MarkdownBlockKind:
     return MarkdownBlockKind.BODY
 
 
-def analyze_markdown(body: str) -> MarkdownAnalysis:
+def analyze_markdown(
+    body: str, *, preserve_hard_breaks: bool = True
+) -> MarkdownAnalysis:
     """Normalize and classify Markdown in the normalizer's single block pass."""
 
     source_line_starts = _source_line_start_index(body)
@@ -513,7 +521,7 @@ def analyze_markdown(body: str) -> MarkdownAnalysis:
     lines = text.split("\n")
     if len(lines) != len(source_line_starts):  # pragma: no cover - invariant
         raise ValueError("source line map diverged from canonical line endings")
-    offset = _frontmatter_body_offset(lines)
+    offset = frontmatter_body_offset(lines)
     frontmatter = lines[:offset]
     body_lines = lines[offset:]
     had_separator = bool(body_lines) and body_lines[0].strip() == ""
@@ -585,7 +593,18 @@ def analyze_markdown(body: str) -> MarkdownAnalysis:
         for emitted_line, (_raw_line, source_line_index) in zip(
             emitted_lines, pipe_run, strict=True
         ):
-            normalized_line = emitted_line if well_formed else emitted_line.rstrip()
+            normalized_line = (
+                emitted_line
+                if well_formed
+                else _strip_trailing_whitespace(
+                    emitted_line,
+                    preserve_hard_break=(
+                        preserve_hard_breaks
+                        and source_line_index + 1 < len(lines)
+                        and bool(lines[source_line_index + 1].strip())
+                    ),
+                )
+            )
             emit(
                 normalized_line,
                 source_line_index,
@@ -667,7 +686,12 @@ def analyze_markdown(body: str) -> MarkdownAnalysis:
             continue
 
         flush_pipe_run()
-        normalized_line = _normalize_body_line(line)
+        normalized_line = _normalize_body_line(
+            line,
+            preserve_hard_break=(
+                preserve_hard_breaks and i + 1 < n and bool(body_lines[i + 1].strip())
+            ),
+        )
         kind = _ordinary_line_kind(normalized_line)
         emit(normalized_line, source_line_index, kind)
         i += 1
@@ -818,3 +842,16 @@ def safe_normalize_markdown(body: str) -> str:
     """
     analysis = safe_analyze_markdown(body)
     return body if analysis is None else analysis.normalized
+
+
+def safe_normalize_markdown_legacy_v1(body: str) -> str:
+    """Replay old branch proofs that predate hard-break preservation.
+
+    New writes use :func:`safe_normalize_markdown`. A manifest without an
+    explicit transform still needs the exact formatter behavior it captured.
+    """
+    try:
+        return analyze_markdown(body, preserve_hard_breaks=False).normalized
+    except Exception:  # pragma: no cover - defensive legacy proof replay
+        logger.exception("Legacy Markdown formatting failed; retaining the prior body")
+        return body

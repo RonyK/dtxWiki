@@ -97,55 +97,57 @@ def test_base_equal_to_head_is_committed(page_service, actor):
 
 def test_stale_base_with_untouched_target_is_rebased_onto_head(page_service, actor):
     workspace_id = _workspace_id(page_service)
-    page = page_service.write_page(
-        workspace_slug="default",
-        slug="push-rebased",
-        title="Push Rebased",
-        body_md="# Title\n\nfirst\n\nsecond\n",
-        actor_kind="human",
-        actor_id="00000000-0000-0000-0000-000000000010",
-        actor_provenance="browser_session",
-    )
-    base_map = _structure_map(workspace_id, page.id, actor, page_service)
-    first_para = next(b for b in base_map.blocks if b.preview == "first")
-    second_para = next(b for b in base_map.blocks if b.preview == "second")
-    base_version_id = str(page.version_id)
+    with page_service.session_factory.begin() as session:
+        session.get(Workspace, workspace_id).auto_fix_enabled = True
+    for suffix, before, replacement in (
+        ("text", "first", "first, edited"),
+        ("hard-break", "first\ncontinued", "first  \ncontinued"),
+    ):
+        slug = f"push-rebased-{suffix}"
+        page = page_service.write_page(
+            workspace_slug="default",
+            slug=slug,
+            title="Push Rebased",
+            body_md=f"# Title\n\n{before}\n\nsecond\n",
+            actor_kind="human",
+            actor_id="00000000-0000-0000-0000-000000000010",
+            actor_provenance="browser_session",
+        )
+        base_map = _structure_map(workspace_id, page.id, actor, page_service)
+        first_para = next(b for b in base_map.blocks if b.kind == "p")
+        second_para = next(b for b in base_map.blocks if b.preview == "second")
 
-    # Someone else advances head by lightly editing an UNRELATED block --
-    # a small enough edit that block_identity's fuzzy-match tier carries the
-    # id forward, so the "changed" set names exactly one id, not two (a
-    # rewrite past the similarity threshold retires the old id and mints a
-    # new one, both of which legitimately appear as "changed since base" --
-    # covered by the diverged test below, which targets exactly such a
-    # block).
-    page_service.write_page(
-        workspace_slug="default",
-        slug="push-rebased",
-        title="Push Rebased",
-        body_md="# Title\n\nfirst\n\nsecond!\n",
-        actor_kind="human",
-        actor_id="00000000-0000-0000-0000-000000000010",
-        actor_provenance="browser_session",
-        base_version_id=page.version_id,
-        base_content_hash=page.content_hash,
-    )
+        # Advancing an unrelated block preserves its ID. A hard-break-only
+        # candidate still has a real delta despite its unchanged canonical hash.
+        page_service.write_page(
+            workspace_slug="default",
+            slug=slug,
+            title="Push Rebased",
+            body_md=f"# Title\n\n{before}\n\nsecond!\n",
+            actor_kind="human",
+            actor_id="00000000-0000-0000-0000-000000000010",
+            actor_provenance="browser_session",
+            base_version_id=page.version_id,
+            base_content_hash=page.content_hash,
+        )
+        result = _patch_draft(
+            page_service,
+            actor,
+            workspace_id,
+            page_id=page.id,
+            reason="rebase onto head",
+            base=str(page.version_id),
+            operations=[_replace_block_op(first_para, replacement)],
+        )
 
-    result = _patch_draft(
-        page_service,
-        actor,
-        workspace_id,
-        page_id=page.id,
-        reason="rebase onto head",
-        base=base_version_id,
-        operations=[_replace_block_op(first_para, "first, edited")],
-    )
-
-    assert result.push_outcome == "rebased"
-    assert result.changed_since_base_ids == [second_para.id]
-
-    after_map = _structure_map(workspace_id, page.id, actor, page_service)
-    assert any(b.preview == "first, edited" for b in after_map.blocks)
-    assert any(b.preview == "second!" for b in after_map.blocks)
+        assert result.push_outcome == "rebased"
+        assert result.changed_since_base_ids == [second_para.id]
+        with page_service.session_factory() as session:
+            stored = session.get(ContextPageVersion, result.draft_version_id)
+            assert stored.body_md == f"# Title\n\n{replacement}\n\nsecond!\n"
+        after_map = _structure_map(workspace_id, page.id, actor, page_service)
+        assert any(b.preview.startswith("first") for b in after_map.blocks)
+        assert any(b.preview == "second!" for b in after_map.blocks)
 
 
 def test_stale_raw_no_effect_keeps_head_without_creating_a_branch(page_service, actor):
@@ -497,6 +499,59 @@ def test_stale_base_with_touched_target_diverges_into_a_branch(page_service, act
     head_paragraph = next(b for b in after_map.blocks if b.kind == "p")
     assert "changed by someone else" in head_paragraph.preview
     assert "my edit" not in head_paragraph.preview
+
+    # A hard-break-only HEAD change must also conflict: its canonical block
+    # hash equals base, but rebasing would overwrite the author's line break.
+    with page_service.session_factory.begin() as session:
+        session.get(Workspace, workspace_id).auto_fix_enabled = True
+    hard_break_base = page_service.write_page(
+        workspace_slug="default",
+        slug="push-diverged-hard-break",
+        title="Push Diverged",
+        body_md="# Title\n\nfirst\ncontinued\n",
+        actor_kind="human",
+        actor_id="00000000-0000-0000-0000-000000000010",
+        actor_provenance="browser_session",
+    )
+    hard_break_map = _structure_map(
+        workspace_id, hard_break_base.id, actor, page_service
+    )
+    hard_break_target = next(b for b in hard_break_map.blocks if b.kind == "p")
+    hard_break_head = page_service.write_page(
+        workspace_slug="default",
+        slug="push-diverged-hard-break",
+        title="Push Diverged",
+        body_md="# Title\n\nfirst  \ncontinued\n",
+        actor_kind="human",
+        actor_id="00000000-0000-0000-0000-000000000010",
+        actor_provenance="browser_session",
+        base_version_id=hard_break_base.version_id,
+        base_content_hash=hard_break_base.content_hash,
+    )
+    assert hard_break_head.content_hash == hard_break_base.content_hash
+    hard_break_result = _patch_draft(
+        page_service,
+        actor,
+        workspace_id,
+        page_id=hard_break_base.id,
+        reason="conflict with a hard break added at head",
+        base=str(hard_break_base.version_id),
+        operations=[_replace_block_op(hard_break_target, "first, my edit\ncontinued")],
+    )
+    assert hard_break_result.push_outcome == "diverged"
+    assert hard_break_result.changed_since_base_ids == [hard_break_target.id]
+    assert hard_break_result.conflicts[0]["head"]["text"] == "first  \ncontinued"
+    with page_service.session_factory() as session:
+        assert (
+            session.get(ContextPageVersion, hard_break_head.version_id).body_md
+            == "# Title\n\nfirst  \ncontinued\n"
+        )
+        assert (
+            session.get(
+                ContextPageVersion, hard_break_result.alternative_draft_id
+            ).body_md
+            == "# Title\n\nfirst, my edit\ncontinued\n"
+        )
 
 
 def test_unknown_base_is_rejected_with_a_recoverable_error(page_service, actor):

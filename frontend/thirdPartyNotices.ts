@@ -39,6 +39,20 @@ type BundledPackage = {
   legalFiles: LegalFile[];
 };
 
+// These npm releases omit their repository's LICENSE and author metadata.
+// Keep an unmodified, offline copy from the v10.5.3 tag's immutable commit;
+// never apply it to other package versions or changed license metadata.
+const STORYBOOK_LICENSE = {
+  packages: ["@storybook/react", "@storybook/react-dom-shim", "storybook"],
+  version: "10.5.3",
+  license: "MIT",
+  repository: "https://github.com/storybookjs/storybook.git",
+  source:
+    "https://github.com/storybookjs/storybook/blob/9ac273930a49ad33b6a331f1f36dc472f5c36054/LICENSE",
+  file: "frontend/licenses/storybook-10.5.3.LICENSE",
+  sha256: "bc90586179d44dcb313a9a289d687a2f26226303b2066bd21dbefd2378e894e5",
+};
+
 // Third-party code the package scan below cannot attribute, because no
 // package root holds its license text. Two kinds:
 //   - `file`: a file copied into this repository. It is always listed, its
@@ -209,12 +223,40 @@ function reconstructedMit(manifest: Record<string, unknown>) {
   ];
 }
 
-function readPackage(root: string): BundledPackage {
+function upstreamLicense(manifest: Record<string, unknown>, repoRoot: string): LegalFile[] {
+  const pinned = STORYBOOK_LICENSE;
+  if (!pinned.packages.includes(String(manifest.name)) || manifest.version !== pinned.version) {
+    return [];
+  }
+  const repository = manifest.repository as { url?: unknown } | undefined;
+  const id = `${String(manifest.name)}@${String(manifest.version)}`;
+  if (licenseOf(manifest) !== pinned.license || repository?.url !== pinned.repository) {
+    throw new Error(`${id}: metadata does not match its pinned upstream license`);
+  }
+  const file = path.join(repoRoot, pinned.file);
+  if (!existsSync(file)) {
+    throw new Error(`${id}: pinned upstream license is missing: ${pinned.file}`);
+  }
+  // Normalize checkout line endings so Windows builds verify the same text.
+  const text = readFileSync(file, "utf-8").replaceAll("\r\n", "\n");
+  if (createHash("sha256").update(text).digest("hex") !== pinned.sha256) {
+    throw new Error(`${id}: pinned upstream license changed: ${pinned.file}`);
+  }
+  if (inferLicense(text) !== pinned.license) {
+    throw new Error(`${id}: pinned upstream license is not ${pinned.license}`);
+  }
+  return [{ name: `LICENSE (from ${pinned.source}; omitted by the npm package)`, text: text.trim() }];
+}
+
+function readPackage(root: string, repoRoot: string): BundledPackage {
   const manifest = JSON.parse(readFileSync(path.join(root, "package.json"), "utf-8"));
   const legalFiles = readdirSync(root)
     .filter((name) => LEGAL_FILE.test(name))
     .sort()
     .map((name) => ({ name, text: readFileSync(path.join(root, name), "utf-8").trim() }));
+  if (legalFiles.length === 0) {
+    legalFiles.push(...upstreamLicense(manifest, repoRoot));
+  }
   const declared = licenseOf(manifest);
   const inferred =
     declared === "UNKNOWN"
@@ -296,7 +338,8 @@ function render(packages: BundledPackage[], vendored: VendoredNotice[]): string 
     "Third-party software bundled with the dtxWiki web UI",
     "",
     "The dtxWiki web UI includes the following third-party packages. Each is",
-    "licensed under its own terms, reproduced below as shipped by the package.",
+    "licensed under its own terms, reproduced below. When a package omits its",
+    "license text, the attributed source of the reproduced text is identified.",
     "Each package can be obtained from the npm registry (https://www.npmjs.com/)",
     "under the name and version shown.",
     "",
@@ -371,7 +414,7 @@ export function thirdPartyNotices({
       }
       const byId = new Map<string, BundledPackage>();
       for (const root of roots) {
-        const pkg = readPackage(root);
+        const pkg = readPackage(root, repoRoot);
         byId.set(`${pkg.name}@${pkg.version}`, pkg);
       }
       const packages = [...byId.values()].sort((a, b) =>

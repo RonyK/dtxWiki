@@ -51,9 +51,17 @@ const VIEWPORTS: ViewportCase[] = [
   { key: "desktop-1280x720", width: 1280, height: 720 },
 ];
 
+// The usability journey branches on width > 1024, width <= 1024 and width ===
+// 390, so the phone and desktop cases reach every branch. The tablet cases
+// take the <= 1024 branch and add only the 641-1024px CSS bands; they run on
+// Chromium here and on every engine in the weekly exhaustive run.
+const CROSS_BROWSER_USABILITY_KEYS = new Set(["phone-390x844", "desktop-1280x720"]);
+
+// The dialog is min(720px, 100vw - 32px) wide and min(88dvh, 820px) tall.
+// 1920x1080 reaches the 820px cap; a 1440x900 case would repeat 1280x720,
+// where the height follows the viewport.
 const FAMILY_DIALOG_VIEWPORTS: ViewportCase[] = [
   ...VIEWPORTS,
-  { key: "desktop-1440x900", width: 1440, height: 900 },
   { key: "desktop-1920x1080", width: 1920, height: 1080 },
 ];
 
@@ -61,9 +69,63 @@ const FAMILY_DIALOG_VIEWPORTS: ViewportCase[] = [
 // spacing contract while tolerating that engine-level geometry rounding.
 const CSS_GEOMETRY_EPSILON_PX = 0.001;
 
-test.describe("Overall UI responsive acceptance @cross-browser", () => {
+// @cross-browser is set per test, so the tablet usability cases can stay on
+// Chromium.
+test.describe("Overall UI responsive acceptance", () => {
+  test.describe("foldable viewport", () => {
+    test.use({ hasTouch: true });
+
+    test("persisted collapsed sidebar keeps full width after folding and reload @cross-browser", async ({
+      page,
+    }, testInfo) => {
+      await page.setViewportSize({ width: 1280, height: 850 });
+      await authenticatePage(page, testInfo, "fold-collapsed-sidebar");
+      await page.goto("/dashboard");
+      const shell = page.locator(".app-shell");
+      const toggle = page.locator(".desktop-sidebar-toggle");
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+      await toggle.click();
+      await expect(shell).toHaveAttribute("data-sidebar-collapsed", "true");
+      await expect.poll(() => page.locator(".main-surface").evaluate((element) =>
+        Math.round(element.getBoundingClientRect().left),
+      )).toBe(64);
+      expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches))
+        .toBe(true);
+
+      // A phone can inherit this preference from a previous wide viewport.
+      // Exercise one fold, then reload once with that preference still saved.
+      for (const width of [850, 344]) {
+        await page.setViewportSize({ width, height: 850 });
+        await expect(page.locator(".feature-header h1")).toBeVisible();
+        await expect(page.locator(".sidebar")).toBeHidden();
+        await expectNoHorizontalOverflow(page, `fold to ${width}px`);
+        const styles = await page.evaluate(() => ({
+          gap: getComputedStyle(document.querySelector(".topbar-brand")!).gap,
+          minimumWidth: getComputedStyle(
+            document.querySelector(".workspace-switcher-button")!,
+          ).minWidth,
+        }));
+        expect(styles.gap).toBe(width <= 480 ? "6px" : "10px");
+        expect(styles.minimumWidth).toBe("44px");
+        await expectMinimumTouchTarget(
+          page.locator(".workspace-switcher-button"), "workspace switcher",
+        );
+        await expect(page.locator(".workspace-switcher-label")).toBeVisible();
+        await evidenceScreenshot(page, testInfo, `fold-collapsed-${width}.png`);
+      }
+
+      await page.reload();
+      await expect(page.locator(".feature-header h1")).toBeVisible();
+      await expect(shell).toHaveAttribute("data-sidebar-collapsed", "true");
+      expect(await page.evaluate(() =>
+        localStorage.getItem("dtxwiki:sidebar-collapsed"),
+      )).toBe("true");
+      await expectNoHorizontalOverflow(page, "folded reload");
+    });
+  });
+
   for (const viewport of VIEWPORTS) {
-    test(`${viewport.key}: Context, Library policy, Lint, Chats, and Activity stay usable`, async ({
+    test(`${viewport.key}: Context, Library policy, Lint, Chats, and Activity stay usable${CROSS_BROWSER_USABILITY_KEYS.has(viewport.key) ? " @cross-browser" : ""}`, async ({
       page,
     }, testInfo) => {
       test.setTimeout(120_000);
@@ -488,10 +550,10 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
         await expect(v1).toBeVisible();
         await expect(latest).toBeVisible();
 
-        // Row-level Compare buttons always carry an aria-label. Restore and
-        // discard actions do not, so this proves v1 has no predecessor action.
+        // The first version has nothing to measure its changes against, so
+        // it offers no Changes action.
         await expect(
-          v1.locator(".history-card-actions button[aria-label]"),
+          v1.locator(".history-card-actions .history-changes-action"),
         ).toHaveCount(0);
         const latestCompare = latest.locator(
           `.history-card-actions button[aria-label*="v2"][aria-label*="v1"]`,
@@ -692,12 +754,18 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
           );
         });
 
-        await test.step("Ask composer input keeps a mobile touch target", async () => {
+        await test.step("Ask direct access has a usable mobile recovery action", async () => {
           await page.goto("/ask");
+          await expect(
+            page.getByRole("heading", { name: "We couldn't find that page" }),
+          ).toBeVisible();
+          await expect(page.locator(".ask-composer")).toHaveCount(0);
+          await expect(page.locator('a[href^="/ask"]')).toHaveCount(0);
           await expectMinimumTouchTarget(
-            page.locator(".ask-composer input").first(),
-            "Ask composer input",
+            page.getByRole("link", { name: "Back to dashboard", exact: true }),
+            "Unavailable Ask recovery link",
           );
+          await expectNoHorizontalOverflow(page, "Unavailable Ask route");
         });
 
         await test.step("Settings form controls keep mobile touch targets", async () => {
@@ -730,7 +798,7 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
   // them. Every authenticated surface stayed clean, which is why the account
   // recovery screens were the only place this ever showed.
   for (const width of [280, 320, 360]) {
-    test(`signed-out shell fits a ${width}px viewport`, async ({ page }) => {
+    test(`signed-out shell fits a ${width}px viewport @cross-browser`, async ({ page }) => {
       test.setTimeout(60_000);
       await page.setViewportSize({ width, height: 844 });
       for (const path of [
@@ -761,7 +829,7 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
   // same shape of bug that let the topbar break twice already in this branch
   // (Shell.test.tsx's own "wires the .feature-main scrollLeft guard" comment
   // makes the same point about a different guard). This drives the real DOM.
-  test("signed-out desktop topbar placeholder paints nothing", async ({ page }) => {
+  test("signed-out desktop topbar placeholder paints nothing @cross-browser", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto("/login");
     const placeholder = page.locator(".topbar-search[aria-hidden='true']");
@@ -781,7 +849,7 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
     expect(painted.pointerEvents).toBe("none");
   });
 
-  test("the horizontal-overflow guard can still fail", async ({ page }, testInfo) => {
+  test("the horizontal-overflow guard can still fail @cross-browser", async ({ page }, testInfo) => {
     // This suite's entire value rests on expectNoHorizontalOverflow being able
     // to fail, and it has silently lost that ability once already: the
     // document-level check cannot detect a blown-out layout inside
@@ -803,6 +871,20 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
 
     // Baseline: the real screen passes.
     await expectNoHorizontalOverflow(page, "overflow guard baseline");
+
+    // A 64px surface may not overflow. Prove the shared geometry check also
+    // rejects this separate failure, rather than relying on scrollWidth.
+    await page.locator(".main-surface").evaluate((element) => {
+      (element as HTMLElement).style.width = "64px";
+    });
+    try {
+      await expect(expectNoHorizontalOverflow(page, "squeezed surface"))
+        .rejects.toThrow("fills the mobile viewport");
+    } finally {
+      await page.locator(".main-surface").evaluate((element) => {
+        (element as HTMLElement).style.removeProperty("width");
+      });
+    }
 
     await page.evaluate(() => {
       const surface = document.querySelector(".main-surface");
@@ -842,7 +924,7 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
     });
   });
 
-  test("Fold-down resize clears a residual shell offset without a scroll event", async ({
+  test("Fold-down resize clears a residual shell offset without a scroll event @cross-browser", async ({
     page,
   }, testInfo) => {
     // A Galaxy Fold can go from its 690px unfolded viewport to 344px without
@@ -914,7 +996,7 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
     }
   });
 
-  test("phone-390x844-ko: Library policy stays localized and usable", async ({
+  test("phone-390x844-ko: Library policy stays localized and usable @cross-browser", async ({
     page,
   }, testInfo) => {
     test.setTimeout(60_000);
@@ -974,7 +1056,7 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
     );
   });
 
-  test("phone-390x844: preset and custom families persist and reject duplicate formats", async ({
+  test("phone-390x844: preset and custom families persist and reject duplicate formats @cross-browser", async ({
     page,
   }, testInfo) => {
     test.setTimeout(120_000);
@@ -1221,7 +1303,7 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
     }
   });
 
-  test("Context page Children tab deep-links, paginates, and restores through browser history", async ({
+  test("Context page Children tab deep-links, paginates, and restores through browser history @cross-browser", async ({
     page,
   }, testInfo) => {
     test.setTimeout(120_000);
@@ -1993,7 +2075,16 @@ async function expectNoHorizontalOverflow(page: Page, label: string) {
     const featureMain = document.querySelector(
       ".feature-main",
     ) as HTMLElement | null;
+    const fullWidthSurfaces = root.clientWidth <= 1024
+      ? [".app-shell", ".topbar", ".main-surface"].flatMap((selector) => {
+        const element = document.querySelector<HTMLElement>(selector);
+        if (!element?.getClientRects().length) return [];
+        const rect = element.getBoundingClientRect();
+        return [{ selector, left: rect.left, width: rect.width }];
+      })
+      : [];
     return {
+      fullWidthSurfaces,
       bodyScrollWidth: body.scrollWidth,
       documentScrollWidth: root.scrollWidth,
       shellClientWidth: shell?.clientWidth ?? -1,
@@ -2010,6 +2101,15 @@ async function expectNoHorizontalOverflow(page: Page, label: string) {
     Math.max(metrics.bodyScrollWidth, metrics.documentScrollWidth),
     `${label} document width`,
   ).toBeLessThanOrEqual(metrics.viewportClientWidth + 1);
+  // A squeezed grid can have no overflow at all. Check its painted width too.
+  for (const surface of metrics.fullWidthSurfaces) {
+    expect(Math.abs(surface.left), `${label} ${surface.selector} left edge`)
+      .toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(surface.width - metrics.viewportClientWidth),
+      `${label} ${surface.selector} fills the mobile viewport`,
+    ).toBeLessThanOrEqual(1);
+  }
   // The document check alone can never fail for the failure this suite exists
   // to catch: `.app-shell` is `height:100vh` and clips its overflow, so it —
   // not the document — is what the layout is measured against. (It takes

@@ -4,7 +4,7 @@
 override, so every description in that document is world-readable. Those
 descriptions are not written where they are read: FastAPI and Pydantic lift
 them out of route and model docstrings, so an internal design-doc citation
-("doc/Epic-2/...md"), a source-file name, a dotted module path
+(an internal Markdown plan), a source-file name, a dotted module path
 ("backend.models.job.Job") or a review-item number ("Codex #24") reads as an
 ordinary code comment in the file being edited and only becomes public two
 generators later. The same docstrings feed the MCP tool contracts, so one
@@ -78,9 +78,9 @@ _PACKAGES = "|".join(_REPO_PACKAGES)
 # gate gets switched off rather than obeyed, so a bare "<dir>/<word>" with no
 # further path structure and no extension is accepted, and a bare "<name>.md"
 # is accepted too -- an internal doc citation in this repo is always
-# path-qualified ("doc/Epic-2/...md"), which the first alternative catches.
+# path-qualified, which the first alternative catches.
 _INTERNAL_PATH = re.compile(
-    # A tree path, two or more segments deep: "doc/Epic-2/plan.md",
+    # A tree path, two or more segments deep: "internal/example/plan.md",
     # "backend/services/job_read_service.py".
     r"(?<![\w/.-])(?:" + _DIRECTORIES + r")/(?:[\w.-]+/)+[\w.-]+"
     # A file sitting directly in a top-level directory: "backend/models.py".
@@ -294,7 +294,7 @@ def test_detector_reaches_a_description_nested_below_a_property():
                         "unreachable_workspace_ids": {
                             "description": (
                                 "Phase 6a fan-out "
-                                "(doc/Epic-2/260828_workspace_db_isolation_plan.md "
+                                "(internal/example/plan.md "
                                 "§4)."
                             )
                         }
@@ -307,7 +307,7 @@ def test_detector_reaches_a_description_nested_below_a_property():
     assert _document_leaks(document) == [
         "components/schemas/AdminJobListData/properties/"
         "unreachable_workspace_ids/description: "
-        "'doc/Epic-2/260828_workspace_db_isolation_plan.md'"
+        "'internal/example/plan.md'"
     ]
     assert _document_leaks(document, pattern=_INTERNAL_SHORTHAND) == [
         "components/schemas/AdminJobListData/properties/"

@@ -1,21 +1,51 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title">
-  <title id="title">dtxWiki</title>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_레이어_1" data-name="레이어_1" xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 256 256">
+  <!-- Generator: Adobe Illustrator 30.7.0, SVG Export Plug-In . SVG Version: 2.1.4 Build 114)  -->
   <defs>
-    <linearGradient id="surface" x1="160" y1="128" x2="864" y2="896" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#8c7cff"/>
-      <stop offset="1" stop-color="#5038c7"/>
-    </linearGradient>
-    <filter id="shadow" x="0" y="0" width="1024" height="1024" filterUnits="userSpaceOnUse">
-      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#24166f" flood-opacity="0.28"/>
-    </filter>
+    <style>
+      .st1 {
+        fill: #fbbf24;
+      }
+
+      .st2 {
+        fill: #fff;
+      }
+
+      .st3 {
+        mask: url(#mask);
+      }
+
+      .st4 {
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 22.14px;
+      }
+
+      .st4, .st5 {
+        fill: none;
+        stroke: #fff;
+      }
+
+      .st6 {
+        fill: #7c3aed;
+      }
+
+      .st5 {
+        stroke-opacity: .14;
+        stroke-width: 2px;
+      }
+    </style>
+    <mask id="mask" x="0" y="0" width="256" height="256" maskUnits="userSpaceOnUse">
+      <g id="flat-night-solid-chevron">
+        <rect width="256" height="256"/>
+        <path class="st4" d="M69.24,86.96l45.92,41-45.92,41"/>
+      </g>
+    </mask>
   </defs>
-  <rect x="76" y="60" width="872" height="872" rx="218" fill="url(#surface)" filter="url(#shadow)"/>
-  <g fill="none" stroke="#fff" stroke-width="68" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M342 292v430"/>
-    <path d="M342 470c-41-41-129-38-166 24-31 51-27 154 16 199 39 40 112 38 150-4"/>
-    <path d="M516 350v338c0 28 18 44 45 44h34"/>
-    <path d="M450 466h150"/>
-    <path d="M686 470l178 252"/>
-    <path d="M854 470L676 722"/>
+  <rect class="st6" x="8" y="8" width="240" height="240" rx="58" ry="58"/>
+  <rect class="st5" x="9" y="9" width="238" height="238" rx="57" ry="57"/>
+  <g class="st3">
+    <rect class="st2" width="256" height="256"/>
   </g>
+  <path class="st1" d="M201,112c-6.4,11.2-6.4,20.8,0,32-11.2-6.4-20.8-6.4-32,0,6.4-11.2,6.4-20.8,0-32,11.2,6.4,20.8,6.4,32,0Z"/>
 </svg>

@@ -18,7 +18,7 @@
     "activeTitle": "Filters ({{count}})"
   },
   "overview": {
-    "windowNotice": "Showing the newest {{count}} events. Open a lane to load older activity."
+    "windowNotice": "Showing {{count}} display entries in the current query range. Open a lane to load older activity."
   },
   "filterSummary": {
     "label": "Filtered",
@@ -148,7 +148,13 @@
     "job": "Background job"
   },
   "actors": {
-    "agentWorker": "Internal agent worker"
+    "agentWorker": "Internal agent worker",
+    "fullNames": "Show full names: {{names}}",
+    "details": "Full activity actor names",
+    "user": "User",
+    "mcp": "MCP client",
+    "keyboardHelp": "Press Down Arrow to enter the names, or Escape to close.",
+    "close": "Close names"
   },
   "details": {
     "trigger": "Triggered by {{value}}",
@@ -190,6 +196,7 @@
     "agent": "Agent change",
     "ask": "Ask activity",
     "review": "Review decision",
+    "reviewUndo": "Review decision undone",
     "chat": "Chat activity"
   },
   "contextActivity": {
@@ -257,5 +264,92 @@
     "close": "Close record details",
     "actor": "Actor",
     "time": "Recorded at"
+  },
+  "feed": {
+    "count": "{{count}} {{entryUnit}} · {{events}} original {{eventUnit}}",
+    "repeatCount": "{{count}} times",
+    "resource": "the resource",
+    "mcpFallback": "MCP tool execution record",
+    "types": {
+      "context": "Context",
+      "agent": "Agent",
+      "library": "Library",
+      "mcp": "MCP call",
+      "tree": "Workspace tree",
+      "review": "Review request",
+      "job": "Background job",
+      "activity": "Activity"
+    },
+    "action": {
+      "edited": "Edited",
+      "read": "Read",
+      "search": "Searched",
+      "logged": "Logged",
+      "created": "Created",
+      "published": "Published",
+      "restored": "Restored",
+      "deleted": "Deleted",
+      "reviewed": "Reviewed",
+      "failed": "Failed",
+      "partial": "Partially completed",
+      "accepted": "Accepted"
+    },
+    "mcpOperations": {
+      "read_one": "Read {{target}}",
+      "read_other": "Read {{target}} {{count}} times",
+      "search": "Searched workspace resources",
+      "edit": "Updated a draft",
+      "create": "Created an item",
+      "review": "Requested a review",
+      "publish": "Published changes",
+      "restore": "Restored earlier content",
+      "delete": "Deleted an item",
+      "cite": "Cited a resource",
+      "guide": "Opened the usage guide"
+    },
+    "mcpResults": {
+      "failed": "The tool execution could not be completed",
+      "conflict": "The request could not be completed due to a version conflict",
+      "rejected_by_policy": "The request was rejected by policy",
+      "partial": "The request was partially completed",
+      "accepted": "The request was accepted"
+    },
+    "noTarget": "No target link",
+    "openMcpActivity": "View MCP activity",
+    "openActivity": "View activity list",
+    "openReview": "Open review: {{title}}",
+    "reviewRequiredFor": "Review required: {{title}}",
+    "reviewRequired": "Review required",
+    "technical": {
+      "title": "Technical information",
+      "tool": "Tool",
+      "result": "Result",
+      "duration": "Duration",
+      "milliseconds": "{{count}}ms",
+      "error": "Public error code"
+    },
+    "group": {
+      "expand": "Expand {{count}} original events",
+      "collapse": "Collapse events",
+      "loading": "Loading original events",
+      "error": "Original events could not be loaded. Try again.",
+      "retry": "Try again",
+      "timeRange": "First to last activity"
+    },
+    "groupReads": "Group repeated reads",
+    "grouped": "Repeated reads grouped",
+    "raw": "Individual events",
+    "scope": "Current query range",
+    "loadedAll": "All matching activity in this snapshot is shown",
+    "reload": "Reload activity",
+    "seeAllPending": "View all pending activity",
+    "seeAllAdvisory": "View all advisory activity",
+    "seeAllHistory": "View all history activity",
+    "preview": "Showing {{count}} of {{loaded}} loaded entries",
+    "queryEvents": "Events in the current query range",
+    "entryUnit_one": "entry",
+    "entryUnit_other": "entries",
+    "originalEventUnit_one": "event",
+    "originalEventUnit_other": "events"
   }
 }

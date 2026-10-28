@@ -177,6 +177,19 @@ def test_context_activity_details_reviews_and_stable_cursor(session_factory):
                 for _ in range(2)
             ]
         )
+        # Review publication also records a metadata snapshot. Its page and
+        # version need the same authorization as the content operation; treating
+        # this supported operation as unknown hides the entire approval event.
+        session.add(
+            ChangeOperation(
+                workspace_id=workspace.id,
+                change_set_id=change.id,
+                target_type="context_page_metadata",
+                target_id=page.id,
+                operation="metadata_snapshot",
+                diff_ref=f"context_page_version:{version.id}",
+            )
+        )
         review = ReviewItem(
             workspace_id=workspace.id,
             change_set_id=change.id,

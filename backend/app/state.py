@@ -52,18 +52,21 @@ def get_page_service_from_app(request: Request) -> PageService:
     state = request.app.state
     if hasattr(state, "page_service"):
         return state.page_service
-    if hasattr(state, "container"):
-        page_service = state.container.get_page_service()
-        state.page_service = page_service
-        return page_service
     with _state_lock:
         if not hasattr(state, "page_service"):
             if hasattr(state, "container"):
                 state.page_service = state.container.get_page_service()
             else:
+                session_factory = get_session_factory_from_app(request)
+                container = get_container_from_app(request)
+                services = container.get_services()
                 state.page_service = PageService(
-                    get_session_factory_from_app(request)
+                    session_factory,
+                    job_queue=services.job_queue,
+                    body_preparer=services.body_preparer,
+                    lint_registry=services.lint_registry,
                 )
+                container.page_service = state.page_service
         return state.page_service
 
 

@@ -1,3 +1,4 @@
+import { inputTextError, textInputLimit, trimShortText } from "../../shared/lib/inputPolicy";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -36,8 +37,9 @@ import type {
 import { normalizeMcpCompatibilityReasonCode } from "../../shared/api/mcpApps";
 import { Dialog } from "../../shared/components/Dialog";
 import { StatusBanner } from "../../shared/components/StatusBanner";
-import { canWriteToClipboard, selectText } from "../../shared/lib/clipboard";
+import { canCopyText, selectText, writeTextToClipboard } from "../../shared/lib/clipboard";
 import { renderMcpSetupPlan } from "./mcpSetupRenderer";
+import { SettingsLoadingRow } from "./SettingsPaneParts";
 import type {
   McpSetupStep,
   RenderedMcpSetupArtifact,
@@ -323,6 +325,10 @@ export const McpAppHub = forwardRef<McpAppHubHandle, McpAppHubProps>(
         customAppLabelRef.current?.focus();
         return;
       }
+      if (customAppLabel) {
+        const error = inputTextError(customAppLabel, 160);
+        if (error) { setCustomAppLabelError(error); customAppLabelRef.current?.focus(); return; }
+      }
       const requestGeneration = planRequestGeneration.current + 1;
       const requestContextKey = contextKey;
       planRequestGeneration.current = requestGeneration;
@@ -382,9 +388,9 @@ export const McpAppHub = forwardRef<McpAppHubHandle, McpAppHubProps>(
             </div>
           </div>
           {loading ? (
-            <p className="meta-line" role="status">
+            <SettingsLoadingRow>
               {t("appHub.loading", { defaultValue: "Loading supported apps…" })}
-            </p>
+            </SettingsLoadingRow>
           ) : null}
           {error ? (
             <div className="mcp-app-hub-recovery">
@@ -541,7 +547,6 @@ export const McpAppHub = forwardRef<McpAppHubHandle, McpAppHubProps>(
 
             {selectedOwner ? (
               <div
-                aria-busy={planBusy || undefined}
                 className="mcp-app-method-panel"
                 ref={methodPanelRef}
                 tabIndex={-1}
@@ -561,7 +566,7 @@ export const McpAppHub = forwardRef<McpAppHubHandle, McpAppHubProps>(
                       }
                       aria-invalid={customAppLabelError ? "true" : undefined}
                       id="mcp-picker-custom-app-label"
-                      maxLength={128}
+                      {...textInputLimit(160)}
                       onChange={(event) => {
                         setCustomAppLabelDraft(event.target.value);
                         setCustomAppLabelError(null);
@@ -651,11 +656,11 @@ export const McpAppHub = forwardRef<McpAppHubHandle, McpAppHubProps>(
                   />
                 )}
                 {planBusy ? (
-                  <p className="meta-line" role="status">
+                  <SettingsLoadingRow>
                     {t("appHub.preparing", {
                       defaultValue: "Preparing setup…",
                     })}
-                  </p>
+                  </SettingsLoadingRow>
                 ) : null}
                 {planError ? (
                   <StatusBanner tone="warning">{planError}</StatusBanner>
@@ -791,7 +796,7 @@ export function SetupRecipeView({
     };
     let key: string;
     let defaultValue: string;
-    if (canWriteToClipboard()) {
+    if (canCopyText()) {
       if (artifact.kind === "command") {
         key = "appHub.copyCommandForShell";
         defaultValue = "Copy {{label}} for {{shell}}";
@@ -910,26 +915,11 @@ export function SetupRecipeView({
                       // action color rather than one solid and one outline.
                       className="icon-button primary mcp-copy-artifact"
                       onClick={async () => {
-                        if (!canWriteToClipboard()) {
-                          setCopyNotice({
-                            index,
-                            mode: selectText(codeRefs.current[index])
-                              ? "selected"
-                              : "failed",
-                          });
-                          return;
-                        }
-                        try {
-                          await navigator.clipboard.writeText(artifact.value);
-                          setCopyNotice({ index, mode: "copied" });
-                        } catch {
-                          setCopyNotice({
-                            index,
-                            mode: selectText(codeRefs.current[index])
-                              ? "selected"
-                              : "failed",
-                          });
-                        }
+                        const copied = await writeTextToClipboard(artifact.value);
+                        setCopyNotice({
+                          index,
+                          mode: copied ? "copied" : selectText(codeRefs.current[index]) ? "selected" : "failed",
+                        });
                       }}
                       type="button"
                     >
@@ -941,7 +931,7 @@ export function SetupRecipeView({
                             : copyNotice.mode === "selected"
                               ? t("appHub.selected", { defaultValue: "Selected" })
                               : t("appHub.copyFailed", { defaultValue: "Copy failed" })
-                          : canWriteToClipboard()
+                          : canCopyText()
                             ? t("appHub.copy", { defaultValue: "Copy" })
                             : t("appHub.select", { defaultValue: "Select text" })}
                       </span>
@@ -1289,6 +1279,6 @@ function genericOwner(profile: McpGenericProfile): McpAppOwner {
 }
 
 function normalizeGenericLabelDraft(value: string) {
-  const normalized = value.trim();
-  return normalized ? normalized.slice(0, 128) : null;
+  const normalized = trimShortText(value);
+  return normalized || null;
 }

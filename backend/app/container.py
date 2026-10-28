@@ -7,7 +7,8 @@ import logging
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from threading import Lock
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -16,7 +17,36 @@ from backend.app.db import make_session_factory_from_settings
 from backend.app.settings import Settings
 from backend.spi.context import ToolCallContext
 
+if TYPE_CHECKING:
+    from datetime import datetime
+
+    from backend.services.lint.base import LintModule
+
 logger = logging.getLogger(__name__)
+
+
+def has_due_media_install_work(
+    session: Session, *, workspace_id: UUID, now: datetime
+) -> bool:
+    """Compose the read-only install probe without creating storage adapters."""
+    from backend.media.adapters.sqlalchemy.reconcile import (
+        SqlAlchemyMediaInstallReconciler,
+    )
+
+    return SqlAlchemyMediaInstallReconciler.has_due_work(
+        session, workspace_id=workspace_id, now=now
+    )
+
+
+def has_due_media_gc_work(
+    session: Session, *, workspace_id: UUID, now: datetime
+) -> bool:
+    """Compose the read-only GC probe independently of filesystem services."""
+    from backend.media.adapters.sqlalchemy.gc import SqlAlchemyBlobGcService
+
+    return SqlAlchemyBlobGcService.has_due_work(
+        session, workspace_id=workspace_id, now=now
+    )
 
 __all__ = [
     "PER_WORKSPACE_DATABASE_TOPOLOGY",
@@ -66,10 +96,12 @@ PER_WORKSPACE_DATABASE_TOPOLOGY = "per_workspace_database"
 # unsupported; see README.md ("현재 제한 사항") and DEPLOYMENT.md
 # ("데이터베이스").
 SHIPPED_STORAGE_TOPOLOGY = SINGLE_DATABASE_TOPOLOGY
-KNOWN_STORAGE_TOPOLOGIES = frozenset({
-    SINGLE_DATABASE_TOPOLOGY,
-    PER_WORKSPACE_DATABASE_TOPOLOGY,
-})
+KNOWN_STORAGE_TOPOLOGIES = frozenset(
+    {
+        SINGLE_DATABASE_TOPOLOGY,
+        PER_WORKSPACE_DATABASE_TOPOLOGY,
+    }
+)
 UNDECLARED_STORAGE_TOPOLOGY = "undeclared"
 
 
@@ -327,22 +359,35 @@ class WorkspaceDirectory:
 class ServiceRegistry:
     """Container-owned domain services (R1′ — replaces module singletons).
 
-    Every service is stateless (a session is passed per call), so one shared
-    instance per container is safe; the registry is the single rebinding
-    point an overlay swaps instead of monkeypatching module globals. Imports
-    stay lazy so importing the container never drags the service graph in.
+    Services receive sessions or a routed provider per call. Container-owned
+    state, such as the permalink request budget, persists across requests.
+    The registry is the single rebinding point an overlay swaps instead of
+    monkeypatching module globals. Imports stay lazy so importing the
+    container never drags the service graph in.
     """
 
     settings: Settings | None = None
-    # D-7 (doc/design/workspace-database-separation-plan.md): Context media
-    # is workspace-owned data, so this holds a routing callable
+    lint_modules: tuple[LintModule, ...] = ()
+    # Context media is workspace-owned data, so this holds a routing callable
     # (Callable[[UUID], sessionmaker[Session]]) -- get_services() stamps
     # self.db.session_for -- not one session_factory pinned to a plane.
     context_media_session_for: object | None = None
+    _page_locations_lock = Lock()
 
     @cached_property
     def workspace_directory(self) -> WorkspaceDirectory:
         return WorkspaceDirectory()
+
+    @property
+    def page_locations(self):
+        # This service owns request budgets, so concurrent first requests
+        # must share one instance. Keep the existing dictionary override seam.
+        with self._page_locations_lock:
+            if "page_locations" not in self.__dict__:
+                from backend.services.page_location import PageLocationService
+
+                self.__dict__["page_locations"] = PageLocationService()
+            return self.__dict__["page_locations"]
 
     @cached_property
     def tree_read(self):
@@ -375,6 +420,7 @@ class ServiceRegistry:
         return DomainReadService(
             self.tree_read,
             library_blob_repository_factory=self.library_blob_repository_factory,
+            lint_registry=self.lint_registry,
         )
 
     @cached_property
@@ -645,7 +691,6 @@ class ServiceRegistry:
     def _new_validated_media_installer(self, journal, *, workspace_id: UUID):
         from backend.media.application import InstallValidatedBlob
 
-        # D-5 (doc/design/workspace-database-separation-plan.md): the seam
         # BlobStoreProvider.store_for(workspace_id) existed but nothing
         # called it with a real workspace_id -- every caller of the four
         # factory methods above already knows which workspace it is acting
@@ -872,13 +917,22 @@ class ServiceRegistry:
     def settings_svc(self):
         from backend.services.settings_service import SettingsService
 
-        return SettingsService(library_family_policy=self.library_family_policy)
+        return SettingsService(
+            lint_registry=self.lint_registry,
+            library_family_policy=self.library_family_policy,
+            orphan_retention_hours=(
+                self.settings.context_media_orphan_retention_hours
+                if self.settings is not None
+                else 168
+            ),
+        )
 
     @cached_property
     def context_ingress(self):
         from backend.services.context_ingress_service import ContextIngressService
 
         return ContextIngressService(
+            body_preparer=self.body_preparer,
             tree_read_service=self.tree_read,
             context_media_repository_factory=self.context_media_repository_factory,
         )
@@ -900,6 +954,7 @@ class ServiceRegistry:
         from backend.services.context_write_service import ContextWriteService
 
         return ContextWriteService(
+            body_preparer=self.body_preparer,
             context_media_repository_factory=self.context_media_repository_factory,
             media_installer_factory=self.validated_media_installer_for_session,
         )
@@ -921,14 +976,28 @@ class ServiceRegistry:
         from backend.services.review_service import ReviewService
 
         return ReviewService(
-            context_media_repository_factory=self.context_media_repository_factory
+            context_media_repository_factory=self.context_media_repository_factory,
+            body_preparer=self.body_preparer,
         )
+
+    @cached_property
+    def body_preparer(self):
+        from backend.services.body_preparer import BodyPreparer
+
+        return BodyPreparer(registry=self.lint_registry)
+
+    @cached_property
+    def lint_registry(self):
+        from backend.services.lint.modules import BUILTIN_LINT_MODULES
+        from backend.services.lint.registry import LintRegistry
+
+        return LintRegistry((*BUILTIN_LINT_MODULES, *self.lint_modules))
 
     @cached_property
     def lint(self):
         from backend.services.lint_service import LintService
 
-        return LintService(job_queue=self.job_queue)
+        return LintService(job_queue=self.job_queue, lint_registry=self.lint_registry)
 
     @cached_property
     def job_queue(self):
@@ -1009,6 +1078,8 @@ class AppContainer:
             self.page_service = PageService(
                 self.db.control_session_factory(),
                 job_queue=self.services.job_queue,
+                body_preparer=self.services.body_preparer,
+                lint_registry=self.services.lint_registry,
                 context_media_repository_factory=(
                     self.services.context_media_repository_factory
                 ),
@@ -1073,16 +1144,26 @@ def assemble(
     ask_service: object | None = None,
     directory: WorkspaceDirectory | None = None,
     services: ServiceRegistry | None = None,
+    lint_modules: tuple[LintModule, ...] = (),
     blob_store_provider: BlobStoreProvider | None = None,
 ) -> AppContainer:
     if db is not None and session_factory is not None:
         raise ValueError("db and session_factory cannot both be provided")
+    if lint_modules and services is not None and "lint_registry" in services.__dict__:
+        raise ValueError(
+            "lint modules must be injected before the lint registry is constructed"
+        )
     resolved_db = (
         db
         if db is not None
         else DatabaseProvider(settings, session_factory=session_factory)
     )
     resolved_services = services if services is not None else ServiceRegistry()
+    if lint_modules:
+        resolved_services.lint_modules = (
+            *resolved_services.lint_modules,
+            *lint_modules,
+        )
     if directory is not None:
         # WorkspaceDirectory is a cached_property on the default registry.
         # Seeding the cache gives overlays one explicit rebinding point while

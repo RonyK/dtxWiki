@@ -1,9 +1,8 @@
 """Actor labels, split by the plane the label comes from.
 
 ``users`` is a control-plane (identity) table and every other table these
-helpers touch is workspace-plane -- see ``backend/tenancy_manifest.py`` and
-doc/design/workspace-database-separation-plan.md §2. That split is the whole
-reason this module is shaped the way it is:
+helpers touch is workspace-plane -- see ``backend/tenancy_manifest.py``.
+That split is the reason this module is shaped the way it is:
 
 * :func:`resolve_actor_display_names` reads ``users`` and therefore needs an
   IDENTITY-plane session. Handing it a workspace session is the

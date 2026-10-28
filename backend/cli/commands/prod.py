@@ -22,11 +22,16 @@ from backend.app.bootstrap import bootstrap as bootstrap_app
 from backend.app.db import make_engine, make_session_factory
 from backend.app.settings import Settings, default_signup_enabled
 from backend.cli import prod_setup
+from backend.cli.commands.admin import cli_operator_actor_id
 from backend.models.user import User
 from backend.services import deployment, server_admin_service
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.ops import service_control
-from backend.services.session_service import DuplicateEmailError, normalize_email
+from backend.services.session_service import (
+    DuplicateEmailError,
+    EmailInputPolicyError,
+    normalize_email,
+)
 from backend.services.user_admin_service import UserAdminService
 from backend.utils.redact import redact_url
 
@@ -409,6 +414,11 @@ def setup_production(
     ] = None,
 ) -> None:
     """One command to stand up (or reconfigure) a production dtxWiki server."""
+    if do_admin and email is not None:
+        try:
+            email = normalize_email(email)
+        except EmailInputPolicyError as exc:
+            raise typer.BadParameter(str(exc), param_hint="--email") from exc
     existing = prod_setup.read_env_file(env_file)
     if domain is None:
         domain = deployment.domain_of(existing.get("DTXWIKI_PUBLIC_BASE_URL"))
@@ -420,6 +430,7 @@ def setup_production(
         )
         raise typer.Exit(2)
     is_fresh = not env_file.exists()
+    install_systemd = systemd and sys.platform != "win32"
 
     tls_mode = _resolve_tls_mode(
         tls, existing, dry_run=dry_run, insecure_eval=insecure_eval
@@ -522,6 +533,7 @@ def setup_production(
             database_url=db_url,
             tls_mode=tls_mode,
             forwarded_allow_ips=forwarded_allow_ips,
+            worker_mode="external" if install_systemd else "managed",
         )
         runner.action(
             f"write {env_file}",
@@ -553,6 +565,10 @@ def setup_production(
             ),
             "DTXWIKI_APP_ENV": "production",
             "DTXWIKI_APP_MODE": app_mode,
+            "DTXWIKI_WORKER_MODE": (
+                "external" if install_systemd
+                else existing.get("DTXWIKI_WORKER_MODE", "managed")
+            ),
             # Backfill the mode-derived safe default for legacy env files, but
             # never replace an operator's explicit true/false choice.
             "DTXWIKI_SIGNUP_ENABLED": signup_enabled,
@@ -825,7 +841,9 @@ def _ensure_admin_user(email: str, settings: Settings) -> None:
         )
         temp_password = secrets.token_urlsafe(16)
         try:
-            service.add_user(email=email, password=temp_password)
+            service.add_user(
+                email=email, password=temp_password, actor_id=cli_operator_actor_id()
+            )
             typer.echo(f"    admin {email} created")
             typer.echo(f"    temporary password: {temp_password}")
             typer.echo(
@@ -842,7 +860,10 @@ def _ensure_admin_user(email: str, settings: Settings) -> None:
             )
             if user is not None:
                 server_admin_service.grant_server_admin(
-                    session, user.id, granted_by="setup"
+                    session,
+                    user.id,
+                    granted_by="setup",
+                    actor_id=cli_operator_actor_id(),
                 )
                 typer.echo(f"    granted server-admin to {email}")
     finally:

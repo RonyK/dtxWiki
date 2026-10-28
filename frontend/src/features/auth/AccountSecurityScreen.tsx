@@ -1,5 +1,6 @@
 import {
   BriefcaseBusiness,
+  Copy,
   KeyRound,
   Link as LinkIcon,
   LogOut,
@@ -28,6 +29,7 @@ import {
   type WorkspaceListData,
 } from "../../shared/api/workspace";
 import { useAuth } from "../../shared/auth/AuthContext";
+import { validateAccountPassword, preventCompositionSubmit } from "../../shared/auth/identityPolicy";
 import {
   clearStoredUiLocale,
   hasStoredUiLocale,
@@ -38,6 +40,9 @@ import { CountChip } from "../../shared/components/CountChip";
 import { RouteLoading } from "../../shared/components/RouteLoading";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
+import { AccountDeletionPanel } from "./AccountDeletionPanel";
+import { writeTextToClipboard } from "../../shared/lib/clipboard";
+import { LoginMethodsSection } from "./LoginMethodsSection";
 
 type AccountOverview = {
   workspaces: WorkspaceListData | null;
@@ -73,6 +78,7 @@ export function AccountSecurityScreen() {
   const [signingOut, setSigningOut] = useState(false);
   const [verificationBusy, setVerificationBusy] = useState(false);
   const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
+  const [userIdCopyStatus, setUserIdCopyStatus] = useState<string | null>(null);
   const workspaceContext = useOptionalWorkspaceContext();
   const [defaultBusyId, setDefaultBusyId] = useState<string | null>(null);
   const [defaultStatus, setDefaultStatus] = useState<string | null>(null);
@@ -97,7 +103,7 @@ export function AccountSecurityScreen() {
     // button below. Shell preloads this once its banner needs it, but a user
     // can land here directly (deep link, or before Shell's own gate has
     // fired), so fetch it on demand rather than assume it is warm.
-    if (!user || user.email_verified_at || capabilitiesChecked) {
+    if (!user?.email || user.email_verified_at || capabilitiesChecked) {
       return;
     }
     void refreshCapabilities();
@@ -183,6 +189,16 @@ export function AccountSecurityScreen() {
     }
   }
 
+  async function onCopyUserId() {
+    if (!user) return;
+    try {
+      const copied = await writeTextToClipboard(user.user_id);
+      setUserIdCopyStatus(t(copied ? "account.userIdCopied" : "account.copyUserIdFailed"));
+    } catch {
+      setUserIdCopyStatus(t("account.copyUserIdFailed"));
+    }
+  }
+
   async function onRequestEmailVerification() {
     setVerificationBusy(true);
     setVerificationStatus(null);
@@ -226,7 +242,7 @@ export function AccountSecurityScreen() {
   }
 
   return (
-    <div className="workspace-screen single-column">
+    <div className="workspace-screen single-column account-security-screen">
       <section className="feature-main account-layout">
         <Breadcrumbs
           items={[
@@ -252,34 +268,39 @@ export function AccountSecurityScreen() {
           <StatusBanner tone="warning">{overviewError}</StatusBanner>
         ) : null}
         {user ? (
-          <div className="account-grid">
+          <><div className="account-security-grid">
+            {user.has_password !== undefined ? <LoginMethodsSection /> : null}
             <section
               className="auth-panel account-profile-panel"
+              id="account-profile"
               aria-label={t("account.profileAria", { defaultValue: "Profile" })}
             >
               <div className="auth-summary">
                 <UserRound size={18} aria-hidden="true" />
                 <div>
+                  <span className="field-hint">{t("account.displayName")}</span>
                   <strong>{user.display_name}</strong>
-                  <span>{user.email}</span>
+                  <span aria-label={t("account.accountEmail")}>{user.email ?? t("account.noEmail")}</span>
                 </div>
               </div>
-              {/* A server with no mail provider has no email verification at
-                  all: nothing sends the message, and nothing depends on the
-                  flag (it only gates email-based password recovery, which is
-                  equally unavailable). Showing "Email not verified" there
-                  warns about a state the person cannot leave and does not
-                  need to -- so on those servers the verification row is not
-                  rendered at all, rather than rendered as an unfixable
-                  warning plus an apology. Verified accounts still show their
-                  pill, since that is a fact and not a demand -- and the
-                  comment above only became true when this gate stopped
-                  dropping the whole row. `emailVerificationOffered` is
-                  derived from `passwordRecoveryMode`, which is only loaded on
-                  auth-bootstrap routes, so for an already-verified account it
-                  stays at its "disabled" default and the pill vanished on
-                  every server, not just no-mail ones. */}
-              {emailVerificationOffered || user.email_verified_at ? (
+              <div className="account-user-id">
+                {user.username ? <>
+                  <span>{t("account.username")}</span>
+                  <code>{user.username}</code>
+                  <p>{t("account.usernameHint")}</p>
+                </> : null}
+                <span>{t("account.userId")}</span>
+                <code>{user.user_id}</code>
+                <button className="icon-button text-button" type="button" onClick={() => void onCopyUserId()}>
+                  <Copy size={15} aria-hidden="true" />
+                  {t("account.copyUserId")}
+                </button>
+                {userIdCopyStatus ? <p role="status">{userIdCopyStatus}</p> : null}
+              </div>
+              {/* A trusted SSO assertion or explicit email confirmation can
+                  verify the account email. Preserve that fact without SMTP;
+                  show an unverified state only when confirmation is offered. */}
+              {user.email && (emailVerificationOffered || user.email_verified_at) ? (
               <div className="account-email-verification">
                 <StatusPill
                   compact
@@ -321,14 +342,14 @@ export function AccountSecurityScreen() {
                   defaultValue: "Account actions",
                 })}
               >
-                <Link className="icon-button" to="/account/password">
+                {user.has_password !== false ? <Link className="icon-button" to="/account/password">
                   <KeyRound size={16} aria-hidden="true" />
                   <span>
                     {t("account.updatePassword", {
                       defaultValue: "Update password",
                     })}
                   </span>
-                </Link>
+                </Link> : null}
                 <button
                   className="icon-button"
                   disabled={signingOut}
@@ -364,7 +385,8 @@ export function AccountSecurityScreen() {
                 </p>
               ) : null}
             </section>
-
+          </div>
+          <div className="account-resources-grid">
             <section
               className="auth-panel workspace-access-panel"
               aria-label={t("account.workspaceAccessAria", {
@@ -452,7 +474,13 @@ export function AccountSecurityScreen() {
                 </Link>
               </div>
             </section>
+            <AccountDeletionPanel
+              email={user.email}
+              hasPassword={user.has_password !== false}
+              key={user.user_id}
+            />
           </div>
+          </>
         ) : (
           <section
             className="auth-panel"
@@ -497,6 +525,10 @@ export function AccountPasswordScreen() {
     event.preventDefault();
     setError(null);
     setStatus(null);
+    try {
+      validateAccountPassword(currentPassword);
+      validateAccountPassword(newPassword, true);
+    } catch (caught) { setError(t((caught as Error).message)); return; }
     if (newPassword !== confirmPassword) {
       setError(
         t("password.mismatch", { defaultValue: "New passwords do not match." }),
@@ -540,6 +572,10 @@ export function AccountPasswordScreen() {
     );
   }
 
+  if (user?.has_password === false) {
+    return <div className="workspace-screen single-column"><LoginMethodsSection /></div>;
+  }
+
   return (
     <div className="workspace-screen single-column">
       <section className="feature-main auth-layout">
@@ -569,7 +605,7 @@ export function AccountPasswordScreen() {
           </div>
         </div>
         {status ? <StatusBanner tone="info">{status}</StatusBanner> : null}
-        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+        {error ? <div id="account-password-error"><StatusBanner tone="warning">{error}</StatusBanner></div> : null}
         {user ? (
           <section
             className="auth-panel"
@@ -579,8 +615,11 @@ export function AccountPasswordScreen() {
               <label className="field-stack">
                 {t("password.current", { defaultValue: "Current password" })}
                 <input
+                  onKeyDown={preventCompositionSubmit}
                   autoComplete="current-password"
                   name="currentPassword"
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={error ? "account-password-error" : undefined}
                   onChange={(event) => setCurrentPassword(event.target.value)}
                   required
                   type="password"
@@ -590,25 +629,28 @@ export function AccountPasswordScreen() {
               <label className="field-stack">
                 {t("password.new", { defaultValue: "New password" })}
                 <input
+                  onKeyDown={preventCompositionSubmit}
                   autoComplete="new-password"
-                  minLength={8}
                   name="newPassword"
+                  aria-invalid={Boolean(error)}
                   onChange={(event) => setNewPassword(event.target.value)}
                   required
-                  aria-describedby="new-password-rule"
+                  aria-describedby={error ? "new-password-rule account-password-error" : "new-password-rule"}
                   type="password"
                   value={newPassword}
                 />
               </label>
               <p className="field-hint field-hint--attached" id="new-password-rule">
-                {t("password.rule", { defaultValue: "At least 8 characters." })}
+                {t("password.rule", { defaultValue: "8–128 characters." })}
               </p>
               <label className="field-stack">
                 {t("password.confirm", { defaultValue: "Confirm new password" })}
                 <input
+                  onKeyDown={preventCompositionSubmit}
                   autoComplete="new-password"
-                  minLength={8}
                   name="confirmPassword"
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={error ? "account-password-error" : undefined}
                   onChange={(event) => setConfirmPassword(event.target.value)}
                   required
                   type="password"

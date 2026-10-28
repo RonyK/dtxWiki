@@ -44,6 +44,44 @@ describe("copyTextWithReason", () => {
     });
   });
 
+  it("prepares the visible fallback only when automatic copy fails", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const prepare = vi.fn().mockReturnValue(null);
+    await copyTextWithReason("full-id", prepare);
+    expect(prepare).not.toHaveBeenCalled();
+    writeText.mockRejectedValueOnce(new Error("denied"));
+    await copyTextWithReason("full-id", prepare);
+    expect(prepare).toHaveBeenCalledOnce();
+  });
+
+  it("leaves the current selection alone when the old target has detached", async () => {
+    let reject!: (error: Error) => void;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => new Promise<void>((_, fail) => { reject = fail; }) },
+    });
+    const old = document.createElement("code");
+    old.textContent = "old-id";
+    document.body.append(old);
+    const pending = copyTextWithReason("old-id", old);
+    old.remove();
+    const current = document.createElement("p");
+    current.textContent = "New selection";
+    document.body.append(current);
+    const range = document.createRange();
+    range.selectNodeContents(current);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    reject(new Error("denied"));
+    await expect(pending).resolves.toEqual({ status: "unavailable", reason: "selection" });
+    expect(window.getSelection()?.toString()).toBe("New selection");
+    current.remove();
+  });
+
   it("reports a failed visible selection without exposing an exception", async () => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,

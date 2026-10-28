@@ -51,6 +51,7 @@ import { StatusPill } from "../../shared/components/StatusPill";
 import { WorkspaceLayout } from "../../shared/components/WorkspaceLayout";
 import { WorkspacePanelChrome } from "../../shared/components/WorkspacePanelChrome";
 import { TREE_TARGET_PARAM } from "../../shared/components/treeRouteState";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { resolveInitialLocale } from "../../shared/i18n";
 import { displayConceptPath } from "../../shared/lib/conceptPath";
 import type { TimeBucketKey } from "../../shared/lib/datetime";
@@ -60,6 +61,7 @@ import {
   timeBucketFor,
 } from "../../shared/lib/datetime";
 import { domainLabel } from "../../shared/lib/domainLabel";
+import { fitGeneratedTitle } from "../../shared/lib/inputPolicy";
 import { searchResultHref } from "../../shared/lib/searchResultHref";
 import { isEditorRole } from "../../shared/workspace/permissions";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
@@ -583,6 +585,7 @@ export function AskScreen() {
   const [loadingMoreSessions, setLoadingMoreSessions] = useState(false);
   const consumedNewRequestRef = useRef<string | null>(null);
   const loadGenerationRef = useRef(0);
+  const entryRefreshGenerationRef = useRef(0);
   // The `target` this screen has already loaded (or is loading). Held in a ref
   // rather than state so the URL effect cannot start a second load for it from
   // a render that has not caught up yet.
@@ -640,6 +643,37 @@ export function AskScreen() {
     return true;
   }
 
+  useScreenEntryRefresh("/ask", () => {
+    if (!state?.workspaceId) return;
+    const workspaceId = state.workspaceId;
+    const generation = ++entryRefreshGenerationRef.current;
+    const loadGeneration = loadGenerationRef.current;
+    void Promise.all([listAskSessions(workspaceId), listTree(workspaceId, "context")])
+      .then(([next, contextTree]) => {
+        if (
+          !mountedRef.current ||
+          generation !== entryRefreshGenerationRef.current ||
+          loadGeneration !== loadGenerationRef.current
+        ) return;
+        setState((current) => current?.workspaceId === workspaceId ? {
+          ...current,
+          contextTree,
+          sessions: sortSessionsByActivity(next.items),
+          sessionsCursor: next.next_cursor,
+          sessionsHasMore: next.has_more,
+        } : current);
+      })
+      .catch((exc) => {
+        if (
+          mountedRef.current &&
+          generation === entryRefreshGenerationRef.current &&
+          loadGeneration === loadGenerationRef.current
+        ) {
+          setError(errorMessage(exc, ASK_COPY[state.workspaceLanguage].errors.load));
+        }
+      });
+  }, { isHome: !searchParams.has("new") && !searchParams.has(TREE_TARGET_PARAM) });
+
   // Append the next keyset page of older sessions to the history rail. Guarded
   // against double-fire and unmount; a reload (create/select/send) resets back
   // to the first page, which is the intended fresh-recency behavior.
@@ -653,7 +687,7 @@ export function AskScreen() {
     ) {
       return;
     }
-    const { workspaceId, sessionsCursor, workspaceLanguage } = state;
+    const { workspaceId, sessionsCursor, workspaceLanguage, sessions } = state;
     setLoadingMoreSessions(true);
     try {
       const next = await listAskSessions(workspaceId, { cursor: sessionsCursor });
@@ -669,6 +703,7 @@ export function AskScreen() {
         if (
           !prev ||
           prev.workspaceId !== workspaceId ||
+          prev.sessions !== sessions ||
           prev.sessionsCursor !== sessionsCursor
         ) {
           return prev;
@@ -2016,8 +2051,9 @@ function PlacementPanel({
 
 function defaultTitle(turn: AskTurnDetail, copy: AskCopy) {
   return (
-    turn.user_message ?? `${copy.placement.defaultTitlePrefix} ${turn.turn_no}`
-  ).slice(0, 60);
+    fitGeneratedTitle(turn.user_message ?? "", 60) ||
+    `${copy.placement.defaultTitlePrefix} ${turn.turn_no}`
+  );
 }
 
 function AskWorkflowActions({

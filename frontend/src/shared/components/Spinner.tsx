@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 
 type SpinnerProps = {
-  /** Visible label announced to assistive tech. Defaults to "Loading". */
+  /** Accessible label for an icon-only status. Defaults to "Loading". */
   "aria-label"?: string;
   /** Extra class names appended to the spinner element. */
   className?: string;
@@ -12,12 +12,7 @@ type SpinnerProps = {
 };
 
 /**
- * Accessible, animated loading indicator.
- *
- * Renders a role="status" span with a spinning glyph (driven by the
- * `.spinner` CSS keyframes) plus a visually-hidden text label so screen
- * readers announce the loading state even though the glyph itself is
- * decorative.
+ * Shared glyph. Use decorative inside an already-labelled loading status.
  */
 export function Spinner({
   "aria-label": ariaLabel = "Loading",
@@ -31,6 +26,7 @@ export function Spinner({
     <span
       aria-hidden={decorative ? "true" : undefined}
       aria-label={decorative ? undefined : ariaLabel}
+      aria-live={decorative ? undefined : "polite"}
       className={`spinner${className ? ` ${className}` : ""}`}
       role={decorative ? undefined : "status"}
     >

@@ -12,6 +12,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from backend.api.admin import router as admin_router
 from backend.api.agent_bundles import router as agent_bundles_router
 from backend.api.auth import router as auth_router
+from backend.api.auth_sso import capabilities_router
+from backend.api.auth_sso import router as auth_sso_router
+from backend.api.auth_verification import router as auth_verification_router
 from backend.api.context_media import router as context_media_router
 from backend.api.context_pages import router as context_pages_router
 from backend.api.health import health_root_router
@@ -40,6 +43,7 @@ from backend.api.middleware.security_headers import (
     SecurityHeadersMiddleware,
 )
 from backend.api.oauth import router as oauth_router
+from backend.api.page_location import router as page_location_router
 from backend.api.public import router as public_router
 from backend.api.read import router as read_router
 from backend.api.users import router as users_router
@@ -54,11 +58,14 @@ from backend.app.container import (
 )
 from backend.app.db_errors import SCHEMA_MISMATCH_MESSAGE, is_database_schema_mismatch
 from backend.app.errors import build_rest_error_response
+from backend.app.plugins import load_plugins
 from backend.app.settings import Settings, get_settings
 from backend.catalog.library_family_presets import (
     get_library_family_preset_catalog_repository,
 )
 from backend.catalog.mcp_apps import get_mcp_app_catalog_repository
+from backend.domain.input_policy import InputPolicyError
+from backend.services.auth.provider_registry import ProviderRegistry
 
 
 async def http_exception_handler(
@@ -93,6 +100,17 @@ async def request_validation_exception_handler(
     return build_rest_error_response(
         error_code="validation_failed",
         message=summarize_validation_errors(exc.errors()),
+        status_code=422,
+    )
+
+
+async def input_policy_exception_handler(
+    _request: Request,
+    exc: InputPolicyError,
+) -> JSONResponse:
+    return build_rest_error_response(
+        error_code="validation_failed",
+        message=str(exc),
         status_code=422,
     )
 
@@ -147,7 +165,7 @@ async def _mcp_lifespan(app: FastAPI):
         yield
 
 
-def _compose_lifespan(extra_lifespan):
+def _compose_lifespan(extra_lifespan, plugin_registry=None):
     """Always run the core MCP lifespan; enter the overlay's around it.
 
     §18.13.5-1: the ``extra_lifespan`` seam ADDS startup/shutdown behavior.
@@ -157,13 +175,16 @@ def _compose_lifespan(extra_lifespan):
     core lifespan always runs inside it.
     """
 
-    if extra_lifespan is None:
+    if extra_lifespan is None and plugin_registry is None:
         return _mcp_lifespan
 
     @asynccontextmanager
     async def _composed(app: FastAPI):
         async with AsyncExitStack() as stack:
-            await stack.enter_async_context(extra_lifespan(app))
+            if extra_lifespan is not None:
+                await stack.enter_async_context(extra_lifespan(app))
+            if plugin_registry is not None:
+                await stack.enter_async_context(plugin_registry.lifespan(app))
             await stack.enter_async_context(_mcp_lifespan(app))
             yield
 
@@ -191,6 +212,19 @@ def create_app(
         container.settings if container else get_settings()
     )
     resolved_settings.validate_for_startup()
+    plugin_registry = load_plugins(resolved_settings)
+    auth_providers = ProviderRegistry(
+        resolved_settings,
+        plugin_registry.auth_methods(),
+    )
+    if (
+        not resolved_settings.auth_password_login_enabled
+        and not auth_providers.login_methods()
+    ):
+        raise ValueError(
+            "password login is disabled but no active external login provider "
+            "is configured"
+        )
     # Resolve the session secret before serving: a solo_local install
     # generates its data-directory secret here, so a data directory that
     # cannot hold it fails startup instead of the first login.
@@ -222,10 +256,12 @@ def create_app(
         title=resolved_settings.app_name,
         version=resolved_settings.app_version,
         license_info={"name": LICENSE_EXPRESSION, "identifier": LICENSE_EXPRESSION},
-        lifespan=_compose_lifespan(extra_lifespan),
+        lifespan=_compose_lifespan(extra_lifespan, plugin_registry),
     )
     app.state.settings = resolved_settings
     app.state.container = resolved_container
+    app.state.plugin_registry = plugin_registry
+    app.state.auth_providers = auth_providers
     if bootstrap_on_startup:
         bootstrap(resolved_settings, app)
     if page_service is not None:
@@ -312,14 +348,19 @@ def create_app(
         request_validation_exception_handler,
     )
     app.add_exception_handler(Exception, unhandled_exception_handler)
+    app.add_exception_handler(InputPolicyError, input_policy_exception_handler)
     app.include_router(health_root_router)
     mount_storage_topology_health(app, resolved_container)
     app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(auth_sso_router, prefix="/api/v1")
+    app.include_router(auth_verification_router, prefix="/api/v1")
+    app.include_router(capabilities_router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(users_router, prefix="/api/v1")
     app.include_router(workspace_members_router, prefix="/api/v1")
     app.include_router(workspace_access_router, prefix="/api/v1")
     app.include_router(context_pages_router, prefix="/api/v1")
+    app.include_router(page_location_router, prefix="/api/v1")
     app.include_router(context_media_router, prefix="/api/v1")
     app.include_router(agent_bundles_router, prefix="/api/v1")
     # Unauthenticated public read surface (T16) — structurally RBAC-isolated.
@@ -337,6 +378,7 @@ def create_app(
     app.include_router(oauth_router)
     app.include_router(mcp_http_router)
     app.include_router(metrics_router)
+    plugin_registry.mount(app)
     if extra_mount is not None:
         extra_mount(app)
     mount_api_fallback(app)
@@ -403,6 +445,7 @@ RESERVED_NON_SPA_PREFIXES: frozenset[str] = frozenset(
         ".well-known",
         "oauth",
         "mcp",
+        "ext",
         "llms.txt",
         THIRD_PARTY_NOTICES_FILE,
     }

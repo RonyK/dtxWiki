@@ -189,3 +189,32 @@ def visible_context_version_expression(actor: ActorContext | None):
             else_=ContextPage.current_published_version_id,
         )
     return ContextPage.current_published_version_id
+
+
+def visible_context_page_expression(actor: ActorContext | None):
+    """SQL equivalent of ordinary context_page_visible for a joined page."""
+    return and_(
+        ContextPage.lifecycle_status != "archived",
+        visible_context_version_expression(actor).is_not(None),
+    )
+
+
+def explicit_context_version_visible_expression(version, actor: ActorContext | None):
+    """SQL equivalent of context_version_is_visible for an aliased version."""
+    published = version.version_status.in_(
+        ("published_snapshot", "superseded_snapshot")
+    )
+    if not actor_can_read_drafts(actor):
+        return published
+    identity = _actor_identity(actor)
+    own = (
+        False
+        if identity is None
+        else and_(
+            version.created_by_actor_kind == identity[0],
+            version.created_by_actor_id == identity[1],
+        )
+    )
+    return (
+        published | ~version.version_status.in_(tuple(PRIVATE_VERSION_STATUSES)) | own
+    )

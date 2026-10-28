@@ -753,13 +753,13 @@
   font-size: 12px;
 }
 
-.context-diff-selectors {
+.history-diff-selectors {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px 12px;
 }
 
-.context-diff-selectors label {
+.history-diff-selectors label {
   display: grid;
   gap: 5px;
   min-width: 0;
@@ -768,7 +768,7 @@
   font-weight: 800;
 }
 
-.context-diff-selectors select {
+.history-diff-selectors select {
   width: 100%;
   min-height: 44px;
   border: 1px solid var(--border);
@@ -779,7 +779,7 @@
   font: inherit;
 }
 
-.context-diff-selectors p {
+.history-diff-selectors p {
   grid-column: 1 / -1;
   margin: 0;
   color: var(--ink-muted);
@@ -788,11 +788,11 @@
 }
 
 @media (max-width: 720px) {
-  .context-diff-selectors {
+  .history-diff-selectors {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .context-diff-selectors p {
+  .history-diff-selectors p {
     grid-column: auto;
   }
 }
@@ -1245,9 +1245,7 @@ button.history-card {
    into a ~504px list that pushed all content past the fold. The trigger costs
    one row and always names where you are. */
 .settings-section-picker {
-  position: sticky;
-  top: 0;
-  z-index: 2;
+  position: static;
   background: var(--surface-page, var(--surface));
   padding-block: 4px;
 }
@@ -2439,7 +2437,7 @@ button.history-card {
 }
 
 .ask-composer input,
-.field-stack input,
+.field-stack input:not([type="checkbox"]):not([type="radio"]),
 .field-stack select,
 .field-stack textarea {
   width: 100%;
@@ -2527,7 +2525,7 @@ button.history-card {
   max-width: 72ch;
 }
 
-.settings-content .field-stack:not(.checkbox-field) > input,
+.settings-content .field-stack:not(.checkbox-field) > input:not([type="checkbox"]):not([type="radio"]),
 .settings-content .field-stack:not(.checkbox-field) > select {
   width: min(100%, var(--settings-control-width));
 }
@@ -2607,7 +2605,7 @@ button.history-card {
   max-width: var(--settings-control-structured);
 }
 
-.settings-content .library-rule-row input,
+.settings-content .library-rule-row input:not([type="checkbox"]):not([type="radio"]),
 .settings-content .library-rule-row select {
   width: 100%;
 }
@@ -2624,9 +2622,9 @@ button.history-card {
 
 .checkbox-field {
   display: grid;
-  /* A-1 (260908 UI audit): matches the 24px checkbox target size below. */
-  grid-template-columns: 24px minmax(0, 1fr);
-  align-items: center;
+  grid-template-columns: var(--checkbox-size) minmax(0, 1fr);
+  min-height: 24px;
+  align-items: start;
   column-gap: 8px;
   row-gap: 2px;
   text-transform: none;
@@ -2688,9 +2686,9 @@ button.history-card {
    Match .checkbox-field's 16px so every settings check control is one size. */
 .lint-rules-card .lint-rule-row > input[type="checkbox"],
 .lint-rules-card .lint-rule-group-toggle input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  min-height: 16px;
+  width: var(--checkbox-size);
+  height: var(--checkbox-size);
+  min-height: var(--checkbox-size);
   margin-top: 2px;
 }
 
@@ -2748,6 +2746,13 @@ button.history-card {
   gap: 8px;
 }
 
+.lint-rules-card .lint-layer-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 24px;
+}
+
 .lint-rules-card .lint-rule-group-count {
   font-size: 12px;
   font-weight: 500;
@@ -2763,12 +2768,11 @@ button.history-card {
 }
 
 .checkbox-field input[type="checkbox"] {
-  /* A-1 (260908 UI audit): WCAG 2.2 SC 2.5.8 needs a 24x24 minimum target;
-     .review-row-select already uses 24px for the same reason. */
-  width: 24px;
-  height: 24px;
-  min-height: 24px;
+  width: var(--checkbox-size);
+  height: var(--checkbox-size);
+  min-height: var(--checkbox-size);
   margin: 0;
+  margin-block-start: 2px;
   padding: 0;
   accent-color: var(--context);
   justify-self: start;
@@ -3112,10 +3116,6 @@ button.history-card {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .app-shell[data-sidebar-collapsed="true"] .topbar {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
   /* `.app-shell-public .topbar` (01-base.css) is declared outside any media
      query at specificity (0,2,0) and so beat the (0,1,0) rule above: every
      signed-out screen kept the desktop three-column topbar on a phone, and its
@@ -3133,11 +3133,6 @@ button.history-card {
     border-right: 0;
   }
 
-  .app-shell[data-sidebar-collapsed="true"] .topbar-brand {
-    justify-content: flex-start;
-    padding: 0 16px;
-  }
-
   .brand-name {
     display: none;
   }
@@ -3146,24 +3141,6 @@ button.history-card {
      trigger competing for this space. Keep their service identity visible. */
   .app-shell-public .brand-name {
     display: inline;
-  }
-
-  .app-shell[data-sidebar-collapsed="true"] .workspace-controls {
-    display: inline-flex;
-  }
-
-  /* Undo the desktop collapsed compaction: mobile shows the full switcher.
-     Re-assert the viewport width cap at matching specificity, else the desktop
-     rule's `max-width: none` would leak in and let the switcher overflow. */
-  .app-shell[data-sidebar-collapsed="true"] .workspace-switcher-button {
-    grid-template-columns: 22px minmax(0, 1fr) 14px;
-    width: 100%;
-    min-width: 0;
-    max-width: min(340px, 100%);
-  }
-
-  .app-shell[data-sidebar-collapsed="true"] .workspace-switcher-label {
-    display: block;
   }
 
   /* 340px, not the 210px this used to be. The old ceiling never lifted, so on
@@ -3449,8 +3426,8 @@ button.history-card {
     border-bottom: 0;
   }
 
-  .icon-button,
-  .compact-icon-button,
+  .icon-button:not(.icon-button--small),
+  .compact-icon-button:not(.icon-button--small),
   .compact-button,
   .filter-chip,
   .segmented-control button,
@@ -3847,32 +3824,6 @@ button.history-card {
   line-height: 1.4;
 }
 
-.workspace-member-add-action {
-  display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: minmax(0, 1fr) minmax(130px, 180px) auto;
-  align-items: end;
-  gap: 10px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--surface-subtle);
-  padding: 11px;
-}
-
-.workspace-member-add-action > div {
-  display: grid;
-  align-self: center;
-  gap: 3px;
-  min-width: 0;
-}
-
-.workspace-member-add-action span {
-  color: var(--ink-muted);
-  font-size: 12px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-
 .workspace-member-active-filter {
   min-height: 18px;
   color: var(--ink-muted);
@@ -3907,30 +3858,20 @@ button.history-card {
   overflow-wrap: anywhere;
 }
 
-.workspace-member-identity > span:not(.workspace-member-anchor, .workspace-member-you) {
+.workspace-member-identity > span:not(.workspace-member-you) {
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--ink-muted);
 }
 
-.workspace-member-anchor,
-.workspace-member-you {
-  border-radius: 999px;
-  padding: 2px 7px;
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.workspace-member-anchor {
-  border: 1px solid #bfdbfe;
-  background: #eff6ff;
-  color: #1d4ed8;
-}
-
 .workspace-member-you {
   border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 7px;
   background: var(--surface-subtle);
   color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .workspace-member-actions {
@@ -4190,7 +4131,6 @@ button.history-card {
   }
 
   .workspace-member-lookup,
-  .workspace-member-add-action,
   .workspace-member-row,
   .workspace-access-policy-cards,
   .workspace-access-options,
@@ -4235,12 +4175,7 @@ button.history-card {
     padding-inline: 8px;
   }
 
-  .app-shell[data-sidebar-collapsed="true"] .topbar-brand {
-    padding-inline: 8px;
-  }
-
-  .workspace-controls,
-  .app-shell[data-sidebar-collapsed="true"] .workspace-controls {
+  .workspace-controls {
     flex: 1 1 auto;
     min-width: 0;
     max-width: calc(100% - 50px);
@@ -4256,8 +4191,7 @@ button.history-card {
      while the name is right beside it -- so it yields its 22px track and its
      7px gap to the title, which is what the reader actually needs. Same
      reasoning as .prism-glyph directly above. */
-  .workspace-switcher-button,
-  .app-shell[data-sidebar-collapsed="true"] .workspace-switcher-button {
+  .workspace-switcher-button {
     grid-template-columns: minmax(0, 1fr) 14px;
   }
 
@@ -4338,4 +4272,19 @@ button.history-card {
   color: var(--ink-muted);
   font-size: 11px;
   font-weight: 600;
+}
+
+.lint-rules-card .lint-rule-label label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+}
+
+/* Boolean policy controls use an external for/id label instead of a wrapping
+   label. Preserve its hit area independently of the 16px visible square. */
+.policy-edit-field:has(input[type="checkbox"]) .policy-setting-copy label,
+.review-auto-approve-setting-row .policy-setting-copy label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
 }

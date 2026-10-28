@@ -37,6 +37,7 @@ import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { searchResultHref } from "../../shared/lib/searchResultHref";
 import { isEditorRole } from "../../shared/workspace/permissions";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
@@ -165,6 +166,19 @@ export function LintScreen() {
       },
     },
   );
+
+  useScreenEntryRefresh("/lint", reloadLatest, {
+    queryDeps: [
+      severity,
+      layer,
+      status,
+      view,
+      page,
+      pageSize,
+      selectedWorkspaceId,
+      linkedFindingId,
+    ],
+  });
 
   const selectionContextKey = [
     selectedWorkspaceId ?? state?.workspaceId ?? "",

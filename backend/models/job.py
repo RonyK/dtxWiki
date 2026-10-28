@@ -81,9 +81,9 @@ from backend.models.library_discovery import (  # noqa: E402
 
 
 class WorkspaceJobHint(Base):
-    """Phase 6b advisory hint (Epic-2 plan §3 D-2,
-    doc/design/workspace-database-separation-plan.md): "workspace_id may have
-    queued work". Control-plane only -- see backend/services/job_hints.py for
+    """Advisory hint: "workspace_id may have queued work".
+
+    Control-plane only -- see backend/services/job_hints.py for
     the write/peek/clear contract and worker/runtime.py's ``_claim_via_hint``
     for the consumer.
 

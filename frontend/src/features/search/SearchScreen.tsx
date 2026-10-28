@@ -1,6 +1,6 @@
-import { ExternalLink, Search } from "lucide-react";
+import { ChevronRight, Folder, Info, Search } from "lucide-react";
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -22,10 +22,11 @@ import { Spinner } from "../../shared/components/Spinner";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
 import { displayConceptPath } from "../../shared/lib/conceptPath";
 import { domainLabel } from "../../shared/lib/domainLabel";
 import { SEARCH_QUERY_MAX_LENGTH } from "../../shared/lib/searchLimits";
-import { searchResultHref } from "../../shared/lib/searchResultHref";
+import { searchResultLink } from "../../shared/lib/searchResultHref";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 
 const SCOPES: SearchScope[] = [
@@ -34,19 +35,12 @@ const SCOPES: SearchScope[] = [
   "library_item",
   "library_artifact",
   "agent_page",
-  "change",
 ];
 const SEARCH_EXAMPLES = [
   { key: "embeddingPolicy", defaultValue: "embedding policy" },
   { key: "reviewGuideline", defaultValue: "review guideline" },
   { key: "sourceTrustLevel", defaultValue: "source trust level" },
 ];
-type DisambiguationCandidate = {
-  id?: string;
-  concept_path?: string;
-  title?: string;
-};
-
 class SearchIndexUnavailableError extends Error {
   constructor() {
     super();
@@ -56,19 +50,22 @@ class SearchIndexUnavailableError extends Error {
 
 export function SearchScreen() {
   const { t } = useTranslation("search");
-  // P10.1: ambient workspace id for canonical Context permalink hrefs on
-  // search results and disambiguation candidates.
+  const { preferences: labsPreferences } = useLabsPreferences();
+  const includeAgents = labsPreferences.agent;
+  // Ambient workspace id for canonical Context result links.
   const workspaceId = useOptionalWorkspaceContext()?.selectedId ?? null;
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState("");
-  const [scope, setScope] = useState<SearchScope>("all");
+  const [selectedScope, setScope] = useState<SearchScope>("all");
+  const scope = selectedScope === "agent_page" && !includeAgents ? "all" : selectedScope;
   const [retrievalMode, setRetrievalMode] = useState<string>(() =>
     parseMode(searchParams.get("mode")),
   );
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const searchBaseKey = `${debouncedQuery}:${scope}:${retrievalMode}:${includeAgents}`;
   const indexUnavailableMessage = t("errors.indexUnavailable", {
     defaultValue:
-      "Search index is not available in this build. Try Library, Context, or Agent navigation instead.",
+      "Search index is not available in this build. Use the navigation to browse documents.",
   });
   const { data: capabilities } = useAsyncLoad(
     async () => {
@@ -100,11 +97,12 @@ export function SearchScreen() {
   // and before the new request settles.
   const requestIdRef = useRef(0);
   const {
-    data: payload,
+    data: searchResponse,
+    revision: searchRevision,
     error,
     loading,
     reload,
-  } = useAsyncLoad<SearchPayload | null>(
+  } = useAsyncLoad<{ key: string; payload: SearchPayload } | null>(
     async (signal) => {
       const requestId = ++requestIdRef.current;
       if (!debouncedQuery || capabilities === null) {
@@ -126,6 +124,7 @@ export function SearchScreen() {
           {
             query: debouncedQuery,
             scope,
+            filters: { include_agents: includeAgents },
             retrieval_mode: retrievalMode,
             limit: 20,
           },
@@ -134,7 +133,7 @@ export function SearchScreen() {
         if (signal?.aborted || requestId !== requestIdRef.current) {
           throw new DOMException("Aborted", "AbortError");
         }
-        return result;
+        return { key: searchBaseKey, payload: result };
       } catch (caught) {
         if (caught instanceof DOMException && caught.name === "AbortError") {
           throw caught;
@@ -149,6 +148,8 @@ export function SearchScreen() {
       debouncedQuery,
       scope,
       retrievalMode,
+      includeAgents,
+      searchBaseKey,
       capabilities,
       indexUnavailableMessage,
     ],
@@ -162,18 +163,22 @@ export function SearchScreen() {
       signalAware: true,
     },
   );
+  const payload = searchResponse?.key === searchBaseKey ? searchResponse.payload : null;
   const searchLoading = loading && Boolean(debouncedQuery);
+  // A successful reload resets only appended rows. Query identity must remain
+  // stable because searchBaseKey is also a loader dependency and response key.
+  const searchRowsKey = `${searchBaseKey}:${searchRevision}`;
 
   // A5: search is keyset-paged. Accumulate appended pages on top of the loader's
-  // first page, keyed by the active query+scope so a new search drops the stale
+  // first page, keyed by the search parameters and enabled features to drop the stale
   // tail; the cursor guard mirrors the overview Load more.
-  const searchBaseKey = `${debouncedQuery}:${scope}:${retrievalMode}`;
   const [appended, setAppended] = useState<{
     key: string;
     items: RankedSearchResult[];
     cursor: string | null;
-  }>({ key: searchBaseKey, items: [], cursor: payload?.next_cursor ?? null });
+  }>({ key: searchRowsKey, items: [], cursor: payload?.next_cursor ?? null });
   const [loadingMore, setLoadingMore] = useState(false);
+  const paginationGenerationRef = useRef(0);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   // Reset the appended tail whenever a fresh first page lands. We key on the
   // `payload` object identity, not `next_cursor`: the keyset cursor is an opaque
@@ -183,15 +188,17 @@ export function SearchScreen() {
   // reset and leave stale page-2+ rows mixed under a refreshed first page after
   // content/index changes.
   useEffect(() => {
+    paginationGenerationRef.current += 1;
+    setLoadingMore(false);
     setAppended({
-      key: searchBaseKey,
+      key: searchRowsKey,
       items: [],
       cursor: payload?.next_cursor ?? null,
     });
     setLoadMoreError(null);
-  }, [payload, searchBaseKey]);
+  }, [payload, searchRowsKey]);
 
-  const appendedForBase = appended.key === searchBaseKey ? appended : null;
+  const appendedForBase = appended.key === searchRowsKey ? appended : null;
   const loadedResults = [
     ...(payload?.ranked_results ?? []),
     ...(appendedForBase?.items ?? []),
@@ -208,6 +215,7 @@ export function SearchScreen() {
       return;
     }
     const requestCursor = searchCursor;
+    const requestGeneration = paginationGenerationRef.current;
     setLoadingMore(true);
     setLoadMoreError(null);
     try {
@@ -218,12 +226,13 @@ export function SearchScreen() {
       const next = await searchWorkspace(workspaceId, {
         query: debouncedQuery,
         scope,
+        filters: { include_agents: includeAgents },
         retrieval_mode: retrievalMode,
         limit: 20,
         cursor: requestCursor,
       });
       setAppended((current) =>
-        current.key === searchBaseKey && current.cursor === requestCursor
+        current.key === searchRowsKey && current.cursor === requestCursor
           ? {
               key: current.key,
               items: [...current.items, ...next.ranked_results],
@@ -235,11 +244,15 @@ export function SearchScreen() {
       // The cursor only advances on success, so the Load more button stays
       // available for retry; surface a localized error instead of a silent
       // unhandled rejection (mirrors the Agent overview Load more).
-      setLoadMoreError(
-        t("errors.loadMore", { defaultValue: "Failed to load more results" }),
-      );
+      if (requestGeneration === paginationGenerationRef.current) {
+        setLoadMoreError(
+          t("errors.loadMore", { defaultValue: "Failed to load more results" }),
+        );
+      }
     } finally {
-      setLoadingMore(false);
+      if (requestGeneration === paginationGenerationRef.current) {
+        setLoadingMore(false);
+      }
     }
   }
 
@@ -251,6 +264,14 @@ export function SearchScreen() {
     setScope(urlScope);
     setDebouncedQuery(urlQuery);
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!includeAgents && searchParams.get("scope") === "agent_page") {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete("scope");
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [includeAgents, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (capabilities === null) return;
@@ -322,6 +343,12 @@ export function SearchScreen() {
     setScope(nextScope);
     const trimmed = query.trim();
     if (!trimmed || !debouncedQuery) {
+      if (searchParams.get("scope") === "change") {
+        const nextParams = new URLSearchParams(searchParams);
+        if (nextScope === "all") nextParams.delete("scope");
+        else nextParams.set("scope", nextScope);
+        setSearchParams(nextParams, { replace: true });
+      }
       return;
     }
     // Keep the URL in step with the rescoped results so refresh/share
@@ -357,12 +384,21 @@ export function SearchScreen() {
             <p className="feature-subtitle">
               {t("header.subtitle", {
                 defaultValue:
-                  "Search across Context pages, Library sources, Agent pages, and changes.",
+                  "Search documents in this workspace.",
               })}
             </p>
           </div>
         </div>
         {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+        {searchParams.get("scope") === "change" ? (
+          <StatusBanner tone="info">
+            {t("results.changeScopeMoved", {
+              defaultValue: "Showing all documents. For changes, use document History, Activity, or Review.",
+            })}
+            {" "}<Link to="/activity">{t("results.activity", { defaultValue: "Activity" })}</Link>
+            {" · "}<Link to="/review">{t("results.review", { defaultValue: "Review" })}</Link>
+          </StatusBanner>
+        ) : null}
         <form className="search-panel" onSubmit={submit}>
           <div className="search-panel-field">
             <label htmlFor="workspace-search-query">
@@ -374,7 +410,7 @@ export function SearchScreen() {
               id="workspace-search-query"
               maxLength={SEARCH_QUERY_MAX_LENGTH}
               placeholder={t("form.queryPlaceholder", {
-                defaultValue: "Search Context, Library, Agent pages, changes",
+                defaultValue: "Search workspace documents",
               })}
               value={query}
               onChange={updateQuery}
@@ -386,7 +422,7 @@ export function SearchScreen() {
               value={scope}
               onChange={(event) => updateScope(event.target.value as SearchScope)}
             >
-              {SCOPES.map((entry) => (
+              {SCOPES.filter((entry) => includeAgents || entry !== "agent_page").map((entry) => (
                 <option key={entry} value={entry}>
                   {t(`scopes.${entry}`, { defaultValue: defaultScopeLabel(entry) })}
                 </option>
@@ -424,6 +460,7 @@ export function SearchScreen() {
           unavailable={Boolean(error && debouncedQuery)}
           onSelectSuggestion={runSuggestedQuery}
           workspaceId={workspaceId}
+          query={debouncedQuery}
         />
         {loadMoreError ? (
           <StatusBanner tone="warning">{loadMoreError}</StatusBanner>
@@ -451,12 +488,14 @@ function SearchResults({
   unavailable,
   onSelectSuggestion,
   workspaceId,
+  query,
 }: {
   loading: boolean;
   payload: SearchPayload | null;
   unavailable: boolean;
   onSelectSuggestion: (query: string) => void;
   workspaceId: string | null;
+  query: string;
 }) {
   const { t } = useTranslation("search");
   const suggestions = SEARCH_EXAMPLES.map((entry) =>
@@ -477,7 +516,7 @@ function SearchResults({
         <p>
           {t("empty.unavailableDescription", {
             defaultValue:
-              "Use Library, Context, or Agent navigation while the search index is offline or not deployed in this build.",
+              "Use the navigation to browse documents while the search index is offline or not deployed in this build.",
           })}
         </p>
       </div>
@@ -559,7 +598,6 @@ function SearchResults({
   return (
     <>
       <SearchAdvisories payload={payload} />
-      <SearchDisambiguation payload={payload} workspaceId={workspaceId} />
       <section className="feature-section">
         <ListPanelHeader
           title={t("results.serverOrder", { defaultValue: "Results" })}
@@ -577,6 +615,7 @@ function SearchResults({
               key={`${result.type}-${result.id}`}
               result={result}
               workspaceId={workspaceId}
+              query={query}
             />
           ))}
         </div>
@@ -606,189 +645,106 @@ function SearchAdvisories({ payload }: { payload: SearchPayload }) {
   );
 }
 
-function SearchDisambiguation({
-  payload,
-  workspaceId,
-}: {
-  payload: SearchPayload;
-  workspaceId: string | null;
-}) {
-  const { t } = useTranslation("search");
-  const disambiguation = payload.disambiguation;
-  const candidates: DisambiguationCandidate[] =
-    disambiguation &&
-    typeof disambiguation === "object" &&
-    "candidates" in disambiguation &&
-    Array.isArray(disambiguation.candidates)
-      ? (disambiguation.candidates as DisambiguationCandidate[])
-      : [];
-  if (candidates.length === 0) {
-    return null;
-  }
-  return (
-    <section className="feature-section search-disambiguation">
-      <div className="panel-header">
-        <span>
-          {t("results.disambiguation", {
-            defaultValue: "Multiple exact matches",
-          })}
-        </span>
-      </div>
-      <div className="search-disambiguation-list">
-        {candidates.map((candidate) => {
-          const href = disambiguationHref(candidate, workspaceId);
-          const key = `${candidate.id}-${candidate.concept_path}`;
-          const label =
-            candidate.title ??
-            (candidate.concept_path
-              ? displayConceptPath(candidate.concept_path)
-              : candidate.concept_path);
-          // §12.2: candidate click = navigate; title alone cannot separate
-          // same-named pages, so the concept path renders alongside.
-          if (!href) {
-            return (
-              <span className="search-disambiguation-candidate" key={key}>
-                <strong>{label}</strong>
-                {candidate.concept_path ? (
-                  <span>{displayConceptPath(candidate.concept_path)}</span>
-                ) : null}
-              </span>
-            );
-          }
-          return (
-            <Link
-              className="search-disambiguation-candidate"
-              key={key}
-              to={href}
-            >
-              <strong>{label}</strong>
-              {candidate.concept_path ? (
-                <span>{candidate.concept_path}</span>
-              ) : null}
-            </Link>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function disambiguationHref(
-  candidate: DisambiguationCandidate,
-  workspaceId: string | null,
-): string | null {
-  if (!candidate.id) {
-    return null;
-  }
-  // Disambiguation candidates come from the context-page entity lane; route
-  // them through the shared href resolver so link semantics stay single-source.
-  return searchResultHref(
-    {
-      id: candidate.id,
-      type: "context_page",
-      title: candidate.title ?? "",
-      snippet: "",
-      score: 0,
-      citation_available: false,
-      stale: false,
-      archived: false,
-      concept_path: candidate.concept_path,
-    },
-    workspaceId,
-  );
-}
-
 function SearchResultRow({
   result,
   workspaceId,
+  query,
 }: {
   result: RankedSearchResult;
   workspaceId: string | null;
+  query: string;
 }) {
   const { t } = useTranslation("search");
-  const href = searchResultHref(result, workspaceId);
-  const identity = identityForHref(href);
-  const title = result.title;
-  const snippet = result.snippet;
+  const descriptionId = useId();
+  const link = searchResultLink(result, workspaceId);
   const typeLabel = domainLabel("search", "types", result.type, t);
-  const matchReason = result.match_reason
-    ? t(`matchReasons.${result.match_reason}`, {
-        defaultValue: defaultMatchReasonLabel(result.match_reason),
-      })
-    : null;
-  const content = (
-    <div className="search-result-body">
-      {/* The result kind leads the row as a toned pill, the same slot Lint
-          gives severity and Activity gives the actor. It used to be carried
-          only by the trailing open-button's hue, while every row shared one
-          identical leading glyph. */}
-      <p className="search-result-title">
-        <span
-          className="search-result-kind"
-          data-identity={identity ?? "muted"}
-        >
-          {typeLabel}
-        </span>
-        <span>{title}</span>
-      </p>
-      {snippet || result.matched_name ? (
-        <p className="search-result-snippet">
-          {snippet ||
-            t("results.matchedName", {
-              name: result.matched_name,
-              defaultValue: `Matched name: ${result.matched_name}`,
-            })}
-        </p>
-      ) : null}
-      {result.concept_path ? (
-        <p className="search-result-path">
-          {displayConceptPath(result.concept_path)}
-        </p>
-      ) : null}
-      <span className="row-badges search-result-chips">
-        {/* Match reason and the open action are one bordered box split by a
-            hairline -- the same joined segment as Lint's [rule | target].
-            As two separate chips they never agreed: 20px against 24px. */}
-        <span className="search-source-chip">
-          {matchReason ? (
-            <span className="search-source-chip__reason">{matchReason}</span>
-          ) : null}
-          <span
-            className="search-source-chip__open"
-            data-identity={identity ?? "muted"}
-          >
-            {href && identity ? (
-              <>
-                <ExternalLink size={13} aria-hidden="true" />
-                {t(
-                  `results.open${identity[0].toUpperCase()}${identity.slice(1)}`,
-                  { defaultValue: typeLabel },
-                )}
-              </>
-            ) : (
-              t("results.openUnavailable", {
-                defaultValue: "Open unavailable",
-              })
-            )}
-          </span>
-        </span>
-        {result.stale ? <StatusPill status="stale" compact /> : null}
-        {result.archived ? <StatusPill status="archived" compact /> : null}
-        {!result.citation_available ? (
-          <span className="search-result-meta">
-            {t("results.noCitation", { defaultValue: "No citation" })}
-          </span>
-        ) : null}
-      </span>
-    </div>
+  const snippet = searchPreview(result.snippet ?? "");
+  const summary = searchPreview(result.summary ?? "");
+  const matchedName = result.matched_name ?? "";
+  const preview = snippet || summary || (
+    normalizedText(matchedName) !== normalizedText(result.title) ? matchedName : ""
   );
-  if (!href) {
+  const heading = snippet && result.heading_path
+    ? result.heading_path.filter((part) => normalizedText(part) !== normalizedText(result.title)).at(-1)
+    : null;
+  const reason = result.match_reason;
+  let matchReason: string | null = null;
+  if (reason === "trigram") {
+    matchReason = normalizedText(query) && normalizedText(result.title).includes(normalizedText(query))
+      ? t("matchReasons.titleContains", { defaultValue: "Title contains the query" })
+      : t("matchReasons.similarName", { name: matchedName || result.title, defaultValue: "Similar name: ‘{{name}}’" });
+  } else if (reason === "exact_alias") {
+    matchReason = t("matchReasons.aliasMatch", { name: matchedName, defaultValue: "Alias ‘{{name}}’ matches" });
+  } else if (reason && reason !== "keyword" && reason !== "hybrid") {
+    matchReason = t(`matchReasons.${reason}`, { defaultValue: defaultMatchReasonLabel(reason) });
+  }
+  const location = resultLocation(result);
+  const locationParts = presentLocation(location);
+  const fullPath = location.join(" › ");
+  const unavailable = !link ? t(
+    result.type === "change_set" ? "results.reviewLinkMissing" : "results.linkMissing",
+    { defaultValue: result.type === "change_set"
+      ? "Cannot open directly from search · Review link information unavailable"
+      : "Cannot open directly from search · Link information unavailable" },
+  ) : null;
+  const description = [fullPath, matchReason, unavailable].filter(Boolean).join(". ");
+  const content = (
+    <>
+      <div className="search-result-body">
+        <p className="search-result-title">
+          <span className="search-result-kind" data-identity={link?.destination ?? "muted"}>
+            {typeLabel}
+          </span>
+          <span className="search-result-title-text">{result.title}</span>
+          {result.archived ? <StatusPill status="archived" compact /> : null}
+        </p>
+        {preview ? (
+          <p className="search-result-snippet">
+            {heading ? <><strong>{heading}</strong>{" · "}</> : null}
+            {preview}
+          </p>
+        ) : null}
+        {location.length > 0 ? (
+          <p className="search-result-location" aria-hidden="true">
+            <Folder size={13} aria-hidden="true" />
+            <span className="search-result-location-parts">
+              {locationParts.map((part, index) => (
+                <span
+                  className="search-result-location-part"
+                  data-desktop-visible={part.desktop}
+                  data-mobile-visible={part.mobile}
+                  key={index}
+                >
+                  {index > 0 ? <ChevronRight size={12} aria-hidden="true" /> : null}
+                  <span>{part.text}</span>
+                </span>
+              ))}
+            </span>
+          </p>
+        ) : null}
+        {matchReason ? (
+          <p className="search-result-reason">
+            <Search size={13} aria-hidden="true" />{matchReason}
+          </p>
+        ) : null}
+        {unavailable ? <p className="search-result-unavailable">{unavailable}</p> : null}
+        {description ? <span className="visually-hidden" id={descriptionId}>{description}</span> : null}
+      </div>
+      {link ? (
+        <ChevronRight className="search-result-chevron" size={18} aria-hidden="true" />
+      ) : (
+        <span className="search-result-disabled-label">
+          <Info size={14} aria-hidden="true" />
+          {t("results.openUnavailable", { defaultValue: "Open unavailable" })}
+        </span>
+      )}
+    </>
+  );
+  if (!link) {
     return (
       <div
-        aria-label={t("results.cannotOpen", {
-          defaultValue: "{{title}} cannot be opened from search yet",
-          title,
-        })}
+        aria-label={t("results.cannotOpen", { defaultValue: "{{title}} cannot be opened from search yet", title: result.title })}
+        aria-describedby={description ? descriptionId : undefined}
         className="search-result-row is-disabled"
       >
         {content}
@@ -798,26 +754,69 @@ function SearchResultRow({
   return (
     <Link
       className="search-result-row linked"
-      to={href}
-      aria-label={t("results.open", {
-        defaultValue: "Open {{title}}",
-        title,
-      })}
+      to={link.href}
+      aria-label={t("results.open", { defaultValue: "Open {{title}}", title: result.title })}
+      aria-describedby={description ? descriptionId : undefined}
     >
       {content}
     </Link>
   );
 }
 
-function identityForHref(
-  href: string | null,
-): "context" | "library" | "agent" | "review" | null {
-  if (!href) return null;
-  if (href.startsWith("/context")) return "context";
-  if (href.startsWith("/library")) return "library";
-  if (href.startsWith("/agent")) return "agent";
-  if (href.startsWith("/review")) return "review";
-  return null;
+function normalizedText(value: string) {
+  return value.normalize("NFKC").toLocaleLowerCase().trim().replace(/\s+/g, " ");
+}
+
+function resultLocation(result: RankedSearchResult): string[] {
+  if (result.location?.length) return result.location;
+  if (!result.concept_path) return [];
+  const path = displayConceptPath(result.concept_path);
+  // Generated Context slugs are storage identifiers. Human slugs remain useful
+  // as a fallback when the server has no tree placement for the result.
+  if ((result.type === "context_page" || result.type === "context_claim") &&
+    /^\/?context\/p-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(path)) return [];
+  return [path];
+}
+
+function presentLocation(location: string[]) {
+  const shorten = (part: string) => {
+    const characters = Array.from(part);
+    return characters.length > 22 ? `${characters.slice(0, 21).join("")}…` : part;
+  };
+  return location.flatMap((part, index) => {
+    const stage = {
+      text: shorten(part),
+      desktop: location.length < 4 || index === 0 || index >= location.length - 2,
+      mobile: location.length < 3 || index === 0 || index === location.length - 1,
+    };
+    return index === 1 && location.length >= 3
+      ? [{ text: "…", desktop: location.length >= 4, mobile: true }, stage]
+      : [stage];
+  });
+}
+
+// Search previews are plain text. Keep labels/content while removing Markdown
+// presentation syntax; never change the stored source or render result HTML.
+function searchPreview(value: string): string {
+  const code: string[] = [];
+  return value
+    .replace(/```[^\n]*\n([\s\S]*?)```|~~~[^\n]*\n([\s\S]*?)~~~|`([^`\n]+)`/g,
+      (_match, fenced: string | undefined, tilde: string | undefined, inline: string | undefined) => {
+        code.push(fenced ?? tilde ?? inline ?? "");
+        return `\uE000${code.length - 1}\uE001`;
+      })
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/<((?:https?:\/\/|mailto:)[^>]+)>/g, "$1")
+    .replace(/<\/?(?:a|abbr|b|blockquote|br|code|del|div|em|h[1-6]|hr|i|li|ol|p|pre|s|small|span|strong|sub|sup|table|tbody|td|th|thead|tr|ul)(?:\s[^<>]*?)?\s*\/?>/gi, "")
+    .replace(/^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/gm, "")
+    .replace(/\*\*(\S(?:[^*]*\S)?)\*\*/g, "$1")
+    .replace(/\*(\S(?:[^*]*\S)?)\*/g, "$1")
+    .replace(/(^|[^\p{L}\p{N}_])__([^_\n]+)__(?=$|[^\p{L}\p{N}_])/gu, "$1$2")
+    .replace(/(^|[^\p{L}\p{N}_])_([^_\n]+)_(?=$|[^\p{L}\p{N}_])/gu, "$1$2")
+    .replace(/`+/g, "")
+    .replace(/\uE000(\d+)\uE001/g, (_match, index: string) => code[Number(index)] ?? "")
+    .replace(/\s+/g, " ").trim();
 }
 
 function parseScope(value: string | null): SearchScope {
@@ -882,12 +881,8 @@ function newPageFromSearchHref(query: string | undefined) {
 function defaultMatchReasonLabel(reason: string) {
   if (reason === "exact_id") return "Exact ID";
   if (reason === "exact_title") return "Exact title";
-  if (reason === "exact_slug") return "Exact slug";
-  if (reason === "exact_alias") return "Exact alias";
-  if (reason === "trigram") return "Fuzzy name";
-  if (reason === "grep_wiki") return "Grep";
-  if (reason === "semantic") return "Semantic";
-  if (reason === "hybrid") return "Hybrid";
+  if (reason === "exact_slug") return "Path match";
+  if (reason === "semantic") return "Similar meaning";
   if (reason === "associative") return "Associated";
   return "Keyword";
 }

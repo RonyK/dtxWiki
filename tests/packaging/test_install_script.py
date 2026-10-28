@@ -364,8 +364,8 @@ def _run_wrapper(tmp_path: Path, name: str, *args: str) -> list[str]:
 
 
 DB_COMMANDS = (
-    "serve", "bootstrap", "users", "workspace", "admin", "context", "reindex",
-    "eval", "info", "migrate-data",
+    "serve", "bootstrap", "users", "workspace", "admin", "context", "inputs",
+    "reindex", "eval", "info", "migrate-data",
 )
 # They write /etc, drive systemctl, or never open the database.
 ROOT_COMMANDS = (

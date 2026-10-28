@@ -4,9 +4,12 @@ import {
   Edit,
   FileText,
   Folder,
+  GitMerge,
   MoreHorizontal,
   Plus,
+  RotateCcw,
   Share2,
+  Trash2,
 } from "lucide-react";
 import {
   useCallback,
@@ -15,7 +18,6 @@ import {
   useRef,
   useState,
   type ComponentProps,
-  type CSSProperties,
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -44,7 +46,6 @@ import {
   discardAlternativeDraft,
   diffPageVersions,
   restorePageVersion,
-  type PageVersionDiff,
 } from "../../shared/api/pages";
 import {
   listContextChanges,
@@ -94,7 +95,15 @@ import {
   ContentSummaryPanel,
 } from "../../shared/components/ContentInspectorPanels";
 import { CountChip } from "../../shared/components/CountChip";
-import { DiffViewerDialog } from "../../shared/components/DiffViewerDialog";
+import {
+  HistoryActionButton,
+  HistoryCard,
+  HistoryChangesButton,
+  HistoryChangesUnavailable,
+  HistoryLineDelta,
+} from "../../shared/components/HistoryCard";
+import { HistoryDiffDialog } from "../../shared/components/HistoryDiffDialog";
+import { HistoryGraphList } from "../../shared/components/HistoryGraphList";
 import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
 import { WorkspaceFirstUseChecklist } from "../../shared/components/FirstUseChecklist";
 import { NewItemDialog } from "../../shared/components/NewItemDialog";
@@ -127,6 +136,7 @@ import {
   writeExpandedNodeIdsToStorage,
 } from "../../shared/components/treeRouteState";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { useDocumentTitle } from "../../shared/hooks/useDocumentTitle";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import {
@@ -135,12 +145,21 @@ import {
 } from "../../shared/lib/copyText";
 import { ActivityEventCard } from "../../shared/components/ActivityEventCard";
 import {
+  contextHistoryNodes,
   contextHistoryPillTone,
   contextHistoryPresentation,
+  priorRelationForVersion,
 } from "../../shared/lib/contextHistory";
+import {
+  buildHistoryGraph,
+  type HistoryGraphRow,
+} from "../../shared/lib/historyGraph";
+import { normalizeVersionPair } from "../../shared/lib/historyVersionPair";
+import { useVersionPairDiff } from "../../shared/hooks/useVersionPairDiff";
 import { domainLabel, humanizeEnum } from "../../shared/lib/domainLabel";
 import { searchResultHref } from "../../shared/lib/searchResultHref";
 import { isEditorRole } from "../../shared/workspace/permissions";
+import { useOptionalAuth } from "../../shared/auth/AuthContext";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 
 const CONTEXT_CHILD_PAGE_SIZE = 5;
@@ -156,13 +175,6 @@ type PublishedVersionInfo = {
 type ContextDetailWithPublishedVersion = ContextPageDetail & {
   published_version_info?: PublishedVersionInfo | null;
 };
-
-type PriorRelation = "root" | "visible" | "hidden" | "missing";
-type ContextVersionEntry = VersionEntry & {
-  prior_relation?: PriorRelation;
-};
-
-
 
 type ContextState = {
   workspaceId: string;
@@ -183,6 +195,7 @@ type ContextState = {
 export function ContextScreen() {
   const { t } = useTranslation("context");
   // Codex #25: hide write affordances from viewers (the backend re-enforces).
+  const auth = useOptionalAuth();
   const workspaceContext = useOptionalWorkspaceContext();
   const canEdit = isEditorRole(workspaceContext?.selectedWorkspace?.role);
   const [expandedNodeIds, setExpandedNodeIds] = useState<string[]>([]);
@@ -229,8 +242,6 @@ export function ContextScreen() {
   );
   const requestedTargetId =
     searchParams.get(TREE_TARGET_PARAM) ?? routedPageId ?? null;
-  const previousSearchRef = useRef(location.search);
-  const searchChangedRef = useRef(false);
   const expansionWorkspaceRef = useRef<string | null>(null);
   const routeRevealKeyRef = useRef<string | null>(null);
   // Removing a selected page updates the in-memory tree before React Router
@@ -251,7 +262,9 @@ export function ContextScreen() {
         );
         return;
       }
-      setSearchParams(nextParams, { replace: true });
+      if (nextParams.toString() !== searchParams.toString()) {
+        setSearchParams(nextParams, { replace: true });
+      }
     },
     [navigate, routedPageId, searchParams, setSearchParams],
   );
@@ -294,7 +307,9 @@ export function ContextScreen() {
   ]);
   const {
     data: state,
+    revision: overviewRevision,
     error,
+    reload,
     setData: setState,
     setError,
   } = useAsyncLoad<ContextState>(
@@ -411,12 +426,18 @@ export function ContextScreen() {
     },
   );
 
+  useScreenEntryRefresh("/context", reload, {
+    isHome: requestedTargetId === null && !searchParams.has(TREE_NEW_FOLDER_PARAM),
+    queryDeps: [pageSize, draftFilter, ambientSelectedId],
+    readArrivalNotice: readContextPublishNotice,
+  });
+
   const workspaceId = state?.workspaceId ?? "";
   // The loader fetches page 1 (state.pages); these accumulate the appended
   // pages on top of it. Keyed on the base page so a fresh first page (page-size
   // change / reload) drops the appended tail. Derived synchronously so Load
   // more always reads the live cursor rather than a one-render-stale one.
-  const overviewBaseKey = `${workspaceId}:${pageSize}:${draftFilter}:${
+  const overviewBaseKey = `${workspaceId}:${pageSize}:${draftFilter}:${overviewRevision}:${
     state?.pages.length ?? 0
   }:${state?.pages[0]?.id ?? ""}`;
   const [appended, setAppended] = useState<{
@@ -425,13 +446,16 @@ export function ContextScreen() {
     cursor: string | null;
   }>({ key: overviewBaseKey, items: [], cursor: state?.pagesCursor ?? null });
   const [loadingMore, setLoadingMore] = useState(false);
+  const overviewGenerationRef = useRef(0);
   useEffect(() => {
+    overviewGenerationRef.current += 1;
+    setLoadingMore(false);
     setAppended({
       key: overviewBaseKey,
       items: [],
       cursor: state?.pagesCursor ?? null,
     });
-  }, [overviewBaseKey, state?.pagesCursor]);
+  }, [overviewBaseKey, state?.pages, state?.pagesCursor]);
 
   // When the accumulator key matches the current base its cursor is
   // authoritative (it starts at the base cursor and advances/exhausts to null);
@@ -486,6 +510,7 @@ export function ContextScreen() {
       return;
     }
     const requestCursor = overviewCursor;
+    const requestGeneration = overviewGenerationRef.current;
     setLoadingMore(true);
     try {
       const next = await listContextPages(workspaceId, {
@@ -494,12 +519,10 @@ export function ContextScreen() {
         cursor: requestCursor,
       });
       setAppended((current) =>
-        // Skip the append when a fresh first page replaced the base mid-flight.
-        // The base key must still match AND the live cursor must still be the
-        // one this request paged from: the key alone is a length+first-id
-        // heuristic, so a reload that preserves it while advancing the cursor
-        // would otherwise graft a stale page on. Matches useLoadMore's
-        // next_cursor guard so all four list surfaces gate identically.
+        // The successful-load revision distinguishes refreshes even when the
+        // first item and cursor are unchanged. Older requests belong to that
+        // prior first page and must not append to the refreshed overview.
+        overviewGenerationRef.current === requestGeneration &&
         current.key === overviewBaseKey && current.cursor === requestCursor
           ? {
               key: current.key,
@@ -508,8 +531,14 @@ export function ContextScreen() {
             }
           : current,
       );
+    } catch (exc) {
+      if (requestGeneration === overviewGenerationRef.current) {
+        setError(apiErrorMessage(exc, t("errors.load")));
+      }
     } finally {
-      setLoadingMore(false);
+      if (requestGeneration === overviewGenerationRef.current) {
+        setLoadingMore(false);
+      }
     }
   }
 
@@ -623,7 +652,7 @@ export function ContextScreen() {
     if (pageData) {
       const pages = pageData.data;
       setAppended({
-        key: `${state.workspaceId}:${pageSize}:${draftFilter}:${pages.length}:${pages[0]?.id ?? ""}`,
+        key: `${state.workspaceId}:${pageSize}:${draftFilter}:${overviewRevision}:${pages.length}:${pages[0]?.id ?? ""}`,
         items: [],
         cursor: pageData.next_cursor,
       });
@@ -676,7 +705,7 @@ export function ContextScreen() {
     setTreeRefreshing(true);
     setError(null);
     try {
-      await refreshTree();
+      await refreshTree({ refreshOverview: true });
     } catch (exc) {
       setError(
         apiErrorMessage(
@@ -912,11 +941,6 @@ export function ContextScreen() {
   }
 
   useEffect(() => {
-    searchChangedRef.current = previousSearchRef.current !== location.search;
-    previousSearchRef.current = location.search;
-  }, [location.search]);
-
-  useEffect(() => {
     if (
       unavailableTargetIdRef.current &&
       requestedTargetId !== unavailableTargetIdRef.current
@@ -937,7 +961,6 @@ export function ContextScreen() {
     if (!targetNodeId) {
       routeRevealKeyRef.current = `${state.workspaceId}:${requestedTargetId ?? ""}:${searchParams.get(TREE_EXPANDED_PARAM) ?? ""}`;
       if (
-        (requestedTargetId || searchChangedRef.current) &&
         (state.selectedNodeId ||
           state.detail ||
           state.history ||
@@ -1187,6 +1210,7 @@ export function ContextScreen() {
           onExpandWidth,
         }) => (
           <TreeRail
+            favoriteScope={auth?.user && state.workspaceId ? { actorId: auth.user.user_id, workspaceId: state.workspaceId } : undefined}
             title={t("rail.title", { defaultValue: "Context" })}
             accent="context"
             nodes={state.tree}
@@ -1982,24 +2006,7 @@ function normalizeComparePair(
   versions: VersionEntry[],
   candidate: CompareCandidate,
 ): ComparePair | null {
-  const to = versions.find((entry) => entry.version_id === candidate.to);
-  if (!to) {
-    return null;
-  }
-  if (candidate.from === null) {
-    return { ...candidate, to: to.version_id };
-  }
-  const from = versions.find((entry) => entry.version_id === candidate.from);
-  if (
-    !from ||
-    from.version_id === to.version_id ||
-    from.version_no === to.version_no
-  ) {
-    return null;
-  }
-  return from.version_no < to.version_no
-    ? { ...candidate, from: from.version_id, to: to.version_id }
-    : { ...candidate, from: to.version_id, to: from.version_id };
+  return normalizeVersionPair(contextHistoryNodes(versions), candidate);
 }
 
 function defaultHistoryCompareCandidate(
@@ -2011,17 +2018,6 @@ function defaultHistoryCompareCandidate(
     to: selected.version_id,
     origin: "history",
   };
-}
-
-function priorRelationForVersion(entry: VersionEntry): PriorRelation {
-  const explicit = (entry as ContextVersionEntry).prior_relation;
-  if (explicit) {
-    return explicit;
-  }
-  if (entry.prior_version_id) {
-    return "visible";
-  }
-  return entry.version_no <= 1 ? "root" : "missing";
 }
 
 function comparePairCrossesLineage(
@@ -3773,323 +3769,6 @@ export function ContextChildrenIndex({
   );
 }
 
-type HistoryGraphRow = {
-  entry: VersionEntry;
-  incomingLanes: number[];
-  lane: number;
-  parentLane: number | null;
-  parent: VersionEntry | null;
-  passingLanes: number[];
-  relation: "root" | "linear" | "branch" | "older" | "hidden" | "missing";
-  // The reconcile merge edge (git-merge second parent). Every edge in this
-  // graph is drawn as "leave THIS row's node downward", because the list is
-  // newest-first so an edge's other end is always in a LOWER row -- the curve
-  // box starts just below the node and cannot reach above it. A merge is no
-  // exception once it is drawn from the correct end: the merge version is the
-  // newer row, so its row owns the curve and the merged branch (older, lower)
-  // receives it. Hence this lives on the MERGE VERSION's row and names the
-  // branch's lane the curve descends into. Its landing stub and any
-  // pass-through segments need no fields of their own -- they are the same
-  // shapes as a lineage edge's, so they reuse incomingLanes/passingLanes.
-  mergeToLane: number | null;
-};
-
-// Lane colouring follows the convention every git graph viewer uses: a lane
-// owns a colour, and every mark on it -- dot, line, and the curves entering or
-// leaving it -- wears that colour, so a branch is followed by eye instead of by
-// tracing geometry. Lane 0 is the trunk and keeps the section accent
-// (`--reader-accent`, so Context/Agent/Library each stay themselves); the rest
-// cycle. The values live in CSS (09-context-audit-fixes.css) rather than here,
-// so they stay themeable; this only picks the index.
-// 8 base hues plus a darkened repeat of each, so the palette only wraps once a
-// page holds 16 lanes at the SAME time -- which lane recycling makes far harder
-// to reach than the old never-freed counter did.
-const HISTORY_LANE_COLOR_COUNT = 16;
-
-function historyLaneTint(lane: number): string {
-  const index = ((lane % HISTORY_LANE_COLOR_COUNT) + HISTORY_LANE_COLOR_COUNT)
-    % HISTORY_LANE_COLOR_COUNT;
-  return `var(--history-lane-color-${index})`;
-}
-
-// The graph gutter is bounded so it cannot eat the cards beside it, so lane
-// spacing has to give instead: a fixed 18px pitch put lane 5 past the old 96px
-// cap, and `overflow: hidden` then deleted its dot outright. Pitch (and the dot
-// with it) shrinks only as far as the lane count actually demands, so ordinary
-// pages look exactly as before and only a genuinely busy one tightens up.
-const HISTORY_LANE_PAD = 7;
-const HISTORY_LANE_PITCH_MAX = 18;
-const HISTORY_LANE_PITCH_MIN = 10;
-const HISTORY_LANE_DOT_MAX = 12;
-const HISTORY_LANE_GUTTER_MAX = 132;
-const HISTORY_LANE_GUTTER_MIN = 32;
-
-type HistoryLaneMetrics = { pitch: number; dot: number; gutter: number };
-
-function historyLaneMetrics(laneCount: number): HistoryLaneMetrics {
-  const span = Math.max(1, laneCount - 1);
-  const budget = HISTORY_LANE_GUTTER_MAX - HISTORY_LANE_PAD * 2;
-  const pitch = Math.max(
-    HISTORY_LANE_PITCH_MIN,
-    Math.min(HISTORY_LANE_PITCH_MAX, Math.floor(budget / span)),
-  );
-  const dot = Math.min(HISTORY_LANE_DOT_MAX, pitch - 1);
-  const gutter = Math.max(
-    HISTORY_LANE_GUTTER_MIN,
-    Math.min(
-      HISTORY_LANE_GUTTER_MAX,
-      HISTORY_LANE_PAD * 2 + span * pitch + dot,
-    ),
-  );
-  return { pitch, dot, gutter };
-}
-
-function historyLaneCentre(lane: number, metrics: HistoryLaneMetrics): number {
-  return lane * metrics.pitch + HISTORY_LANE_PAD + metrics.dot / 2;
-}
-
-function buildHistoryGraph(versions: VersionEntry[]) {
-  const byId = new Map(versions.map((entry) => [entry.version_id, entry]));
-  const childrenByParent = new Map<string, VersionEntry[]>();
-  versions.forEach((entry) => {
-    if (entry.prior_version_id) {
-      const children = childrenByParent.get(entry.prior_version_id) ?? [];
-      children.push(entry);
-      childrenByParent.set(entry.prior_version_id, children);
-    }
-  });
-  const laneById = new Map<string, number>();
-  const ascending = [...versions].sort(
-    (left, right) => left.version_no - right.version_no,
-  );
-  const ascendingIndexById = new Map(
-    ascending.map((entry, index) => [entry.version_id, index]),
-  );
-
-  // Lanes are a recycled resource, not a running counter. A never-reused
-  // counter made the Nth branch a page ever produced sit at lane N forever,
-  // and the gutter is capped at 96px (~5 lanes) with overflow hidden, so past
-  // that the dots were simply clipped away -- a page could show a branch curve
-  // running to a version marker that was not on screen. Reuse mirrors what git
-  // graph viewers do: a lane is free again once its occupant's span has ended,
-  // and because colour is derived from the lane index, freeing the lane frees
-  // the colour with it.
-  //
-  // A "segment" is one chain of versions sharing a lane: a start version plus
-  // every descendant that inherits its lane (the first child; later children
-  // are branches and start segments of their own).
-  const laneInheritorByVersion = new Map<string, string>();
-  const claimedChildren = new Map<string, number>();
-  const segmentStartIds: string[] = [];
-  ascending.forEach((entry) => {
-    const parentId = entry.prior_version_id;
-    if (parentId != null && ascendingIndexById.has(parentId)) {
-      const ordinal = claimedChildren.get(parentId) ?? 0;
-      claimedChildren.set(parentId, ordinal + 1);
-      if (ordinal === 0) {
-        laneInheritorByVersion.set(parentId, entry.version_id);
-        return;
-      }
-    }
-    segmentStartIds.push(entry.version_id);
-  });
-
-  type LaneSegment = { members: string[]; spanStart: number; spanEnd: number };
-  const segments: LaneSegment[] = segmentStartIds.map((startId) => {
-    const members: string[] = [];
-    let cursor: string | undefined = startId;
-    while (cursor !== undefined) {
-      members.push(cursor);
-      cursor = laneInheritorByVersion.get(cursor);
-    }
-    const indexes = members.map((id) => ascendingIndexById.get(id) ?? 0);
-    return { members, spanStart: Math.min(...indexes), spanEnd: Math.max(...indexes) };
-  });
-
-  const segmentIndexByVersion = new Map<string, number>();
-  segments.forEach((segment, index) => {
-    segment.members.forEach((id) => segmentIndexByVersion.set(id, index));
-  });
-  // A lane is busy wherever an edge RUNS ALONG it, which is not the same as
-  // where its versions sit. A branch's curve only crosses its own row -- it
-  // enters at the branch's lane and leaves at the parent's -- and everything
-  // below that row continues on the PARENT's lane, never the branch's. So the
-  // lane a branch opens is claimed by the row it opened from down to the
-  // parent it rejoins, and that claim belongs to the PARENT's segment.
-  // Charging it to the branch instead (as if the branch owned every row down
-  // to its parent) made sibling branches off one version look mutually
-  // overlapping, so each took a fresh lane and colour even though none of them
-  // ever appears beside another.
-  ascending.forEach((entry, index) => {
-    const parentId = entry.prior_version_id;
-    if (parentId == null) return;
-    const parentSegment = segmentIndexByVersion.get(parentId);
-    if (
-      parentSegment === undefined ||
-      parentSegment === segmentIndexByVersion.get(entry.version_id)
-    ) {
-      return;
-    }
-    segments[parentSegment].spanEnd = Math.max(
-      segments[parentSegment].spanEnd,
-      index,
-    );
-  });
-  // A merged branch keeps its lane until the merge version, because the merge
-  // curve travels back up through every row in between.
-  ascending.forEach((entry) => {
-    const mergedIntoId = entry.merged_into_version_id;
-    if (mergedIntoId == null) return;
-    const mergeIndex = ascendingIndexById.get(mergedIntoId);
-    const segmentIndex = segmentIndexByVersion.get(entry.version_id);
-    if (mergeIndex === undefined || segmentIndex === undefined) return;
-    segments[segmentIndex].spanEnd = Math.max(
-      segments[segmentIndex].spanEnd,
-      mergeIndex,
-    );
-  });
-
-  // segmentStartIds is built during the ascending walk, so segments are
-  // already ordered by where they begin; first fit gives the leftmost free
-  // lane, keeping the graph as narrow as the real concurrency requires.
-  const laneSpanEnds: number[] = [];
-  segments.forEach((segment) => {
-    let lane = laneSpanEnds.findIndex((end) => end < segment.spanStart);
-    if (lane === -1) {
-      lane = laneSpanEnds.length;
-    }
-    laneSpanEnds[lane] = segment.spanEnd;
-    segment.members.forEach((id) => laneById.set(id, lane));
-  });
-  const rows: HistoryGraphRow[] = versions.map((entry) => {
-    const relation = priorRelationForVersion(entry);
-    const parent = entry.prior_version_id
-      ? (byId.get(entry.prior_version_id) ?? null)
-      : null;
-    const parentLane = parent
-      ? (laneById.get(parent.version_id) ?? null)
-      : null;
-    const branch =
-      Boolean(entry.prior_version_id) &&
-      ((childrenByParent.get(entry.prior_version_id ?? "")?.length ?? 0) > 1 ||
-        entry.graph_status === "branched" ||
-        entry.history_status === "alternative_draft" ||
-        entry.history_status === "discarded_draft");
-    return {
-      entry,
-      incomingLanes: [] as number[],
-      lane: laneById.get(entry.version_id) ?? 0,
-      mergeToLane: null as number | null,
-      parentLane,
-      parent,
-      passingLanes: [] as number[],
-      relation:
-        relation === "root"
-          ? "root"
-          : relation === "hidden"
-            ? "hidden"
-            : relation === "missing"
-              ? "missing"
-              : !parent
-                ? "older"
-                : branch
-                  ? "branch"
-                  : "linear",
-    };
-  });
-  const rowIndexById = new Map(
-    rows.map((row, index) => [row.entry.version_id, index]),
-  );
-  rows.forEach((row, childIndex) => {
-    if (!row.parent || row.parentLane == null) return;
-    const parentIndex = rowIndexById.get(row.parent.version_id);
-    if (parentIndex == null || parentIndex <= childIndex) return;
-    if (!rows[parentIndex].incomingLanes.includes(row.parentLane)) {
-      rows[parentIndex].incomingLanes.push(row.parentLane);
-    }
-    for (let index = childIndex + 1; index < parentIndex; index += 1) {
-      if (!rows[index].passingLanes.includes(row.parentLane)) {
-        rows[index].passingLanes.push(row.parentLane);
-      }
-    }
-  });
-  // The reconcile merge edge (git-merge second parent, section 7.1). The
-  // reconcile creates a NEWER version, so the merge version sits ABOVE the
-  // branch in this newest-first list. Assign the pieces the same way the
-  // parent pass above does -- curve leaves the upper row's node, passes
-  // through the rows between, lands on the lower row's node -- with the merge
-  // version as the upper row and the merged branch as the lower one.
-  rows.forEach((branchRow, branchIndex) => {
-    const mergedIntoId = branchRow.entry.merged_into_version_id;
-    if (!mergedIntoId) return;
-    const mergeIndex = rowIndexById.get(mergedIntoId);
-    if (mergeIndex == null || mergeIndex >= branchIndex) return;
-    const branchLane = branchRow.lane;
-    rows[mergeIndex].mergeToLane = branchLane;
-    if (!branchRow.incomingLanes.includes(branchLane)) {
-      branchRow.incomingLanes.push(branchLane);
-    }
-    for (let index = mergeIndex + 1; index < branchIndex; index += 1) {
-      if (!rows[index].passingLanes.includes(branchLane)) {
-        rows[index].passingLanes.push(branchLane);
-      }
-    }
-  });
-  return {
-    rows,
-    laneCount: Math.max(1, ...rows.map((row) => row.lane + 1)),
-  };
-}
-
-function HistoryParentRelation({ row }: { row: HistoryGraphRow }) {
-  const { t } = useTranslation("context");
-  if (row.relation === "root") {
-    return <>{t("history.firstVersion", { defaultValue: "First version" })}</>;
-  }
-  if (row.relation === "hidden") {
-    return (
-      <>
-        {t("history.parentHidden", {
-          defaultValue: "Previous version is not visible",
-        })}
-      </>
-    );
-  }
-  if (row.relation === "missing") {
-    return (
-      <>
-        {t("history.parentMissing", {
-          defaultValue: "Previous version is unavailable",
-        })}
-      </>
-    );
-  }
-  if (!row.parent) {
-    return (
-      <>
-        {t("history.parentOlder", {
-          defaultValue: "Continues from an older version",
-        })}
-      </>
-    );
-  }
-  return row.relation === "branch" ? (
-    <>
-      {t("history.branchedFrom", {
-        defaultValue: "Branched from v{{version}}",
-        version: row.parent.version_no,
-      })}
-    </>
-  ) : (
-    <>
-      {t("history.continuesFrom", {
-        defaultValue: "Continues from v{{version}}",
-        version: row.parent.version_no,
-      })}
-    </>
-  );
-}
-
 export function ContextHistory({
   canEdit,
   comparePair,
@@ -4125,35 +3804,68 @@ export function ContextHistory({
 }) {
   const { t } = useTranslation("context");
   const { t: tShell } = useTranslation("shell");
-  const [diff, setDiff] = useState<PageVersionDiff | null>(null);
-  const [diffError, setDiffError] = useState<string | null>(null);
-  const [diffLoadingVersionId, setDiffLoadingVersionId] = useState<
-    string | null
-  >(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoreMessage, setRestoreMessage] = useState<string | null>(null);
   const [restoreVersionId, setRestoreVersionId] = useState<string | null>(null);
+  // One restore at a time across the whole list, not just per row.
+  const restoring = restoreVersionId !== null;
   const [discardVersionId, setDiscardVersionId] = useState<string | null>(null);
   const [discardCandidate, setDiscardCandidate] = useState<VersionEntry | null>(
     null,
   );
   const [discardReason, setDiscardReason] = useState("");
   const versions = useMemo(() => history?.versions ?? [], [history?.versions]);
-  const historyGraph = useMemo(() => buildHistoryGraph(versions), [versions]);
-  const laneMetrics = useMemo(
-    () => historyLaneMetrics(historyGraph.laneCount),
-    [historyGraph.laneCount],
+  const versionNodes = useMemo(() => contextHistoryNodes(versions), [versions]);
+  const historyComplete = !history?.next_cursor;
+  const historyGraph = useMemo(
+    () =>
+      buildHistoryGraph(versionNodes, {
+        // Page-level ids, not row flags: the trunk has to be known before the
+        // page holding its head is loaded, or Load older would re-seat rows.
+        headCandidateIds: [
+          detail.latest_draft_version_id,
+          detail.current_published_version_id,
+          detail.visible_version_id,
+        ],
+        complete: historyComplete,
+      }),
+    [
+      detail.current_published_version_id,
+      detail.latest_draft_version_id,
+      detail.visible_version_id,
+      historyComplete,
+      versionNodes,
+    ],
   );
-  const orderedVersions = [...versions].sort(
-    (left, right) => left.version_no - right.version_no,
+  const loadDiff = useCallback(
+    (pair: ComparePair, signal: AbortSignal) =>
+      workspaceId
+        ? diffPageVersions(workspaceId, detail.id, pair.from, pair.to, {
+            signal,
+          })
+        : Promise.reject(new Error("No workspace")),
+    [detail.id, workspaceId],
   );
-  const newestVersion = orderedVersions.at(-1) ?? null;
-  const narrowDiffDialog = useMediaQuery("(max-width: 720px)");
+  const {
+    diff,
+    error: diffError,
+    loadingVersionId: diffLoadingVersionId,
+  } = useVersionPairDiff(
+    workspaceId ? comparePair : null,
+    loadDiff,
+    tShell("history.failedChanges", {
+      defaultValue: "Failed to load changes",
+    }),
+  );
+  const newestVersion = versionNodes.reduce<VersionEntry | null>(
+    (newest, node) =>
+      newest === null || node.versionNo > newest.version_no
+        ? node.entry
+        : newest,
+    null,
+  );
   const comparedVersion =
     versions.find((entry) => entry.version_id === comparePair?.to) ?? null;
-  const baseVersion = comparePair?.from
-    ? (versions.find((entry) => entry.version_id === comparePair.from) ?? null)
-    : null;
   const publishedVersion =
     versions.find(
       (entry) =>
@@ -4163,21 +3875,8 @@ export function ContextHistory({
   const visibleHeadVersionId = versions.find((entry) =>
     versionBooleanField(entry, "is_visible_head"),
   )?.version_id;
-  // Checked explicitly rather than through `comparePair?.from`: now that an
-  // empty baseline makes from_version_id nullable, `undefined === null` no
-  // longer proves comparePair is set, so the optional chain stops narrowing it.
-  const selectedDiff =
-    diff !== null &&
-    comparePair !== null &&
-    comparePair.from === diff.from_version_id &&
-    comparePair.to === diff.to_version_id
-      ? diff
-      : null;
   const crossesLineage = comparePairCrossesLineage(versions, comparePair);
   useEffect(() => {
-    setDiff(null);
-    setDiffError(null);
-    setDiffLoadingVersionId(null);
     setRestoreError(null);
     setRestoreMessage(null);
     setRestoreVersionId(null);
@@ -4185,60 +3884,18 @@ export function ContextHistory({
     setDiscardCandidate(null);
     setDiscardReason("");
   }, [detail.id]);
-
   useEffect(() => {
-    const controller = new AbortController();
-    setDiff(null);
-    setDiffError(null);
     setRestoreError(null);
-    setDiffLoadingVersionId(null);
-    if (!comparePair || !workspaceId) {
-      return () => controller.abort();
-    }
-    setDiffLoadingVersionId(comparePair.to);
-    void diffPageVersions(
-      workspaceId,
-      detail.id,
-      comparePair.from,
-      comparePair.to,
-      { signal: controller.signal },
-    )
-      .then((nextDiff) => {
-        if (!controller.signal.aborted) {
-          setDiff(nextDiff);
-        }
-      })
-      .catch((exc: unknown) => {
-        if (!controller.signal.aborted) {
-          setDiffError(
-            apiErrorMessage(
-              exc,
-              t("history.failedDiff", {
-                defaultValue: "Failed to load diff",
-              }),
-            ),
-          );
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setDiffLoadingVersionId(null);
-        }
-      });
-    return () => controller.abort();
-  }, [comparePair, detail.id, workspaceId, t, tShell]);
+  }, [comparePair]);
 
   function closeCompareVersion() {
-    setDiff(null);
-    setDiffError(null);
-    setDiffLoadingVersionId(null);
     setRestoreError(null);
     onCloseCompare();
   }
 
   async function restoreVersion(entry: VersionEntry) {
     // Restoring the version you are already on just stacks an identical one.
-    if (entry.is_visible_head || !workspaceId) {
+    if (entry.is_visible_head || !workspaceId || restoring) {
       return;
     }
     const ok = window.confirm(
@@ -4267,7 +3924,6 @@ export function ContextHistory({
           defaultValue: "v{{version}} was restored as draft v{{draft}}.",
         }),
       );
-      setDiff(null);
       onCloseCompare();
       await onVersionRestored();
     } catch (exc) {
@@ -4324,6 +3980,142 @@ export function ContextHistory({
     }
   }
 
+  function renderCard(row: HistoryGraphRow<VersionEntry>) {
+    const { entry } = row;
+    const historyStatus = entry.history_status ?? "state_inconsistent";
+    const presentation = contextHistoryPresentation(historyStatus);
+    const comparing = comparePair?.to === entry.version_id;
+    const isVisibleHead = entry.version_id === visibleHeadVersionId;
+    const isCurrent = versionBooleanField(entry, "is_current");
+    const isLatestDraft =
+      versionBooleanField(entry, "is_draft_head") ||
+      versionBooleanField(entry, "is_latest_draft");
+    const reviewStatus = versionStringField(entry, "review_status");
+    const priorRelation = row.node.parentRelation;
+    return (
+      <HistoryCard
+        actions={
+          <>
+            {canEdit &&
+            !comparing &&
+            !isCurrent &&
+            !isVisibleHead &&
+            !isLatestDraft &&
+            entry.reconciliation_available !== true ? (
+              <HistoryActionButton
+                accessibleLabel={t("history.restore", {
+                  defaultValue: "Restore this version",
+                })}
+                busy={restoreVersionId === entry.version_id}
+                disabled={restoring}
+                icon={RotateCcw}
+                label={
+                  restoreVersionId === entry.version_id
+                    ? t("history.restoring", { defaultValue: "Restoring" })
+                    : tShell("history.restoreShort", { defaultValue: "Restore" })
+                }
+                onClick={() => void restoreVersion(entry)}
+              />
+            ) : null}
+            {canEdit &&
+            entry.history_status === "alternative_draft" &&
+            entry.reconciliation_available === true ? (
+              <HistoryActionButton
+                accessibleLabel={t("reconciliation.open", {
+                  defaultValue: "Reconcile",
+                })}
+                icon={GitMerge}
+                label={t("reconciliation.open", { defaultValue: "Reconcile" })}
+                onClick={() => onReconcile(entry.version_id)}
+              />
+            ) : null}
+            {/* Offered whenever the parent is visible, even when it is on an
+                older page not loaded yet: opening it loads that page. */}
+            {priorRelation === "visible" && entry.prior_version_id ? (
+              <HistoryChangesButton
+                loading={diffLoadingVersionId === entry.version_id}
+                onToggle={() =>
+                  comparing ? closeCompareVersion() : onCompare(entry)
+                }
+                open={comparing}
+                row={row}
+              />
+            ) : null}
+            {/* Last in source order and pushed to the right edge, so the
+                buttons every row shares keep the same place whether or not
+                this row can be discarded, and focus order matches the eye. */}
+            {canEdit && entry.history_status === "alternative_draft" ? (
+              <HistoryActionButton
+                accessibleLabel={t("history.discard", {
+                  defaultValue: "Discard",
+                })}
+                busy={discardVersionId === entry.version_id}
+                icon={Trash2}
+                label={
+                  discardVersionId === entry.version_id
+                    ? t("history.discarding", { defaultValue: "Discarding" })
+                    : t("history.discard", { defaultValue: "Discard" })
+                }
+                onClick={() => {
+                  setDiscardCandidate(entry);
+                  setDiscardReason("");
+                }}
+                tone="danger"
+              />
+            ) : null}
+          </>
+        }
+        author={
+          <>
+            <AvatarWithTimestamp
+              actorType={entry.actor_type}
+              name={entry.actor_display_name ?? null}
+              timestamp={entry.created_at ?? null}
+            />
+            {reviewStatus ? (
+              <span className="context-history-review">
+                <span className="context-history-review-label">
+                  {t("history.reviewLabel", { defaultValue: "Review" })}
+                </span>
+                <StatusPill status={reviewStatus} compact />
+              </span>
+            ) : null}
+          </>
+        }
+        badges={
+          <>
+            {highlightedVersionId === entry.version_id ? (
+              <span className="history-reader-visible">
+                {t("history.readerVisibleVersion", {
+                  defaultValue: "Readers see this version",
+                })}
+              </span>
+            ) : null}
+            <HistoryLineDelta
+              added={entry.lines_added}
+              removed={entry.lines_removed}
+            />
+          </>
+        }
+        description={t(presentation.descriptionKey)}
+        notices={
+          priorRelation === "hidden" || priorRelation === "missing" ? (
+            <HistoryChangesUnavailable />
+          ) : null
+        }
+        row={row}
+        status={
+          <StatusPill
+            compact
+            label={t(presentation.labelKey)}
+            status={historyStatus}
+            tone={contextHistoryPillTone(historyStatus)}
+          />
+        }
+      />
+    );
+  }
+
   const olderHistoryControls = (
     <>
       {historyLoadError ? (
@@ -4364,7 +4156,7 @@ export function ContextHistory({
         <div className="history-help">
           {t("history.help", {
             defaultValue:
-              "Review versions newest first, compare changes, or restore an earlier version as a draft.",
+              "Review versions newest first. Changes shows what a version changed from the version it was based on; Compare two versions diffs any pair.",
           })}
         </div>
         <div className="history-compare-toolbar">
@@ -4379,7 +4171,9 @@ export function ContextHistory({
             }}
             type="button"
           >
-            {t("history.compareTwo", { defaultValue: "Compare two versions" })}
+            {tShell("history.compareTwo", {
+              defaultValue: "Compare two versions",
+            })}
           </button>
         </div>
         {compareStateError ? (
@@ -4391,303 +4185,28 @@ export function ContextHistory({
         {restoreError ? (
           <StatusBanner tone="warning">{restoreError}</StatusBanner>
         ) : null}
-        <ul
-          className="history-timeline history-graph-list"
-          data-accent="context"
-          style={
-            {
-              "--history-lane-pitch": `${laneMetrics.pitch}px`,
-              "--history-lane-dot": `${laneMetrics.dot}px`,
-              "--history-lane-gutter": `${laneMetrics.gutter}px`,
-            } as CSSProperties
-          }
-        >
-          {historyGraph.rows.map((graphRow) => {
-            const { entry } = graphRow;
-            const historyStatus = entry.history_status ?? "state_inconsistent";
-            const presentation = contextHistoryPresentation(historyStatus);
-            const comparing = comparePair?.to === entry.version_id;
-            const isVisibleHead = entry.version_id === visibleHeadVersionId;
-            const isCurrent = versionBooleanField(entry, "is_current");
-            const isLatestDraft =
-              versionBooleanField(entry, "is_draft_head") ||
-              versionBooleanField(entry, "is_latest_draft");
-            const reviewStatus = versionStringField(entry, "review_status");
-            const priorRelation = priorRelationForVersion(entry);
-            const canCompareWithParent =
-              priorRelation === "visible" && Boolean(entry.prior_version_id);
-            const laneDistance = Math.abs(
-              graphRow.lane - (graphRow.parentLane ?? graphRow.lane),
-            );
-            const graphWidth = laneMetrics.gutter;
-            const laneX = historyLaneCentre(graphRow.lane, laneMetrics);
-            const parentLaneX = historyLaneCentre(
-              graphRow.parentLane ?? graphRow.lane,
-              laneMetrics,
-            );
-            const mergeToLaneX =
-              graphRow.mergeToLane != null
-                ? historyLaneCentre(graphRow.mergeToLane, laneMetrics)
-                : null;
-            return (
-              <li
-                aria-current={isVisibleHead ? "page" : undefined}
-                className={`history-card history-graph-row ${highlightedVersionId === entry.version_id ? "history-card-highlighted" : ""}`}
-                data-context-version-id={entry.version_id}
-                data-history-lane={graphRow.lane}
-                data-parent-relation={graphRow.relation}
-                data-tone={presentation.tone}
-                key={entry.version_id}
-                style={
-                  {
-                    "--history-lane": graphRow.lane,
-                    "--history-lane-count": historyGraph.laneCount,
-                    // Inherited by this row's dot, its straight line, and its
-                    // branch curve -- everything that belongs to this lane.
-                    // Segments and the merge curve override it per element.
-                    "--history-lane-tint": historyLaneTint(graphRow.lane),
-                  } as CSSProperties
-                }
-                tabIndex={
-                  highlightedVersionId === entry.version_id ? -1 : undefined
-                }
-              >
-                <div aria-hidden="true" className="history-graph-visual">
-                  {graphRow.passingLanes.map((lane) => (
-                    <span
-                      className="history-graph-pass-line"
-                      key={`pass-${lane}`}
-                      style={
-                        {
-                          "--history-segment-lane": lane,
-                          "--history-lane-tint": historyLaneTint(lane),
-                        } as CSSProperties
-                      }
-                    />
-                  ))}
-                  {graphRow.incomingLanes.map((lane) => (
-                    <span
-                      className="history-graph-incoming-line"
-                      key={`incoming-${lane}`}
-                      style={
-                        {
-                          "--history-segment-lane": lane,
-                          "--history-lane-tint": historyLaneTint(lane),
-                        } as CSSProperties
-                      }
-                    />
-                  ))}
-                  {mergeToLaneX != null && graphRow.mergeToLane != null ? (
-                    // Same shape and direction as the branch curve below --
-                    // leave this row's node, descend into another lane -- so a
-                    // merge reads as the mirror of the branch that opened it.
-                    // It wears the colour of the lane it lands on, not this
-                    // row's, because the edge belongs to the branch it closes.
-                    <svg
-                      aria-hidden="true"
-                      className="history-graph-curve history-graph-merge-curve"
-                      preserveAspectRatio="none"
-                      style={
-                        {
-                          "--history-lane-tint": historyLaneTint(
-                            graphRow.mergeToLane,
-                          ),
-                        } as CSSProperties
-                      }
-                      viewBox={`0 0 ${graphWidth} 47`}
-                    >
-                      <path
-                        d={`M ${laneX} 0 C ${laneX} 18, ${mergeToLaneX} 27, ${mergeToLaneX} 47`}
-                      />
-                    </svg>
-                  ) : null}
-                  {graphRow.relation !== "root" ? (
-                    laneDistance > 0 ? (
-                      <svg
-                        aria-hidden="true"
-                        className="history-graph-curve"
-                        preserveAspectRatio="none"
-                        viewBox={`0 0 ${graphWidth} 47`}
-                      >
-                        <path
-                          d={`M ${laneX} 0 C ${laneX} 18, ${parentLaneX} 27, ${parentLaneX} 47`}
-                        />
-                      </svg>
-                    ) : (
-                      <span className="history-graph-line" />
-                    )
-                  ) : null}
-                  <span className="history-graph-node" />
-                </div>
-                <div className="history-graph-card-content">
-                  <div className="history-card-title">
-                    <span className="context-history-version">
-                      v{entry.version_no}
-                    </span>
-                    <StatusPill
-                      compact
-                      label={t(presentation.labelKey)}
-                      status={historyStatus}
-                      tone={contextHistoryPillTone(historyStatus)}
-                    />
-                    {highlightedVersionId === entry.version_id ? (
-                      <span className="history-reader-visible">
-                        {t("history.readerVisibleVersion", {
-                          defaultValue: "Readers see this version",
-                        })}
-                      </span>
-                    ) : null}
-                    {entry.lines_added != null || entry.lines_removed != null ? (
-                      <span className="context-history-delta">
-                        {entry.lines_added != null ? (
-                          <span className="delta-plus">
-                            +{entry.lines_added}
-                          </span>
-                        ) : null}
-                        {entry.lines_removed != null ? (
-                          <span className="delta-minus">
-                            -{entry.lines_removed}
-                          </span>
-                        ) : null}
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="context-history-card-body">
-                    <div className="context-history-card-summary">
-                      <div className="history-card-desc">
-                        {t(presentation.descriptionKey)}
-                      </div>
-                      <div className="history-parent-relation">
-                        <HistoryParentRelation row={graphRow} />
-                      </div>
-                      {priorRelation === "hidden" ||
-                      priorRelation === "missing" ? (
-                        <span className="history-compare-unavailable">
-                          {t("history.compareUnavailable", {
-                            defaultValue: "Comparison unavailable",
-                          })}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="history-card-author">
-                      <AvatarWithTimestamp
-                        actorType={entry.actor_type}
-                        name={entry.actor_display_name ?? null}
-                        timestamp={entry.created_at ?? null}
-                      />
-                      {reviewStatus ? (
-                        <span className="context-history-review">
-                          <span className="context-history-review-label">
-                            {t("history.reviewLabel", {
-                              defaultValue: "Review",
-                            })}
-                          </span>
-                          <StatusPill status={reviewStatus} compact />
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="history-card-actions">
-                    {canEdit && entry.history_status === "alternative_draft" ? (
-                      <button
-                        aria-busy={discardVersionId === entry.version_id}
-                        className="text-button compact-button danger-action"
-                        disabled={discardVersionId === entry.version_id}
-                        onClick={() => {
-                          setDiscardCandidate(entry);
-                          setDiscardReason("");
-                        }}
-                        type="button"
-                      >
-                        {discardVersionId === entry.version_id
-                          ? t("history.discarding", {
-                              defaultValue: "Discarding",
-                            })
-                          : t("history.discard", { defaultValue: "Discard" })}
-                      </button>
-                    ) : null}
-                    {canEdit &&
-                    !comparing &&
-                    !isCurrent &&
-                    !isVisibleHead &&
-                    !isLatestDraft &&
-                    entry.reconciliation_available !== true ? (
-                      <button
-                        aria-busy={restoreVersionId === entry.version_id}
-                        className="text-button compact-button"
-                        disabled={restoreVersionId === entry.version_id}
-                        onClick={() => void restoreVersion(entry)}
-                        type="button"
-                      >
-                        {restoreVersionId === entry.version_id
-                          ? t("history.restoring", {
-                              defaultValue: "Restoring",
-                            })
-                          : t("history.restore", {
-                              defaultValue: "Restore this version",
-                            })}
-                      </button>
-                    ) : null}
-                    {canEdit &&
-                    entry.history_status === "alternative_draft" &&
-                    entry.reconciliation_available === true ? (
-                      <button
-                        className="text-button compact-button"
-                        onClick={() => onReconcile(entry.version_id)}
-                        type="button"
-                      >
-                        {t("reconciliation.open", {
-                          defaultValue: "Reconcile",
-                        })}
-                      </button>
-                    ) : null}
-                    {canCompareWithParent ? (
-                      <button
-                        aria-label={
-                          comparing
-                            ? t("history.closeDiffForVersion", {
-                                defaultValue:
-                                  "Close comparison for v{{version}}",
-                                version: entry.version_no,
-                              })
-                            : graphRow.parent
-                              ? t("history.compareVersionPair", {
-                                  defaultValue:
-                                    "Compare v{{version}} with v{{previous}}",
-                                  previous: graphRow.parent.version_no,
-                                  version: entry.version_no,
-                                })
-                              : t("history.compareWithPrevious", {
-                                  defaultValue:
-                                    "Compare v{{version}} with the previous version",
-                                  version: entry.version_no,
-                                })
-                        }
-                        aria-busy={diffLoadingVersionId === entry.version_id}
-                        className="text-button compact-button context-history-compare-action"
-                        disabled={diffLoadingVersionId === entry.version_id}
-                        onClick={() =>
-                          comparing ? closeCompareVersion() : onCompare(entry)
-                        }
-                        type="button"
-                      >
-                        {diffLoadingVersionId === entry.version_id
-                          ? t("history.loadingDiff", {
-                              defaultValue: "Loading diff",
-                            })
-                          : comparing
-                            ? t("history.closeDiff", {
-                                defaultValue: "Close diff",
-                              })
-                            : t("history.compare", { defaultValue: "Compare" })}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+        <HistoryGraphList
+          accent="context"
+          graph={historyGraph}
+          renderCard={renderCard}
+          rowView={(row) => {
+            const highlighted = highlightedVersionId === row.entry.version_id;
+            return {
+              ariaCurrent:
+                row.entry.version_id === visibleHeadVersionId
+                  ? "page"
+                  : undefined,
+              className: highlighted ? "history-card-highlighted" : undefined,
+              dataAttributes: {
+                "data-context-version-id": row.entry.version_id,
+              },
+              tabIndex: highlighted ? -1 : undefined,
+              tone: contextHistoryPresentation(
+                row.entry.history_status ?? "state_inconsistent",
+              ).tone,
+            };
+          }}
+        />
         {olderHistoryControls}
       </div>
       {discardCandidate ? (
@@ -4748,126 +4267,18 @@ export function ContextHistory({
           </div>
         </Dialog>
       ) : null}
-      {comparedVersion ? (
-        <DiffViewerDialog
-          // Context normalizes every pair through normalizeComparePair, so it
-          // is the one screen that can honestly promise left-is-earlier.
-          baseEndpointLabel={tShell("diff.baseEarlier", {
-            defaultValue: "Base version (earlier)",
-          })}
-          comparedEndpointLabel={tShell("diff.comparedLater", {
-            defaultValue: "Compared version (later)",
-          })}
-          controls={
-            comparePair ? (
-              <div
-                aria-describedby="context-diff-selector-help"
-                className="context-diff-selectors"
-                role="group"
-                aria-label={t("history.versionSelectors", {
-                  defaultValue: "Versions to compare",
-                })}
-              >
-                <label>
-                  <span>
-                    {t("history.earlierEndpoint", {
-                      defaultValue: "Earlier version",
-                    })}
-                  </span>
-                  <select
-                    onChange={(event) => {
-                      if (event.target.value) {
-                        onComparePair({
-                          from: event.target.value,
-                          to: comparePair.to,
-                          origin: "history",
-                        });
-                      }
-                    }}
-                    value={comparePair.from ?? ""}
-                  >
-                    {comparePair.from === null ? (
-                      <option value="">
-                        {t("history.noEarlierEndpoint", {
-                          defaultValue: "Empty baseline",
-                        })}
-                      </option>
-                    ) : null}
-                    {orderedVersions.map((entry) => {
-                      const disabled = entry.version_id === comparePair.to;
-                      return (
-                        <option
-                          disabled={disabled}
-                          key={`from-${entry.version_id}`}
-                          value={entry.version_id}
-                        >
-                          {disabled
-                            ? t("history.versionDisabledLater", {
-                                version: entry.version_no,
-                                defaultValue:
-                                  "v{{version}} — unavailable: already selected as the later version",
-                              })
-                            : `v${entry.version_no}`}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </label>
-                <label>
-                  <span>
-                    {t("history.laterEndpoint", {
-                      defaultValue: "Later version",
-                    })}
-                  </span>
-                  <select
-                    onChange={(event) =>
-                      onComparePair({
-                        from: comparePair.from,
-                        to: event.target.value,
-                        origin: "history",
-                      })
-                    }
-                    value={comparePair.to}
-                  >
-                    {orderedVersions.map((entry) => {
-                      const disabled = entry.version_id === comparePair.from;
-                      return (
-                        <option
-                          disabled={disabled}
-                          key={`to-${entry.version_id}`}
-                          value={entry.version_id}
-                        >
-                          {disabled
-                            ? t("history.versionDisabledEarlier", {
-                                version: entry.version_no,
-                                defaultValue:
-                                  "v{{version}} — unavailable: already selected as the earlier version",
-                              })
-                            : `v${entry.version_no}`}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </label>
-                <p id="context-diff-selector-help">
-                  {t("history.selectorHelp", {
-                    defaultValue:
-                      "A version cannot be compared with itself. The pair is ordered oldest-first automatically.",
-                  })}
-                </p>
-              </div>
-            ) : null
-          }
-          defaultMode={narrowDiffDialog ? "unified" : "split"}
-          diff={selectedDiff}
+      {comparedVersion && comparePair ? (
+        <HistoryDiffDialog
+          diff={diff}
           error={diffError}
-          fullScreen={narrowDiffDialog}
           loading={diffLoadingVersionId === comparedVersion.version_id}
           onClose={closeCompareVersion}
+          onPairChange={(pair) => onComparePair({ ...pair, origin: "history" })}
+          pair={comparePair}
           publishedEndpoint={
-            publishedVersion?.version_id === comparePair?.from
+            publishedVersion?.version_id === comparePair.from
               ? "from"
-              : publishedVersion?.version_id === comparePair?.to
+              : publishedVersion?.version_id === comparePair.to
                 ? "to"
                 : null
           }
@@ -4880,19 +4291,7 @@ export function ContextHistory({
                 })
               : undefined
           }
-          showChangeMarkers
-          title={
-            baseVersion
-              ? tShell("diff.compareVersionsTitle", {
-                  from: baseVersion.version_no,
-                  to: comparedVersion.version_no,
-                  defaultValue: "Compare v{{from}} and v{{to}}",
-                })
-              : tShell("diff.compareFirstTitle", {
-                  to: comparedVersion.version_no,
-                  defaultValue: "Compare changes for v{{to}}",
-                })
-          }
+          versions={versionNodes}
           warning={
             crossesLineage
               ? t("history.crossLineageWarning", {
@@ -4905,30 +4304,6 @@ export function ContextHistory({
       ) : null}
     </>
   );
-}
-
-function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(() =>
-    typeof window !== "undefined" && typeof window.matchMedia === "function"
-      ? window.matchMedia(query).matches
-      : false,
-  );
-  useEffect(() => {
-    if (
-      typeof window === "undefined" ||
-      typeof window.matchMedia !== "function"
-    ) {
-      return;
-    }
-    const mediaQuery = window.matchMedia(query);
-    setMatches(mediaQuery.matches);
-    function handleChange(event: MediaQueryListEvent) {
-      setMatches(event.matches);
-    }
-    mediaQuery.addEventListener("change", handleChange);
-    return () => mediaQuery.removeEventListener("change", handleChange);
-  }, [query]);
-  return matches;
 }
 
 // Map deleted-source tombstones to the render-time marks MarkdownView swaps in

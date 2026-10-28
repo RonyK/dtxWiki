@@ -20,6 +20,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider } from "../../auth/AuthContext";
 import type { WorkspaceSummary } from "../../api/workspace";
 import { i18n } from "../../i18n";
+import { useLabsPreferences } from "../../hooks/useLabsPreferences";
 import { WorkspaceProvider } from "../../workspace/WorkspaceContext";
 import { Shell } from "../Shell";
 
@@ -37,14 +38,12 @@ const EXPECTED_SIDEBAR_NAV: Array<{
       ["Dashboard", "/dashboard"],
       ["Library", "/library"],
       ["Context", "/context"],
-      ["Agent", "/agent"],
       ["Chats", "/chats"],
     ],
   },
   {
     group: "Workflow",
     links: [
-      ["Ask", "/ask"],
       ["Review queue", "/review"],
       ["Lint queue", "/lint"],
       ["Activity", "/activity"],
@@ -72,7 +71,7 @@ describe("Shell", () => {
     ).toHaveAttribute("href", "#main-content");
     expect(screen.getByRole("main")).toHaveAttribute("id", "main-content");
     const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
-    await within(sidebar).findByText("Chats");
+    await screen.findByRole("button", { name: /Create/ });
 
     // Whole-sidebar assertion first — catches silent swaps between groups
     // or links being moved out of a group entirely.
@@ -89,7 +88,7 @@ describe("Shell", () => {
     expect(allSidebarLinks.map((link) => link.getAttribute("href"))).toEqual(
       expectedFlatLinks.map((item) => item.href),
     );
-    for (const label of ["Agent", "Ask"]) {
+    for (const label of ["Review queue"]) {
       const link = within(sidebar).getByText(label).closest("a");
       expect(link).not.toBeNull();
       expect(within(link as HTMLElement).getByText("Preview")).toHaveClass(
@@ -126,8 +125,8 @@ describe("Shell", () => {
       screen.getByRole("menuitem", { name: "New Context page" }),
     ).toHaveAttribute("href", "/context/new?from=context");
     expect(
-      screen.getByRole("menuitem", { name: "New Ask session" }),
-    ).toBeVisible();
+      screen.queryByRole("menuitem", { name: "New Ask session" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("menuitem", { name: "New folder" }),
     ).toHaveAttribute("href", "/context?newFolder=1");
@@ -138,13 +137,11 @@ describe("Shell", () => {
       "href",
       "/search",
     );
-    await userEvent.click(
-      screen.getByRole("menuitem", { name: "New Ask session" }),
-    );
-    expect(screen.getByTestId("location").textContent).toMatch(/^\/ask\?new=/);
+    expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
   });
 
   it("hides write-only Shell controls for viewer-role members", async () => {
+    window.localStorage.setItem("dtxwiki:labs:user-1", JSON.stringify({ agent: true, chats: true }));
     mockSession(true, [
       { ...workspace("workspace-1", "Default", "en"), role: "viewer" },
     ]);
@@ -159,6 +156,43 @@ describe("Shell", () => {
     expect(
       screen.queryByRole("button", { name: /Create/ }),
     ).not.toBeInTheDocument();
+  });
+
+  it("updates navigation and route commands when Labs menus are toggled independently", async () => {
+    const user = userEvent.setup();
+    mockSession(true);
+    renderShell(["/dashboard"], <LabsControlsProbe />);
+
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
+    expect((await within(sidebar).findByText("Chats")).closest("a")).toHaveAttribute("href", "/chats");
+    expect(within(sidebar).getByText("Chats").closest("a")?.querySelector(".nav-preview-badge")).toBeNull();
+    const agentToggle = await screen.findByRole("button", { name: "Toggle Agent menu" });
+    const askToggle = screen.getByRole("button", { name: "Toggle Ask menu" });
+    await waitFor(() => expect(agentToggle).toBeEnabled());
+    expect(within(sidebar).queryByText("Agent")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByText("Ask")).not.toBeInTheDocument();
+
+    await user.click(agentToggle);
+    expect(within(sidebar).getByText("Agent").closest("a")).toHaveAttribute("href", "/agent");
+    expect(within(sidebar).queryByText("Ask")).not.toBeInTheDocument();
+
+    await user.click(askToggle);
+    expect(within(sidebar).getByText("Ask").closest("a")).toHaveAttribute("href", "/ask");
+    const searchbox = screen.getByRole("combobox", { name: "Search workspace" });
+    await user.click(searchbox);
+    expect(screen.getByRole("option", { name: "AgentKnowledge" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "AskKnowledge" })).toBeInTheDocument();
+
+    await user.click(agentToggle);
+    await user.click(screen.getByRole("combobox", { name: "Search workspace" }));
+    expect(within(sidebar).queryByText("Agent")).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "AgentKnowledge" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "AskKnowledge" })).toBeInTheDocument();
+
+    await user.click(askToggle);
+    await user.click(screen.getByRole("combobox", { name: "Search workspace" }));
+    expect(within(sidebar).queryByText("Ask")).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "AskKnowledge" })).not.toBeInTheDocument();
   });
 
   it("collapses and restores the desktop sidebar", async () => {
@@ -631,7 +665,7 @@ describe("Shell", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("separates the Personal anchor without duplicating it and links to discovery", async () => {
+  it("lists every membership in one group with its badges and links to discovery", async () => {
     const user = userEvent.setup();
     mockSession(
       true,
@@ -648,10 +682,7 @@ describe("Shell", () => {
         },
       ],
       [],
-      {
-        default_workspace_id: "workspace-personal",
-        personal_workspace_id: "workspace-personal",
-      },
+      { default_workspace_id: "workspace-personal" },
     );
     renderShell();
 
@@ -659,23 +690,14 @@ describe("Shell", () => {
       await screen.findByRole("button", { name: /Switch workspace/ }),
     );
 
-    const personalGroup = screen.getByRole("group", {
-      name: "Personal workspace",
-    });
     const memberGroup = screen.getByRole("group", { name: "My workspaces" });
-    expect(within(personalGroup).getAllByRole("button")).toHaveLength(1);
+    expect(within(memberGroup).getAllByRole("button")).toHaveLength(2);
     expect(
-      within(personalGroup).getByRole("button", { name: /Personal Workspace/ }),
-    ).toHaveTextContent("Personal");
-    expect(
-      within(personalGroup).getByRole("button", { name: /Personal Workspace/ }),
+      within(memberGroup).getByRole("button", { name: /Personal Workspace/ }),
     ).toHaveTextContent("Default");
     expect(
-      within(personalGroup).getByRole("button", { name: /Personal Workspace/ }),
+      within(memberGroup).getByRole("button", { name: /Personal Workspace/ }),
     ).not.toHaveTextContent("Shared");
-    expect(
-      within(memberGroup).queryByText("Personal Workspace"),
-    ).not.toBeInTheDocument();
     expect(
       within(memberGroup).getByRole("button", { name: /Research Guild/ }),
     ).toHaveTextContent("Editor");
@@ -690,11 +712,10 @@ describe("Shell", () => {
     ).toHaveAttribute("href", "/workspaces/find");
   });
 
-  it("distinguishes another member's shared Personal workspace by its owner (WS-09)", async () => {
-    // Every Personal workspace defaults to the identical title "Personal
-    // Workspace" and the same "PW" initials. Without an owner name, two
-    // such rows in "My workspaces" are pixel-identical, risking a write to
-    // the wrong person's private space.
+  it("distinguishes same-titled workspaces by their owners (WS-09)", async () => {
+    // Two workspaces can share a title such as "Personal Workspace" and the
+    // same "PW" initials. Without an owner name, the rows in "My workspaces"
+    // are pixel-identical, risking a write to the wrong person's space.
     const user = userEvent.setup();
     mockSession(
       true,
@@ -702,6 +723,7 @@ describe("Shell", () => {
         {
           ...workspace("workspace-mine", "Personal Workspace", "en"),
           member_count: 1,
+          owner_display_name: "User",
         },
         {
           ...workspace("workspace-shared-personal", "Personal Workspace", "en"),
@@ -711,10 +733,7 @@ describe("Shell", () => {
         },
       ],
       [],
-      {
-        default_workspace_id: "workspace-mine",
-        personal_workspace_id: "workspace-mine",
-      },
+      { default_workspace_id: "workspace-mine" },
     );
     renderShell();
 
@@ -723,19 +742,13 @@ describe("Shell", () => {
     );
 
     const memberGroup = screen.getByRole("group", { name: "My workspaces" });
-    const sharedRow = within(memberGroup).getByRole("button", {
+    const [ownRow, sharedRow] = within(memberGroup).getAllByRole("button", {
       name: /Personal Workspace/,
     });
+    // The viewer's own starter workspace is an ordinary row: it carries the
+    // same owner label as any other workspace.
+    expect(ownRow).toHaveTextContent("Owned by User");
     expect(sharedRow).toHaveTextContent("Owned by Alex Rivera");
-    // The viewer's own Personal workspace lives in the separate "Personal
-    // workspace" group and must not grow an "Owned by" label pointing at
-    // itself.
-    const personalGroup = screen.getByRole("group", {
-      name: "Personal workspace",
-    });
-    expect(
-      within(personalGroup).getByRole("button", { name: /Personal Workspace/ }),
-    ).not.toHaveTextContent("Owned by");
   });
 
   it("groups pending join requests and exposes scoped row actions", async () => {
@@ -825,7 +838,6 @@ describe("Shell", () => {
       {
         current_workspace_id: null,
         default_workspace_id: null,
-        personal_workspace_id: null,
       },
     );
     const { container } = renderShell();
@@ -853,7 +865,6 @@ describe("Shell", () => {
     mockSession(true, [], [], {
       current_workspace_id: null,
       default_workspace_id: null,
-      personal_workspace_id: null,
     });
     renderShell();
 
@@ -886,7 +897,6 @@ describe("Shell", () => {
       mockSession(true, [], [], {
         current_workspace_id: null,
         default_workspace_id: null,
-        personal_workspace_id: null,
       });
       renderShell([pathname]);
 
@@ -896,26 +906,6 @@ describe("Shell", () => {
       ).not.toBeInTheDocument();
     },
   );
-
-  it("does not infer a Personal anchor when the list omits its identity", async () => {
-    const user = userEvent.setup();
-    mockSession(true, [workspace("workspace-1", "Personal Workspace", "en")]);
-    renderShell();
-
-    await user.click(
-      await screen.findByRole("button", { name: /Switch workspace/ }),
-    );
-
-    expect(
-      screen.queryByRole("group", { name: "Personal workspace" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("group", { name: "My workspaces" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText("Personal", { selector: ".workspace-mini-badge" }),
-    ).not.toBeInTheDocument();
-  });
 
   it("switches workspace to the dashboard without a full-page reload", async () => {
     const user = userEvent.setup();
@@ -1081,6 +1071,14 @@ describe("Shell", () => {
       "button",
       { name: "Create" },
     );
+    fireEvent.change(titleInput, { target: { value: "😀".repeat(129) } });
+    await user.click(createSubmit);
+    expect(createRequestCount).toBe(0);
+    expect(shouldProceed).not.toHaveBeenCalled();
+    expect(titleInput).toHaveValue("😀".repeat(129));
+    expect(titleInput).toBeInvalid();
+    expect((titleInput as HTMLInputElement).validationMessage).toBe("Use 128 characters or fewer.");
+    fireEvent.input(titleInput, { target: { value: "Committed workspace" } });
     await waitFor(() =>
       expect(
         window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
@@ -1626,9 +1624,14 @@ describe("Shell", () => {
     expect(searchbox).toHaveFocus();
 
     await user.type(searchbox, "ask");
-    await user.click(screen.getByRole("option", { name: "AskWorkflow" }));
+    expect(
+      screen.queryByRole("option", { name: "AskWorkflow" }),
+    ).not.toBeInTheDocument();
+    await user.clear(searchbox);
+    await user.type(searchbox, "review");
+    await user.click(screen.getByRole("option", { name: "Review queueWorkflow" }));
 
-    expect(screen.getByTestId("location")).toHaveTextContent("/ask");
+    expect(screen.getByTestId("location")).toHaveTextContent("/review");
   });
 
   it("activates highlighted topbar route commands with Enter", async () => {
@@ -1642,13 +1645,13 @@ describe("Shell", () => {
     const searchbox = screen.getByRole("combobox", {
       name: "Search workspace",
     });
-    await user.type(searchbox, "ask");
-    const askOption = screen.getByRole("option", { name: "AskWorkflow" });
-    expect(searchbox).toHaveAttribute("aria-activedescendant", askOption.id);
+    await user.type(searchbox, "review");
+    const reviewOption = screen.getByRole("option", { name: "Review queueWorkflow" });
+    expect(searchbox).toHaveAttribute("aria-activedescendant", reviewOption.id);
 
     await user.keyboard("{Enter}");
 
-    expect(screen.getByTestId("location")).toHaveTextContent("/ask");
+    expect(screen.getByTestId("location")).toHaveTextContent("/review");
   });
 
   it("leaves the command shortcut to editable surfaces", async () => {
@@ -1968,6 +1971,20 @@ function LocationProbe() {
   const location = useLocation();
   return (
     <div data-testid="location">{location.pathname + location.search}</div>
+  );
+}
+
+function LabsControlsProbe() {
+  const { preferences, setMenuVisible, ready } = useLabsPreferences();
+  return (
+    <>
+      <button disabled={!ready} onClick={() => setMenuVisible("agent", !preferences.agent)}>
+        Toggle Agent menu
+      </button>
+      <button disabled={!ready} onClick={() => setMenuVisible("ask", !preferences.ask)}>
+        Toggle Ask menu
+      </button>
+    </>
   );
 }
 

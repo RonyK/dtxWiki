@@ -397,12 +397,23 @@ def _bundled_subprocess(plugin: ConverterPlugin) -> ConverterPlugin:
         descriptor,
         distribution_digest=_bundled_distribution_digest(plugin),
     )
+    host_command = (
+        ("converter-host",)
+        if getattr(sys, "frozen", False)
+        else (
+            "-I",
+            "-s",
+            str(
+                (Path(__file__).resolve().parents[1] / "worker" / "converter_host.py")
+                .resolve(strict=True)
+            ),
+        )
+    )
     return ExternalProcessConverter(
         descriptor,
         command=(
             sys.executable,
-            "-m",
-            "backend.worker.converter_host",
+            *host_command,
             "--converter",
             descriptor.converter_id,
         ),
@@ -424,6 +435,7 @@ def _bundled_distribution_digest(plugin: ConverterPlugin) -> str:
         raise ConverterRegistryError("bundled converter source is unavailable")
     files = {
         Path(plugin_source).resolve(),
+        (backend_root / "app" / "process_tree.py").resolve(),
         (backend_root / "converters" / "builtin_text.py").resolve(),
         (backend_root / "converters" / "external_protocol.py").resolve(),
         (backend_root / "spi" / "conversion.py").resolve(),

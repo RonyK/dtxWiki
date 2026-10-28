@@ -10,6 +10,7 @@ from backend.schemas.common import (
     RetrievalMode,
     SearchScope,
 )
+from backend.schemas.input_policy import InputRequest
 from backend.spi.types import (
     RankedResult as RankedResult,
 )
@@ -37,10 +38,9 @@ class WorkspaceSummary(BaseModel):
     join_policy: str = "invite_only"
     member_count: int = 0
     role: str | None = None
-    # WS-09: every Personal workspace defaults to the same title
-    # ("Personal Workspace"), and since 5130b614 a viewer can be a member of
-    # someone else's shared Personal workspace, not only their own. Without
-    # an owner name, two such rows in the switcher are pixel-identical.
+    # Show the live owner independently of the workspace title: titles can
+    # repeat across owners, and display names can change after a title that
+    # includes one was created.
     owner_display_name: str | None = None
 
     model_config = ConfigDict(extra="forbid")
@@ -60,7 +60,6 @@ class WorkspaceListData(BaseModel):
     workspaces: list[WorkspaceSummary]
     current_workspace_id: UUID | None = None
     default_workspace_id: UUID | None = None
-    personal_workspace_id: UUID | None = None
     # D-01v2 (P10.3 T2, section 2.2): count of the actor's live
     # WorkspaceMembership rows that fall OUTSIDE a pat/oauth_jwt credential's
     # allowed set (no id/title -- the credential is not allowed to know
@@ -72,7 +71,7 @@ class WorkspaceListData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class WorkspaceCreateRequest(BaseModel):
+class WorkspaceCreateRequest(InputRequest):
     title: str = Field(min_length=1, max_length=128)
     slug: str | None = Field(default=None, min_length=1, max_length=80)
     goal: str | None = Field(default=None, min_length=1, max_length=512)
@@ -109,6 +108,10 @@ class TreeNodePayload(TreePathEntry):
     target_kind: str | None = None
     target_id: UUID | None = None
     target_meta: dict[str, str] = Field(default_factory=dict)
+    content_changed_at: datetime | None = None
+    review_status: Literal["pending", "changes_requested"] | None = None
+    review_requested_at: datetime | None = None
+    is_favorite: bool = False
     is_system_node: bool
     can_have_children: bool
     primary_placement: bool
@@ -493,13 +496,6 @@ class DisambiguationCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class DisambiguationPayload(BaseModel):
-    status: Literal["ambiguous"] = "ambiguous"
-    candidates: list[DisambiguationCandidate]
-
-    model_config = ConfigDict(extra="forbid")
-
-
 class SearchPayload(BaseModel):
     # Every field is always present in a search response, so the REST/MCP
     # contract declares them required (the frontend `operations.ts` SearchPayload
@@ -518,7 +514,6 @@ class SearchPayload(BaseModel):
     tried_lanes: list[str] = Field(default_factory=list)
     raw_query: str = ""
     normalized_query: str = ""
-    disambiguation: DisambiguationPayload | None = None
     # Actor-visible, low-confidence entity hints retained for a true miss.
     # These are advisory inputs for coverage-gap/Q-4 review, not search hits.
     nearest_candidates: list[dict[str, str]] = Field(default_factory=list)
@@ -620,9 +615,7 @@ class LibraryFormatCapabilityPayload(BaseModel):
     upload_limit_sources: dict[
         Literal["workspace", "family", "format", "instance"], int
     ]
-    upload_limiting_source: Literal[
-        "workspace", "family", "format", "instance"
-    ]
+    upload_limiting_source: Literal["workspace", "family", "format", "instance"]
 
     model_config = ConfigDict(extra="forbid")
 
@@ -650,9 +643,7 @@ class LibraryFormatFamilyCapabilityPayload(BaseModel):
     unavailable_count: int = Field(ge=0)
     max_upload_bytes: int | None = Field(default=None, gt=0)
     effective_max_upload_bytes: int = Field(gt=0)
-    upload_limiting_source: Literal[
-        "workspace", "family", "instance"
-    ]
+    upload_limiting_source: Literal["workspace", "family", "instance"]
     blockers: list[str]
 
     model_config = ConfigDict(extra="forbid")
@@ -817,7 +808,7 @@ class ListChangesResponse(RESTResponseBase):
     model_config = ConfigDict(extra="forbid")
 
 
-class SearchRequest(BaseModel):
+class SearchRequest(InputRequest):
     query: str = Field(default="", max_length=SEARCH_QUERY_MAX_LENGTH)
     scope: SearchScope = "all"
     filters: SearchFilters = Field(default_factory=SearchFilters)

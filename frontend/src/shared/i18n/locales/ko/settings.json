@@ -1,4 +1,10 @@
 {
+  "workspaceScoped": {
+    "back": "설정으로 돌아가기",
+    "loading": "워크스페이스 설정 불러오는 중",
+    "unavailable": "워크스페이스를 사용할 수 없거나 멤버가 아닙니다.",
+    "deleted": "이 워크스페이스가 삭제되었습니다. 이 창을 닫아도 됩니다."
+  },
   "breadcrumb": "설정",
   "loading": "설정 불러오는 중",
   "loadRetry": "다시 시도",
@@ -87,11 +93,15 @@
     "deployment": {
       "label": "배포",
       "description": "도메인·TLS·서비스 상태입니다. 변경은 dtxwiki CLI로 합니다."
+    },
+    "labs": {
+      "label": "실험실",
+      "description": "표시할 실험 중인 메뉴를 선택합니다."
     }
   },
   "crossLinks": {
-    "toUsers": "이 워크스페이스에 접근할 수 있는 사람들입니다. 서버 전체에서 사람을 찾거나 계정 복구를 시작하려면 다음으로 이동하세요:",
-    "toMembers": "서버 전체의 계정을 조회합니다. 이 워크스페이스의 구성원이나 역할을 바꾸려면 다음으로 이동하세요:"
+    "toUsers": "서버 전체 계정 검색·복구는",
+    "toMembers": "이 워크스페이스의 멤버·역할 관리는"
   },
   "workspaceMembers": {
     "title": "멤버",
@@ -107,7 +117,6 @@
     "loadingMore": "불러오는 중…",
     "loadMore": "더 보기",
     "joined": "{{date}} 가입",
-    "personalAnchor": "개인 워크스페이스 소유자",
     "you": "나",
     "roleFor": "{{name}}의 역할",
     "remove": "제거",
@@ -118,23 +127,30 @@
       "owner": "소유자"
     },
     "add": {
-      "email": "정확한 로그인 이메일",
-      "emailPlaceholder": "person@example.com",
       "role": "초기 역할",
       "action": "멤버 추가",
       "adding": "추가 중…",
-      "fromSearchTitle": "정확한 로그인 이메일 추가",
-      "fromSearchReady": "{{email}} 사용자를 워크스페이스 멤버로 추가합니다.",
-      "fromSearchHint": "위 입력란에 기존 활성 사용자의 전체 로그인 이메일을 입력하세요."
+      "fromSearchReady": "{{email}} 계정을 추가합니다.",
+      "fromSearchHint": "기존 계정을 추가하려면 정확한 계정 UUID 또는 native 로그인 이메일을 입력하세요.",
+      "title": "멤버 추가",
+      "selector": "사용자 ID 또는 계정 이메일",
+      "selectorPlaceholder": "사용자 ID 또는 name@example.com",
+      "identityHint": "계정에 등록된 이메일을 정확히 입력하세요. 이메일이 없는 계정은 사용자 ID로 추가합니다.",
+      "description": "이 워크스페이스를 함께 사용할 기존 계정을 추가합니다.",
+      "methods": "멤버 추가 방법",
+      "directTab": "직접 입력",
+      "close": "멤버 추가 닫기",
+      "workspaceScope": "추가하면 워크스페이스 전체에 접근할 수 있습니다. 처음 공유할 때는 한 번 더 확인합니다."
     },
     "filters": {
-      "query": "멤버 찾기 또는 추가",
-      "queryPlaceholder": "이름 또는 정확한 로그인 이메일",
-      "queryHelp": "현재 멤버 목록을 검색합니다. 전체 로그인 이메일을 입력하면 같은 입력란에서 멤버를 추가할 수 있습니다.",
+      "query": "현재 멤버 검색",
+      "queryPlaceholder": "이름 또는 계정 이메일",
+      "queryHelp": "이미 이 워크스페이스에 접근할 수 있는 멤버를 검색합니다.",
       "role": "역할 필터",
       "search": "검색",
       "active": "표시 중: {{query}} · {{role}}",
-      "anyQuery": "모든 멤버"
+      "anyQuery": "모든 멤버",
+      "title": "현재 멤버"
     },
     "empty": {
       "title": "일치하는 멤버가 없습니다",
@@ -181,7 +197,6 @@
       "firstShareWarning": "{{email}} 사용자를 추가하면 {{workspace}} 전체가 해당 멤버에게 공유됩니다.",
       "firstShareScope": "페이지 단위 공유가 아닙니다. 선택한 역할이 워크스페이스 전체에 적용됩니다.",
       "collaborativeRecommendation": "작업 일부만 공유하려면 새 협업용 워크스페이스를 만들고 해당 작업을 이동하거나 복사하세요.",
-      "renamePersonalRecommendation": "권장: 공유 목적이 분명하도록 개인 워크스페이스의 이름을 먼저 바꾸세요.",
       "renameRecommendation": "권장: 공유 목적이 분명한 워크스페이스 이름을 사용하세요.",
       "ownerTitle": "소유자 권한을 부여할까요?",
       "ownerWarning": "{{name}} 사용자가 멤버, 공유, 정책, 다른 소유자를 관리할 수 있게 됩니다.",
@@ -197,7 +212,25 @@
       "confirmSelfDemote": "소유자 권한 포기",
       "confirmOwner": "소유자 권한 부여",
       "confirmRemove": "멤버 제거"
-    }
+    },
+    "directory": {
+      "title": "회사 디렉터리",
+      "hint": "회사 SSO 연동과 디렉터리 검색이 허용된 경우에만 표시됩니다.",
+      "loading": "회사 계정 검색 중…",
+      "add": "{{name}} 추가",
+      "refine": "일치하는 계정이 더 있습니다. 검색 범위를 좁혀 주세요.",
+      "query": "같은 회사에서 이름 검색",
+      "queryPlaceholder": "2자 이상 입력",
+      "search": "디렉터리 검색",
+      "empty": "검색어와 일치하는 회사 계정이 없습니다.",
+      "verified": "회사 계정 확인됨",
+      "resultCount": "검색 결과 {{count}}명",
+      "distinguish": "동명이인은 사용자 ID로 구분하세요.",
+      "addAction": "추가",
+      "verifiedShort": "회사 계정 확인됨"
+    },
+    "userIdFor": "{{name}}의 전체 사용자 ID",
+    "removeFor": "{{name}} 멤버 제거"
   },
   "workspaceAccess": {
     "title": "검색 노출, 가입 및 웹 게시",
@@ -287,8 +320,7 @@
     "loading": "배포 상태 불러오는 중",
     "loadError": "배포 상태를 불러오지 못했습니다",
     "subtitle": "읽기 전용입니다. 값을 바꾸려면 서버 터미널에서 아래 명령을 실행하세요 — 앱은 /etc 를 직접 수정할 수 없습니다.",
-    "systemScopeNote": "이 설정은 dtxWiki 서버(인스턴스 전체, 모든 워크스페이스 공통) 설정으로, 이 워크스페이스에만 적용되는 것이 아닙니다. 서버 관리자만 볼 수 있습니다.",
-    "updateAvailable": "dtxWiki {{latest}} 사용 가능 (현재 {{current}}). 서버에서 'dtxwiki update' 를 실행해 업그레이드하세요.",
+    "systemScopeNote": "서버 관리자 전용 · 모든 워크스페이스에 공통으로 적용되는 인스턴스 설정입니다.",
     "tlsNotReady": "HTTPS가 설정되지 않았습니다. 공개 https:// URL을 지정하고 리버스 프록시가 인증서를 발급하도록 하세요 (DNS와 80/443 포트가 이 서버에 도달해야 합니다).",
     "notConfigured": "설정 안 됨",
     "commandsTitle": "설정 변경",
@@ -390,7 +422,8 @@
       "db": "데이터베이스",
       "app_version": "앱 버전",
       "mcp": "MCP 서비스",
-      "oauth_jwk": "OAuth 서명 키"
+      "oauth_jwk": "OAuth 서명 키",
+      "worker": "백그라운드 처리"
     },
     "healthStatus": {
       "ok": "정상",
@@ -415,6 +448,84 @@
       "session_invalidation": "전체 로그아웃됨",
       "token_invalidation": "전체 클라이언트 재인증",
       "data_migration": "데이터 먼저 이전"
+    },
+    "update": {
+      "title": "버전 및 업데이트",
+      "commandNotice": "명령은 서버 터미널에서 실행하세요.",
+      "currentVersion": "현재 버전",
+      "latestVersion": "최신 배포 버전",
+      "previousLatest": "이전에 확인한 배포 버전",
+      "unknownVersion": "알 수 없음",
+      "checkedAt": "마지막 확인 성공: {{time}}",
+      "neverChecked": "아직 확인하지 않음",
+      "source": "조회 출처: {{source}}",
+      "configuredIndex": "설정된 패키지 인덱스",
+      "pypi": "PyPI",
+      "checkNow": "지금 확인",
+      "checkAgain": "재확인",
+      "checking": "확인 중…",
+      "releaseNotes": "GitHub 릴리스 노트",
+      "status": {
+        "checking": "확인 중",
+        "disabled": "조회 비활성화",
+        "failed": "조회 실패",
+        "stale": "확인 결과 만료",
+        "available": "새 버전 출시",
+        "current": "최신 버전",
+        "checked": "확인 완료",
+        "notChecked": "확인 전"
+      },
+      "message": {
+        "checking": "패키지 인덱스에서 새 배포 버전을 확인하고 있습니다.",
+        "disabled": "서버 설정에서 버전 조회를 비활성화했습니다. 아래에서 설치 방법별 업데이트 안내를 볼 수 있습니다.",
+        "failed": "최신 배포 버전을 확인하지 못했습니다. 이전 결과는 참고용으로 표시합니다. 다시 확인하거나 문서를 참고하세요.",
+        "stale": "이전 확인 결과가 만료되었습니다. 설치할 버전을 선택하기 전에 다시 확인하세요.",
+        "available": "새 배포 버전이 있습니다. 업데이트 전에 릴리스 노트와 설치 방법에 맞는 안내를 확인하세요.",
+        "current": "현재 실행 중인 버전이 패키지 인덱스의 최신 배포 버전과 같습니다.",
+        "checked": "패키지 인덱스를 확인했습니다. 현재 인스턴스보다 새로운 배포 버전이 확인되지 않았습니다.",
+        "notChecked": "패키지 인덱스를 아직 확인하지 않았습니다."
+      },
+      "methodLabel": "설치 방법",
+      "methodHint": "사용한 설치 방법을 선택하면 업데이트 순서를 안내합니다.",
+      "methodPlaceholder": "설치 방법 선택",
+      "methods": {
+        "uv": "uv tool",
+        "pipx": "pipx",
+        "pip": "pip (가상 환경)",
+        "npx": "npx (바로 실행)",
+        "npm": "npm (전역 설치)",
+        "docker": "Docker",
+        "service": "서버 서비스 / wheel (systemd)"
+      },
+      "guideLabel": "{{method}} 업데이트 안내",
+      "steps": {
+        "prepare": "준비",
+        "update": "업데이트",
+        "launch": "최신 버전 실행",
+        "restart": "재시작 및 확인",
+        "verify": "버전 확인"
+      },
+      "prepareDescription": "릴리스 노트와 문서의 사전 조건을 먼저 확인하세요. 실행 중인 서버와 별도로 관리하는 worker를 모두 중지한 뒤 데이터베이스, 파일, 설정을 백업하세요.",
+      "npxPrepareDescription": "npm에서 업데이트할 버전을 선택하세요. 서버를 실행하기 전에 npx @dtxsuite/dtxwiki@<version> inputs audit처럼 해당 버전으로 릴리스에 필요한 검사를 실행하세요. 필요한 복구·마이그레이션 절차도 문서에 따라 완료하세요.",
+      "backupDocs": "백업 및 업데이트 사전 조건",
+      "instructions": {
+        "uv": "처음 uv tool을 설치한 환경에서 실행하세요. 기존 Python 인터프리터 옵션과 패키지 인덱스·인증 설정을 유지하세요.",
+        "pipx": "기존 pipx 환경과 Python 인터프리터 옵션을 사용하세요. 패키지 인덱스·인증 설정도 유지하세요.",
+        "pip": "기존 가상 환경을 활성화한 뒤 해당 환경의 Python으로 실행하세요. 기존 패키지 인덱스·인증 설정을 유지하세요.",
+        "npx": "아래 @latest를 1단계 검사에 사용한 npm 버전으로 바꾸세요. 검사를 통과한 뒤 평소 사용하던 서버 옵션과 환경 변수를 적용해 실행하세요.",
+        "npm": "처음 설치할 때와 같은 사용자 계정과 npm 환경에서 전역 패키지를 업데이트하세요.",
+        "docker": "사용 중인 Compose 설정에 맞춰 문서의 백업, 버전을 고정한 이미지 빌드, 마이그레이션, 컨테이너 재생성 절차를 따르세요.",
+        "service": "문서의 검증된 wheel 준비, 서비스 중지, 업데이트, 마이그레이션, 서비스 시작 절차를 따르세요."
+      },
+      "commandLabel": "터미널 명령",
+      "noPinnedCommand": "새로운 Python 배포 버전을 아직 확인하지 못했습니다. 지금 확인하거나 문서에서 다운그레이드를 피할 버전을 선택하세요.",
+      "uvPythonNote": "Python 3.12 이상이 필요합니다. 특정 인터프리터를 사용하려는 경우 uv 명령에 --python <version>을 추가할 수 있습니다.",
+      "npmVersionNote": "@latest는 npm 레지스트리를 사용합니다. 위에 표시한 Python 패키지 인덱스의 버전과 다를 수 있습니다.",
+      "methodDocs": "{{method}} 상세 업데이트 문서",
+      "restartDescription": "문서의 마이그레이션과 릴리스 확인 절차를 마친 뒤 기존 명령, 환경, 옵션으로 재시작하세요. 이 페이지를 새로고침해 실제 실행 버전을 확인하세요.",
+      "verifyDescription": "2단계 명령이 서버를 실행합니다. 서버를 다시 실행하지 말고 이 페이지를 새로고침해 실제 실행 버전을 확인하세요.",
+      "description": "새 배포를 확인하고 설치 방법에 맞는 업데이트 절차를 살펴보세요.",
+      "guideTitle": "업데이트 안내"
     }
   },
   "setupScreen": {
@@ -423,21 +534,21 @@
     "loadError": "서버 설치 정보를 불러오지 못했습니다",
     "eyebrow": "워크스페이스 준비하기",
     "title": "서버 설치",
-    "description": "AI가 답변에 사용할 소스, 페이지, 규칙을 추가하세요.",
+    "description": "소스 자료를 추가하고 워크스페이스 지식을 정리하세요.",
     "status": {
-      "ready": "3개 중 3개 · 준비 완료",
-      "pending": "3개 중 0개 · 대기",
-      "partial": "3개 중 {{count}}개 · 일부 완료"
+      "ready": "{{total}}개 중 {{total}}개 · 준비 완료",
+      "pending": "{{total}}개 중 0개 · 대기",
+      "partial": "{{total}}개 중 {{count}}개 · 일부 완료"
     },
     "itemCount_one": "{{count}}개",
     "itemCount_other": "{{count}}개",
     "itemCountAtLeast": "최소 {{count}}개 로드됨",
     "callout": {
-      "allSetTitle": "모두 준비됐습니다. 질문해 보세요.",
-      "allSetBody": "이 워크스페이스에는 소스, 지식 페이지, AI 규칙이 있습니다.",
-      "openAsk": "Ask 열기",
+      "allSetTitle": "워크스페이스가 준비됐습니다.",
+      "allSetBody": "이 워크스페이스에는 소스와 지식 페이지가 있습니다.",
+      "openContext": "컨텍스트 열기",
       "emptyTitle": "라이브러리가 비어 있습니다. 소스를 추가해 시작하세요.",
-      "emptyBody": "PDF나 페이지 하나만 있어도 첫 질문을 할 수 있습니다.",
+      "emptyBody": "PDF나 페이지를 추가해 워크스페이스 지식을 쌓아 보세요.",
       "addFirstSource": "첫 소스 추가",
       "partialTitle": "계속 진행하세요.",
       "partialFallback": "남은 설정 항목을 확인하세요."
@@ -979,7 +1090,7 @@
     "serverAdminOnlyNotice": "사용자 검색과 계정 복구는 서버 관리자만 볼 수 있습니다.",
     "eyebrow": "서버 관리",
     "title": "계정 복구",
-    "description": "인스턴스 사용자를 찾아 일회용 복구 절차를 시작합니다. 관리자는 사용자의 새 비밀번호를 정하거나 볼 수 없습니다.",
+    "description": "계정을 찾아 SSO 계정을 다시 연결하거나 이메일 로그인 비밀번호 복구를 도와주세요.",
     "serverAdminOnly": "서버 관리자 전용",
     "boundary": "재설정이 완료되면 사용자의 모든 브라우저 세션이 종료됩니다. PAT/MCP 토큰은 별도 자격 증명이며 아래에서 선택한 경우에만 폐기됩니다.",
     "unlock": {
@@ -991,10 +1102,10 @@
       "unlocked": "{{date}}까지 보호된 사용자 검색을 사용할 수 있습니다.",
       "shortTime": "짧은 확인 시간이 끝날 때",
       "error": "비밀번호를 확인하지 못했습니다. 다시 시도하세요.",
-      "expired": "최근 본인 확인이 만료되었습니다. 사용자를 다시 검색하려면 비밀번호를 입력하세요."
+      "expired": "최근 본인 인증이 만료되었습니다. 사용자를 다시 검색하려면 본인 인증을 다시 진행하세요."
     },
     "searchLabel": "사용자 검색",
-    "searchHint": "이메일, 표시 이름 또는 워크스페이스 이름",
+    "searchHint": "이름·계정 이메일·사용자 ID·워크스페이스",
     "searchPlaceholder": "예: alex@example.com 또는 연구",
     "searchAction": "검색",
     "searching": "검색 중…",
@@ -1030,7 +1141,7 @@
     "mailUnavailableActionHint": "서버의 메일 복구 준비가 완료되지 않아 이메일 전달을 사용할 수 없습니다.",
     "capabilityLoading": "서버 복구 가능 여부를 확인하는 중…",
     "capabilityError": "복구 가능 여부를 확인하지 못했습니다. 재설정을 발급하기 전에 페이지를 새로고침하세요.",
-    "adminRecoveryUnavailable": "공식 HTTPS 공개 URL이 준비될 때까지 관리자 지원 복구를 사용할 수 없습니다.",
+    "adminRecoveryUnavailable": "이메일 로그인 비밀번호 복구 링크에는 공식 HTTPS 공개 URL이 필요합니다. SSO 계정은 계속 다시 연결할 수 있습니다.",
     "emailQueued": "{{email}} 주소로 보낼 복구 메일을 대기열에 추가했습니다.",
     "linkMissing": "서버가 복구 링크를 반환하지 않았습니다. 새 재설정을 발급하세요.",
     "linkDismissed": "일회용 링크를 숨겼습니다. 다른 링크가 필요하면 새 재설정을 발급하세요.",
@@ -1075,6 +1186,69 @@
       "reauthentication": "현재 비밀번호가 올바르지 않습니다. 다시 시도하세요.",
       "unavailable": "이 전달 방법을 사용할 수 없습니다. 창을 닫고 사용 가능한 복구 작업을 명시적으로 선택하세요.",
       "generic": "비밀번호 재설정을 발급하지 못했습니다. 다시 시도하세요."
+    },
+    "rebind": {
+      "action": "SSO identity 다시 연결",
+      "title": "선택한 계정의 SSO identity 다시 연결",
+      "warning": "먼저 조직의 별도 신뢰할 수 있는 절차로 본인과 새 identity를 확인하세요. 선택한 SSO identity를 변경하고 기존 세션을 무효화합니다. 임시 로그인 링크를 만들거나 native 이메일 로그인을 변경하지 않습니다.",
+      "noEmail": "등록된 계정 이메일이 없는 SSO 계정입니다. 이메일 복구 대신 identity 재연결로 복구하세요.",
+      "currentIdentity": "현재 SSO identity",
+      "provider": "새 제공자 slug",
+      "issuer": "새 issuer",
+      "subject": "새 subject",
+      "reason": "변경 이유와 별도 본인 확인 근거",
+      "confirmUser": "확인하려면 대상 계정 UUID를 입력하세요",
+      "complete": "선택한 SSO identity를 다시 연결하고 기존 세션을 무효화했습니다.",
+      "failed": "SSO identity를 다시 연결하지 못했습니다. 관리자 본인 확인과 identity 정보를 확인하세요."
+    },
+    "optionsSummary": "복구 방법과 세션에 미치는 영향",
+    "conflicts": {
+      "title": "이메일 충돌로 대기 중인 SSO 가입",
+      "description": "제공자가 확인한 주소를 이메일 확인을 마치지 않은 기존 계정이 사용하고 있어 계정을 만들지 않았습니다. 승인하면 그 계정을 비활성화하고 주소를 해제합니다. 데이터는 보존됩니다. 서버 관리자 계정은 목록에 나오지 않습니다.",
+      "load": "대기 중인 요청 보기",
+      "empty": "대기 중인 요청이 없습니다.",
+      "requester": "{{provider}}로 요청함 (subject {{subject}})",
+      "holder": "현재 사용 계정: {{name}} ({{status}})",
+      "reason": "사유와 확인 방법",
+      "approve": "주소 해제",
+      "reject": "기존 계정 유지",
+      "failed": "요청을 불러오거나 처리하지 못했습니다. 다시 시도하세요."
+    },
+    "audit": {
+      "title": "서버 감사 기록",
+      "description": "계정·자격 증명·서버 관리자 권한 변경과 운영자 CLI 작업 기록입니다. 서버 관리자만 볼 수 있으며, 조회한 사실도 기록됩니다.",
+      "actionPrefix": "작업 접두어",
+      "targetUserId": "대상 사용자 UUID",
+      "load": "기록 보기",
+      "more": "더 보기",
+      "empty": "조건에 맞는 기록이 없습니다.",
+      "actor": "실행: {{actor}}",
+      "failed": "감사 기록을 불러오지 못했습니다. 다시 시도하세요."
+    },
+    "accountCard": {
+      "details": "계정 정보 보기",
+      "actions": "{{name}} 계정 작업",
+      "noEmail": "등록된 계정 이메일 없음",
+      "shortId": "ID",
+      "copyId": "{{name}} 전체 사용자 ID 복사",
+      "copied": "사용자 ID를 복사했습니다.",
+      "copyUnavailable": "복사할 수 없습니다. 계정 정보에서 전체 ID를 복사하세요.",
+      "sso": "SSO",
+      "noSso": "연결 없음",
+      "workspaces": "워크스페이스"
+    },
+    "accountDetails": {
+      "title": "계정 정보",
+      "close": "계정 정보 닫기",
+      "displayName": "표시 이름",
+      "userId": "사용자 ID",
+      "email": "계정 이메일",
+      "emailVerifiedAt": "이메일 검증 시각",
+      "status": "상태",
+      "provider": "제공자",
+      "issuer": "발급자",
+      "subject": "주체 식별자",
+      "identityId": "연결 ID"
     }
   },
   "jobs": {
@@ -1131,11 +1305,11 @@
     "refresh": "새로고침",
     "loading": "첨부 파일을 불러오는 중…",
     "loadError": "첨부 파일을 불러오지 못했습니다.",
-    "serverAdminFallbackNotice": "이 워크스페이스의 구성원이 아니므로 미사용 업로드만 미리보기와 삭제 없이 표시됩니다. 첨부 파일을 관리하려면 워크스페이스에 참여하세요.",
-    "editorOnlyNotice": "첨부 파일 관리는 편집자와 소유자의 권한입니다. 읽을 수 있는 페이지에서는 그 페이지의 파일을 그대로 볼 수 있습니다.",
+    "serverAdminFallbackNotice": "첨부 파일을 보려면 이 워크스페이스에 가입하세요.",
+    "editorOnlyNotice": "이 워크스페이스의 구성원만 첨부 파일을 조회할 수 있습니다.",
     "retentionNotice": "미사용 업로드는 서버의 보존 기간이 지나면 자동으로 회수됩니다. 여기서 삭제하면 그 시점을 앞당길 뿐입니다.",
-    "allScopeNotice": "다른 사람이 저장하지 않은 초안에 올린 파일을 제외한 모든 첨부 파일입니다 — 열린 초안은 저장될 때까지 작성자에게만 보입니다.",
-    "mineScopeNotice": "내가 업로드한 첨부 파일입니다. 워크스페이스 소유자는 모든 구성원의 파일을 볼 수 있습니다.",
+    "allScopeNotice": "조회할 수 있는 페이지의 첨부 파일만 표시합니다. 다른 사용자의 저장하지 않은 초안에 있는 비공개 업로드는 제외합니다.",
+    "mineScopeNotice": "조회할 수 있는 페이지에 직접 업로드한 파일입니다. 소유자도 조회 가능한 페이지의 파일만 확인할 수 있습니다.",
     "fileMeta": "{{mediaType}} 파일 · {{size}}",
     "mineBadge": "나",
     "state": {
@@ -1208,7 +1382,72 @@
     },
     "expandPreview": "{{filename}} 크게 보기",
     "previewViewerTitle": "{{filename}} 미리보기",
-    "closePreview": "미리보기 닫기"
+    "closePreview": "미리보기 닫기",
+    "bulk": {
+      "selectAll_other": "전체 선택 · 현재 불러온 {{count}}개",
+      "selected_other": "{{count}}개 선택",
+      "delete": "선택 삭제",
+      "confirm_other": "선택한 첨부 파일 {{count}}개를 삭제할까요?",
+      "permanent": "파일이 영구 삭제되며 되돌릴 수 없습니다.",
+      "confirmAction": "삭제 확인",
+      "progress": "삭제 중… {{done}}/{{total}}개 완료",
+      "result": "{{deleted}}개 삭제, {{failed}}개 실패",
+      "selectFile": "{{filename}} 선택",
+      "failure": {
+        "permission_other": "{{count}}개 권한 상실",
+        "changed_other": "{{count}}개 변경됨",
+        "inUse_other": "{{count}}개 사용 중",
+        "delete_other": "{{count}}개 요청 실패",
+        "permission_one": "{{count}}개 권한 상실",
+        "changed_one": "{{count}}개 변경됨",
+        "inUse_one": "{{count}}개 사용 중",
+        "delete_one": "{{count}}개 요청 실패"
+      },
+      "selectAll_one": "전체 선택 · 현재 불러온 {{count}}개",
+      "selected_one": "{{count}}개 선택",
+      "confirm_one": "선택한 첨부 파일 {{count}}개를 삭제할까요?"
+    },
+    "policy": {
+      "title": "미사용 파일 자동 회수",
+      "edit": "설정 변경",
+      "unknown": "미사용 파일 보존 기간을 확인하지 못했습니다. 필요 없는 파일은 지금 삭제할 수 있습니다.",
+      "days_one": "{{count}}일",
+      "days_other": "{{count}}일",
+      "hours_one": "{{count}}시간",
+      "hours_other": "{{count}}시간",
+      "daysHours": "{{days}} {{hours}}",
+      "disabledTitle": "미사용 파일 자동 회수 꺼짐",
+      "retentionTitle": "미사용 파일 보존 기간: {{duration}}",
+      "disabledBody": "이 워크스페이스는 미사용 파일을 자동으로 회수하지 않습니다. 필요 없는 파일은 지금 삭제할 수 있습니다.",
+      "retentionBody": "업로드 후 {{duration}}이 지난 미사용 파일은 정기 정리 시 자동으로 회수됩니다. 지금 삭제할 수도 있습니다.",
+      "source": {
+        "server": "서버 기본값 사용 중",
+        "workspace": "워크스페이스 설정"
+      },
+      "reload": "정책 다시 조회",
+      "enabled": "자동 회수 사용",
+      "period": "보존 기간",
+      "unit": "단위",
+      "dayUnit": "일",
+      "hourUnit": "시간",
+      "useDefault": "서버 기본값 사용",
+      "nextSweep": "저장 후 새로 시작하는 정리부터 적용됩니다. 진행 중인 정리는 시작 시 정책으로 끝날 수 있습니다.",
+      "cancel": "정책 변경 취소",
+      "save": "정책 저장",
+      "impact": "자동 회수를 켜거나 보존 기간을 줄이면 기존에 업로드한 미사용 파일도 다음 정리 대상이 될 수 있습니다. 저장할까요?",
+      "confirm": "저장 및 적용",
+      "conflict": "정책이 변경되었습니다. 최신 정책을 확인한 뒤 다시 저장하세요.",
+      "saveError": "정책을 저장하지 못했습니다. 입력값은 유지됩니다.",
+      "invalid": "1~{{max}}시간 범위의 정수 일수 또는 시간을 입력하세요."
+    },
+    "scope": {
+      "label": "첨부 파일 조회 범위",
+      "workspace": "현재 워크스페이스",
+      "server": "전체 워크스페이스"
+    },
+    "workspaceName": "워크스페이스: {{name}}",
+    "adminNotice": "전체 워크스페이스의 첨부 파일입니다. 미사용 파일을 선택해 정리할 수 있습니다.",
+    "serverDescription": "전체 워크스페이스의 페이지에 업로드된 첨부 파일입니다."
   },
   "deployment": {
     "serverAdminOnlyNotice": "이 설정은 dtxWiki 서버(시스템) 설정으로 서버 관리자만 볼 수 있습니다. 서버 관리자에게 요청하거나 `dtxwiki admin grant` 로 권한을 부여하세요.",
@@ -1231,8 +1470,8 @@
   "mcpClients": {
     "filterLabel": "MCP 클라이언트 상태",
     "filter": {
-      "active": "활성",
-      "disabled": "비활성",
+      "active": "사용 가능",
+      "disabled": "그 외 상태",
       "all": "전체"
     },
     "loading": "MCP 클라이언트 불러오는 중…",
@@ -1334,7 +1573,8 @@
     "reconciliationReminderMax": "조정 브랜치 알림 대기 시간은 30일 이하여야 합니다.",
     "reconciliationAttentionMin": "조정 브랜치 주의 기간은 최소 1일이어야 합니다.",
     "reconciliationAttentionMax": "조정 브랜치 주의 기간은 365일 이하여야 합니다.",
-    "webRulePattern": "웹 URL 규칙 {{index}}번에는 패턴이 필요합니다."
+    "webRulePattern": "웹 URL 규칙 {{index}}번에는 패턴이 필요합니다.",
+    "slugFormat": "소문자·숫자와 단일 하이픈을 사용해 주세요."
   },
   "state": {
     "unsaved": "저장 안 됨 {{count}}개",
@@ -1420,10 +1660,10 @@
       "searchAria": "워크스페이스 검색",
       "searchClear": "워크스페이스 검색 지우기",
       "searchPlaceholder": "워크스페이스 이름 또는 슬러그",
-      "selectAllShown": "표시된 항목 모두 선택",
-      "clearAll": "모두 해제",
+      "selectAllShown": "이 페이지 전체 선택",
+      "clearAll": "전체 선택 지우기",
       "selectedCount": "선택",
-      "toggleAllAria": "표시된 워크스페이스 전체 선택 또는 해제",
+      "toggleAllAria": "이 페이지 선택 또는 해제",
       "defaultBadge": "기본",
       "membershipMissing": "멤버십 없음",
       "noMatches": "검색과 일치하는 워크스페이스가 없습니다.",
@@ -1452,7 +1692,8 @@
     "oauthAppsIntroUrlClientId": "HTTPS URL 클라이언트 식별자가 설정된 MCP 클라이언트는 OAuth를 사용할 수 있습니다. 이 서버에서는 클라이언트 자동 등록이 비활성화되어 있습니다.",
     "oauthAppsIntroUnavailable": "보통 OAuth 지원 MCP 클라이언트가 여기로 연결하지만, 이 서버에서는 사용할 수 없습니다(위 참고). 대신 액세스 키를 사용하세요.",
     "oauthDetailsToggle": "OAuth 상세 보기 (이 서버에서는 사용 불가)",
-    "oauthUnavailable": "이 서버는 OAuth를 제공할 수 없습니다(https URL이 필요하며, 표준을 따르는 MCP 클라이언트는 https가 아닌 인증 서버를 거부합니다). 아래의 액세스 키를 대신 사용하세요.",
+    "useAccessKey": "Access Key를 사용하세요.",
+    "oauthUnavailable": "이 서버는 OAuth를 제공할 수 없습니다(https URL이 필요하며, 표준을 따르는 MCP 클라이언트는 https가 아닌 인증 서버를 거부합니다).",
     "pill": {
       "recommended": "권장",
       "unavailable": "설정 필요",
@@ -1552,7 +1793,7 @@
       "template": "템플릿"
     },
     "setupCommandPlaceholder": "키를 만들면 설정 명령이 여기에 나타납니다.",
-    "oauthCapabilityUnknown": "이 서버의 연결 설정을 읽지 못해 OAuth 제공 가능 여부를 알 수 없습니다. 다시 시도하거나 아래의 액세스 키를 사용하세요.",
+    "oauthCapabilityUnknown": "이 서버의 연결 설정을 읽지 못해 OAuth 제공 가능 여부를 알 수 없습니다. 다시 시도하세요.",
     "oauthCapabilityRetry": "다시 시도"
   },
   "clipboard": {
@@ -1611,10 +1852,11 @@
     "connectionTiming": "마지막 사용 {{lastUsed}} · 다음 만료 {{nextExpiry}}",
     "noLiveExpiry": "유효한 토큰 없음",
     "state": {
-      "active": "활성",
-      "expired": "만료됨",
-      "revoked": "해지됨",
-      "disabled": "비활성"
+      "active": "인증 유효",
+      "expired": "인증 만료",
+      "revoked": "인증 취소",
+      "disabled": "사용 차단",
+      "unknown": "인증 상태 확인 필요"
     }
   },
   "dangerZone": {
@@ -1786,5 +2028,121 @@
   },
   "commandBlock": {
     "copyFallback": "{{label}} 복사"
+  },
+  "workspacePicker": {
+    "selectedCount": "{{count}}개 선택",
+    "more": "외 {{count}}개",
+    "open": "전체 목록 보기·선택",
+    "apply": "{{count}}개 선택 적용",
+    "close": "닫기",
+    "showAll": "전체 Workspace 보기",
+    "showSelected": "선택한 항목 ({{count}}개)",
+    "loading": "Workspace 불러오는 중…",
+    "loadError": "Workspace를 불러오지 못했습니다.",
+    "retry": "다시 시도",
+    "range": "{{start}}–{{end}} / {{total}}개",
+    "previous": "이전",
+    "next": "다음",
+    "search": "Workspace 이름 또는 slug",
+    "clearSearch": "Workspace 검색 지우기",
+    "noMatches": "검색 결과가 없습니다"
+  },
+  "mcpCard": {
+    "permissions": "권한",
+    "workspaces": "허용 Workspace",
+    "details": "키 세부 정보",
+    "created": "생성일",
+    "lastUsed": "최근 사용",
+    "expires": "키 만료일",
+    "noExpiry": "키 만료일 없음",
+    "sessionExpiry": "세션 만료",
+    "expiryUnknown": "만료 정보 확인 불가",
+    "reapprove": "재승인 필요",
+    "cleanupTitle": "연결 기록 정리",
+    "cleanupBody": "만료되었거나 취소된 연결 기록을 확인한 뒤 정리합니다.",
+    "cleanupPreview": "정리 대상 확인",
+    "allowed": "사용 허용",
+    "blocked": "사용 차단",
+    "granted": "승인일",
+    "expiry": "만료 정보"
+  },
+  "labs": {
+    "title": "실험 중인 메뉴",
+    "description": "아직 개발 중인 기능입니다. 사용해 보고 싶은 메뉴를 켜세요.",
+    "showAsk": "Ask 메뉴 표시",
+    "showAgent": "Agent 메뉴 표시",
+    "savedLocally": "변경 사항은 즉시 적용되며 이 브라우저에서 현재 계정에 저장됩니다."
+  },
+  "userDeletion": {
+    "action": "계정 삭제",
+    "confirmTitle": "사용자 계정을 삭제할까요?",
+    "confirmDescription": "확인 후 {{account}} 계정의 모든 세션·API 키·OAuth 접근 권한이 즉시 폐기됩니다.",
+    "retention_other": "계정 데이터와 함께 보관된 워크스페이스를 {{count}}일 보관한 뒤 서버 워커가 삭제합니다. 0일이면 다음 정리 작업부터 삭제 대상이 됩니다.",
+    "sharedContent": "다른 워크스페이스의 문서, 제출된 초안, 검토 이력은 유지되며 정리 후에는 작성자 이름이 표시되지 않습니다. 제출하지 않은 비공개 편집본은 삭제됩니다. 정리 전까지는 이 목록에서 계정을 복구할 수 있습니다.",
+    "confirmEmail": "확인을 위해 {{email}} 입력",
+    "currentPassword": "현재 관리자 비밀번호",
+    "cancel": "취소",
+    "submit": "계정 삭제 확정",
+    "submitting": "계정 삭제 처리 중…",
+    "scheduled": "{{date}} 이후 데이터 정리 예정",
+    "success": "{{account}} 계정의 접근 권한을 폐기했습니다. {{date}} 이후 데이터를 정리합니다.",
+    "failed": "계정 삭제를 요청하지 못했습니다.",
+    "reloadPolicy": "삭제 내용 다시 불러오기",
+    "policy": {
+      "title": "계정 삭제 데이터 보관 기간",
+      "description": "영구 삭제 전 계정 데이터를 보관할 기간입니다. 새 삭제 요청에 적용되며 기존 삭제 예정일은 유지됩니다. 0일이면 다음 워커 정리 작업부터 삭제 대상이 되어 복구를 보장할 수 없습니다.",
+      "days": "보관 기간(일)",
+      "invalid": "0부터 36500 사이의 정수를 입력하세요.",
+      "loading": "보관 기간 불러오는 중…",
+      "loadFailed": "계정 데이터 보관 기간을 불러오지 못했습니다.",
+      "saveFailed": "계정 데이터 보관 기간을 저장하지 못했습니다.",
+      "saved": "계정 데이터 보관 기간을 저장했습니다.",
+      "save": "보관 기간 저장",
+      "saving": "저장 중…",
+      "retry": "다시 시도"
+    },
+    "errors": {
+      "user_deletion_last_owner": "아직 다른 멤버가 있는 워크스페이스가 있습니다. 새로고침한 뒤 다시 검토하세요.",
+      "user_deletion_last_server_admin": "계정을 삭제하기 전에 다른 활성 사용자에게 서버 관리자 권한을 부여하세요.",
+      "user_deletion_email_mismatch": "확인 이메일이 이 계정과 일치하지 않습니다.",
+      "user_deletion_not_found": "계정을 찾을 수 없습니다. 사용자 목록을 새로고침하세요.",
+      "invalid_credentials": "현재 비밀번호가 올바르지 않습니다.",
+      "user_deletion_unavailable": "이 서버에서는 계정 삭제를 사용할 수 없습니다. 서버 운영자에게 문의하세요.",
+      "user_deletion_policy_changed": "보관 기간이 변경되었습니다. 기간을 다시 불러와 검토한 후 확인하세요.",
+      "user_deletion_purge_started": "데이터 정리가 이미 시작되어 계정을 복구할 수 없습니다.",
+      "user_deletion_not_pending": "삭제 대기 중인 계정이 아닙니다. 사용자 목록을 새로고침하세요.",
+      "user_deletion_targets_changed": "계정과 함께 삭제될 워크스페이스가 바뀌었습니다. 내용을 다시 불러와 다시 승인하세요.",
+      "workspace_not_deletion_pending": "이 워크스페이스는 더 이상 삭제 대기 중이 아닙니다. 사용자 목록을 새로고침하세요.",
+      "workspace_member_inactive": "활성 계정만 추가할 수 있습니다.",
+      "workspace_member_not_found": "그 이메일을 쓰는 계정이 없습니다."
+    },
+    "retention_one": "계정 데이터와 함께 보관된 워크스페이스를 {{count}}일 보관한 뒤 서버 워커가 삭제합니다. 0일이면 다음 정리 작업부터 삭제 대상이 됩니다.",
+    "pending": "삭제 대기",
+    "previewFailed": "삭제 내용을 불러오지 못했습니다.",
+    "cleanupFailed_one": "정리 실패: {{code}} ({{count}}회)",
+    "cleanupFailed_other": "정리 실패: {{code}} ({{count}}회)",
+    "restore": "계정 복구",
+    "restoring": "복구 중…",
+    "restoreTitle": "이 계정을 복구할까요?",
+    "restoreDescription": "{{email}} 계정이 삭제 요청 전 상태로 돌아갑니다. 세션·API 키·OAuth 접근 권한은 폐기된 채로 남으며, 사용자가 다시 로그인해야 합니다.",
+    "restored": "{{email}} 계정을 복구했습니다.",
+    "restoreFailed": "계정을 복구하지 못했습니다.",
+    "verifyToLoad": "최근 본인 확인이 만료되었습니다. 삭제 내용을 불러오려면 비밀번호를 입력하세요.",
+    "verify": "확인 후 내용 불러오기",
+    "approveHeld_one": "이 워크스페이스를 계정과 함께 삭제합니다. 지금 멤버의 접근이 중지되고, 새 관리자를 지정하지 않으면 보관 기간 뒤 삭제됩니다.",
+    "approveHeld_other": "이 워크스페이스 {{count}}개를 계정과 함께 삭제합니다. 지금 멤버의 접근이 중지되고, 새 관리자를 지정하지 않으면 보관 기간 뒤 삭제됩니다.",
+    "heldWorkspaces": "이 계정과 함께 삭제 대기 중인 워크스페이스:",
+    "manageHeld": "관리자 지정",
+    "heldTitle": "“{{title}}” 유지",
+    "heldDescription": "이 워크스페이스는 접근이 중지되었고 계정과 함께 삭제됩니다. 활성 멤버를 관리자로 지정하면 다시 열리고 유지됩니다. 필요하면 먼저 멤버로 추가하세요.",
+    "heldLoading": "멤버를 불러오는 중…",
+    "appointAdmin": "관리자로 지정",
+    "heldAddEmail": "이메일로 멤버 추가",
+    "heldAddRole": "역할",
+    "heldAdd": "멤버 추가",
+    "heldFailed": "워크스페이스를 변경하지 못했습니다.",
+    "heldReopened": "“{{title}}”에 새 관리자가 지정되어 계정과 함께 삭제되지 않습니다.",
+    "scheduledLabel": "삭제",
+    "cleanupFailedLabel": "정리"
   }
 }

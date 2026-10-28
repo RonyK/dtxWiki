@@ -1,7 +1,14 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { isValidElement, Suspense, type ReactNode } from "react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import {
+  matchRoutes,
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigationType,
+} from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,6 +18,7 @@ import {
   appRoutes,
   isAuthBootstrapPath,
   RequireAuth,
+  RequireAskEnabled,
   RequireEditor,
   RootRouteError,
 } from "./App";
@@ -442,6 +450,22 @@ describe("appRoutes role gating", () => {
     expect(findRoute(appRoutes, "/context-map")).toBeNull();
   });
 
+  it.each(["/ask", "/ask?new=1", "/ask/"])(
+    "registers Ask URL %s behind its experiment gate",
+    (path) => {
+      const matches = matchRoutes(appRoutes, path);
+      const route = matches?.at(-1)?.route;
+      expect(route?.path).toBe("/ask");
+      const element = route?.element;
+      if (!isValidElement<{ children: ReactNode }>(element)) {
+        throw new Error("Ask route has no element");
+      }
+      expect(element.type).toBe(RequireAuth);
+      const child = element.props.children;
+      expect(isValidElement(child) && child.type === RequireAskEnabled).toBe(true);
+    },
+  );
+
   it("keeps the one-time password reset route public", () => {
     const route = findRoute(appRoutes, "/reset-password");
     expect(route).not.toBeNull();
@@ -464,14 +488,158 @@ describe("appRoutes role gating", () => {
     expect(isValidElement(child) && child.type === RequireEditor).toBe(false);
   });
 
-  // P10.1: the 3 legacy ambient-workspace-guessing routes are deleted with no
-  // alias kept — canonical link-outs now emit /workspaces/:workspaceId/....
-  it.each(["/pages/:slug", "/pages/:slug/edit", "/p/:pageId"])(
+  // Slug-based legacy readers remain deleted. The id-only /p route resolves
+  // the authorized workspace before redirecting to the canonical reader.
+  it.each(["/pages/:slug", "/pages/:slug/edit"])(
     "does not register the legacy %s route",
     (path) => {
       expect(findRoute(appRoutes, path)).toBeNull();
     },
   );
+
+  it("resolves page permalinks only to the canonical reader and preserves fragments through authentication", async () => {
+    vi.restoreAllMocks();
+    const pageId = "00000000-0000-0000-0000-000000000123";
+    const locationUrl = `http://127.0.0.1:21080/api/v1/context/pages/${pageId}/location`;
+    let resolveLocation!: (response: Response) => void;
+    const locationResponse = new Promise<Response>((resolve) => {
+      resolveLocation = resolve;
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input) => {
+        const url = String(input);
+        if (url.endsWith("/api/v1/auth/me")) {
+          return jsonResponse({ data: userPayload("user@example.com") });
+        }
+        if (url === locationUrl) return locationResponse;
+        throw new Error(`Unexpected fetch: ${url}`);
+      },
+    );
+    const route = findRoute(appRoutes, "/p/:pageId");
+    const element = route?.element;
+    if (!isValidElement(element)) {
+      throw new Error("page permalink route has no element");
+    }
+    expect(element.type).toBe(RequireAuth);
+
+    function Destination() {
+      const location = useLocation();
+      const navigationType = useNavigationType();
+      return (
+        <div data-testid="destination">
+          {location.pathname}{location.search}{location.hash} {navigationType}
+        </div>
+      );
+    }
+
+    const view = render(
+      <AuthProvider>
+        <MemoryRouter initialEntries={[`/p/${pageId}#design%20details`]}>
+          <Suspense fallback={<div>Loading route</div>}>
+            <Routes>
+              <Route path="/p/:pageId" element={element} />
+              <Route
+                path="/workspaces/:workspaceId/context/pages/:pageId"
+                element={<Destination />}
+              />
+            </Routes>
+          </Suspense>
+        </MemoryRouter>
+      </AuthProvider>,
+    );
+    expect(await screen.findByRole("status", { name: "Loading" })).toBeInTheDocument();
+    expect(document.querySelector(".markdown-body")).toBeNull();
+    resolveLocation(jsonResponse({
+      data: { workspace_id: "resolved-workspace", page_id: pageId },
+    }));
+    expect(await screen.findByTestId("destination")).toHaveTextContent(
+      `/workspaces/resolved-workspace/context/pages/${pageId}#design%20details REPLACE`,
+    );
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      "http://127.0.0.1:21080/api/v1/auth/me",
+      locationUrl,
+    ]);
+    view.unmount();
+
+    for (const missingPage of [
+      {
+        id: pageId,
+        status: 404,
+        error_code: "not_found",
+        message: "Page not found.",
+      },
+      {
+        id: "00000000-0000-0000-0000-00000000012",
+        status: 422,
+        error_code: "validation_failed",
+        message: "Input should be a valid UUID.",
+      },
+      { id: "null" },
+      { id: "undefined" },
+    ]) {
+      const missingLocationUrl = `http://127.0.0.1:21080/api/v1/context/pages/${missingPage.id}/location`;
+      fetchMock.mockClear().mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.endsWith("/api/v1/auth/me")) {
+          return jsonResponse({ data: userPayload("user@example.com") });
+        }
+        if (missingPage.status && url === missingLocationUrl) {
+          return jsonResponse({
+            error_code: missingPage.error_code,
+            message: missingPage.message,
+            request_id: "request-permalink-error",
+            warnings: [],
+          }, missingPage.status);
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      });
+      const notFoundView = render(
+        <AuthProvider>
+          <MemoryRouter initialEntries={[`/p/${missingPage.id}`]}>
+            <Suspense fallback={<div>Loading route</div>}>
+              <Routes>
+                <Route path="/p/:pageId" element={element} />
+              </Routes>
+            </Suspense>
+          </MemoryRouter>
+        </AuthProvider>,
+      );
+      expect(await screen.findByRole("heading", {
+        name: "We couldn't find that page",
+      })).toBeInTheDocument();
+      expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+        "http://127.0.0.1:21080/api/v1/auth/me",
+        ...(missingPage.status ? [missingLocationUrl] : []),
+      ]);
+      notFoundView.unmount();
+    }
+
+    fetchMock.mockClear().mockImplementation(async (input) => {
+      if (String(input).endsWith("/api/v1/auth/me")) {
+        return jsonResponse({ error_code: "unauthorized", warnings: [] }, 401);
+      }
+      throw new Error(`Unexpected anonymous fetch: ${String(input)}`);
+    });
+    const anonymousEntry = `/p/${pageId}?from=shared#design%20details`;
+    render(
+      <AuthProvider>
+        <MemoryRouter initialEntries={[anonymousEntry]}>
+          <Suspense fallback={<div>Loading route</div>}>
+            <Routes>
+              <Route path="/p/:pageId" element={element} />
+              <Route path="/login" element={<Destination />} />
+            </Routes>
+          </Suspense>
+        </MemoryRouter>
+      </AuthProvider>,
+    );
+    expect(await screen.findByTestId("destination")).toHaveTextContent(
+      `/login?next=${encodeURIComponent(anonymousEntry)} REPLACE`,
+    );
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      "http://127.0.0.1:21080/api/v1/auth/me",
+    ]);
+  });
 
   it("mounts the canonical Context page permalink under RequireAuth", () => {
     const route = findRoute(

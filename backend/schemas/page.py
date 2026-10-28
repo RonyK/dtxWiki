@@ -18,6 +18,7 @@ from backend.schemas.common import (
 )
 from backend.schemas.context_ingress import ContextPageType
 from backend.schemas.edit_receipt import EditReceipt
+from backend.schemas.input_policy import InputRequest
 from backend.schemas.read import (
     PendingReviewInfo,
     PublishedVersionInfo,
@@ -49,6 +50,19 @@ CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD = Field(
         "Generate and hold it before the first send."
     ),
 )
+
+
+class ContextPageLocation(BaseModel):
+    workspace_id: UUID
+    page_id: UUID
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ContextPageLocationResponse(RESTResponseBase):
+    data: ContextPageLocation
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class PageSummary(BaseModel):
@@ -126,7 +140,8 @@ class PagePayload(PageSummary):
     publish_blocked_reasons: list[DraftReviewReason] = Field(default_factory=list)
     # What the write that produced this payload changed. Set by the MCP edit
     # commands and read by their handlers; a private attribute, so the REST
-    # payload and the idempotency ledger's stored result stay unchanged.
+    # payload stays unchanged. The command ledger retains it separately for
+    # an identical receipt when an idempotent patch is replayed.
     _edit_receipt: EditReceipt | None = PrivateAttr(default=None)
 
 
@@ -159,7 +174,7 @@ class PublishPageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class PublishPageVersionRequest(BaseModel):
+class PublishPageVersionRequest(InputRequest):
     reason: str = Field(min_length=1)
     publish_despite_findings: bool = False
     # The content the caller staged and means to publish. A draft row is
@@ -226,7 +241,7 @@ def _check_alias_lengths(aliases: list[str] | None) -> list[str] | None:
     return aliases
 
 
-class PageCreateRequest(BaseModel):
+class PageCreateRequest(InputRequest):
     workspace_slug: str = Field(min_length=1)
     # P2.3: omitting slug is page-first creation -- title defaults to "제목
     # 없음", slug to a fresh `p-{page_id}` (never a lookup key, so this never
@@ -351,7 +366,7 @@ class PageInlineComment(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class PageUpdateRequest(BaseModel):
+class PageUpdateRequest(InputRequest):
     title: str | None = Field(default=None, min_length=1)
     body_md: str = Field(min_length=1, max_length=BODY_MD_MAX_LENGTH)
     page_type: ContextPageType | None = None
@@ -410,7 +425,7 @@ class PageAutosaveRequest(PageUpdateRequest):
     retry_only: bool = False
 
 
-class UpdateContextEditRequest(BaseModel):
+class UpdateContextEditRequest(InputRequest):
     """P8.6: the MCP `update_context_edit` wire command -- the same autosave
     command as `PageAutosaveRequest`, minus `session_version_id`/`on_stale`.
 
@@ -443,9 +458,7 @@ class UpdateContextEditRequest(BaseModel):
             "too and both must match."
         ),
     )
-    base_content_hash: str | None = Field(
-        default=None, pattern=CONTENT_HASH_PATTERN
-    )
+    base_content_hash: str | None = Field(default=None, pattern=CONTENT_HASH_PATTERN)
     # Binds the save to the editing row the caller read. The revision alone
     # cannot say WHICH row that was: a row discarded or submitted since, and a
     # new one opened in its place, used to start from the same revisions.
@@ -521,7 +534,7 @@ class ListMyContextEditsResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class PageMetadataPatch(BaseModel):
+class PageMetadataPatch(InputRequest):
     """Metadata-only subset shared by REST page writes and MCP context writes."""
 
     title: str | None = Field(default=None, min_length=1)
@@ -566,7 +579,7 @@ class BeginContextEditRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class SubmitContextEditRequest(BaseModel):
+class SubmitContextEditRequest(InputRequest):
     version_id: UUID
     expected_editing_revision: int = Field(ge=1)
     reason: str = Field(default="author submitted for review", min_length=1)
@@ -594,7 +607,7 @@ class DiscardContextEditResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class PageInlineCommentCreateRequest(BaseModel):
+class PageInlineCommentCreateRequest(InputRequest):
     note: str = Field(min_length=1, max_length=5000)
     anchor: PageInlineCommentAnchor
 
@@ -609,7 +622,7 @@ class PageInlineCommentCreateRequest(BaseModel):
         return stripped
 
 
-class ContextPageCreateRequest(BaseModel):
+class ContextPageCreateRequest(InputRequest):
     """Canonical ``POST context/pages`` body (P8.1/P9.1).
 
     Deliberately has no ``slug``/``as_draft`` field: the canonical create

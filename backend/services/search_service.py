@@ -20,8 +20,6 @@ from backend.repositories.search_projection import (
     WorkspaceFts5ProjectionRepository,
 )
 from backend.schemas.read import (
-    DisambiguationCandidate,
-    DisambiguationPayload,
     RankedResult,
     SearchFilters,
     SearchPayload,
@@ -51,6 +49,7 @@ from backend.services.retrieval.keyword import (
 )
 from backend.services.retrieval.protocol import Retriever
 from backend.services.search_query import QueryPlan
+from backend.services.search_result_metadata import enrich_search_result_metadata
 
 # Re-exported for backward-compatible imports (api/read.py imports these names
 # from this module). The canonical definitions live in retrieval.keyword.
@@ -70,7 +69,14 @@ logger = logging.getLogger("dtxwiki.search")
 
 _CURSOR_VERSION = 1
 APPLIED_SEARCH_FILTERS = frozenset(
-    {"context_type", "status", "connector_type", "format_hint", "trust_level"}
+    {
+        "include_agents",
+        "context_type",
+        "status",
+        "connector_type",
+        "format_hint",
+        "trust_level",
+    }
 )
 ADVISORY_SEARCH_FILTERS = frozenset({"tag", "date_from", "date_to"})
 _TRIGRAM_CANDIDATE_LIMIT = 200
@@ -202,7 +208,6 @@ class SearchService:
         explicit_direct = (
             plan.direct_page_id is not None or plan.explicit_context_slug is not None
         )
-        entity_results: list[RankedResult] = []
         if direct_results:
             tried_lanes.append("direct")
             ranked = sorted(
@@ -226,15 +231,12 @@ class SearchService:
             )
             if symbolic_lane_eligible:
                 tried_lanes.append("entity")
-            # Exact-name hits are resolver results, not candidates for global
-            # reranking. Multiple pages are an explicit disambiguation.
+            # Exact-name hits retain resolver priority without fallback reranking.
             if entity_results:
                 ranked = sorted(
                     entity_results,
                     key=lambda result: (-result.score, str(result.id)),
                 )
-                if len(ranked) > 1:
-                    warnings = [*warnings, "disambiguation_required"]
             else:
                 trigram_eligible = (
                     symbolic_lane_eligible
@@ -334,6 +336,12 @@ class SearchService:
                     primary=[*ranked[:insertion], *associative],
                     fallback=ranked[insertion:],
                 )
+        if not active_filters.include_agents:
+            # Apply the request policy to custom retrievers too, before counts,
+            # pagination, and metadata enrichment use the ranked candidate set.
+            ranked = [
+                result for result in ranked if result.type != EntityKind.AGENT_PAGE
+            ]
         nearest_candidates: list[dict[str, str]] = []
         if (
             not ranked
@@ -357,6 +365,8 @@ class SearchService:
         # set (especially for semantic mode), never a full-corpus COUNT.
         offset = _decode_search_cursor(cursor)
         window = ranked[offset : offset + limit]
+        if session is not None:
+            enrich_search_result_metadata(session, workspace_id, window, actor)
         next_offset = offset + limit
         has_more = len(ranked) > next_offset
         permission_note = restricted_library_permission_note(actor)
@@ -373,7 +383,6 @@ class SearchService:
             tried_lanes=tried_lanes,
             raw_query=plan.raw_query,
             normalized_query=plan.query_norm,
-            disambiguation=_disambiguation_payload(entity_results),
             nearest_candidates=nearest_candidates,
         )
 
@@ -795,7 +804,7 @@ def _ranked_context_page(
         slug=page.slug,
         version_id=version.id,
     )
-    return RankedResult(
+    result = RankedResult(
         id=page.id,
         type=EntityKind.CONTEXT_PAGE.value,
         title=page.title,
@@ -803,7 +812,6 @@ def _ranked_context_page(
         matched_name=matched_name,
         score=score,
         citation_available=True,
-        stale=page.lifecycle_status == "stale",
         archived=False,
         concept_path=context_concept_path(page.slug),
         concept_type=page.page_type,
@@ -812,6 +820,8 @@ def _ranked_context_page(
         match_reason=match_reason,
         entity_ref=entity_ref.source_ref(),
     )
+    result._summary_markdown = version.body_md
+    return result
 
 
 def _page_matches_context_filters(
@@ -908,21 +918,3 @@ def _unsupported_filter_warnings(filters: SearchFilters) -> list[str]:
     if filters.date_from is not None or filters.date_to is not None:
         warnings.append("unsupported_filter_date")
     return warnings
-
-
-def _disambiguation_payload(
-    entity_results: list[RankedResult],
-) -> DisambiguationPayload | None:
-    if len(entity_results) <= 1:
-        return None
-    return DisambiguationPayload(
-        candidates=[
-            DisambiguationCandidate(
-                id=result.id,
-                title=result.title,
-                concept_path=result.concept_path,
-                match_reason=result.match_reason or "exact_title",
-            )
-            for result in entity_results
-        ]
-    )

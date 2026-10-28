@@ -11,7 +11,7 @@ const css = readFileSync(
 );
 
 describe("Lint findings geometry", () => {
-  it("keeps one full-width card and a 20px checkbox inside a 44px hit area", () => {
+  it("keeps one full-width card and a 16px checkbox inside a 44px hit area", () => {
     expect(css).toMatch(
       /\.lint-finding-card\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0;/s,
     );
@@ -19,7 +19,7 @@ describe("Lint findings geometry", () => {
       /\.lint-finding-card \.lint-row-selector\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px;/s,
     );
     expect(css).toMatch(
-      /\.lint-finding-card \.lint-row-checkbox,[^{]*\{[^}]*width:\s*20px;[^}]*height:\s*20px;/s,
+      /\.lint-finding-card \.lint-row-checkbox,[^{]*\{[^}]*width:\s*var\(--checkbox-size\);[^}]*height:\s*var\(--checkbox-size\);/s,
     );
   });
 

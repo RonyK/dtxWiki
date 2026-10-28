@@ -31,15 +31,14 @@ from pathlib import Path
 
 from deploy_static_bundle import _local_entry_files
 
-# Canonical IDs of the historical schema boundaries, base first. Every later release
-# keeps them as
-# the start of one linear chain: a new revision descends from the current head
-# and never edits a released file (see FROZEN_MIGRATIONS).
+# Canonical IDs of the historical schema boundaries, base first. Later revisions
+# descend from the core boundary and converge to one head. A merge preserves
+# independently applied revisions without editing either parent.
 RELEASED_CHAIN_BASE = [
     ["bd62193d5cf6", None],
     ["efcbcf724889", "bd62193d5cf6"],
 ]
-# SHA-256 of the renamed baseline and its implementation modules, relative to
+# SHA-256 of released revisions and their implementation modules, relative to
 # backend/migrations. A deliberate second copy of
 # backend/migrations/frozen_revisions.json: editing a released revision and
 # re-hashing the manifest in the same change still fails here, and
@@ -50,6 +49,9 @@ FROZEN_MIGRATIONS = {
     ),
     "revision_modules/v0_1/__init__.py": (
         "4a10c05f30c23333471d4ce1a16d2d768361fb82aac88f3862dbedff753bf7b6"
+    ),
+    "revision_modules/v0_1/content_event_backfill_v1.py": (
+        "0321e31467fa8112e133b39a197b9456ea39795a684aaae0c8934eeb1f655995"
     ),
     "revision_modules/v0_1/efcbcf724889_core_schema/__init__.py": (
         "b57efc37a5d5c2e8027f42613fdfdb3252376d6784ba4cff95030e74ccd26f09"
@@ -84,8 +86,17 @@ FROZEN_MIGRATIONS = {
     "revision_modules/v0_1/efcbcf724889_core_schema/workspace_schema.py": (
         "6daaec7d569a6ec8c6f76c444a95e4fc945e218215d9234debcbb5187e2960ec"
     ),
+    "revision_modules/v0_1/input_restrictions_v1.py": (
+        "14f50082552dc8490e2ee2ac239983f4224cbbce80758df6ce498f9cacef26d5"
+    ),
     "versions/v0_0/bd62193d5cf6_initial_schema.py": (
         "1c944d1f3c1d5427ff40470aacf1fbf611092a8e7e1111f19bc4089d13bd45e8"
+    ),
+    "versions/v0_1/19db79d3e622_release_0_1_3.py": (
+        "f6eade587f72c760ff86a37d2769355e22cbb647b9815c12c3e3ec084dcf5a0c"
+    ),
+    "versions/v0_1/ef53a0a7061c_index_change_operation_change_set_id.py": (
+        "4ca7da3416959c22c15d39b453bb7d72024c9efca56e68253ea1e244a2066547"
     ),
     "versions/v0_1/efcbcf724889_core_schema.py": (
         "1e4edcea3733bc4ea0f7407a9cd331a5f2f5e6913eebb289856cf87a45b9cd6b"
@@ -128,6 +139,7 @@ _GRAPH_PROBE = """
 import json
 import os
 import sys
+import warnings
 
 root = sys.argv[1]
 sys.path.insert(0, root)
@@ -140,8 +152,11 @@ config.set_main_option(
     "script_location", os.path.join(root, "backend", "migrations")
 )
 script = ScriptDirectory.from_config(config)
-heads = sorted(script.get_heads())
-chain = [[entry.revision, entry.down_revision] for entry in script.walk_revisions()]
+with warnings.catch_warnings():
+    # Alembic otherwise warns and silently replaces a duplicate revision ID.
+    warnings.simplefilter("error", UserWarning)
+    heads = sorted(script.get_heads())
+    chain = [[entry.revision, entry.down_revision] for entry in script.walk_revisions()]
 
 contained = os.path.realpath(root)
 foreign = {}
@@ -257,6 +272,9 @@ def _check_alembic_payload(root: Path) -> list[str]:
         expected = {
             "0.0.1": {"group": "v0_0", "head": "bd62193d5cf6"},
             "0.1.1": {"group": "v0_1", "head": "efcbcf724889"},
+            "0.1.2": {"group": "v0_1", "head": "efcbcf724889"},
+            "0.1.3": {"group": "v0_1", "head": "19db79d3e622"},
+            "0.1.4": {"group": "v0_1", "head": "ef53a0a7061c"},
         }
         aliases = {
             "0001_initial_release": "bd62193d5cf6",
@@ -280,9 +298,9 @@ def _check_alembic_payload(root: Path) -> list[str]:
 
 
 def _check_frozen_migrations(root: Path) -> list[str]:
-    """Canonical migration files remain byte-identical to the renamed baseline.
+    """Released migration files remain byte-identical to their frozen digests.
 
-    A database stamped ``efcbcf724889`` is only described by that exact
+    A database stamped at a released revision is described by that exact
     code; editing a released revision silently diverges every such database
     from a fresh one. New schema work belongs in a new revision.
     """
@@ -412,29 +430,78 @@ def _check_migration_graph(root: Path) -> tuple[list[str], str | None]:
 
 
 def _chain_failures(heads: list[str], chain: list[list]) -> list[str]:
-    """One linear chain that starts with the released revisions.
+    """One current head with every later branch descending from frozen core.
 
-    ``chain`` is Alembic's ``walk_revisions`` order (head first). Revisions
-    after ``efcbcf724889`` are allowed; a second head, a merge, or a chain that
-    does not begin with the released 0001 -> 0002 boundary is not.
+    ``chain`` carries Alembic's revision edges. Walk order does not determine
+    ancestry: independent branches may converge through a merge revision.
     """
 
     failures: list[str] = []
     if len(heads) != 1:
         failures.append(f"packaged Alembic heads are {heads}, expected exactly one")
-    base_first = list(reversed(chain))
-    if base_first[: len(RELEASED_CHAIN_BASE)] != RELEASED_CHAIN_BASE:
-        failures.append(
-            f"packaged revision chain is {chain}; it must start with "
-            f"{RELEASED_CHAIN_BASE} (base first)"
-        )
-    for (previous, _), (revision, down_revision) in zip(
-        base_first, base_first[1:], strict=False
-    ):
-        if down_revision != previous:
+    parents: dict[str, tuple[str, ...]] = {}
+    for revision, down_revision in chain:
+        if revision in parents:
+            failures.append(f"packaged revision {revision} is present more than once")
+        if down_revision is None:
+            ancestors = ()
+        elif isinstance(down_revision, str):
+            ancestors = (down_revision,)
+        else:
+            ancestors = tuple(down_revision)
+        if len(set(ancestors)) != len(ancestors):
+            failures.append(f"packaged revision {revision} repeats a parent")
+        parents[revision] = ancestors
+
+    for revision, down_revision in RELEASED_CHAIN_BASE:
+        expected = () if down_revision is None else (down_revision,)
+        if parents.get(revision) != expected:
             failures.append(
-                f"packaged revision {revision} descends from {down_revision!r}, "
-                f"not from {previous}; the chain must be linear"
+                "packaged revision graph must preserve released boundaries "
+                f"{RELEASED_CHAIN_BASE}; {revision} has parents "
+                f"{parents.get(revision)!r}"
+            )
+
+    referenced = {parent for ancestors in parents.values() for parent in ancestors}
+    for revision, ancestors in parents.items():
+        for parent in ancestors:
+            if parent not in parents:
+                failures.append(
+                    f"packaged revision {revision} has missing parent {parent}"
+                )
+    graph_heads = sorted(set(parents) - referenced)
+    if sorted(heads) != graph_heads:
+        failures.append(
+            f"packaged Alembic heads {heads} do not match graph heads {graph_heads}"
+        )
+
+    core = RELEASED_CHAIN_BASE[-1][0]
+    visiting: set[str] = set()
+    reaches_core: dict[str, bool] = {}
+
+    def descends_from_core(revision: str) -> bool:
+        if revision == core:
+            return True
+        if revision in reaches_core:
+            return reaches_core[revision]
+        if revision in visiting:
+            failures.append(f"packaged revision graph contains a cycle at {revision}")
+            return False
+        if revision not in parents:
+            return False
+        visiting.add(revision)
+        # Evaluate every parent so a valid path cannot hide a corrupt sibling.
+        paths = [descends_from_core(parent) for parent in parents[revision]]
+        visiting.remove(revision)
+        reaches_core[revision] = bool(paths) and all(paths)
+        return reaches_core[revision]
+
+    frozen = {revision for revision, _ in RELEASED_CHAIN_BASE}
+    for revision in sorted(set(parents) - frozen):
+        if not descends_from_core(revision):
+            failures.append(
+                f"every ancestry path of packaged revision {revision} "
+                f"must descend from released core {core}"
             )
     return failures
 

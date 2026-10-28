@@ -90,7 +90,11 @@ describe("AccountSecurityScreen", () => {
 
     expect(await screen.findByText("user@example.com")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Account" })).toBeInTheDocument();
-    expect(screen.queryByText("00000000-0000-0000-0000-000000000010")).not.toBeInTheDocument();
+    expect(screen.getByText("u_00000000000000000000000000000010")).toBeInTheDocument();
+    expect(screen.getByText("Identifies your account separately from your display name. It is not used to sign in.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Account email")).toHaveTextContent("user@example.com");
+    expect(screen.getByText("00000000-0000-0000-0000-000000000010")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy user ID" })).toBeInTheDocument();
     expect(screen.queryByText("Status")).not.toBeInTheDocument();
     expect(screen.queryByText("active")).not.toBeInTheDocument();
     expect(screen.getByText("Workspace access")).toBeInTheDocument();
@@ -129,6 +133,9 @@ describe("AccountSecurityScreen", () => {
       "/account/password",
     );
 
+    await user.click(screen.getByRole("button", { name: "Copy user ID" }));
+    expect(await navigator.clipboard.readText()).toBe("00000000-0000-0000-0000-000000000010");
+
     await user.click(screen.getByRole("button", { name: "Sign out" }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -164,8 +171,8 @@ describe("AccountSecurityScreen", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Update password" })).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Current password"), "old-password");
-    await user.type(screen.getByLabelText("New password"), "new-password");
+    await user.type(screen.getByLabelText("Current password"), "old-password-123");
+    await user.type(screen.getByLabelText("New password"), "new-password-123");
     await user.type(screen.getByLabelText("Confirm new password"), "different-password");
     await user.click(screen.getByRole("button", { name: "Update password" }));
 
@@ -173,15 +180,15 @@ describe("AccountSecurityScreen", () => {
     expect(passwordRequests).toHaveLength(0);
 
     await user.clear(screen.getByLabelText("Confirm new password"));
-    await user.type(screen.getByLabelText("Confirm new password"), "new-password");
+    await user.type(screen.getByLabelText("Confirm new password"), "new-password-123");
     await user.click(screen.getByRole("button", { name: "Update password" }));
 
     expect(await screen.findByText("Password updated. Returning to account…"))
       .toBeInTheDocument();
     expect(passwordRequests).toEqual([
       {
-        current_password: "old-password",
-        new_password: "new-password",
+        current_password: "old-password-123",
+        new_password: "new-password-123",
       },
     ]);
     expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -435,7 +442,11 @@ describe("AccountSecurityScreen", () => {
       .mockImplementation(async (input) => {
         const url = input.toString();
         if (url === `${BASE}/api/v1/auth/me`) {
-          return jsonResponse({ data: userPayload("verified@example.com") });
+          return jsonResponse({ data: {
+            ...userPayload("verified@example.com"),
+            session_method: "ext",
+            session_provider_slug: "company",
+          } });
         }
         if (url === `${BASE}/api/v1/workspaces`) {
           return jsonResponse({
@@ -498,6 +509,7 @@ function userPayload(
 ) {
   return {
     user_id: "00000000-0000-0000-0000-000000000010",
+    username: "u_00000000000000000000000000000010",
     email,
     display_name: "User",
     status: "active",

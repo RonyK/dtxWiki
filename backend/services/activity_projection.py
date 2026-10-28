@@ -201,7 +201,7 @@ class ContextActivityProjection:
                 op.target_id
                 for ops in self.operations.values()
                 for op in ops
-                if op.target_type == "context_page"
+                if op.target_type in {"context_page", "context_page_metadata"}
             }
         )
         if self.tree:
@@ -230,6 +230,14 @@ class ContextActivityProjection:
             else {}
         )
         decision_ids = {audit_uuid(p.get("decision_id")) for p in payloads} - {None}
+        from backend.app.container import SINGLE_DATABASE_TOPOLOGY
+
+        # Owner recovery reads control-plane Users. Only explicitly co-located
+        # providers may add that lookup to this workspace-scoped activity query.
+        include_owner_fallback = (
+            getattr(session.info.get("database_provider"), "storage_topology", None)
+            == SINGLE_DATABASE_TOPOLOGY
+        )
         self.decisions = (
             {
                 d.id: d
@@ -237,7 +245,11 @@ class ContextActivityProjection:
                     select(ReviewDecision).where(
                         ReviewDecision.workspace_id == workspace_id,
                         ReviewDecision.id.in_(decision_ids),
-                        review_decision_audience_clause(role, principal),
+                        review_decision_audience_clause(
+                            role,
+                            principal,
+                            include_owner_fallback=include_owner_fallback,
+                        ),
                     )
                 )
             }
@@ -262,7 +274,7 @@ class ContextActivityProjection:
         return self._change_visibility[change_id]
 
     def _operation_visible(self, op: ChangeOperation) -> bool:
-        if op.target_type == "context_page":
+        if op.target_type in {"context_page", "context_page_metadata"}:
             if not self.page_visible(op.target_id):
                 return False
             vid = operation_version(op)

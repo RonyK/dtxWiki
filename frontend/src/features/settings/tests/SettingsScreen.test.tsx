@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { type ReactNode, useEffect } from "react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes, useLocation, useNavigationType } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readAppStyles } from "../../../test-support/appStyles";
@@ -20,6 +20,7 @@ import {
 } from "../../../shared/workspace/WorkspaceContext";
 import { i18n, setLocale } from "../../../shared/i18n";
 import { SettingsScreen } from "../SettingsScreen";
+import { WorkspaceScopedSettingsScreen } from "../WorkspaceScopedSettingsScreen";
 
 const BASE = "https://wiki.example.test";
 const LOOPBACK_BASE = "http://127.0.0.1:21080";
@@ -81,8 +82,39 @@ describe("SettingsScreen", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
-  it("renders labelled policy groups and MCP clients behind section navigation", async () => {
-    const user = userEvent.setup();
+  it("renders the URL workspace without changing the ambient selection", async () => {
+    window.localStorage.setItem("dtxwiki.selectedWorkspaceId", "ambient");
+    window.localStorage.setItem("dtxwiki.selectedWorkspaceSlug", "ambient-slug");
+    const scrollIntoView = vi.fn();
+    const originalScroll = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView")!;
+    Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
+    const fetchMock = mockFetch({
+      [`${BASE}/api/v1/workspaces`]: { data: {
+        current_workspace_id: "ambient",
+        default_workspace_id: "ambient",
+        workspaces: [workspaceSummary("ambient", "Ambient", "ambient-slug"), workspaceSummary("target", "Target workspace", "target-slug", "viewer")],
+      } },
+      [`${BASE}/api/v1/workspaces/target/settings/policies`]: { data: {
+        ...basicSettingsPolicies(),
+        workspace: policy("workspace", "Workspace policy", { title: "Target workspace", slug: "target-slug" }),
+      } },
+    });
+
+    render(<MemoryRouter initialEntries={["/workspaces/target/settings?section=workspace#workspace-danger-title"]}>
+      <Routes><Route path="/workspaces/:workspaceId/settings" element={<WorkspaceScopedSettingsScreen />} /></Routes>
+    </MemoryRouter>);
+
+    expect(await screen.findByRole("heading", { name: "Target workspace" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to Settings" })).toHaveAttribute("href", "/settings");
+    expect(screen.getByRole("button", { name: "Delete workspace…" })).toBeDisabled();
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(`${BASE}/api/v1/workspaces/target/settings/policies`, expect.anything());
+    expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe("ambient");
+    expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceSlug")).toBe("ambient-slug");
+    Object.defineProperty(Element.prototype, "scrollIntoView", originalScroll);
+  });
+
+  function mockPolicyNavigationAndMcpClients() {
     let mcpStatus: "active" | "disabled" = "active";
     const mcpPage = (status: "active" | "disabled" | "all") => {
       const row = {
@@ -199,8 +231,19 @@ describe("SettingsScreen", () => {
         data: [],
       },
     });
+    return {
+      fetchMock,
+      setMcpStatus(status: "active" | "disabled") {
+        mcpStatus = status;
+      },
+    };
+  }
 
-    render(
+  it("renders labelled workspace and content policies behind section navigation", async () => {
+    const user = userEvent.setup();
+    const { fetchMock } = mockPolicyNavigationAndMcpClients();
+
+    const view = render(
       <MemoryRouter>
         <SettingsScreen />
       </MemoryRouter>,
@@ -208,8 +251,15 @@ describe("SettingsScreen", () => {
 
     // The h1 names the destination now, not the screen; "Settings" survives
     // as the first breadcrumb.
+    // Wait for loaded content with a text query, then keep accessible-role
+    // assertions inside their UI region. Global role scans repeatedly compute
+    // visibility/names for unrelated navigation and MCP setup controls.
+    const workspaceBasics = await screen.findByText("Workspace basics");
+    const header = within(view.container.querySelector<HTMLElement>(".feature-header")!);
+    const workspaceCard = within(workspaceBasics.closest<HTMLElement>(".policy-card")!);
+    const navigation = within(screen.getByRole("navigation", { name: "Settings sections" }));
     expect(
-      await screen.findByRole("heading", { name: "Workspace", level: 1 }),
+      header.getByRole("heading", { name: "Workspace", level: 1 }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Settings" }),
@@ -219,9 +269,9 @@ describe("SettingsScreen", () => {
         "Name, owner, language, and visibility.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("Workspace basics")).toBeInTheDocument();
+    expect(workspaceBasics).toBeInTheDocument();
     expect(
-      screen.getByRole("combobox", { name: "Default language" }),
+      workspaceCard.getByRole("combobox", { name: "Default language" }),
     ).toHaveDisplayValue("English");
     // UI-04: visibility is no longer editable from this screen.
     expect(
@@ -237,10 +287,11 @@ describe("SettingsScreen", () => {
         input.toString().includes("/api/v1/auth/tokens"),
       ),
     ).toBe(true);
-    const rawSummary = screen.getByRole("button", { name: "Show raw values" });
+    const rawSummary = workspaceCard.getByRole("button", { name: "Show raw values" });
     expect(rawSummary).toHaveAttribute("aria-expanded", "false");
-    await openContentPolicies(user);
-    const agentInjectionNav = screen.getByRole("tab", {
+    await user.click(navigation.getByRole("button", { name: /^Content policies/ }));
+    const policyTabs = within(await screen.findByRole("tablist", { name: "Content policies" }));
+    const agentInjectionNav = policyTabs.getByRole("tab", {
       name: /Agent injection/i,
     });
     expect(within(agentInjectionNav).getByText("Preview")).toHaveClass(
@@ -252,19 +303,20 @@ describe("SettingsScreen", () => {
     );
 
     await user.click(
-      screen.getByRole("tab", { name: /Citation & write policy/i }),
+      policyTabs.getByRole("tab", { name: /Citation & write policy/i }),
     );
     expect(screen.getByText("Citation policy")).toBeInTheDocument();
+    const citationPanel = within(screen.getByRole("tabpanel", { name: /Citation & write policy/i }));
     // The server's "Context write policy" card had no fields and could not be
     // saved, so the tab names the two places the rules actually live.
     expect(
       screen.getByText("Publishing a knowledge page"),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Open Lint rules" }),
+      citationPanel.getByRole("button", { name: "Open Lint rules" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Open Review policy" }),
+      citationPanel.getByRole("button", { name: "Open Review policy" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByText("Agent injection policy"),
@@ -290,20 +342,33 @@ describe("SettingsScreen", () => {
     expect(
       screen.queryByRole("button", { name: /Audit & diagnostics/i }),
     ).not.toBeInTheDocument();
+  });
 
+  it("confirms MCP client disabling and updates the status projection", async () => {
+    const user = userEvent.setup();
+    const { fetchMock, setMcpStatus } = mockPolicyNavigationAndMcpClients();
+    render(
+      <MemoryRouter>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+    await screen.findByRole("heading", { name: "Workspace", level: 1 });
     await user.click(screen.getByRole("button", { name: /MCP access/i }));
     expect(screen.getByText("Access key setup")).toBeInTheDocument();
     expect(await screen.findByText("Local MCP")).toBeInTheDocument();
     expect(screen.queryByText("internal-agent")).not.toBeInTheDocument();
     expect(screen.queryByText("System MCP clients")).not.toBeInTheDocument();
     expect(screen.getByText("Connected MCP clients")).toBeInTheDocument();
+    const clientSection = screen
+      .getByText("Connected MCP clients")
+      .closest(".mcp-clients-section") as HTMLElement;
     expect(
       fetchMock.mock.calls.some(([input]) =>
         input.toString().includes("/api/v1/auth/tokens"),
       ),
     ).toBe(true);
     // A39: the row Disable now opens a confirm before the PATCH fires.
-    await user.click(screen.getByRole("button", { name: /^Disable / }));
+    await user.click(within(clientSection).getByRole("button", { name: /^Disable / }));
     const disableDialog = screen.getByRole("dialog", {
       name: /Disable MCP client/,
     });
@@ -324,18 +389,15 @@ describe("SettingsScreen", () => {
       expect.objectContaining({ method: "PATCH" }),
     );
     // Reopen and confirm: the default Active projection removes the row.
-    await user.click(screen.getByRole("button", { name: /^Disable / }));
-    mcpStatus = "disabled";
+    await user.click(within(clientSection).getByRole("button", { name: /^Disable / }));
+    setMcpStatus("disabled");
     await user.click(
       within(
         screen.getByRole("dialog", { name: /Disable MCP client/ }),
       ).getByRole("button", { name: "Disable client" }),
     );
-    const clientSection = screen
-      .getByText("Connected MCP clients")
-      .closest(".mcp-clients-section") as HTMLElement;
     await user.click(
-      within(clientSection).getByRole("radio", { name: /Deactivated/ }),
+      within(clientSection).getByRole("radio", { name: /Other states/ }),
     );
     expect(
       await within(clientSection).findByRole("button", {
@@ -346,6 +408,17 @@ describe("SettingsScreen", () => {
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/mcp-clients/mcp-1`,
       expect.objectContaining({ method: "PATCH" }),
     );
+  });
+
+  it("shows MCP client and access-key metadata from a direct account link", async () => {
+    const user = userEvent.setup();
+    mockPolicyNavigationAndMcpClients();
+    render(
+      <MemoryRouter initialEntries={["/settings?section=mcp"]}>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+    await screen.findByText("Local MCP");
     await user.click(screen.getByText("View details"));
     expect(screen.getByText("Client ID")).toBeInTheDocument();
     expect(screen.getByText("mcp-1")).toBeInTheDocument();
@@ -358,10 +431,109 @@ describe("SettingsScreen", () => {
     ).toBeInTheDocument();
     expect(await screen.findByText("CI token")).toBeInTheDocument();
     expect(screen.getByText("Prefix not saved")).toBeInTheDocument();
-    expect(screen.getByText("UUID token1")).toBeInTheDocument();
+    expect(screen.getByText("token-1")).toBeInTheDocument();
     expect(
       screen.getByText(/Read - view sources and pages/),
     ).toBeInTheDocument();
+  });
+
+
+
+  it("adopts a conflicting save's server revision while the form is dirty and retries with that revision", async () => {
+    const revisions = ["a".repeat(64), "b".repeat(64), "c".repeat(64)];
+    let policyReads = 0;
+    const saves: Array<{ expected_revision: string; changes: { title: string } }> = [];
+    const policies = (title: string, revision: string) => ({
+      ...basicSettingsPolicies(),
+      workspace: {
+        ...policy("workspace", "Workspace basics", {
+          title, goal: "Existing goal", default_language: "en", visibility: "private",
+        }),
+        revision,
+      },
+    });
+    const fetchMock = mockFetch({
+      [`${BASE}/api/v1/workspaces`]: { data: {
+        current_workspace_id: WORKSPACE_ID,
+        workspaces: [workspaceSummary(WORKSPACE_ID, "Original workspace", "default")],
+      } },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: () => {
+        policyReads += 1;
+        return { data: policyReads === 1
+          ? policies("Original workspace", revisions[0])
+          : policies("New server workspace", revisions[1]) };
+      },
+      [`${BASE}/api/v1/auth/tokens`]: { data: [] },
+      [`${BASE}/oauth/consents`]: { data: [] },
+    });
+    const originalFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (input.toString().endsWith("/settings/policies/batch") && init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body));
+        saves.push(body);
+        return saves.length === 1
+          ? jsonResponse({ error_code: "settings_revision_conflict", message: "Conflict", request_id: "conflict-probe", warnings: [] }, 409)
+          : jsonResponse({ data: policies(body.changes.title, revisions[2]) });
+      }
+      return originalFetch(input, init);
+    });
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+    const title = await screen.findByDisplayValue("Original workspace");
+    await userEvent.clear(title);
+    await userEvent.type(title, "Conflicting local title");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    const current = await screen.findByDisplayValue("New server workspace");
+    expect(policyReads).toBe(2);
+    await userEvent.clear(current);
+    await userEvent.type(current, "Retried local title");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled());
+    expect(saves.map((save) => save.expected_revision)).toEqual(revisions.slice(0, 2));
+    expect(screen.getByDisplayValue("Retried local title")).toBeInTheDocument();
+  });
+
+  it("preserves unsaved settings when a menu refresh is pending or requested again", async () => {
+    let policyReads = 0;
+    let releaseRefresh!: (value: unknown) => void;
+    const refresh = new Promise((resolve) => { releaseRefresh = resolve; });
+    const policies = (title: string) => ({
+      ...basicSettingsPolicies(),
+      workspace: policy("workspace", "Workspace basics", {
+        title, goal: "Existing goal", default_language: "en", visibility: "private",
+      }),
+    });
+    mockFetch({
+      [`${BASE}/api/v1/workspaces`]: { data: {
+        current_workspace_id: WORKSPACE_ID,
+        workspaces: [workspaceSummary(WORKSPACE_ID, "Original workspace", "default")],
+      } },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: () => {
+        policyReads += 1;
+        return policyReads === 1 ? { data: policies("Original workspace") } : refresh;
+      },
+      [`${BASE}/api/v1/auth/tokens`]: { data: [] },
+      [`${BASE}/oauth/consents`]: { data: [] },
+    });
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <Link to="/settings">Main menu Settings</Link>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+    const title = await screen.findByDisplayValue("Original workspace");
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Settings" }));
+    await waitFor(() => expect(policyReads).toBe(2));
+    await userEvent.clear(title);
+    await userEvent.type(title, "Unsaved local title");
+    await act(async () => releaseRefresh({ data: policies("Remote workspace") }));
+    expect(title).toHaveValue("Unsaved local title");
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Settings" }));
+    expect(policyReads).toBe(2);
+    expect(title).toHaveValue("Unsaved local title");
   });
 
   it("localizes system policy titles and edit states without changing workspace data", async () => {
@@ -483,10 +655,10 @@ describe("SettingsScreen", () => {
       .getByText("Connected MCP clients")
       .closest(".mcp-clients-section") as HTMLElement;
     expect(
-      within(clientSection).getByRole("radio", { name: "Active 21" }),
+      within(clientSection).getByRole("radio", { name: "Available 21" }),
     ).toBeChecked();
     expect(
-      within(clientSection).getByRole("radio", { name: "Deactivated 2" }),
+      within(clientSection).getByRole("radio", { name: "Other states 2" }),
     ).toBeInTheDocument();
     expect(within(clientSection).getByText("1–20 of 21")).toBeInTheDocument();
 
@@ -540,7 +712,7 @@ describe("SettingsScreen", () => {
     ).toBeInTheDocument();
 
     await user.click(
-      within(clientSection).getByRole("radio", { name: "Deactivated 2" }),
+      within(clientSection).getByRole("radio", { name: "Other states 2" }),
     );
     expect(
       await within(clientSection).findByText("disabled-1", {
@@ -625,7 +797,7 @@ describe("SettingsScreen", () => {
     ).closest(".mcp-clients-section") as HTMLElement;
     await user.click(
       await within(clientSection).findByRole("radio", {
-        name: "Deactivated 1",
+        name: "Other states 1",
       }),
     );
     expect(
@@ -833,7 +1005,7 @@ describe("SettingsScreen", () => {
     ).closest(".mcp-clients-section") as HTMLElement;
     await user.click(
       await within(clientSection).findByRole("radio", {
-        name: "Deactivated 1",
+        name: "Other states 1",
       }),
     );
     expect(
@@ -1072,7 +1244,6 @@ describe("SettingsScreen", () => {
               data: {
                 current_workspace_id: "workspace-1",
                 default_workspace_id: null,
-                personal_workspace_id: null,
                 workspaces: [
                   workspaceSummary(
                     "workspace-1",
@@ -1167,10 +1338,10 @@ describe("SettingsScreen", () => {
     { caseName: "the authoritative empty list loads", refreshFails: false },
     { caseName: "the authoritative refresh fails", refreshFails: true },
   ])(
-    "deletes the only Personal workspace and opens discovery when $caseName",
+    "deletes the only workspace and opens discovery when $caseName",
     async ({ refreshFails }) => {
       const user = userEvent.setup();
-      const personalWorkspaceId = "workspace-personal";
+      const onlyWorkspaceId = "workspace-personal";
       let workspaceListReads = 0;
       const fetchMock = mockFetch({
         [`${BASE}/api/v1/workspaces`]: () => {
@@ -1178,12 +1349,11 @@ describe("SettingsScreen", () => {
           if (workspaceListReads === 1) {
             return {
               data: {
-                current_workspace_id: personalWorkspaceId,
-                default_workspace_id: personalWorkspaceId,
-                personal_workspace_id: personalWorkspaceId,
+                current_workspace_id: onlyWorkspaceId,
+                default_workspace_id: onlyWorkspaceId,
                 workspaces: [
                   workspaceSummary(
-                    personalWorkspaceId,
+                    onlyWorkspaceId,
                     "Personal Workspace",
                     "personal-space",
                   ),
@@ -1198,12 +1368,11 @@ describe("SettingsScreen", () => {
             data: {
               current_workspace_id: null,
               default_workspace_id: null,
-              personal_workspace_id: null,
               workspaces: [],
             },
           };
         },
-        [`${BASE}/api/v1/workspaces/${personalWorkspaceId}/settings/policies`]: {
+        [`${BASE}/api/v1/workspaces/${onlyWorkspaceId}/settings/policies`]: {
           data: {
             workspace: policy("workspace", "Workspace policy", {
               default_language: "en",
@@ -1220,8 +1389,8 @@ describe("SettingsScreen", () => {
             mcp_clients: [],
           },
         },
-        [`DELETE ${BASE}/api/v1/workspaces/${personalWorkspaceId}`]: {
-          data: { deleted_workspace_id: personalWorkspaceId },
+        [`DELETE ${BASE}/api/v1/workspaces/${onlyWorkspaceId}`]: {
+          data: { deleted_workspace_id: onlyWorkspaceId },
         },
         [`${BASE}/api/v1/auth/tokens`]: {
           data: [],
@@ -1269,15 +1438,12 @@ describe("SettingsScreen", () => {
         ).toHaveTextContent("REPLACE");
       });
       expect(fetchMock).toHaveBeenCalledWith(
-        `${BASE}/api/v1/workspaces/${personalWorkspaceId}`,
+        `${BASE}/api/v1/workspaces/${onlyWorkspaceId}`,
         expect.objectContaining({ method: "DELETE" }),
       );
       expect(screen.getByTestId("settings-workspace-count")).toHaveTextContent(
         "0",
       );
-      expect(
-        screen.getByTestId("settings-personal-workspace"),
-      ).toHaveTextContent("none");
       expect(
         window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
       ).toBeNull();
@@ -2336,17 +2502,6 @@ describe("SettingsScreen", () => {
     );
   });
 
-  it("keeps Members & access as one visual surface with nested subsections", () => {
-    const styles = readAppStyles();
-
-    expect(styles).toMatch(
-      /\.workspace-members-access-unified\s*\{[^}]*border:\s*1px solid var\(--border\);[^}]*box-shadow:\s*var\(--shadow-1\);/,
-    );
-    expect(styles).toMatch(
-      /\.workspace-members-access-unified \.workspace-settings-card\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/,
-    );
-  });
-
   it("asks before discarding a draft, and only when there is one", async () => {
     // Five policy surfaces used to be five destinations, so losing a draft
     // meant leaving one. As tabs they look like a lightweight toggle, and
@@ -2483,15 +2638,18 @@ describe("SettingsScreen", () => {
       </MemoryRouter>,
     );
 
-    const status = await screen.findByText("Loading lint rules…");
+    const label = await screen.findByText("Loading lint rules…");
+    const status = label.closest(".settings-loading-row");
     expect(status).toHaveAttribute("role", "status");
-    expect(status).toHaveClass("settings-loading-row");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(status?.querySelector(".spinner")).toHaveAttribute("aria-hidden", "true");
 
     await act(async () => {
       rules.resolve({ data: { rules: [] } });
       await rules.promise;
     });
     expect(await screen.findByText("No lint rules")).toBeInTheDocument();
+    expect(screen.queryByText("Loading lint rules…")).not.toBeInTheDocument();
   });
 
   it("keeps a policy save failure inside the pane that raised it", async () => {
@@ -2709,20 +2867,21 @@ describe("SettingsScreen", () => {
   it("keeps Settings checkbox labels separated from the box control", () => {
     const styles = readAppStyles();
 
-    // A-1 (260908 UI audit): 24px matches the WCAG 2.2 SC 2.5.8 minimum
-    // target size (the same size .review-row-select already uses).
-    expect(styles).toContain("grid-template-columns: 24px minmax(0, 1fr);");
+    // A 16px control column keeps the square fixed; the wrapping label owns
+    // the separate minimum 24px hit area.
+    expect(styles).toContain("grid-template-columns: var(--checkbox-size) minmax(0, 1fr);");
     expect(styles).toContain("column-gap: 8px;");
     expect(styles).toContain('.checkbox-field input[type="checkbox"]');
     expect(styles).toContain("margin: 0;");
     expect(styles).toContain("accent-color: var(--context);");
   });
 
-  it("gives every checkbox field a WCAG 2.2-compliant 24x24 target size (A-1)", () => {
+  it("keeps a 16px visible box inside a label with a separate hit target", () => {
     const styles = readAppStyles();
+    expect(styles).toMatch(/\.checkbox-field\s*\{[^}]*min-height:\s*24px;/s);
 
     expect(styles).toMatch(
-      /\.checkbox-field input\[type="checkbox"\]\s*\{[^}]*width:\s*24px;[^}]*height:\s*24px;/s,
+      /\.checkbox-field input\[type="checkbox"\]\s*\{[^}]*width:\s*var\(--checkbox-size\);[^}]*height:\s*var\(--checkbox-size\);/s,
     );
   });
 
@@ -2933,6 +3092,10 @@ describe("SettingsScreen", () => {
     );
 
     const goal = await screen.findByLabelText("Goal");
+    fireEvent.change(goal, { target: { value: "😀".repeat(513) } });
+    expect(goal).toHaveValue("😀".repeat(513));
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(screen.getByText("Use 512 characters or fewer.")).toBeVisible();
     await user.clear(goal);
     await user.type(goal, "Temporary workspace purpose");
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
@@ -3348,6 +3511,62 @@ describe("SettingsScreen", () => {
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`,
       expect.objectContaining({ method: "PATCH" }),
     );
+  });
+
+  it.each([80, 81])("counts Library family names as code points when validating a %i-emoji draft", async (length) => {
+    const libraryPolicy = {
+      policy_schema_version: 5,
+      builtin_format_overrides: {},
+      custom_formats: [],
+      format_families: [{
+        family_id: "family-emoji",
+        name: "😀".repeat(length),
+        format_ids: ["markdown"],
+        max_upload_bytes: null,
+      }],
+      max_upload_bytes: 20_000_000,
+      format_overrides: {},
+      allow_store_without_converter: true,
+    };
+    mockFetch({
+      [`${BASE}/api/v1/workspaces`]: {
+        data: {
+          current_workspace_id: WORKSPACE_ID,
+          workspaces: [workspaceSummary(WORKSPACE_ID, "Default Workspace", "default")],
+        },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {
+        data: {
+          workspace: policy("workspace", "Workspace policy"),
+          library: policy("library", "Library policy", libraryPolicy),
+          citation: policy("citation", "Citation policy"),
+          context_write: policy("context_write", "Context write policy"),
+          agent_injection: policy("agent_injection", "Agent injection policy"),
+          mcp_clients: [],
+        },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/capabilities`]: {
+        data: settingsLibraryCapabilities(),
+      },
+      [`${BASE}/api/v1/auth/tokens`]: { data: [] },
+      [`${BASE}/oauth/consents`]: { data: [] },
+    });
+    render(
+      <MemoryRouter initialEntries={["/settings?section=library"]}>
+        <WorkspaceProvider>
+          <WorkspaceRefreshGate><SettingsScreen /></WorkspaceRefreshGate>
+        </WorkspaceProvider>
+      </MemoryRouter>,
+    );
+    const card = (await screen.findByRole("heading", {
+      name: "Library upload policy",
+    })).closest(".policy-card") as HTMLElement;
+    const limit = within(card).getByRole("spinbutton", { name: "Manual upload limit" });
+    await waitFor(() => expect(limit).toHaveValue(20));
+    fireEvent.change(limit, { target: { value: "21" } });
+    const save = within(card).getByRole("button", { name: "Save changes" });
+    if (length === 80) expect(save).toBeEnabled();
+    else expect(save).toBeDisabled();
   });
 
   it("manages custom aliases and families while keeping individual limits advanced", async () => {
@@ -5576,7 +5795,7 @@ describe("SettingsScreen", () => {
     expect(screen.getByText(/Authorization: Bearer/)).toBeInTheDocument();
     expect(screen.queryByText(/pipx install dtxwiki/)).not.toBeInTheDocument();
     expect(screen.queryByText(/pipx run dtxwiki/)).not.toBeInTheDocument();
-    expect(screen.getByText("Client Claude Code")).toBeInTheDocument();
+    expect(document.querySelector(".mcp-key-identity")).toHaveTextContent("Claude Code");
     await user.click(
       screen.getByRole("button", { name: "Revoke key Claude Code access key" }),
     );
@@ -5717,9 +5936,9 @@ describe("SettingsScreen", () => {
       </MemoryRouter>,
     );
 
-    const picker = await screen.findByRole("listbox", {
-      name: "Allowed workspaces",
-    });
+    await user.click(await screen.findByRole("button", { name: "View and select workspaces" }));
+    const picker = await screen.findByRole("listbox", { name: "Allowed workspaces" });
+    await waitFor(() => expect(within(picker).getAllByRole("option")).toHaveLength(2));
     // Creating defaults to the user's default workspace, nothing more.
     const options = within(picker).getAllByRole("option");
     expect(options).toHaveLength(2);
@@ -5727,16 +5946,14 @@ describe("SettingsScreen", () => {
     expect(options[0]).toHaveAttribute("aria-selected", "true");
     expect(options[1]).toHaveAttribute("aria-selected", "false");
     expect(screen.getByText("1/2 selected")).toBeInTheDocument();
-    // Two rows is under the switcher's 7-row threshold, so no local filter.
-    expect(
-      screen.queryByRole("searchbox", { name: "Filter workspaces" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Filter workspaces" })).toBeInTheDocument();
 
     // Space toggles the focused option (role="option" + aria-selected).
     options[1].focus();
     await user.keyboard("{ }");
     expect(options[1]).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("2/2 selected")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", {name: "Apply 2 selected"}));
 
     const generate = screen.getByRole("button", {
       name: "Generate access key",
@@ -5754,7 +5971,7 @@ describe("SettingsScreen", () => {
     });
   });
 
-  it("disables key issuance when the workspace picker is cleared", async () => {
+  it("blocks applying an empty workspace draft and preserves the committed selection", async () => {
     const user = userEvent.setup();
     mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
@@ -5784,26 +6001,21 @@ describe("SettingsScreen", () => {
       name: "Generate access key",
     });
     await waitFor(() => expect(generate).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "Clear all" }));
-    expect(screen.getByText("0/2 selected")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "With no workspace selected this connection can reach no workspace at all.",
-      ),
-    ).toBeInTheDocument();
-    expect(generate).toBeDisabled();
-
-    // "Select all shown" puts every row back and re-enables issuance.
-    await user.click(
-      screen.getByRole("checkbox", {
-        name: "Select or clear every shown workspace",
-      }),
-    );
-    expect(screen.getByText("2/2 selected")).toBeInTheDocument();
-    await waitFor(() => expect(generate).toBeEnabled());
+    await user.click(screen.getByRole("button", {name: "View and select workspaces"}));
+    const dialog = screen.getByRole("dialog", {name: "Allowed workspaces"});
+    await waitFor(() => expect(within(dialog).getAllByRole("option")).toHaveLength(2));
+    await user.click(within(dialog).getByRole("button", { name: "Clear all selections" }));
+    expect(within(dialog).getByText("0/2 selected")).toBeInTheDocument();
+    expect(within(dialog).getByText("With no workspace selected this connection can reach no workspace at all.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", {name: "Apply 0 selected"})).toBeDisabled();
+    await user.click(within(dialog).getByRole("checkbox", {name: "Select or clear this page"}));
+    expect(within(dialog).getByText("2/2 selected")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", {name: "Cancel"}));
+    expect(screen.getByText(/1 selected · Default Workspace/)).toBeInTheDocument();
+    expect(generate).toBeEnabled();
   });
 
-  it("shows at most three workspace chips with sync state and a full popover", async () => {
+  it("shows at most two workspace chips and all grant details in a read-only dialog", async () => {
     const user = userEvent.setup();
     mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
@@ -5841,32 +6053,21 @@ describe("SettingsScreen", () => {
       ".mcp-key-row",
     ) as HTMLElement;
     const chipRow = row.querySelector(".workspace-chip-row") as HTMLElement;
-    // Three chips plus a "+1" overflow, section 3.2.
     expect(within(chipRow).getByText("Alpha")).toBeInTheDocument();
     expect(within(chipRow).getByText("Beta")).toBeInTheDocument();
-    expect(within(chipRow).getByText("Gamma")).toBeInTheDocument();
+    expect(within(chipRow).queryByText("Gamma")).not.toBeInTheDocument();
     expect(within(chipRow).queryByText("Delta")).not.toBeInTheDocument();
-    expect(within(chipRow).getByText("+1")).toBeInTheDocument();
-
-    // synced shows nothing; pending and failed each carry their own chip text,
-    // and failed explains that its requests are refused (section 2.6).
+    expect(within(chipRow).getByText("+2")).toBeInTheDocument();
     expect(within(chipRow).getByText("Syncing")).toBeInTheDocument();
-    const failedChip = within(chipRow)
-      .getByText("Sync failed")
-      .closest("button") as HTMLElement;
-    expect(failedChip).toHaveAttribute(
-      "title",
-      "Requests for this workspace are refused; a retry is running.",
-    );
-
-    await user.click(within(chipRow).getByText("+1"));
-    const popover = within(chipRow).getByRole("group", {
-      name: "Allowed workspaces",
-    });
-    expect(within(popover).getByText("Delta")).toBeInTheDocument();
-    expect(
-      within(popover).getAllByText(/Granted scopes: mcp:read/).length,
-    ).toBe(4);
+    await user.click(within(chipRow).getByText("+2"));
+    const dialog = screen.getByRole("dialog", {name: "Allowed workspaces"});
+    expect(within(dialog).getByText("Gamma")).toBeInTheDocument();
+    expect(within(dialog).getByText("Delta")).toBeInTheDocument();
+    expect(within(dialog).getByText(/Requests for this workspace are refused/)).toBeInTheDocument();
+    expect(within(dialog).getAllByText(/Granted scopes: mcp:read/)).toHaveLength(4);
+    expect(within(dialog).queryByRole("checkbox")).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(within(chipRow).getByText("+2").closest("button")).toHaveFocus();
   });
 
   it("edits an access key's allowed workspaces with a diff-summary confirmation", async () => {
@@ -5922,21 +6123,23 @@ describe("SettingsScreen", () => {
     ).toBeInTheDocument();
     expect(within(dialog).getByText("No change yet.")).toBeInTheDocument();
 
+    await user.click(within(dialog).getByRole("button", {name: /Selected items/}));
     const orphan = within(dialog)
       .getByText("Orphaned")
       .closest('[role="option"]') as HTMLElement;
     expect(within(orphan).getByText("No membership")).toBeInTheDocument();
     expect(orphan).toHaveAttribute("aria-selected", "true");
     await user.click(orphan);
-    expect(orphan).toHaveAttribute("aria-selected", "false");
-    // Once dropped it can no longer be re-added.
-    expect(orphan).toHaveAttribute("aria-disabled", "true");
-    await user.click(orphan);
-    expect(orphan).toHaveAttribute("aria-selected", "false");
+    expect(orphan).not.toBeInTheDocument();
+    // A lost membership cannot return as a selectable candidate after removal.
+    expect(within(dialog).queryByText("Orphaned")).not.toBeInTheDocument();
 
     await user.click(
       within(dialog).getByText("Beta").closest('[role="option"]') as HTMLElement,
     );
+    await user.click(within(dialog).getByRole("button", {name: /Show all workspaces/}));
+    await within(dialog).findByText("Gamma");
+    expect(within(dialog).queryByText("Orphaned")).not.toBeInTheDocument();
     await user.click(
       within(dialog)
         .getByText("Gamma")
@@ -7329,11 +7532,16 @@ describe("SettingsScreen", () => {
 
     expect(await screen.findByText("Laptop")).toBeInTheDocument();
     expect(screen.getByText("dtxw_lapt...")).toBeInTheDocument();
-    expect(screen.getByText("UUID tokenren")).toBeInTheDocument();
+    expect(screen.getByText("token-rename")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Rename" }));
     const renameInput = screen.getByRole("textbox", { name: "Rename Laptop" });
     expect(renameInput).toHaveClass("mcp-key-rename-input");
     expect(renameInput.closest("label")).toHaveClass("mcp-key-rename-field");
+    fireEvent.change(renameInput, { target: { value: "😀".repeat(129) } });
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+    expect(renameInput).toHaveValue("😀".repeat(129));
+    expect(screen.getByText("Use 128 characters or fewer.")).toBeVisible();
+    expect(lastJsonBody(fetchMock, `${BASE}/api/v1/auth/tokens/token-rename`, "PATCH")).toBeUndefined();
     await user.clear(renameInput);
     await user.type(renameInput, "Research laptop");
     await user.click(screen.getByRole("button", { name: "Save name" }));
@@ -7776,7 +7984,7 @@ describe("SettingsScreen", () => {
     const customAppLabel = screen.getByRole("textbox", {
       name: "AI app display name",
     });
-    expect(customAppLabel).toHaveAttribute("maxLength", "128");
+    expect(customAppLabel).not.toHaveAttribute("maxLength");
     expect(
       screen.getByText(/does not identify or authorize the app/),
     ).toBeInTheDocument();
@@ -7906,6 +8114,167 @@ describe("SettingsScreen", () => {
     expect(copied).toContain("--bearer-token-env-var DTXWIKI_MCP_PAT");
   });
 
+  it("lets the user retry a failed cleanup preview without sending a cleanup POST", async () => {
+    const user = userEvent.setup();
+    let previewFails = true;
+    const fetchMock = mockFetch({
+      [`${BASE}/api/v1/workspaces`]: {data: {current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary(WORKSPACE_ID, "Default", "default")]}},
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {data: basicSettingsPolicies()},
+      [`${BASE}/api/v1/auth/tokens`]: {data: []},
+      [`${BASE}/oauth/consents`]: {data: []},
+      [`${BASE}/oauth/consents/cleanup`]: () => {
+        if (previewFails) throw new Error("Offline");
+        return {data:{eligible_consent_count:1,affected_mcp_client_count:0,cleaned_consent_count:0}};
+      },
+    });
+    render(<MemoryRouter initialEntries={["/settings/integrations"]}><SettingsScreen /></MemoryRouter>);
+    const trigger = await screen.findByRole("button",{name:"Review cleanup candidates"});
+    await user.click(trigger);
+    expect(await screen.findByText("The Settings request failed. Please try again.")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toBeEnabled();
+    previewFails = false;
+    await user.click(trigger);
+    const dialog = await screen.findByRole("dialog",{name:"Clean up old connections"});
+    await user.click(within(dialog).getByRole("button",{name:"Cancel"}));
+    expect(trigger).toHaveFocus();
+    expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith("/oauth/consents/cleanup") && init?.method === "POST")).toBe(false);
+  });
+
+  it.each([0, 7])(
+    "uses the server cleanup preview count %i and restores focus on cancel",
+    async (count) => {
+      const user = userEvent.setup();
+      const fetchMock = mockFetch({
+        [`${BASE}/api/v1/workspaces`]: {
+          data: {
+            current_workspace_id: WORKSPACE_ID,
+            workspaces: [workspaceSummary(WORKSPACE_ID, "Default", "default")],
+          },
+        },
+        [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {
+          data: basicSettingsPolicies(),
+        },
+        [`${BASE}/api/v1/auth/tokens`]: { data: [] },
+        [`${BASE}/oauth/consents`]: { data: [] },
+        [`${BASE}/oauth/consents/cleanup`]: {
+          data: {
+            eligible_consent_count: count,
+            affected_mcp_client_count: 99,
+            cleaned_consent_count: 0,
+          },
+        },
+      });
+      render(
+        <MemoryRouter initialEntries={["/settings/integrations"]}>
+          <SettingsScreen />
+        </MemoryRouter>,
+      );
+      const trigger = await screen.findByRole("button", {
+        name: "Review cleanup candidates",
+      });
+      await user.click(trigger);
+      const dialog = await screen.findByRole("dialog", {
+        name: "Clean up old connections",
+      });
+      expect(
+        within(dialog).getByText(new RegExp(`Remove ${count} expired`)),
+      ).toBeInTheDocument();
+      if (count === 0)
+        expect(
+          within(dialog).getByRole("button", { name: "Clean up" }),
+        ).toBeDisabled();
+      else
+        expect(
+          within(dialog).getByRole("button", { name: "Clean up" }),
+        ).toBeEnabled();
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      expect(trigger).toHaveFocus();
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url).endsWith("/oauth/consents/cleanup") &&
+            init?.method === "POST",
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it("keeps cleanup failures inside the dialog and refreshes only after an explicit successful retry", async () => {
+    const user = userEvent.setup();
+    let fail = true;
+    const fetchMock = mockFetch({
+      [`${BASE}/api/v1/workspaces`]: {
+        data: {
+          current_workspace_id: WORKSPACE_ID,
+          workspaces: [workspaceSummary(WORKSPACE_ID, "Default", "default")],
+        },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {
+        data: basicSettingsPolicies(),
+      },
+      [`${BASE}/api/v1/auth/tokens`]: { data: [] },
+      [`${BASE}/oauth/consents`]: { data: [] },
+      [`${BASE}/oauth/consents/cleanup`]: {
+        data: {
+          eligible_consent_count: 3,
+          affected_mcp_client_count: 0,
+          cleaned_consent_count: 0,
+        },
+      },
+      [`POST ${BASE}/oauth/consents/cleanup`]: () => {
+        if (fail) throw new Error("Cleanup failed");
+        return {
+          data: {
+            eligible_consent_count: 0,
+            affected_mcp_client_count: 0,
+            cleaned_consent_count: 3,
+          },
+        };
+      },
+    });
+    render(
+      <MemoryRouter initialEntries={["/settings/integrations"]}>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+    const trigger = await screen.findByRole("button", {
+      name: "Review cleanup candidates",
+    });
+    await user.click(trigger);
+    const dialog = await screen.findByRole("dialog", {
+      name: "Clean up old connections",
+    });
+    await user.click(within(dialog).getByRole("button", { name: "Clean up" }));
+    expect(
+      await within(dialog).findByText(
+        "The Settings request failed. Please try again.",
+      ),
+    ).toBeInTheDocument();
+    fail = false;
+    fetchMock.mockClear();
+    await user.click(within(dialog).getByRole("button", { name: "Clean up" }));
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).endsWith("/oauth/consents/cleanup") &&
+          init?.method === "POST",
+      ),
+    ).toBe(true);
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).includes("/settings/policies"),
+      ),
+    ).toBe(true);
+    expect(
+      fetchMock.mock.calls.some(
+        ([url]) => new URL(String(url)).pathname === "/oauth/consents",
+      ),
+    ).toBe(true);
+  });
+
   it("lists and revokes OAuth consents by client after confirming modal", async () => {
     const user = userEvent.setup();
     let consentRevoked = false;
@@ -8024,9 +8393,8 @@ describe("SettingsScreen", () => {
     // One right-hand column: state chip on its own line, actions below it.
     const alphaActions = alphaRow.children[2] as HTMLElement;
     expect(alphaActions).toHaveClass("row-actions", "oauth-consent-actions");
-    expect(alphaActions.children[0]).toHaveClass("row-actions-status");
-    expect(alphaActions.children[0].firstElementChild).toHaveClass("status-pill");
-    expect(alphaActions.children[1]).toHaveClass("row-actions-buttons");
+    expect(alphaRow.querySelector(".mcp-credential-heading .status-pill")).toBeInTheDocument();
+    expect(alphaActions.children[0]).toHaveClass("row-actions-buttons");
     expect(
       alphaActions.querySelector(".oauth-consent-revoke")?.parentElement,
     ).toHaveClass("row-actions-buttons");
@@ -8605,6 +8973,35 @@ describe("SettingsScreen", () => {
     };
   }
 
+  it("opens Labs from a shared link and through the searchable account navigation", async () => {
+    const user = userEvent.setup();
+    mockFetch(navFixture(false));
+    render(
+      <MemoryRouter initialEntries={["/settings?section=labs"]}>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Labs", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Show Ask menu" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Show Agent menu" })).not.toBeChecked();
+
+    const nav = screen.getByRole("navigation", { name: "Settings sections" });
+    const labs = within(nav).getByRole("button", { name: "Labs" });
+    expect(labs).toHaveAttribute("aria-current", "page");
+    expect(labs.closest(".settings-subnav-group")).toHaveTextContent("Your account");
+
+    await user.click(within(nav).getByRole("button", { name: "Workspace" }));
+    await screen.findByRole("heading", { name: "Workspace", level: 1 });
+    await user.type(
+      within(nav).getByRole("searchbox", { name: "Filter settings sections" }),
+      "experimental",
+    );
+    expect(within(nav).queryByRole("button", { name: "Workspace" })).not.toBeInTheDocument();
+    await user.click(within(nav).getByRole("button", { name: "Labs" }));
+    expect(await screen.findByRole("heading", { name: "Labs", level: 1 })).toBeInTheDocument();
+  });
+
   it("groups Settings sections and marks the server-wide ones for an admin", async () => {
     mockFetch(navFixture(true));
     render(
@@ -8673,14 +9070,17 @@ describe("SettingsScreen", () => {
     expect(nav.querySelector(".nav-admin-badge")).toBeNull();
   });
 
-  it("tells a viewer why Attachments is closed instead of calling a server-admin endpoint", async () => {
-    // Shipped bug: the pane had no gate and picked its scope with
-    // `canManageAttachments ? "workspace" : "server"`, which lumps a viewer in
-    // with a server admin who is not a member. The viewer got the admin
-    // orphan endpoint (refused) and a banner claiming they were not a member
-    // of a workspace they belong to.
+  it("shows a viewer read-only attachments without calling a server-admin endpoint", async () => {
+    // Viewer membership permits policy reads but never owner edits or admin fallback.
     const fetchMock = mockFetch({
       ...navFixture(false),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/media/attachments?scope=mine&limit=24`]: {
+        data: { items: [], next_cursor: null, scope: "mine", retention_policy: {
+          orphan_retention_hours: null, effective_orphan_retention_hours: 168,
+          default_orphan_retention_hours: 168, max_orphan_retention_hours: 876000,
+          source: "server", revision: "a".repeat(64),
+        } },
+      },
       [`${BASE}/api/v1/workspaces`]: {
         data: {
           current_workspace_id: WORKSPACE_ID,
@@ -8697,8 +9097,10 @@ describe("SettingsScreen", () => {
     );
 
     expect(
-      await screen.findByText(/Attachments are managed by editors and owners/),
+      await screen.findByRole("heading", { name: "Attachments", level: 2 }),
     ).toBeInTheDocument();
+    expect(await screen.findByText("Unused file retention: 7 days")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save policy" })).not.toBeInTheDocument();
     expect(
       screen.queryByText(/not a member of this workspace/),
     ).not.toBeInTheDocument();
@@ -9099,9 +9501,12 @@ describe("SettingsScreen", () => {
       // server's unlocalized reason)...
       expect(
         screen.getByText(
-          "이 서버는 OAuth를 제공할 수 없습니다(https URL이 필요하며, 표준을 따르는 MCP 클라이언트는 https가 아닌 인증 서버를 거부합니다). 아래의 액세스 키를 대신 사용하세요.",
+          "이 서버는 OAuth를 제공할 수 없습니다(https URL이 필요하며, 표준을 따르는 MCP 클라이언트는 https가 아닌 인증 서버를 거부합니다).",
         ),
       ).toBeInTheDocument();
+      const fallbackLink = screen.getByRole("link", { name: "Access Key를 사용하세요." });
+      expect(fallbackLink).toHaveAttribute("href", "#mcp-key-setup");
+      expect(document.getElementById("mcp-key-setup")).toHaveTextContent("액세스 키");
       // ...and the server's own detail should still be visible, as
       // supplementary information, not silently dropped.
       expect(
@@ -9792,15 +10197,12 @@ describe("SettingsScreen", () => {
 function WorkspaceDeletionProbe() {
   const location = useLocation();
   const navigationType = useNavigationType();
-  const { personalWorkspaceId, workspaces } = useWorkspaceContext();
+  const { workspaces } = useWorkspaceContext();
   return (
     <>
       <span data-testid="settings-location">{location.pathname}</span>
       <span data-testid="settings-navigation-type">{navigationType}</span>
       <span data-testid="settings-workspace-count">{workspaces.length}</span>
-      <span data-testid="settings-personal-workspace">
-        {personalWorkspaceId ?? "none"}
-      </span>
     </>
   );
 }
@@ -9867,7 +10269,12 @@ function mockFetch(responses: Record<string, unknown>) {
         responses[url];
       if (!response && method === "GET") {
         const parsed = new URL(url);
-        if (
+        if (parsed.pathname === "/api/v1/auth/credential-workspaces") {
+          const roster = responses[`${BASE}/api/v1/workspaces`] as {data?: {workspaces?: {id: string; title: string; slug: string; role?: string}[]; default_workspace_id?: string}};
+          const query = (parsed.searchParams.get("q") ?? "").toLowerCase();
+          const rows = (roster?.data?.workspaces ?? []).filter(w => `${w.title} ${w.slug}`.toLowerCase().includes(query)).map(w => ({...w, is_default: w.id === roster.data?.default_workspace_id}));
+          response = {data: rows.slice(0, 8), total_count: rows.length, next_cursor: null};
+        } else if (
           parsed.pathname ===
           `/api/v1/workspaces/${WORKSPACE_ID}/settings/mcp-clients`
         ) {

@@ -8,11 +8,15 @@ from sqlalchemy import select
 
 from backend.app.settings import Settings
 from backend.app.state import get_session_factory_from_app
+from backend.domain.credential_input import (
+    OAUTH_JWT_MAX_BYTES,
+    ascii_token_is_valid,
+    authorization_header_is_valid,
+)
 from backend.models.oauth import OAuthConsent
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
 from backend.policy.rbac import get_workspace_access
-from backend.policy.workspace_resolution import repair_default_workspace_to_personal
 from backend.services.api_token_service import (
     ApiTokenService,
     InvalidApiTokenError,
@@ -43,11 +47,13 @@ def get_rest_actor(
         Security(bearer_scheme),
     ] = None,
 ) -> ActorContext:
+    if not authorization_header_is_valid(request.headers.get("authorization", "")):
+        raise_unauthorized("Authorization header is invalid")
     settings = request.app.state.settings
     session_factory = _session_factory(request)
     if credentials is not None:
         actor = _authenticate_api_token(
-            token=credentials.credentials,
+            token=credentials.credentials.strip(" \t"),
             session_factory=session_factory,
             settings=settings,
             public_base_url=public_base_url_from_request(request),
@@ -82,6 +88,8 @@ def get_rest_actor(
 
 
 def authenticate_bearer_token(request: Request, token: str) -> ActorContext:
+    if not authorization_header_is_valid(request.headers.get("authorization", "")):
+        raise_unauthorized("Authorization header is invalid")
     actor = _authenticate_api_token(
         token=token,
         session_factory=_session_factory(request),
@@ -99,6 +107,8 @@ def _authenticate_api_token(
     settings: Settings,
     public_base_url: str,
 ) -> ActorContext:
+    if not ascii_token_is_valid(token, OAUTH_JWT_MAX_BYTES):
+        raise_unauthorized("Bearer token is invalid")
     if not token.startswith("dtxw_"):
         return _authenticate_oauth_token(
             token=token,
@@ -228,18 +238,18 @@ def _default_workspace_access(session_factory, user_id: UUID):
         if user is None:
             return None
 
-        repair_default_workspace_to_personal(session=session, user=user)
-        for workspace_id in (user.default_workspace_id, user.personal_workspace_id):
-            if workspace_id is None or session.get(Workspace, workspace_id) is None:
-                continue
+        workspace_id = user.default_workspace_id
+        if (
+            workspace_id is not None
+            and session.get(Workspace, workspace_id) is not None
+        ):
             access = get_workspace_access(
                 session,
                 user_id=user_id,
                 workspace_id=workspace_id,
             )
-            if access is None:
-                continue
-            return access
+            if access is not None:
+                return access
 
         membership_workspace_ids = list(
             session.scalars(

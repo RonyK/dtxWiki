@@ -4,9 +4,9 @@ import unicodedata
 from bisect import bisect_right
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from hashlib import sha256
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -18,6 +18,8 @@ from backend.context_media.domain import (
     validate_markdown_media_policy,
 )
 from backend.context_media.ports import ContextMediaRepository
+from backend.domain.input_policy import InputPolicyError
+from backend.domain.prepared_body import PreparedBody
 from backend.models.audit import AuditEvent
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import (
@@ -66,6 +68,7 @@ from backend.schemas.context_write import (
     WriteDraftRequest,
     WriteDraftResult,
 )
+from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.page import BODY_MD_MAX_LENGTH, PageMetadataPatch
 from backend.services.actor_visible_read import (
     context_page_visible,
@@ -73,11 +76,13 @@ from backend.services.actor_visible_read import (
 )
 from backend.services.audit_service import AuditService
 from backend.services.auto_approval import AutoApprovalDecision, evaluate_context_write
+from backend.services.body_preparer import BodyInput, BodyPreparer, WriteContext
 from backend.services.change_propagation import process_page_publish_maintenance
 from backend.services.context_editing import (
     ContextEditError,
     PreparedBlockMap,
     ResolvedEdit,
+    apply_operations,
     apply_operations_with_block_map,
     apply_resolved_edits,
     block_map_edit_plan,
@@ -85,7 +90,12 @@ from backend.services.context_editing import (
 )
 from backend.services.context_lifecycle import (
     apply_context_publication,
+    apply_page_metadata_snapshot,
     assert_context_publish_candidate,
+    effective_metadata_snapshot_records,
+    live_draft_chain,
+    record_metadata_snapshot,
+    rejected_draft_restart,
 )
 from backend.services.context_media_legacy_cutover import (
     require_no_visible_legacy_media,
@@ -123,9 +133,8 @@ from backend.services.library_canonical import (
     get_canonical_library_version,
 )
 from backend.services.library_storage import INLINE_TEXT_PREFIX
-from backend.services.lint.autofix import safe_normalize_markdown
+from backend.services.lint import publish_floor_findings
 from backend.services.lint.rules_format import (
-    body_error_findings,
     body_relative_message,
 )
 from backend.services.mcp_client_service import find_trace_mcp_client
@@ -171,10 +180,11 @@ from backend.utils.block_identity import (
     validated_block_map_for_version,
 )
 from backend.utils.block_map import compute_blocks
-from backend.utils.content_hash import canonicalize_markdown
+from backend.utils.content_hash import canonicalize_markdown, same_authored_markdown
 from backend.utils.content_hash import content_hash as calculate_content_hash
 from backend.utils.markdown_outline import parse_outline
 from backend.utils.markdown_parser import parse_markdown
+from backend.utils.page_frontmatter import validate_page_markdown_input
 from backend.utils.uuid import parse_uuid_or_none
 
 
@@ -188,13 +198,17 @@ class _ContextUpdateClassification:
 
 @dataclass(frozen=True)
 class _PreparedDivergedPatch:
-    body: str
+    prepared_body: PreparedBody
     pre_normalize_body: str
     normalized: bool
     outside_target_changed: bool
     risk_resolution: ReviewRiskResolution
     predicted_block_map: list[dict]
     operation_receipts: list[PatchOperationResolution]
+
+    @property
+    def body(self) -> str:
+        return self.prepared_body.body
 
 
 @dataclass(frozen=True)
@@ -503,6 +517,8 @@ def stale_pages_for_conversation(
                         head_version.block_map,
                         head_version.body_md,
                     ),
+                    base_body_md=read_version.body_md,
+                    candidate_body_md=head_version.body_md,
                 )
             )
         except (KeyError, TypeError, ValueError):
@@ -635,12 +651,94 @@ class ContextWriteService:
         context_media_repository_factory: Callable[[Session], ContextMediaRepository]
         | None = None,
         media_installer_factory: Callable[[Session, UUID], object] | None = None,
+        body_preparer: BodyPreparer | None = None,
     ) -> None:
         self.audit_service = audit_service or AuditService()
         self.risk_resolver = ReviewRiskResolver()
         self.job_queue = job_queue or JobQueueService()
         self.context_media_repository_factory = context_media_repository_factory
         self.media_installer_factory = media_installer_factory
+        self.body_preparer = body_preparer or BodyPreparer()
+
+    def _prepare_body(
+        self,
+        markdown: str,
+        *,
+        workspace: Workspace,
+        actor_kind: str,
+        actor_id: str,
+        actor_provenance: str,
+        session: Session,
+        page: ContextPage | None = None,
+        version: ContextPageVersion | None = None,
+    ) -> PreparedBody:
+        try:
+            return self.body_preparer.prepare(
+                BodyInput(markdown),
+                WriteContext(
+                    workspace=workspace,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    actor_provenance=actor_provenance,
+                    page=page,
+                    version=version,
+                    session=session,
+                ),
+            )
+        except MarkdownMediaPolicyError as exc:
+            raise RejectedByPolicyError(str(exc), error_code=exc.error_code) from exc
+
+    def preview_body(
+        self,
+        session: Session,
+        *,
+        workspace_id: UUID,
+        markdown: str,
+        actor_kind: str,
+        actor_id: str,
+        actor_provenance: str,
+    ) -> PreparedBody:
+        return self.body_preparer.preview(
+            markdown,
+            WriteContext(
+                workspace=self._require_workspace(session, workspace_id),
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                actor_provenance=actor_provenance,
+                session=session,
+            ),
+        )
+
+    def _prepared_base_matches(
+        self,
+        base_version: ContextPageVersion,
+        new_body: str,
+        *,
+        workspace: Workspace,
+        page: ContextPage,
+        session: Session,
+        actor_kind: str,
+        actor_id: str,
+        actor_provenance: str,
+    ) -> bool:
+        try:
+            return (
+                self._prepare_body(
+                    base_version.body_md,
+                    workspace=workspace,
+                    session=session,
+                    page=page,
+                    version=base_version,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    actor_provenance=actor_provenance,
+                ).body
+                == new_body
+            )
+        except (InputPolicyError, RejectedByPolicyError):
+            # Historical invalid bytes can still be repaired by a valid new
+            # write. They cannot establish a format-only auto-approval proof.
+            return False
 
     def _enqueue_embed(
         self,
@@ -649,12 +747,13 @@ class ContextWriteService:
         page: ContextPage,
         version: ContextPageVersion,
         marker: str,
+        decision_id: UUID | None = None,
     ) -> None:
         # Auto-index the page for vector retrieval (Epic-1 §6): the worker's
         # embed handler re-chunks + re-embeds the page's published + draft
         # scopes (a no-op when no embedding provider is configured). The key is
-        # version-addressed: a content revert must enqueue again because the
-        # worker resolves the current page head rather than a historical hash.
+        # version-addressed, or decision-addressed when review can undo and
+        # reapply that version. The worker resolves the current page head.
         # The enqueue shares the domain transaction so content and its trigger
         # commit atomically. In a split deployment the row is workspace-local;
         # S0 outbox/EventSink relays it to the control-side worker. Overlay jobs
@@ -669,6 +768,7 @@ class ContextWriteService:
                 marker,
                 version.id,
                 version.content_hash,
+                decision_id=decision_id,
             ),
             target_ref={"kind": "context_page", "id": str(page.id)},
         )
@@ -679,12 +779,12 @@ class ContextWriteService:
         *,
         page: ContextPage,
         transition_version: ContextPageVersion,
+        decision_id: UUID | None = None,
     ) -> None:
         """Queue the publish-path reindex after a visible-head transition.
 
-        A rejected draft was already queued with the ``draft`` marker. Using
-        its unused ``published`` marker makes this transition addressable and
-        idempotent while the worker still resolves the page's resulting head.
+        A review decision has its own key so a rejection repeated after undo
+        still runs. Other callers retain the version-addressed published key.
         """
 
         self._enqueue_embed(
@@ -692,6 +792,7 @@ class ContextWriteService:
             page=page,
             version=transition_version,
             marker="published",
+            decision_id=decision_id,
         )
 
     def count_workspace_pages(self, session: Session, workspace_id: UUID) -> int:
@@ -714,6 +815,8 @@ class ContextWriteService:
         actor_role: str,
         origin_chat_session_id: UUID | None = None,
         force_new_page: bool = False,
+        *,
+        actor_provenance: str = "internal",
     ) -> WriteDraftResult:
         # B-P1-4 Sprint_6 Fix_4: wrap the entire write_draft body in a
         # SAVEPOINT so a mid-write exception rolls back every partial
@@ -729,19 +832,20 @@ class ContextWriteService:
         # allocation in insert_version. Outside the SAVEPOINT on purpose: the
         # writer lock belongs to the whole transaction, not to the rollback
         # scope. PostgreSQL keeps using the narrower row locks below.
+        validate_request_inputs(request)
         acquire_write_intent(session)
         self._lock_context_media_usage_intent(session, workspace_id)
         with session.begin_nested():
             workspace = self._require_workspace(session, workspace_id)
-            # F2c: Auto-fix mode normalizes the body before the gate + persistence
-            # so the saved draft is already well-formatted.
-            if workspace.auto_fix_enabled and request.body_markdown:
-                request = request.model_copy(
-                    update={
-                        "body_markdown": safe_normalize_markdown(request.body_markdown)
-                    }
-                )
-            self._validate_media_markdown(request.body_markdown)
+            prepared_body = self._prepare_body(
+                request.body_markdown,
+                workspace=workspace,
+                session=session,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                actor_provenance=actor_provenance,
+            )
+            request = request.model_copy(update={"body_markdown": prepared_body.body})
             missing_citation_warnings = self._citation_warnings(
                 workspace,
                 request.citations,
@@ -763,6 +867,7 @@ class ContextWriteService:
                 workspace_id=workspace_id,
                 needs_review=request.needs_review,
                 body=request.body_markdown,
+                lint_registry=self.body_preparer.registry,
             )
             risk_resolution = self.risk_resolver.resolve(
                 workspace=workspace,
@@ -814,7 +919,7 @@ class ContextWriteService:
                 session=session,
                 page=page,
                 parent_version_id=parent_version_id,
-                body_markdown=request.body_markdown,
+                body=prepared_body,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
                 change_set_id=change_set.id,
@@ -878,6 +983,9 @@ class ContextWriteService:
                 diff_ref=f"context_page_version:{version.id}",
             )
             session.add(operation)
+            record_metadata_snapshot(
+                session, change_set_id=change_set.id, page=page, version=version
+            )
             review = self._create_review_item(
                 session=session,
                 workspace_id=workspace_id,
@@ -920,7 +1028,9 @@ class ContextWriteService:
                 outcome="created_draft" if page_created else "updated_draft",
                 body_changed=(
                     parent_version is None
-                    or parent_version.content_hash != version.content_hash
+                    or not same_authored_markdown(
+                        parent_version.body_md, version.body_md
+                    )
                 ),
                 metadata_changed=page_created or bool(metadata_patch),
                 version_status=version.version_status,
@@ -953,40 +1063,6 @@ class ContextWriteService:
             for review in cls._reviews_for_version(session, version)
         )
 
-    @classmethod
-    def _is_restartable_rejected_version(
-        cls,
-        session: Session,
-        page: ContextPage,
-        version: ContextPageVersion,
-    ) -> bool:
-        """Whether ``version`` can start a new lineage after head retirement."""
-
-        if (
-            page.latest_draft_version_id is not None
-            or version.version_status != "draft"
-        ):
-            return False
-        version_ref = f"context_page_version:{version.id}"
-        return (
-            session.scalar(
-                select(ReviewItem.id)
-                .join(ChangeSet, ChangeSet.id == ReviewItem.change_set_id)
-                .join(ChangeOperation, ChangeOperation.change_set_id == ChangeSet.id)
-                .where(
-                    ReviewItem.workspace_id == page.workspace_id,
-                    ChangeSet.workspace_id == page.workspace_id,
-                    ReviewItem.review_type == "context_update",
-                    ReviewItem.status == "rejected",
-                    ChangeOperation.target_type == "context_page",
-                    ChangeOperation.target_id == page.id,
-                    ChangeOperation.diff_ref == version_ref,
-                )
-                .limit(1)
-            )
-            is not None
-        )
-
     def update_draft(
         self,
         session: Session,
@@ -996,6 +1072,7 @@ class ContextWriteService:
         actor_id: str,
         origin_chat_session_id: UUID | None = None,
         *,
+        actor_provenance: str = "internal",
         auto_approve_format_only: bool = True,
         allow_changes_requested_revision: bool = False,
     ) -> UpdateDraftResult:
@@ -1005,6 +1082,7 @@ class ContextWriteService:
         # change_set together.
         # SQLite: see write_draft. Write intent goes outside the SAVEPOINT so it
         # covers the guarded read below and the version_no allocation.
+        validate_request_inputs(request)
         acquire_write_intent(session)
         self._lock_context_media_usage_intent(session, workspace_id)
         with session.begin_nested():
@@ -1021,12 +1099,14 @@ class ContextWriteService:
                 resource_id=request.base_version_id,
             )
             latest = self._latest_edit_base(session, page)
-            restart_after_reject = (
-                base_version is not None
+            restart = (
+                rejected_draft_restart(session, page, base_version)
+                if base_version is not None
                 and base_version.page_id == page.id
                 and base_version.content_hash == request.base_content_hash
-                and self._is_restartable_rejected_version(session, page, base_version)
+                else None
             )
+            restart_after_reject = restart is not None
             if (
                 base_version is None
                 or base_version.page_id != page.id
@@ -1065,6 +1145,10 @@ class ContextWriteService:
                     latest_content_hash=disclosed_hash,
                 )
 
+            if restart is not None:
+                for retired in restart.retired_versions:
+                    retired.graph_status = "discarded"
+
             new_body = self._body_for_update(base_version, request)
             classification = _ContextUpdateClassification(
                 measured_event=_measure_update_event(base_version.body_md, new_body),
@@ -1082,6 +1166,7 @@ class ContextWriteService:
                 page=page,
                 base_version=base_version,
                 restart_after_reject=restart_after_reject,
+                restart_parent_id=restart.parent_version_id if restart else None,
                 new_body=new_body,
                 metadata_patch=request.metadata_patch,
                 citations=request.citations,
@@ -1091,6 +1176,7 @@ class ContextWriteService:
                 classification=classification,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
+                actor_provenance=actor_provenance,
                 origin_chat_session_id=origin_chat_session_id,
                 auto_approve_format_only=auto_approve_format_only,
             )
@@ -1104,9 +1190,11 @@ class ContextWriteService:
         actor_id: str,
         origin_chat_session_id: UUID | None = None,
         *,
+        actor_provenance: str = "internal",
         auto_approve_format_only: bool = True,
         require_current_base: bool = False,
     ) -> UpdateDraftResult:
+        validate_request_inputs(request)
         anchor_operation_count = sum(
             isinstance(getattr(operation, "at", None), AnchorAddress)
             for operation in request.operations
@@ -1165,6 +1253,7 @@ class ContextWriteService:
                 request=effective_request,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
+                actor_provenance=actor_provenance,
                 origin_chat_session_id=origin_chat_session_id,
                 auto_approve_format_only=auto_approve_format_only,
                 identity_seed=identity_seed,
@@ -1279,6 +1368,7 @@ class ContextWriteService:
         request: PatchDraftRequest,
         actor_kind: str,
         actor_id: str,
+        actor_provenance: str,
         origin_chat_session_id: UUID | None,
         auto_approve_format_only: bool,
         identity_seed: str,
@@ -1530,6 +1620,11 @@ class ContextWriteService:
                     ) from exc
                 prepared_stale_patch = self._prepare_diverged_patch(
                     workspace=workspace,
+                    session=session,
+                    page=page,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    actor_provenance=actor_provenance,
                     base_version=requested_base_version,
                     new_body=stale_body,
                     edits=stale_base_edits,
@@ -1540,6 +1635,8 @@ class ContextWriteService:
                     effective_operations,
                     base_block_map=requested_base_map,
                     candidate_block_map=prepared_stale_patch.predicted_block_map,
+                    base_body_md=requested_base_version.body_md,
+                    candidate_body_md=prepared_stale_patch.body,
                 )
                 if prepared_stale_patch.body != requested_base_version.body_md:
                     actual_target_ids = frozenset(
@@ -1553,6 +1650,8 @@ class ContextWriteService:
                 base_block_map=requested_base_map,
                 head_block_map=head_block_map,
                 target_ids=actual_target_ids,
+                base_body_md=requested_base_version.body_md,
+                head_body_md=base_version.body_md,
             )
 
             if (
@@ -1627,8 +1726,8 @@ class ContextWriteService:
                     return project_caller_receipts(
                         UpdateDraftResult(
                             diff_summary=request.reason,
-                            persisted_content_hash=calculate_content_hash(
-                                prepared_diverged.body
+                            persisted_content_hash=(
+                                prepared_diverged.prepared_body.content_hash
                             ),
                             persisted_character_count=len(prepared_diverged.body),
                             outcome="updated_draft",
@@ -1852,9 +1951,17 @@ class ContextWriteService:
                         error_code="body_length_exceeded",
                     )
                 pre_normalize_body = new_body
-                if workspace.auto_fix_enabled and new_body:
-                    new_body = safe_normalize_markdown(new_body)
-                self._validate_media_markdown(new_body)
+                prepared_body = self._prepare_body(
+                    new_body,
+                    workspace=workspace,
+                    session=session,
+                    page=page,
+                    version=base_version,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    actor_provenance=actor_provenance,
+                )
+                new_body = prepared_body.body
                 outside_target_changed = _body_changed_outside_edit_ranges(
                     base_version.body_md,
                     pre_normalize_body,
@@ -1896,14 +2003,14 @@ class ContextWriteService:
                     or not (engine_noop or normalized_noop)
                 )
                 would_create_version = would_create_workflow and (
-                    calculate_content_hash(new_body) != base_version.content_hash
+                    not same_authored_markdown(new_body, base_version.body_md)
                     or requires_fork
                 )
                 return project_head_receipts(
                     UpdateDraftResult(
                         draft_version_id=None,
                         diff_summary=request.reason,
-                        persisted_content_hash=calculate_content_hash(new_body),
+                        persisted_content_hash=prepared_body.content_hash,
                         persisted_character_count=len(new_body),
                         outcome=(
                             "no_change"
@@ -1912,9 +2019,8 @@ class ContextWriteService:
                             if would_create_version
                             else "review_only"
                         ),
-                        body_changed=(
-                            calculate_content_hash(new_body)
-                            != base_version.content_hash
+                        body_changed=not same_authored_markdown(
+                            new_body, base_version.body_md
                         ),
                         metadata_changed=False,
                         version_status=(
@@ -1968,6 +2074,7 @@ class ContextWriteService:
                 classification=classification,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
+                actor_provenance=actor_provenance,
                 origin_chat_session_id=origin_chat_session_id,
                 auto_approve_format_only=auto_approve_format_only,
                 edits=edits,
@@ -2083,6 +2190,7 @@ class ContextWriteService:
             workspace_id=workspace.id,
             needs_review=needs_review,
             body=new_body,
+            lint_registry=self.body_preparer.registry,
         )
         declared_defaults = normalized_review_policy(workspace.review_policy)[
             "defaults"
@@ -2261,6 +2369,11 @@ class ContextWriteService:
         self,
         *,
         workspace: Workspace,
+        session: Session,
+        page: ContextPage,
+        actor_kind: str,
+        actor_id: str,
+        actor_provenance: str,
         base_version: ContextPageVersion,
         new_body: str,
         edits: tuple[ResolvedEdit, ...],
@@ -2274,9 +2387,17 @@ class ContextWriteService:
                 error_code="body_length_exceeded",
             )
         pre_normalize_body = new_body
-        if workspace.auto_fix_enabled and new_body:
-            new_body = safe_normalize_markdown(new_body)
-        self._validate_media_markdown(new_body)
+        prepared_body = self._prepare_body(
+            new_body,
+            workspace=workspace,
+            session=session,
+            page=page,
+            version=base_version,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            actor_provenance=actor_provenance,
+        )
+        new_body = prepared_body.body
         outside_target_changed = _body_changed_outside_edit_ranges(
             base_version.body_md,
             pre_normalize_body,
@@ -2289,7 +2410,7 @@ class ContextWriteService:
             signals={"review_required": True},
         )
         return _PreparedDivergedPatch(
-            body=new_body,
+            prepared_body=prepared_body,
             pre_normalize_body=pre_normalize_body,
             normalized=new_body != pre_normalize_body,
             outside_target_changed=outside_target_changed,
@@ -2341,6 +2462,10 @@ class ContextWriteService:
         `requested_base_version.body_md`, NOT head's -- a diverged push must
         never silently land on content the caller never saw.
         """
+        from backend.services.context_reconciliation import (
+            build_reconciliation_normalization_proof,
+        )
+
         change_set = self._create_change_set(
             session=session,
             workspace_id=workspace_id,
@@ -2356,7 +2481,7 @@ class ContextWriteService:
             session=session,
             page=page,
             parent_version_id=requested_base_version.id,
-            body_markdown=prepared.body,
+            body=prepared.prepared_body,
             actor_kind=actor_kind,
             actor_id=actor_id,
             change_set_id=change_set.id,
@@ -2395,17 +2520,29 @@ class ContextWriteService:
         original_operations = [
             operation.model_dump(mode="json") for operation in operations
         ]
-        clean_operations = [
-            operation.model_dump(mode="json")
+        clean_operation_models = [
+            operation
             for operation in operations
             if operation_target_id(operation) in actual_target_ids
             and operation_target_id(operation) not in conflicting_ids
         ]
-        conflict_operations = [
-            operation.model_dump(mode="json")
+        conflict_operation_models = [
+            operation
             for operation in operations
             if operation_target_id(operation) in conflicting_ids
         ]
+        active_body, _active_edits = apply_operations(
+            requested_base_version.body_md,
+            None,
+            [*clean_operation_models, *conflict_operation_models],
+            block_map=base_block_map,
+        )
+        normalization_proof = build_reconciliation_normalization_proof(
+            prepared.pre_normalize_body, prepared.body
+        )
+        normalization_proof["active"] = build_reconciliation_normalization_proof(
+            active_body, prepared.body
+        )
         manifest = {
             "schema": _DIVERGED_MANIFEST_SCHEMA,
             "branch_version_id": str(version.id),
@@ -2425,13 +2562,7 @@ class ContextWriteService:
                 "content_hash": version.content_hash,
                 "parent_version_id": str(version.parent_version_id),
             },
-            "normalization": {
-                "applied": prepared.normalized,
-                "pre_normalize_body_sha256": sha256(
-                    prepared.pre_normalize_body.encode("utf-8")
-                ).hexdigest(),
-                "final_body_sha256": sha256(prepared.body.encode("utf-8")).hexdigest(),
-            },
+            "normalization": normalization_proof,
             "target_ids": sorted(target_ids_for_operations(operations) or frozenset()),
             "changed_since_base_ids": sorted(changed_ids),
             "conflicting_ids": sorted(conflicting_ids),
@@ -2444,8 +2575,14 @@ class ContextWriteService:
                 for entry in conflicts
             ],
             "original_operations": original_operations,
-            "clean_operations": clean_operations,
-            "conflict_operations": conflict_operations,
+            "clean_operations": [
+                operation.model_dump(mode="json")
+                for operation in clean_operation_models
+            ],
+            "conflict_operations": [
+                operation.model_dump(mode="json")
+                for operation in conflict_operation_models
+            ],
             "operation_receipts": [
                 receipt.model_dump(mode="json")
                 for receipt in prepared.operation_receipts
@@ -2640,6 +2777,7 @@ class ContextWriteService:
         restart_after_reject: bool,
         new_body: str,
         metadata_patch: PageMetadataPatch | None,
+        restart_parent_id: UUID | None = None,
         citations: list[CitationInput],
         feedback_id: UUID | None,
         needs_review: bool,
@@ -2647,6 +2785,7 @@ class ContextWriteService:
         classification: _ContextUpdateClassification,
         actor_kind: str,
         actor_id: str,
+        actor_provenance: str,
         origin_chat_session_id: UUID | None,
         auto_approve_format_only: bool,
         edits: tuple[ResolvedEdit, ...] | None = None,
@@ -2683,9 +2822,18 @@ class ContextWriteService:
         # F2c: Auto-fix mode normalizes the resulting body before the gate +
         # persistence (append/replace results are normalized as a whole).
         pre_normalize_body = new_body
-        if workspace.auto_fix_enabled and new_body:
-            new_body = safe_normalize_markdown(new_body)
-            self._validate_media_markdown(new_body)
+        prepared_body = self._prepare_body(
+            new_body,
+            workspace=workspace,
+            session=session,
+            page=page,
+            version=base_version,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            actor_provenance=actor_provenance,
+        )
+        new_body = prepared_body.body
+        if workspace.auto_fix_enabled and pre_normalize_body:
             # I13 (re-review r2 findings 3-7): a true no-op under Auto-fix
             # (the normalized body is byte-identical to the stored base,
             # nothing else to apply) must not mint a change_set / review —
@@ -2710,6 +2858,7 @@ class ContextWriteService:
                 and feedback_id is None
                 and not needs_review
                 and not force_new_version
+                and not restart_after_reject
                 and not self._identical_body_requires_fork(session, base_version)
             ):
                 no_effect_classification = replace(
@@ -2757,8 +2906,6 @@ class ContextWriteService:
                         else None
                     ),
                 )
-        else:
-            self._validate_media_markdown(new_body)
         normalized = new_body != pre_normalize_body
         outside_target_changed = (
             _body_changed_outside_edit_ranges(
@@ -2818,7 +2965,16 @@ class ContextWriteService:
             and not citations
             and bool(new_body)
             and base_version is not None
-            and safe_normalize_markdown(base_version.body_md) == new_body
+            and self._prepared_base_matches(
+                base_version,
+                new_body,
+                workspace=workspace,
+                session=session,
+                page=page,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                actor_provenance=actor_provenance,
+            )
             and not gate.force_signals()
             and not risk_at_or_above("low", review_from)
         )
@@ -2849,8 +3005,8 @@ class ContextWriteService:
             version = self._restart_rejected_draft(
                 session=session,
                 page=page,
-                rejected_version=base_version,
-                body_markdown=new_body,
+                parent_version_id=restart_parent_id,
+                body=prepared_body,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
                 change_set_id=change_set.id,
@@ -2864,7 +3020,7 @@ class ContextWriteService:
                 session=session,
                 page=page,
                 base_version=base_version,
-                body_markdown=new_body,
+                body=prepared_body,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
                 change_set_id=change_set.id,
@@ -2877,7 +3033,7 @@ class ContextWriteService:
                 prepared_block_map=prepared_block_map,
                 force_new_version=force_new_version,
             )
-        body_changed = version.content_hash != base_version.content_hash
+        body_changed = not same_authored_markdown(version.body_md, base_version.body_md)
         metadata_changed = self._metadata_patch_changes(
             session=session,
             page=page,
@@ -2914,6 +3070,9 @@ class ContextWriteService:
                 diff_summary=reason,
                 diff_ref=f"context_page_version:{version.id}",
             )
+        )
+        record_metadata_snapshot(
+            session, change_set_id=change_set.id, page=page, version=version
         )
         review = self._create_review_item(
             session=session,
@@ -3062,7 +3221,12 @@ class ContextWriteService:
         actor_id: str,
         *,
         publish_despite_findings: bool = False,
+        publish_chain_ancestor: bool = False,
+        review_decision_id: UUID | None = None,
     ) -> PublishContextPageResult:
+        # `publish_chain_ancestor` lets review approval publish an earlier
+        # linear draft of the chain (the changes up to the reviewed version)
+        # while newer drafts stay pending; it is never a request field.
         # `publish_despite_findings` is an argument rather than a request field
         # so that only a caller holding a reference to this service can set it.
         # The REST publish route and the review-approval path both bind
@@ -3075,6 +3239,7 @@ class ContextWriteService:
         # SQLite: see write_draft. page_service.publish_draft already holds write
         # intent, but read.py and review_service reach this entry point directly,
         # and repeating the statement in one transaction is safe.
+        validate_request_inputs(request)
         acquire_write_intent(session)
         self._lock_context_media_usage_intent(session, workspace_id)
         with session.begin_nested():
@@ -3093,6 +3258,7 @@ class ContextWriteService:
             )
             if version is None or version.page_id != page.id:
                 raise ReadNotFoundError("context page version not found")
+            validate_page_markdown_input(version.body_md)
             # A draft row is mutable, so without this a concurrent session of
             # the same author can change the body between staging and
             # publishing. PublishContextPageRouteRequest (the externally
@@ -3203,7 +3369,9 @@ class ContextWriteService:
                                 version.body_md,
                             ),
                         )
-                        for finding in body_error_findings(version.body_md)
+                        for finding in publish_floor_findings(
+                            version.body_md, registry=self.body_preparer.registry
+                        )
                     ],
                 )
             assert_context_publish_candidate(
@@ -3211,6 +3379,7 @@ class ContextWriteService:
                 page=page,
                 version=version,
                 require_latest_draft=True,
+                allow_chain_ancestor=publish_chain_ancestor,
             )
             if version.version_status != "draft":
                 raise RejectedByPolicyError(
@@ -3229,7 +3398,9 @@ class ContextWriteService:
                         version.body_md,
                     ),
                 )
-                for finding in body_error_findings(version.body_md)
+                for finding in publish_floor_findings(
+                    version.body_md, registry=self.body_preparer.registry
+                )
             ]
             if findings and not publish_despite_findings:
                 # Carry the defects out with the refusal: the author is looking
@@ -3281,11 +3452,18 @@ class ContextWriteService:
             )
 
             was_archived = page.lifecycle_status == "archived"
+            # A first publication of an earlier draft: the page's metadata
+            # still holds the newest draft's values, so the recorded ones apply.
+            publishes_recorded_metadata = (
+                page.current_published_version_id is None
+                and page.latest_draft_version_id not in (None, version.id)
+            )
             previous_published_version_id = apply_context_publication(
                 session,
                 page=page,
                 version=version,
                 require_latest_draft=True,
+                allow_chain_ancestor=publish_chain_ancestor,
             )
 
             change_set = self._create_change_set(
@@ -3309,10 +3487,10 @@ class ContextWriteService:
                     diff_ref=f"context_page_version:{version.id}",
                 )
             )
-            applied_metadata_patch = self._apply_pending_metadata_patches(
-                session,
-                page,
-                version,
+            applied_metadata_patch = (
+                self._publish_recorded_metadata(session, page, version)
+                if publishes_recorded_metadata
+                else self._apply_pending_metadata_patches(session, page, version)
             )
             # Publishing an archived page (draft created before the folder
             # cascade archived it, then approved) resurrects it — revive its
@@ -3379,7 +3557,10 @@ class ContextWriteService:
                 published_version_id=version.id,
                 reason=request.reason,
             )
-            self._enqueue_embed(session, page=page, version=version, marker="published")
+            self._enqueue_embed(
+                session, page=page, version=version, marker="published",
+                decision_id=review_decision_id,
+            )
             return PublishContextPageResult(
                 page_id=page.id,
                 published_version_id=version.id,
@@ -3578,7 +3759,7 @@ class ContextWriteService:
         session: Session,
         page: ContextPage,
         parent_version_id: UUID | None,
-        body_markdown: str,
+        body: PreparedBody,
         actor_kind: str,
         actor_id: str,
         change_set_id: UUID,
@@ -3595,8 +3776,7 @@ class ContextWriteService:
                 session,
                 page_id=page.id,
                 parent_version_id=parent_version_id,
-                body_md=body_markdown,
-                content_hash=calculate_content_hash(body_markdown),
+                body=body,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
                 version_status=version_status,
@@ -3617,7 +3797,7 @@ class ContextWriteService:
         except ContextMediaError as exc:
             raise RejectedByPolicyError(str(exc), error_code=exc.error_code) from exc
         except ValueError as exc:
-            if "dtx-media://asset/" in body_markdown:
+            if "dtx-media://asset/" in body.body:
                 raise RejectedByPolicyError(
                     str(exc),
                     error_code=MarkdownMediaPolicyError.error_code,
@@ -3945,6 +4125,7 @@ class ContextWriteService:
         ReviewService(
             audit_service=self.audit_service,
             context_media_repository_factory=self.context_media_repository_factory,
+            body_preparer=self.body_preparer,
         ).apply_decision(
             session=session,
             workspace_id=workspace_id,
@@ -3965,7 +4146,7 @@ class ContextWriteService:
         session: Session,
         page: ContextPage,
         base_version: ContextPageVersion,
-        body_markdown: str,
+        body: PreparedBody,
         actor_kind: str,
         actor_id: str,
         change_set_id: UUID,
@@ -3979,7 +4160,10 @@ class ContextWriteService:
         prepared_block_map: PreparedBlockMap | None = None,
         force_new_version: bool = False,
     ) -> ContextPageVersion:
-        same_body = calculate_content_hash(body_markdown) == base_version.content_hash
+        # The canonical hash ignores trailing spaces, including Markdown hard
+        # breaks. Keep the established NFC/newline equivalence without losing
+        # a hard-break-only save.
+        same_body = same_authored_markdown(body.body, base_version.body_md)
         identical_body_requires_fork = self._identical_body_requires_fork(
             session, base_version
         )
@@ -3998,9 +4182,9 @@ class ContextWriteService:
         next_block_map = _next_block_map_for_edits(
             base_version=base_version,
             provisional_body=(
-                body_markdown if provisional_body is None else provisional_body
+                body.body if provisional_body is None else provisional_body
             ),
-            final_body=body_markdown,
+            final_body=body.body,
             edits=edits,
             identity_seed=identity_seed,
             prepared_block_map=prepared_block_map,
@@ -4009,7 +4193,7 @@ class ContextWriteService:
             session=session,
             page=page,
             parent_version_id=base_version.id,
-            body_markdown=body_markdown,
+            body=body,
             actor_kind=actor_kind,
             actor_id=actor_id,
             change_set_id=change_set_id,
@@ -4028,8 +4212,8 @@ class ContextWriteService:
         *,
         session: Session,
         page: ContextPage,
-        rejected_version: ContextPageVersion,
-        body_markdown: str,
+        parent_version_id: UUID | None,
+        body: PreparedBody,
         actor_kind: str,
         actor_id: str,
         change_set_id: UUID,
@@ -4039,18 +4223,21 @@ class ContextWriteService:
         explicit_block_replacements: dict[str, str] | None = None,
         prepared_block_map: list[dict] | None = None,
     ) -> ContextPageVersion:
-        """Create a fresh actionable draft parented by retired evidence.
+        """Create a fresh actionable draft from a rejected draft's bytes.
 
-        The surrounding ``update_draft`` transition creates the fresh pending
-        review. The rejected version and its original decision are never
-        mutated, and this path is actor-kind agnostic for browser and agent use.
+        ``parent_version_id`` is the head the rejection left (see
+        ``rejected_draft_restart``); the update's audit names the rejected
+        source. The surrounding ``update_draft`` transition creates the fresh
+        pending review. The rejected version and its original decision are
+        never mutated, and this path is actor-kind agnostic for browser and
+        agent use.
         """
 
         version = self._insert_version(
             session=session,
             page=page,
-            parent_version_id=rejected_version.id,
-            body_markdown=body_markdown,
+            parent_version_id=parent_version_id,
+            body=body,
             actor_kind=actor_kind,
             actor_id=actor_id,
             change_set_id=change_set_id,
@@ -4204,6 +4391,48 @@ class ContextWriteService:
         self._apply_metadata_patch(page, patch)
         return patch
 
+    def _publish_recorded_metadata(
+        self,
+        session: Session,
+        page: ContextPage,
+        version: ContextPageVersion,
+    ) -> dict[str, object]:
+        """Apply an earlier draft's recorded metadata at its first publication.
+
+        The newer drafts above it were written with their own values; from now
+        on they wait as staged patches in their own change sets, as any draft
+        of a published page does.
+        """
+
+        newer = live_draft_chain(session, page)
+        snapshots = effective_metadata_snapshot_records(
+            session, page, [version.id, *(draft.id for draft in newer)]
+        )
+        published_record = snapshots.get(version.id)
+        if published_record is None:
+            raise StaleContextDraftError(
+                "an earlier draft without recorded metadata cannot be first published"
+            )
+        published = published_record[0]
+        changed = apply_page_metadata_snapshot(page, published)
+        for draft in newer:
+            record = snapshots.get(draft.id)
+            if record is None:
+                continue
+            snapshot, change_set_id = record
+            # The whole snapshot, not a delta against this publication: each
+            # newer draft must publish its own values whatever lands between.
+            # Page-first versions need not own a change set; their snapshot
+            # operation owns the metadata ledger we must carry forward.
+            stage_page_metadata_patch(
+                session,
+                change_set_id=change_set_id,
+                page=page,
+                version=draft,
+                patch=snapshot,
+            )
+        return {field: published[field] for field in changed}
+
     @staticmethod
     def _apply_metadata_patch(
         page: ContextPage,
@@ -4211,11 +4440,17 @@ class ContextWriteService:
     ) -> None:
         if not metadata_patch:
             return
-        patch = (
-            metadata_patch
-            if isinstance(metadata_patch, PageMetadataPatch)
-            else PageMetadataPatch.model_validate(metadata_patch)
-        )
+        try:
+            patch = (
+                metadata_patch
+                if isinstance(metadata_patch, PageMetadataPatch)
+                else PageMetadataPatch.model_validate(metadata_patch)
+            )
+            validate_request_inputs(patch)
+        except ValidationError as exc:
+            raise InputPolicyError(
+                "stored metadata violates current input policy"
+            ) from exc
         fields = patch.model_fields_set
         if "title" in fields:
             page.title = patch.title
@@ -4467,6 +4702,8 @@ class ContextWriteService:
             authored_body_md=branch.body_md,
             authored_block_map=branch_map,
             head_block_map=reconcile_base_map,
+            base_body_md=verified_manifest.base.body_md,
+            head_body_md=reconcile_base_version.body_md,
         )
         dynamic_conflict_ids = set(target_sets.conflict_ids)
         already_satisfied_ids = set(target_sets.already_satisfied_ids)

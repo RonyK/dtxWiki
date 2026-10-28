@@ -1,4 +1,10 @@
 {
+  "workspaceScoped": {
+    "back": "Back to Settings",
+    "loading": "Loading workspace settings",
+    "unavailable": "This workspace is unavailable or you are not a member.",
+    "deleted": "This workspace was deleted. You can close this window."
+  },
   "breadcrumb": "Settings",
   "loading": "Loading Settings",
   "loadRetry": "Retry",
@@ -87,11 +93,15 @@
     "deployment": {
       "label": "Deployment",
       "description": "Domain, TLS, and service status. Changes are made with the dtxwiki CLI."
+    },
+    "labs": {
+      "label": "Labs",
+      "description": "Choose which experimental menus appear."
     }
   },
   "crossLinks": {
-    "toUsers": "This is who can reach this workspace. To find a person across every workspace on the server, or to start account recovery, go to",
-    "toMembers": "This reads every account on the server. To change who is in this workspace, or their roles, go to"
+    "toUsers": "For server-wide account search and recovery, go to",
+    "toMembers": "For this workspace’s membership and roles, go to"
   },
   "workspaceMembers": {
     "title": "Members",
@@ -107,7 +117,6 @@
     "loadingMore": "Loading…",
     "loadMore": "Load more",
     "joined": "Joined {{date}}",
-    "personalAnchor": "Personal workspace owner",
     "you": "You",
     "roleFor": "Role for {{name}}",
     "remove": "Remove",
@@ -118,23 +127,30 @@
       "owner": "Owner"
     },
     "add": {
-      "email": "Exact login email",
-      "emailPlaceholder": "person@example.com",
       "role": "Initial role",
       "action": "Add member",
       "adding": "Adding…",
-      "fromSearchTitle": "Add exact login email",
-      "fromSearchReady": "Add {{email}} as a workspace member.",
-      "fromSearchHint": "Enter a complete login email above to add an existing active user."
+      "fromSearchReady": "Add account {{email}}.",
+      "fromSearchHint": "Enter an exact account UUID or native login email to add an existing account.",
+      "title": "Add a member",
+      "selector": "User ID or account email",
+      "selectorPlaceholder": "User ID or name@example.com",
+      "identityHint": "Enter the exact email registered on the account. Use a user ID when the account has no email.",
+      "description": "Add an existing account to this workspace.",
+      "methods": "Add member method",
+      "directTab": "Direct entry",
+      "close": "Close member form",
+      "workspaceScope": "Members can access the whole workspace. First-time sharing requires confirmation."
     },
     "filters": {
-      "query": "Find or add members",
-      "queryPlaceholder": "Name or exact login email",
-      "queryHelp": "Search the current member list. A complete login email can also be added from the same field.",
+      "query": "Search current members",
+      "queryPlaceholder": "Name or account email",
+      "queryHelp": "Filters people who already have access to this workspace.",
       "role": "Role filter",
       "search": "Search",
       "active": "Showing {{query}} · {{role}}",
-      "anyQuery": "all members"
+      "anyQuery": "all members",
+      "title": "Current members"
     },
     "empty": {
       "title": "No members match",
@@ -181,7 +197,6 @@
       "firstShareWarning": "Adding {{email}} shares all of {{workspace}} with that member.",
       "firstShareScope": "This is not page-level sharing. The member receives the selected role across the entire workspace.",
       "collaborativeRecommendation": "If you only want to share part of your work, create a new collaborative Workspace and move or copy that work there.",
-      "renamePersonalRecommendation": "Recommended: rename the Personal Workspace before sharing so its shared purpose is clear.",
       "renameRecommendation": "Recommended: use a workspace name that makes its shared purpose clear.",
       "ownerTitle": "Grant Owner access?",
       "ownerWarning": "{{name}} will be able to manage members, sharing, policies, and other owners.",
@@ -197,7 +212,25 @@
       "confirmSelfDemote": "Give up Owner access",
       "confirmOwner": "Grant Owner access",
       "confirmRemove": "Remove member"
-    }
+    },
+    "directory": {
+      "title": "Company directory",
+      "hint": "Shown only when company SSO is connected and directory search is enabled.",
+      "loading": "Searching company accounts…",
+      "add": "Add {{name}}",
+      "refine": "More accounts match. Refine your search.",
+      "query": "Search names in your company",
+      "queryPlaceholder": "At least 2 characters",
+      "search": "Search directory",
+      "empty": "No company accounts match this search.",
+      "verified": "Company account verified",
+      "resultCount": "Matches: {{count}}",
+      "distinguish": "Use the user ID to distinguish people with the same name.",
+      "addAction": "Add",
+      "verifiedShort": "Verified"
+    },
+    "userIdFor": "Full user ID for {{name}}",
+    "removeFor": "Remove {{name}}"
   },
   "workspaceAccess": {
     "title": "Discovery, joining & web publishing",
@@ -287,8 +320,7 @@
     "loading": "Loading deployment status",
     "loadError": "Failed to load deployment status",
     "subtitle": "Read-only. To change a value, run the shown command in a terminal on the server — the app cannot edit /etc itself.",
-    "systemScopeNote": "These are dtxWiki SERVER settings — they apply to the whole instance (all workspaces), not just this workspace. Server admins only.",
-    "updateAvailable": "dtxWiki {{latest}} is available (current {{current}}). Run 'dtxwiki update' on the server to upgrade.",
+    "systemScopeNote": "Server admins · these settings apply to the whole instance (all workspaces).",
     "tlsNotReady": "HTTPS is not configured. Set a public https:// URL and let the reverse proxy obtain a certificate (DNS + ports 80/443 must reach this server).",
     "notConfigured": "Not configured",
     "commandsTitle": "Change configuration",
@@ -390,7 +422,8 @@
       "db": "Database",
       "app_version": "App version",
       "mcp": "MCP service",
-      "oauth_jwk": "OAuth signing key"
+      "oauth_jwk": "OAuth signing key",
+      "worker": "Background processing"
     },
     "healthStatus": {
       "ok": "OK",
@@ -415,6 +448,84 @@
       "session_invalidation": "signs everyone out",
       "token_invalidation": "re-auth all clients",
       "data_migration": "migrate data first"
+    },
+    "update": {
+      "title": "Version & updates",
+      "commandNotice": "Run commands in a terminal on the server.",
+      "currentVersion": "Current version",
+      "latestVersion": "Latest release",
+      "previousLatest": "Previously checked release",
+      "unknownVersion": "Unknown",
+      "checkedAt": "Last successful check: {{time}}",
+      "neverChecked": "Not yet checked",
+      "source": "Source: {{source}}",
+      "configuredIndex": "Configured package index",
+      "pypi": "PyPI",
+      "checkNow": "Check now",
+      "checkAgain": "Check again",
+      "checking": "Checking…",
+      "releaseNotes": "Release notes on GitHub",
+      "status": {
+        "checking": "Checking",
+        "disabled": "Checking disabled",
+        "failed": "Check failed",
+        "stale": "Check expired",
+        "available": "New release",
+        "current": "Up to date",
+        "checked": "Check complete",
+        "notChecked": "Not checked"
+      },
+      "message": {
+        "checking": "Checking the package index for a newer release.",
+        "disabled": "Version checks are disabled by server configuration. Update instructions remain available below.",
+        "failed": "The latest release could not be verified. Previous results are shown for reference; try again or check the documentation.",
+        "stale": "The previous result has expired. Check again before choosing a release to install.",
+        "available": "A newer release is available. Review its release notes and the instructions for your installation before updating.",
+        "current": "This instance matches the latest release from the package index.",
+        "checked": "The package index was checked. No newer release has been confirmed for this instance.",
+        "notChecked": "The package index has not been checked yet."
+      },
+      "methodLabel": "Installation method",
+      "methodHint": "Choose how you installed dtxWiki to see the update steps.",
+      "methodPlaceholder": "Select an installation method",
+      "methods": {
+        "uv": "uv tool",
+        "pipx": "pipx",
+        "pip": "pip (virtual environment)",
+        "npx": "npx (run directly)",
+        "npm": "npm (global installation)",
+        "docker": "Docker",
+        "service": "Server service / wheel (systemd)"
+      },
+      "guideLabel": "Update instructions: {{method}}",
+      "steps": {
+        "prepare": "Prepare",
+        "update": "Update",
+        "launch": "Start the latest version",
+        "restart": "Restart & check",
+        "verify": "Check the version"
+      },
+      "prepareDescription": "Read the release notes and documentation prerequisites first. Stop the server and any separately run worker, then back up the database, files, and configuration.",
+      "npxPrepareDescription": "Choose the target version from npm. Before starting, run the release's required checks with that version, for example npx @dtxsuite/dtxwiki@<version> inputs audit. Complete any required repair or migration steps in the documentation.",
+      "backupDocs": "Backup and upgrade prerequisites",
+      "instructions": {
+        "uv": "Run in the environment used for the original uv tool installation. Keep its Python interpreter options and package index/authentication configuration.",
+        "pipx": "Use the original pipx environment and Python interpreter options. Keep any package index/authentication configuration.",
+        "pip": "Activate the original virtual environment, then run this command with its Python interpreter and existing package index/authentication configuration.",
+        "npx": "Replace @latest below with the same npm version used for the checks in step 1. Start only after those checks pass, using your usual server options and environment variables.",
+        "npm": "Update the global npm package using the same user and npm environment as the original installation.",
+        "docker": "Follow the documented backup, pinned-version image rebuild, migration, and container recreation procedure for your Compose configuration.",
+        "service": "Follow the documented verified-wheel, service stop, upgrade, migration, and service start procedure for your deployment."
+      },
+      "commandLabel": "Terminal command",
+      "noPinnedCommand": "A fresh newer Python release has not been confirmed. Check now, or follow the documentation to select a version without downgrading.",
+      "uvPythonNote": "Requires Python 3.12 or newer. Optionally add --python <version> to the uv command to select a particular interpreter.",
+      "npmVersionNote": "@latest uses the npm registry. Its version may differ from the Python package index shown above.",
+      "methodDocs": "Detailed {{method}} instructions",
+      "restartDescription": "Complete the documented migration and release checks, then restart using your existing command, environment, and options. Refresh this page to confirm the running version.",
+      "verifyDescription": "The command in step 2 starts the server. Refresh this page to confirm the running version; do not launch a second server.",
+      "description": "Check the latest release and follow the guide for your installation.",
+      "guideTitle": "Update guide"
     }
   },
   "setupScreen": {
@@ -423,21 +534,21 @@
     "loadError": "Failed to load Setup",
     "eyebrow": "Get your workspace ready",
     "title": "Setup",
-    "description": "Add the sources, pages, and rules your AI will use to answer.",
+    "description": "Add source materials and organize your workspace knowledge.",
     "status": {
-      "ready": "3 of 3 · Ready",
-      "pending": "0 of 3 · Pending",
-      "partial": "{{count}} of 3 · Partial"
+      "ready": "{{total}} of {{total}} · Ready",
+      "pending": "0 of {{total}} · Pending",
+      "partial": "{{count}} of {{total}} · Partial"
     },
     "itemCount_one": "{{count}} item",
     "itemCount_other": "{{count}} items",
     "itemCountAtLeast": "{{count}}+ items loaded",
     "callout": {
-      "allSetTitle": "All set. Try asking a question.",
-      "allSetBody": "Your workspace has sources, knowledge pages, and AI rules.",
-      "openAsk": "Open Ask",
+      "allSetTitle": "Your workspace is ready.",
+      "allSetBody": "Your workspace has sources and knowledge pages.",
+      "openContext": "Open Context",
       "emptyTitle": "Library is empty. Start by adding a source.",
-      "emptyBody": "Even one PDF or page is enough to ask your first question.",
+      "emptyBody": "Add a PDF or page to start building your workspace knowledge.",
       "addFirstSource": "Add your first source",
       "partialTitle": "Keep going.",
       "partialFallback": "Review the remaining setup items."
@@ -979,7 +1090,7 @@
     "serverAdminOnlyNotice": "User search and account recovery are visible to server admins only.",
     "eyebrow": "Server administration",
     "title": "Account recovery",
-    "description": "Find an instance user and start a one-time recovery flow. You never choose or see the user's new password.",
+    "description": "Find an account, reconnect its SSO identity, or help the user reset a native password.",
     "serverAdminOnly": "Server admin only",
     "boundary": "A successful reset signs the user out of every browser session. PAT/MCP tokens are separate and are revoked only when selected below.",
     "unlock": {
@@ -991,10 +1102,10 @@
       "unlocked": "Protected user search is unlocked until {{date}}.",
       "shortTime": "the short verification window ends",
       "error": "Your password was not accepted. Try again.",
-      "expired": "Your recent verification expired. Re-enter your password to search users again."
+      "expired": "Your recent verification expired. Verify your identity again to search users."
     },
     "searchLabel": "Search users",
-    "searchHint": "Email, display name, or workspace name",
+    "searchHint": "Name, account email, user ID, or workspace",
     "searchPlaceholder": "e.g. alex@example.com or Research",
     "searchAction": "Search",
     "searching": "Searching…",
@@ -1030,7 +1141,7 @@
     "mailUnavailableActionHint": "Email delivery is unavailable because server mail recovery is not ready.",
     "capabilityLoading": "Checking server recovery availability…",
     "capabilityError": "Recovery availability could not be confirmed. Reload before issuing a reset.",
-    "adminRecoveryUnavailable": "Admin-assisted recovery is unavailable until the canonical HTTPS public URL is ready.",
+    "adminRecoveryUnavailable": "Native password recovery links require the canonical HTTPS public URL. SSO identity reconnection remains available.",
     "emailQueued": "Recovery email queued for {{email}}.",
     "linkMissing": "The server did not return a recovery link. Issue a new reset.",
     "linkDismissed": "The one-time link was hidden. Issue a new reset if another link is needed.",
@@ -1075,6 +1186,69 @@
       "reauthentication": "Your current password is incorrect. Try again.",
       "unavailable": "That delivery method is unavailable. Close this dialog and explicitly choose an available recovery action.",
       "generic": "Password reset could not be issued. Try again."
+    },
+    "rebind": {
+      "action": "Reconnect SSO identity",
+      "title": "Reconnect this account’s SSO identity",
+      "warning": "Verify the person and the new identity through your organization’s separate trusted process first. This changes the selected SSO identity, revokes existing sessions, and does not create a temporary login link or change a native email login.",
+      "noEmail": "This account uses SSO and has no registered account email. Use identity recovery instead of email recovery.",
+      "currentIdentity": "Current SSO identity",
+      "provider": "New provider slug",
+      "issuer": "New issuer",
+      "subject": "New subject",
+      "reason": "Reason and independent verification reference",
+      "confirmUser": "Type the target account UUID to confirm",
+      "complete": "The selected SSO identity was reconnected. Existing sessions were revoked.",
+      "failed": "The SSO identity could not be reconnected. Verify your administrator session and the identity details."
+    },
+    "optionsSummary": "Recovery options and session effects",
+    "conflicts": {
+      "title": "SSO sign-ups waiting on an email conflict",
+      "description": "A provider verified this address, but an existing account with an unverified email already uses it, so no account was created. Approving deactivates that account and frees the address; its data is kept. Server-admin accounts are never listed.",
+      "load": "Show pending requests",
+      "empty": "No pending requests.",
+      "requester": "Requested through {{provider}} (subject {{subject}})",
+      "holder": "Current holder: {{name}} ({{status}})",
+      "reason": "Reason and how you verified it",
+      "approve": "Release the address",
+      "reject": "Keep the existing account",
+      "failed": "Requests could not be loaded or updated. Try again."
+    },
+    "audit": {
+      "title": "Server audit log",
+      "description": "Account, credential and server-admin changes, including operator CLI actions. Only server admins can read this history; viewing it is recorded too.",
+      "actionPrefix": "Action prefix",
+      "targetUserId": "Target user UUID",
+      "load": "Show records",
+      "more": "Show more",
+      "empty": "No matching records.",
+      "actor": "by {{actor}}",
+      "failed": "The audit log could not be loaded. Try again."
+    },
+    "accountCard": {
+      "details": "View account information",
+      "actions": "Account actions for {{name}}",
+      "noEmail": "No registered account email",
+      "shortId": "ID",
+      "copyId": "Copy full user ID for {{name}}",
+      "copied": "User ID copied.",
+      "copyUnavailable": "Copy unavailable. Open account information to copy the full ID.",
+      "sso": "SSO",
+      "noSso": "Not connected",
+      "workspaces": "Workspaces"
+    },
+    "accountDetails": {
+      "title": "Account information",
+      "close": "Close account information",
+      "displayName": "Display name",
+      "userId": "User ID",
+      "email": "Account email",
+      "emailVerifiedAt": "Email verified",
+      "status": "Status",
+      "provider": "Provider",
+      "issuer": "Issuer",
+      "subject": "Subject",
+      "identityId": "Identity ID"
     }
   },
   "jobs": {
@@ -1131,11 +1305,11 @@
     "refresh": "Refresh",
     "loading": "Loading attachments…",
     "loadError": "Could not load attachments.",
-    "serverAdminFallbackNotice": "You are not a member of this workspace, so this lists unused uploads only, without previews or deletion. Join the workspace to manage its attachments.",
-    "editorOnlyNotice": "Attachments are managed by editors and owners. You can still see the files on each page you can read.",
+    "serverAdminFallbackNotice": "Join this workspace to view its attachments.",
+    "editorOnlyNotice": "Attachments are available to members of this workspace.",
     "retentionNotice": "Unused uploads are reclaimed automatically once they pass the server's retention window. Deleting one here only brings that forward.",
-    "allScopeNotice": "Every attachment except those staged in someone else's unsaved draft — an open draft stays private to its author until it is saved.",
-    "mineScopeNotice": "These are the attachments you uploaded. Workspace owners can see every member's.",
+    "allScopeNotice": "Attachments on pages you can read, excluding private uploads in someone else's unsaved draft.",
+    "mineScopeNotice": "Your uploads on pages you can read. Workspace owners can see other members' uploads on pages they can read.",
     "fileMeta": "{{mediaType}} · {{size}}",
     "mineBadge": "You",
     "state": {
@@ -1208,7 +1382,72 @@
     },
     "expandPreview": "Expand {{filename}}",
     "previewViewerTitle": "{{filename}} preview",
-    "closePreview": "Close preview"
+    "closePreview": "Close preview",
+    "bulk": {
+      "selectAll_one": "Select all · {{count}} currently loaded file",
+      "selectAll_other": "Select all · {{count}} currently loaded files",
+      "selected_one": "{{count}} selected",
+      "selected_other": "{{count}} selected",
+      "delete": "Delete selected",
+      "confirm_one": "Delete {{count}} selected attachment?",
+      "confirm_other": "Delete {{count}} selected attachments?",
+      "permanent": "These files will be permanently deleted. This cannot be undone.",
+      "confirmAction": "Confirm deletion",
+      "progress": "Deleting… {{done}}/{{total}} completed",
+      "result": "{{deleted}} deleted, {{failed}} failed",
+      "selectFile": "Select {{filename}}",
+      "failure": {
+        "permission_one": "{{count}} access denied",
+        "permission_other": "{{count}} access denied",
+        "changed_one": "{{count}} changed",
+        "changed_other": "{{count}} changed",
+        "inUse_one": "{{count}} in use",
+        "inUse_other": "{{count}} in use",
+        "delete_one": "{{count}} request failed",
+        "delete_other": "{{count}} requests failed"
+      }
+    },
+    "policy": {
+      "title": "Unused file auto reclamation",
+      "edit": "Change settings",
+      "unknown": "Could not confirm the unused file retention period. You can delete unwanted files now.",
+      "days_one": "{{count}} day",
+      "days_other": "{{count}} days",
+      "hours_one": "{{count}} hour",
+      "hours_other": "{{count}} hours",
+      "daysHours": "{{days}} {{hours}}",
+      "disabledTitle": "Unused file auto reclamation is off",
+      "retentionTitle": "Unused file retention: {{duration}}",
+      "disabledBody": "This workspace does not automatically reclaim unused files. You can delete unwanted files now.",
+      "retentionBody": "Unused files older than {{duration}} from upload are reclaimed during periodic cleanup. You can delete them now.",
+      "source": {
+        "server": "Using server default",
+        "workspace": "Workspace override"
+      },
+      "reload": "Reload policy",
+      "enabled": "Enable auto reclamation",
+      "period": "Retention period",
+      "unit": "Unit",
+      "dayUnit": "Days",
+      "hourUnit": "Hours",
+      "useDefault": "Use server default",
+      "nextSweep": "Applies to cleanup started after saving. Cleanup already running may finish with its starting policy.",
+      "cancel": "Cancel policy changes",
+      "save": "Save policy",
+      "impact": "Existing unused uploads may be reclaimed in the next cleanup when you enable auto reclamation or shorten the retention period. Continue?",
+      "confirm": "Save and apply",
+      "conflict": "The policy changed. Review the latest policy before saving again.",
+      "saveError": "Could not save the policy. Your edits have been kept.",
+      "invalid": "Enter a whole number of days or hours, from 1 to {{max}} hours."
+    },
+    "scope": {
+      "label": "Attachment scope",
+      "workspace": "Current workspace",
+      "server": "All workspaces"
+    },
+    "workspaceName": "Workspace: {{name}}",
+    "adminNotice": "Attachments from all workspaces. Select unused files to clean up.",
+    "serverDescription": "Attachments uploaded into pages across all workspaces."
   },
   "deployment": {
     "serverAdminOnlyNotice": "These are dtxWiki server (system) settings, visible to server admins only. Ask a server admin, or grant access with `dtxwiki admin grant`.",
@@ -1231,8 +1470,8 @@
   "mcpClients": {
     "filterLabel": "MCP client state",
     "filter": {
-      "active": "Active",
-      "disabled": "Deactivated",
+      "active": "Available",
+      "disabled": "Other states",
       "all": "All"
     },
     "loading": "Loading MCP clients…",
@@ -1334,7 +1573,8 @@
     "reconciliationReminderMax": "Reconciliation reminder delay must be 30 days or shorter.",
     "reconciliationAttentionMin": "Reconciliation attention window must be at least 1 day.",
     "reconciliationAttentionMax": "Reconciliation attention window must be 365 days or shorter.",
-    "webRulePattern": "Web URL rule {{index}} requires a pattern."
+    "webRulePattern": "Web URL rule {{index}} requires a pattern.",
+    "slugFormat": "Use lowercase letters, numbers, and single hyphens."
   },
   "state": {
     "unsaved": "{{count}} unsaved",
@@ -1420,10 +1660,10 @@
       "searchAria": "Filter workspaces",
       "searchClear": "Clear workspace filter",
       "searchPlaceholder": "Workspace name or slug",
-      "selectAllShown": "Select all shown",
-      "clearAll": "Clear all",
+      "selectAllShown": "Select this page",
+      "clearAll": "Clear all selections",
       "selectedCount": "selected",
-      "toggleAllAria": "Select or clear every shown workspace",
+      "toggleAllAria": "Select or clear this page",
       "defaultBadge": "Default",
       "membershipMissing": "No membership",
       "noMatches": "No workspace matches this search.",
@@ -1452,7 +1692,8 @@
     "oauthAppsIntroUrlClientId": "OAuth is available for MCP clients configured with an HTTPS URL client identifier. Automatic client self-registration is disabled on this server.",
     "oauthAppsIntroUnavailable": "OAuth-aware MCP clients normally connect here, but it is unavailable on this server (see above). Use an Access Key instead.",
     "oauthDetailsToggle": "Show OAuth details (unavailable on this server)",
-    "oauthUnavailable": "This server can't offer OAuth (it needs an https URL, and standards-compliant MCP clients refuse a non-https authorization server). Use an Access Key below instead.",
+    "useAccessKey": "Use an Access Key.",
+    "oauthUnavailable": "This server can't offer OAuth (it needs an https URL, and standards-compliant MCP clients refuse a non-https authorization server).",
     "pill": {
       "recommended": "Recommended",
       "unavailable": "Not configured",
@@ -1552,7 +1793,7 @@
       "template": "Template"
     },
     "setupCommandPlaceholder": "The setup command appears here once a key exists.",
-    "oauthCapabilityUnknown": "This server's connection settings could not be read, so whether OAuth can be offered is unknown. Reload to try again, or use an Access Key below.",
+    "oauthCapabilityUnknown": "This server's connection settings could not be read, so whether OAuth can be offered is unknown. Reload to try again.",
     "oauthCapabilityRetry": "Try again"
   },
   "clipboard": {
@@ -1611,10 +1852,11 @@
     "connectionTiming": "Last used {{lastUsed}} · Next expiry {{nextExpiry}}",
     "noLiveExpiry": "no live token",
     "state": {
-      "active": "Active",
-      "expired": "Expired",
-      "revoked": "Revoked",
-      "disabled": "Deactivated"
+      "active": "Credential valid",
+      "expired": "Credential expired",
+      "revoked": "Credential revoked",
+      "disabled": "Use blocked",
+      "unknown": "Check credential status"
     }
   },
   "dangerZone": {
@@ -1786,5 +2028,121 @@
   },
   "commandBlock": {
     "copyFallback": "Copy {{label}}"
+  },
+  "workspacePicker": {
+    "selectedCount": "{{count}} selected",
+    "more": "{{count}} more",
+    "open": "View and select workspaces",
+    "apply": "Apply {{count}} selected",
+    "close": "Close",
+    "showAll": "Show all workspaces",
+    "showSelected": "Selected items ({{count}})",
+    "loading": "Loading workspaces…",
+    "loadError": "Could not load workspaces.",
+    "retry": "Retry",
+    "range": "{{start}}–{{end}} / {{total}}",
+    "previous": "Previous",
+    "next": "Next",
+    "search": "Workspace name or slug",
+    "clearSearch": "Clear workspace search",
+    "noMatches": "No matching workspace"
+  },
+  "mcpCard": {
+    "permissions": "Permissions",
+    "workspaces": "Allowed workspaces",
+    "details": "Key details",
+    "created": "Created",
+    "lastUsed": "Last used",
+    "expires": "Key expiry",
+    "noExpiry": "No key expiry",
+    "sessionExpiry": "Session expiry",
+    "expiryUnknown": "Expiry unavailable",
+    "reapprove": "Reauthorization required",
+    "cleanupTitle": "Connection history cleanup",
+    "cleanupBody": "Review expired or revoked connection records before cleaning them up.",
+    "cleanupPreview": "Review cleanup candidates",
+    "allowed": "Use allowed",
+    "blocked": "Use blocked",
+    "granted": "Granted",
+    "expiry": "Expiry"
+  },
+  "labs": {
+    "title": "Experimental menus",
+    "description": "These features are still being developed. Turn on the menus you want to try.",
+    "showAsk": "Show Ask menu",
+    "showAgent": "Show Agent menu",
+    "savedLocally": "Changes apply immediately and are saved for your account in this browser."
+  },
+  "userDeletion": {
+    "action": "Delete account",
+    "confirmTitle": "Delete this user account?",
+    "confirmDescription": "Access for {{account}} ends immediately after confirmation, including all sessions, API keys and OAuth access.",
+    "retention_one": "Account data and the workspaces held with it are retained for {{count}} day, then deleted by the server worker. With 0 days they are eligible for the next cleanup.",
+    "retention_other": "Account data and the workspaces held with it are retained for {{count}} days, then deleted by the server worker. With 0 days they are eligible for the next cleanup.",
+    "sharedContent": "Documents, submitted drafts and review history in other workspaces remain; the author name is no longer shown after cleanup, and unsubmitted private edits are deleted. Until cleanup, the account can be restored from this list.",
+    "confirmEmail": "Type {{email}} to confirm",
+    "currentPassword": "Your current password",
+    "cancel": "Cancel",
+    "submit": "Confirm account deletion",
+    "submitting": "Deleting account…",
+    "scheduled": "Deletion scheduled after {{date}}",
+    "success": "Account access revoked for {{account}}. Data cleanup is scheduled after {{date}}.",
+    "failed": "Could not request account deletion.",
+    "reloadPolicy": "Reload deletion details",
+    "policy": {
+      "title": "Account deletion retention",
+      "description": "Choose how long to retain account data before permanent cleanup. Applies to new deletion requests; existing deadlines stay fixed. With 0 days an account is eligible for the next worker sweep, so restoring it cannot be guaranteed.",
+      "days": "Retention period (days)",
+      "invalid": "Enter a whole number from 0 to 36500.",
+      "loading": "Loading the retention period…",
+      "loadFailed": "Could not load the account retention period.",
+      "saveFailed": "Could not save the account retention period.",
+      "saved": "Account retention period saved.",
+      "save": "Save retention period",
+      "saving": "Saving…",
+      "retry": "Retry"
+    },
+    "errors": {
+      "user_deletion_last_owner": "Some workspaces still have other members. Refresh and review the deletion again.",
+      "user_deletion_last_server_admin": "Grant server-admin access to another active user before deleting this account.",
+      "user_deletion_email_mismatch": "The confirmation email does not match this account.",
+      "user_deletion_not_found": "This account could not be found. Refresh the user list.",
+      "invalid_credentials": "Your current password was not accepted.",
+      "user_deletion_unavailable": "Account deletion is unavailable on this server. Contact the server operator.",
+      "user_deletion_policy_changed": "The retention period changed. Reload the period and review it before confirming again.",
+      "user_deletion_purge_started": "Cleanup has already started, so the account can no longer be restored.",
+      "user_deletion_not_pending": "This account has no pending deletion. Refresh the user list.",
+      "user_deletion_targets_changed": "The workspaces held with this account changed. Reload the details and approve them again.",
+      "workspace_not_deletion_pending": "This workspace is no longer held for deletion. Refresh the user list.",
+      "workspace_member_inactive": "Only active accounts can be added.",
+      "workspace_member_not_found": "No account uses that email address."
+    },
+    "pending": "Deletion pending",
+    "previewFailed": "Could not load the deletion details.",
+    "cleanupFailed_one": "Cleanup failed: {{code}} ({{count}} attempt)",
+    "cleanupFailed_other": "Cleanup failed: {{code}} ({{count}} attempts)",
+    "restore": "Restore account",
+    "restoring": "Restoring…",
+    "restoreTitle": "Restore this account?",
+    "restoreDescription": "{{email}} returns to its status before the deletion request. Sessions, API keys and OAuth access stay revoked; the user signs in again.",
+    "restored": "Account restored for {{email}}.",
+    "restoreFailed": "Could not restore the account.",
+    "verifyToLoad": "Your recent verification expired. Enter your password to load the deletion details.",
+    "verify": "Verify and load details",
+    "approveHeld_one": "Delete this workspace with the account. It closes to its members now and is deleted after the retention period unless you appoint a new admin.",
+    "approveHeld_other": "Delete these {{count}} workspaces with the account. They close to their members now and are deleted after the retention period unless you appoint a new admin.",
+    "heldWorkspaces": "Held for deletion with this account:",
+    "manageHeld": "Appoint an admin",
+    "heldTitle": "Keep “{{title}}”",
+    "heldDescription": "This workspace is closed and will be deleted with the account. Making an active member an admin reopens it and keeps it. Add the person as a member first if needed.",
+    "heldLoading": "Loading members…",
+    "appointAdmin": "Make admin",
+    "heldAddEmail": "Add member by email",
+    "heldAddRole": "Role",
+    "heldAdd": "Add member",
+    "heldFailed": "Could not update this workspace.",
+    "heldReopened": "“{{title}}” has a new admin and is no longer deleted with the account.",
+    "scheduledLabel": "Deletion",
+    "cleanupFailedLabel": "Cleanup"
   }
 }

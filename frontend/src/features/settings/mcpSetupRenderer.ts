@@ -57,7 +57,7 @@ export function renderMcpSetupPlan(
   }
   const slots = {
     accessToken: context.accessToken ?? null,
-    mcpUrl: validateMcpUrl(plan.mcp_url),
+    mcpUrl: validateMcpUrl(plan.mcp_url, plan.auth === "access-key"),
     serverName: "dtxwiki",
   };
   // Ordinals count within a step, not across the whole recipe: "Login
@@ -340,23 +340,40 @@ function validateEnvironmentName(value: string) {
   return value;
 }
 
-function validateMcpUrl(value: string) {
+function validateMcpUrl(value: string, allowPrivateHttp: boolean) {
   // WHATWG URL parsing strips tab/CR/LF before validating, so the raw string
   // must be checked first or control characters survive into rendered slots.
   if (/[\u0000-\u001f\u007f\u2028\u2029]/.test(value)) {
     throw new Error("MCP setup URL contains unsafe control characters");
   }
   const parsed = new URL(value);
+  if (parsed.username || parsed.password || /[?#\\\s]/u.test(value)) {
+    throw new Error("MCP setup URL must not contain credentials, query, or fragment");
+  }
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
   const loopback =
     parsed.protocol === "http:" &&
-    ["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname);
-  if (parsed.protocol !== "https:" && !loopback) {
-    throw new Error("MCP setup URL must use HTTPS or loopback HTTP");
+    (hostname === "localhost" || hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(hostname));
+  const privateHttp =
+    parsed.protocol === "http:" && allowPrivateHttp && isPrivateNetworkIp(hostname);
+  if (parsed.protocol !== "https:" && !loopback && !privateHttp) {
+    throw new Error("MCP setup URL must use HTTPS or permitted local-network HTTP");
   }
-  if (!parsed.pathname.replace(/\/$/, "").endsWith("/mcp")) {
+  if (!parsed.pathname.replace(/\/+$/, "").endsWith("/mcp")) {
     throw new Error("MCP setup URL must point to /mcp");
   }
-  return value.replace(/\/$/, "");
+  return value.replace(/\/+$/, "");
+}
+
+function isPrivateNetworkIp(hostname: string): boolean {
+  // URL has already validated/canonicalized the IP. Accept RFC1918 and ULA
+  // literals only; DNS names and other special-use ranges are not LAN proof.
+  if (hostname.startsWith("[")) return /^\[f[cd][0-9a-f]{2}:/i.test(hostname);
+  const octets = hostname.split(".").map(Number);
+  if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  return octets[0] === 10 ||
+    (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+    (octets[0] === 192 && octets[1] === 168);
 }
 
 function localized(value: { en: string; ko: string }, locale: "en" | "ko") {

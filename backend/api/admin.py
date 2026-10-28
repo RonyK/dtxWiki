@@ -9,43 +9,98 @@ app process cannot mutate ``/etc`` under the systemd sandbox, so it returns the
 
 from __future__ import annotations
 
+from dataclasses import asdict, replace
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query, Request, Response
+from fastapi import APIRouter, Depends, Header, Path, Query, Request, Response
 
 from backend.api.auth import (
     PasswordRecoveryServiceDep,
     require_recent_server_admin_reauthentication,
     require_server_admin,
 )
+from backend.api.context_media import _error_response as context_media_error_response
 from backend.api.deps import (
     DatabaseProviderDep,
+    RestActorDep,
+    ServicesDep,
     SessionFactoryDep,
+    WorkspaceAdminAccessDep,
     WorkspaceSessionFactoryDep,
 )
 from backend.api.health import _ready_payload as health_ready_payload
+from backend.api.users import user_deletion_error_response, user_deletion_service
+from backend.api.workspace_members import (
+    member_payload,
+    membership_error_response,
+    mutation_payload,
+)
 from backend.app.errors import build_rest_error_response
 from backend.app.settings import oauth_token_lifetime_report
 from backend.mcp.envelope import advisory_warnings
 from backend.schemas.admin_users import (
+    AdminAuditEventListResponse,
+    AdminEmailConflictDecisionRequest,
+    AdminEmailConflictDecisionResponse,
+    AdminEmailConflictListResponse,
+    AdminIdentityRebindRequest,
+    AdminIdentityRebindResponse,
     AdminPasswordResetRequest,
     AdminPasswordResetResponse,
     AdminUserListResponse,
 )
 from backend.schemas.common import RESTErrorBody
-from backend.schemas.context_media import ContextMediaOrphanListResponse
-from backend.schemas.deployment import DeploymentStatusResponse
+from backend.schemas.context_media import (
+    AdminContextMediaAttachmentListResponse,
+    ContextMediaDeleteResponse,
+    ContextMediaOrphanListResponse,
+)
+from backend.schemas.deployment import (
+    DeploymentStatusResponse,
+    DeploymentUpdateCheckRequest,
+    DeploymentUpdateStatusResponse,
+)
 from backend.schemas.jobs import (
     AdminJobListResponse,
     JobQueueSummaryResponse,
     JobRetryResponse,
     JobStatus,
 )
+from backend.schemas.user_deletion import (
+    AdminUserDeletionRequest,
+    UserDeletionPolicyData,
+    UserDeletionPolicyResponse,
+    UserDeletionPreviewResponse,
+    UserDeletionResponse,
+    UserDeletionRestoreResponse,
+)
+from backend.schemas.workspace_membership import (
+    WorkspaceMemberAddRequest,
+    WorkspaceMemberListResponse,
+    WorkspaceMemberMutationResponse,
+    WorkspaceMemberRoleUpdateRequest,
+)
 from backend.services import deployment as deployment_service
 from backend.services import update_check_service
+from backend.services.admin_audit import AdminAuditCursorError, AdminAuditService
+from backend.services.admin_context_media import (
+    AdminAttachmentError,
+    AdminAttachmentUnavailable,
+    delete_admin_attachment,
+    list_admin_attachments,
+)
 from backend.services.admin_user_recovery import AdminUserRecoveryService
 from backend.services.audit_service import AuditService
+from backend.services.auth.email_conflicts import (
+    EmailConflictError,
+    EmailConflictService,
+)
+from backend.services.auth.identity_recovery import (
+    IdentityRecoveryError,
+    IdentityRecoveryService,
+)
 from backend.services.context_media_orphan_sweep import (
     list_orphans as list_context_media_orphans,
 )
@@ -62,7 +117,21 @@ from backend.services.password_recovery_service import (
 )
 from backend.services.session_service import (
     AuthenticatedUser,
+    EmailInputPolicyError,
+    InvalidCredentialsError,
     VerifiedRecentReauthentication,
+)
+from backend.services.user_deletion_service import (
+    UserDeletionError,
+    UserDeletionService,
+)
+from backend.services.workspace_membership_service import (
+    WorkspaceMemberCursorInvalidError,
+    WorkspaceMembershipConflictError,
+    WorkspaceMembershipForbiddenError,
+    WorkspaceMembershipNotFoundError,
+    WorkspaceMembershipService,
+    WorkspaceMembershipValidationError,
 )
 from backend.utils.actor_display import resolve_actor_display_names
 
@@ -74,6 +143,292 @@ REST_ERROR_RESPONSES = {
     404: {"model": RESTErrorBody},
     422: {"model": RESTErrorBody},
 }
+USER_DELETION_ERROR_RESPONSES = {
+    **REST_ERROR_RESPONSES,
+    409: {"model": RESTErrorBody},
+    503: {"model": RESTErrorBody},
+}
+
+
+@router.get(
+    "/user-deletion-policy",
+    response_model=UserDeletionPolicyResponse,
+    responses=USER_DELETION_ERROR_RESPONSES,
+)
+def admin_get_user_deletion_policy(
+    response: Response,
+    session_factory: SessionFactoryDep,
+    _: Annotated[AuthenticatedUser, Depends(require_server_admin)],
+):
+    try:
+        days = UserDeletionService(session_factory=session_factory).get_policy()
+    except UserDeletionError as exc:
+        return user_deletion_error_response(exc)
+    response.headers["Cache-Control"] = "no-store"
+    return {"data": {"retention_days": days}}
+
+
+@router.patch(
+    "/user-deletion-policy",
+    response_model=UserDeletionPolicyResponse,
+    responses=USER_DELETION_ERROR_RESPONSES,
+)
+def admin_set_user_deletion_policy(
+    request_body: UserDeletionPolicyData,
+    response: Response,
+    session_factory: SessionFactoryDep,
+    admin: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+):
+    try:
+        days = UserDeletionService(session_factory=session_factory).set_policy(
+            actor_user_id=admin.user_id,
+            retention_days=request_body.retention_days,
+            expected_actor_session_generation=admin.session_generation,
+        )
+    except UserDeletionError as exc:
+        return user_deletion_error_response(exc)
+    response.headers["Cache-Control"] = "no-store"
+    return {"data": {"retention_days": days}}
+
+
+@router.delete(
+    "/users/{user_id}",
+    response_model=UserDeletionResponse,
+    responses=USER_DELETION_ERROR_RESPONSES,
+)
+def admin_delete_user(
+    user_id: UUID,
+    request_body: AdminUserDeletionRequest,
+    response: Response,
+    session_factory: SessionFactoryDep,
+    database_provider: DatabaseProviderDep,
+    admin: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+):
+    try:
+        result = user_deletion_service(
+            session_factory, database_provider
+        ).request_deletion(
+            user_id=user_id,
+            actor_user_id=admin.user_id,
+            admin_request=True,
+            expected_actor_session_generation=admin.session_generation,
+            confirmation_email=request_body.confirmation_email,
+            expected_retention_days=request_body.expected_retention_days,
+            approved_workspaces=[
+                item.model_dump() for item in request_body.approved_workspaces
+            ],
+        )
+    except UserDeletionError as exc:
+        return user_deletion_error_response(exc)
+    response.headers["Cache-Control"] = "no-store"
+    return {"data": result}
+
+
+@router.get(
+    "/users/{user_id}/deletion-preview",
+    response_model=UserDeletionPreviewResponse,
+    responses=USER_DELETION_ERROR_RESPONSES,
+)
+def admin_user_deletion_preview(
+    user_id: UUID,
+    response: Response,
+    session_factory: SessionFactoryDep,
+    database_provider: DatabaseProviderDep,
+    _: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+):
+    try:
+        preview = user_deletion_service(
+            session_factory, database_provider
+        ).deletion_preview(user_id=user_id, admin_request=True)
+    except UserDeletionError as exc:
+        return user_deletion_error_response(exc)
+    response.headers["Cache-Control"] = "no-store"
+    return {"data": preview}
+
+
+@router.post(
+    "/users/{user_id}/deletion-restore",
+    response_model=UserDeletionRestoreResponse,
+    responses=USER_DELETION_ERROR_RESPONSES,
+)
+def admin_restore_user_deletion(
+    user_id: UUID,
+    response: Response,
+    session_factory: SessionFactoryDep,
+    database_provider: DatabaseProviderDep,
+    admin: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+):
+    try:
+        result = user_deletion_service(
+            session_factory, database_provider
+        ).restore_deletion(
+            user_id=user_id,
+            actor_user_id=admin.user_id,
+            expected_actor_session_generation=admin.session_generation,
+        )
+    except UserDeletionError as exc:
+        return user_deletion_error_response(exc)
+    response.headers["Cache-Control"] = "no-store"
+    return {"data": result}
+
+
+@router.get(
+    "/workspaces/{workspace_id}/members",
+    response_model=WorkspaceMemberListResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def admin_list_held_workspace_members(
+    workspace_id: Annotated[UUID, Path()],
+    response: Response,
+    session_factory: SessionFactoryDep,
+    admin: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+    cursor: Annotated[str | None, Query(max_length=2048)] = None,
+):
+    """Members of a workspace held for account deletion (server admins only)."""
+
+    try:
+        page = WorkspaceMembershipService(
+            session_factory=session_factory
+        ).list_members_page(
+            actor_user_id=admin.user_id,
+            workspace_id=workspace_id,
+            limit=limit,
+            cursor=cursor,
+            server_admin=True,
+        )
+    except WorkspaceMembershipNotFoundError as exc:
+        return membership_error_response(exc, 404)
+    except WorkspaceMembershipForbiddenError as exc:
+        return membership_error_response(exc, 403)
+    except WorkspaceMembershipConflictError as exc:
+        return membership_error_response(exc, 409)
+    except (
+        WorkspaceMembershipValidationError,
+        WorkspaceMemberCursorInvalidError,
+    ) as exc:
+        return membership_error_response(exc, 422)
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "data": {
+            "items": [
+                member_payload(member, actor_user_id=admin.user_id)
+                for member in page.items
+            ],
+            "total": page.total,
+            "limit": page.limit,
+            "offset": page.offset,
+            "has_more": page.has_more,
+            "next_cursor": page.next_cursor,
+        }
+    }
+
+
+@router.post(
+    "/workspaces/{workspace_id}/members",
+    response_model=WorkspaceMemberMutationResponse,
+    responses={**REST_ERROR_RESPONSES, 201: {"model": WorkspaceMemberMutationResponse}},
+)
+def admin_add_held_workspace_member(
+    workspace_id: Annotated[UUID, Path()],
+    request_body: WorkspaceMemberAddRequest,
+    response: Response,
+    session_factory: SessionFactoryDep,
+    admin: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+):
+    """Add a viewer or editor to a held workspace before appointing an admin."""
+
+    try:
+        result = WorkspaceMembershipService(
+            session_factory=session_factory
+        ).add_member_with_metadata(
+            actor_user_id=admin.user_id,
+            workspace_id=workspace_id,
+            email=request_body.email,
+            user_id=request_body.user_id,
+            role=request_body.role,
+            confirm_first_share=True,
+            server_admin=True,
+        )
+    except WorkspaceMembershipNotFoundError as exc:
+        return membership_error_response(exc, 404)
+    except WorkspaceMembershipForbiddenError as exc:
+        return membership_error_response(exc, 403)
+    except EmailInputPolicyError as exc:
+        return build_rest_error_response(
+            error_code=exc.error_code, message=str(exc), status_code=422
+        )
+    except InvalidCredentialsError:
+        return build_rest_error_response(
+            error_code="user_not_found",
+            message="user not found",
+            status_code=404,
+        )
+    except WorkspaceMembershipConflictError as exc:
+        return membership_error_response(exc, 409)
+    except WorkspaceMembershipValidationError as exc:
+        return membership_error_response(exc, 422)
+    response.status_code = 201 if result.created else 200
+    response.headers["Cache-Control"] = "no-store"
+    return {"data": mutation_payload(result, actor_user_id=admin.user_id)}
+
+
+@router.patch(
+    "/workspaces/{workspace_id}/members/{user_id}",
+    response_model=WorkspaceMemberMutationResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def admin_change_held_workspace_member_role(
+    workspace_id: Annotated[UUID, Path()],
+    user_id: Annotated[UUID, Path()],
+    request_body: WorkspaceMemberRoleUpdateRequest,
+    response: Response,
+    session_factory: SessionFactoryDep,
+    admin: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+):
+    """Change a role in a held workspace; an active admin reopens it."""
+
+    try:
+        result = WorkspaceMembershipService(
+            session_factory=session_factory
+        ).change_member_role(
+            actor_user_id=admin.user_id,
+            workspace_id=workspace_id,
+            target_user_id=user_id,
+            role=request_body.role,
+            server_admin=True,
+        )
+    except WorkspaceMembershipNotFoundError as exc:
+        return membership_error_response(exc, 404)
+    except WorkspaceMembershipForbiddenError as exc:
+        return membership_error_response(exc, 403)
+    except WorkspaceMembershipConflictError as exc:
+        return membership_error_response(exc, 409)
+    except WorkspaceMembershipValidationError as exc:
+        return membership_error_response(exc, 422)
+    response.headers["Cache-Control"] = "no-store"
+    return {"data": mutation_payload(result, actor_user_id=admin.user_id)}
 
 
 def deployment_status_data(request: Request, session_factory) -> dict:
@@ -93,7 +448,7 @@ def deployment_status_data(request: Request, session_factory) -> dict:
         latest_delivery_attempt_at=outbox_status.latest_attempt_at,
     )
     # Cache-only + fail-open: never block this request on the package index.
-    update_info = update_check_service.check_for_update(settings, allow_network=False)
+    update_status = update_check_service.get_update_status(settings)
     return {
         "public_base_url": settings.public_base_url,
         "mcp_url": deployment_service.mcp_url(settings),
@@ -131,9 +486,7 @@ def deployment_status_data(request: Request, session_factory) -> dict:
             "mail_connection_status": recovery.mail_connection_status,
             "mail_last_attempt_at": recovery.mail_last_attempt_at,
             "mail_from_address": recovery.mail_from_address,
-            "smtp_credentials_configured": (
-                recovery.smtp_credentials_configured
-            ),
+            "smtp_credentials_configured": (recovery.smtp_credentials_configured),
             "canonical_public_url": recovery.canonical_public_url,
             "https_ready": recovery.https_ready,
             "outbox_queued": recovery.outbox_queued,
@@ -152,9 +505,7 @@ def deployment_status_data(request: Request, session_factory) -> dict:
             }
             for item in suggestions
         ],
-        "current_version": settings.app_version,
-        "latest_version": update_info.latest_version if update_info else None,
-        "update_available": bool(update_info and update_info.update_available),
+        **asdict(update_status),
     }
 
 
@@ -175,6 +526,27 @@ def admin_deployment_status(
     """
 
     return {"data": deployment_status_data(request, session_factory)}
+
+
+@router.post(
+    "/deployment/update-check",
+    response_model=DeploymentUpdateStatusResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def admin_deployment_update_check(
+    request: Request,
+    body: DeploymentUpdateCheckRequest,
+    _: Annotated[AuthenticatedUser, Depends(require_server_admin)],
+):
+    """Check the package index for a release without applying any update."""
+
+    return {
+        "data": asdict(
+            update_check_service.get_update_status(
+                request.app.state.settings, force=body.force, allow_network=True
+            )
+        )
+    }
 
 
 @router.get(
@@ -210,12 +582,26 @@ def admin_search_users(
                     "display_name": record.user.display_name,
                     "status": record.user.status,
                     "email_verified_at": record.user.email_verified_at,
+                    "deletion_requested_at": record.user.deletion_requested_at,
+                    "purge_after": record.user.purge_after,
+                    "deletion_failure_count": record.user.deletion_failure_count,
+                    "deletion_last_error": record.user.deletion_last_error,
+                    "identities": [
+                        {
+                            "identity_id": identity.id,
+                            "provider_slug": identity.provider_slug,
+                            "issuer": identity.issuer,
+                            "subject": identity.subject,
+                        }
+                        for identity in record.identities
+                    ],
                     "workspaces": [
                         {
                             "workspace_id": membership.workspace_id,
                             "slug": membership.slug,
                             "title": membership.title,
                             "role": membership.role,
+                            "deletion_held": membership.deletion_held,
                         }
                         for membership in record.workspaces
                     ],
@@ -227,6 +613,144 @@ def admin_search_users(
             "offset": result.offset,
         }
     }
+
+
+@router.post(
+    "/users/{user_id}/identities/rebind",
+    response_model=AdminIdentityRebindResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def admin_rebind_identity(
+    request: Request,
+    body: AdminIdentityRebindRequest,
+    response: Response,
+    session_factory: SessionFactoryDep,
+    user_id: UUID,
+    admin: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+):
+    try:
+        result = IdentityRecoveryService(
+            session_factory, request.app.state.auth_providers
+        ).rebind(
+            user_id=user_id,
+            **body.model_dump(),
+            actor_id=str(admin.user_id),
+            actor_user_id=admin.user_id,
+            actor_session_generation=admin.session_generation,
+        )
+    except IdentityRecoveryError as exc:
+        return build_rest_error_response(
+            error_code=exc.error_code, message=str(exc), status_code=exc.status_code
+        )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return {"data": result}
+
+
+def _no_store(response: Response) -> None:
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+
+
+@router.get(
+    "/email-conflicts",
+    response_model=AdminEmailConflictListResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def admin_list_email_conflicts(
+    response: Response,
+    session_factory: SessionFactoryDep,
+    admin: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+    status: str | None = Query(
+        default="pending",
+        pattern="^(pending|approved|rejected|resolved|auto_released)$",
+    ),
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    total, items = EmailConflictService(session_factory).list_requests(
+        status=status, limit=limit, offset=offset
+    )
+    _no_store(response)
+    return {
+        "data": {"items": items, "total": total, "limit": limit, "offset": offset}
+    }
+
+
+@router.post(
+    "/email-conflicts/{request_id}/decision",
+    response_model=AdminEmailConflictDecisionResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def admin_decide_email_conflict(
+    body: AdminEmailConflictDecisionRequest,
+    response: Response,
+    session_factory: SessionFactoryDep,
+    request_id: Annotated[UUID, Path()],
+    admin: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+):
+    try:
+        result = EmailConflictService(session_factory).decide(
+            request_id,
+            approve=body.decision == "approve",
+            reason=body.reason,
+            actor_user_id=admin.user_id,
+            actor_session_generation=admin.session_generation,
+        )
+    except EmailConflictError as exc:
+        return build_rest_error_response(
+            error_code=exc.error_code, message=str(exc), status_code=exc.status_code
+        )
+    _no_store(response)
+    return {"data": result}
+
+
+@router.get(
+    "/audit-events",
+    response_model=AdminAuditEventListResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def admin_list_audit_events(
+    response: Response,
+    session_factory: SessionFactoryDep,
+    admin: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+    action_prefix: str | None = Query(default=None, max_length=128),
+    target_user_id: Annotated[UUID | None, Query()] = None,
+    actor_id: str | None = Query(default=None, max_length=256),
+    since: Annotated[datetime | None, Query()] = None,
+    until: Annotated[datetime | None, Query()] = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=512),
+):
+    try:
+        items, next_cursor = AdminAuditService(session_factory).list_events(
+            actor_user_id=admin.user_id,
+            action_prefix=action_prefix,
+            target_user_id=target_user_id,
+            actor_id=actor_id,
+            since=since,
+            until=until,
+            limit=limit,
+            cursor=cursor,
+        )
+    except AdminAuditCursorError as exc:
+        return build_rest_error_response(
+            error_code=exc.error_code, message=str(exc), status_code=422
+        )
+    _no_store(response)
+    return {"data": {"items": items, "next_cursor": next_cursor}}
 
 
 @router.post(
@@ -389,28 +913,22 @@ def admin_list_jobs(
 def admin_list_context_media_orphans(
     workspace_id: UUID,
     session_factory: WorkspaceSessionFactoryDep,
+    actor: RestActorDep,
+    access: WorkspaceAdminAccessDep,
     control_session_factory: SessionFactoryDep,
     _: Annotated[AuthenticatedUser, Depends(require_server_admin)],
 ):
-    """Every current Context-media orphan in one workspace: an asset whose
-    upload session expired before anything claimed it, or one claimed onto a
-    page but written into no version's Markdown -- either never (an upload
-    abandoned mid-edit, the usual case) or no longer. An unclaimed upload
-    session that has not expired yet is an upload in progress and is not
-    listed.
-
-    Server-admin surface -- unlike the workspace-scoped listing it reads any
-    workspace, not only ones the caller is a member of. ``workspace_id`` is
-    required: this endpoint reports one workspace per call and never
-    aggregates across the instance.
-    """
-    # Required workspace_id instead of an instance-wide aggregation: every read
-    # here has to run on session_for(workspace_id), never the control plane. A
-    # media-orphan fan-out would be another copy of list_all_jobs' roster +
-    # per-workspace session + skip-and-flag shape -- one more call site to keep
-    # in sync with that pattern rather than reusing it.
     with session_factory() as session:
-        items = list_context_media_orphans(session, workspace_id=workspace_id)
+        items = list_context_media_orphans(
+            session,
+            workspace_id=workspace_id,
+            actor=replace(
+                actor,
+                workspace_id=workspace_id,
+                role=access.role,
+                workspace_role=access.role,
+            ),
+        )
     # Uploader labels come off the CONTROL session -- `users` is identity
     # plane, the listing above is workspace plane. Same split as the
     # workspace-scoped endpoint in backend/api/read.py.
@@ -513,3 +1031,91 @@ def admin_retry_job(
                 lease_timeout_seconds=lease_timeout_seconds,
             )
         }
+
+
+@router.get(
+    "/context-media/attachments",
+    response_model=AdminContextMediaAttachmentListResponse,
+    responses={**REST_ERROR_RESPONSES, 503: {"model": RESTErrorBody}},
+)
+def admin_list_context_media_attachments(
+    db: DatabaseProviderDep,
+    svc: ServicesDep,
+    response: Response,
+    admin: Annotated[AuthenticatedUser, Depends(require_server_admin)],
+    q: Annotated[str, Query(max_length=200)] = "",
+    mine: bool = False,
+    orphan_only: bool = False,
+    limit: Annotated[int, Query(ge=1, le=100)] = 24,
+    cursor: Annotated[str | None, Query(max_length=2048)] = None,
+):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return {
+            "data": list_admin_attachments(
+                db=db,
+                repository_factory=svc.context_media_repository_factory,
+                actor_id=admin.user_id,
+                q=q,
+                mine=mine,
+                orphan_only=orphan_only,
+                limit=limit,
+                cursor=cursor,
+            )
+        }
+    except ValueError:
+        return build_rest_error_response(
+            error_code="validation_failed",
+            message="Invalid attachment cursor",
+            status_code=422,
+        )
+    except AdminAttachmentUnavailable:
+        return build_rest_error_response(
+            error_code="media_unavailable",
+            message="A workspace could not be read. Refresh to try again.",
+            status_code=503,
+        )
+
+
+@router.delete(
+    "/context-media/attachments/{asset_id}",
+    response_model=ContextMediaDeleteResponse,
+    responses={
+        **REST_ERROR_RESPONSES,
+        **{code: {"model": RESTErrorBody} for code in (409, 412, 503)},
+    },
+)
+def admin_delete_context_media_attachment(
+    asset_id: UUID,
+    workspace_id: UUID,
+    db: DatabaseProviderDep,
+    svc: ServicesDep,
+    response: Response,
+    admin: Annotated[AuthenticatedUser, Depends(require_server_admin)],
+    usage_token: Annotated[str, Header(alias="If-Match", min_length=1)],
+):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        delete_admin_attachment(
+            db=db,
+            repository_factory=svc.context_media_repository_factory,
+            workspace_id=workspace_id,
+            asset_id=asset_id,
+            actor_id=admin.user_id,
+            usage_token=usage_token.strip('"'),
+        )
+    except AdminAttachmentError as exc:
+        return context_media_error_response(exc)
+    except AdminAttachmentUnavailable:
+        return build_rest_error_response(
+            error_code="media_unavailable",
+            message="Workspace is unavailable",
+            status_code=503,
+        )
+    return {
+        "data": {
+            "id": asset_id,
+            "association_state": "tombstoned",
+            "gc_state": "queued",
+        }
+    }

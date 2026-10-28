@@ -19,6 +19,41 @@ import {
 describe("McpAppHub", () => {
   beforeEach(() => setLocale("en", { persist: false }));
 
+  it("announces catalog loading and retains the displayed apps while refreshing", () => {
+    const props = {
+      catalog: catalog(),
+      error: null,
+      loading: false,
+      locale: "en" as const,
+      loadPlan: async (owner: { id: string }, option: McpConnectionOption) =>
+        plan(owner.id, option.auth, option.variant_id),
+      onAccessKeySelected: vi.fn(),
+      shell: "bash" as const,
+    };
+    const view = render(<McpAppHub {...props} catalog={null} loading />);
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("Loading supported apps…");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(status.querySelector(".spinner")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.queryByRole("button", { name: /Claude Code/ })).toBeNull();
+
+    view.rerender(<McpAppHub {...props} />);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("button", { name: /Claude Code/ })).toBeVisible();
+
+    view.rerender(<McpAppHub {...props} loading />);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading supported apps…");
+    expect(screen.getByRole("button", { name: /Claude Code/ })).toBeVisible();
+
+    view.rerender(
+      <McpAppHub {...props} error="The catalog could not be refreshed." />,
+    );
+    expect(screen.queryByText("Loading supported apps…")).toBeNull();
+    expect(screen.getByText("The catalog could not be refreshed.")).toBeVisible();
+    expect(screen.getByRole("button", { name: /Claude Code/ })).toBeVisible();
+  });
+
   it("discovers an ordinary synthetic app by vendor and alias without app-id code", async () => {
     const user = userEvent.setup();
     const onAccessKeySelected = vi.fn();
@@ -160,6 +195,30 @@ describe("McpAppHub", () => {
       owner: { kind: "generic-profile", id: "other-mcp-client" },
       customAppLabel: "Grok Workbench",
     });
+  });
+
+  it.each([160, 161])("validates %i code points in custom labels without truncating", async (length) => {
+    const user = userEvent.setup();
+    const onAccessKeySelected = vi.fn();
+    const loadPlan = vi.fn(async (owner, option) =>
+      plan(owner.id, option.auth, option.variant_id),
+    );
+    render(<McpAppHub catalog={catalog()} error={null} loading={false} locale="en" loadPlan={loadPlan} onAccessKeySelected={onAccessKeySelected} shell="bash" />);
+    await user.click(screen.getByRole("button", { name: /Browse all AI apps/ }));
+    await user.click(screen.getByRole("button", { name: /Other MCP client/ }));
+    const input = screen.getByRole("textbox", { name: "AI app display name" });
+    const value = "😀".repeat(length);
+    fireEvent.change(input, { target: { value } });
+    await user.click(screen.getByRole("button", { name: /Access Key/ }));
+    expect(input).toHaveValue(value);
+    if (length === 160) {
+      await waitFor(() => expect(onAccessKeySelected).toHaveBeenCalledOnce());
+      expect(onAccessKeySelected.mock.calls[0][0].customAppLabel).toBe(value);
+    } else {
+      expect(onAccessKeySelected).not.toHaveBeenCalled();
+      expect(loadPlan).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert")).toHaveTextContent("160");
+    }
   });
 
   it("loads an OAuth-first setup recipe as copy-only text", async () => {
@@ -451,7 +510,7 @@ describe("McpAppHub", () => {
     expect(screen.queryByText(/Unsupported MCP setup recipe version/)).toBeNull();
   });
 
-  it("ignores an older owner error and keeps the newer owner request busy", async () => {
+  it("ignores an older owner error and keeps the newer loading status announced", async () => {
     const user = userEvent.setup();
     const claudeRequest = deferred<McpSetupPlan>();
     const codexRequest = deferred<McpSetupPlan>();
@@ -481,6 +540,12 @@ describe("McpAppHub", () => {
     await user.click(within(dialog).getByRole("button", { name: /Codex CLI/ }));
     const codexOAuth = within(dialog).getByRole("button", { name: /^OAuth/ });
     await user.click(codexOAuth);
+    const preparationStatus = within(dialog).getByRole("status");
+    expect(preparationStatus).toHaveTextContent("Preparing setup…");
+    expect(preparationStatus).toHaveAttribute("aria-live", "polite");
+    expect(preparationStatus.closest('[aria-busy="true"]')).toBeNull();
+    expect(preparationStatus.querySelector(".spinner"))
+      .toHaveAttribute("aria-hidden", "true");
 
     await act(async () => {
       claudeRequest.reject(new Error("late Claude failure"));
@@ -488,6 +553,7 @@ describe("McpAppHub", () => {
     });
     expect(screen.queryByText("The current setup could not be generated."))
       .not.toBeInTheDocument();
+    expect(within(dialog).getByRole("status")).toBe(preparationStatus);
     expect(codexOAuth).toBeDisabled();
     expect(screen.getByRole("heading", { name: "Codex CLI" }))
       .toBeInTheDocument();
@@ -497,6 +563,7 @@ describe("McpAppHub", () => {
       await codexRequest.promise;
     });
     expect(await screen.findByText("Setup steps")).toBeInTheDocument();
+    expect(screen.queryByText("Preparing setup…")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Codex CLI" }))
       .toBeInTheDocument();
   });

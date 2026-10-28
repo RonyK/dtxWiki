@@ -974,15 +974,12 @@ body[data-focus-mode="true"] .main-surface {
   letter-spacing: 0;
 }
 
+/* People and the system keep the neutral base above, as the activity actor
+   chips do: violet is the Context section's color, so only AI actors get a
+   tone of their own. */
 .avatar[data-actor-type="agent"] {
   border-color: var(--agent);
   background: var(--agent-soft);
-}
-
-.avatar[data-actor-type="human"],
-.avatar[data-actor-type="user"] {
-  border-color: var(--context);
-  background: var(--context-soft);
 }
 
 .avatar-with-timestamp {
@@ -1100,6 +1097,18 @@ body[data-focus-mode="true"] .main-surface {
   min-height: 26px;
   width: 26px;
   padding: 4px;
+  justify-content: center;
+}
+
+/* Opt-in size for inline secondary actions such as copying an identifier.
+   Keep the same footprint on narrow and coarse-pointer layouts. */
+.icon-button.icon-button--small {
+  width: var(--control-size-small);
+  height: var(--control-size-small);
+  min-width: var(--control-size-small);
+  min-height: var(--control-size-small);
+  padding: 6px;
+  flex-shrink: 0;
   justify-content: center;
 }
 
@@ -3542,10 +3551,14 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 }
 
 .markdown-task-state {
+  font-size: var(--checkbox-size);
+  line-height: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.1em;
+  width: var(--checkbox-size);
+  height: var(--checkbox-size);
+  flex-shrink: 0;
   margin-right: 6px;
   color: var(--ink-muted);
   font-family: system-ui, sans-serif;

@@ -336,11 +336,11 @@ def test_a_redirect_uri_cannot_close_the_handoff_script_element(page_service):
     """The forward URL is written into the page once, HTML-escaped, and the
     script reads it back off the anchor. Serializing it a second time into a JS
     literal let a registered redirect_uri close the script element: json.dumps
-    does not escape a closing script tag, DCR is unauthenticated, and
-    validate_redirect_uri places no character restriction on an https path."""
+    does not escape a closing script tag and DCR is unauthenticated. The
+    whitespace-free payload stays within the URI input contract."""
 
     client = make_client(page_service)
-    hostile = "https://cb.example.test/cb</script><img src=x onerror=alert(1)>"
+    hostile = "https://cb.example.test/cb</script><img/src=x/onerror=alert(1)>"
     client_id = _register(
         client, redirect_uri=hostile, scope="mcp:read", client_name="Hostile"
     )
@@ -355,8 +355,8 @@ def test_a_redirect_uri_cannot_close_the_handoff_script_element(page_service):
     )
 
     assert page.status_code == 200
-    assert "</script><img src=x" not in page.text
-    assert "&lt;/script&gt;&lt;img src=x" in page.text
+    assert "</script><img/src=x" not in page.text
+    assert "&lt;/script&gt;&lt;img/src=x" in page.text
     # The anchor still round-trips the real URL, so the flow is not broken by
     # the escaping — only the second serialization is gone.
     href = re.search(r'id="oauth-forward"\s+href="([^"]+)"', page.text)

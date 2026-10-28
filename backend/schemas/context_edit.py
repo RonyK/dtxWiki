@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from backend.schemas.input_policy import InputRequest
 from backend.schemas.page import BODY_MD_MAX_LENGTH
 
 _SHA256_HEX_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -488,7 +489,7 @@ type PatchDraftOperation = Annotated[
 ]
 
 
-class PatchDraftRequest(_StrictModel):
+class PatchDraftRequest(InputRequest, _StrictModel):
     page_id: UUID
     operations: list[PatchDraftOperation] = Field(max_length=20)
     reason: str = Field(min_length=1)

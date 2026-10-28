@@ -1,6 +1,10 @@
 import type { TFunction } from "i18next";
 
-import type { McpChatSessionRef } from "../../shared/api/operations";
+import type {
+  McpChatArtifactLink,
+  McpChatSessionRef,
+} from "../../shared/api/operations";
+import { artifactVerbRank, isArtifactVerb, repeatedCount } from "./chatArtifacts";
 
 // Legacy chats may still carry a count-only summary ("3 tool calls, 1 write")
 // that just duplicates the count chips on the card/detail — suppress it and fall
@@ -45,15 +49,62 @@ export function artifactVerbLabel(
   t: TFunction<"chats">,
 ): string {
   const normalized = verb.trim().toLowerCase();
-  return [
-    "created",
-    "edited",
-    "cited",
-    "referenced",
-    "search_match",
-  ].includes(normalized)
+  return isArtifactVerb(normalized)
     ? t(`detail.artifactVerbs.${normalized}`)
     : t("detail.artifactVerbs.unknown");
+}
+
+/** A verb pill's label: "Edited ×3", or just "Edited" when it happened once. */
+export function artifactVerbPillLabel(
+  link: Pick<McpChatArtifactLink, "verb" | "occurrence_count">,
+  t: TFunction<"chats">,
+): string {
+  const verb = artifactVerbLabel(link.verb, t);
+  const count = repeatedCount(link);
+  return count === null ? verb : `${verb} ×${count}`;
+}
+
+/**
+ * The pill's fact in words ("Edited 3 links") for tooltips and screen
+ * readers, which would otherwise have to pronounce the "×".
+ */
+export function artifactVerbDescription(
+  link: Pick<McpChatArtifactLink, "verb" | "occurrence_count">,
+  t: TFunction<"chats">,
+): string {
+  const verb = artifactVerbLabel(link.verb, t);
+  const count = repeatedCount(link);
+  return count === null ? verb : `${verb} ${t("detail.artifactLinks", { count })}`;
+}
+
+/**
+ * "Created 1 · Edited 2": how many artifacts carry each verb, in verb order.
+ * Rows are unique per (artifact, verb), so a verb's row count already is that
+ * number of artifacts.
+ */
+export function artifactVerbSummary(
+  links: readonly Pick<McpChatArtifactLink, "verb">[],
+  t: TFunction<"chats">,
+): string {
+  const counts = new Map<string, number>();
+  for (const link of links) {
+    counts.set(link.verb, (counts.get(link.verb) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .sort(([a], [b]) => artifactVerbRank(a) - artifactVerbRank(b))
+    .map(([verb, count]) => `${artifactVerbLabel(verb, t)} ${count}`)
+    .join(" · ");
+}
+
+/** The artifact's title, or its localized kind when the title is hidden or unset. */
+export function artifactDisplayTitle(
+  artifact: Pick<McpChatArtifactLink, "artifact_title" | "resource_kind">,
+  t: TFunction<"chats">,
+): string {
+  return artifact.artifact_title
+    ?? t(`labels.artifactKind.${artifact.resource_kind}`, {
+      defaultValue: t("labels.artifactKind.unknown"),
+    });
 }
 
 /**

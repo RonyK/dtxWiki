@@ -3,16 +3,36 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
+from backend.schemas.common import RESTResponseBase
+from backend.schemas.input_policy import InputRequest
 from backend.schemas.page import PAGE_SLUG_PATTERN
 
+FavoriteTargetKind = Literal["context_page", "library_item", "agent_page"]
 
-class TreeFolderCreateRequest(BaseModel):
+
+class FavoriteUpdateRequest(BaseModel):
+    is_favorite: bool
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class FavoritePayload(BaseModel):
+    target_kind: FavoriteTargetKind
+    target_id: UUID
+    is_favorite: bool
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class FavoriteResponse(RESTResponseBase):
+    data: FavoritePayload
+
+
+class TreeFolderCreateRequest(InputRequest):
     parent_id: UUID | None = None
     section: Literal["context", "agent", "library"]
     title: str = Field(min_length=1, max_length=80)
-    slug: str | None = Field(
-        default=None, pattern=PAGE_SLUG_PATTERN, max_length=64
-    )
+    slug: str | None = Field(default=None, pattern=PAGE_SLUG_PATTERN, max_length=64)
     node_kind: Literal["folder"] = "folder"
 
     model_config = ConfigDict(extra="forbid")
@@ -34,7 +54,7 @@ class TreeFolderCreateRequest(BaseModel):
         return self.parent_id
 
 
-class TreeNodeUpdate(BaseModel):
+class TreeNodeUpdate(InputRequest):
     display_name: str = Field(min_length=1)
     # Folder-only routing summary; explicit null clears the stored value
     # (model_fields_set distinguishes omitted from null).
@@ -43,7 +63,7 @@ class TreeNodeUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class TreeMoveRequest(BaseModel):
+class TreeMoveRequest(InputRequest):
     node_id: UUID
     new_parent_id: UUID
     sort_key: str | None = None

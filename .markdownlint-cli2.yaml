@@ -6,6 +6,12 @@ config:
   MD013: false
   # Ordered lists: the docs number lists explicitly, across code blocks.
   MD029: false
+  # Allow collapsible setup details and explicit section anchors.
+  MD033:
+    allowed_elements:
+      - a
+      - details
+      - summary
   # First-line heading: the pull request template is pasted into a PR body and
   # starts at level 2 on purpose.
   MD041: false

@@ -40,9 +40,9 @@ def _actors(page_service):
         requester = session.scalar(
             select(User).where(User.email == "directory-user@example.com")
         )
-        assert owner is not None and owner.personal_workspace_id is not None
-        assert requester is not None and requester.personal_workspace_id is not None
-        workspace = session.get(Workspace, owner.personal_workspace_id)
+        assert owner is not None and owner.default_workspace_id is not None
+        assert requester is not None and requester.default_workspace_id is not None
+        workspace = session.get(Workspace, owner.default_workspace_id)
         assert workspace is not None
         return owner, requester, workspace
 
@@ -72,7 +72,7 @@ def test_directory_is_normalized_cursor_bound_and_membership_neutral(page_servic
     owner, requester, workspace = _actors(page_service)
     with page_service.session_factory.begin() as session:
         persisted = session.get(Workspace, workspace.id)
-        persisted.title = "Straße\tﬁ   Ａlpha Team"
+        persisted.title = "Straße\u2003ﬁ   Ａlpha Team"
         persisted.description = "  A directory-safe   short description.  "
 
     current_access = owner_client.get(
@@ -155,7 +155,7 @@ def test_directory_is_normalized_cursor_bound_and_membership_neutral(page_servic
     assert data["items"] == [
         {
             "workspace_id": str(workspace.id),
-            "title": "Straße\tﬁ   Ａlpha Team",
+            "title": "Straße\u2003ﬁ   Ａlpha Team",
             "description": "A directory-safe short description.",
             "visibility": "team",
             "join_policy": "request",
@@ -232,7 +232,7 @@ def test_directory_uses_binary_normalized_order_with_equal_key_cursors(page_serv
     _, requester_client = _clients(page_service)
     owner, _, _ = _actors(page_service)
     workspace_specs = [
-        (UUID(int=100), "Straße\tﬁ"),
+        (UUID(int=100), "Straße\u2003ﬁ"),
         (UUID(int=101), "STRASSE FI"),
         (UUID(int=102), "Zulu"),
         (UUID(int=103), "Ångstrom"),
@@ -360,7 +360,7 @@ def test_join_attempts_are_idempotent_stale_safe_and_viewer_only(page_service):
         persisted_requester = session.get(User, requester.id)
         assert membership is not None and membership.role == "viewer"
         assert persisted_requester.default_workspace_id == (
-            requester.personal_workspace_id
+            requester.default_workspace_id
         )
         events = list(
             session.scalars(
@@ -1141,7 +1141,7 @@ def test_public_sharing_profile_scoped_index_and_mcp_matrix(page_service):
         "/api/v1/auth/tokens",
         json={
             "workspace_grants": [
-                {"workspace_id": str(requester.personal_workspace_id)}
+                {"workspace_id": str(requester.default_workspace_id)}
             ],
             "name": "directory-denied",
             "scopes": ["mcp:read"],

@@ -315,7 +315,7 @@ describe("api client session expiry", () => {
     });
     const onExpired = vi.fn();
     window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
       jsonResponse(
         errorBody(
           "recent_reauthentication_required",
@@ -326,9 +326,13 @@ describe("api client session expiry", () => {
     );
 
     try {
-      await expect(
-        apiRequest("/api/v1/admin/users?query=alex&limit=25&offset=0"),
-      ).rejects.toMatchObject({ status: 401 });
+      // The directory search and a later admin mutation share the rule.
+      for (const path of [
+        "/api/v1/admin/users?query=alex&limit=25&offset=0",
+        "/api/v1/admin/users/user-1/identities/rebind",
+      ]) {
+        await expect(apiRequest(path)).rejects.toMatchObject({ status: 401 });
+      }
     } finally {
       window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
     }

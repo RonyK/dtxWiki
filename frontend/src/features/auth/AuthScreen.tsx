@@ -1,4 +1,4 @@
-import { KeyRound, LogIn, UserPlus } from "lucide-react";
+import { ArrowUpRight, KeyRound, LogIn, ShieldCheck, UserPlus } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -6,20 +6,20 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import { login, signup } from "../../shared/api/auth";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
 import { useAuth } from "../../shared/auth/AuthContext";
-import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
+import { isNonSpaAuthPath, safeNextPath } from "../../shared/auth/navigation";
+import { normalizeAccountEmail, normalizeAccountName, validateAccountPassword, rejectMultilinePaste, preventCompositionSubmit } from "../../shared/auth/identityPolicy";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
-import { StatusPill } from "../../shared/components/StatusPill";
+import { loginMethodLabel, loginMethodStyle } from "./loginMethodBranding";
+import { EmailConflictNotice } from "./EmailConflictNotice";
+import { SSO_ERROR_CODES } from "./ExternalAuthErrorBanner";
 
 type AuthMode = "login" | "signup";
 
-// Backend-rendered routes outside the SPA (e.g. the OAuth consent page). SPA
-// navigation to these would land on the router catch-all, so they need a
-// full-page load instead.
-const NON_SPA_PATH_PREFIXES = ["/oauth/"];
+export { safeNextPath } from "../../shared/auth/navigation";
 
 export function AuthScreen() {
-  const { t } = useTranslation("auth");
+  const { t, i18n } = useTranslation("auth");
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -38,6 +38,8 @@ export function AuthScreen() {
     sessionChecked,
     capabilitiesChecked,
     signupEnabled,
+    passwordLoginEnabled,
+    loginMethods,
     passwordRecoveryMode,
     capabilitiesError,
     refreshCapabilities,
@@ -50,15 +52,27 @@ export function AuthScreen() {
   // "you already have a session" redirect would fire on that result and carry
   // the visitor into the app as A, one round trip after the "wrong password"
   // banner appeared.
-  const credentialFailureRef = useRef(false);
+  const credentialFailureRef = useRef(searchParams.has("auth_error"));
   const [status, setStatus] = useState<string | null>(() =>
-    searchParams.get("reset") === "complete" ? t("status.passwordReset") : null,
+    searchParams.get("reset") === "complete" ? t("status.passwordReset")
+      : searchParams.get("account") === "deletion-pending" ? t("deletion.accepted") : null,
   );
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() => {
+    const code = searchParams.get("auth_error");
+    return code ? t(`sso.errors.${SSO_ERROR_CODES.has(code) ? code : "unknown"}`) : null;
+  });
+  const [emailConflict] = useState(() => searchParams.get("auth_error") === "account_email_conflict");
   const [submitting, setSubmitting] = useState(false);
 
   const canSignup =
-    capabilitiesChecked && capabilitiesError === null && signupEnabled;
+    capabilitiesChecked && capabilitiesError === null && signupEnabled && passwordLoginEnabled;
+
+  useEffect(() => {
+    if (!searchParams.has("auth_error")) return;
+    const clean = new URLSearchParams(searchParams);
+    clean.delete("auth_error");
+    navigate({ pathname: location.pathname, search: clean.toString() }, { replace: true });
+  }, [location.pathname, navigate, searchParams]);
 
   useEffect(() => {
     if (requestedMode === "login") {
@@ -106,7 +120,7 @@ export function AuthScreen() {
       !credentialFailureRef.current
     ) {
       const next = safeNextPath(searchParams.get("next"));
-      if (isNonSpaPath(next)) {
+      if (isNonSpaAuthPath(next)) {
         window.location.assign(next);
         return;
       }
@@ -116,6 +130,16 @@ export function AuthScreen() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    let normalizedEmail: string;
+    let normalizedName: string | undefined;
+    try {
+      normalizedEmail = normalizeAccountEmail(email);
+      normalizedName = mode === "signup" ? normalizeAccountName(displayName) : undefined;
+      validateAccountPassword(password, mode === "signup");
+    } catch (caught) {
+      setError(t((caught as Error).message));
+      return;
+    }
     // Freeze automatic existing-session redirects and fence the pre-login
     // /auth/me probe before the credential request starts. Failures release
     // the guard and explicitly reconcile the surviving cookie below.
@@ -129,18 +153,18 @@ export function AuthScreen() {
       const session =
         mode === "signup"
           ? await signup({
-              email,
+              email: normalizedEmail,
               password,
-              display_name: displayName.trim() || undefined,
+              display_name: normalizedName,
               remember_me: rememberMe,
             })
-          : await login({ email, password, remember_me: rememberMe });
+          : await login({ email: normalizedEmail, password, remember_me: rememberMe });
       setAuthenticatedSession(session);
       setStatus(mode === "signup" ? t("status.created") : t("status.signedIn"));
       const next = searchParams.get("next");
       const target =
         mode === "signup" && !next ? "/dashboard?welcome=1" : safeNextPath(next);
-      if (isNonSpaPath(target)) {
+      if (isNonSpaAuthPath(target)) {
         window.location.assign(target);
       } else {
         navigate(target);
@@ -178,23 +202,18 @@ export function AuthScreen() {
   return (
     <div className="workspace-screen single-column auth-screen">
       <section className="feature-main auth-layout">
-        <Breadcrumbs items={[{ label: t("breadcrumb") }]} />
-        <div className="feature-header">
-          <div>
-            <p className="eyebrow">{t("eyebrow")}</p>
-            <h1>{mode === "signup" ? t("title.signup") : t("title.login")}</h1>
-          </div>
-          <StatusPill
-            status={currentUser ? currentUser.status : "signed out"}
-            label={currentUser ? undefined : t("pill.signedOut")}
-          />
-        </div>
+        <header className="auth-welcome">
+          <span className="auth-welcome-icon"><LogIn size={24} aria-hidden="true" /></span>
+          <h1>{mode === "signup" ? t("title.signup") : t("title.login")}</h1>
+          <p>{mode === "signup" ? t("welcome.signup") : t("welcome.login")}</p>
+        </header>
         {status ? <StatusBanner tone="info">{status}</StatusBanner> : null}
-        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+        {error ? <div id="auth-input-error"><StatusBanner tone="warning">{error}</StatusBanner></div> : null}
+        {emailConflict ? <EmailConflictNotice passwordLoginEnabled={passwordLoginEnabled} /> : null}
         {capabilitiesChecked && capabilitiesError ? (
           <StatusBanner tone="warning">{t("capabilitiesUnavailable")}</StatusBanner>
         ) : null}
-        {capabilitiesChecked && !capabilitiesError && !signupEnabled ? (
+        {capabilitiesChecked && !capabilitiesError && !signupEnabled && passwordLoginEnabled ? (
           <StatusBanner tone="info">{t("signupDisabled")}</StatusBanner>
         ) : null}
         <section className="auth-panel" aria-label={t("panelLabel")}>
@@ -226,15 +245,20 @@ export function AuthScreen() {
               onChange={switchMode}
             />
           ) : null}
-          <form className="auth-form" onSubmit={onSubmit}>
+          {passwordLoginEnabled ? <form className="auth-form" onSubmit={onSubmit}>
             <label className="field-stack">
               {t("fields.email")}
               <input
+                  onKeyDown={preventCompositionSubmit}
                 autoComplete="email"
                 name="email"
                 onChange={(event) => setEmail(event.target.value)}
                 required
-                type="email"
+                type="text"
+                inputMode="email"
+                aria-invalid={Boolean(error)}
+                aria-describedby={error ? "auth-input-error" : undefined}
+                onPaste={(event) => rejectMultilinePaste(event, () => setError(t("validation.email")))}
                 value={email}
               />
             </label>
@@ -242,20 +266,26 @@ export function AuthScreen() {
               <label className="field-stack">
                 {t("fields.displayName")}
                 <input
+                  onKeyDown={preventCompositionSubmit}
                   autoComplete="name"
                   name="displayName"
+                  aria-describedby={error ? "display-name-rule auth-input-error" : "display-name-rule"}
+                  aria-invalid={Boolean(error)}
+                  onPaste={(event) => rejectMultilinePaste(event, () => setError(t("validation.displayName")))}
                   onChange={(event) => setDisplayName(event.target.value)}
                   type="text"
                   value={displayName}
                 />
               </label>
             ) : null}
+            {mode === "signup" ? <p id="display-name-rule" className="field-hint field-hint--attached">{t("validation.displayNameHint")}</p> : null}
             <label className="field-stack">
               {t("fields.password")}
               <input
-                aria-describedby={mode === "signup" ? "signup-password-rule" : undefined}
+                  onKeyDown={preventCompositionSubmit}
+                aria-describedby={mode === "signup" ? (error ? "signup-password-rule auth-input-error" : "signup-password-rule") : (error ? "auth-input-error" : undefined)}
+                aria-invalid={Boolean(error)}
                 autoComplete={mode === "signup" ? "new-password" : "current-password"}
-                minLength={mode === "signup" ? 8 : 1}
                 name="password"
                 onChange={(event) => setPassword(event.target.value)}
                 required
@@ -269,19 +299,11 @@ export function AuthScreen() {
               // least 8 characters." instead of "Password"). Same pattern
               // and copy as AccountSecurityScreen's new-password-rule.
               <p className="field-hint field-hint--attached" id="signup-password-rule">
-                {t("password.rule", { defaultValue: "At least 8 characters." })}
+                {t("password.rule", { defaultValue: "8–128 characters." })}
               </p>
             ) : null}
-            <label className="checkbox-field auth-remember">
-              <input
-                checked={rememberMe}
-                onChange={(event) => setRememberMe(event.target.checked)}
-                type="checkbox"
-              />
-              <span>{t("fields.remember")}</span>
-            </label>
             <div className="auth-actions">
-              <button className="icon-button primary" disabled={submitting} type="submit">
+              <button className="icon-button primary auth-submit" disabled={submitting} type="submit">
                 <KeyRound size={16} aria-hidden="true" />
                 <span>
                   {mode === "signup" ? t("actions.signup") : t("actions.login")}
@@ -304,22 +326,39 @@ export function AuthScreen() {
                 )}
               </p>
             )}
-          </form>
+          </form> : null}
+          {passwordLoginEnabled && loginMethods.length > 0 ? (
+            <div className="auth-method-divider"><span>{t("welcome.externalContinue")}</span></div>
+          ) : null}
+          {loginMethods.length > 0 ? (
+            <div className="auth-provider-group" aria-label={t("sso.methods")}>
+              {!passwordLoginEnabled ? <p className="auth-section-label">{t("welcome.external")}</p> : null}
+              {loginMethods.map((method) => {
+                const query = new URLSearchParams({
+                  next: safeNextPath(searchParams.get("next")),
+                  remember_me: String(rememberMe),
+                });
+                return <a className="icon-button auth-provider-button" key={method.slug} style={loginMethodStyle(method)}
+                  href={`${method.start_url}?${query.toString()}`}>
+                  {method.icon_url ? <img src={method.icon_url} width={20} height={20} alt="" /> : <ShieldCheck size={20} aria-hidden="true" />}
+                  <span>{loginMethodLabel(method, i18n.language)}</span>
+                  <ArrowUpRight size={16} aria-hidden="true" />
+                </a>;
+              })}
+            </div>
+          ) : null}
+          {passwordLoginEnabled || loginMethods.length > 0 ? (
+            <label className="checkbox-field auth-remember">
+              <input checked={rememberMe} onKeyDown={preventCompositionSubmit}
+                onChange={(event) => setRememberMe(event.target.checked)} type="checkbox" />
+              <span>{t("fields.remember")}</span>
+            </label>
+          ) : null}
         </section>
+        {!passwordLoginEnabled && loginMethods.length > 0 ? <p className="auth-provider-help">{t("welcome.ssoOnly")}</p> : null}
       </section>
     </div>
   );
-}
-
-function safeNextPath(next: string | null) {
-  if (!next || !next.startsWith("/") || next.startsWith("//")) {
-    return "/dashboard";
-  }
-  return next;
-}
-
-function isNonSpaPath(path: string) {
-  return NON_SPA_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
 
 function loginLocationWithoutSignupMode(searchParams: URLSearchParams) {

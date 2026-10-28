@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.schemas.common import RESTResponseBase
+from backend.schemas.input_policy import InputRequest
 from backend.schemas.page import BODY_MD_MAX_LENGTH
 
 
@@ -138,7 +139,7 @@ class ContextReconciliationResolution(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ContextReconciliationRequest(BaseModel):
+class ContextReconciliationRequest(InputRequest):
     expected_head_version_id: UUID
     reconciles: list[UUID] = Field(min_length=1, max_length=1)
     resolutions: list[ContextReconciliationResolution] = Field(max_length=20)
@@ -213,7 +214,7 @@ class ContextReconciliationResultResponse(RESTResponseBase):
     model_config = ConfigDict(extra="forbid")
 
 
-class ContextReconciliationDiscardRequest(BaseModel):
+class ContextReconciliationDiscardRequest(InputRequest):
     reason: str = Field(min_length=1, max_length=2000)
 
     @model_validator(mode="after")
@@ -226,7 +227,7 @@ class ContextReconciliationDiscardRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ContextReconciliationBulkDiscardRequest(BaseModel):
+class ContextReconciliationBulkDiscardRequest(InputRequest):
     review_item_ids: list[UUID] = Field(min_length=1, max_length=100)
     reason: str = Field(min_length=1, max_length=2000)
 

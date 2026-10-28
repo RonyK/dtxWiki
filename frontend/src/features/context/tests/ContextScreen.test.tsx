@@ -9,6 +9,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import {
+  Link,
   MemoryRouter,
   Route,
   Routes,
@@ -492,6 +493,99 @@ describe("ContextScreen", () => {
   // The former single mega-test drove every surface in one 5s budget and timed
   // out under full-suite load (review R-9 / Codex F-8). Each surface now keeps
   // its own budget over the same fixture.
+  it("refreshes the overview and tree after leaving the reader and clicking its menu again", async () => {
+    const fetchMock = mockDecisionLogRoutes();
+    const originalFetch = fetchMock.getMockImplementation()!;
+    let pages = [contextPage(PAGE_ID, "Decision Log", "decision-log")];
+    let listReads = 0;
+    let treeReads = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(input.toString());
+      if (url.pathname === `/api/v1/workspaces/${WORKSPACE_ID}/context/pages`) {
+        listReads += 1;
+        return jsonResponse({ data: pages, total: pages.length });
+      }
+      if (url.pathname === `/api/v1/workspaces/${WORKSPACE_ID}/tree`) {
+        treeReads += 1;
+        return jsonResponse({ data: treeResponse("context", pages.map((page) =>
+          treeNode(`node-${page.id}`, page.id, page.title),
+        )) });
+      }
+      return originalFetch(input, init);
+    });
+    const view = render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
+        <Link to="/context">Main menu Context</Link>
+        <Routes>
+          <Route path="/context" element={<ContextScreen />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId" element={<ContextScreen />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText("Needle body");
+    const main = within(view.container.querySelector(".feature-main") as HTMLElement);
+    expect([listReads, treeReads]).toEqual([1, 1]);
+
+    pages = [contextPage("fresh-1", "Fresh after reader", "fresh-1"), ...pages];
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Context" }));
+    await screen.findByRole("treeitem", { name: "Fresh after reader" });
+    expect(await main.findByRole("button", { name: /Fresh after reader/ })).toBeInTheDocument();
+    expect(screen.queryByText("Needle body")).not.toBeInTheDocument();
+    expect([listReads, treeReads]).toEqual([2, 2]);
+
+    pages = [contextPage("fresh-2", "Fresh while home", "fresh-2"), ...pages];
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Context" }));
+    await screen.findByRole("treeitem", { name: "Fresh while home" });
+    expect(await main.findByRole("button", { name: /Fresh while home/ })).toBeInTheDocument();
+    expect([listReads, treeReads]).toEqual([3, 3]);
+  });
+
+  it("drops appended and in-flight pages when a menu refresh returns the same first page and cursor", async () => {
+    const fetchMock = mockDecisionLogRoutes();
+    const originalFetch = fetchMock.getMockImplementation()!;
+    const stalePage = deferredResponse();
+    let firstPageReads = 0;
+    let moreReads = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(input.toString());
+      if (url.pathname === `/api/v1/workspaces/${WORKSPACE_ID}/context/pages`) {
+        if (url.searchParams.has("cursor")) {
+          moreReads += 1;
+          return moreReads === 1 ? jsonResponse({
+            data: [contextPage("old-tail", "Previously loaded tail", "old-tail")],
+            next_cursor: null, total: 3, has_more: false,
+          }) : stalePage.promise;
+        }
+        firstPageReads += 1;
+        const response = await originalFetch(input, init);
+        const body = await response.json();
+        return jsonResponse({ ...body, next_cursor: "same-cursor", total: 3, has_more: true });
+      }
+      return originalFetch(input, init);
+    });
+    render(
+      <MemoryRouter initialEntries={["/context"]}>
+        <Link to="/context">Main menu Context</Link>
+        <ContextScreen />
+      </MemoryRouter>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Load more" }));
+    await screen.findByText("Previously loaded tail");
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Context" }));
+    await waitFor(() => expect(screen.queryByText("Previously loaded tail")).not.toBeInTheDocument());
+    expect(firstPageReads).toBe(2);
+    await userEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Context" }));
+    await waitFor(() => expect(firstPageReads).toBe(3));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Load more" })).toBeEnabled());
+    await act(async () => stalePage.resolve(jsonResponse({
+      data: [contextPage("stale-tail", "Stale in-flight tail", "stale-tail")],
+      next_cursor: null, total: 3, has_more: false,
+    })));
+    expect(screen.queryByText("Stale in-flight tail")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Load more" })).toBeEnabled();
+  });
+
   it("renders the tree and hides the Details rail before any selection", async () => {
     await renderDecisionLog();
     expect(document.title).toBe("dtxWiki");
@@ -1174,23 +1268,35 @@ describe("ContextScreen", () => {
       .closest(".history-card") as HTMLElement;
     expect(draftHead).toHaveAttribute("aria-current", "page");
     expect(
-      within(draftHead).getByRole("button", { name: "Compare v8 with v7" }),
+      within(draftHead).getByRole("button", { name: "Show changes in v8 since v7" }),
     ).toBeInTheDocument();
     expect(
-      within(draftHead).queryByRole("button", { name: "Restore this version" }),
+      within(draftHead).queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
     expect(publishedHead).not.toHaveAttribute("aria-current");
     expect(
-      within(publishedHead).getByRole("button", { name: "Compare v7 with v6" }),
+      within(publishedHead).getByRole("button", { name: "Show changes in v7 since v6" }),
     ).toBeInTheDocument();
     expect(
       within(publishedHead).getByRole("button", {
-        name: "Restore this version",
+        name: "Start a new draft from this version",
       }),
     ).toBeInTheDocument();
     expect(
       within(panel).getAllByRole("button", { name: "Discard" }),
     ).toHaveLength(1);
+    // Discard comes after the buttons every row shares, so a row that can be
+    // discarded keeps Restore and Changes where every other row has them.
+    // (Visible text is the short label; the full names are the accessible
+    // names the rest of this suite queries by.)
+    const discardActions = within(panel)
+      .getByRole("button", { name: "Discard" })
+      .closest(".history-card-actions") as HTMLElement;
+    expect(
+      Array.from(discardActions.querySelectorAll("button")).map(
+        (button) => button.textContent,
+      ),
+    ).toEqual(["Restore", "Changes", "Discard"]);
   });
 
   it("discards a preserved alternative with an explicit reason", async () => {
@@ -1251,7 +1357,7 @@ describe("ContextScreen", () => {
       .getByText("v1")
       .closest(".history-card") as HTMLElement;
     expect(
-      within(alternative).queryByRole("button", { name: "Restore this version" }),
+      within(alternative).queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
     await userEvent.click(
       within(alternative).getByRole("button", { name: "Reconcile" }),
@@ -2358,7 +2464,7 @@ describe("ContextScreen", () => {
     expect(within(viewerHistory).queryByText("Alternative draft")).toBeNull();
     // restore is a write; viewers must not see it (backend re-enforces anyway).
     expect(
-      screen.queryByRole("button", { name: "Restore this version" }),
+      screen.queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
   });
 
@@ -2717,22 +2823,24 @@ describe("ContextScreen", () => {
       .closest(".history-card") as HTMLElement;
     expect(versionOne.tagName).toBe("LI");
 
-    // The visible head is not a per-row action target, but the explicit
-    // two-version toolbar still opens its chronological comparison.
+    // The visible head offers its own Changes but never Restore; the explicit
+    // two-version toolbar opens the newest version's Changes first.
     const versionTwo = within(historyPanel)
       .getByText("v2")
       .closest(".history-card") as HTMLElement;
     expect(versionTwo).toHaveAttribute("aria-current", "page");
     expect(
-      within(versionTwo).queryByRole("button", { name: "Compare" }),
-    ).toBeNull();
+      within(versionTwo).getByRole("button", {
+        name: "Show changes in v2 since v1",
+      }),
+    ).toHaveTextContent("Changes");
     expect(
       within(versionTwo).queryByRole("button", {
-        name: "Restore this version",
+        name: "Start a new draft from this version",
       }),
     ).toBeNull();
     expect(
-      within(versionOne).getByRole("button", { name: "Restore this version" }),
+      within(versionOne).getByRole("button", { name: "Start a new draft from this version" }),
     ).toBeInTheDocument();
 
     await userEvent.click(
@@ -2742,7 +2850,7 @@ describe("ContextScreen", () => {
     );
 
     const dialog = await screen.findByRole("dialog", {
-      name: "Compare v1 and v2",
+      name: "Changes in v2 since v1",
     });
     const split = within(dialog).getByLabelText("Side-by-side diff");
     expect(
@@ -2762,18 +2870,18 @@ describe("ContextScreen", () => {
       within(dialog).getByText("Current published v2 · visible to readers"),
     ).toBeInTheDocument();
     expect(
-      within(dialog).queryByRole("button", { name: "Restore this version" }),
+      within(dialog).queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
 
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Close diff" }),
     );
     await userEvent.click(
-      within(versionOne).getByRole("button", { name: "Restore this version" }),
+      within(versionOne).getByRole("button", { name: "Start a new draft from this version" }),
     );
 
     expect(confirmSpy).toHaveBeenCalledWith(
-      "Restore v1 as a new draft? The published version stays unchanged.",
+      "Create a new draft from v1? The published version stays unchanged.",
     );
     expect(fetchMock).toHaveBeenCalledWith(
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}/restore`,
@@ -2921,7 +3029,7 @@ describe("ContextScreen", () => {
       within(panel).getByRole("button", { name: "Compare two versions" }),
     );
     await userEvent.click(
-      within(v2).getByRole("button", { name: "Compare v2 with v1" }),
+      within(v2).getByRole("button", { name: "Show changes in v2 since v1" }),
     );
     if (!firstRequest.signal)
       throw new Error("First diff request did not carry a signal");
@@ -2947,7 +3055,7 @@ describe("ContextScreen", () => {
       }),
     );
     const dialog = await screen.findByRole("dialog", {
-      name: "Compare v1 and v2",
+      name: "Changes in v2 since v1",
     });
     expect(dialog).toHaveTextContent("Second selection");
 
@@ -3071,7 +3179,7 @@ describe("ContextScreen", () => {
 
     await userEvent.click(compareTwo);
     const dialog = await screen.findByRole("dialog", {
-      name: "Compare v1 and v2",
+      name: "Changes in v2 since v1",
     });
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Close diff" }),
@@ -3779,7 +3887,7 @@ describe("ContextScreen", () => {
     );
 
     const dialog = await screen.findByRole("dialog", {
-      name: "Compare v1 and v2",
+      name: "Changes in v2 since v1",
     });
     expect(screen.getByRole("tab", { name: /History/ })).toHaveAttribute(
       "aria-selected",
@@ -3828,14 +3936,14 @@ describe("ContextScreen", () => {
       .closest(".history-card") as HTMLElement;
 
     expect(
-      within(draftCard).getByRole("button", { name: "Compare v2 with v1" }),
+      within(draftCard).getByRole("button", { name: "Show changes in v2 since v1" }),
     ).toBeInTheDocument();
     expect(
-      within(draftCard).queryByRole("button", { name: "Restore this version" }),
+      within(draftCard).queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
     expect(
       within(publishedCard).queryByRole("button", {
-        name: "Restore this version",
+        name: "Start a new draft from this version",
       }),
     ).toBeNull();
   });
@@ -3940,7 +4048,7 @@ describe("ContextScreen", () => {
       .getByText("v1")
       .closest(".history-card") as HTMLElement;
     expect(
-      within(firstVersion).queryByRole("button", { name: /Compare/ }),
+      within(firstVersion).queryByRole("button", { name: /Show changes/ }),
     ).toBeNull();
     expect(within(firstVersion).getByText("First version")).toBeInTheDocument();
     expect(
@@ -3987,7 +4095,7 @@ describe("ContextScreen", () => {
     );
 
     const dialog = await screen.findByRole("dialog", {
-      name: "Compare v1 and v2",
+      name: "Changes in v2 since v1",
     });
     expect(await within(dialog).findByText("Newest draft body")).toHaveClass(
       "diff-viewer-cell-add",
@@ -4010,7 +4118,7 @@ describe("ContextScreen", () => {
       screen.getByRole("button", { name: "Compare two versions" }),
     );
     expect(
-      await screen.findByRole("dialog", { name: "Compare v2 and v3" }),
+      await screen.findByRole("dialog", { name: "Changes in v3 since v2" }),
     ).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Go back" }));
@@ -4035,7 +4143,7 @@ describe("ContextScreen", () => {
     );
 
     let dialog = await screen.findByRole("dialog", {
-      name: "Compare v2 and v3",
+      name: "Changes in v3 since v2",
     });
     const earlier = within(dialog).getByRole("combobox", {
       name: "Earlier version",
@@ -4064,7 +4172,7 @@ describe("ContextScreen", () => {
     // Choosing an older value in the "later" control still becomes the left
     // endpoint. The request, title, selectors, and rendered body all agree.
     await userEvent.selectOptions(later, "version-1");
-    dialog = await screen.findByRole("dialog", { name: "Compare v1 and v2" });
+    dialog = await screen.findByRole("dialog", { name: "Changes in v2 since v1" });
     expect(
       within(dialog).getByRole("combobox", { name: "Earlier version" }),
     ).toHaveValue("version-1");
@@ -4081,7 +4189,7 @@ describe("ContextScreen", () => {
       within(dialog).getByRole("combobox", { name: "Earlier version" }),
       "version-3",
     );
-    dialog = await screen.findByRole("dialog", { name: "Compare v2 and v3" });
+    dialog = await screen.findByRole("dialog", { name: "Changes in v3 since v2" });
     expect(
       within(dialog).getByRole("combobox", { name: "Earlier version" }),
     ).toHaveValue("version-2");
@@ -4116,12 +4224,12 @@ describe("ContextScreen", () => {
       .getByText("v2")
       .closest(".history-card") as HTMLElement;
     const opener = within(versionTwo).getByRole("button", {
-      name: "Compare v2 with v1",
+      name: "Show changes in v2 since v1",
     });
     await userEvent.click(opener);
 
     const dialog = await screen.findByRole("dialog", {
-      name: "Compare v1 and v2",
+      name: "Changes in v2 since v1",
     });
     expect(
       within(dialog).getByRole("combobox", { name: "Earlier version" }),
@@ -4184,12 +4292,12 @@ describe("ContextScreen", () => {
     ).toBeInTheDocument();
     await userEvent.click(
       within(latest).getByRole("button", {
-        name: "Compare v3 with the previous version",
+        name: "Show changes in v3 since the version it was based on",
       }),
     );
 
     expect(
-      await screen.findByRole("dialog", { name: "Compare v2 and v3" }),
+      await screen.findByRole("dialog", { name: "Changes in v3 since v2" }),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(olderHistoryUrl, expect.anything());
   });
@@ -4231,10 +4339,10 @@ describe("ContextScreen", () => {
       within(latest).getByText("Previous version is not visible"),
     ).toBeInTheDocument();
     expect(
-      within(latest).getByText("Comparison unavailable"),
+      within(latest).getByText("Changes unavailable"),
     ).toBeInTheDocument();
     expect(
-      within(latest).queryByRole("button", { name: /Compare v3/ }),
+      within(latest).queryByRole("button", { name: /Show changes in v3/ }),
     ).toBeNull();
     expect(
       fetchMock.mock.calls.some((call) =>
@@ -4257,19 +4365,30 @@ describe("ContextScreen", () => {
     );
 
     let dialog = await screen.findByRole("dialog", {
-      name: "Compare v1 and v3",
+      name: "Changes in v3 since v1",
     });
     await userEvent.selectOptions(
       within(dialog).getByRole("combobox", { name: "Earlier version" }),
       "version-2",
     );
+    // v2 is not v3's parent here, so this is a free comparison, not Changes.
     dialog = await screen.findByRole("dialog", { name: "Compare v2 and v3" });
     expect(dialog).toHaveTextContent(
       "These versions are on different lineages. This diff compares snapshots across a branch, not a single progression.",
     );
   });
 
-  it("draws a branch transition with a continuous cubic History path", async () => {
+  // These two check the DOM mapping of the layout (shared/lib/historyGraph.ts,
+  // whose own tests cover the routing rules): which lane each painted segment
+  // sits in. Asserting only that a path or a pass line exists is what let a
+  // same-base fork render as one straight line ever since the graph shipped.
+  const segmentLanes = (row: HTMLElement, selector: string) =>
+    Array.from(row.querySelectorAll<HTMLElement>(selector)).map((element) =>
+      element.style.getPropertyValue("--history-segment-lane"),
+    );
+
+  it("draws a fork beside its sibling and joins it only at their shared parent", async () => {
+    // v3 (published head) and v2 both fork from v1.
     mockFetch(comparisonHistoryFetch(true));
     render(
       <MemoryRouter
@@ -4280,30 +4399,38 @@ describe("ContextScreen", () => {
     );
 
     const panel = await screen.findByRole("tabpanel", { name: /History/ });
-    const branchRow = within(panel)
-      .getByText("v3")
-      .closest(".history-graph-row") as HTMLElement;
-    const path = branchRow.querySelector(".history-graph-curve path");
-    expect(branchRow).toHaveAttribute("data-parent-relation", "branch");
-    expect(path).toHaveAttribute(
-      "d",
-      expect.stringMatching(/^M \d+ 0 C \d+ 18, \d+ 27, \d+ 47$/),
-    );
-    expect(branchRow.querySelector(".history-graph-elbow")).toBeNull();
+    const rowOf = (label: string) =>
+      within(panel).getByText(label).closest(".history-graph-row") as HTMLElement;
+    const head = rowOf("v3");
+    const fork = rowOf("v2");
+
+    expect(head).toHaveAttribute("data-history-lane", "0");
+    expect(head.querySelector(".history-graph-bend")).toBeNull();
+    expect(fork).toHaveAttribute("data-history-lane", "1");
+    // v3 -> v1 passes v2 on the trunk lane, beside v2's dot, never through it.
+    expect(segmentLanes(fork, ".history-graph-pass-line")).toEqual(["0"]);
+    // v2's own edge leaves in its lane and bends into v1's at the row bottom.
+    expect(
+      segmentLanes(fork, ".history-graph-line.history-graph-before-bend"),
+    ).toEqual(["1"]);
+    expect(fork.querySelector(".history-graph-bend")).not.toBeNull();
   });
 
-  it("draws a merge curve, its passing lane, and its landing stub across the rows it spans", async () => {
-    // mergeToLane, passingLanes and incomingLanes have zero test coverage
-    // anywhere in the repo -- the 22px card-boundary gap they were meant to
-    // cross shipped undetected for exactly that reason. v4 merges v3's
-    // branch back onto the trunk: v3 (idx1) sits between the merge (v4,
-    // idx0) and v3's own branch point (v1), and v4's real parent is v2
-    // (idx2) -- two rows down -- so v4's own lineage line ALSO passes
-    // through v3's row. v3 ends up carrying both a passing line (the
-    // trunk's v4->v2 edge) and an incoming line (the merge's own landing
-    // stub), which is realistic: git graphs overlap edges on a shared row
-    // constantly.
+  it("draws a merge departing into the branch lane and the branch joining at its fork point", async () => {
+    // v4 (published head, parent v2) merges v3, which forked from v1.
     const responses = comparisonHistoryFetch();
+    const detailUrl = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`;
+    const detailResponse = responses[detailUrl] as {
+      data: Record<string, unknown>;
+    };
+    responses[detailUrl] = {
+      data: {
+        ...detailResponse.data,
+        current_version_id: "version-4",
+        current_published_version_id: "version-4",
+        visible_version_id: "version-4",
+      },
+    };
     const historyUrl = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=context_page&target_id=${PAGE_ID}`;
     responses[historyUrl] = {
       data: {
@@ -4336,22 +4463,23 @@ describe("ContextScreen", () => {
     );
 
     const panel = await screen.findByRole("tabpanel", { name: /History/ });
-    const mergeRow = within(panel)
-      .getByText("v4")
-      .closest(".history-graph-row") as HTMLElement;
-    const branchRow = within(panel)
-      .getByText("v3")
-      .closest(".history-graph-row") as HTMLElement;
+    const rowOf = (label: string) =>
+      within(panel).getByText(label).closest(".history-graph-row") as HTMLElement;
+    const merge = rowOf("v4");
+    const branch = rowOf("v3");
+    const trunkBelow = rowOf("v2");
 
+    expect(merge.querySelector(".history-graph-departure")).not.toBeNull();
     expect(
-      mergeRow.querySelector(".history-graph-curve.history-graph-merge-curve"),
-    ).not.toBeNull();
-    expect(
-      branchRow.querySelector(".history-graph-pass-line"),
-    ).not.toBeNull();
-    expect(
-      branchRow.querySelector(".history-graph-incoming-line"),
-    ).not.toBeNull();
+      segmentLanes(merge, ".history-graph-line.history-graph-after-departure"),
+    ).toEqual(["1"]);
+    expect(branch).toHaveAttribute("data-history-lane", "1");
+    expect(branch.querySelector(".history-graph-incoming-line")).not.toBeNull();
+    expect(segmentLanes(branch, ".history-graph-pass-line")).toEqual(["0"]);
+    // v3 -> v1 keeps lane 1 past v2 and bends into v1's lane at v2's bottom;
+    // nothing passes through v2's own dot on lane 0.
+    expect(segmentLanes(trunkBelow, ".history-graph-pass-line")).toEqual(["1"]);
+    expect(trunkBelow.querySelector(".history-graph-bend")).not.toBeNull();
   });
 
   it("localizes a generic History diff exception instead of exposing internals", async () => {
@@ -4372,10 +4500,10 @@ describe("ContextScreen", () => {
       .getByText("v2")
       .closest(".history-card") as HTMLElement;
     await userEvent.click(
-      within(versionTwo).getByRole("button", { name: "Compare v2 with v1" }),
+      within(versionTwo).getByRole("button", { name: "Show changes in v2 since v1" }),
     );
 
-    expect(await screen.findByText("Failed to load diff")).toBeInTheDocument();
+    expect(await screen.findByText("Failed to load changes")).toBeInTheDocument();
     expect(screen.queryByText(/SQLSTATE/)).toBeNull();
   });
 
@@ -4394,7 +4522,7 @@ describe("ContextScreen", () => {
     );
 
     const dialog = await screen.findByRole("dialog", {
-      name: "Compare v2 and v3",
+      name: "Changes in v3 since v2",
     });
     expect(dialog).toHaveClass("is-mobile-fullscreen");
     expect(

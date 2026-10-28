@@ -101,7 +101,7 @@
     "pickSourceFile": "Pick a source file to add to the Library.",
     "pageTitle": "Page title",
     "folderName": "Folder name",
-    "titleLength": "Enter 1-80 characters.",
+    "titleLength": "Enter 1-{{maximum}} characters.",
     "slugPreview": "Slug preview: {{slug}}",
     "editorHint": "The editor will open with this title and location.",
     "advancedSlug": "Advanced slug",
@@ -143,5 +143,21 @@
     "previewTitle": "Index preview (how agents see this folder)",
     "previewLoading": "Loading…",
     "previewError": "Could not load the index preview."
+  },
+  "favorite": {
+    "add": "Add to my favorites",
+    "remove": "Remove from my favorites",
+    "mine": "My favorite",
+    "failed": "Could not update favorites for {{title}}."
+  },
+  "status": {
+    "normal": "Normal",
+    "recent": "Recent change",
+    "pending": "Pending review",
+    "changesRequested": "Changes requested",
+    "noReviewTime": "Review request time unavailable",
+    "noContentTime": "Content change time unavailable",
+    "reviewTime": "Review requested {{time}}",
+    "contentTime": "Last content change {{time}}"
   }
 }

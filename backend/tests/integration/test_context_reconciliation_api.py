@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from uuid import UUID
 
 import pytest
@@ -23,12 +24,16 @@ from backend.schemas.context_edit import (
     PatchDraftRequest,
     ReplaceBlockOperation,
 )
+from backend.services.body_preparer import BodyPreparer
 from backend.services.context_reconciliation import discard_reconciliation_branch
 from backend.services.context_write_service import ContextWriteService
+from backend.services.lint.autofix import safe_normalize_markdown_legacy_v1
+from backend.services.lint.base import FixResult, LintModule
+from backend.services.lint.registry import LintRegistry
 from backend.services.read_errors import ReadValidationError
 from backend.tests.conftest import authenticate_test_client_in_workspace
+from backend.tests.utils.prepared_body import prepare_context_body
 from backend.utils.block_identity import block_map_for_version
-from backend.utils.content_hash import content_hash as calculate_content_hash
 
 
 def _client(page_service, *, role: str = "owner", email: str = "owner@example.com"):
@@ -55,13 +60,21 @@ def _workspace_id(page_service) -> UUID:
         return session.scalar(select(Workspace.id).where(Workspace.slug == "default"))
 
 
-def _create_paragraph_conflict(page_service, *, slug: str):
+def _create_paragraph_conflict(
+    page_service,
+    *,
+    slug: str,
+    writer: ContextWriteService | None = None,
+    branch_content: str = "alpha on branch",
+    normalization_only_edit: bool = False,
+):
     workspace_id = _workspace_id(page_service)
+    suffix = "\n- stable\n" if normalization_only_edit else ""
     base = page_service.write_page(
         workspace_slug="default",
         slug=slug,
         title="Reconciliation",
-        body_md="alpha\n\nbeta\n",
+        body_md=f"alpha\n\nbeta\n{suffix}",
         actor_kind="human",
         actor_id="00000000-0000-0000-0000-000000000010",
         actor_provenance="browser_session",
@@ -74,29 +87,40 @@ def _create_paragraph_conflict(page_service, *, slug: str):
         workspace_slug="default",
         slug=slug,
         title="Reconciliation",
-        body_md="alpha at head\n\nbeta\n",
+        body_md=f"alpha at head\n\nbeta\n{suffix}",
         actor_kind="human",
         actor_id="00000000-0000-0000-0000-000000000010",
         actor_provenance="browser_session",
         base_version_id=base.version_id,
         base_content_hash=base.content_hash,
     )
+    operations = [
+        ReplaceBlockOperation(
+            op="replace_block",
+            block=target["id"],
+            expected=target["hash"],
+            content=branch_content,
+        )
+    ]
+    if normalization_only_edit:
+        list_target = next(entry for entry in base_map if entry["kind"] == "list")
+        operations.append(
+            ReplaceBlockOperation(
+                op="replace_block",
+                block=list_target["id"],
+                expected=list_target["hash"],
+                content="* stable",
+            )
+        )
     with page_service.session_factory.begin() as session:
-        diverged = ContextWriteService().patch_draft(
+        diverged = (writer or ContextWriteService()).patch_draft(
             session=session,
             workspace_id=workspace_id,
             request=PatchDraftRequest(
                 page_id=base.id,
                 base=str(base.version_id),
                 reason="create workbench branch",
-                operations=[
-                    ReplaceBlockOperation(
-                        op="replace_block",
-                        block=target["id"],
-                        expected=target["hash"],
-                        content="alpha on branch",
-                    )
-                ],
+                operations=operations,
             ),
             actor_kind="mcp_client",
             actor_id="workbench-test-client",
@@ -158,11 +182,42 @@ def _create_row_conflict(page_service, *, slug: str):
 def test_reconciliation_api_preview_commit_replay_and_server_owned_projection(
     page_service,
 ):
+    class CanonicalURLFixer:
+        def fix(self, body, ctx):
+            final = body.replace("https://example.test:443/", "https://example.test/")
+            return FixResult(final, ("canonical_url",) if final != body else ())
+
+    registry = LintRegistry(
+        (
+            *LintRegistry.builtin().modules,
+            LintModule("canonical_url", 100, (), CanonicalURLFixer(), "auto_fix"),
+        )
+    )
+    with page_service.session_factory.begin() as session:
+        session.get(Workspace, _workspace_id(page_service)).auto_fix_enabled = True
+    branch_content = "alpha on branch [ref](https://example.test:443/path)"
+    final_content = "alpha on branch [ref](https://example.test/path)"
     base, head, diverged = _create_paragraph_conflict(
         page_service,
         slug="reconciliation-rest-contract",
+        writer=ContextWriteService(body_preparer=BodyPreparer(registry)),
+        branch_content=branch_content,
+        normalization_only_edit=True,
     )
+    # A durable branch remains verifiable when its fixer is no longer loaded
+    # and the workspace policy has since changed. The REST service has only
+    # builtin modules, while creation used the explicit overlay above.
+    with page_service.session_factory.begin() as session:
+        session.get(Workspace, _workspace_id(page_service)).auto_fix_enabled = False
     branch_id = diverged.alternative_draft_id
+    with page_service.session_factory() as session:
+        manifest = session.get(ContextPageVersion, branch_id).reconcile_manifest
+        assert len(manifest["original_operations"]) == 2
+        assert not manifest["clean_operations"]
+        assert len(manifest["conflict_operations"]) == 1
+        assert manifest["normalization"]["pre_normalize_body_sha256"] != (
+            manifest["normalization"]["active"]["pre_normalize_body_sha256"]
+        )
     client = _client(page_service)
     route = (
         f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}/versions/{branch_id}/reconciliation"
@@ -181,7 +236,7 @@ def test_reconciliation_api_preview_commit_replay_and_server_owned_projection(
     assert conflict["granularity"] == "block"
     assert conflict["parent_block_id"] is None
     assert conflict["head"]["text"] == "alpha at head"
-    assert conflict["yours"]["text"] == "alpha on branch"
+    assert conflict["yours"]["text"] == final_content
 
     payload = {
         "expected_head_version_id": str(head.version_id),
@@ -203,7 +258,7 @@ def test_reconciliation_api_preview_commit_replay_and_server_owned_projection(
     assert preview_data["dry_run"] is True
     preview = preview_data["preview"]
     assert preview["head_version_id"] == str(head.version_id)
-    assert preview["merged_body_markdown"] == "alpha on branch\n\nbeta\n"
+    assert preview["merged_body_markdown"] == f"{final_content}\n\nbeta\n\n- stable\n"
     assert preview["predicted_block_map"]
     assert preview["unresolved_count"] == 0
 
@@ -230,7 +285,7 @@ def test_reconciliation_api_preview_commit_replay_and_server_owned_projection(
         workspace_slug="default",
         slug="reconciliation-rest-contract",
         title="Reconciliation",
-        body_md="alpha on branch\n\nbeta advanced after reconciliation\n",
+        body_md=f"{final_content}\n\nbeta advanced after reconciliation\n\n- stable\n",
         actor_kind="human",
         actor_id="00000000-0000-0000-0000-000000000010",
         actor_provenance="browser_session",
@@ -283,6 +338,7 @@ def test_insert_after_conflict_projects_and_applies_the_complete_gap_operations(
         base_content_hash=base.content_hash,
     )
     with page_service.session_factory.begin() as session:
+        session.get(Workspace, workspace_id).auto_fix_enabled = True
         diverged = ContextWriteService().patch_draft(
             session=session,
             workspace_id=workspace_id,
@@ -295,7 +351,7 @@ def test_insert_after_conflict_projects_and_applies_the_complete_gap_operations(
                         op="insert_after",
                         block=alpha["id"],
                         expected=alpha["hash"],
-                        content="branch gap one\n\nbranch gap two",
+                        content="branch gap one   \n\nbranch gap two",
                     )
                 ],
             ),
@@ -303,6 +359,8 @@ def test_insert_after_conflict_projects_and_applies_the_complete_gap_operations(
             actor_id="insert-effect-test-client",
         )
     branch_id = diverged.alternative_draft_id
+    with page_service.session_factory.begin() as session:
+        session.get(Workspace, workspace_id).auto_fix_enabled = False
     client = _client(page_service, email="insert-effect-owner@example.com")
     route = (
         f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}/versions/{branch_id}/reconciliation"
@@ -1267,9 +1325,27 @@ def test_syntactically_valid_manifest_that_no_longer_recreates_branch_fails_clos
     assert valid_detail.status_code == 200, valid_detail.text
     conflict = valid_detail.json()["data"]["conflicts"][0]
 
+    with page_service.session_factory() as session:
+        original_manifest = deepcopy(
+            session.get(ContextPageVersion, branch_id).reconcile_manifest
+        )
+    for invalid_transform in (
+        {"schema": "context_body_transform.unknown"},
+        {"start": True},
+        {"end": 1_000_000},
+        {"replacement": "different final bytes"},
+    ):
+        with page_service.session_factory.begin() as session:
+            manifest = deepcopy(original_manifest)
+            manifest["normalization"]["transform"].update(invalid_transform)
+            session.get(ContextPageVersion, branch_id).reconcile_manifest = manifest
+        rejected_transform = client.get(route)
+        assert rejected_transform.status_code == 422, rejected_transform.text
+        assert rejected_transform.json()["error_code"] == "reconcile_target_invalid"
+
     with page_service.session_factory.begin() as session:
         branch = session.get(ContextPageVersion, branch_id)
-        manifest = deepcopy(branch.reconcile_manifest)
+        manifest = deepcopy(original_manifest)
         assert manifest["clean_operations"]
         manifest["clean_operations"][0]["content"] = "syntactically valid corruption"
         branch.reconcile_manifest = manifest
@@ -1335,8 +1411,13 @@ def test_reconciliation_never_discloses_a_different_authors_private_editing_head
             session,
             page_id=page.id,
             parent_version_id=head.version_id,
-            body_md=private_body,
-            content_hash=calculate_content_hash(private_body),
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md=private_body,
+                actor_kind="human",
+                actor_id="00000000-0000-0000-0000-0000000000ee",
+            ),
             actor_kind="human",
             actor_id="00000000-0000-0000-0000-0000000000ee",
             version_status="editing",
@@ -1403,8 +1484,13 @@ def test_review_item_detail_never_discloses_a_different_authors_private_editing_
             session,
             page_id=page.id,
             parent_version_id=head.version_id,
-            body_md=private_body,
-            content_hash=calculate_content_hash(private_body),
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md=private_body,
+                actor_kind="human",
+                actor_id="00000000-0000-0000-0000-0000000000ee",
+            ),
             actor_kind="human",
             actor_id="00000000-0000-0000-0000-0000000000ee",
             version_status="editing",
@@ -1433,6 +1519,11 @@ def test_a_manifest_stored_before_accept_fuzzy_moved_still_reconciles(page_servi
     field now exists only where an anchor address can use it, so a stored
     diverged branch must not become unreconcilable when the model tightens."""
 
+    class LegacyFormatFixer:
+        def fix(self, body, ctx):
+            final = safe_normalize_markdown_legacy_v1(body)
+            return FixResult(final, ("format",) if final != body else ())
+
     workspace_id = _workspace_id(page_service)
     base = page_service.write_page(
         workspace_slug="default",
@@ -1458,8 +1549,18 @@ def test_a_manifest_stored_before_accept_fuzzy_moved_still_reconciles(page_servi
         base_version_id=base.version_id,
         base_content_hash=base.content_hash,
     )
+    registry = LintRegistry(
+        tuple(
+            replace(module, fixer=LegacyFormatFixer())
+            if module.module_id == "format"
+            else module
+            for module in LintRegistry.builtin().modules
+        )
+    )
+    writer = ContextWriteService(body_preparer=BodyPreparer(registry))
     with page_service.session_factory.begin() as session:
-        diverged = ContextWriteService().patch_draft(
+        session.get(Workspace, workspace_id).auto_fix_enabled = True
+        diverged = writer.patch_draft(
             session=session,
             workspace_id=workspace_id,
             request=PatchDraftRequest(
@@ -1471,7 +1572,7 @@ def test_a_manifest_stored_before_accept_fuzzy_moved_still_reconciles(page_servi
                         op="replace_block",
                         block=alpha["id"],
                         expected=alpha["hash"],
-                        content="alpha on branch",
+                        content="alpha on branch  \ncontinued",
                     ),
                     ReplaceBlockOperation(
                         op="replace_block",
@@ -1487,7 +1588,12 @@ def test_a_manifest_stored_before_accept_fuzzy_moved_still_reconciles(page_servi
     branch_id = diverged.alternative_draft_id
     with page_service.session_factory.begin() as session:
         branch = session.get(ContextPageVersion, branch_id)
+        assert branch.body_md == "alpha on branch\ncontinued\n\nbeta on branch\n"
         manifest = deepcopy(branch.reconcile_manifest)
+        # Old manifests have no recorded transform and used the earlier
+        # normalizer, which removed Markdown hard breaks.
+        del manifest["normalization"]["transform"]
+        del manifest["normalization"]["active"]
         for key in ("original_operations", "clean_operations", "conflict_operations"):
             for operation in manifest[key]:
                 operation["accept_fuzzy"] = False

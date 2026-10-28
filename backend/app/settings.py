@@ -11,7 +11,7 @@ from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 from backend.app.data_dir import data_dir, default_sqlite_url
@@ -39,6 +39,7 @@ SESSION_TTL_DEFAULT_SECONDS = 60 * 60 * 12
 SESSION_REMEMBERED_TTL_DEFAULT_SECONDS = 60 * 60 * 24 * 30
 SESSION_REMEMBERED_REFRESH_THRESHOLD_DEFAULT_SECONDS = 60 * 60 * 24 * 7
 SESSION_REMEMBERED_ABSOLUTE_TTL_DEFAULT_SECONDS = 60 * 60 * 24 * 90
+AUTH_REAUTHENTICATION_MAX_AGE_DEFAULT_SECONDS = 60 * 60
 # Every request body is bounded before routing and authentication; the
 # upload routes that legitimately need more carry their own, larger bounds
 # (backend/api/middleware/request_body_limit.py).
@@ -58,8 +59,7 @@ _RETIRED_DEFAULT_SESSION_SECRET_SHA256 = (
     "4a2c406a513a7d39768444571f948c649f89eeb2a93cdd1a219f53e09daf2440"
 )
 _SESSION_SECRET_GUIDANCE = (
-    "Generate one with: python3 -c "
-    "\"import secrets; print(secrets.token_urlsafe(64))\""
+    'Generate one with: python3 -c "import secrets; print(secrets.token_urlsafe(64))"'
 )
 
 logger = logging.getLogger("dtxwiki.startup")
@@ -128,6 +128,7 @@ OPERATIONAL_ENV_KEYS = frozenset(
 
 
 class Settings(BaseSettings):
+    _plugin_registry: object | None = PrivateAttr(default=None)
     app_name: str = "dtxWiki"
     app_version: str = Field(default_factory=package_version)
     app_env: str = "development"
@@ -137,6 +138,12 @@ class Settings(BaseSettings):
     frontend_dev_port: int = DEFAULT_FRONTEND_DEV_PORT
     cors_origins: str | None = None
     auto_bootstrap: bool = True
+    plugins: str = ""
+    auth_providers_file: str | None = None
+    auth_password_login_enabled: bool = True
+    # Ordinary launches own their worker. Service-managed deployments select
+    # external when their service manager starts the worker separately.
+    worker_mode: Literal["managed", "external"] = "managed"
     # SPA asset directory override (R7′ assembly contract): lets an overlay
     # ship its own built frontend without patching every create_app call.
     static_root: str | None = None
@@ -181,6 +188,14 @@ class Settings(BaseSettings):
         gt=0,
     )
     session_cookie_name: str = "dtxwiki_session"
+    # The window is also capped by each session's own expiry. The upper bound
+    # only keeps an accidental huge value from overflowing datetime arithmetic
+    # (a 500 on every sensitive request) instead of failing at startup.
+    auth_reauthentication_max_age_seconds: int = Field(
+        default=AUTH_REAUTHENTICATION_MAX_AGE_DEFAULT_SECONDS,
+        gt=0,
+        le=366 * 24 * 60 * 60,
+    )
     session_cookie_secure: bool | None = None
     # Keep the raw operator value nullable so mode-derived defaults remain
     # distinguishable from an explicit true/false override.
@@ -278,8 +293,7 @@ class Settings(BaseSettings):
     librarian_tick_interval_days: int = Field(default=7, ge=0)
     search_associative_lane: bool = False
 
-    # Epic-2 D-7 (doc/design/workspace-database-separation-plan.md): how long
-    # a Context media asset must sit as a derived orphan before the sweep
+    # How long a Context media asset must sit as a derived orphan before the sweep
     # reclaims it. The retention clock runs BEFORE tombstoning -- the asset
     # stays active and rescuable (simply by being used) for this whole
     # window; nothing is at risk until it elapses.
@@ -588,6 +602,9 @@ class Settings(BaseSettings):
         return _parse_cors_origins(self.cors_origins)
 
     def validate_for_startup(self) -> None:
+        from backend.app.plugins import load_plugins
+
+        plugin_registry = load_plugins(self)
         for env_key in sorted(REMOVED_ENV_KEYS.intersection(os.environ)):
             _warn_removed_env(env_key)
 
@@ -707,7 +724,11 @@ class Settings(BaseSettings):
             if k.startswith("DTXWIKI_") and not k.startswith("DTXWIKI_SERVICE_")
         }
         _unknown = (
-            _env_dtxwiki - _known_fields - OPERATIONAL_ENV_KEYS - REMOVED_ENV_KEYS
+            _env_dtxwiki
+            - _known_fields
+            - OPERATIONAL_ENV_KEYS
+            - REMOVED_ENV_KEYS
+            - plugin_registry.environment_keys
         )
         if _unknown:
             raise RuntimeError(
@@ -767,9 +788,7 @@ class Settings(BaseSettings):
                 f"{_SESSION_SECRET_GUIDANCE}"
             )
         if inline_secret:
-            problem = session_secret_problem(
-                inline_secret, remote=self.is_remote_mode
-            )
+            problem = session_secret_problem(inline_secret, remote=self.is_remote_mode)
             if problem is not None:
                 raise RuntimeError(
                     f"DTXWIKI_SESSION_SECRET {problem}. {_SESSION_SECRET_GUIDANCE}"
@@ -943,8 +962,7 @@ def _resolve_session_secret(
             value = _read_session_secret_file(path)
         except FileNotFoundError as exc:
             raise RuntimeError(
-                f"DTXWIKI_SESSION_SECRET_FILE points to {path}, which does not "
-                "exist."
+                f"DTXWIKI_SESSION_SECRET_FILE points to {path}, which does not exist."
             ) from exc
         except (OSError, ValueError) as exc:
             raise RuntimeError(

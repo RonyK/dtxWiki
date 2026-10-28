@@ -10,11 +10,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from backend.domain.input_policy import fit_generated_title, validate_title
 from backend.library_media.ports import (
     LibraryBlobRepositoryFactory,
     LibraryLogicalQuotaFactory,
 )
 from backend.media.domain import BlobReference
+from backend.models.base import utc_now
 from backend.models.library import LibraryItem, LibraryItemVersion
 from backend.models.workspace import Workspace
 from backend.repositories.media_blob_reference import (
@@ -210,6 +212,7 @@ class LibraryBinaryRegistrationService:
         workspace = session.get(Workspace, workspace_id)
         if workspace is None:
             raise ValueError("Workspace was not found")
+        validate_title(accepted.detection.original_filename)
         # Begin SQLite's outer write transaction before the item-creation
         # savepoint so a later quota rejection rolls back the whole registration.
         acquire_write_intent(session)
@@ -288,7 +291,8 @@ class LibraryBinaryRegistrationService:
                 workspace_id=workspace_id,
                 target_kind="library_item",
                 target_id=item.id,
-                title=item.title or item.uri,
+                title=item.title
+                or fit_generated_title(item.uri, fallback="Library item"),
                 slug=None,
                 section="library",
                 parent_id=parent_node_id,
@@ -373,6 +377,8 @@ class LibraryBinaryRegistrationService:
         # of which branch produced it, otherwise re-uploading bytes matching an
         # older version leaves current_version_id pointing at a version that
         # is no longer the one this operation just registered.
+        if item.current_version_id != version.id:
+            item.content_changed_at = utc_now()
         item.current_version_id = version.id
 
         self.logical_quota_factory(session).reserve(

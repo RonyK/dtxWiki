@@ -6,6 +6,7 @@ import logging
 import secrets
 import smtplib
 import ssl
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from email.message import EmailMessage
@@ -18,7 +19,9 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.settings import Settings
+from backend.domain.identity_policy import EmailPolicyError, normalize_email
 from backend.models.audit import AuditEvent
+from backend.models.auth_verification import EmailReauthenticationChallenge
 from backend.models.base import utc_now
 from backend.models.mail import EmailOutbox
 from backend.models.password_reset import PasswordResetToken
@@ -117,6 +120,25 @@ class MailDeliveryConfigurationError(MailDeliveryError):
 
 class MailProviderError(MailDeliveryError):
     error_code = "mail_provider_failed"
+
+
+class _ObsoleteMail(Exception):
+    """An expected terminal token/contact state, without a provider failure."""
+
+
+_TERMINAL_TOKEN_REASONS = (
+    "recovery_token_revoked",
+    "authentication_confirmation_obsolete",
+)
+
+
+def _validated_recipient(value: str | None) -> str:
+    if value is None:
+        raise MailDeliveryConfigurationError("recipient email is unavailable")
+    try:
+        return normalize_email(value)
+    except EmailPolicyError as exc:
+        raise MailDeliveryConfigurationError("recipient email is invalid") from exc
 
 
 @dataclass(frozen=True)
@@ -265,9 +287,7 @@ class EmailDeliveryService:
         if self.provider is not None:
             return self.provider
         if not self.settings.mail_configured:
-            raise MailDeliveryConfigurationError(
-                "email recovery is not configured"
-            )
+            raise MailDeliveryConfigurationError("email recovery is not configured")
         assert self.settings.smtp_host is not None
         return SMTPMailProvider(
             host=self.settings.smtp_host,
@@ -287,16 +307,29 @@ class EmailDeliveryService:
         token_model: PasswordResetToken,
         raw_token: str,
         message_kind: str,
+        recipient_email: str | None = None,
     ) -> EmailOutbox:
         if message_kind not in {"password_reset", "email_verification"}:
             raise ValueError("unsupported token email kind")
+        if (
+            message_kind != "email_verification"
+            and recipient_email is not None
+            and recipient_email != user.email
+        ):
+            raise MailDeliveryConfigurationError("recipient does not match account")
         self._assert_configured()
         outbox_id = uuid4()
         outbox = EmailOutbox(
             id=outbox_id,
             recipient_user_id=user.id,
             token_id=token_model.id,
-            recipient_email=user.email,
+            recipient_email=_validated_recipient(
+                recipient_email
+                if recipient_email is not None
+                else user.pending_email
+                if message_kind == "email_verification" and user.pending_email
+                else user.email
+            ),
             message_kind=message_kind,
             encrypted_token=self.cipher.encrypt(
                 outbox_id=outbox_id,
@@ -304,6 +337,24 @@ class EmailDeliveryService:
                 token=raw_token,
             ),
             status="queued",
+        )
+        session.add(outbox)
+        session.flush()
+        return outbox
+
+    def queue_reauthentication_email(self, session, *, user, challenge, token):
+        self._assert_configured()
+        outbox = EmailOutbox(
+            id=uuid4(),
+            recipient_user_id=user.id,
+            recipient_email=_validated_recipient(user.email),
+            reauthentication_challenge_id=challenge.id,
+            message_kind="email_reauthentication",
+            status="queued",
+            attempt_count=0,
+        )
+        outbox.encrypted_token = self.cipher.encrypt(
+            outbox_id=outbox.id, message_kind=outbox.message_kind, token=token
         )
         session.add(outbox)
         session.flush()
@@ -317,11 +368,15 @@ class EmailDeliveryService:
     ) -> EmailOutbox | None:
         # A mail-less installation must never make a successful password reset
         # roll back just because notifications are unavailable.
-        if not self.settings.mail_configured or user.email_verified_at is None:
+        if (
+            not self.settings.mail_configured
+            or user.email is None
+            or user.email_verified_at is None
+        ):
             return None
         outbox = EmailOutbox(
             recipient_user_id=user.id,
-            recipient_email=user.email,
+            recipient_email=_validated_recipient(user.email),
             message_kind="password_changed",
             status="queued",
         )
@@ -382,13 +437,12 @@ class EmailDeliveryService:
                 WorkspaceMembership.role == "owner",
                 User.status == "active",
                 User.email_verified_at.is_not(None),
+                User.email.is_not(None),
             )
         ).all()
         queued: list[EmailOutbox] = []
         for owner in owners:
-            outbox_id = job_failure_outbox_id(
-                job_id=job_id, recipient_user_id=owner.id
-            )
+            outbox_id = job_failure_outbox_id(job_id=job_id, recipient_user_id=owner.id)
             existing = session.get(EmailOutbox, outbox_id)
             if existing is not None:
                 if (
@@ -400,7 +454,7 @@ class EmailDeliveryService:
             outbox = EmailOutbox(
                 id=outbox_id,
                 recipient_user_id=owner.id,
-                recipient_email=owner.email,
+                recipient_email=_validated_recipient(owner.email),
                 message_kind="job_failed",
                 source_job_type=job_type,
                 status="queued",
@@ -437,6 +491,7 @@ class EmailDeliveryService:
                 WorkspaceMembership.role == "owner",
                 User.status == "active",
                 User.email_verified_at.is_not(None),
+                User.email.is_not(None),
             )
         ).all()
         queued: list[EmailOutbox] = []
@@ -459,7 +514,7 @@ class EmailDeliveryService:
             outbox = EmailOutbox(
                 id=outbox_id,
                 recipient_user_id=owner.id,
-                recipient_email=owner.email,
+                recipient_email=_validated_recipient(owner.email),
                 message_kind="reconciliation_reminder",
                 status="queued",
             )
@@ -596,7 +651,7 @@ class EmailDeliveryService:
         outbox = session.get(EmailOutbox, outbox_id)
         if outbox is None:
             raise ValueError("email outbox row not found")
-        if outbox.status == "sent":
+        if outbox.status == "sent" or outbox.last_error in _TERMINAL_TOKEN_REASONS:
             return _ClaimOutcome()
         # Atomically claim provider ownership.  A row lock alone is a no-op on
         # SQLite, while this guarded UPDATE is re-evaluated after a conflicting
@@ -648,6 +703,11 @@ class EmailDeliveryService:
         session.refresh(outbox)
         try:
             return _ClaimOutcome(message=self._render(session, outbox))
+        except _ObsoleteMail:
+            _terminalize_outbox_rows(
+                session, [outbox], reason="authentication_confirmation_obsolete"
+            )
+            return _ClaimOutcome()
         except MailDeliveryError as exc:
             return _ClaimOutcome(render_error=exc)
         except Exception:  # normalize rendering failures
@@ -742,9 +802,7 @@ class EmailDeliveryService:
         )
         session.flush()
 
-    def _reload(
-        self, *, session_factory: sessionmaker, outbox_id: UUID
-    ) -> EmailOutbox:
+    def _reload(self, *, session_factory: sessionmaker, outbox_id: UUID) -> EmailOutbox:
         with session_factory() as session:
             outbox = session.get(EmailOutbox, outbox_id)
         if outbox is None:
@@ -867,9 +925,7 @@ class EmailDeliveryService:
         try:
             self.reclaim_stale_sending(session_factory=session_factory, now=now)
         except Exception:
-            logger.exception(
-                "email outbox lease reclaim failed; continuing this sweep"
-            )
+            logger.exception("email outbox lease reclaim failed; continuing this sweep")
         with session_factory() as read_session:
             due_ids = list(
                 read_session.scalars(
@@ -910,8 +966,10 @@ class EmailDeliveryService:
         delivered = 0
         for outbox_id in due_ids:
             try:
-                self.deliver(session_factory=session_factory, outbox_id=outbox_id)
-                delivered += 1
+                outcome = self.deliver(
+                    session_factory=session_factory, outbox_id=outbox_id
+                )
+                delivered += int(outcome.status == "sent")
             except Exception:
                 logger.exception(
                     "email outbox sweep failed to deliver %s; will retry "
@@ -945,12 +1003,24 @@ class EmailDeliveryService:
         counts = dict(
             session.execute(
                 select(EmailOutbox.status, func.count())
+                .where(
+                    or_(
+                        EmailOutbox.last_error.is_(None),
+                        EmailOutbox.last_error.not_in(_TERMINAL_TOKEN_REASONS),
+                    )
+                )
                 .group_by(EmailOutbox.status)
             ).all()
         )
         latest_attempt = session.execute(
             select(EmailOutbox.status, EmailOutbox.updated_at)
             .where(EmailOutbox.attempt_count > 0)
+            .where(
+                or_(
+                    EmailOutbox.last_error.is_(None),
+                    EmailOutbox.last_error.not_in(_TERMINAL_TOKEN_REASONS),
+                )
+            )
             .order_by(EmailOutbox.updated_at.desc(), EmailOutbox.id.desc())
             .limit(1)
         ).first()
@@ -985,9 +1055,7 @@ class EmailDeliveryService:
             else "mail_delivery_failed"
         )
         stable_path = (
-            delivery_path
-            if delivery_path in STABLE_MAIL_DELIVERY_PATHS
-            else "worker"
+            delivery_path if delivery_path in STABLE_MAIL_DELIVERY_PATHS else "worker"
         )
         event_payload_ref = f"email_outbox:{outbox.id}:terminal_failure"
         already_audited = session.scalar(
@@ -1037,6 +1105,16 @@ class EmailDeliveryService:
         sender = self.settings.mail_from_address
         if not sender:
             raise MailDeliveryConfigurationError("mail sender is not configured")
+        if outbox.message_kind == "email_reauthentication":
+            return self._render_authentication_confirmation(session, outbox, sender)
+        recipient = session.get(User, outbox.recipient_user_id)
+        if recipient is None or recipient.status != "active":
+            raise _ObsoleteMail()
+        addresses = {recipient.email}
+        if outbox.message_kind == "email_verification":
+            addresses.add(recipient.pending_email)
+        if outbox.recipient_email not in addresses:
+            raise _ObsoleteMail()
         if outbox.message_kind == "password_changed":
             return OutboundMail(
                 recipient=outbox.recipient_email,
@@ -1110,12 +1188,14 @@ class EmailDeliveryService:
         now = utc_now()
         if (
             token_model is None
+            or token_model.user_id != outbox.recipient_user_id
+            or token_model.purpose != outbox.message_kind
             or token_model.used_at is not None
             or token_model.revoked_at is not None
             or token_model.expires_at <= now
             or not outbox.encrypted_token
         ):
-            raise MailDeliveryError("recovery token is no longer deliverable")
+            raise _ObsoleteMail()
         token = self.cipher.decrypt(
             outbox_id=outbox.id,
             message_kind=outbox.message_kind,
@@ -1142,11 +1222,60 @@ class EmailDeliveryService:
             ),
         )
 
+    def _render_authentication_confirmation(self, session, outbox, sender):
+        resource = session.get(
+            EmailReauthenticationChallenge, outbox.reauthentication_challenge_id
+        )
+        user = session.get(User, outbox.recipient_user_id)
+        path = f"/auth/verify?scope={resource.scope}" if resource else "/auth/verify"
+        subject = "Confirm your dtxWiki account operation"
+        valid = (
+            resource is not None
+            and resource.revoked_at is None
+            and user is not None
+            and resource.user_id == user.id
+            and user.status == "active"
+            and user.session_generation == resource.session_generation
+            and user.email is not None
+            and user.email == outbox.recipient_email
+            and hashlib.sha256(user.email.encode()).hexdigest()
+            == resource.recipient_digest
+        )
+        if (
+            not valid
+            or resource.consumed_at is not None
+            or resource.expires_at <= utc_now()
+            or not outbox.encrypted_token
+        ):
+            raise _ObsoleteMail()
+        token = self.cipher.decrypt(
+            outbox_id=outbox.id,
+            message_kind=outbox.message_kind,
+            envelope=outbox.encrypted_token,
+        )
+        if not secrets.compare_digest(
+            resource.token_digest or "", hashlib.sha256(token.encode()).hexdigest()
+        ):
+            raise _ObsoleteMail()
+        url = one_time_token_link(
+            (self.settings.public_base_url or "").rstrip("/"), path, token
+        )
+        return OutboundMail(
+            recipient=outbox.recipient_email,
+            sender=sender,
+            subject=subject,
+            text_body=(
+                "Open this link in the browser that started the request, "
+                "then confirm:\n\n"
+                f"{url}\n\n요청을 시작한 브라우저에서 링크를 열고 확인하세요.\n"
+                "If you did not request this, ignore this message. / "
+                "본인이 요청하지 않았다면 무시하세요."
+            ),
+        )
+
     def _assert_configured(self) -> None:
         if not self.settings.mail_configured:
-            raise MailDeliveryConfigurationError(
-                "email recovery is not configured"
-            )
+            raise MailDeliveryConfigurationError("email recovery is not configured")
 
 
 def build_email_delivery_service(
@@ -1168,8 +1297,9 @@ def sanitized_mail_delivery_error(exc: MailDeliveryError) -> MailDeliveryError:
 def terminalize_token_outboxes(
     *,
     session: Session,
-    token_ids: list[UUID],
+    token_ids: Sequence[UUID] = (),
     terminal_at: datetime,
+    reauthentication_challenge_ids: Sequence[UUID] = (),
 ) -> int:
     """Erase every matching token envelope and mark its delivery terminal.
 
@@ -1181,20 +1311,33 @@ def terminalize_token_outboxes(
     parameter is a follow-up in password_recovery_service.py's lane.
     """
 
-    if not token_ids:
+    if not token_ids and not reauthentication_challenge_ids:
         return 0
     outboxes = list(
         session.scalars(
             select(EmailOutbox)
-            .where(EmailOutbox.token_id.in_(token_ids))
+            .where(
+                or_(
+                    EmailOutbox.token_id.in_(token_ids),
+                    EmailOutbox.reauthentication_challenge_id.in_(
+                        reauthentication_challenge_ids
+                    ),
+                )
+            )
             .with_for_update()
         ).all()
     )
+    return _terminalize_outbox_rows(session, outboxes, reason="recovery_token_revoked")
+
+
+def _terminalize_outbox_rows(
+    session: Session, outboxes: list[EmailOutbox], *, reason: str
+) -> int:
     for outbox in outboxes:
         outbox.encrypted_token = None
         if outbox.status != "sent":
             outbox.status = "failed"
-            outbox.last_error = "recovery_token_revoked"
+            outbox.last_error = reason
             outbox.next_attempt_at = None
     session.flush()
     return len(outboxes)

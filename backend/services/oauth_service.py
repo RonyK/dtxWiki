@@ -6,6 +6,7 @@ import hashlib
 import itertools
 import json
 import logging
+import re
 import secrets
 import threading
 import time
@@ -33,6 +34,22 @@ from backend.catalog.mcp_apps import (
     VerifiedOAuthAssociation,
     get_mcp_app_catalog_repository,
 )
+from backend.domain.credential_input import (
+    OAUTH_IDENTIFIER_MAX_BYTES,
+    OAUTH_JWT_MAX_BYTES,
+    OAUTH_OPAQUE_TOKEN_MAX_BYTES,
+    WORKSPACE_GRANTS_MAX_COUNT,
+    ascii_token_is_valid,
+    require_ascii_token,
+    utf8_size_is_valid,
+)
+from backend.domain.oauth_input import (
+    validate_client_name,
+    validate_identifier,
+    validate_redirect_list,
+    validate_scope_input,
+    validate_supported_metadata,
+)
 from backend.models.base import utc_now
 from backend.models.oauth import (
     OAuthAccessTokenJti,
@@ -56,6 +73,11 @@ from backend.services.credential_replica_service import (
     resolve_oauth_replica_credential_id,
 )
 from backend.services.db_write_intent import acquire_write_intent
+from backend.services.mcp_credential_health import (
+    CredentialHealth,
+    binding_key_for_client,
+    load_credential_health,
+)
 from backend.services.oauth_cimd import (
     CIMDClientMetadata,
     fetch_client_metadata_document,
@@ -160,7 +182,8 @@ def _csrf_state_bucket_prune_locked(now: float) -> None:
 
     for bucket in (_OAUTH_CSRF_ISSUED_STATES, _OAUTH_CSRF_CONSUMED_STATES):
         stale = [
-            key for key, stamp in bucket.items()
+            key
+            for key, stamp in bucket.items()
             if now - stamp > _OAUTH_CSRF_STATE_BUCKET_TTL
         ]
         for key in stale:
@@ -353,6 +376,7 @@ class RegisteredClient:
     redirect_uris: list[str]
     scope: str
     issued_at: int
+    application_type: str
 
 
 @dataclass(frozen=True)
@@ -395,6 +419,7 @@ def _registered_client(client: OAuthClient) -> RegisteredClient:
         redirect_uris=list(client.redirect_uris),
         scope=client.scope,
         issued_at=int(client.created_at.timestamp()),
+        application_type=client.application_type,
     )
 
 
@@ -500,13 +525,12 @@ def _apply_verified_oauth_association(
     client.catalog_app_id = values["catalog_app_id"]
     client.catalog_app_label_snapshot = values["catalog_app_label_snapshot"]
     client.catalog_revision = values["catalog_revision"]
-    client.catalog_association_provenance = values[
-        "catalog_association_provenance"
-    ]
+    client.catalog_association_provenance = values["catalog_association_provenance"]
 
 
 def oauth_client_id_for_mcp_client(client: MCPClient) -> str | None:
-    value = (client.token_metadata or {}).get("oauth_client_id")
+    metadata = client.token_metadata if isinstance(client.token_metadata, dict) else {}
+    value = metadata.get("oauth_client_id")
     return str(value) if value else None
 
 
@@ -712,22 +736,10 @@ WorkspaceConnectionKey = tuple[UUID | None, str]
 
 @dataclass(frozen=True)
 class WorkspaceOAuthHealth:
-    """Everything ONE workspace's connection health depends on, read off the
-    control plane and small enough to push back down as literal key sets.
+    """Control-plane names and exact credential facts for one workspace.
 
-    ``MCPClient`` is workspace-plane while ``OAuthClient``/``OAuthConsent``/
-    ``OAuthRefreshToken`` are control-plane, so the correlation between them
-    cannot be a join once the two planes are separate databases. Both control
-    tables involved carry ``workspace_id``, though, so for a single workspace
-    the answer set is finite and computable on the control plane alone: this
-    snapshot is that answer, and callers turn it into either an ``IN`` filter
-    over ``MCPClient`` columns or a per-row classification.
-
-    Keys are ``(issued_to_user_id, oauth_client_id)``. Every consent and token
-    contributes BOTH its exact key and an aggregate ``(None, client_id)`` key,
-    because an ``MCPClient`` with no issuing user matches any row for the
-    client/workspace pair -- the same disjunction the previous correlated
-    EXISTS spelled out in SQL.
+    The historical class name is retained for the workspace-plane adapter.
+    Identity-less legacy rows never inherit another user's or grant's health.
     """
 
     workspace_id: UUID
@@ -735,62 +747,65 @@ class WorkspaceOAuthHealth:
     # OAuth client ids this snapshot actually looked up, so a refinement can
     # tell "known absent" apart from "never asked".
     known_oauth_client_ids: frozenset[str]
-    live_oauth_client_ids: frozenset[str]
-    consent_keys: frozenset[WorkspaceConnectionKey]
-    live_expiry: Mapping[WorkspaceConnectionKey, datetime]
     oauth_client_names: Mapping[str, str]
     # None means "no search term", which is NOT the same as "nothing matched".
     name_matched_oauth_client_ids: frozenset[str] | None
 
+    credential_health: Mapping[tuple[UUID, str], CredentialHealth] = dataclass_field(
+        default_factory=dict
+    )
+
+    def credential_for(self, client: MCPClient) -> CredentialHealth | None:
+        metadata = (
+            client.token_metadata if isinstance(client.token_metadata, dict) else {}
+        )
+        binding = binding_key_for_client(client)
+        credential = self.credential_health.get((client.issued_to_user_id, binding))
+        # A server-owned binding already identifies a globally unique credential.
+        # Legacy rows may lack the issuer projection; metadata-only fallbacks
+        # still require an exact issuer match before they can be trusted.
+        if (
+            credential is None
+            and client.issued_to_user_id is None
+            and client.runtime_binding_key is not None
+        ):
+            credential = next(
+                (
+                    value
+                    for key, value in self.credential_health.items()
+                    if key[1] == binding
+                ),
+                None,
+            )
+        raw_app_id = metadata.get("oauth_client_id")
+        if credential is not None and raw_app_id not in (
+            None,
+            "",
+            credential.oauth_client_id,
+        ):
+            credential = None
+        return credential
+
     def connection_state_for(
         self,
         client: MCPClient,
-    ) -> tuple[ConnectionState, datetime | None, str | None, str | None]:
+    ) -> tuple[str, datetime | None, str | None, str | None]:
         """Classify one MCPClient row without touching any session."""
 
+        credential = self.credential_for(client)
         oauth_client_id = oauth_client_id_for_mcp_client(client)
-        if oauth_client_id is None:
-            state: ConnectionState = (
-                "active" if client.status == "active" else "disabled"
-            )
-            return state, None, None, None
-        key = (client.issued_to_user_id, oauth_client_id)
-        state, next_expiry = classify_oauth_connection_state(
-            physical_status=client.status,
-            oauth_client_is_live=oauth_client_id in self.live_oauth_client_ids,
-            consent_granted=key in self.consent_keys,
-            live_expiry=self.live_expiry.get(key),
-        )
+        if credential is not None:
+            oauth_client_id = credential.oauth_client_id
+        state = credential.state if credential is not None else "unknown"
+        expiry = credential.expires_at if credential is not None else None
+        if client.status != "active":
+            state = "disabled"
         return (
             state,
-            next_expiry,
+            expiry,
             oauth_client_id,
             self.oauth_client_names.get(oauth_client_id),
         )
-
-    def active_connection_keys(
-        self,
-    ) -> tuple[frozenset[str], frozenset[tuple[UUID, str]]]:
-        """The keys whose OAuth side is healthy, split by the SQL shape each needs.
-
-        Returned as (aggregate client ids, exact ``(user_id, client_id)`` pairs).
-        They stay separate because a row-value ``IN`` never matches a NULL
-        ``issued_to_user_id``: SQL comparison with NULL is UNKNOWN, not TRUE.
-        """
-
-        aggregate: set[str] = set()
-        exact: set[tuple[UUID, str]] = set()
-        for key in self.consent_keys:
-            user_id, oauth_client_id = key
-            if oauth_client_id not in self.live_oauth_client_ids:
-                continue
-            if key not in self.live_expiry:
-                continue
-            if user_id is None:
-                aggregate.add(oauth_client_id)
-            else:
-                exact.add((user_id, oauth_client_id))
-        return frozenset(aggregate), frozenset(exact)
 
 
 def load_workspace_oauth_health(
@@ -798,84 +813,31 @@ def load_workspace_oauth_health(
     *,
     workspace_id: UUID,
     now: datetime,
+    bindings: Collection[str],
     oauth_client_ids: Collection[str] | None = None,
 ) -> WorkspaceOAuthHealth:
-    """Read one workspace's connection health from a CONTROL session.
+    """Capture the named credentials once; resolve app names on the same plane.
 
-    ``oauth_client_ids`` narrows the consent/token scan to a known page of
-    clients; leaving it None loads the whole workspace, which is what a facet
-    count over the whole table needs. Either way the result is keyed exactly,
-    so the two agree row for row.
-
-    Name search is NOT part of this snapshot: it needs a candidate id set read
-    off the workspace plane, which does not exist yet at this point in a
-    listing. ``attach_name_matched_oauth_client_ids`` adds it afterwards.
+    ``bindings`` are the ``runtime_binding_key`` values the caller's workspace
+    rows name. Required on purpose: omitting it must not fall back to scanning
+    every member's credentials.
     """
-
-    # D-01v2/D-01v3 (P10.3 T1/section 2.3): OAuthRefreshToken lost its
-    # workspace_id -- family liveness ("family_alive") is now a GLOBAL
-    # (user, client) value by design, not scoped to this workspace. Only
-    # the consent scan stays workspace-filtered ("consented" = this
-    # workspace has a live oauth_consents row), which is still exactly
-    # right: OAuthConsent's PK still carries workspace_id.
-    consent_filters = [OAuthConsent.workspace_id == workspace_id]
-    token_filters = [
-        OAuthRefreshToken.revoked_at.is_(None),
-        OAuthRefreshToken.expires_at > now,
-    ]
+    credentials = load_credential_health(
+        session, workspace_id=workspace_id, now=now, bindings=bindings
+    )
+    candidate_ids = {
+        c.oauth_client_id for c in credentials.values() if c.oauth_client_id is not None
+    }
     if oauth_client_ids is not None:
-        restriction = list(oauth_client_ids)
-        if not restriction:
-            # A page with no OAuth-backed client correlates against nothing, so
-            # skip both scans instead of issuing two guaranteed-empty IN
-            # queries on what is a hot settings read.
-            return WorkspaceOAuthHealth(
-                workspace_id=workspace_id,
-                now=now,
-                known_oauth_client_ids=frozenset(),
-                live_oauth_client_ids=frozenset(),
-                consent_keys=frozenset(),
-                live_expiry={},
-                oauth_client_names={},
-                name_matched_oauth_client_ids=None,
-            )
-        consent_filters.append(OAuthConsent.client_id.in_(restriction))
-        token_filters.append(OAuthRefreshToken.client_id.in_(restriction))
-
-    consent_keys: set[WorkspaceConnectionKey] = set()
-    for user_id, client_id in session.execute(
-        select(OAuthConsent.user_id, OAuthConsent.client_id).where(*consent_filters)
-    ):
-        consent_keys.add((user_id, client_id))
-        consent_keys.add((None, client_id))
-
-    live_expiry: dict[WorkspaceConnectionKey, datetime] = {}
-    for user_id, client_id, expires_at in session.execute(
-        select(
-            OAuthRefreshToken.user_id,
-            OAuthRefreshToken.client_id,
-            OAuthRefreshToken.expires_at,
-        ).where(*token_filters)
-    ):
-        for key in ((user_id, client_id), (None, client_id)):
-            previous = live_expiry.get(key)
-            if previous is None or expires_at > previous:
-                live_expiry[key] = expires_at
-
-    candidate_ids = {key[1] for key in consent_keys} | {key[1] for key in live_expiry}
-    if oauth_client_ids is not None:
-        candidate_ids |= set(oauth_client_ids)
-    live_ids, names = _load_oauth_client_liveness(session, candidate_ids)
-
+        candidate_ids.update(oauth_client_ids)
+    _, names = _load_oauth_client_liveness(session, candidate_ids)
     return WorkspaceOAuthHealth(
         workspace_id=workspace_id,
         now=now,
         known_oauth_client_ids=frozenset(candidate_ids),
-        live_oauth_client_ids=live_ids,
-        consent_keys=frozenset(consent_keys),
-        live_expiry=live_expiry,
         oauth_client_names=names,
         name_matched_oauth_client_ids=None,
+        credential_health=credentials,
     )
 
 
@@ -943,11 +905,10 @@ def refine_workspace_oauth_health(
     }
     if not missing:
         return health
-    live_ids, names = _load_oauth_client_liveness(session, missing)
+    _, names = _load_oauth_client_liveness(session, missing)
     return replace(
         health,
         known_oauth_client_ids=health.known_oauth_client_ids | frozenset(missing),
-        live_oauth_client_ids=health.live_oauth_client_ids | live_ids,
         oauth_client_names={**health.oauth_client_names, **names},
     )
 
@@ -1229,16 +1190,24 @@ class OAuthService:
         *,
         payload: dict[str, Any],
         client_ip: str,
+        _rate_limit_consumed: bool = False,
     ) -> RegisteredClient:
         if not self.settings.oauth_allow_dcr:
             raise InvalidClientRegistrationError("dynamic client registration disabled")
-        _consume_dcr_slot(client_ip)
-        redirect_uris = payload.get("redirect_uris")
-        if not isinstance(redirect_uris, list) or not redirect_uris:
-            raise InvalidClientRegistrationError("redirect_uris is required")
-        normalized_redirects = [
-            validate_redirect_uri(str(uri)) for uri in redirect_uris
-        ]
+        # HTTP callers consume before JSON parsing; direct callers still count
+        # invalid metadata, exactly once per registration attempt.
+        if not _rate_limit_consumed:
+            _consume_dcr_slot(client_ip)
+        if not isinstance(payload, dict):
+            raise InvalidClientRegistrationError(
+                "client metadata must be a JSON object"
+            )
+        try:
+            validate_supported_metadata(payload)
+            redirects = validate_redirect_list(payload.get("redirect_uris"))
+        except ValueError as exc:
+            raise InvalidClientRegistrationError(str(exc)) from exc
+        normalized_redirects = [validate_redirect_uri(uri) for uri in redirects]
         # Sprint_5 Phase_3 Task 3.2: scope subset of ALLOWED_OAUTH_SCOPES.
         # ``normalize_scope`` raises ``InvalidOAuthRequestError`` for unknown
         # scopes; DCR converts that to ``InvalidClientRegistrationError`` so
@@ -1250,25 +1219,25 @@ class OAuthService:
         # explicitly (and the user still approves it at /oauth/authorize consent).
         default_scope = "mcp:read"
         try:
-            scope = normalize_scope(
-                default_scope if raw_scope in (None, "") else str(raw_scope)
-            )
+            scope = normalize_scope(default_scope if raw_scope is None else raw_scope)
         except InvalidOAuthRequestError as exc:
-            raise InvalidClientRegistrationError(
-                f"scope is invalid: {exc}"
-            ) from exc
+            raise InvalidClientRegistrationError(f"scope is invalid: {exc}") from exc
         # Sprint_5 Phase_3 Task 3.2: client_name length ∈ [1, 200]. Previously
         # silently truncated to 128 chars, which masked over-long submissions.
         raw_client_name = payload.get("client_name")
         if raw_client_name is None or raw_client_name == "":
             client_name = "Dynamic MCP Client"
         else:
-            client_name = str(raw_client_name)
-        if len(client_name) < 1 or len(client_name) > 200:
-            raise InvalidClientRegistrationError(
-                "client_name length must be between 1 and 200 characters"
-            )
-        application_type = str(payload.get("application_type") or "native")
+            client_name = raw_client_name
+        try:
+            client_name = validate_client_name(client_name)
+        except ValueError as exc:
+            raise InvalidClientRegistrationError(str(exc)) from exc
+        # Like the auth method, register only a supported value (RFC 7591 lets
+        # the server replace metadata) instead of storing arbitrary text.
+        application_type = (
+            "web" if payload.get("application_type") == "web" else "native"
+        )
         registration_identity = _dcr_registration_identity(
             client_name=client_name,
             redirect_uris=normalized_redirects,
@@ -1278,9 +1247,7 @@ class OAuthService:
             application_type=application_type,
             scope=scope,
         )
-        catalog_repository = (
-            self.catalog_repository or get_mcp_app_catalog_repository()
-        )
+        catalog_repository = self.catalog_repository or get_mcp_app_catalog_repository()
         catalog_association = catalog_repository.find_verified_oauth_association(
             registration_identity
         )
@@ -1317,8 +1284,7 @@ class OAuthService:
                 )
             ).all()
             normalized_redirect_set = {
-                _registration_identity_redirect_uri(uri)
-                for uri in normalized_redirects
+                _registration_identity_redirect_uri(uri) for uri in normalized_redirects
             }
             for existing in candidates:
                 if (
@@ -1403,15 +1369,10 @@ class OAuthService:
                 },
                 retention_class="sensitive",
             )
-            return RegisteredClient(
-                client_id=client.id,
-                client_name=client.client_name,
-                redirect_uris=list(client.redirect_uris),
-                scope=client.scope,
-                issued_at=int(client.created_at.timestamp()),
-            )
+            return _registered_client(client)
 
     def get_client(self, client_id: str) -> OAuthClient:
+        _validate_client_id(client_id)
         with self.session_factory() as session:
             client = session.get(OAuthClient, client_id)
             if client is None or client.revoked_at is not None:
@@ -1428,18 +1389,19 @@ class OAuthService:
         widen redirects and a fetch outage cannot revoke a working grant.
         """
 
+        _validate_client_id(client_id)
         with self.session_factory() as session:
             client = session.get(OAuthClient, client_id)
             if client is not None and client.created_via != "cimd":
                 if client.revoked_at is not None:
                     raise InvalidOAuthRequestError("client is invalid")
                 client.redirect_uris = list(client.redirect_uris)
-                return client
+                return _validate_client_snapshot(client)
             if client is not None and _cimd_has_established_grant(session, client_id):
                 if client.revoked_at is not None:
                     raise InvalidOAuthRequestError("client is invalid")
                 client.redirect_uris = list(client.redirect_uris)
-                return client
+                return _validate_client_snapshot(client)
 
             if client is None and urlparse(client_id).scheme.lower() != "https":
                 raise InvalidOAuthRequestError("client is invalid")
@@ -1447,17 +1409,13 @@ class OAuthService:
         try:
             metadata = fetch_client_metadata_document(client_id)
             if metadata.client_id != client_id:
-                raise InvalidOAuthRequestError(
-                    "client metadata is unavailable"
-                )
+                raise InvalidOAuthRequestError("client metadata is unavailable")
             registration = _validated_cimd_registration(metadata)
         except Exception:
             # This is an unauthenticated network probe. No DNS result,
             # response body, transport exception, or validation detail may
             # cross the OAuth boundary or reach normal request logs.
-            raise InvalidOAuthRequestError(
-                "client metadata is unavailable"
-            ) from None
+            raise InvalidOAuthRequestError("client metadata is unavailable") from None
 
         metadata_fingerprint = _dcr_registration_identity(
             client_name=registration.client_name,
@@ -1468,9 +1426,7 @@ class OAuthService:
             application_type=registration.application_type,
             scope=registration.scope,
         )
-        catalog_repository = (
-            self.catalog_repository or get_mcp_app_catalog_repository()
-        )
+        catalog_repository = self.catalog_repository or get_mcp_app_catalog_repository()
         catalog_association = catalog_repository.find_verified_oauth_association(
             metadata_fingerprint
         )
@@ -1483,12 +1439,12 @@ class OAuthService:
                 if client.revoked_at is not None:
                     raise InvalidOAuthRequestError("client is invalid")
                 client.redirect_uris = list(client.redirect_uris)
-                return client
+                return _validate_client_snapshot(client)
             if client is not None and _cimd_has_established_grant(session, client_id):
                 if client.revoked_at is not None:
                     raise InvalidOAuthRequestError("client is invalid")
                 client.redirect_uris = list(client.redirect_uris)
-                return client
+                return _validate_client_snapshot(client)
             if client is None:
                 client = OAuthClient(
                     id=client_id,
@@ -1538,7 +1494,7 @@ class OAuthService:
                     replace_unconsented=True,
                 )
             client.redirect_uris = list(client.redirect_uris)
-            return client
+            return _validate_client_snapshot(client)
 
     def validate_authorization_request(
         self,
@@ -1557,6 +1513,7 @@ class OAuthService:
         normalized_scope = normalize_scope(scope)
         validate_pkce_request(code_challenge, code_challenge_method)
         validate_state(state)
+        _validate_request_redirect(redirect_uri)
         client = self._resolve_authorization_client(client_id)
         if "authorization_code" not in client.grant_types:
             raise InvalidOAuthRequestError("grant_type is not registered")
@@ -1797,6 +1754,7 @@ class OAuthService:
         replica-fan-out step to wait for.
         """
 
+        _validate_workspace_ids(workspace_ids)
         if workspace_ids is not None and not workspace_ids:
             raise InvalidOAuthRequestError("workspace_ids must not be empty")
 
@@ -2005,9 +1963,7 @@ class OAuthService:
                 ),
                 "scope": representative["scope"] if representative else "",
                 "workspaces": workspaces_payload,
-                "granted_at": (
-                    representative["granted_at"] if representative else now
-                ),
+                "granted_at": (representative["granted_at"] if representative else now),
                 "connection_state": connection_state,
                 "last_used_at": client_last_used_at,
                 "next_expiry": next_expiry,
@@ -2015,9 +1971,7 @@ class OAuthService:
                 "refresh_ttl_seconds": (
                     representative["refresh_ttl_seconds"] if representative else None
                 ),
-                "effective_refresh_ttl_seconds": _effective_refresh_ttl(
-                    representative
-                ),
+                "effective_refresh_ttl_seconds": _effective_refresh_ttl(representative),
                 "sliding_enabled": (
                     representative["sliding_enabled"] if representative else False
                 ),
@@ -2048,9 +2002,7 @@ class OAuthService:
         """
 
         if len(set(workspace_ids)) != len(workspace_ids):
-            raise InvalidOAuthRequestError(
-                "duplicate workspace_id in workspace_ids"
-            )
+            raise InvalidOAuthRequestError("duplicate workspace_id in workspace_ids")
         common_scope = live_group[0].scope
         common_refresh_ttl = live_group[0].refresh_ttl_seconds
         common_sliding = live_group[0].sliding_enabled
@@ -2142,6 +2094,8 @@ class OAuthService:
         outstanding credential: refresh tokens, live access JWTs (via the
         jti denylist), and unconsumed authorization codes."""
 
+        # Management addresses an existing, user-owned registration verbatim.
+        # Legacy CIMD IDs used a code-point limit and may exceed today's bytes.
         with self.session_factory.begin() as session:
             consents = session.scalars(
                 select(OAuthConsent).where(
@@ -2428,14 +2382,6 @@ class OAuthService:
         workspace the user currently holds membership in; an authorize
         request from a user with zero memberships returns an empty list (the
         caller renders a submit-disabled empty checklist).
-
-        Uses a COMMITTING transaction, not a read-only session: the no-hint,
-        no-existing-consent fallback calls ``resolve_workspace_for_actor``,
-        whose single-membership path can repair a stale/inaccessible
-        ``User.default_workspace_id`` to the live Personal workspace
-        (``repair_default_workspace_to_personal``) -- a real write that must
-        survive past this call, exactly as the deleted
-        ``resolve_authorization_workspace`` committed it.
         """
 
         with self.session_factory.begin() as session:
@@ -2556,6 +2502,10 @@ class OAuthService:
         consent for this (user, client) still covers the requested scope.
         """
 
+        _validate_workspace_ids(workspace_ids)
+        validate_state(state)
+        validate_pkce_request(code_challenge, code_challenge_method)
+        _validate_request_redirect(redirect_uri)
         normalized_scope = normalize_scope(scope)
         # Re-resolve before the state-changing POST. A successful GET will hit
         # the bounded cache; after the first grant the persisted snapshot wins.
@@ -2619,16 +2569,12 @@ class OAuthService:
                 member_ids = {workspace.id for workspace, _role in memberships}
                 for requested_id in workspace_ids:
                     if requested_id not in member_ids:
-                        raise InvalidOAuthRequestError(
-                            "workspace access is required"
-                        )
+                        raise InvalidOAuthRequestError("workspace access is required")
                 selected_ids = set(workspace_ids)
                 live_by_workspace = {row.workspace_id: row for row in live_group}
                 merged_scope = normalized_scope
                 if live_group:
-                    merged_scope = merge_scopes(
-                        live_group[0].scope, normalized_scope
-                    )
+                    merged_scope = merge_scopes(live_group[0].scope, normalized_scope)
                 added_ids: list[UUID] = []
                 removed_ids: list[UUID] = []
                 now = utc_now()
@@ -2655,9 +2601,7 @@ class OAuthService:
                             ),
                             catalog_revision=client.catalog_revision,
                             granted_at=now,
-                            desired_scopes=normalize_scope(
-                                merged_scope
-                            ).split(),
+                            desired_scopes=normalize_scope(merged_scope).split(),
                             revision=1,
                             sync_state="pending",
                         )
@@ -2747,6 +2691,7 @@ class OAuthService:
                 ):
                     raise InvalidOAuthRequestError("consent is required")
             code = secrets.token_urlsafe(32)
+            _validate_opaque_token(code, "authorization code")
             session.add(
                 OAuthCode(
                     code_hash=token_hash(code),
@@ -2782,6 +2727,13 @@ class OAuthService:
         redirect_uri: str,
         code_verifier: str,
     ) -> OAuthTokenResult:
+        _validate_client_id(client_id)
+        _validate_opaque_token(code, "authorization code")
+        validate_code_verifier(code_verifier)
+        try:
+            validate_redirect_uri(redirect_uri)
+        except InvalidClientRegistrationError as exc:
+            raise InvalidOAuthRequestError(str(exc)) from exc
         with self.session_factory.begin() as session:
             # SQLite needs explicit write intent before the guarded read;
             # pysqlite otherwise defers BEGIN until the first DML statement.
@@ -2833,6 +2785,8 @@ class OAuthService:
         defenses. The process mutex is also required by the supported
         single-process deployment and covers test/in-memory engines.
         """
+        _validate_client_id(client_id)
+        _validate_opaque_token(refresh_token, "refresh token")
         requested_scope = None if scope in (None, "") else normalize_scope(scope)
         with _OAUTH_REFRESH_LOCK:
             return self._refresh_access_token_locked(
@@ -2891,8 +2845,7 @@ class OAuthService:
                 current = session.scalar(
                     select(OAuthRefreshToken)
                     .where(
-                        OAuthRefreshToken.token_lookup_hash
-                        == token_hash(refresh_token)
+                        OAuthRefreshToken.token_lookup_hash == token_hash(refresh_token)
                     )
                     .with_for_update()
                 )
@@ -2910,11 +2863,7 @@ class OAuthService:
                 family_key = current.grant_id or current.id
                 token_age_seconds = max(
                     0,
-                    int(
-                        (
-                            now - to_aware_utc(current.created_at)
-                        ).total_seconds()
-                    ),
+                    int((now - to_aware_utc(current.created_at)).total_seconds()),
                 )
 
                 def refuse(
@@ -3163,6 +3112,8 @@ class OAuthService:
         * ``None`` — neither matched (caller still returns 200)
         """
 
+        if not ascii_token_is_valid(token, OAUTH_JWT_MAX_BYTES):
+            return None
         matched_kind: str | None = None
         with self.session_factory.begin() as session:
             order: list[str]
@@ -3216,6 +3167,8 @@ class OAuthService:
         revoker_actor_id: str | None,
         revoker_client_id: str | None,
     ) -> bool:
+        if not ascii_token_is_valid(token, OAUTH_OPAQUE_TOKEN_MAX_BYTES):
+            return False
         row = session.scalar(
             select(OAuthRefreshToken).where(
                 OAuthRefreshToken.token_lookup_hash == token_hash(token),
@@ -3228,10 +3181,7 @@ class OAuthService:
         # client-id auth is enforced at the endpoint layer (the endpoint
         # validates client_id form == token.client_id before calling
         # this method); we treat None as "endpoint already authorised".
-        if (
-            revoker_user_id is not None
-            and row.user_id != revoker_user_id
-        ):
+        if revoker_user_id is not None and row.user_id != revoker_user_id:
             # Wrong-user oracle: behave as if the token were unknown so
             # the endpoint returns 200 and does NOT disclose existence.
             return False
@@ -3283,6 +3233,8 @@ class OAuthService:
         revoker_actor_id: str | None,
         revoker_client_id: str | None,
     ) -> bool:
+        if not ascii_token_is_valid(token, OAUTH_JWT_MAX_BYTES):
+            return False
         try:
             payload = jwt.decode(
                 token,
@@ -3301,10 +3253,7 @@ class OAuthService:
         jti_row = session.get(OAuthAccessTokenJti, jti)
         if jti_row is None:
             return False
-        if (
-            revoker_user_id is not None
-            and jti_row.user_id != revoker_user_id
-        ):
+        if revoker_user_id is not None and jti_row.user_id != revoker_user_id:
             return False
         if revoker_client_id is not None and jti_row.client_id != revoker_client_id:
             return False
@@ -3340,6 +3289,8 @@ class OAuthService:
         endpoint to enforce the native ``client_id`` form-match rule
         without leaking token existence to unauthenticated callers."""
 
+        if not ascii_token_is_valid(token, OAUTH_OPAQUE_TOKEN_MAX_BYTES):
+            return None
         with self.session_factory() as session:
             row = session.scalar(
                 select(OAuthRefreshToken).where(
@@ -3352,6 +3303,8 @@ class OAuthService:
         """Return the ``client_id`` claim of an access JWT, or ``None``
         if the token cannot be decoded as a signed JWT for this issuer."""
 
+        if not ascii_token_is_valid(token, OAUTH_JWT_MAX_BYTES):
+            return None
         try:
             payload = jwt.decode(
                 token,
@@ -3368,6 +3321,8 @@ class OAuthService:
         return str(client_id) if client_id else None
 
     def verify_access_token(self, token: str) -> OAuthAccessTokenActor:
+        if not ascii_token_is_valid(token, OAUTH_JWT_MAX_BYTES):
+            raise InvalidOAuthGrantError("access token is invalid")
         try:
             payload = jwt.decode(
                 token,
@@ -3488,11 +3443,13 @@ class OAuthService:
             algorithm="RS256",
             headers={"kid": JWT_KID},
         )
+        require_ascii_token(access_token, OAUTH_JWT_MAX_BYTES, "access token")
         # Refresh-token issuance intentionally remains unconditional. Hosted
         # clients that do not request ``offline_access`` would otherwise
         # re-authorize every access-token lifetime; do not gate issuance on the
         # scope unless client behavior and the compatibility policy both change.
         refresh_token = f"rt_{secrets.token_urlsafe(32)}"
+        _validate_opaque_token(refresh_token, "refresh token")
         refresh_model = OAuthRefreshToken(
             token_lookup_hash=token_hash(refresh_token),
             grant_id=stable_grant_id,
@@ -3662,9 +3619,7 @@ def _validated_cimd_registration(
 def _cimd_has_established_grant(session: Session, client_id: str) -> bool:
     now = utc_now()
     consent = session.scalar(
-        select(OAuthConsent.user_id)
-        .where(OAuthConsent.client_id == client_id)
-        .limit(1)
+        select(OAuthConsent.user_id).where(OAuthConsent.client_id == client_id).limit(1)
     )
     if consent is not None:
         return True
@@ -3703,6 +3658,10 @@ def effective_consent_sliding_enabled(
 
 
 def normalize_scope(scope: str) -> str:
+    try:
+        validate_scope_input(scope)
+    except ValueError as exc:
+        raise InvalidOAuthRequestError(str(exc)) from exc
     requested = [item for item in scope.split() if item]
     if not requested:
         requested = ["mcp:read"]
@@ -3976,17 +3935,15 @@ def record_refresh_token_refusal(
     family_refresh_count = 0
     family_access_count = 0
     if reason == "rotated_reuse":
-        family_refresh_count, family_access_count = (
-            revoke_refresh_token_grant_family(
-                session,
-                user_id=user_id,
-                client_id=client_id,
-                detected_via=detected_via or "rotated_to_id",
-                reused_refresh_id=refresh_token_id,
-                family_key=family_key,
-                reason=reason,
-                token_age_seconds=token_age_seconds,
-            )
+        family_refresh_count, family_access_count = revoke_refresh_token_grant_family(
+            session,
+            user_id=user_id,
+            client_id=client_id,
+            detected_via=detected_via or "rotated_to_id",
+            reused_refresh_id=refresh_token_id,
+            family_key=family_key,
+            reason=reason,
+            token_age_seconds=token_age_seconds,
         )
     elif reason in _REFRESH_REFUSALS_REVOKING_FAMILY:
         family_refresh_count, family_access_count = (
@@ -4111,25 +4068,20 @@ def revoke_live_token_grant_families(
     the refresh-token family.
     """
 
-    statement = select(OAuthRefreshToken).where(
-        OAuthRefreshToken.user_id == user_id
-    )
+    statement = select(OAuthRefreshToken).where(OAuthRefreshToken.user_id == user_id)
     if client_id is not None:
         statement = statement.where(OAuthRefreshToken.client_id == client_id)
     family_keys = {
-        token.grant_id or token.id
-        for token in session.scalars(statement).all()
+        token.grant_id or token.id for token in session.scalars(statement).all()
     }
     now = revoked_at or utc_now()
     refresh_count = 0
     access_count = 0
     for family_key in family_keys:
-        revoked_refresh, revoked_access = (
-            _revoke_refresh_token_grant_family_rows(
-                session,
-                family_key=family_key,
-                revoked_at=now,
-            )
+        revoked_refresh, revoked_access = _revoke_refresh_token_grant_family_rows(
+            session,
+            family_key=family_key,
+            revoked_at=now,
         )
         refresh_count += revoked_refresh
         access_count += revoked_access
@@ -4234,7 +4186,20 @@ _LOOPBACK_CANONICAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 def validate_redirect_uri(uri: str) -> str:
-    parsed = urlparse(uri)
+    if not utf8_size_is_valid(uri, OAUTH_IDENTIFIER_MAX_BYTES) or any(
+        character.isspace() or ord(character) < 32 or 127 <= ord(character) <= 159
+        for character in uri
+    ):
+        raise InvalidClientRegistrationError(
+            "redirect_uri must contain 1-2048 UTF-8 bytes "
+            "without whitespace or controls"
+        )
+    try:
+        parsed = urlparse(uri)
+    except ValueError as exc:
+        # urlsplit rejects unbalanced or non-IP brackets and a netloc that
+        # NFKC-normalizes to a delimiter; callers expect an OAuth error.
+        raise InvalidClientRegistrationError("redirect_uri is malformed") from exc
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise InvalidClientRegistrationError("redirect_uri must be absolute http(s)")
     if parsed.fragment:
@@ -4275,9 +4240,7 @@ def validate_redirect_uri(uri: str) -> str:
             "redirect_uri host trailing dot not allowed"
         )
     if port == 0:
-        raise InvalidClientRegistrationError(
-            "redirect_uri loopback port 0 not allowed"
-        )
+        raise InvalidClientRegistrationError("redirect_uri loopback port 0 not allowed")
     if parsed.scheme == "http" and port is None:
         raise InvalidClientRegistrationError(
             "redirect_uri loopback port is required (RFC 8252 §7.3)"
@@ -4380,20 +4343,83 @@ def validate_pkce_request(code_challenge: str, code_challenge_method: str) -> No
 
 
 def validate_code_challenge(code_challenge: str) -> None:
-    if len(code_challenge) < 43 or len(code_challenge) > 128:
+    if (
+        not isinstance(code_challenge, str)
+        or re.fullmatch(r"[A-Za-z0-9_-]{43}", code_challenge) is None
+    ):
         raise InvalidOAuthRequestError("code_challenge is invalid")
 
 
 def validate_state(state: str) -> None:
-    if len(state) < MIN_STATE_LENGTH:
+    if isinstance(state, str) and len(state) < MIN_STATE_LENGTH:
         raise InvalidOAuthRequestError(
             f"state is required and must be at least {MIN_STATE_LENGTH} chars"
+        )
+    if (
+        not isinstance(state, str)
+        or len(state) > 512
+        or any(not " " <= character <= "~" for character in state)
+    ):
+        raise InvalidOAuthRequestError(
+            "state is required and must contain "
+            f"{MIN_STATE_LENGTH}-512 printable ASCII chars"
         )
 
 
 def challenge_s256(code_verifier: str) -> str:
+    validate_code_verifier(code_verifier)
     digest = hashlib.sha256(code_verifier.encode()).digest()
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+
+def validate_code_verifier(code_verifier: str) -> None:
+    if (
+        not isinstance(code_verifier, str)
+        or re.fullmatch(r"[A-Za-z0-9._~-]{43,128}", code_verifier) is None
+    ):
+        raise InvalidOAuthRequestError(
+            "code_verifier must contain 43-128 ASCII unreserved chars"
+        )
+
+
+def _validate_client_id(client_id: str) -> None:
+    try:
+        validate_identifier(client_id)
+    except ValueError as exc:
+        raise InvalidOAuthRequestError(str(exc)) from exc
+
+
+def _validate_workspace_ids(workspace_ids: object) -> None:
+    if workspace_ids is not None and (
+        not isinstance(workspace_ids, list)
+        or len(workspace_ids) > WORKSPACE_GRANTS_MAX_COUNT
+    ):
+        raise InvalidOAuthRequestError("workspace_ids must contain at most 256 entries")
+
+
+def _validate_client_snapshot(client: OAuthClient) -> OAuthClient:
+    try:
+        validate_client_name(client.client_name)
+        redirects = validate_redirect_list(client.redirect_uris)
+        for uri in redirects:
+            validate_redirect_uri(uri)
+    except (ValueError, InvalidClientRegistrationError) as exc:
+        raise InvalidOAuthRequestError(
+            "client metadata exceeds supported input limits"
+        ) from exc
+    return client
+
+
+def _validate_opaque_token(token: str, label: str) -> None:
+    if not ascii_token_is_valid(token, OAUTH_OPAQUE_TOKEN_MAX_BYTES):
+        raise InvalidOAuthGrantError(f"{label} is invalid")
+
+
+def _validate_request_redirect(redirect_uri: str) -> None:
+    try:
+        validate_redirect_uri(redirect_uri)
+    except InvalidClientRegistrationError as exc:
+        raise InvalidOAuthRequestError(str(exc)) from exc
 
 
 def token_hash(token: str) -> str:

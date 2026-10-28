@@ -598,32 +598,36 @@
   margin-top: 0;
 }
 
-/* Identity pill: who did this. A single tone for human/agent/system; split in
-   two for an MCP actor (see .activity-actor-split below). */
+/* Identity pill: who did this. People and the system are neutral and told
+   apart by their glyph; color stays with sections (type icons), the AI half of
+   an MCP actor and status. Tokens come from the shared palette as-is. */
 .activity-actor-pill {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   height: 22px;
   padding: 0 10px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--av-tone) 15%, var(--surface));
-  color: color-mix(in srgb, var(--av-tone) 62%, var(--ink));
+  background: var(--av-bg);
+  color: var(--av-ink);
   font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
 }
 
-.activity-actor-pill[data-actor="human"] {
-  --av-tone: var(--context);
+.activity-actor-pill[data-actor="human"],
+.activity-actor-pill[data-actor="system"] {
+  --av-bg: var(--surface-active);
+  --av-ink: var(--ink);
+  padding-left: 7px;
 }
 
 .activity-actor-pill[data-actor="agent"] {
-  --av-tone: var(--library);
+  --av-bg: var(--library-soft);
+  --av-ink: var(--library-text);
 }
 
-.activity-actor-pill[data-actor="system"] {
-  --av-tone: var(--ink-muted);
-}
+.activity-actor-icon { flex: none; color: var(--ink-muted); }
 
 /* An MCP client's identity is two facts, not one: who granted the access, and
    which registered AI ran under it. Splitting one pill in half (rather than
@@ -642,18 +646,19 @@
 .activity-actor-split__owner {
   display: inline-flex;
   align-items: center;
-  padding: 0 9px 0 10px;
-  background: color-mix(in srgb, var(--context) 15%, var(--surface));
-  color: color-mix(in srgb, var(--context) 62%, var(--ink));
+  gap: 4px;
+  padding: 0 9px 0 7px;
+  background: var(--surface-active);
+  color: var(--ink);
 }
 
 .activity-actor-split__ai {
   display: inline-flex;
   align-items: center;
   padding: 0 10px 0 9px;
-  border-left: 1px solid color-mix(in srgb, var(--agent) 32%, var(--border));
-  background: color-mix(in srgb, var(--agent) 16%, var(--surface));
-  color: color-mix(in srgb, var(--agent) 62%, var(--ink));
+  border-left: 1px solid var(--border-strong);
+  background: var(--agent-soft);
+  color: var(--agent-text);
 }
 
 /* An MCP client with no owner on record (legacy key, deleted user) has only
@@ -918,13 +923,12 @@ a.activity-source-chip:focus-visible {
    `18px minmax(0, 1fr) auto auto` already provides, so no override remains
    here. */
 
-/* Search result card. Same language as the Lint findings queue and the
-   Activity feed: neutral surface, one toned pill for identity, and a bordered
-   two-segment chip for the metadata + action pair. It replaces .operations-row
-   here rather than changing that shared primitive, which Setup/Settings/
-   AccountSecurity still use as-is. */
+/* Search rows: title, preview, location, then an optional match explanation. */
 .search-result-row {
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
   width: 100%;
   min-width: 0;
   padding: 12px 14px;
@@ -940,30 +944,23 @@ a.activity-source-chip:focus-visible {
     border-color: var(--border-strong);
     background: var(--surface-hover);
   }
+  a.search-result-row:hover .search-result-title-text { text-decoration: underline; }
+  a.search-result-row:hover .search-result-chevron { color: var(--info); }
 }
 
-a.search-result-row:focus-visible {
-  outline: 2px solid var(--info);
-  outline-offset: 2px;
-}
-
-/* A result that cannot be opened is still a card, but must not offer the
-   hover/pointer affordances of a link. */
-.search-result-row.is-disabled {
-  background: var(--surface-subtle);
-  cursor: default;
-}
-
+a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+.search-result-row.is-disabled { background: var(--surface-subtle); cursor: default; }
 .search-result-body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   min-width: 0;
 }
-
+/* Keep every text block inside the column reserved beside the chevron. */
+.search-result-body > * { min-width: 0; max-width: 100%; }
 .search-result-title {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  align-items: baseline;
   gap: 8px;
   margin: 0;
   color: var(--ink);
@@ -971,13 +968,18 @@ a.search-result-row:focus-visible {
   font-weight: 600;
   overflow-wrap: anywhere;
 }
-
-/* The result kind, in the slot Lint gives severity and Activity gives the
-   actor. Every row previously shared one identical leading glyph, so kind was
-   carried only by the trailing button's hue. */
+.search-result-title-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  min-width: 0;
+  line-height: 1.5;
+}
 .search-result-kind {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
   height: 22px;
   padding: 0 10px;
   border-radius: 999px;
@@ -987,172 +989,44 @@ a.search-result-row:focus-visible {
   font-weight: 700;
   white-space: nowrap;
 }
-
-.search-result-kind[data-identity="context"] {
-  --kind-tone: var(--context);
-}
-
-.search-result-kind[data-identity="library"] {
-  --kind-tone: var(--library);
-}
-
-.search-result-kind[data-identity="agent"] {
-  --kind-tone: var(--agent);
-}
-
-.search-result-kind[data-identity="review"] {
-  --kind-tone: var(--review);
-}
-
-.search-result-kind[data-identity="muted"] {
-  --kind-tone: var(--ink-muted);
-}
-
+.search-result-kind[data-identity="context"] { --kind-tone: var(--context); }
+.search-result-kind[data-identity="library"] { --kind-tone: var(--library); }
+.search-result-kind[data-identity="agent"] { --kind-tone: var(--agent); }
+.search-result-kind[data-identity="review"] { --kind-tone: var(--review); }
+.search-result-kind[data-identity="muted"] { --kind-tone: var(--ink-muted); }
 .search-result-snippet,
-.search-result-path {
+.search-result-location,
+.search-result-reason,
+.search-result-unavailable {
   margin: 0;
-  color: var(--ink-soft);
   font-size: 12px;
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
-
-/* The chip row is a distinct component, not a continuation of the snippet
-   above it (matches .lint-finding-chips / .activity-row__chips). */
-.search-result-chips {
-  margin-top: 4px;
-}
-
-/* Match reason and the open action live in ONE bordered box divided by a
-   hairline. As two separate chips they never agreed -- 20px against 24px --
-   the same drift the Lint queue had between its rule and target chips. */
-.search-source-chip {
-  display: inline-flex;
-  align-items: stretch;
-  min-width: 0;
-  max-width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  overflow: hidden;
-}
-
-.search-source-chip__reason {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 1 auto;
-  min-width: 0;
-  min-height: 30px;
-  padding: 0 14px;
-  overflow: hidden;
-  background: var(--surface-subtle);
-  color: var(--ink-muted);
-  font-size: 12px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The whole row is already the link, so this is a visual affordance rather
-   than a nested interactive element -- it must not be an <a>. */
-.search-source-chip__open {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 30px;
-  padding: 0 14px;
-  background: color-mix(in srgb, var(--kind-tone) 8%, var(--surface));
-  color: color-mix(in srgb, var(--kind-tone) 70%, var(--ink));
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.search-source-chip__reason + .search-source-chip__open {
-  border-left: 1px solid var(--border);
-}
-
-.search-source-chip__open[data-identity="context"] {
-  --kind-tone: var(--context);
-}
-
-.search-source-chip__open[data-identity="library"] {
-  --kind-tone: var(--library);
-}
-
-.search-source-chip__open[data-identity="agent"] {
-  --kind-tone: var(--agent);
-}
-
-.search-source-chip__open[data-identity="review"] {
-  --kind-tone: var(--review);
-}
-
-.search-source-chip__open[data-identity="muted"] {
-  --kind-tone: var(--ink-muted);
-}
-
-/* Muted meta text replacing the invented "open unavailable"/"no citation"
-   StatusPills (which falsely read as system faults). */
-.search-result-meta {
-  color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 600;
-}
+.search-result-snippet { color: var(--ink-soft); }
+.search-result-snippet strong { font-weight: 600; }
+.search-result-location { display: flex; align-items: center; gap: 5px; color: var(--ink-muted); }
+.search-result-location > svg { flex-shrink: 0; }
+.search-result-location-parts { display: flex; flex: 1 1 0; align-items: center; min-width: 0; max-width: 100%; }
+.search-result-location-part { display: inline-flex; align-items: center; min-width: 0; gap: 4px; }
+.search-result-location-part > svg { flex-shrink: 0; }
+.search-result-location-part > span { min-width: 0; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Keep first and last two stages on desktop. The full path is also supplied
+   through aria-describedby, including on touch screens. */
+.search-result-location-part[data-desktop-visible="false"] { display: none; }
+.search-result-reason { display: flex; align-items: center; gap: 5px; margin-top: 4px; color: var(--info); }
+.search-result-reason > svg { flex-shrink: 0; }
+.search-result-unavailable,
+.search-result-chevron,
+.search-result-disabled-label { color: var(--ink-muted); }
+.search-result-disabled-label { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
 
 @media (max-width: 640px) {
-  /* Side by side on a phone the open segment shrinks to a few unreadable
-     characters; stack the two segments inside the same box instead, exactly
-     as .lint-source-chip does. */
-  .search-source-chip {
-    flex-direction: column;
-    align-items: stretch;
-    width: 100%;
-  }
-
-  .search-source-chip__reason + .search-source-chip__open {
-    border-left: 0;
-    border-top: 1px solid var(--border);
-  }
-}
-
-@media (max-width: 1024px), (any-pointer: coarse) {
-  .search-source-chip__reason,
-  .search-source-chip__open {
-    min-height: 44px;
-  }
-}
-
-.search-disambiguation-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.search-disambiguation-candidate {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 7px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-subtle);
-  padding: 3px 9px;
-  color: var(--ink);
-  font-size: 12px;
-  text-decoration: none;
-}
-
-a.search-disambiguation-candidate:hover {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  color: var(--accent);
-}
-
-.search-disambiguation-candidate strong {
-  font-weight: 700;
-}
-
-.search-disambiguation-candidate span {
-  color: var(--ink-muted);
-  font-family: var(--font-mono, monospace);
-  font-size: 11px;
+  .search-result-title { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .search-result-title-text { -webkit-line-clamp: 3; }
+  .search-result-row.is-disabled { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .search-result-location-part[data-mobile-visible="true"] { display: inline-flex; }
+  .search-result-location-part[data-mobile-visible="false"] { display: none; }
 }
 
 .operations-row.compact {
@@ -1397,16 +1271,6 @@ a.search-disambiguation-candidate:hover {
   background: var(--surface-hover);
 }
 
-.search-field-spinner {
-  animation: search-field-spin 800ms linear infinite;
-}
-
-@keyframes search-field-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @media (pointer: coarse) {
   .search-field {
     min-height: 44px;
@@ -1627,3 +1491,294 @@ a.search-disambiguation-candidate:hover {
 .lint-bulk-spacer {
   flex: 1;
 }
+
+/* Shared Dashboard / Activity feed. One list surface; each entry is a row grid
+   with the meta line (type -> actor | status) above the title (| time), the
+   description, and one line of secondary controls. The wrappers keep their
+   DOM roles but give up their boxes, so every part takes a cell of the row.
+   Visible spacing follows the plan (chip -> title 4px, title -> description
+   4px); row targets stay 24px for pointer and touch input. */
+.activity-feed-list {
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.activity-feed-list > .activity-feed-entry + .activity-feed-entry { border-top: 1px solid var(--border); }
+.activity-feed-list > .activity-feed-entry:first-child { border-top-left-radius: 9px; border-top-right-radius: 9px; }
+.activity-feed-list > .activity-feed-entry:last-child { border-bottom-left-radius: 9px; border-bottom-right-radius: 9px; }
+
+.activity-feed-entry {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  column-gap: 16px;
+  min-width: 0;
+  padding: 16px 20px;
+  background: var(--surface);
+}
+.activity-feed-entry :is(.activity-entry__layout, .activity-entry__body, .activity-entry__trailing, .activity-entry__review-footer, .activity-read-group) { display: contents; }
+
+.activity-entry__identity {
+  grid-column: 1 / 4;
+  grid-row: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+  min-height: 24px;
+}
+.activity-entry__type {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  max-width: 45%;
+  min-width: 0;
+  overflow: hidden;
+  padding-bottom: 3px;
+  color: var(--activity-type-ink, #475569);
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 700;
+}
+.activity-entry__type > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Section icons repeat the sidebar's glyph and palette color for the type. */
+.activity-entry__type-icon { flex: none; color: var(--activity-type-icon, var(--ink-muted)); }
+.activity-entry__type[data-kind="context"] { --activity-type-icon: var(--context); }
+.activity-entry__type[data-kind="library"] { --activity-type-icon: var(--library); }
+.activity-entry__type[data-kind="agent"] { --activity-type-icon: var(--agent); }
+.activity-entry__type[data-kind="review"] { --activity-type-icon: var(--review); }
+
+.activity-actor-disclosure {
+  display: inline-flex;
+  align-items: flex-end;
+  flex: 0 1 auto;
+  min-width: 24px;
+  max-width: 100%;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  text-align: start;
+}
+.activity-actor-disclosure :is(.activity-actor-pill, .activity-actor-split) { min-width: 0; max-width: 100%; }
+.activity-actor-disclosure .activity-actor-pill { padding-right: 9px; }
+.activity-actor-disclosure .activity-actor-pill[data-actor="agent"] { padding-left: 9px; }
+.activity-actor-disclosure .activity-actor-pill > span {
+  min-width: 0;
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-actor-disclosure :is(.activity-actor-split__owner, .activity-actor-split__ai) {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: calc(14ch + 30px);
+  padding-right: 9px;
+}
+.activity-actor-disclosure .activity-actor-split__ai { max-width: calc(12ch + 18px); padding-left: 9px; }
+.activity-actor-disclosure .activity-actor-split__ai:only-child { padding-left: 10px; }
+.activity-actor-disclosure :is(.activity-actor-split__owner, .activity-actor-split__ai) > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-actor-popover {
+  z-index: var(--z-popover, 1000);
+  width: min(360px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.activity-actor-popover dl, .activity-entry__technical dl { margin: 0; }
+.activity-actor-popover dt, .activity-entry__technical dt { color: var(--ink-muted); font-size: 11px; font-weight: 700; }
+.activity-actor-popover dd, .activity-entry__technical dd { margin: 2px 0 12px; }
+.activity-actor-popover dd:last-child, .activity-entry__technical dd:last-child { margin-bottom: 0; }
+
+.activity-entry__title-link, .activity-entry__plain-title {
+  grid-column: 1 / 4;
+  grid-row: 2;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  max-width: 100%;
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.activity-entry__title-link { width: fit-content; min-height: 24px; border-radius: 5px; }
+.activity-entry__heading { display: inline-flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.activity-entry__heading > svg { flex: none; margin-top: 4px; }
+.activity-entry__description { margin: 0; color: var(--ink-soft); font-size: 12px; line-height: 18px; font-weight: 400; }
+.activity-entry__times {
+  grid-column: 4;
+  grid-row: 2 / span 2;
+  display: grid;
+  justify-items: end;
+  align-self: start;
+  min-width: 0;
+  max-width: 100%;
+  margin-top: 4px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 22px;
+  white-space: nowrap;
+}
+.activity-entry__time-range { max-width: 100%; font-size: 11px; line-height: 16px; white-space: normal; overflow-wrap: anywhere; text-align: end; }
+.activity-entry__time-range > time { white-space: nowrap; }
+.activity-action-badge {
+  --activity-action-tone: var(--ink-soft);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--activity-action-tone) 9%, var(--surface));
+  color: var(--activity-action-tone);
+  font-size: 11px;
+  line-height: 22px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.activity-entry__trailing > .activity-action-badge { grid-column: 4; grid-row: 1; justify-self: end; align-self: end; }
+.activity-action-badge svg { flex: none; }
+.activity-action-badge[data-action="edited"] { --activity-action-tone: #1d4ed8; }
+.activity-action-badge[data-action="created"] { --activity-action-tone: #0f766e; }
+.activity-action-badge[data-action="published"] { --activity-action-tone: #166534; }
+.activity-action-badge[data-action="restored"] { --activity-action-tone: #7e22ce; }
+.activity-action-badge[data-action="deleted"] { --activity-action-tone: #9f1239; }
+.activity-action-badge[data-action="reviewed"] { --activity-action-tone: #0e7490; }
+.activity-action-badge[data-action="failed"] { --activity-action-tone: #b91c1c; }
+.activity-action-badge:is([data-action="pending"], [data-action="partial"], [data-action="accepted"]) { --activity-action-tone: #92400e; }
+/* A pending review's link takes the status cell every other row uses. */
+.activity-entry__review-link { grid-column: 4; grid-row: 1; justify-self: end; align-self: end; display: inline-flex; align-items: center; min-height: 24px; border-radius: 5px; }
+.activity-entry__fallback { grid-column: 1 / 4; grid-row: 3; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; color: var(--ink-muted); font-size: 12px; line-height: 18px; }
+.activity-entry__fallback > span, .activity-entry__fallback > a { display: inline-flex; align-items: center; gap: 5px; }
+.activity-entry__fallback > a { min-height: 24px; border-radius: 5px; color: var(--activity-link-ink, var(--context)); }
+/* Secondary controls share one quiet line under the title block. */
+.activity-entry__technical { grid-column: 1; grid-row: 4; margin-top: 8px; color: var(--ink-soft); font-size: 12px; line-height: 18px; }
+.activity-entry__technical > summary { width: fit-content; min-height: 24px; line-height: 24px; cursor: pointer; border-radius: 5px; }
+.activity-entry__technical[open] { grid-column: 1 / -1; }
+.activity-entry__technical > dl { margin-top: 6px; padding: 8px 12px; border-radius: 6px; background: var(--surface-subtle); overflow-wrap: anywhere; }
+
+.activity-read-group__toggle, .activity-read-group__collapse, .activity-read-group__retry {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 24px; margin: 0; padding: 0 8px;
+  border: 0; border-radius: 5px; background: transparent; color: var(--activity-link-ink, var(--context)); font-size: 12px; line-height: 18px; cursor: pointer;
+}
+.activity-read-group__toggle { grid-column: 2; grid-row: 4; justify-self: start; margin-top: 8px; padding: 0; }
+.activity-feed-entry:not(:has(> .activity-entry__layout .activity-entry__technical)) .activity-read-group__toggle { grid-column: 1; }
+/* Open details occupy the full row; the group's own controls follow them.
+   Scope the match to this entry so nested member details do not move it. */
+.activity-feed-entry:has(> .activity-entry__layout .activity-entry__technical[open]) > .activity-read-group > .activity-read-group__toggle { grid-column: 1 / -1; grid-row: 5; }
+.activity-feed-entry:has(> .activity-entry__layout .activity-entry__technical[open]) > .activity-read-group > .activity-read-group__members { grid-row: 6; }
+/* Expanded members: an inset panel (no left bar). Members share the group's
+   actor, target and action, so each repeats neither chip nor badge. */
+.activity-read-group__members { grid-column: 1 / -1; grid-row: 5; margin: 12px 0 0; padding: 4px 0; border-radius: 8px; background: var(--surface-subtle); }
+.activity-read-group__members[hidden] { display: none; }
+.activity-read-group__message { padding: 8px 16px; color: var(--ink-soft); font-size: 12px; line-height: 18px; }
+.activity-read-group__list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.activity-read-group__list .activity-feed-entry { grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; padding: 8px 16px; background: var(--surface-subtle); }
+.activity-read-group__list li + li .activity-feed-entry { border-top: 1px solid var(--border); }
+.activity-read-group__list :is(.activity-entry__identity, .activity-action-badge) { display: none; }
+.activity-read-group__list :is(.activity-entry__title-link, .activity-entry__plain-title) { grid-column: 1; grid-row: 1; margin: 0; font-size: 13px; line-height: 20px; font-weight: 500; }
+.activity-read-group__list .activity-entry__technical { grid-column: 2; grid-row: 1; margin: 0; }
+.activity-read-group__list .activity-entry__technical[open] { grid-column: 1 / -1; grid-row: 3; margin-top: 6px; }
+.activity-read-group__list .activity-entry__times { grid-column: 3; grid-row: 1; margin: 0; }
+.activity-read-group__list .activity-entry__fallback { grid-column: 1 / -1; grid-row: 2; }
+.activity-read-group__collapse { margin: 0 8px; }
+
+.activity-feed-panel { min-width: 0; }
+.activity-feed-counts { color: var(--ink-soft); font-size: 12px; line-height: 18px; }
+.activity-feed-scope { color: var(--ink-muted); font-size: 11px; line-height: 16px; }
+.activity-feed-summary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; min-width: 0; }
+.activity-grouping-control { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: var(--ink-soft); font-size: 12px; line-height: 18px; cursor: pointer; }
+.activity-grouping-control > input { flex: none; width: 16px; height: 16px; accent-color: var(--context); }
+.activity-feed-reload { min-width: 44px; min-height: 44px; }
+
+:is(.activity-actor-disclosure, .activity-entry__title-link, .activity-entry__review-link, .activity-entry__fallback > a, .activity-read-group__toggle, .activity-read-group__collapse, .activity-read-group__retry):focus-visible { outline: 3px solid var(--info); outline-offset: 2px; }
+@media (hover: hover) {
+  .activity-entry__title-link:hover .activity-entry__heading > span,
+  .activity-entry__review-link:hover .activity-action-badge > span,
+  .activity-entry__fallback > a:hover,
+  .activity-read-group__toggle:hover,
+  .activity-read-group__collapse:hover,
+  .activity-read-group__retry:hover { text-decoration: underline; text-underline-offset: 3px; }
+}
+
+@media (max-width: 700px) {
+  .activity-feed-entry { padding: 14px 16px; column-gap: 12px; }
+  .activity-entry__identity,
+  .activity-entry__title-link,
+  .activity-entry__plain-title,
+  .activity-entry__fallback { grid-column: 1 / -1; }
+  /* A wrapped title keeps its chevron after the last word. */
+  .activity-entry__heading { display: inline; }
+  .activity-entry__heading > svg { display: inline; vertical-align: -2px; margin: 0 0 0 4px; }
+  /* The plan's mobile footer: status on the left, time on the right. */
+  .activity-entry__trailing > .activity-action-badge,
+  .activity-entry__review-link { grid-column: 1 / 3; grid-row: 6; justify-self: start; align-self: center; margin-top: 8px; }
+  .activity-entry__times { grid-column: 3 / -1; grid-row: 6; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; justify-self: end; align-self: center; gap: 0 8px; margin-top: 8px; }
+  .activity-read-group__members,
+  .activity-feed-entry:has(> .activity-entry__layout .activity-entry__technical[open]) > .activity-read-group > .activity-read-group__members { grid-row: 7; }
+  /* Cross-date ranges need their own line; short same-day ranges keep the
+     compact status/time footer above. Whole timestamp ends wrap as a unit. */
+  .activity-entry__times[data-range-spans-days] { grid-column: 1 / -1; grid-row: 7; width: 100%; margin-top: 4px; }
+  .activity-feed-entry:has(> .activity-entry__layout .activity-entry__times[data-range-spans-days]) > .activity-read-group > .activity-read-group__members { grid-row: 8; }
+  .activity-read-group__list .activity-feed-entry { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; padding: 8px 12px; }
+  .activity-read-group__list :is(.activity-entry__title-link, .activity-entry__plain-title) { grid-column: 1 / -1; }
+  .activity-read-group__list .activity-entry__technical { grid-column: 1; grid-row: 2; }
+  .activity-read-group__list .activity-entry__technical[open] { grid-column: 1 / -1; grid-row: 3; }
+  .activity-read-group__list .activity-entry__times { grid-column: 2; grid-row: 2; align-self: center; }
+}
+
+/* Component-scoped dark context. The application has no global dark-theme
+   switch; these tokens cover both the feed surface and its portaled names.
+   Actor chips keep their 700 weight; the neutral person/system chip uses the
+   dark --surface-active below. */
+[data-theme="dark"] .activity-feed-panel,
+[data-theme="dark"] .activity-actor-popover {
+  color-scheme: dark;
+  --surface: #111827;
+  --surface-subtle: #192438;
+  --surface-hover: #243247;
+  --surface-active: #2b3a52;
+  --border: #42516a;
+  --border-strong: #64748b;
+  --ink: #f1f5f9;
+  --ink-soft: #cbd5e1;
+  --ink-muted: #b1bfd2;
+  --info: #93c5fd;
+  --activity-type-ink: #cbd5e1;
+  --activity-link-ink: #c4b5fd;
+  --shadow-2: 0 12px 30px rgb(0 0 0 / 35%);
+  color: var(--ink);
+  background: var(--surface);
+}
+
+[data-theme="dark"] .activity-feed-panel .activity-action-badge {
+  color: color-mix(in srgb, var(--activity-action-tone) 40%, var(--ink));
+}
+
+.activity-feed-see-all { display: inline-flex; align-items: center; gap: 5px; min-height: 44px; border-radius: 5px; color: var(--activity-link-ink, var(--context)); font-size: 12px; line-height: 18px; }
+.activity-actor-popover__help { margin: 0 0 10px; color: var(--ink-muted); font-size: 11px; line-height: 16px; }
+.activity-actor-popover__close { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; margin: 8px 0 0; padding: 0 8px; border: 0; border-radius: 5px; background: transparent; color: var(--activity-link-ink, var(--context)); cursor: pointer; font-size: 12px; }

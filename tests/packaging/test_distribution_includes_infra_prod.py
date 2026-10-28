@@ -58,6 +58,12 @@ MIGRATION_FILES = sorted(
     path.relative_to(REPO_ROOT).as_posix()
     for path in (REPO_ROOT / "backend" / "migrations" / "versions").rglob("*.py")
 )
+PLUGIN_RUNTIME_FILES = [
+    "backend/spi/plugins.py",
+    "backend/app/plugins.py",
+    "backend/app/plugin_migrations/__init__.py",
+    "backend/app/plugin_migrations/env.py",
+]
 REVISION_0002_FILES = sorted(
     path.relative_to(REPO_ROOT).as_posix()
     for path in (
@@ -160,7 +166,12 @@ def test_wheel_and_sdist_include_operator_artifacts(tmp_path, built_dist):
         assert any(
             name.endswith(f"share/dtxwiki/{relative_path}") for name in wheel_names
         ), f"wheel missing {relative_path}"
-    for relative_path in [*CATALOG_FILES, *MIGRATION_FILES, *REVISION_0002_FILES]:
+    for relative_path in [
+        *CATALOG_FILES,
+        *MIGRATION_FILES,
+        *REVISION_0002_FILES,
+        *PLUGIN_RUNTIME_FILES,
+    ]:
         assert any(name.endswith(relative_path) for name in wheel_names), (
             f"wheel missing {relative_path}"
         )
@@ -216,7 +227,7 @@ def test_wheel_and_sdist_include_operator_artifacts(tmp_path, built_dist):
     assert packaged_migrations.returncode == 0, (
         packaged_migrations.stdout + packaged_migrations.stderr
     )
-    assert packaged_migrations.stdout.strip() == "efcbcf724889"
+    assert packaged_migrations.stdout.strip() == "eb86fdacb1bb"
 
     with tarfile.open(sdist_path) as sdist:
         sdist_names = set(sdist.getnames())

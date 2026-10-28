@@ -1,3 +1,5 @@
+import { inputTextError, textInputLimit } from "../../shared/lib/inputPolicy";
+import { validateAccountPassword, preventCompositionSubmit, sameAccountEmail } from "../../shared/auth/identityPolicy";
 import {
   CheckCircle2,
   Copy,
@@ -5,6 +7,7 @@ import {
   Mail,
   Search,
   ShieldAlert,
+  ShieldCheck,
 } from "lucide-react";
 import {
   type FormEvent,
@@ -19,21 +22,40 @@ import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 
 import {
+  addHeldWorkspaceMember,
+  appointHeldWorkspaceAdmin,
   issueAdminPasswordReset,
+  listHeldWorkspaceMembers,
+  rebindAdminIdentity,
   searchAdminUsers,
   type AdminPasswordResetDelivery,
   type AdminUser,
+  type AdminUserWorkspace,
+  type HeldWorkspaceMember,
 } from "../../shared/api/adminUsers";
 import { getAuthCapabilities, reauthenticate } from "../../shared/api/auth";
+import {
+  approvedDeletionWorkspaces,
+  deleteUserAccount,
+  getUserDeletionPreview,
+  restoreUserAccount,
+  type UserDeletionPreview,
+} from "../../shared/api/userDeletion";
+import { useOptionalAuth } from "../../shared/auth/AuthContext";
+import { ExternalAuthErrorBanner } from "../auth/ExternalAuthErrorBanner";
+import { AdminAuditLogPanel, EmailConflictReviewPanel } from "./AdminAccountReviewPanels";
+import { AdminUserAccountRow, AdminUserAccountDetails } from "./AdminUserAccountRow";
+import { IdentityVerificationPanel } from "../auth/IdentityVerificationPanel";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
 import { StatusBanner } from "../../shared/components/StatusBanner";
-import { StatusPill } from "../../shared/components/StatusPill";
+import { UserDeletionImpact } from "../../shared/components/UserDeletionImpact";
 import {
   SettingsEmptyState,
-  SettingsPaneHeader,
+  SettingsLoadingRow,
 } from "./SettingsPaneParts";
-import { canWriteToClipboard } from "../../shared/lib/clipboard";
+import { writeTextToClipboard } from "../../shared/lib/clipboard";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
+import { UserDeletionPolicyCard } from "./UserDeletionPolicyCard";
 
 type IssuedLink = {
   email: string;
@@ -52,6 +74,14 @@ type RecoveryCapabilityState = {
 
 export function AdminUserRecoverySection() {
   const { t } = useTranslation("settings");
+  const auth = useOptionalAuth();
+  const usesPasswordVerification = auth === null;
+  const [externalVerified, setExternalVerified] = useState(false);
+  const [currentSessionAccepted, setCurrentSessionAccepted] = useState(false);
+  const requiresPassword = usesPasswordVerification && !externalVerified;
+  const verificationParams = new URLSearchParams(window.location.search);
+  verificationParams.set("sso_verified", "1");
+  const reauthenticationReturnTo = `${window.location.pathname}?${verificationParams}${window.location.hash}`;
   const [directoryUnlocked, setDirectoryUnlocked] = useState(false);
   const [reauthenticatedUntil, setReauthenticatedUntil] = useState<
     string | null
@@ -69,6 +99,11 @@ export function AdminUserRecoverySection() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchValidation, setSearchValidation] = useState<string | null>(null);
   const [target, setTarget] = useState<AdminUser | null>(null);
+  const [rebindTarget, setRebindTarget] = useState<AdminUser | null>(null);
+  const [detailsTarget, setDetailsTarget] = useState<AdminUser | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<AdminUser | null>(null);
+  const [heldTarget, setHeldTarget] = useState<AdminUserWorkspace | null>(null);
   const [delivery, setDelivery] = useState<AdminPasswordResetDelivery>("email");
   const [recoveryMode, setRecoveryMode] = useState<RecoveryMode>("ordinary");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -83,6 +118,13 @@ export function AdminUserRecoverySection() {
       linkReady: false,
       status: "loading",
     });
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("sso_verified")) return;
+    params.delete("sso_verified");
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${params.size ? `?${params}` : ""}${window.location.hash}`);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -116,6 +158,8 @@ export function AdminUserRecoverySection() {
     if (!unlockPassword) {
       return;
     }
+    try { validateAccountPassword(unlockPassword); }
+    catch (caught) { setUnlockError(t((caught as Error).message, {ns: "auth"})); return; }
     setUnlocking(true);
     setUnlockError(null);
     try {
@@ -140,8 +184,14 @@ export function AdminUserRecoverySection() {
     }
   }
 
+  function relockForReauthentication() {
+    lockDirectory(t("loginMethods.adminVerifyHint", { ns: "auth" }));
+  }
+
   function lockDirectory(message: string) {
     setDirectoryUnlocked(false);
+    setExternalVerified(false);
+    setCurrentSessionAccepted(false);
     setReauthenticatedUntil(null);
     setUnlockError(message);
     setQuery("");
@@ -153,10 +203,16 @@ export function AdminUserRecoverySection() {
     setSearchError(null);
     setSearchValidation(null);
     setTarget(null);
+    setDetailsTarget(null);
+    setDeleteTarget(null);
+    setRestoreTarget(null);
+    setHeldTarget(null);
   }
 
   async function onSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const error = inputTextError(query, 320);
+    if (error) { setSearchValidation(error); return; }
     const normalizedQuery = query.trim();
     if (!normalizedQuery) {
       setSearchValidation(
@@ -191,7 +247,7 @@ export function AdminUserRecoverySection() {
         lockDirectory(
           t("userRecovery.unlock.expired", {
             defaultValue:
-              "Your recent verification expired. Re-enter your password to search users again.",
+              "Your recent verification expired. Verify your identity again to search users.",
           }),
         );
         return;
@@ -216,8 +272,8 @@ export function AdminUserRecoverySection() {
     if (
       user.status !== "active" ||
       (selectedDelivery === "email" &&
-        (!user.email_verified_at || !recoveryCapability.emailReady)) ||
-      (selectedDelivery === "link" && !recoveryCapability.linkReady)
+        (!user.email || !user.email_verified_at || !recoveryCapability.emailReady)) ||
+      (selectedDelivery === "link" && (!user.email || !recoveryCapability.linkReady))
     ) {
       return;
     }
@@ -249,13 +305,15 @@ export function AdminUserRecoverySection() {
 
   async function onIssue(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!target || !currentPassword) {
+    if (!target || (requiresPassword && !currentPassword)) {
       return;
     }
+    try { if (requiresPassword) validateAccountPassword(currentPassword); }
+    catch (caught) { setIssueError(t((caught as Error).message, {ns: "auth"})); return; }
     setIssuing(true);
     setIssueError(null);
     try {
-      await reauthenticate({ current_password: currentPassword });
+      if (requiresPassword) await reauthenticate({ current_password: currentPassword });
       const result = await issueAdminPasswordReset(target.user_id, {
         delivery,
         revoke_api_tokens: revokeApiTokens,
@@ -272,7 +330,7 @@ export function AdminUserRecoverySection() {
           return;
         }
         setIssuedLink({
-          email: target.email,
+          email: target.email ?? target.user_id,
           expiresAt: result.expires_at,
           resetUrl: result.reset_url,
           revokeApiTokens: result.revoke_api_tokens,
@@ -290,7 +348,12 @@ export function AdminUserRecoverySection() {
       setRevokeApiTokens(false);
     } catch (caught) {
       setCurrentPassword("");
-      setIssueError(adminRecoveryErrorMessage(caught, t));
+      if (!requiresPassword && caught instanceof ApiError &&
+          caught.body.error_code === "recent_reauthentication_required") {
+        lockDirectory(t("loginMethods.adminVerifyHint", { ns: "auth" }));
+      } else {
+        setIssueError(adminRecoveryErrorMessage(caught, t));
+      }
     } finally {
       setIssuing(false);
     }
@@ -311,55 +374,20 @@ export function AdminUserRecoverySection() {
       aria-labelledby="admin-user-recovery-heading"
       className="feature-section admin-user-recovery"
     >
-      {/* No eyebrow: the page header two lines above already says "System
-          administration", and this said the same thing in different words. The
-          destination was being named three times -- nav "User accounts", h1
-          "Users", h2 "Account recovery" -- under two eyebrows. The h1 is the
-          destination now; this h2 names the card's job, which is a different
-          thing and may stay. */}
-      <SettingsPaneHeader
-        action={
-          <StatusPill
-            compact
-            label={t("userRecovery.serverAdminOnly", {
-              defaultValue: "Server admin only",
-            })}
-            status="restricted"
-            tone="warn"
-          />
-        }
-        description={t("userRecovery.description", {
-          defaultValue:
-            "Find an instance user and start a one-time recovery flow. You never choose or see the user's new password.",
-        })}
-        headingId="admin-user-recovery-heading"
-        title={t("userRecovery.title", { defaultValue: "Account recovery" })}
-      />
-
-      <StatusBanner tone="info">
-        {t("userRecovery.boundary", {
-          defaultValue:
-            "A successful reset signs the user out of every browser session. PAT/MCP tokens are separate and are revoked only when selected below.",
-        })}
-      </StatusBanner>
+      <h2 className="visually-hidden" id="admin-user-recovery-heading">
+        {t("userRecovery.title", { defaultValue: "Account recovery" })}
+      </h2>
       {recoveryCapability.status === "loading" ? (
-        <StatusBanner tone="info">
+        <SettingsLoadingRow>
           {t("userRecovery.capabilityLoading", {
             defaultValue: "Checking server recovery availability…",
           })}
-        </StatusBanner>
+        </SettingsLoadingRow>
       ) : recoveryCapability.status === "error" ? (
         <StatusBanner tone="warning">
           {t("userRecovery.capabilityError", {
             defaultValue:
               "Recovery availability could not be confirmed. Reload before issuing a reset.",
-          })}
-        </StatusBanner>
-      ) : !recoveryCapability.linkReady ? (
-        <StatusBanner tone="warning">
-          {t("userRecovery.adminRecoveryUnavailable", {
-            defaultValue:
-              "Admin-assisted recovery is unavailable until the canonical HTTPS public URL is ready.",
           })}
         </StatusBanner>
       ) : null}
@@ -371,8 +399,10 @@ export function AdminUserRecoverySection() {
           </span>
         </StatusBanner>
       ) : null}
+      <ExternalAuthErrorBanner />
+      {!usesPasswordVerification && unlockError ? <StatusBanner tone="warning">{unlockError}</StatusBanner> : null}
       {!directoryUnlocked ? (
-        <form className="admin-user-reauth" onSubmit={onUnlockDirectory}>
+        usesPasswordVerification ? <form className="admin-user-reauth" onSubmit={onUnlockDirectory}>
           <div>
             <strong>
               {t("userRecovery.unlock.title", {
@@ -400,6 +430,7 @@ export function AdminUserRecoverySection() {
             </span>
             <input
               autoComplete="current-password"
+              onKeyDown={preventCompositionSubmit}
               disabled={unlocking}
               id="admin-user-directory-password"
               onChange={(event) => {
@@ -424,11 +455,20 @@ export function AdminUserRecoverySection() {
                   defaultValue: "Unlock user search",
                 })}
           </button>
-        </form>
+        </form> : <IdentityVerificationPanel scope="admin" returnTo={reauthenticationReturnTo}
+          onVerified={(until, _target, mode) => {
+            setDirectoryUnlocked(true);
+            setExternalVerified(true);
+            setCurrentSessionAccepted(mode === "session");
+            setReauthenticatedUntil(until);
+          }} />
       ) : (
         <>
-          <StatusBanner tone="info">
-            {t("userRecovery.unlock.unlocked", {
+          <UserDeletionPolicyCard />
+          <div className="identity-settings-protection" role="status">
+            <ShieldCheck size={17} aria-hidden="true" />
+            <p>
+            {currentSessionAccepted ? t("verification.sessionAccepted", { ns: "auth" }) : t("userRecovery.unlock.unlocked", {
               defaultValue: "Protected user search is unlocked until {{date}}.",
               date: reauthenticatedUntil
                 ? formatVersionTimestamp(reauthenticatedUntil)
@@ -436,240 +476,161 @@ export function AdminUserRecoverySection() {
                     defaultValue: "the short verification window ends",
                   }),
             })}
-          </StatusBanner>
-          {searchError ? (
-            <StatusBanner tone="warning">{searchError}</StatusBanner>
-          ) : null}
-
-          <form className="admin-user-search" onSubmit={onSearch}>
-            <label className="field-stack" htmlFor="admin-user-search-query">
-              <span>
-                {t("userRecovery.searchLabel", {
-                  defaultValue: "Search users",
-                })}
-              </span>
-              <span className="meta-line">
-                {t("userRecovery.searchHint", {
-                  defaultValue: "Email, display name, or workspace name",
-                })}
-              </span>
-              <input
-                aria-describedby={
-                  searchValidation ? "admin-user-search-error" : undefined
-                }
-                aria-invalid={Boolean(searchValidation)}
-                autoComplete="off"
-                id="admin-user-search-query"
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                  setSearchValidation(null);
-                }}
-                placeholder={t("userRecovery.searchPlaceholder", {
-                  defaultValue: "e.g. alex@example.com or Research",
-                })}
-                type="search"
-                value={query}
-              />
-            </label>
-            <button
-              className="icon-button primary admin-user-search-action"
-              disabled={searching}
-              type="submit"
-            >
-              <Search aria-hidden="true" size={16} />
-              {searching
-                ? t("userRecovery.searching", { defaultValue: "Searching…" })
-                : t("userRecovery.searchAction", { defaultValue: "Search" })}
-            </button>
-          </form>
-          {searchValidation ? (
-            <p className="form-error" id="admin-user-search-error" role="alert">
-              {searchValidation}
             </p>
-          ) : null}
-
-          {searched ? (
-            <div className="admin-user-search-results">
-              <p aria-live="polite" className="meta-line">
-                {t("userRecovery.resultCount", {
-                  count: total,
-                  defaultValue: "{{count}} users found",
-                })}
-              </p>
-              {users.length === 0 ? (
-                <SettingsEmptyState
-                  description={t("userRecovery.noResultsHint", {
-                    defaultValue: "Check the search term and try again.",
-                  })}
-                  title={t("userRecovery.noResults", {
-                    defaultValue: "No users found",
-                  })}
-                />
-              ) : (
-                <ul className="admin-user-list">
-                  {users.map((user) => (
-                    <li className="admin-user-card" key={user.user_id}>
-                      <div className="admin-user-card-main">
-                        <div className="admin-user-identity">
-                          <strong>{user.display_name || user.email}</strong>
-                          <span>{user.email}</span>
-                        </div>
-                        <div className="admin-user-statuses">
-                          <StatusPill
-                            compact
-                            label={
-                              user.status === "active"
-                                ? t("userRecovery.status.active", {
-                                    defaultValue: "Active",
-                                  })
-                                : t("userRecovery.status.inactive", {
-                                    defaultValue: "Inactive",
-                                  })
-                            }
-                            status={user.status}
-                            tone={user.status === "active" ? "ok" : "muted"}
-                          />
-                          <StatusPill
-                            compact
-                            label={
-                              user.email_verified_at
-                                ? t("userRecovery.emailVerified", {
-                                    defaultValue: "Email verified",
-                                  })
-                                : t("userRecovery.emailUnverified", {
-                                    defaultValue: "Email unverified",
-                                  })
-                            }
-                            status={
-                              user.email_verified_at ? "verified" : "unverified"
-                            }
-                            tone={user.email_verified_at ? "ok" : "warn"}
-                          />
-                        </div>
-                        <p className="admin-user-workspaces">
-                          {user.workspaces.length
-                            ? user.workspaces
-                                .map(
-                                  (workspace) =>
-                                    `${workspace.title} (${t(
-                                      `userRecovery.roles.${workspace.role}`,
-                                      { defaultValue: workspace.role },
-                                    )})`,
-                                )
-                                .join(" · ")
-                            : t("userRecovery.noWorkspaces", {
-                                defaultValue: "No workspace memberships",
-                              })}
-                        </p>
-                        {user.status !== "active" ? (
-                          <p className="meta-line">
-                            {t("userRecovery.inactiveHint", {
-                              defaultValue:
-                                "Recovery is available only for active accounts.",
-                            })}
-                          </p>
-                        ) : null}
-                      </div>
-                      <div className="admin-user-recovery-actions">
-                        <button
-                          className="icon-button primary admin-user-recovery-action"
-                          disabled={
-                            user.status !== "active" ||
-                            !user.email_verified_at ||
-                            !recoveryCapability.emailReady
-                          }
-                          onClick={() => openRecovery(user, "email")}
-                          type="button"
-                        >
-                          <Mail aria-hidden="true" size={16} />
-                          {t("userRecovery.emailAction", {
-                            defaultValue: "Send recovery email",
-                          })}
-                        </button>
-                        <button
-                          className="icon-button primary admin-user-recovery-action"
-                          disabled={
-                            user.status !== "active" ||
-                            !recoveryCapability.linkReady
-                          }
-                          onClick={() => openRecovery(user, "link")}
-                          type="button"
-                        >
-                          <Link2 aria-hidden="true" size={16} />
-                          {t("userRecovery.linkAction", {
-                            defaultValue: "Issue one-time link",
-                          })}
-                        </button>
-                        {user.status === "active" && !user.email_verified_at ? (
-                          <p className="meta-line">
-                            {t("userRecovery.emailUnverifiedActionHint", {
-                              defaultValue:
-                                "Email delivery is unavailable because this address is not verified.",
-                            })}
-                          </p>
-                        ) : user.status === "active" &&
-                          recoveryCapability.status === "ready" &&
-                          !recoveryCapability.emailReady ? (
-                          <p className="meta-line">
-                            {t("userRecovery.mailUnavailableActionHint", {
-                              defaultValue:
-                                "Email delivery is unavailable because server mail recovery is not ready.",
-                            })}
-                          </p>
-                        ) : null}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {total > 25 ? (
-                <nav
-                  aria-label={t("userRecovery.pagination.label", {
-                    defaultValue: "User search pages",
-                  })}
-                  className="admin-user-pagination"
-                >
-                  <button
-                    className="icon-button"
-                    disabled={searching || offset === 0}
-                    onClick={() =>
-                      void loadUsers(submittedQuery, Math.max(0, offset - 25))
-                    }
-                    type="button"
-                  >
-                    {t("userRecovery.pagination.previous", {
-                      defaultValue: "Previous",
-                    })}
-                  </button>
-                  <span className="meta-line">
-                    {t("userRecovery.pagination.position", {
-                      defaultValue: "{{start}}–{{end}} of {{total}}",
-                      start: offset + 1,
-                      end: Math.min(offset + users.length, total),
-                      total,
-                    })}
-                  </span>
-                  <button
-                    className="icon-button"
-                    disabled={searching || offset + users.length >= total}
-                    onClick={() => void loadUsers(submittedQuery, offset + 25)}
-                    type="button"
-                  >
-                    {t("userRecovery.pagination.next", {
-                      defaultValue: "Next",
-                    })}
-                  </button>
-                </nav>
-              ) : null}
+          </div>
+          <div className="workspace-settings-card admin-user-directory">
+            <div className="workspace-settings-heading">
+              <h3 className="metric-card-title" id="admin-user-search-heading">
+                <Search aria-hidden="true" size={16} />
+                {t("userRecovery.searchLabel")}
+              </h3>
             </div>
-          ) : null}
+            {searchError ? (
+              <StatusBanner tone="warning">{searchError}</StatusBanner>
+            ) : null}
+
+            <form className="admin-user-search" onSubmit={onSearch}>
+              <label className="field-stack" htmlFor="admin-user-search-query">
+                <span className="meta-line" id="admin-user-search-hint">
+                  {t("userRecovery.searchHint", {
+                    defaultValue: "Email, display name, or workspace name",
+                  })}
+                </span>
+                <input
+                  aria-describedby={
+                    searchValidation ? "admin-user-search-hint admin-user-search-error" : "admin-user-search-hint"
+                  }
+                  aria-labelledby="admin-user-search-heading"
+                  aria-invalid={Boolean(searchValidation)}
+                  autoComplete="off"
+                  id="admin-user-search-query"
+                  {...textInputLimit(320)}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setSearchValidation(null);
+                  }}
+                  placeholder={t("userRecovery.searchPlaceholder", {
+                    defaultValue: "e.g. alex@example.com or Research",
+                  })}
+                  type="search"
+                  value={query}
+                />
+              </label>
+              <button
+                aria-label={searching
+                  ? t("userRecovery.searching", { defaultValue: "Searching…" })
+                  : t("userRecovery.searchAction", { defaultValue: "Search" })}
+                className="icon-button primary admin-user-search-action"
+                disabled={searching}
+                type="submit"
+              >
+                <Search aria-hidden="true" size={16} />
+                <span className="admin-user-search-label">{searching
+                  ? t("userRecovery.searching", { defaultValue: "Searching…" })
+                  : t("userRecovery.searchAction", { defaultValue: "Search" })}</span>
+              </button>
+            </form>
+            {searchValidation ? (
+              <p className="form-error" id="admin-user-search-error" role="alert">
+                {searchValidation}
+              </p>
+            ) : null}
+
+            {searched ? (
+              <div className="admin-user-search-results">
+                <p aria-live="polite" className="meta-line admin-user-result-count">
+                  {t("userRecovery.resultCount", {
+                    count: total,
+                    defaultValue: "{{count}} users found",
+                  })}
+                </p>
+                {users.length === 0 ? (
+                  <SettingsEmptyState
+                    description={t("userRecovery.noResultsHint", {
+                      defaultValue: "Check the search term and try again.",
+                    })}
+                    title={t("userRecovery.noResults", {
+                      defaultValue: "No users found",
+                    })}
+                  />
+                ) : (
+                  <ul className="admin-user-list" aria-label={t("userRecovery.searchLabel")}>
+                    {users.map((user) => (
+                      <li key={user.user_id}>
+                        <AdminUserAccountRow user={user} recovery={recoveryCapability}
+                          onDetails={() => setDetailsTarget(user)}
+                          onRebind={() => setRebindTarget(user)}
+                          onRecover={(selectedDelivery) => openRecovery(user, selectedDelivery)}
+                          onDelete={() => { setDeleteTarget(user); setSuccessNotice(null); }}
+                          onRestore={() => { setRestoreTarget(user); setSuccessNotice(null); }}
+                          onManageHeld={(workspace) => { setHeldTarget(workspace); setSuccessNotice(null); }} />
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {total > 25 ? (
+                  <nav
+                    aria-label={t("userRecovery.pagination.label", {
+                      defaultValue: "User search pages",
+                    })}
+                    className="admin-user-pagination"
+                  >
+                    <button
+                      className="icon-button"
+                      disabled={searching || offset === 0}
+                      onClick={() =>
+                        void loadUsers(submittedQuery, Math.max(0, offset - 25))
+                      }
+                      type="button"
+                    >
+                      {t("userRecovery.pagination.previous", {
+                        defaultValue: "Previous",
+                      })}
+                    </button>
+                    <span className="meta-line">
+                      {t("userRecovery.pagination.position", {
+                        defaultValue: "{{start}}–{{end}} of {{total}}",
+                        start: offset + 1,
+                        end: Math.min(offset + users.length, total),
+                        total,
+                      })}
+                    </span>
+                    <button
+                      className="icon-button"
+                      disabled={searching || offset + users.length >= total}
+                      onClick={() => void loadUsers(submittedQuery, offset + 25)}
+                      type="button"
+                    >
+                      {t("userRecovery.pagination.next", {
+                        defaultValue: "Next",
+                      })}
+                    </button>
+                  </nav>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <EmailConflictReviewPanel onReauthenticationRequired={relockForReauthentication} />
+          <AdminAuditLogPanel onReauthenticationRequired={relockForReauthentication} />
         </>
       )}
+
+      <details className="admin-recovery-policy">
+        <summary>{t("userRecovery.optionsSummary")}</summary>
+        <p>{t("userRecovery.boundary", {
+          defaultValue:
+            "A successful reset signs the user out of every browser session. PAT/MCP tokens are separate and are revoked only when selected below.",
+        })}</p>
+        {recoveryCapability.status === "ready" && !recoveryCapability.linkReady ? (
+          <p>{t("userRecovery.adminRecoveryUnavailable")}</p>
+        ) : null}
+      </details>
 
       {target ? (
         <RecoveryConfirmationDialog
           busy={issuing}
           currentPassword={currentPassword}
+          requirePassword={requiresPassword}
           delivery={delivery}
           error={issueError}
           onCancel={closeRecovery}
@@ -682,16 +643,483 @@ export function AdminUserRecoverySection() {
           target={target}
         />
       ) : null}
+      {detailsTarget ? <AdminUserAccountDetails user={detailsTarget} recovery={recoveryCapability}
+        onClose={() => setDetailsTarget(null)} /> : null}
+      {deleteTarget ? (
+        <UserDeletionDialog
+          target={deleteTarget}
+          requirePassword={requiresPassword}
+          onClose={() => setDeleteTarget(null)}
+          onReauthenticationRequired={relockForReauthentication}
+          onDeleted={async (purgeAfter) => {
+            setDeleteTarget(null);
+            if (auth?.user?.user_id === deleteTarget.user_id) {
+              await auth.signOut();
+              window.location.assign("/login?account=deletion-pending");
+              return;
+            }
+            setSuccessNotice(t("userDeletion.success", {
+              account: deleteTarget.email ?? (deleteTarget.display_name || deleteTarget.user_id),
+              date: formatVersionTimestamp(purgeAfter),
+            }));
+            void loadUsers(submittedQuery, offset);
+          }}
+        />
+      ) : null}
+      {restoreTarget ? (
+        <UserRestoreDialog
+          target={restoreTarget}
+          requirePassword={requiresPassword}
+          onClose={() => setRestoreTarget(null)}
+          onReauthenticationRequired={relockForReauthentication}
+          onRestored={() => {
+            setRestoreTarget(null);
+            setSuccessNotice(t("userDeletion.restored", { email: restoreTarget.email ?? restoreTarget.display_name }));
+            void loadUsers(submittedQuery, offset);
+          }}
+        />
+      ) : null}
+      {heldTarget ? (
+        <HeldWorkspaceDialog
+          workspace={heldTarget}
+          onClose={() => setHeldTarget(null)}
+          onReauthenticationRequired={relockForReauthentication}
+          onReopened={() => {
+            setHeldTarget(null);
+            setSuccessNotice(t("userDeletion.heldReopened", { title: heldTarget.title }));
+            void loadUsers(submittedQuery, offset);
+          }}
+        />
+      ) : null}
       {issuedLink ? (
         <OneTimeLinkDialog link={issuedLink} onClose={dismissIssuedLink} />
       ) : null}
+      {rebindTarget ? <IdentityRebindDialog target={rebindTarget} onCancel={() => setRebindTarget(null)}
+        onReauthenticationRequired={() => {
+          setRebindTarget(null);
+          relockForReauthentication();
+        }}
+        onComplete={() => {
+          setRebindTarget(null);
+          setSuccessNotice(t("userRecovery.rebind.complete"));
+          void loadUsers(submittedQuery, offset);
+        }} /> : null}
     </section>
+  );
+}
+
+function IdentityRebindDialog({ target, onCancel, onReauthenticationRequired, onComplete }: {
+  target: AdminUser;
+  onCancel: () => void;
+  onReauthenticationRequired: () => void;
+  onComplete: () => void;
+}) {
+  const { t } = useTranslation("settings");
+  const identities = target.identities ?? [];
+  const [identityId, setIdentityId] = useState(identities[0]?.identity_id ?? "");
+  const current = identities.find((identity) => identity.identity_id === identityId);
+  const [provider, setProvider] = useState(current?.provider_slug ?? "");
+  const [issuer, setIssuer] = useState(current?.issuer ?? "");
+  const [subject, setSubject] = useState("");
+  const [reason, setReason] = useState("");
+  const [confirmedUserId, setConfirmedUserId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!current || confirmedUserId.trim() !== target.user_id) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await rebindAdminIdentity(target.user_id, {
+        identity_id: current.identity_id,
+        expected_issuer: current.issuer,
+        expected_subject: current.subject,
+        provider_slug: provider.trim(), issuer: issuer.trim(), subject: subject.trim(), reason: reason.trim(),
+      });
+      onComplete();
+    } catch (caught) {
+      if (caught instanceof ApiError &&
+          caught.body.error_code === "recent_reauthentication_required") {
+        onReauthenticationRequired();
+        return;
+      }
+      setError(apiErrorMessage(caught, t("userRecovery.rebind.failed")));
+    } finally { setBusy(false); }
+  }
+
+  return <AccessibleDialog busy={busy} labelledBy="admin-identity-rebind-title" onCancel={onCancel}>
+    <form className="modal-panel admin-recovery-modal" onSubmit={(event) => void submit(event)}>
+      <h2 id="admin-identity-rebind-title">{t("userRecovery.rebind.title")}</h2>
+      <StatusBanner tone="warning">{t("userRecovery.rebind.warning")}</StatusBanner>
+      <p>{target.display_name || target.user_id}</p><code>{target.user_id}</code>
+      {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+      <label className="field-stack">{t("userRecovery.rebind.currentIdentity")}
+        <select value={identityId} disabled={busy} onChange={(event) => {
+          const next = identities.find((identity) => identity.identity_id === event.target.value);
+          setIdentityId(event.target.value); setProvider(next?.provider_slug ?? ""); setIssuer(next?.issuer ?? ""); setSubject("");
+        }}>
+          {identities.map((identity) => <option key={identity.identity_id} value={identity.identity_id}>{identity.provider_slug}: {identity.subject}</option>)}
+        </select>
+      </label>
+      {current ? <p className="meta-line">{current.issuer}</p> : null}
+      <label className="field-stack">{t("userRecovery.rebind.provider")}
+        <input required autoComplete="off" disabled={busy} {...textInputLimit(64)} value={provider} onChange={(event) => setProvider(event.target.value)} />
+      </label>
+      <label className="field-stack">{t("userRecovery.rebind.issuer")}
+        <input required autoComplete="off" disabled={busy} {...textInputLimit(2048)} value={issuer} onChange={(event) => setIssuer(event.target.value)} />
+      </label>
+      <label className="field-stack">{t("userRecovery.rebind.subject")}
+        <input required autoComplete="off" disabled={busy} {...textInputLimit(512)} value={subject} onChange={(event) => setSubject(event.target.value)} />
+      </label>
+      <label className="field-stack">{t("userRecovery.rebind.reason")}
+        <input required disabled={busy} {...textInputLimit(500)} value={reason} onChange={(event) => setReason(event.target.value)} />
+      </label>
+      <label className="field-stack">{t("userRecovery.rebind.confirmUser")}
+        <input required autoComplete="off" disabled={busy} {...textInputLimit(36)} value={confirmedUserId} onChange={(event) => setConfirmedUserId(event.target.value)} />
+      </label>
+      <div className="modal-actions">
+        <button type="button" className="icon-button" disabled={busy} onClick={onCancel}>{t("userRecovery.dialog.cancel", { defaultValue: "Cancel" })}</button>
+        <button type="submit" className="icon-button primary" disabled={busy || !current || confirmedUserId.trim() !== target.user_id}>{t("userRecovery.rebind.action")}</button>
+      </div>
+    </form>
+  </AccessibleDialog>;
+}
+
+function UserDeletionDialog({ target, requirePassword, onClose, onDeleted, onReauthenticationRequired }: {
+  target: AdminUser;
+  requirePassword: boolean;
+  onClose: () => void;
+  onDeleted: (purgeAfter: string) => void | Promise<void>;
+  onReauthenticationRequired: () => void;
+}) {
+  const { t } = useTranslation("settings");
+  const [confirmationEmail, setConfirmationEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [preview, setPreview] = useState<UserDeletionPreview | null>(null);
+  const [policyAttempt, setPolicyAttempt] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [canReload, setCanReload] = useState(false);
+  // The details are behind recent verification, which may have expired while
+  // the search results stayed on screen.
+  const [needsVerification, setNeedsVerification] = useState(false);
+  // Every workspace left without an admin is held and deleted with the
+  // account, members or not; the administrator approves that list.
+  const [approved, setApproved] = useState(false);
+  const retentionDays = preview?.retention_days ?? null;
+  // The account email is typed to confirm; an account without one is
+  // confirmed by its id alone.
+  const emailConfirmed = target.email === null || sameAccountEmail(confirmationEmail, target.email);
+  const needsApproval = (preview?.target_workspaces.length ?? 0) > 0;
+  // The parent recreates this callback on every render; the effect below
+  // must not reload the preview because of that.
+  const reauthenticationRequired = useRef(onReauthenticationRequired);
+  useEffect(() => {
+    reauthenticationRequired.current = onReauthenticationRequired;
+  }, [onReauthenticationRequired]);
+
+  useEffect(() => {
+    let active = true;
+    setPreview(null);
+    setApproved(false);
+    setError(null);
+    setCanReload(false);
+    setNeedsVerification(false);
+    void getUserDeletionPreview(target.user_id).then((loaded) => {
+      if (active) setPreview(loaded);
+    }).catch((caught) => {
+      if (!active) return;
+      if (caught instanceof ApiError && caught.body.error_code === "recent_reauthentication_required") {
+        if (requirePassword) setNeedsVerification(true);
+        else reauthenticationRequired.current();
+        return;
+      }
+      setError(apiErrorMessage(caught, t("userDeletion.previewFailed")));
+      setCanReload(true);
+    });
+    return () => { active = false; };
+  }, [policyAttempt, requirePassword, t, target.user_id]);
+
+  async function verifyAndLoad() {
+    setBusy(true);
+    setError(null);
+    try {
+      await reauthenticate({ current_password: password });
+      setPolicyAttempt((value) => value + 1);
+    } catch (caught) {
+      setError(caught instanceof ApiError && t(`userDeletion.errors.${caught.body.error_code}`, { defaultValue: "" })
+        || apiErrorMessage(caught, t("userDeletion.previewFailed")));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    if (requirePassword) {
+      try { validateAccountPassword(password); }
+      catch (caught) { setError(t((caught as Error).message, { ns: "auth" })); return; }
+      if (needsVerification) {
+        await verifyAndLoad();
+        return;
+      }
+    }
+    if (preview === null || retentionDays === null || !emailConfirmed) return;
+    if (needsApproval && !approved) return;
+    setBusy(true);
+    setError(null);
+    setCanReload(false);
+    try {
+      if (requirePassword) await reauthenticate({ current_password: password });
+      const result = await deleteUserAccount(
+        target.user_id,
+        target.email === null ? null : confirmationEmail,
+        retentionDays,
+        approvedDeletionWorkspaces(preview),
+      );
+      await onDeleted(result.purge_after);
+    } catch (caught) {
+      if (!requirePassword && caught instanceof ApiError
+          && caught.body.error_code === "recent_reauthentication_required") {
+        onReauthenticationRequired();
+        return;
+      }
+      setError(caught instanceof ApiError && t(`userDeletion.errors.${caught.body.error_code}`, { defaultValue: "" })
+        || apiErrorMessage(caught, t("userDeletion.failed")));
+      setCanReload(
+        caught instanceof ApiError
+          && ["user_deletion_policy_changed", "user_deletion_targets_changed"].includes(
+            caught.body.error_code,
+          ),
+      );
+      setBusy(false);
+    } finally {
+      setPassword("");
+    }
+  }
+
+  return (
+    <AccessibleDialog busy={busy} labelledBy="admin-user-deletion-title" onCancel={onClose}>
+      <form className="modal-panel admin-recovery-modal" onSubmit={submit}>
+        <h2 id="admin-user-deletion-title">{t("userDeletion.confirmTitle")}</h2>
+        <p>{t("userDeletion.confirmDescription", { account: target.email ?? (target.display_name || target.user_id) })}</p>
+        {preview !== null ? <><StatusBanner tone="warning">{t("userDeletion.retention", { count: preview.retention_days })}</StatusBanner><UserDeletionImpact preview={preview} /></> : null}
+        {preview !== null && needsApproval ? (
+          <label className="checkbox-row" htmlFor="admin-user-deletion-approve">
+            <input id="admin-user-deletion-approve" checked={approved} disabled={busy} onChange={(event) => setApproved(event.target.checked)} type="checkbox" />
+            <span>{t("userDeletion.approveHeld", { count: preview.target_workspaces.length })}</span>
+          </label>
+        ) : null}
+        <p className="meta-line">{t("userDeletion.sharedContent")}</p>
+        {needsVerification ? <StatusBanner tone="info">{t("userDeletion.verifyToLoad")}</StatusBanner> : null}
+        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+        {error && canReload ? <button className="icon-button" disabled={busy} onClick={() => setPolicyAttempt((value) => value + 1)} type="button">{t("userDeletion.reloadPolicy")}</button> : null}
+        {needsVerification || target.email === null ? null : (
+          <label className="field-stack" htmlFor="admin-user-deletion-email"><span>{t("userDeletion.confirmEmail", { email: target.email })}</span>
+            <input id="admin-user-deletion-email" autoComplete="off" disabled={busy} onChange={(event) => setConfirmationEmail(event.target.value)} onKeyDown={preventCompositionSubmit} required type="email" value={confirmationEmail} />
+          </label>
+        )}
+        {requirePassword ? (
+          <label className="field-stack" htmlFor="admin-user-deletion-password"><span>{t("userDeletion.currentPassword")}</span>
+            <input id="admin-user-deletion-password" autoComplete="current-password" disabled={busy} maxLength={128} onChange={(event) => setPassword(event.target.value)} onKeyDown={preventCompositionSubmit} required type="password" value={password} />
+          </label>
+        ) : null}
+        <div className="modal-actions">
+          <button className="icon-button" disabled={busy} onClick={onClose} type="button">{t("userDeletion.cancel")}</button>
+          {needsVerification ? (
+            <button className="icon-button primary" disabled={busy || !password} type="submit">{t("userDeletion.verify")}</button>
+          ) : (
+            <button className="icon-button danger-action" disabled={busy || retentionDays === null || !emailConfirmed || (requirePassword && !password) || (needsApproval && !approved)} type="submit">{t(busy ? "userDeletion.submitting" : "userDeletion.submit")}</button>
+          )}
+        </div>
+      </form>
+    </AccessibleDialog>
+  );
+}
+
+function HeldWorkspaceDialog({ workspace, onClose, onReopened, onReauthenticationRequired }: {
+  workspace: AdminUserWorkspace;
+  onClose: () => void;
+  onReopened: () => void;
+  onReauthenticationRequired: () => void;
+}) {
+  const { t } = useTranslation("settings");
+  const [members, setMembers] = useState<HeldWorkspaceMember[] | null>(null);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<"viewer" | "editor">("editor");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const reauthenticationRequired = useRef(onReauthenticationRequired);
+  useEffect(() => {
+    reauthenticationRequired.current = onReauthenticationRequired;
+  }, [onReauthenticationRequired]);
+
+  function fail(caught: unknown) {
+    if (caught instanceof ApiError && caught.body.error_code === "recent_reauthentication_required") {
+      reauthenticationRequired.current();
+      return;
+    }
+    setError(heldError(caught, t));
+  }
+
+  useEffect(() => {
+    let active = true;
+    setError(null);
+    void listHeldWorkspaceMembers(workspace.workspace_id).then((loaded) => {
+      if (active) setMembers(loaded);
+    }).catch((caught) => {
+      if (!active) return;
+      if (caught instanceof ApiError && caught.body.error_code === "recent_reauthentication_required") {
+        reauthenticationRequired.current();
+        return;
+      }
+      setError(heldError(caught, t));
+    });
+    return () => { active = false; };
+  }, [attempt, t, workspace.workspace_id]);
+
+  async function addMember(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy || !email) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await addHeldWorkspaceMember(workspace.workspace_id, email, role);
+      setEmail("");
+      setAttempt((value) => value + 1);
+    } catch (caught) {
+      fail(caught);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function appoint(member: HeldWorkspaceMember) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await appointHeldWorkspaceAdmin(workspace.workspace_id, member.user_id);
+      onReopened();
+    } catch (caught) {
+      fail(caught);
+      setBusy(false);
+    }
+  }
+  return (
+    <AccessibleDialog busy={busy} labelledBy="admin-held-workspace-title" onCancel={onClose}>
+      <div className="modal-panel admin-recovery-modal">
+        <h2 id="admin-held-workspace-title">{t("userDeletion.heldTitle", { title: workspace.title })}</h2>
+        <p>{t("userDeletion.heldDescription")}</p>
+        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+        {members === null && !error ? <p role="status">{t("userDeletion.heldLoading")}</p> : null}
+        {members !== null ? (
+          <ul className="admin-held-members">
+            {members.map((member) => (
+              <li key={member.user_id}>
+                <span>{member.display_name || member.email} · {t(`userRecovery.roles.${member.role}`, { defaultValue: member.role })}</span>
+                {member.status === "active" && member.role !== "owner" ? (
+                  <button className="icon-button primary" disabled={busy} onClick={() => void appoint(member)} type="button">
+                    {t("userDeletion.appointAdmin")}
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <form className="admin-held-add" onSubmit={addMember}>
+          <label className="field-stack" htmlFor="admin-held-member-email"><span>{t("userDeletion.heldAddEmail")}</span>
+            <input id="admin-held-member-email" autoComplete="off" disabled={busy} onChange={(event) => setEmail(event.target.value)} onKeyDown={preventCompositionSubmit} required type="email" value={email} />
+          </label>
+          <label className="field-stack" htmlFor="admin-held-member-role"><span>{t("userDeletion.heldAddRole")}</span>
+            <select id="admin-held-member-role" disabled={busy} onChange={(event) => setRole(event.target.value as "viewer" | "editor")} value={role}>
+              <option value="viewer">{t("userRecovery.roles.viewer", { defaultValue: "viewer" })}</option>
+              <option value="editor">{t("userRecovery.roles.editor", { defaultValue: "editor" })}</option>
+            </select>
+          </label>
+          <div className="modal-actions">
+            <button className="icon-button" disabled={busy} onClick={onClose} type="button">{t("userDeletion.cancel")}</button>
+            <button className="icon-button" disabled={busy || !email} type="submit">{t("userDeletion.heldAdd")}</button>
+          </div>
+        </form>
+      </div>
+    </AccessibleDialog>
+  );
+}
+
+function heldError(caught: unknown, t: TFunction<"settings">) {
+  return caught instanceof ApiError
+    && t(`userDeletion.errors.${caught.body.error_code}`, { defaultValue: "" })
+    || apiErrorMessage(caught, t("userDeletion.heldFailed"));
+}
+
+function UserRestoreDialog({ target, requirePassword, onClose, onRestored, onReauthenticationRequired }: {
+  target: AdminUser;
+  requirePassword: boolean;
+  onClose: () => void;
+  onRestored: () => void;
+  onReauthenticationRequired: () => void;
+}) {
+  const { t } = useTranslation("settings");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    if (requirePassword) {
+      try { validateAccountPassword(password); }
+      catch (caught) { setError(t((caught as Error).message, { ns: "auth" })); return; }
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      if (requirePassword) await reauthenticate({ current_password: password });
+      await restoreUserAccount(target.user_id);
+      onRestored();
+    } catch (caught) {
+      if (!requirePassword && caught instanceof ApiError
+          && caught.body.error_code === "recent_reauthentication_required") {
+        onReauthenticationRequired();
+        return;
+      }
+      setError(caught instanceof ApiError && t(`userDeletion.errors.${caught.body.error_code}`, { defaultValue: "" })
+        || apiErrorMessage(caught, t("userDeletion.restoreFailed")));
+      setBusy(false);
+    } finally {
+      setPassword("");
+    }
+  }
+
+  return (
+    <AccessibleDialog busy={busy} labelledBy="admin-user-restore-title" onCancel={onClose}>
+      <form className="modal-panel admin-recovery-modal" onSubmit={submit}>
+        <h2 id="admin-user-restore-title">{t("userDeletion.restoreTitle")}</h2>
+        <p>{t("userDeletion.restoreDescription", { email: target.email ?? target.display_name })}</p>
+        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+        {requirePassword ? (
+          <label className="field-stack" htmlFor="admin-user-restore-password"><span>{t("userDeletion.currentPassword")}</span>
+            <input id="admin-user-restore-password" autoComplete="current-password" disabled={busy} maxLength={128} onChange={(event) => setPassword(event.target.value)} onKeyDown={preventCompositionSubmit} required type="password" value={password} />
+          </label>
+        ) : null}
+        <div className="modal-actions">
+          <button className="icon-button" disabled={busy} onClick={onClose} type="button">{t("userDeletion.cancel")}</button>
+          <button className="icon-button primary" disabled={busy || (requirePassword && !password)} type="submit">{t(busy ? "userDeletion.restoring" : "userDeletion.restore")}</button>
+        </div>
+      </form>
+    </AccessibleDialog>
   );
 }
 
 function RecoveryConfirmationDialog({
   busy,
   currentPassword,
+  requirePassword,
   delivery,
   error,
   onCancel,
@@ -705,6 +1133,7 @@ function RecoveryConfirmationDialog({
 }: {
   busy: boolean;
   currentPassword: string;
+  requirePassword: boolean;
   delivery: AdminPasswordResetDelivery;
   error: string | null;
   onCancel: () => void;
@@ -746,7 +1175,7 @@ function RecoveryConfirmationDialog({
           {t("userRecovery.dialog.description", {
             defaultValue:
               "This starts recovery for {{email}}. The user chooses the new password; you cannot view it.",
-            email: target.email,
+          email: target.email ?? target.user_id,
           })}
         </p>
         {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
@@ -841,7 +1270,7 @@ function RecoveryConfirmationDialog({
             </span>
           </label>
         </fieldset>
-        <label
+        {requirePassword ? <label
           className="field-stack"
           htmlFor="admin-recovery-current-password"
         >
@@ -858,6 +1287,7 @@ function RecoveryConfirmationDialog({
           </span>
           <input
             autoComplete="current-password"
+            onKeyDown={preventCompositionSubmit}
             disabled={busy}
             id="admin-recovery-current-password"
             onChange={(event) => onCurrentPasswordChange(event.target.value)}
@@ -866,7 +1296,7 @@ function RecoveryConfirmationDialog({
             type="password"
             value={currentPassword}
           />
-        </label>
+        </label> : null}
         <label
           className="admin-recovery-token-option"
           htmlFor="admin-recovery-revoke-tokens"
@@ -906,7 +1336,7 @@ function RecoveryConfirmationDialog({
           </button>
           <button
             className="icon-button primary"
-            disabled={busy || !currentPassword}
+            disabled={busy || (requirePassword && !currentPassword)}
             type="submit"
           >
             {busy
@@ -963,51 +1393,6 @@ function maskRecoveryUrl(rawUrl: string): string {
   return `${visible}${query ? `?${query}` : ""}${fragment}`;
 }
 
-/**
- * Copy `text` without ever rendering it.
- *
- * `navigator.clipboard` is gated on a secure context, and the deployment that
- * lacks one -- self-hosted dtxWiki behind plain HTTP -- is exactly where an
- * admin still has to hand a recovery link to a locked-out user. `execCommand`
- * is deprecated but is the only copy path those browsers have.
- *
- * The carrier is created, read and removed inside a single synchronous turn,
- * so it is never painted, never part of a React commit, and cannot be observed
- * by a snapshot taken between renders. That is the whole point: the fallback
- * must not undo the masking above.
- */
-function copyThroughTransientNode(text: string): boolean {
-  if (
-    typeof document === "undefined" ||
-    typeof document.execCommand !== "function"
-  ) {
-    return false;
-  }
-  const carrier = document.createElement("textarea");
-  carrier.value = text;
-  carrier.readOnly = true;
-  carrier.tabIndex = -1;
-  carrier.setAttribute("aria-hidden", "true");
-  carrier.style.position = "fixed";
-  carrier.style.top = "0";
-  carrier.style.opacity = "0";
-  carrier.style.pointerEvents = "none";
-  const previouslyFocused =
-    document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-  document.body.append(carrier);
-  try {
-    carrier.select();
-    return document.execCommand("copy");
-  } catch {
-    return false;
-  } finally {
-    carrier.remove();
-    previouslyFocused?.focus();
-  }
-}
-
 function OneTimeLinkDialog({
   link,
   onClose,
@@ -1047,26 +1432,8 @@ function OneTimeLinkDialog({
   // Ordered by how much of the credential each rung exposes: the Clipboard API
   // and the transient carrier below never render it, revealing it does.
   async function copyLink() {
-    if (canWriteToClipboard()) {
-      try {
-        await navigator.clipboard.writeText(link.resetUrl);
-        setCopyStatus(
-          t("userRecovery.linkDialog.copied", {
-            defaultValue: "Recovery link copied.",
-          }),
-        );
-        return;
-      } catch {
-        // Permission denied or a transient failure: try the older path before
-        // falling back to putting the secret on screen.
-      }
-    }
-    if (copyThroughTransientNode(link.resetUrl)) {
-      setCopyStatus(
-        t("userRecovery.linkDialog.copied", {
-          defaultValue: "Recovery link copied.",
-        }),
-      );
+    if (await writeTextToClipboard(link.resetUrl)) {
+      setCopyStatus(t("userRecovery.linkDialog.copied", { defaultValue: "Recovery link copied." }));
       return;
     }
     // Already on screen from an earlier attempt: the operator has most likely

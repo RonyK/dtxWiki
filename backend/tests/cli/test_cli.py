@@ -71,7 +71,7 @@ def test_package_exposes_no_stdio_mcp_entry_point():
     assert "dtxwiki-mcp" not in project["project"]["scripts"]
 
 
-def test_version_does_not_start_server(monkeypatch):
+def test_version_does_not_start_server(monkeypatch, capsys):
     monkeypatch.setattr(
         cli_main,
         "run_server",
@@ -82,6 +82,15 @@ def test_version_does_not_start_server(monkeypatch):
 
     assert result.exit_code == 0
     assert result.stdout.startswith("dtxwiki ")
+
+    # The installed entry point must preserve eager version reporting even
+    # when extension discovery cannot configure the serving process.
+    monkeypatch.setenv("DTXWIKI_PLUGINS", "missing_version_test_plugin")
+    monkeypatch.setattr(sys, "argv", ["dtxwiki", "--version"])
+    with pytest.raises(SystemExit) as stopped:
+        cli_main.main()
+    assert stopped.value.code == 0
+    assert capsys.readouterr().out.startswith("dtxwiki ")
 
 
 def test_root_invocation_accepts_serve_options(monkeypatch):
@@ -105,6 +114,7 @@ def test_root_invocation_accepts_serve_options(monkeypatch):
             "db": None,
             "open_browser": False,
             "log_level": "warning",
+            "worker_mode": None,
         }
     ]
 
@@ -112,28 +122,26 @@ def test_root_invocation_accepts_serve_options(monkeypatch):
 def test_root_invocation_uses_env_backed_default_port(monkeypatch):
     calls = []
 
-    def fake_uvicorn_run(app_instance, **kwargs):
+    async def fake_runtime(app_instance, settings, **kwargs):
         calls.append({"app": app_instance, **kwargs})
 
     monkeypatch.setenv("DTXWIKI_BACKEND_PORT", "22080")
     monkeypatch.setattr(cli_main, "bootstrap_app", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli_main, "create_app", lambda settings: object())
-    monkeypatch.setattr(cli_main.uvicorn, "run", fake_uvicorn_run)
+    monkeypatch.setattr(cli_main, "serve_runtime", fake_runtime)
 
     result = CliRunner().invoke(cli_main.app, ["--no-open"])
 
     assert result.exit_code == 0
-    assert calls == [
-        {
-            "app": calls[0]["app"],
-            "host": "127.0.0.1",
-            "port": 22080,
-            "log_level": "info",
-            "access_log": False,
-            "proxy_headers": False,
-            "forwarded_allow_ips": "127.0.0.1",
-        }
-    ]
+    assert len(calls) == 1
+    assert calls[0]["host"] == "127.0.0.1"
+    assert calls[0]["port"] == 22080
+    assert calls[0]["log_level"] == "info"
+    assert calls[0]["proxy_headers"] is False
+    assert calls[0]["forwarded_allow_ips"] == "127.0.0.1"
+    assert calls[0]["on_started"] is None
+    assert calls[0]["app"] is None
+    assert callable(calls[0]["application_factory"])
 
 
 def test_cli_import_does_not_create_global_asgi_app_under_production_guard():
@@ -304,7 +312,7 @@ def test_users_add_and_reset_password(tmp_path, monkeypatch):
             "add",
             "User@Example.COM",
             "--password",
-            "correct-pass",
+            "correct-password",
             "--db",
             database_url,
             "--json",
@@ -317,13 +325,16 @@ def test_users_add_and_reset_password(tmp_path, monkeypatch):
     assert "role" not in payload
 
     session_service = make_session_service(database_url)
-    assert session_service.login(
-        email="user@example.com",
-        password="correct-pass",
-    ).user.email == "user@example.com"
+    assert (
+        session_service.login(
+            email="user@example.com",
+            password="correct-password",
+        ).user.email
+        == "user@example.com"
+    )
     existing_session = session_service.login(
         email="user@example.com",
-        password="correct-pass",
+        password="correct-password",
     )
 
     reset = runner.invoke(
@@ -333,7 +344,7 @@ def test_users_add_and_reset_password(tmp_path, monkeypatch):
             "reset-password",
             "user@example.com",
             "--password",
-            "changed-pass",
+            "changed-password",
             "--db",
             database_url,
             "--json",
@@ -345,19 +356,20 @@ def test_users_add_and_reset_password(tmp_path, monkeypatch):
     with pytest.raises(InvalidSessionError, match="session token has been revoked"):
         session_service.authenticate_session(existing_session.session_token)
     with pytest.raises(InvalidCredentialsError, match="email or password is invalid"):
-        session_service.login(email="user@example.com", password="correct-pass")
-    assert session_service.login(
-        email="user@example.com",
-        password="changed-pass",
-    ).user.email == "user@example.com"
+        session_service.login(email="user@example.com", password="correct-password")
+    assert (
+        session_service.login(
+            email="user@example.com",
+            password="changed-password",
+        ).user.email
+        == "user@example.com"
+    )
 
     session_factory = make_session_factory(make_engine(database_url))
     with session_factory() as session:
         user = session.scalar(select(User).where(User.email == "user@example.com"))
         audit = session.scalar(
-            select(AuditEvent).where(
-                AuditEvent.action == "auth.password.admin_reset"
-            )
+            select(AuditEvent).where(AuditEvent.action == "auth.password.admin_reset")
         )
         assert user is not None
         assert user.session_generation == 1
@@ -384,7 +396,7 @@ def test_users_add_reports_duplicate_email(tmp_path):
         "add",
         "dup@example.com",
         "--password",
-        "correct-pass",
+        "correct-password",
         "--db",
         database_url,
     ]
@@ -421,7 +433,7 @@ def test_workspace_members_add_list_and_remove(tmp_path):
             "add",
             "member@example.com",
             "--password",
-            "correct-pass",
+            "correct-password",
             "--db",
             database_url,
         ],
@@ -466,13 +478,21 @@ def test_workspace_members_add_list_and_remove(tmp_path):
     assert listed.exit_code == 0
     assert json.loads(listed.stdout)[0]["role"] == "viewer"
 
+    # Reuse the same traversal to exercise email-less UUID targeting through
+    # Typer parsing and both service wrappers, without another DB/test case.
+    with session_factory.begin() as session:
+        target = session.scalar(select(User).where(User.email == "member@example.com"))
+        target_id = str(target.id)
+        target.email = target.password_hash = None
+
     promoted = runner.invoke(
         cli_main.app,
         [
             "workspace",
             "members",
             "add",
-            "member@example.com",
+            "--user-id",
+            target_id,
             "--workspace",
             "default",
             "--role",
@@ -484,6 +504,15 @@ def test_workspace_members_add_list_and_remove(tmp_path):
     )
     assert promoted.exit_code == 0
     assert json.loads(promoted.stdout)["role"] == "editor"
+    # Text output must still name an email-less member by its UUID selector.
+    text_listed = runner.invoke(
+        cli_main.app,
+        [
+            *("workspace", "members", "list", "--workspace", "default"),
+            *("--db", database_url),
+        ],
+    )
+    assert f"{target_id} (no email) role=editor" in text_listed.stdout
 
     removed = runner.invoke(
         cli_main.app,
@@ -491,7 +520,8 @@ def test_workspace_members_add_list_and_remove(tmp_path):
             "workspace",
             "members",
             "remove",
-            "member@example.com",
+            "--user-id",
+            target_id,
             "--workspace",
             "default",
             "--db",

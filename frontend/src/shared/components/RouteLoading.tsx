@@ -1,4 +1,4 @@
-import { Spinner } from "./Spinner";
+import { LoadingIndicator } from "./LoadingIndicator";
 
 type RouteLoadingProps = {
   label?: string;
@@ -6,9 +6,8 @@ type RouteLoadingProps = {
 
 export function RouteLoading({ label = "Loading" }: RouteLoadingProps) {
   return (
-    <div className="route-loading" role="status" aria-live="polite" aria-label={label}>
-      <Spinner decorative className="route-loading-icon" size={18} />
-      <span>{label}</span>
-    </div>
+    <LoadingIndicator aria-label={label} className="route-loading" size={18}>
+      {label}
+    </LoadingIndicator>
   );
 }

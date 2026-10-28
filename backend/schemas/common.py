@@ -132,7 +132,39 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        revision. Descriptions of update/patch_context_edit and the edit
 #        receipt say when a block keeps its id and that update_context_edit
 #        with no open edit stages a reviewed draft. No tool added/removed.
-MCP_TOOL_CONTRACT_REVISION = 11
+#  12 -- Shared write-input limits: normalized titles and labels, final body
+#        budgets, human explanations, feedback and submitted reference lists.
+#        Refresh tools/list; oversized explicit input now fails validation.
+#  13 -- Bundle categories now expose the supported enum, review notes reject
+#        invalid Unicode, and body budgets describe the final stored Markdown.
+#        Refresh tools/list before submitting content and bundle requests.
+#  14 -- General search excludes feedback and changes; explicit audit scopes
+#        remain available. Search results gain optional summary and location,
+#        and the always-false stale field is deprecated. Refresh tools/list.
+#  15 -- Search returns exact-name matches only through ranked_results and no
+#        longer emits a separate disambiguation projection or search warning.
+#        Optional filters.include_agents defaults true; false excludes Agent
+#        pages before result counts and pagination. Refresh tools/list.
+#        Explicit read_concept and write-target ambiguity policies are retained.
+#  16 -- list_my_workspaces no longer returns personal_workspace_id: the
+#        workspace an account starts with is an ordinary workspace. Use
+#        default_workspace_id or current_workspace_id. Refresh tools/list.
+#  17 -- list_requested_changes evidence adds independently authorized document
+#        destinations and exact candidate/baseline content descriptors,
+#        including the earlier draft a candidate was written on. Clients may
+#        ignore these additive fields and keep using the existing target and
+#        diff_ref fields; no tool or input schema changed.
+#  18 -- what_changed reports each move of a page's published version
+#        (before -> after). It adds unpublished when an undone first
+#        publication leaves no published version: invalidate the page's cached
+#        publication by page_id; version_id is null. created now also covers
+#        a page published again after it was unpublished or archived, so
+#        treat created as an upsert. previous_version_id is the version
+#        published right before the entry, not the version's parent, and is
+#        set on updated, unpublished and archived entries. reason says why
+#        the version moved. Restoring an archived page is reported as created.
+#        Existing visibility rules still apply, including draft visibility.
+MCP_TOOL_CONTRACT_REVISION = 18
 ERROR_CODES = (
     "not_found",
     "stale_base_version",
@@ -163,8 +195,7 @@ ERROR_CODES = (
     "text_match_low_confidence",
     "section_not_found",
     "section_hash_mismatch",
-    # Block-addressed operations (design doc
-    # doc/design/block-provenance-contract.md section 2).
+    # Block-addressed operations.
     "block_not_found",
     "block_hash_mismatch",
     "row_not_found",
@@ -291,12 +322,11 @@ WARNING_CODES = (
     # without re-reading the page, which is the cost patching removes.
     "text_occurrence_mismatch",
     "text_not_found",
-    # Search advisory codes (design §8.2). unsupported_filter_*,
-    # disambiguation_required, and explicit semantic/hybrid fallback fire
-    # today; coverage_gap_recorded is emitted by Ask/REST/MCP zero-hit paths.
+    # Search advisory codes (design §8.2). unsupported_filter_* and explicit
+    # semantic/hybrid fallback fire today; coverage_gap_recorded is emitted by
+    # Ask/REST/MCP zero-hit paths.
     "unsupported_filter_tag",
     "unsupported_filter_date",
-    "disambiguation_required",
     "semantic_fallback_used",
     "keyword_lane_unavailable",
     "coverage_gap_recorded",
@@ -308,8 +338,7 @@ WARNING_CODES = (
     # deterministic evidence pack; these say why it is not the composed one.
     "llm_provider_unavailable",
     "llm_composer_failed",
-    # Epic-2 Phase 6a fan-out (doc/design/workspace-database-separation-plan.md
-    # §4): one or more workspace shards could not be reached while building a
+    # One or more workspace shards could not be reached while building a
     # cross-workspace admin job listing/summary, so the result is a partial
     # one -- the reachable workspaces' data, not every workspace's.
     "job_fanout_incomplete",
@@ -570,6 +599,14 @@ class RESTBlocker(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class RESTBlockingWorkspace(BaseModel):
+    workspace_id: UUID
+    title: str
+    other_member_count: int = Field(ge=0)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class RESTConflictErrorBody(RESTErrorBody):
     server_version_id: UUID | None = None
     server_content_hash: str | None = None
@@ -584,3 +621,6 @@ class RESTConflictErrorBody(RESTErrorBody):
     # they are declared fields.
     purge_grant: str | None = None
     purge_grant_expires_at: datetime | None = None
+    # Account withdrawal 409: workspaces with other active members that must
+    # be deleted, or given another admin, before the account can leave.
+    blocking_workspaces: list[RESTBlockingWorkspace] | None = None

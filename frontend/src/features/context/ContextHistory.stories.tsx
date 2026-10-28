@@ -157,23 +157,25 @@ export const Linear = {
   ),
 };
 
-// Drives mergeToLane + passingLanes + incomingLanes + a branch curve at once
-// -- a combination nothing else in the repo exercises. v1 -> v2 is the trunk;
-// v3 branches off v1 onto its own lane (alternative_draft) and never grows
-// its own descendants; the trunk keeps going v2 -> v4 (v4 "passes through"
-// on the trunk lane, in between the branch's start and its merge); v5 is the
-// reconcile-merge version, landing back on the trunk while its
-// `merged_into_version_id` (set on v3, the branch) pulls the branch's lane
-// back in. Getting the lineage backwards -- e.g. having v4/v5 continue FROM
-// v3 instead of from v2 -- puts the branch and its merge target on the SAME
-// lane, which made an earlier draft of this fixture render a degenerate,
-// invisible "merge" (a curve from a lane back to itself).
+// A fork and its reconcile merge at once. v1 -> v2 -> v4 -> v5 is the trunk;
+// v3 forks off v1 (alternative_draft) and never grows descendants; v5 is the
+// reconcile-merge version, and `merged_into_version_id` (set on v3, the
+// branch) is its second parent. v3 keeps its own lane from v5's merge
+// departure all the way down to the row directly above v1 and joins there --
+// it must never run down the trunk through v2's dot, which is how this story
+// rendered before 2026-10-22 and why it is not a reference picture on its own:
+// compare it with `git log --graph --date-order` for the same parent links
+// (see the HISTORY GRAPH CONTRACT in shared/lib/historyGraph.ts).
 export const ForkAndMerge = {
   render: () => (
     <ReaderColumn>
       <ContextHistory
         {...baseProps}
-        detail={detail({ visible_version_id: "version-5" })}
+        detail={detail({
+          current_version_id: "version-5",
+          current_published_version_id: "version-5",
+          visible_version_id: "version-5",
+        })}
         history={history([
           historyVersion("version-5", 5, "published_snapshot", {
             is_visible_head: true,
@@ -194,6 +196,183 @@ export const ForkAndMerge = {
   ),
 };
 
+// The 2026-10-22 report: two drafts forked from the same published v3. v4 is
+// the draft head (trunk), v5 an alternative. v5's edge keeps lane 1 past v4
+// and joins v3 only at the bottom of v4's row (`|/`); it must not cross v4's
+// dot, which is what made this read as one straight v3 -> v4 -> v5 line.
+export const SameBaseFork = {
+  render: () => (
+    <ReaderColumn>
+      <ContextHistory
+        {...baseProps}
+        detail={detail({
+          current_version_id: "version-4",
+          current_published_version_id: "version-3",
+          latest_draft_version_id: "version-4",
+          visible_version_id: "version-4",
+        })}
+        history={history([
+          historyVersion("version-5", 5, "alternative_draft", {
+            prior_version_id: "version-3",
+            is_alternative: true,
+          }),
+          historyVersion("version-4", 4, "current_draft", {
+            prior_version_id: "version-3",
+            is_draft_head: true,
+            is_visible_head: true,
+          }),
+          historyVersion("version-3", 3, "published_snapshot", {
+            is_current_published: true,
+          }),
+          historyVersion("version-2", 2, "superseded_snapshot"),
+          historyVersion("version-1", 1, "superseded_snapshot"),
+        ])}
+      />
+    </ReaderColumn>
+  ),
+};
+
+// Three versions forked from v1 while all three are still alive: three lanes,
+// joining v1 together in the bottom of v2's row. Sharing a lane between any
+// two of them (the pre-2026-10-22 "siblings never sit side by side" packing)
+// erases the fork.
+export const ThreeWayFork = {
+  render: () => (
+    <ReaderColumn>
+      <ContextHistory
+        {...baseProps}
+        detail={detail({
+          current_version_id: "version-4",
+          current_published_version_id: "version-1",
+          latest_draft_version_id: "version-4",
+          visible_version_id: "version-4",
+        })}
+        history={history([
+          historyVersion("version-4", 4, "current_draft", {
+            prior_version_id: "version-1",
+            is_draft_head: true,
+            is_visible_head: true,
+          }),
+          historyVersion("version-3", 3, "alternative_draft", {
+            prior_version_id: "version-1",
+            is_alternative: true,
+          }),
+          historyVersion("version-2", 2, "discarded_draft", {
+            prior_version_id: "version-1",
+            is_discarded: true,
+          }),
+          historyVersion("version-1", 1, "published_snapshot", {
+            is_current_published: true,
+          }),
+        ])}
+      />
+    </ReaderColumn>
+  ),
+};
+
+// A busy same-base fork: fourteen siblings need fourteen distinct lanes.
+// The reader must preserve every dot and edge even when they need more
+// horizontal space than the usual gutter. The count and loaded page can be
+// changed together to inspect an older-page transition without changing the
+// already loaded rows' lane positions.
+export const ManySiblings = {
+  args: { siblingCount: 14, loadedSiblings: 14, includeRoot: true },
+  render: ({
+    siblingCount = 14,
+    loadedSiblings = 14,
+    includeRoot = true,
+  }: {
+    siblingCount?: number;
+    loadedSiblings?: number;
+    includeRoot?: boolean;
+  } = {}) => {
+    const headNo = siblingCount + 1;
+    const loaded = Math.min(siblingCount, loadedSiblings);
+    const versions = Array.from({ length: loaded }, (_, index) => {
+      const versionNo = headNo - index;
+      return historyVersion(
+        `version-${versionNo}`,
+        versionNo,
+        index === 0 ? "current_draft" : "alternative_draft",
+        {
+          version_status: "draft",
+          prior_version_id: "version-1",
+          is_draft_head: index === 0,
+          is_visible_head: index === 0,
+          is_alternative: index !== 0,
+          actor_display_name: "리뷰 작성자",
+          lines_added: 1,
+          lines_removed: 0,
+        },
+      );
+    });
+    if (includeRoot && loaded === siblingCount) {
+      versions.push(
+        historyVersion("version-1", 1, "published_snapshot", {
+          version_status: "published_snapshot",
+          is_current_published: true,
+          actor_display_name: "리뷰 작성자",
+          lines_added: 1,
+          lines_removed: 0,
+        }),
+      );
+    }
+    return (
+      <ReaderColumn>
+        <ContextHistory
+          {...baseProps}
+          detail={detail({
+            current_version_id: `version-${headNo}`,
+            current_published_version_id: "version-1",
+            latest_draft_version_id: `version-${headNo}`,
+            visible_version_id: `version-${headNo}`,
+          })}
+          history={{
+            ...history(versions),
+            next_cursor:
+              loaded < siblingCount || !includeRoot ? "older-page" : null,
+          }}
+        />
+      </ReaderColumn>
+    );
+  },
+};
+
+// First page of a longer history: v5's parent v3 and v4's parent v1 are not
+// loaded yet. Both edges keep their lanes, dashed, to the end of the list
+// instead of stopping in their own row -- a stub that stops would sit right
+// above v4's dot on the same lane and read as "v4 is v5's parent".
+export const OlderPageNotLoaded = {
+  render: () => (
+    <ReaderColumn>
+      <ContextHistory
+        {...baseProps}
+        detail={detail({
+          current_version_id: "version-6",
+          current_published_version_id: "version-6",
+          visible_version_id: "version-6",
+        })}
+        history={{
+          ...history([
+            historyVersion("version-6", 6, "published_snapshot", {
+              is_current_published: true,
+              is_visible_head: true,
+            }),
+            historyVersion("version-5", 5, "superseded_snapshot", {
+              prior_version_id: "version-3",
+            }),
+            historyVersion("version-4", 4, "alternative_draft", {
+              prior_version_id: "version-1",
+              is_alternative: true,
+            }),
+          ]),
+          next_cursor: "older-page",
+        }}
+      />
+    </ReaderColumn>
+  ),
+};
+
 // Three states at once: a hidden parent ("Comparison unavailable"), a
 // state_inconsistent row (danger tone rail), and reconciliation_available on
 // the same row a discard is also valid for -- the case the action-row
@@ -204,7 +383,11 @@ export const States = {
     <ReaderColumn>
       <ContextHistory
         {...baseProps}
-        detail={detail({ visible_version_id: "version-3" })}
+        detail={detail({
+          current_version_id: "version-3",
+          current_published_version_id: "version-3",
+          visible_version_id: "version-3",
+        })}
         history={history([
           historyVersion("version-3", 3, "published_snapshot", {
             is_visible_head: true,

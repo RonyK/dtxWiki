@@ -33,6 +33,10 @@ make bundle-frontend    # SPA를 backend/static 에 번들 (packaged UI를 직�
 자동 생성합니다. 브라우저에서 `http://127.0.0.1:21080/`로 접속하면 backend가 번들된
 frontend를 함께 serve합니다.
 
+`dtxwiki`와 `dtxwiki serve`는 worker도 자동으로 시작하고 종료합니다.
+`--db`를 지정하면 worker도 같은 DB를 사용합니다. 별도 worker를 띄우지 마세요.
+Desktop 로컬 엔진도 같은 실행 관리 코드를 사용합니다.
+
 개발 중에는 보통 dev 서버 두 개를 띄웁니다(번들 없이 HMR):
 
 ```bash
@@ -102,17 +106,133 @@ DB 복사이며 workspace 분할 이전, PG→SQLite, live read/write 중 이전
 
 ## Docker 없이 데모 실행 (SQLite)
 
-명시적인 `DTXWIKI_DATABASE_URL` 을 공유해서 backend/worker 가 같은 DB 를 보도록
-구성합니다.
+별도 데이터 경로를 지정하고 `dtxwiki` 하나로 서버와 작업 처리를 실행합니다.
 
 ```bash
 make install
 export DTXWIKI_DEMO_DIR="$(mktemp -d -t dtxwiki-demo-XXXXXX)"
+export DTXWIKI_DATA_DIR="$DTXWIKI_DEMO_DIR"
 export DTXWIKI_DATABASE_URL="sqlite+pysqlite:///${DTXWIKI_DEMO_DIR}/dtxwiki-demo.sqlite"
 .venv/bin/dtxwiki bootstrap
 .venv/bin/dtxwiki users add admin@example.com --password 'change-me-please'
-.venv/bin/python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 21080
+.venv/bin/dtxwiki --no-open
 ```
+
+## 로그인 및 서버 플러그인 SPI
+
+외부 배포 패키지는 `dtxwiki.plugins` entry point로 `DtxwikiPlugin` 인스턴스 또는
+이를 반환하는 인자 없는 factory를 내보냅니다. 이름은 소문자로 시작하는
+`[a-z][a-z0-9_]*` 형식의 최대 47자이며, 배포자가 `DTXWIKI_PLUGINS`에서 명시적으로 선택해야
+로드됩니다. core SPI는 `backend.spi.SPI_VERSION = "1.1"`, 로그인 method SPI는
+`backend.spi.auth.AUTH_METHOD_SPI_VERSION = "1.0"`입니다. `requires_core`와
+`requires_spi`는 각각 PEP 440 version specifier입니다.
+
+예를 들어 private 패키지의 `pyproject.toml`에 다음 entry point를 등록합니다.
+
+```toml
+[project.entry-points."dtxwiki.plugins"]
+company_login = "company_login.plugin:plugin"
+```
+
+해당 모듈은 공개 OIDC helper를 재사용할 수 있습니다. 이 예시는 별도 패키지의 최소
+adapter이며, 공개 core가 `company_oidc` provider를 기본 등록하지는 않습니다.
+
+```python
+from backend.spi import Branding, DtxwikiPlugin
+from backend.spi.auth_oidc import OidcMethodBase
+
+
+class CompanyOidc(OidcMethodBase):
+    descriptor = OidcMethodBase.describe(
+        method_id="company_oidc",
+        branding=Branding(label={"ko": "회사 계정으로 로그인", "en": "Company SSO"}),
+    )
+
+
+method = CompanyOidc()
+plugin = DtxwikiPlugin(
+    name="company_login",
+    version="1.0.0",
+    requires_core=">=0.1.3,<0.2",
+    requires_spi=">=1.1,<2",
+    auth_methods=lambda: (method,),
+)
+```
+
+provider의 issuer·client ID·secret 참조와 계정 생성·연결 정책은
+[운영 설정](DEPLOYMENT.md#별도-로그인-플러그인과-oidc-provider)에 둡니다. adapter는
+`AuthMethodPlugin`의 `descriptor`, `validate_config`, `begin`, `complete`를 구현하고
+검증된 `ExternalAssertion`을 반환합니다. core가 로그인 거래, 계정 연결과 native
+session을 관리합니다. IdP access/refresh token을 core DB나 로그에 남기지 않습니다.
+`backend.testing.spi_conformance.auth.assert_auth_method_contract`로 adapter의
+기본 계약을 확인하고, 실제 IdP의 issuer·서명·nonce·PKCE 실패 경로는 패키지 자체
+테스트로 검증합니다.
+
+SAML adapter는 `protocol="saml2"`, `interaction="redirect"`, PKCE·nonce
+`"unsupported"`, `id_token="none"`을 선언합니다. 현재 시작 요청은 HTTP Redirect만
+지원하며 `begin()`은 출력 가능한 ASCII 1–512자의 `protocol_request_id`를 반환해야
+합니다. core는 이 값을 callback에 전달하지만 SAML 서명·audience·recipient·시간·
+`InResponseTo`·replay 검증은 adapter가 수행합니다. POST 응답은 core의 같은 사이트
+후속 요청에서 처리합니다. `reauthentication=True`는 실제 강제 재인증과 검증된
+`authenticated_at`을 제공할 때만 선언하세요. SAML conformance에는 서명·audience·
+correlation 실패 fixture도 필요합니다.
+
+`on_login(context: LoginContext) -> ProvisioningResult`는 불변 사용자 UUID·identity UUID·
+provider·검증된 assertion을 받고 `WorkspaceRoleRequest` 목록만 반환합니다. Session이나
+ORM 모델을 전달하지 않습니다. 운영자의 `provisioning_workspace_roles`는 workspace UUID별
+`viewer`/`editor` 허용 목록입니다. core가 같은 계정 transaction에서 이를 검사해 없는
+멤버십만 추가합니다. 기존 다른 역할은 유지하고 감사 기록을 남기며 역할 축소·삭제·owner·
+server-admin 부여는 지원하지 않습니다. 잘못된 요청이나 hook 예외는 로그인 전체를
+되돌립니다. 이는 신뢰된 in-process 플러그인 계약이며 코드 실행 sandbox가 아닙니다.
+`on_identity_linked`와 `on_identity_unlinked` 알림은 commit 후 실행되며 실패가
+계정 변경을 되돌리지 않습니다. credential 로그인과 사용자/provider 삭제 hook은
+현재 공개 SPI 계약에 포함되지 않습니다. 웹 lifespan은 worker에서 실행되지 않습니다.
+
+SSO 가입은 이메일 없이 완료합니다. 가입 전 대기 테이블·API·화면은 제공하지 않습니다.
+`GET /auth/verification`은 확인 상태와 사용 가능한 방법을 조회하며 기간을 연장하지
+않습니다. 본인 확인은 기본 60분이고 서버 설정으로 조정합니다. 확인 토큰은 링크
+fragment에서 즉시 제거한 뒤 명시적인 JSON POST로 제출합니다. 미출시 proof v2를
+account/admin 이메일 확인과 primary(비밀번호·동일 SSO identity) 확인으로 구분하고
+안정적인 세션 ID에 묶습니다. remembered 갱신은 ID와 최초 auth_time을 보존합니다.
+출시된 native session v1에는 서명 검증 후 결정적인 ID를 부여하며, 만료된 과거 proof나
+이 브랜치의 이전 v2를 위한 별도 호환 reader는 두지 않습니다. native 세션 형식은
+기존 v1을 유지합니다.
+
+플러그인 worker handler는 `JobInput`, `WorkerContext`를 받고 `JobResult`를 반환합니다.
+입력은 불변 JSON payload·job/workspace UUID·trigger·idempotency key이고 context는 현재
+시각만 제공합니다. ORM·Session·내부 worker runtime은 전달하지 않습니다. 재시도 가능한
+실패는 `RetryableJobError`, 영구 실패는 `PermanentJobError`로 구분하며 core가 lease·
+ack·재시도 한도와 지연을 관리합니다. 작업은 중복 전달에 안전하게 구현해야 합니다.
+
+선택 hook은 다음과 같습니다.
+
+- `settings_model`: Pydantic 모델. 필드별 환경변수는
+  `DTXWIKI_PLUGIN_<NAME>_<FIELD>`이며 알 수 없는 키는 거부합니다.
+  `configure(model)`은 모든 플러그인의 설정 검증이 끝난 뒤 `Settings` 인스턴스당
+  한 번 실행됩니다. CLI는 실행 단위로 Settings와 registry를 공유하고, update·rollback의
+  환경 파일은 플러그인 탐색 전에 해석합니다.
+- `mount() -> PluginMount`: `api_router`는 `/api/v1/ext/<name>` 아래,
+  `ui_app`은 `/ext/<name>/` 아래에 core가 mount합니다. 임의 root route를
+  등록하는 hook이 아니며, 기존 overlay의 `extra_mount`는 계속 지원합니다.
+- `lifespan(app)`: async context manager. 기존 overlay lifespan 안에서 플러그인
+  lifespan이 시작되고 core MCP lifespan이 이어집니다. 종료 순서는 반대입니다.
+- `worker_handlers()`: 공개 `backend.spi.JobHandler`의 이름별 mapping.
+  core 또는 다른 플러그인과 이름이 충돌하면 시작을 거부합니다. handler는 core의
+  queue claim·완료·실패 transaction 규칙에 맞춥니다.
+- `cli`: `typer.Typer` 인스턴스. `dtxwiki <name> ...` 아래에 등록합니다.
+- `migrations`: `PluginMigrations(script_location, base, plane)`.
+  `script_location/versions/`의 Alembic revision을 사용하며 `plane`은
+  `control`만 지원합니다. 자체 `DeclarativeBase`만 사용하고 core 또는
+  다른 플러그인 metadata로 향하는 FK를 만들지 않습니다. workspace plane이나
+  `workspace_id`가 있는 테이블은 시작 시 거부합니다. 비활성화된 플러그인의
+  데이터까지 blocker 집계와 workspace 삭제에 연결하는 수명주기가 필요하기
+  때문입니다.
+
+플러그인 migration은 core head 적용 뒤 단일 DB에 실행되며 core가 제공하는
+Alembic 환경과 별도 `alembic_version_<name>`을 사용합니다. 플러그인의 `env.py`는
+실행하지 않습니다. 자동 migration이 꺼져 있으면 chain의 head 일치만 검증합니다.
+현재 workspace별 물리 DB와 shard fleet migration은 지원하지 않습니다. 플러그인은
+서버 프로세스에서 실행되는 신뢰된 코드이며 route namespace가 sandbox는 아닙니다.
 
 ## 테스트와 검증
 
@@ -132,6 +252,31 @@ make check-i18n            # i18n namespace 커버리지 + en/ko parity (= npm r
 npm run lint:md            # markdown lint (markdownlint-cli2)
 ```
 
+### 테스트 추가 예산과 실행 범위
+
+예산은 PR 단위로 적용하며, 독립된 실패 경로를 검증하는 케이스만 추가합니다.
+
+| 변경 범위 | 신규 케이스 기본 예산 |
+| --- | --- |
+| 문서·타입·동작 보존 리팩터링 | 0건 |
+| 일반 버그 수정·작은 기능 | backend 0–2건, 그중 DB·transport 합계 1건 이하 |
+| 브라우저 고유 동작 | E2E 기본 0건. 하위 계층으로 검증할 수 없을 때 대표 여정 1건 이하 |
+
+함수 수가 아니라 `parametrize`와 함수 내부 반복 입력도 셉니다. viewport·locale·writer
+조합을 포함한 논리 케이스 수와 수집 건수를 함께 보고하고, E2E는 엔진별 실행 건수도
+구분합니다. 이동·통합 시 추가·삭제·순증감을 각각 보고하며, 큰 반복문으로 예산을
+우회하지 않습니다. 예외가 필요하면 해당 테스트 주석에 독립된 실패 경로와 기존 테스트
+또는 하위 계층에서 검증할 수 없는 이유를 적습니다. Migration에는 아래의
+[기존 예산](#migration-테스트-수-제한)을 적용합니다.
+
+backend 테스트만 바꾼 경우 변경 파일 실행과 `--collect-only` 전후 비교로 검증합니다.
+공유 fixture·저장소·인증 파이프라인을 바꿨다면 전체 backend를 한 번 실행합니다.
+변경한 `@cross-browser` E2E spec은 commit 전에 로컬에서 Chromium·Firefox·WebKit으로
+한 번씩 실행합니다. 아직 push하지 않은 변경의 검증을 향후 CI에 맡겼다고 보고하지 않습니다.
+
+중복 제거와 fixture 정리는 측정 전에는 실행 시간 개선으로 보고하지 않습니다.
+추가 E2E 축소는 spec별 개수보다 CI의 테스트별 실행 시간을 확보해 우선순위를 정합니다.
+
 UI 컴포넌트는 Storybook 으로 격리 확인할 수 있습니다(포트 6006):
 
 ```bash
@@ -144,6 +289,9 @@ Playwright browser E2E:
 ```bash
 npm run playwright:install
 npm run test:e2e
+# PR CI와 같은 project 분할. 아래 두 명령은 순서대로 실행합니다.
+npm run test:e2e -- --project=chromium
+npm run test:e2e -- --project=firefox --project=webkit
 # 단일 spec / 패턴 / headed
 npm run test:e2e -- tests/e2e/sprint4_oauth_integrations.spec.ts
 npm run test:e2e -- --grep "OAuth consent revoke"
@@ -162,6 +310,11 @@ DTXWIKI_E2E_PROFILE=exhaustive npm run test:e2e
 # evidence 가 필요할 때만 아래 스위치를 켭니다.
 DTXWIKI_E2E_EVIDENCE=1 npm run test:e2e -- kosweep.spec.ts
 ```
+
+같은 checkout 에서 두 project 구성을 병렬 실행할 때는 `DTXWIKI_BACKEND_PORT` 와
+`--output` 경로를 실행마다 다르게 지정합니다. 기본 `test-results` 는 각 실행이 시작할 때
+정리하므로 공유하면 다른 실행의 산출물이 삭제될 수 있습니다. HTML reporter 를 사용하는
+경우(`CI=true` 또는 `--reporter=html`)에는 `PLAYWRIGHT_HTML_OUTPUT_DIR` 도 각각 지정합니다.
 
 `npm run test:e2e` harness 가 `tests/e2e/prepare_backend_db.py` 로 전용 DB 환경을
 준비하므로 `npx playwright test` 직접 호출은 권장하지 않습니다. 임시/스크래치 spec 은
@@ -242,13 +395,17 @@ Backend Python 코드만 바꾼 경우:
 make backend-dev
 ```
 
-`dtxwiki --no-open`과 worker를 직접 실행 중이었다면 process를
-종료한 뒤 다시 실행합니다.
+`dtxwiki --no-open`을 실행 중이었다면 `Ctrl+C`로 종료한 뒤 다시 실행합니다.
+함께 실행된 worker도 이 과정에서 교체됩니다.
 
 ```bash
 .venv/bin/dtxwiki --no-open
-.venv/bin/python -m backend.worker.entry run
 ```
+
+외부 process manager로 worker를 따로 관리할 때만 웹 서버에
+`DTXWIKI_WORKER_MODE=external`을 지정하고 `dtxwiki-worker run`을 실행합니다.
+systemd/production Compose 설정은 이 구성을 자동으로 적용합니다.
+`make backend-dev`나 ASGI 직접 실행은 기존처럼 worker를 따로 실행합니다.
 
 Python dependency나 `pyproject.toml`의 entry point를 바꾼 경우:
 
@@ -439,6 +596,32 @@ revision 파일만 둡니다. 릴리스의 DB head 매핑은 `release_manifest.j
 배포되는 migration과 보조 모듈의 해시는 `frozen_revisions.json` 및 독립된
 패키지 검증기의 해시 목록에 함께 고정합니다. 기존에 배포된 migration은 수정하거나
 다시 합치지 않습니다.
+
+여러 브랜치에서 같은 head 뒤에 migration을 추가한 경우에는 기존 revision을
+유지하고, 두 revision을 부모로 지정한 병합 revision을 추가합니다. 최종 그래프는
+head가 하나여야 하며, 모든 신규 경로가 고정된 core revision
+`efcbcf724889`를 거쳐야 합니다. 패키지 검증기는 이 그래프와 고정 파일의 해시를
+함께 확인합니다.
+
+### Migration 테스트 수 제한
+
+새 migration의 기본 예산은 DB별 upgrade → downgrade → re-upgrade 시나리오
+1건, SQLite·PostgreSQL 합계 **2건 이하**입니다. `parametrize`로 생성되는
+실행 건수도 포함합니다. 데이터 보존, 기본값, 제약조건은 같은 시나리오에서
+검증하고 각 중간 단계의 assertion을 유지합니다. 컬럼·입력값·단계·부모 revision마다
+별도의 전체 migration 테스트를 만들지 않습니다. 여러 부모를 지원하면 가능할 때
+DB 하나를 순서대로 업그레이드하면서 각 부모 상태를 확인합니다.
+
+SQL 생성·입력 경계·변환 규칙처럼 Alembic 실행 없이 검증할 수 있는 것은
+작은 스키마나 메모리 DB를 사용하는 단위 테스트로 통합합니다. 같은 조건을 필드마다
+별도 테스트와 DB로 반복하지 않습니다. 체인 연결과 패키징 검증은 기존 공통 테스트를
+확장합니다. 기존 동작 검증과 중복되거나, 구현을 그대로 반복하거나, 실제 결함으로
+실패할 수 없는 무의미한 테스트는 추가하지 않습니다.
+
+예산을 넘는 독립 시나리오가 꼭 필요하면 해당 테스트 주석에 **별도 실패 경로**와
+**기존 시나리오 또는 단위 테스트로 통합할 수 없는 이유**를 명시합니다. 테스트 수를
+줄이려고 assertion을 삭제하거나 실행을 생략해서는 안 됩니다. 검증 결과를 보고할 때는
+이번에 추가한 테스트 수와 기존 회귀 테스트 실행 수를 구분합니다.
 
 `backend/static/`은 생성물이라 gitignored입니다. 따라서 fresh checkout에서 raw
 `python -m build`, `pip install git+...`, Git archive만 사용하면 UI 없는 wheel이 생길 수 있습니다.

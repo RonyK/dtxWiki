@@ -1,3 +1,4 @@
+import { inputTextError, markdownInputError, textInputLimit } from "../../shared/lib/inputPolicy";
 import { autocompletion, closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
@@ -211,8 +212,8 @@ import {
   type PageIcon,
   type PageMetadata,
   type PageType,
-  normalizeAliasesInput,
-  normalizeTagsInput,
+  normalizeAliases,
+  normalizeTags,
   parsePageDocument,
   serializePageDocument,
 } from "./pageFrontmatter";
@@ -325,8 +326,7 @@ const COMPACT_ACTION_BAR_MAX_WIDTH = 720;
 const SINGLE_PANE_EDITOR_MAX_WIDTH = 640;
 const TITLE_TEXTAREA_MIN_HEIGHT = 44;
 const TITLE_TEXTAREA_MAX_HEIGHT = 132;
-const TITLE_MAX_LENGTH = 200;
-const TITLE_CONTROL_CHARS_PATTERN = /[\u0000-\u001F\u007F\u2028\u2029]+/g;
+const TITLE_MAX_LENGTH = 256;
 // Defense-in-depth for legacy or manually pasted upload markers. Interactive
 // uploads keep their transient slots outside EditorState.doc.
 const UPLOAD_PLACEHOLDER_PATTERN = /!\[[^\]]*\]\(\u200b/;
@@ -465,8 +465,8 @@ export function PageEditor({
   const [body, setBody] = useState("");
   const [pageIcon, setPageIcon] = useState<PageIcon>(DEFAULT_PAGE_METADATA.icon);
   const [pageType, setPageType] = useState<PageType>(DEFAULT_PAGE_METADATA.type);
-  const [tagInput, setTagInput] = useState("");
-  const [aliasInput, setAliasInput] = useState("");
+  const [tagInput, setTagInput] = useState<string[]>([]);
+  const [aliasInput, setAliasInput] = useState<string[]>([]);
   // Aliases run with truncateItems={false}, so an over-long entry is rejected
   // rather than silently trimmed. Without this the rejection was invisible:
   // Enter simply did nothing. CustomFormatEditor and FormatAliasGroupList
@@ -645,13 +645,13 @@ export function PageEditor({
   const propertiesPopoverTitleId = useId();
 
   const normalizedSlug = slugify(pageSlug);
-  const normalizedTags = useMemo(() => normalizeTagsInput(tagInput), [tagInput]);
+  const normalizedTags = useMemo(() => normalizeTags(tagInput), [tagInput]);
   const normalizedAliases = useMemo(
-    () => normalizeAliasesInput(aliasInput),
+    () => normalizeAliases(aliasInput),
     [aliasInput],
   );
-  const aliasValidationMessage = aliasInput.split(",").some((alias) => alias.trim().length > 80) ||
-    aliasInput.split(",").filter((alias) => alias.trim()).length > 32
+  const aliasValidationMessage = aliasInput.some((alias) => Boolean(inputTextError(alias, 80))) ||
+    aliasInput.filter((alias) => alias.trim()).length > 32
     ? t("editor.aliasesError", { defaultValue: "Use up to 32 aliases, each 80 characters or fewer." })
     : null;
   const pageMetadata = useMemo<PageMetadata>(() => ({
@@ -1122,6 +1122,7 @@ export function PageEditor({
   const canSave =
     isEditorReady &&
     title.trim().length > 0 &&
+    !inputTextError(title, TITLE_MAX_LENGTH) &&
     normalizedSlug.length > 0 &&
     !aliasValidationMessage &&
     !hasPendingImageUpload &&
@@ -2705,6 +2706,16 @@ export function PageEditor({
   async function save(options: SaveOptions = {}) {
     const source = options.source ?? "manual";
     const submittedBody = options.bodyOverride ?? body;
+    const serializedBody = serializeDraftBody(
+      { ...currentDraft, body: submittedBody, title: title.trim(), slug: mode === "edit" ? pageSlug : normalizedSlug },
+      frontmatterExtraLinesRef.current,
+    );
+    const inputError = inputTextError(title, TITLE_MAX_LENGTH) || markdownInputError(serializedBody);
+    if (inputError) {
+      setStatus(inputError);
+      setSaveError(true);
+      return;
+    }
     if (options.publish && stalePublishState !== "idle") {
       return;
     }
@@ -3320,6 +3331,8 @@ export function PageEditor({
         return false;
       }
       const draft = latestDraftRef.current;
+      const serializedBody = serializeDraftBody(draft, frontmatterExtraLinesRef.current);
+      if (markdownInputError(serializedBody)) return false;
       if (
         draftSaveFingerprint(draft, frontmatterExtraLinesRef.current) ===
         lastSavedFingerprintRef.current
@@ -3328,7 +3341,7 @@ export function PageEditor({
       }
       return sendPageAutosave(workspaceId, page.id, {
         title: draft.title.trim(),
-        body_md: serializeDraftBody(draft, frontmatterExtraLinesRef.current),
+        body_md: serializedBody,
         page_type: draft.pageType,
         tags: draft.tags,
         aliases: draft.aliases,
@@ -3478,9 +3491,12 @@ export function PageEditor({
     setStatus(null);
     try {
       const submittedDraft = { ...currentDraft, slug: pageSlug, title: title.trim() };
+      const serializedBody = serializeDraftBody(submittedDraft, frontmatterExtraLinesRef.current);
+      const inputError = markdownInputError(serializedBody);
+      if (inputError) { setStatus(inputError); return; }
       const preserved = await updatePage(workspaceId, page.id, {
         title: submittedDraft.title,
-        body_md: serializeDraftBody(submittedDraft, frontmatterExtraLinesRef.current),
+        body_md: serializedBody,
         page_type: submittedDraft.pageType,
         tags: submittedDraft.tags,
         aliases: submittedDraft.aliases,
@@ -3543,8 +3559,8 @@ export function PageEditor({
     frontmatterExtraLinesRef.current = [];
     setPageIcon(DEFAULT_PAGE_METADATA.icon);
     setPageType(DEFAULT_PAGE_METADATA.type);
-    setTagInput(tags.join(", "));
-    setAliasInput("");
+    setTagInput(tags);
+    setAliasInput([]);
     setTagQuery("");
     setTagSuggestions([]);
   }
@@ -3553,8 +3569,8 @@ export function PageEditor({
     frontmatterExtraLinesRef.current = metadata.extraLines;
     setPageIcon(metadata.icon);
     setPageType(metadata.type);
-    setTagInput(metadata.tags.join(", "));
-    setAliasInput(metadata.aliases.join(", "));
+    setTagInput(metadata.tags);
+    setAliasInput(metadata.aliases);
   }
 
   function updateSlug(nextSlug: string) {
@@ -3568,12 +3584,12 @@ export function PageEditor({
   }
 
   function updateTags(nextTags: string[]) {
-    setTagInput(nextTags.join(", "));
+    setTagInput(nextTags);
     markDraftMutation();
   }
 
   function updateAliases(nextAliases: string[]) {
-    setAliasInput(nextAliases.join(", "));
+    setAliasInput(nextAliases);
     setAliasItemError(null);
     markDraftMutation();
   }
@@ -3950,6 +3966,11 @@ export function PageEditor({
       return;
     }
     const note = commentPreview.note.trim();
+    const noteError = inputTextError(note, 5000, false);
+    if (noteError) {
+      setStatus(noteError);
+      return;
+    }
     if (!note) {
       setStatus(
         t("editor.commentNoteRequired", {
@@ -4367,6 +4388,7 @@ export function PageEditor({
             </header>
           ) : null}
           <TreeRail
+            favoriteScope={actorId && workspaceId ? { actorId, workspaceId } : undefined}
             title={contextRailLabel}
             accent="context"
             nodes={contextTree}
@@ -4725,7 +4747,7 @@ export function PageEditor({
               aria-label={t("editor.titleAria", { defaultValue: "Title" })}
               className="editor-title-input"
               data-testid="page-title-editor"
-              maxLength={TITLE_MAX_LENGTH}
+              {...textInputLimit(TITLE_MAX_LENGTH)}
               onBlur={() => setTitleValidationRequested(true)}
               onChange={(event) => updateTitle(event.currentTarget.value)}
               onKeyDown={handleTitleKeyDown}
@@ -4738,6 +4760,9 @@ export function PageEditor({
               <div className="editor-title-tags">
                 <ChipInput
                   ariaLabel={t("editor.tagsAria", { defaultValue: "Tags" })}
+                  truncateItems={false}
+                  maxItems={32}
+                  onItemTooLong={() => setStatus(inputTextError("x".repeat(49), 48))}
                   onChange={updateTags}
                   onQueryChange={setTagQuery}
                   placeholder={t("editor.tagPlaceholder", { defaultValue: "+ Tag" })}
@@ -4814,7 +4839,10 @@ export function PageEditor({
                   <ChipInput
                     ariaLabel={t("editor.tagsAria", { defaultValue: "Tags" })}
                     id="editor-mobile-tags"
-                    onChange={updateTags}
+                    truncateItems={false}
+                  maxItems={32}
+                  onItemTooLong={() => setStatus(inputTextError("x".repeat(49), 48))}
+                  onChange={updateTags}
                     onQueryChange={setTagQuery}
                     placeholder={t("editor.tagPlaceholder", { defaultValue: "+ Tag" })}
                     suggestions={tagSuggestions}
@@ -4885,6 +4913,7 @@ export function PageEditor({
                       ariaLabel={t("editor.aliasesLabel", { defaultValue: "Aliases" })}
                       id="editor-aliases"
                       maxItemLength={80}
+                      maxItems={32}
                       onChange={updateAliases}
                       onItemTooLong={(alias) => setAliasItemError(t(
                         "editor.aliasTooLong",
@@ -5410,8 +5439,8 @@ function ConflictDiffPanel({
 function metadataFromPagePayload(metadata: PageMetadata, page: PagePayload): PageMetadata {
   return {
     ...metadata,
-    aliases: normalizeAliasesInput((page.aliases ?? []).join(", ")),
-    tags: normalizeTagsInput((page.tags ?? []).join(", ")),
+    aliases: normalizeAliases(page.aliases ?? []),
+    tags: normalizeTags(page.tags ?? []),
     type: supportedPageType(page.page_type) ?? metadata.type,
   };
 }
@@ -5565,7 +5594,7 @@ function CommentPreviewPopover({
   state: CommentPreviewState;
 }) {
   const { t } = useTranslation("pages");
-  const readyToCreate = canCreate && state.note.trim().length > 0 && !isSubmitting;
+  const readyToCreate = canCreate && state.note.trim().length > 0 && !inputTextError(state.note, 5000, false) && !isSubmitting;
   return (
     <section
       aria-label={t("editor.commentPreviewAria", { defaultValue: "Comment preview" })}
@@ -5601,6 +5630,7 @@ function CommentPreviewPopover({
           })}
           ref={noteRef}
           rows={3}
+          {...textInputLimit(5000, false)}
           value={state.note}
         />
       </label>
@@ -6663,14 +6693,13 @@ function sameBreadcrumbLabel(left: string | undefined, right: string) {
 }
 
 function normalizeInitialTitle(value: string | null) {
-  return value?.trim().slice(0, 80) ?? "";
+  return value?.trim() ?? "";
 }
 
-// Every title input path (typing, paste, drop, programmatic) funnels through
-// updateTitle, so collapsing newline/control runs here covers multi-line
-// paste that bypasses the Enter-key interceptor.
+// Preserve explicit text so the shared policy can report invalid characters
+// or length without rewriting an author's input.
 function normalizeTitleInput(value: string) {
-  return value.replace(TITLE_CONTROL_CHARS_PATTERN, " ").slice(0, TITLE_MAX_LENGTH);
+  return value;
 }
 
 // Walk parent_id links from the destination node up to the root so the editor

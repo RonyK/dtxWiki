@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.schemas.common import RESTResponseBase
+from backend.schemas.input_policy import InputRequest
 from backend.schemas.page import BODY_MD_MAX_LENGTH
 
 LintDecision = Literal["acknowledge", "dismiss", "fix"]
@@ -91,14 +92,14 @@ class LintRunCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class LintFindingDecisionRequest(BaseModel):
+class LintFindingDecisionRequest(InputRequest):
     decision: LintDecision
     reason: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 
 
-class LintFindingBatchDecisionRequest(BaseModel):
+class LintFindingBatchDecisionRequest(InputRequest):
     finding_ids: list[UUID] = Field(min_length=1, max_length=100)
     decision: LintBatchDecision
     reason: str | None = None

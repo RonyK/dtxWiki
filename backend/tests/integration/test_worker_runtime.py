@@ -1,9 +1,10 @@
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from typer.testing import CliRunner
@@ -21,12 +22,14 @@ from backend.models.library import LibraryArtifact, LibraryItem, LibraryItemVers
 from backend.models.library_discovery import LibraryDiscoveryRun
 from backend.models.lint import LintRun
 from backend.models.mail import EmailOutbox
+from backend.models.media import MediaInstallRequest, MediaStagingLease
 from backend.models.user import User
 from backend.models.workspace import MCPClient, Workspace, WorkspaceMembership
 from backend.schemas.lint import LintRunCreateRequest
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.services import job_hints
 from backend.services.bundle_expiration import BundleExpirationService
+from backend.services.context_media_policy import ContextMediaPolicy
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.extraction_service import ExtractionService
 from backend.services.job_hints import record_workspace_job_hint
@@ -46,6 +49,7 @@ from backend.services.mail_delivery import (
 from backend.services.password_recovery_service import PasswordRecoveryService
 from backend.tests.utils.bootstrapped_sqlite import copy_migrated_sqlite
 from backend.worker import entry as worker_entry
+from backend.worker import periodic
 from backend.worker.entry import app as worker_cli
 from backend.worker.registry import registered_handlers
 from backend.worker.runtime import OneShotWorker
@@ -78,6 +82,29 @@ def make_session_factory():
     return sessionmaker(bind=engine, expire_on_commit=False)
 
 
+def _add_expired_bundle(session, workspace_id, now):
+    client = MCPClient(
+        workspace_id=workspace_id,
+        name="periodic-seeding-test-client",
+        client_type="api_token",
+        scopes=["mcp:read"],
+        status="active",
+    )
+    session.add(client)
+    session.flush()
+    session.add(
+        AgentInputBundle(
+            workspace_id=workspace_id,
+            client_id=client.id,
+            task_intent="periodic seeding",
+            token_budget=2048,
+            ttl_seconds=3600,
+            valid_until=now - timedelta(seconds=1),
+        )
+    )
+    session.flush()
+
+
 def test_worker_registry_roster_is_explicit():
     assert set(registered_handlers()) == {
         "library_discovery",
@@ -106,42 +133,41 @@ def test_due_tick_seeder_is_idempotent_and_honors_disabled_intervals():
         lint_tick_interval_hours=24,
         trail_tick_interval_hours=0,
         librarian_tick_interval_days=0,
-        # Out of scope for this test (interval-tick seeding); the sweep's
-        # own minute-job seeding is covered separately below.
+        # Automatic reclamation is off; hourly Context drain still runs.
         context_media_orphan_retention_hours=0,
     )
     with session_factory.begin() as session:
         workspace = seed_default_workspace(session)
         first = seed_due_jobs(session, settings, now=now)
         second = seed_due_jobs(session, settings, now=now)
+        _add_expired_bundle(session, workspace.id, now)
+        with_due_bundle = seed_due_jobs(session, settings, now=now)
+        same_bundle_bucket = seed_due_jobs(session, settings, now=now)
         jobs = session.scalars(select(Job)).all()
 
     assert [job.job_type for job in first] == [
-        "bundle_expiration_sweep",
-        "media_install_reconcile",
-        "credential_replica_reconcile",
         "lint_tick",
-        "media_blob_gc",
+        "context_media_orphan_sweep",
     ]
     assert second == []
+    assert [job.job_type for job in with_due_bundle] == ["bundle_expiration_sweep"]
+    assert same_bundle_bucket == []
     bundle_bucket = now.replace(second=0, microsecond=0).isoformat()
     bucket = int(now.timestamp()) // (24 * 3600)
     assert [(job.job_type, job.idempotency_key) for job in jobs] == [
-        (
-            "bundle_expiration_sweep",
-            f"{workspace.id}:{bundle_bucket}",
-        ),
-        (
-            "media_install_reconcile",
-            f"{workspace.id}:{bundle_bucket}",
-        ),
-        (
-            "credential_replica_reconcile",
-            f"{workspace.id}:{bundle_bucket}",
-        ),
         ("lint_tick", f"lint_tick:24h:{bucket}"),
-        ("media_blob_gc", f"media_blob_gc:1h:{int(now.timestamp()) // 3600}"),
+        (
+            "context_media_orphan_sweep",
+            f"context_media_orphan_sweep:1h:{int(now.timestamp()) // 3600}:"
+            + ContextMediaPolicy(None, 0).revision,
+        ),
+        ("bundle_expiration_sweep", f"{workspace.id}:{bundle_bucket}"),
     ]
+    assert with_due_bundle[0].trigger_type == "schedule"
+    assert with_due_bundle[0].target_ref == {
+        "workspace_id": str(workspace.id),
+        "minute_bucket": bundle_bucket,
+    }
     assert jobs[0].workspace_id == workspace.id
 
 
@@ -176,24 +202,18 @@ def test_due_tick_uses_configured_interval_and_ignores_manual_job_history():
     first_lint = next(job for job in first if job.job_type == "lint_tick")
     second_lint = next(job for job in second if job.job_type == "lint_tick")
     assert {job.job_type for job in first} == {
-        "bundle_expiration_sweep",
-        "media_install_reconcile",
-        "credential_replica_reconcile",
         "lint_tick",
-        "media_blob_gc",
+        "context_media_orphan_sweep",
     }
     assert {job.job_type for job in second} == {
-        "bundle_expiration_sweep",
-        "media_install_reconcile",
-        "credential_replica_reconcile",
         "lint_tick",
-        "media_blob_gc",
+        "context_media_orphan_sweep",
     }
     assert first_lint.idempotency_key != second_lint.idempotency_key
     assert second_lint.trigger_type == "scheduled"
 
 
-def test_due_tick_seeds_minute_maintenance_jobs_once_per_minute():
+def test_due_tick_seeds_due_minute_maintenance_once_per_minute():
     session_factory = make_session_factory()
     start = datetime(2026, 7, 30, 0, 59, 59, tzinfo=UTC)
     settings = Settings(
@@ -203,35 +223,31 @@ def test_due_tick_seeds_minute_maintenance_jobs_once_per_minute():
         context_media_orphan_retention_hours=0,
     )
     with session_factory.begin() as session:
-        seed_default_workspace(session)
+        workspace = seed_default_workspace(session)
+        _add_expired_bundle(session, workspace.id, start)
         first = seed_due_jobs(session, settings, now=start)
-        same_hour = seed_due_jobs(
+        same_minute = seed_due_jobs(
             session,
             settings,
             now=start,
         )
-        next_hour = seed_due_jobs(
+        next_minute = seed_due_jobs(
             session,
             settings,
             now=start + timedelta(seconds=1),
         )
 
     assert [job.job_type for job in first] == [
-        "bundle_expiration_sweep",
-        "media_install_reconcile",
-        "credential_replica_reconcile",
-        "media_blob_gc",
+        "context_media_orphan_sweep",
     ]
-    assert same_hour == []
-    assert [job.job_type for job in next_hour] == [
+    assert same_minute == []
+    assert [job.job_type for job in next_minute] == [
         "bundle_expiration_sweep",
-        "media_install_reconcile",
-        "credential_replica_reconcile",
-        "media_blob_gc",
+        "context_media_orphan_sweep",
     ]
 
 
-def test_due_tick_seeds_one_media_reconcile_job_for_every_workspace():
+def test_due_tick_seeds_one_media_reconcile_job_for_every_workspace(monkeypatch):
     session_factory = make_session_factory()
     scheduled_for = datetime(2026, 7, 30, 1, 2, 3, tzinfo=UTC)
     settings = Settings(
@@ -248,6 +264,67 @@ def test_due_tick_seeds_one_media_reconcile_job_for_every_workspace():
         )
         session.add(second_workspace)
         session.flush()
+        for workspace in (first_workspace, second_workspace):
+            staging_id = uuid4()
+            session.add(
+                MediaStagingLease(
+                    workspace_id=workspace.id,
+                    id=staging_id,
+                    generation=1,
+                    actor_id=uuid4(),
+                    session_key="periodic-seeding",
+                    idempotency_key=f"periodic:{staging_id}",
+                    storage_key=f"stage/{workspace.id}/{staging_id}/1",
+                    max_bytes=1,
+                    byte_size=1,
+                    sha256="a" * 64,
+                    state="reserved",
+                    expires_at=scheduled_for - timedelta(seconds=1),
+                )
+            )
+            session.add(
+                MediaInstallRequest(
+                    workspace_id=workspace.id,
+                    id=uuid4(),
+                    idempotency_key=f"periodic:{staging_id}",
+                    write_generation=1,
+                    staging_id=staging_id,
+                    staging_generation=1,
+                    physical_charge_id=uuid4(),
+                    blob_id=uuid4(),
+                    blob_epoch=1,
+                    inspection_id=uuid4(),
+                    publish_generation=1,
+                    state="pending",
+                )
+            )
+        session.flush()
+
+        bundle_rule = next(
+            rule
+            for rule in periodic.PERIODIC_JOBS
+            if rule.job_type == "bundle_expiration_sweep"
+        )
+
+        def _bundle_probe(session, *, workspace_id, now):
+            if workspace_id == first_workspace.id:
+                # A database error in one precheck must allow that job while
+                # preserving the other rules and workspace's registration.
+                session.execute(text("SELECT * FROM missing_periodic_probe_table"))
+            return bundle_rule.session_probe(
+                session, workspace_id=workspace_id, now=now
+            )
+
+        monkeypatch.setattr(
+            periodic,
+            "PERIODIC_JOBS",
+            tuple(
+                replace(rule, session_probe=_bundle_probe)
+                if rule is bundle_rule
+                else rule
+                for rule in periodic.PERIODIC_JOBS
+            ),
+        )
         seeded = seed_due_jobs(session, settings, now=scheduled_for)
         same_bucket = seed_due_jobs(session, settings, now=scheduled_for)
 
@@ -261,6 +338,9 @@ def test_due_tick_seeds_one_media_reconcile_job_for_every_workspace():
     assert len(reconcile_jobs) == 2
     assert len({job.idempotency_key for job in reconcile_jobs}) == 2
     assert all(job.trigger_type == "scheduled" for job in reconcile_jobs)
+    assert {
+        job.workspace_id for job in seeded if job.job_type == "bundle_expiration_sweep"
+    } == {first_workspace.id}
     assert same_bucket == []
 
 
@@ -1263,6 +1343,48 @@ def test_worker_reclaim_with_session_factory_swallows_reclaim_errors(monkeypatch
     )
 
     assert reclaimed_count == 0
+
+
+def test_initial_recovery_reports_control_roster_failure(monkeypatch):
+    factory = make_session_factory()
+    worker = OneShotWorker()
+
+    def unavailable(_session):
+        raise RuntimeError("roster unavailable")
+
+    monkeypatch.setattr(worker, "_workspace_roster", unavailable)
+    result = worker.recover_initial_stale_jobs_with_session_factory(factory, 600)
+    assert result.status == "roster_failed"
+    assert not result.roster_available
+    # Periodic recovery retains its existing best-effort count contract.
+    assert worker.reclaim_stale_jobs_with_session_factory(factory, 600) == 0
+
+
+def test_initial_recovery_reports_partial_without_skipping_healthy_workspace(
+    monkeypatch,
+):
+    factory = make_session_factory()
+    worker = OneShotWorker()
+    with factory.begin() as session:
+        broken = seed_default_workspace(session)
+        healthy = Workspace(slug="initial-healthy", title="Healthy", name="Healthy")
+        session.add(healthy)
+        session.flush()
+        broken_id, healthy_id = broken.id, healthy.id
+    visited = []
+
+    def reclaim(*, workspace_id, **kwargs):
+        visited.append(workspace_id)
+        if workspace_id == broken_id:
+            raise RuntimeError("workspace unavailable")
+        return []
+
+    monkeypatch.setattr(worker.job_queue, "reclaim_stale_jobs", reclaim)
+    result = worker.recover_initial_stale_jobs_with_session_factory(factory, 600)
+    assert result.status == "partial"
+    assert result.failed_workspace_ids == (broken_id,)
+    assert set(visited) == {broken_id, healthy_id}
+    assert result.reclaimed_count == 0
 
 
 def test_reclaim_stale_jobs_fans_out_and_reclaims_every_workspace():

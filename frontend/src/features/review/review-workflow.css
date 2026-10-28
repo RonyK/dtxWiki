@@ -1,0 +1,176 @@
+/* Review-specific composition of the existing workspace design system. */
+.review-main {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-block-size: 0;
+  scroll-padding-top: var(--review-sticky-clearance, 0px);
+  container-type: inline-size;
+}
+
+.review-main > * { flex: none; }
+.review-main .review-detail-card { display: block; min-block-size: 0; }
+.review-main .review-detail-card > * { margin-bottom: 18px; }
+.review-main .review-detail-card > :last-child { margin-bottom: 0; }
+
+.review-detail-header {
+  position: sticky;
+  top: -22px;
+  z-index: 5;
+  background: var(--bg);
+  padding-block: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.review-detail-heading h2 { font-weight: 600; }
+.review-detail-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; font-size: 12px; color: var(--ink-soft); }
+.review-publication-notice { flex-basis: 100%; }
+.review-detail-badges { margin-block: 8px; }
+.review-action-bar { align-items: center; }
+.review-detail-heading > .eyebrow { margin-bottom: 4px; }
+.review-detail-heading h2:focus { outline: none; }
+.review-action-unavailable { color: var(--ink-muted); font-size: 13px; }
+
+.review-active-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--ink-muted); font-size: 12px; }
+.review-active-filters .text-button { margin-left: auto; }
+.review-group-controls { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; padding-block: 2px 6px; }
+.review-group-controls .text-button { font-size: 12px; }
+
+.review-document-group {
+  flex: none;
+  min-inline-size: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.review-document-group-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-subtle);
+}
+
+/* Beat the shared wrapping-checkbox label rule, which has a 24px minimum. */
+.review-document-group-header .review-document-group-check {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 28px;
+  min-height: 28px;
+  min-width: 28px;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.review-document-group-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--review); }
+.review-document-group-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  min-height: 38px;
+  padding: 4px;
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  text-align: start;
+}
+.review-document-group-toggle:is(button) { cursor: pointer; }
+.review-document-group-toggle:not(button) { grid-template-columns: minmax(0, 1fr); }
+.review-document-group-toggle > svg { color: var(--ink-muted); }
+.review-document-group-header > .count-chip { flex: none; }
+/* The type and title share one hit area, so a 44px title button cannot
+   introduce extra space between their actual text lines on touch screens. */
+.review-document-group-title { display: grid; align-content: start; gap: 2px; min-width: 0; }
+.review-document-group-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.review-document-kind { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-soft); font-size: 12px; }
+.review-document-kind .tree-row-state-dot { flex: none; }
+.review-document-group-title .review-document-kind { line-height: 16px; }
+.review-group-title-text { font-size: 14px; font-weight: 600; line-height: 20px; overflow-wrap: anywhere; }
+.review-document-group-meta .review-current-label { line-height: 16px; }
+.review-document-group-body { display: grid; gap: 4px; padding: 6px; }
+.review-document-group-footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--border); font-size: 12px; color: var(--ink-muted); }
+.review-document-group-footer .icon-button { min-height: 30px; font-size: 12px; }
+.review-document-group .review-row-shell { border-radius: var(--radius-control); }
+.review-document-group .review-row,
+.review-document-group .review-row-select input { scroll-margin-block-start: calc(var(--review-group-header-height, 88px) + 8px); }
+.review-document-group .review-row { border: 1px solid transparent; border-radius: var(--radius-control); background: var(--surface); }
+.review-document-group .review-row-shell + .review-row-shell .review-row:not(.active) { border-top-color: var(--border); }
+.review-row-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.review-row-identity > strong { font-size: 14px; }
+.review-current-label { margin-inline-start: auto; color: var(--review); font-size: 12px; font-weight: 700; }
+.review-row-grouped .review-row-meta { gap: 6px; }
+.review-row-grouped .review-row-main p { margin-top: 6px; }
+.review-row-grouped .review-row-type { font-size: 12px; color: var(--ink-muted); }
+
+/* Match TreeRail's full 1px ring without restoring the rejected left stripe. */
+.review-row.selectable-row.active,
+.review-row.selectable-row.active:hover {
+  border-color: transparent;
+  background: var(--surface-active);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--review) 45%, transparent);
+}
+
+@media (hover: hover) {
+  button.review-document-group-toggle:hover { background: var(--surface-hover); }
+}
+.review-document-group-toggle:focus-visible,
+.review-row:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+.review-risk-explanation,
+.review-diagnostics,
+.review-decision-block { border-top: 1px solid var(--border); padding-top: 12px; }
+.review-risk-explanation > summary,
+.review-diagnostics > summary,
+.review-decision-block > summary { color: var(--ink-muted); cursor: pointer; font-size: 13px; font-weight: 600; }
+.review-risk-explanation > :not(summary),
+.review-diagnostics > :not(summary),
+.review-decision-block > :not(summary) { margin-top: 12px; }
+.review-risk-explanation p { color: var(--ink-soft); font-size: 13px; }
+.review-diagnostics > p { color: var(--ink-soft); font-size: 12px; }
+.review-reject-impact { color: var(--ink); }
+.review-bulk-preview-items,
+.review-bulk-outcome-list { display: grid; gap: 8px; padding: 0; margin: 12px 0; list-style: none; }
+.review-bulk-preview-items { max-height: 320px; overflow-y: auto; }
+.review-bulk-preview-items li { display: grid; gap: 4px; padding-block: 8px; border-bottom: 1px solid var(--border); }
+.review-bulk-preview-items li > span { color: var(--ink-soft); font-size: 12px; }
+.review-bulk-outcomes { width: 100%; }
+.review-bulk-outcome-list li { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--border); padding-block: 10px; }
+.review-bulk-outcome-list li > div { flex: 1; min-width: 0; }
+.review-bulk-outcome-list strong { overflow-wrap: anywhere; }
+.review-bulk-outcome-list p { color: var(--ink-soft); font-size: 12px; }
+
+@container (max-width: 720px) {
+  .review-detail-header { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .review-action-bar { justify-content: flex-start; flex-wrap: wrap; }
+}
+
+@media (max-width: 1024px), (any-pointer: coarse) {
+  .review-row-select { width: 44px; height: 44px; top: 6px; }
+  .review-row-shell.has-bulk-select .review-row { padding-inline-start: 60px; }
+  .review-document-group-header .review-document-group-check { flex-basis: 44px; }
+  .review-document-group-header .review-document-group-check,
+  .review-document-group-toggle,
+  .review-document-group-footer .icon-button,
+  .review-group-controls .text-button,
+  .review-active-filters .text-button,
+  .review-recovery-actions .icon-button,
+  .review-bulk-outcomes .icon-button { min-height: 44px; min-width: 44px; }
+  .review-detail-header { top: -16px; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .review-action-bar { display: flex; flex-wrap: wrap; justify-content: flex-start; }
+  .review-action-bar .icon-button { min-height: 44px; }
+  .review-bulk-outcome-list li { flex-wrap: wrap; }
+}
+.review-next-action { display: grid; gap: 4px; max-width: 100%; }
+.review-next-action > span { color: var(--ink-soft); font-size: 12px; overflow-wrap: anywhere; }
+.review-recovery-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.review-detail-heading { min-width: 0; }
+.review-detail-heading h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-height: 600px) { .review-detail-header { position: static; } }
+.review-candidate-label { color: var(--ink-soft); font-size: 12px; }

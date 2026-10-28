@@ -1,4 +1,5 @@
 import { clearPersistedWorkspaceId } from "./workspace";
+import { outgoingContentError } from "./inputPolicy";
 import { i18n } from "../i18n";
 
 export type ApiWarning = {
@@ -164,6 +165,12 @@ export async function apiRequest<T>(
   init: RequestInit = {},
 ): Promise<T> {
   assertRequestPath(path);
+  const inputError = outgoingContentError(path, init.body);
+  if (inputError) {
+    throw new ApiError(422, {
+      error_code: "validation_failed", message: inputError, request_id: "", warnings: [],
+    });
+  }
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   const apiToken = getApiToken();
@@ -191,16 +198,15 @@ export async function apiRequest<T>(
   return (await response.json()) as T;
 }
 
-// Server Admin recovery surfaces deliberately return 401 when recent
-// reauthentication is missing: the protected directory must relock, and the
-// reset dialog must keep its current-password challenge open. Neither response
-// proves that the browser session itself expired. Every other non-auth 401
-// continues through the normal session-expiry path.
+// Server Admin surfaces deliberately return 401 when recent reauthentication is
+// missing: the protected directory must relock, and open dialogs must keep or
+// request their confirmation. That response never proves that the browser
+// session itself expired. Every other non-auth 401 continues through the
+// normal session-expiry path.
 function isPrivilegedReauthentication(path: string, body: ApiErrorBody) {
   return (
     body.error_code === "recent_reauthentication_required" &&
-    (/^\/api\/v1\/admin\/users(?:\?|$)/.test(path) ||
-      /^\/api\/v1\/admin\/users\/[^/]+\/password-reset$/.test(path))
+    path.startsWith("/api/v1/admin/")
   );
 }
 

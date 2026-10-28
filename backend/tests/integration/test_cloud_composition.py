@@ -14,10 +14,12 @@ import ast
 import base64
 import re
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Event, Lock
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -671,7 +673,7 @@ def test_protocol_only_provider_boots_without_state_backdoors(tmp_path):
     assert resolved_factory is factory
 
 
-def test_overlay_assembly_rejects_ambiguous_inputs_and_preserves_overrides():
+def test_overlay_assembly_rejects_ambiguous_inputs_and_preserves_overrides(monkeypatch):
     # assemble() only wires objects, so an unconnected factory is enough.
     factory = make_session_factory(make_engine("sqlite+pysqlite:///:memory:"))
     settings = Settings(database_url="sqlite+pysqlite:///:memory:")
@@ -689,6 +691,56 @@ def test_overlay_assembly_rejects_ambiguous_inputs_and_preserves_overrides():
     assert container.db is provider
     assert container.services is services
     assert container.services.workspace_directory is directory
+
+    # A cold registry must not split one user's request budget between two
+    # services. The second accessor reaches either the constructor (unsafe
+    # cached_property) or the held initialization lock before the first is freed.
+    from backend.services import page_location
+
+    constructing = Event()
+    contender = Event()
+    release_first = Event()
+    initialization_lock = Lock()
+    instances = []
+
+    class ObservedInitializationLock:
+        def __enter__(self):
+            if constructing.is_set():
+                contender.set()
+            initialization_lock.acquire()
+            return self
+
+        def __exit__(self, *_args):
+            initialization_lock.release()
+
+    def make_page_locations():
+        instance = object()
+        instances.append(instance)
+        if len(instances) == 1:
+            constructing.set()
+            assert release_first.wait(5), "first constructor was not released"
+        else:
+            contender.set()
+        return instance
+
+    monkeypatch.setattr(
+        services, "_page_locations_lock", ObservedInitializationLock(), raising=False
+    )
+    monkeypatch.setattr(page_location, "PageLocationService", make_page_locations)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(lambda: services.page_locations)
+        try:
+            assert constructing.wait(5), "first constructor did not start"
+            second = executor.submit(lambda: services.page_locations)
+            assert contender.wait(5), "second accessor did not reach initialization"
+        finally:
+            release_first.set()
+        assert first.result(timeout=5) is second.result(timeout=5)
+    assert services.page_locations is instances[0]
+    override = object()
+    services.__dict__["page_locations"] = override
+    assert services.page_locations is override
+
     with pytest.raises(ValueError, match="cannot both be provided"):
         assemble(settings, db=provider, session_factory=factory)
     with pytest.raises(ValueError, match="same instance"):
@@ -1765,6 +1817,15 @@ def test_split_provider_routes_rest_workspace_reads_to_data_db(tmp_path):
     assert str(data_page.id) in {page["id"] for page in page_list.json()["data"]}
     page_detail = client.get(f"{pages_url}/{data_page.id}")
     assert page_detail.status_code == 200, page_detail.text
+    # The directory finds this id without a control-plane page row; its
+    # location still requires the target's live control-plane membership.
+    location_url = f"/api/v1/context/pages/{data_page.id}/location"
+    page_location = client.get(location_url)
+    assert page_location.status_code == 200, page_location.text
+    assert page_location.json()["data"] == {
+        "workspace_id": str(workspace_id),
+        "page_id": str(data_page.id),
+    }
     created = client.post(
         pages_url,
         json={"title": "Legacy data write", "body_md": "# Legacy data write"},
@@ -1850,6 +1911,15 @@ def test_split_provider_routes_rest_workspace_reads_to_data_db(tmp_path):
     )
     assert denied_sensitive_diff.status_code == 403
     assert workspace_id in provider.session_for_calls
+
+    with control_factory.begin() as session:
+        membership = session.get(WorkspaceMembership, (user_id, workspace_id))
+        assert membership is not None
+        session.delete(membership)
+    denied_location = client.get(location_url)
+    assert denied_location.status_code == 404, denied_location.text
+    assert denied_location.json()["error_code"] == "not_found"
+    assert denied_location.json()["message"] == "page not found"
 
 
 def _split_upload_surface(tmp_path):
@@ -2604,6 +2674,7 @@ def _seed_split_settings_mcp_fixture(tmp_path, *, slug):
 
     workspace_id = uuid4()
     user_id = uuid4()
+    grant_id = uuid4()
     oauth_client_id = "split-settings-client"
     orphan_oauth_client_id = "split-settings-orphan-client"
     with control_factory.begin() as session:
@@ -2635,6 +2706,11 @@ def _seed_split_settings_mcp_fixture(tmp_path, *, slug):
         )
         session.flush()
         session.add(
+            WorkspaceMembership(
+                user_id=user_id, workspace_id=workspace_id, role="owner"
+            )
+        )
+        session.add(
             OAuthConsent(
                 user_id=user_id,
                 client_id=oauth_client_id,
@@ -2645,6 +2721,7 @@ def _seed_split_settings_mcp_fixture(tmp_path, *, slug):
         )
         session.add(
             OAuthRefreshToken(
+                grant_id=grant_id,
                 token_lookup_hash="sha256:split-settings-live",
                 user_id=user_id,
                 client_id=oauth_client_id,
@@ -2676,6 +2753,7 @@ def _seed_split_settings_mcp_fixture(tmp_path, *, slug):
                 scopes=["mcp:read"],
                 status="active",
                 issued_to_user_id=user_id,
+                runtime_binding_key=f"oauth_grant:{grant_id}",
                 token_metadata={"oauth_client_id": oauth_client_id},
             )
         )
@@ -2749,7 +2827,7 @@ def test_split_provider_settings_mcp_client_listing_spans_both_planes(tmp_path):
         "Split settings orphaned grant",
     }
     orphan = rendered["Split settings orphaned grant"]
-    assert orphan.connection_state == "revoked"
+    assert orphan.connection_state == "unknown"
     assert orphan.client_name == "Orphaned Grant App"
 
     # Searching by OAuth client name is the one filter arm that has no
@@ -2838,7 +2916,7 @@ def test_split_provider_settings_policy_cards_read_the_control_plane(tmp_path):
     assert cards["Split settings connection"].client_name == "Split Settings Client"
     assert cards["Split settings connection"].connection_state == "active"
     assert cards["Split settings orphaned grant"].client_name == "Orphaned Grant App"
-    assert cards["Split settings orphaned grant"].connection_state == "revoked"
+    assert cards["Split settings orphaned grant"].connection_state == "unknown"
 
     # Revert-fail companion: the pre-fix shape read the cards off the workspace
     # session, which holds no Workspace row.
@@ -3114,6 +3192,7 @@ def test_settings_mcp_client_writes_still_fail_on_a_real_shard(true_shard):
 
     workspace_id = uuid4()
     user_id = uuid4()
+    grant_id = uuid4()
     oauth_client_id = "shard-write-client"
     with control_factory.begin() as session:
         session.add(
@@ -3144,6 +3223,11 @@ def test_settings_mcp_client_writes_still_fail_on_a_real_shard(true_shard):
         )
         session.flush()
         session.add(
+            WorkspaceMembership(
+                user_id=user_id, workspace_id=workspace_id, role="owner"
+            )
+        )
+        session.add(
             OAuthConsent(
                 user_id=user_id,
                 client_id=oauth_client_id,
@@ -3154,6 +3238,7 @@ def test_settings_mcp_client_writes_still_fail_on_a_real_shard(true_shard):
         )
         session.add(
             OAuthRefreshToken(
+                grant_id=grant_id,
                 token_lookup_hash="sha256:shard-write-live",
                 user_id=user_id,
                 client_id=oauth_client_id,
@@ -3174,6 +3259,7 @@ def test_settings_mcp_client_writes_still_fail_on_a_real_shard(true_shard):
                 scopes=["mcp:read"],
                 status="active",
                 issued_to_user_id=user_id,
+                runtime_binding_key=f"oauth_grant:{grant_id}",
                 token_metadata={"oauth_client_id": oauth_client_id},
             )
         )

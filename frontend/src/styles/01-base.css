@@ -152,6 +152,7 @@ button {
 }
 
 :root {
+  --control-size-small: 28px;
   /* Global overlay order: feature-local popovers/drawers/inspectors stay at or
      below 80, shell navigation covers them, and a portaled modal covers both. */
   --z-navigation-overlay: 90;
@@ -222,6 +223,8 @@ button {
   --lifecycle-library: #0f9f8f;
   --lifecycle-context: #7c3aed;
   --lifecycle-agent: #d97706;
+  --tree-favorite-fill: #facc15;
+  --tree-favorite-edge: #9a7411;
   --paper: oklch(0.99 0.005 80);
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 5%);
 }
@@ -323,6 +326,7 @@ button {
   align-items: center;
   justify-content: center;
   vertical-align: middle;
+  flex-shrink: 0;
 }
 
 .spinner-glyph {
@@ -333,11 +337,24 @@ button {
   border-right-color: transparent;
   border-radius: 50%;
   animation: spinner-rotate 720ms linear infinite;
+  flex-shrink: 0;
+}
+
+.loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.loading-indicator-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .spinner-glyph {
-    animation-duration: 0s;
+    animation: none;
   }
 }
 
@@ -457,22 +474,52 @@ h3 {
   border-bottom: 1px solid var(--border);
 }
 
-.app-shell[data-sidebar-collapsed="true"] {
-  grid-template-columns: var(--sidebar-collapsed-w) minmax(0, 1fr);
+/* The saved preference belongs to desktop navigation. Narrow layouts must
+   ignore it, including after a fold or a reload with the preference set. */
+@media (min-width: 1025px) {
+  .app-shell[data-sidebar-collapsed="true"] {
+    grid-template-columns: var(--sidebar-collapsed-w) minmax(0, 1fr);
+  }
+
+  .app-shell[data-sidebar-collapsed="true"] .topbar {
+    grid-template-columns:
+      minmax(var(--sidebar-collapsed-w), max-content) minmax(240px, 620px)
+      minmax(0, 1fr);
+  }
+
+  .app-shell[data-sidebar-collapsed="true"] .topbar-brand {
+    justify-content: flex-start;
+    gap: 8px;
+    padding: 0 12px;
+  }
+
+  .app-shell[data-sidebar-collapsed="true"] .brand-name {
+    display: none;
+  }
 }
 
-.app-shell[data-sidebar-collapsed="true"] .topbar {
-  grid-template-columns:
-    minmax(var(--sidebar-collapsed-w), max-content) minmax(240px, 620px)
-    minmax(0, 1fr);
+/* Visible boxes share one geometry; labels and rows own the hit target. */
+:root { --checkbox-size: 16px; }
+input[type="checkbox"],
+.workspace-scope-check,
+.markdown-task-state {
+  box-sizing: border-box;
+  width: var(--checkbox-size);
+  height: var(--checkbox-size);
+  min-width: var(--checkbox-size);
+  min-height: var(--checkbox-size);
+  max-width: var(--checkbox-size);
+  max-height: var(--checkbox-size);
+  padding: 0;
+  margin: 0;
+  flex: 0 0 var(--checkbox-size);
 }
 
-.app-shell[data-sidebar-collapsed="true"] .topbar-brand {
-  justify-content: flex-start;
-  gap: 8px;
-  padding: 0 12px;
-}
-
-.app-shell[data-sidebar-collapsed="true"] .brand-name {
-  display: none;
+/* The visible square stays 16px; the associated label owns the hit area.
+   WCAG 2.2 SC 2.5.8 (Target Size Minimum, 24x24) is met by that label or
+   option row, so an interactive checkbox must never stand alone. The e2e
+   inventory (settings_mcp_refinement.spec.ts) fails any enabled input whose
+   target is smaller than 24px, with or without a label. */
+label:has(> input[type="checkbox"]) {
+  min-block-size: 24px;
 }

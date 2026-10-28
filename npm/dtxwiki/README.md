@@ -1,7 +1,7 @@
 # @dtxsuite/dtxwiki
 
-Run [dtxWiki](https://www.dtxwiki.com/), the local-first MCP-native Markdown
-wiki for AI tools, with `npx`.
+Run [dtxWiki](https://www.dtxwiki.com/), a knowledge base for you and your AI
+tools, with `npx`.
 
 dtxWiki is a Python application published on PyPI as
 [`dtxwiki`](https://pypi.org/project/dtxwiki/). This package does not contain
@@ -13,32 +13,53 @@ The first run downloads dtxWiki and its dependencies; later runs reuse them.
 ## Requirements
 
 - Node.js 22 or newer.
-- uv, or pipx with Python 3.12. uv finds or downloads Python 3.12 by itself.
+- uv, or pipx with Python 3.12 or newer. uv finds or downloads Python 3.12
+  by itself.
 
 ## Usage
 
 ```bash
-npx @dtxsuite/dtxwiki
+npx @dtxsuite/dtxwiki@0.1.3
 ```
 
-This starts dtxWiki on `http://127.0.0.1:21080/` and opens the browser. The
-SQLite database is created in `~/.dtxwiki`. Every argument is passed to the
-`dtxwiki` command, for example `npx @dtxsuite/dtxwiki --help` or
-`npx @dtxsuite/dtxwiki serve --no-open`.
+This opens dtxWiki on `http://127.0.0.1:21080/` in your browser. Only this
+computer can reach that address. Keep the command running while using dtxWiki;
+press `Ctrl+C` to stop it. Your data is kept in `~/.dtxwiki`.
+
+In **0.1.3**, the server starts and stops its managed worker automatically.
+Do not launch a separate worker.
+
+Every argument is passed to the `dtxwiki` command, for example
+`npx @dtxsuite/dtxwiki@0.1.3 --help` or `npx @dtxsuite/dtxwiki@0.1.3 serve --no-open`
+(`--no-open` skips opening the browser).
 
 To keep the `dtxwiki` command on your `PATH`:
 
 ```bash
-npm install --global @dtxsuite/dtxwiki
+npm install --global @dtxsuite/dtxwiki@0.1.3
 dtxwiki
 ```
 
+## Server and MCP setup
+
+The [README](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/README.md#get-started)
+includes administrator grants, external access, background execution, MCP client
+registration commands, and setup troubleshooting. Replace foreground `dtxwiki`
+commands with `npx @dtxsuite/dtxwiki@0.1.3`.
+
+Use a direct Python installation, such as the README's pip virtual environment,
+for the manual background PID examples. The npm launcher starts child processes;
+its PID is not the server PID.
+
 ## Updating
 
-The package version decides which dtxWiki release runs, so `dtxwiki update`
-does not apply here; it prints these steps instead. Stop dtxWiki, back up
-`~/.dtxwiki`, then run the new version, which migrates the database when it
-starts:
+This package selects the Python release, so `dtxwiki update` prints the npm
+steps instead of upgrading it. Stop dtxWiki, back up `~/.dtxwiki`,
+and read the [release notes](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/CHANGELOG.md)
+and [maintenance guide](http://docs.dtxwiki.com/docs/0.1/administration/backup-upgrades/).
+Complete any required data checks or migrations before starting the new version.
+
+Then run the new published version:
 
 ```bash
 npx @dtxsuite/dtxwiki@latest
@@ -46,13 +67,16 @@ npx @dtxsuite/dtxwiki@latest
 npm install --global @dtxsuite/dtxwiki@latest
 ```
 
-To go back, restore the backup and run the version it belongs to, for example
-`npx @dtxsuite/dtxwiki@0.1.2`.
+Restart the launcher after a global update; its worker starts automatically.
+To roll back, restore a verified backup and run the package version that belongs
+to it; see the maintenance guide.
 
 ## Documentation and license
 
-The [project README](https://github.com/dtxSuite/dtxWiki#readme) covers
-configuration, MCP client setup and production deployment.
+The [project README](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/README.md#get-started)
+covers setup for 0.1.3. See the [documentation](http://docs.dtxwiki.com/) for
+SMTP, backups, and advanced configuration.
 
 dtxWiki is licensed under `AGPL-3.0-only OR Elastic-2.0`, at your election;
-see `LICENSE`. dtxSuite also offers commercial licenses.
+see the [license terms](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/LICENSE).
+dtxSuite also offers commercial licenses.

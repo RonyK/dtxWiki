@@ -1,5 +1,23 @@
 """Stable service-provider contracts for dtxWiki backend overlays."""
 
+from backend.spi.auth import (
+    AUTH_METHOD_SPI_VERSION,
+    AuthMethodDescriptor,
+    AuthMethodError,
+    AuthMethodPlugin,
+    BeginRequest,
+    Branding,
+    CallbackInput,
+    ExternalAssertion,
+    IdentityLifecycleHook,
+    LoginContext,
+    MethodCapabilities,
+    ProviderContext,
+    ProvisioningHook,
+    ProvisioningResult,
+    RedirectInstruction,
+    WorkspaceRoleRequest,
+)
 from backend.spi.context import DatabaseProvider, ToolCallContext
 from backend.spi.conversion import (
     CONVERSION_OUTPUT_SCHEMA_VERSION,
@@ -17,6 +35,18 @@ from backend.spi.conversion import (
     ReadOnlyBlobHandle,
     SourceLocation,
     UnsupportedConversionError,
+)
+from backend.spi.plugins import (
+    DtxwikiPlugin,
+    JobFailure,
+    JobHandler,
+    JobInput,
+    JobResult,
+    PermanentJobError,
+    PluginMigrations,
+    PluginMount,
+    RetryableJobError,
+    WorkerContext,
 )
 from backend.spi.preview import (
     PREVIEW_OUTPUT_SCHEMA_VERSION,
@@ -45,10 +75,36 @@ from backend.spi.types import (
     SearchResultType,
 )
 
-SPI_VERSION = "1.0"
+SPI_VERSION = "1.1"
 
 __all__ = [
+    "AUTH_METHOD_SPI_VERSION",
+    "AuthMethodDescriptor",
+    "AuthMethodError",
+    "AuthMethodPlugin",
+    "BeginRequest",
+    "Branding",
+    "CallbackInput",
+    "ExternalAssertion",
+    "IdentityLifecycleHook",
+    "LoginContext",
+    "MethodCapabilities",
+    "ProviderContext",
+    "ProvisioningHook",
+    "ProvisioningResult",
+    "RedirectInstruction",
+    "WorkspaceRoleRequest",
     "SPI_VERSION",
+    "DtxwikiPlugin",
+    "JobHandler",
+    "JobInput",
+    "JobResult",
+    "JobFailure",
+    "PermanentJobError",
+    "RetryableJobError",
+    "WorkerContext",
+    "PluginMigrations",
+    "PluginMount",
     "CONVERSION_OUTPUT_SCHEMA_VERSION",
     "CONVERTER_SPI_VERSION",
     "PREVIEW_OUTPUT_SCHEMA_VERSION",

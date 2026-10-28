@@ -137,6 +137,9 @@ class Workspace(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         ),
     )
     default_language: Mapped[str] = mapped_column(Text, nullable=False, default="en")
+    context_media_policy: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
     library_policy: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         nullable=False,
@@ -217,6 +220,14 @@ class Workspace(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     owner_user_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
+    )
+    # Set while this workspace waits to be deleted with the named account: the
+    # account was its only admin when its deletion was approved. Access and
+    # admissions stay closed until an active admin appears or the account is
+    # restored; account cleanup deletes the workspace. No foreign key, so the
+    # marker never forces a table rebuild; account cleanup clears leftovers.
+    account_deletion_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), index=True
     )
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(),

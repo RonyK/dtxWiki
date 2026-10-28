@@ -1,6 +1,7 @@
 // E2E-02 regression: the ERR_NETWORK_CHANGED retry must never be able to
-// re-roll a semantic verdict, and the dynamic-import suppression must require
-// causation rather than coincidence.
+// re-roll a semantic verdict, the dynamic-import suppression must require
+// causation rather than coincidence, and the console-echo suppression must
+// match only the echo itself.
 //
 // Run with `node tests/e2e/network_retry.test.mjs`. Exits non-zero on first
 // failure. This file is intentionally a single-file self-runner (no test
@@ -23,6 +24,7 @@ const {
 
 const {
   classifyPageError,
+  isNetworkChangeConsoleEcho,
   isTransientNetworkImportError,
   moduleUrlFromImportError,
   recordNetworkChange,
@@ -489,6 +491,25 @@ const cases = [
         ),
         false,
       );
+    },
+  },
+  {
+    label:
+      "only Chromium's exact console echo of ERR_NETWORK_CHANGED is excused as transport",
+    run() {
+      assert.equal(
+        isNetworkChangeConsoleEcho(
+          "Failed to load resource: net::ERR_NETWORK_CHANGED",
+        ),
+        true,
+      );
+      for (const message of [
+        "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+        "Failed to load resource: net::ERR_CONNECTION_REFUSED",
+        "Uncaught (in promise) TypeError: Failed to fetch (net::ERR_NETWORK_CHANGED)",
+      ]) {
+        assert.equal(isNetworkChangeConsoleEcho(message), false, message);
+      }
     },
   },
   {

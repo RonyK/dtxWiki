@@ -6,13 +6,20 @@ import hmac
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from math import ceil
 from uuid import UUID
 
 from sqlalchemy import and_, case, func, not_, or_, select, tuple_
 from sqlalchemy.orm import Session
 
+from backend.domain.input_policy import normalize_short_text, validate_text
+from backend.domain.workspace_slug_policy import (
+    RESERVED_WORKSPACE_SLUG_MESSAGE,
+    WORKSPACE_SLUG_MAX_LENGTH,
+    is_reserved_workspace_slug,
+    slugify_workspace_text,
+)
 from backend.models.base import utc_now
 from backend.models.workspace import (
     NEW_LIBRARY_MAX_UPLOAD_BYTES,
@@ -27,6 +34,10 @@ from backend.schemas.settings import (
     SettingsPolicies,
 )
 from backend.services.audit_service import AuditService
+from backend.services.context_media_policy import (
+    resolve_context_media_policy,
+    validate_retention_hours,
+)
 from backend.services.db_read_snapshot import acquire_consistent_read_snapshot
 from backend.services.db_write_intent import (
     acquire_workspace_write_intent,
@@ -45,6 +56,8 @@ from backend.services.library_policy import (
     LibraryFamilyPolicyService,
     get_default_library_family_policy_service,
 )
+from backend.services.lint import LintRegistry
+from backend.services.mcp_credential_health import binding_key_for_client
 from backend.services.oauth_service import (
     WorkspaceOAuthHealth,
     attach_name_matched_oauth_client_ids,
@@ -82,6 +95,10 @@ logger = logging.getLogger(__name__)
 # here) so an oddly-shaped workspace shows up in logs before it shows up as a
 # failure.
 MCP_CLIENT_PUSHDOWN_KEY_WARNING_THRESHOLD = 2000
+# A cursor freezes its first page's evaluation time so a walk stays coherent,
+# but only briefly: an older cursor re-evaluates credential expiry at the
+# current time instead of showing long-expired credentials as usable.
+MCP_CLIENT_CURSOR_EVALUATION_MAX_AGE = timedelta(minutes=10)
 LANGUAGE_CODES = {"en", "ko"}
 LITERAL_OPTIONS = {
     "visibility": {"private", "team", "public"},
@@ -145,7 +162,7 @@ CITATION_TYPES = {"raw_source", "derived_artifact", "context_page"}
 LIBRARY_RULE_TYPES = {"web", "manual_upload"}
 MCP_CLIENT_STATUSES = {"active", "disabled"}
 MCP_CLIENT_LIST_STATUSES = MCP_CLIENT_STATUSES | {"all"}
-MCP_CLIENT_CURSOR_VERSION = 1
+MCP_CLIENT_CURSOR_VERSION = 2
 MCP_CLIENT_CURSOR_SORT_VERSION = "created_at_desc_id_desc_v1"
 SYSTEM_MCP_CLIENT_TYPES = {
     "internal",
@@ -192,9 +209,7 @@ class LibraryPolicyBatchUpdateRequired(SettingsPolicyUpdateRejected):
     error_code = "library_policy_batch_update_required"
 
 
-class LibraryFormatExtensionTransferRequiresRelease(
-    SettingsPolicyUpdateRejected
-):
+class LibraryFormatExtensionTransferRequiresRelease(SettingsPolicyUpdateRejected):
     error_code = "library_format_extension_transfer_requires_release"
 
 
@@ -256,7 +271,13 @@ class SettingsService:
         self,
         *,
         library_family_policy: LibraryFamilyPolicyService | None = None,
+        orphan_retention_hours: int = 168,
+        lint_registry: LintRegistry | None = None,
     ) -> None:
+        self.lint_registry = (
+            lint_registry if lint_registry is not None else LintRegistry.builtin()
+        )
+        self.orphan_retention_hours = orphan_retention_hours
         self.library_family_policy = (
             library_family_policy or get_default_library_family_policy_service()
         )
@@ -274,49 +295,12 @@ class SettingsService:
         cursor: str | None = None,
         cursor_secret: str,
     ) -> SettingsMcpClientListData:
-        """Return one exact, server-filtered management page.
+        """Filter and count against one control-plane credential snapshot.
 
-        The Active/Deactivated facet keys off *connection health*, not the
-        physical ``MCPClient.status`` column: a client whose consent expired or
-        whose OAuth grant was revoked leaves the Active facet even though it was
-        never administratively disabled. Deactivated therefore covers
-        disabled + expired + revoked, matching the Access Key "Inactive" rule.
-        See ``_mcp_client_active_connection_predicate``. Tombstones and
-        server-managed identities are absent from every list/count projection.
-
-        TWO PLANES, never joined. ``Workspace`` and the three OAuth tables are
-        control-plane; ``MCPClient`` is workspace-plane. Health is read off
-        CONTROL first and reduced to literal key sets, which are then pushed
-        down into workspace-plane SQL, so ``total_count``, both facet counts
-        and the page stay whole-table aggregates -- classifying a materialized
-        page in Python would break the exact server-filtered cursor contract
-        documented above.
-
-        The planes alternate rather than running strictly once each. A search
-        request goes control (health) -> workspace (the distinct OAuth client
-        ids this workspace's rows name) -> control (resolve the client_name
-        LIKE against exactly those ids) -> workspace (facets and page) ->
-        control (name the OAuth clients on the page that the workspace-wide
-        consent scan never saw). Every control step after the first reads
-        nothing but primary keys the workspace plane just handed it, and each
-        is bounded by ``limit`` or by this workspace's own connection count --
-        which is the whole point of the middle pair: it is what keeps a
-        user-supplied search term from turning the installation's entire
-        ``oauth_client`` table into bind parameters. See
-        ``oauth_service.attach_name_matched_oauth_client_ids``.
-
-        What this costs, exactly: cross-plane atomicity, and nothing else.
-        Within one response ``total_count``, both facets, the page and every
-        row's ``connection_state`` remain mutually consistent -- more so than
-        before, where the SQL facet and the Python per-row state were two
-        independent reads that agreed only by sharing one transaction.
-        ``filtered_count``, ``status_counts``, ordering, cursor shape and the
-        exact-filtering contract are unchanged, so no frontend or schema change
-        follows. A token expiring mid-walk still moves facets, exactly as the
-        paragraph above already declares.
-
-        This route reads two planes and writes neither, so there is no
-        distributed transaction here.
+        Only exact credential identities with current workspace permission are
+        active. Inactive is the exhaustive complement, including unknown legacy
+        identities. Control-plane facts cross into the workspace query as
+        literal key sets; no cross-database join or page-local filter is used.
         """
 
         acquire_consistent_read_snapshot(control_session)
@@ -324,12 +308,9 @@ class SettingsService:
             raise ReadNotFoundError("workspace not found")
         if status not in MCP_CLIENT_LIST_STATUSES:
             raise SettingsMcpClientCursorInvalid("invalid MCP client status filter")
-        # Bound once and reused by the facet counts, the data filter, and the
-        # per-row connection_state below, so one response cannot disagree with
-        # itself about what "now" is. This does not freeze across cursor pages
-        # (unlike Access Keys' threaded `evaluated_at`): a token expiring
-        # mid-walk moves facets, the same way the per-row state already shifted
-        # between two separate requests before this change.
+        # Cursor pages retain the first page's evaluation time for a short
+        # window (MCP_CLIENT_CURSOR_EVALUATION_MAX_AGE). Explicit revocations
+        # and membership changes are still re-read on each request.
         now = utc_now()
         normalized_query = " ".join((query or "").split()).casefold()
         actor_binding = _mcp_client_cursor_actor_binding(actor)
@@ -345,20 +326,51 @@ class SettingsService:
             if cursor
             else None
         )
+        if (
+            typed_cursor is not None
+            and now - typed_cursor[2] <= MCP_CLIENT_CURSOR_EVALUATION_MAX_AGE
+        ):
+            now = typed_cursor[2]
+        control_session.rollback()
+
+        # Credentials are judged by the exact bindings this workspace's own rows
+        # name, so the control-plane read follows the connection count instead of
+        # the members x tokens x rotations population. That costs one workspace
+        # read before the control snapshot and a fresh workspace snapshot after
+        # it. Every transaction is released first: the planes can share a single
+        # connection (the single-database profile and every :memory: test pool),
+        # where a second BEGIN is a hard error, and holding both at once is the
+        # nesting backend/api/deps.py warns about.
+        acquire_consistent_read_snapshot(workspace_session)
+        oauth_client_id = MCPClient.token_metadata["oauth_client_id"].as_string()
+        manageable_filters = (
+            MCPClient.workspace_id == workspace_id,
+            MCPClient.deleted_at.is_(None),
+            MCPClient.status.in_(MCP_CLIENT_STATUSES),
+            func.lower(MCPClient.client_type).notin_(SYSTEM_MCP_CLIENT_TYPES),
+            func.lower(MCPClient.name) != "internal-agent",
+        )
+        # One read names every credential and OAuth app the rows point at; the
+        # client_name search below reuses it instead of asking again.
+        bound_rows = workspace_session.execute(
+            select(
+                MCPClient.issued_to_user_id,
+                _mcp_client_binding_expression(),
+                oauth_client_id,
+            )
+            .where(*manageable_filters)
+            .distinct()
+        ).all()
+        workspace_session.rollback()
+        bound_keys = {(row[0], row[1]) for row in bound_rows}
+
+        acquire_consistent_read_snapshot(control_session)
         health = load_workspace_oauth_health(
             control_session,
             workspace_id=workspace_id,
             now=now,
+            bindings={binding for _user, binding in bound_keys if binding is not None},
         )
-
-        # Release the control-plane read transaction before the workspace one
-        # opens. The two sessions can share a single connection -- the
-        # single-database profile, and every :memory: test pool -- where a
-        # second BEGIN is a hard error, and holding both at once is the nesting
-        # backend/api/deps.py warns about. The snapshot has already done its
-        # job: every whole-workspace control value the rest of this method
-        # needs is now plain data inside `health`.
-        #
         # Two later steps still read CONTROL -- the client_name search and the
         # page refinement below -- and both deliberately run OUTSIDE this
         # released snapshot, as plain key lookups rather than a re-entered
@@ -371,14 +383,6 @@ class SettingsService:
         control_session.rollback()
 
         acquire_consistent_read_snapshot(workspace_session)
-        oauth_client_id = MCPClient.token_metadata["oauth_client_id"].as_string()
-        manageable_filters = (
-            MCPClient.workspace_id == workspace_id,
-            MCPClient.deleted_at.is_(None),
-            MCPClient.status.in_(MCP_CLIENT_STATUSES),
-            func.lower(MCPClient.client_type).notin_(SYSTEM_MCP_CLIENT_TYPES),
-            func.lower(MCPClient.name) != "internal-agent",
-        )
         search_filters = ()
         if normalized_query:
             # Resolve the client_name arm against the ids THIS workspace's own
@@ -389,18 +393,39 @@ class SettingsService:
             # by the installation's whole oauth_client table. See
             # attach_name_matched_oauth_client_ids for what the unbounded shape
             # cost.
+            bound_app_ids = {
+                credential.oauth_client_id
+                for key in bound_keys
+                if (credential := health.credential_health.get(key)) is not None
+                and credential.oauth_client_id is not None
+            }
             health = attach_name_matched_oauth_client_ids(
                 control_session,
                 health,
                 name_search=normalized_query,
-                oauth_client_ids=workspace_session.scalars(
-                    select(oauth_client_id)
-                    .where(*manageable_filters, oauth_client_id.isnot(None))
-                    .distinct()
-                ).all(),
+                oauth_client_ids={row[2] for row in bound_rows if row[2] is not None}
+                | bound_app_ids,
             )
+            matched_bindings = [
+                key
+                for key, credential in health.credential_health.items()
+                if credential.oauth_client_id
+                in (health.name_matched_oauth_client_ids or ())
+            ]
             search_filters = (
                 or_(
+                    or_(
+                        tuple_(
+                            MCPClient.issued_to_user_id,
+                            _mcp_client_binding_expression(),
+                        ).in_(matched_bindings),
+                        and_(
+                            MCPClient.issued_to_user_id.is_(None),
+                            MCPClient.runtime_binding_key.in_(
+                                [key[1] for key in matched_bindings]
+                            ),
+                        ),
+                    ),
                     func.lower(MCPClient.name).contains(
                         normalized_query, autoescape=True
                     ),
@@ -442,9 +467,7 @@ class SettingsService:
                     func.sum(
                         case(
                             (
-                                not_(
-                                    _mcp_client_active_connection_predicate(health)
-                                ),
+                                not_(_mcp_client_active_connection_predicate(health)),
                                 1,
                             ),
                             else_=0,
@@ -468,11 +491,9 @@ class SettingsService:
         if status == "active":
             data_filters.append(_mcp_client_active_connection_predicate(health))
         elif status == "disabled":
-            data_filters.append(
-                not_(_mcp_client_active_connection_predicate(health))
-            )
+            data_filters.append(not_(_mcp_client_active_connection_predicate(health)))
         if typed_cursor is not None:
-            cursor_created_at, cursor_id = typed_cursor
+            cursor_created_at, cursor_id, _evaluated_at = typed_cursor
             data_filters.append(
                 or_(
                     MCPClient.created_at < cursor_created_at,
@@ -500,6 +521,7 @@ class SettingsService:
                 query=normalized_query,
                 created_at=last.created_at,
                 client_id=last.id,
+                evaluated_at=now,
             )
         # A page row may name an OAuth client the workspace-wide scan above
         # never saw (no consent here). Its facet answer is already settled;
@@ -580,8 +602,8 @@ class SettingsService:
                 last_client.last_used_at,
                 last_client.id,
             )
-        # Narrowed to this page's clients, so the control-plane scan stays
-        # O(page) rather than O(workspace consents): there is no facet here to
+        # Narrowed to this page's own credentials, so the control-plane read stays
+        # O(page) rather than O(workspace members): there is no facet here to
         # need the whole answer set.
         mcp_payload = _settings_mcp_client_payload(
             mcp_clients,
@@ -590,9 +612,15 @@ class SettingsService:
                 workspace_id=workspace_id,
                 now=utc_now(),
                 oauth_client_ids=_page_oauth_client_ids(mcp_clients),
+                bindings=_page_bindings(mcp_clients),
             ),
         )
         return SettingsPolicies(
+            attachments=_policy_card(
+                name="attachments",
+                title="Unused file retention",
+                policy=self._policy_group_projection(workspace, "attachments"),
+            ),
             workspace=_policy_card(
                 name="workspace",
                 title="Workspace basics",
@@ -729,6 +757,10 @@ class SettingsService:
         is no distributed transaction to reason about.
         """
 
+        if group == "attachments" and expected_revision is None:
+            raise SettingsPolicyUpdateRejected(
+                "attachments requires a batch save with expected_revision"
+            )
         acquire_write_intent(control_session)
         workspace = control_session.scalar(
             select(Workspace).where(Workspace.id == workspace_id).with_for_update()
@@ -747,7 +779,22 @@ class SettingsService:
                 current_policy=current_policy,
             )
 
-        if group == "workspace":
+        if group == "attachments":
+            if set(changes) != {"orphan_retention_hours"}:
+                raise SettingsPolicyUpdateRejected("Unknown attachment policy field")
+            value = changes["orphan_retention_hours"]
+            try:
+                if value is not None:
+                    value = validate_retention_hours(value)
+            except ValueError as exc:
+                raise SettingsPolicyUpdateRejected(str(exc)) from exc
+            policy = dict(workspace.context_media_policy or {})
+            if value is None:
+                policy.pop("orphan_retention_hours", None)
+            else:
+                policy["orphan_retention_hours"] = value
+            workspace.context_media_policy = policy
+        elif group == "workspace":
             for key, value in changes.items():
                 self._update_workspace_field(control_session, workspace, key, value)
         elif group == "lint":
@@ -782,9 +829,7 @@ class SettingsService:
                     "format_families": 3,
                     "format_overrides": 3,
                 }
-                ordered_changes.sort(
-                    key=lambda item: library_order.get(item[0], 3)
-                )
+                ordered_changes.sort(key=lambda item: library_order.get(item[0], 3))
             for key, value in ordered_changes:
                 if group == "library" and key in RETIRED_LIBRARY_SOURCE_RULE_KEYS:
                     raise LibrarySourceRulesRetired(
@@ -839,7 +884,19 @@ class SettingsService:
             action=action,
             target_kind="workspace",
             target_id=workspace_id,
-            payload={"group": group, "key": keys[0], "keys": keys},
+            payload={
+                "group": group,
+                "key": keys[0],
+                "keys": keys,
+                **(
+                    {
+                        "before": current_policy,
+                        "after": self._policy_group_projection(workspace, group),
+                    }
+                    if group == "attachments"
+                    else {}
+                ),
+            },
         )
         control_session.flush()
         return self.get_policies(
@@ -853,6 +910,10 @@ class SettingsService:
         workspace: Workspace,
         group: str,
     ) -> dict[str, object]:
+        if group == "attachments":
+            return resolve_context_media_policy(
+                workspace, self.orphan_retention_hours
+            ).policy
         if group == "workspace":
             return {
                 "slug": workspace.slug,
@@ -1032,6 +1093,11 @@ class SettingsService:
         if key == "slug":
             normalized = _normalize_workspace_slug(value)
             if normalized != workspace.slug:
+                # Checked before the uniqueness probe so the reply never
+                # reveals whether a starter workspace's slug exists. A slug
+                # that already uses the prefix may be kept unchanged.
+                if is_reserved_workspace_slug(normalized):
+                    raise SettingsPolicyUpdateRejected(RESERVED_WORKSPACE_SLUG_MESSAGE)
                 existing = control_session.scalar(
                     select(Workspace.id).where(
                         Workspace.slug == normalized,
@@ -1057,25 +1123,26 @@ class SettingsService:
                 )
             workspace.ask_retrieval_mode = normalized
             return
-        text = _coerce_string(value).strip()
+        text = (
+            normalize_short_text(value, field=key, max_length=128)
+            if key == "title"
+            else validate_text(_coerce_string(value).strip(), field=key, max_length=512)
+        )
         if not text:
             raise SettingsPolicyUpdateRejected(f"{key} cannot be empty")
         setattr(workspace, key, text)
 
-    @staticmethod
-    def _update_lint_policy(workspace: Workspace, key: str, value) -> None:
+    def _update_lint_policy(self, workspace: Workspace, key: str, value) -> None:
         # Lint toggles are dynamic ({rule_id: bool}), so they bypass the
         # fixed-key _update_json_policy. The reserved "auto_fix" key sets the
         # workspace auto-fix mode (F2); everything else is a rule_id toggle
         # validated against the registry. Both require a boolean.
-        from backend.services.lint import all_rules
-
         if not isinstance(value, bool):
             raise SettingsPolicyUpdateRejected("lint toggle must be a boolean")
         if key == "auto_fix":
             workspace.auto_fix_enabled = value
             return
-        rule = next((item for item in all_rules() if item.rule_id == key), None)
+        rule = self.lint_registry.rule(key)
         if rule is None:
             raise SettingsPolicyUpdateRejected(f"unknown lint rule_id: {key}")
         if not getattr(rule, "runtime_checkable", True):
@@ -1147,9 +1214,7 @@ class SettingsService:
         elif key == "builtin_format_overrides":
             try:
                 policy_value = (
-                    self.library_family_policy.coerce_builtin_format_overrides(
-                        value
-                    )
+                    self.library_family_policy.coerce_builtin_format_overrides(value)
                 )
             except LibraryFamilyPolicyError as exc:
                 raise LibraryPolicyValidationRejected(exc) from exc
@@ -1159,9 +1224,7 @@ class SettingsService:
                     value,
                     existing_families=policy.get("format_families", []),
                     custom_formats=policy.get("custom_formats", []),
-                    builtin_format_overrides=policy.get(
-                        "builtin_format_overrides", {}
-                    ),
+                    builtin_format_overrides=policy.get("builtin_format_overrides", {}),
                 )
             except LibraryFamilyPolicyError as exc:
                 raise LibraryPolicyValidationRejected(exc) from exc
@@ -1186,9 +1249,7 @@ class SettingsService:
                 str(item["format_id"])
                 for item in self.library_family_policy.coerce_custom_formats(
                     policy.get("custom_formats", []),
-                    builtin_format_overrides=policy.get(
-                        "builtin_format_overrides", {}
-                    ),
+                    builtin_format_overrides=policy.get("builtin_format_overrides", {}),
                 )
             }
             raw_format_id = key.removeprefix("format_overrides.")
@@ -1233,14 +1294,11 @@ def _validate_policy_cross_fields(
         return
     if group == "library":
         family_policy = (
-            library_family_policy
-            or get_default_library_family_policy_service()
+            library_family_policy or get_default_library_family_policy_service()
         )
         try:
-            builtin_format_overrides = (
-                family_policy.coerce_builtin_format_overrides(
-                    policy.get("builtin_format_overrides", {})
-                )
+            builtin_format_overrides = family_policy.coerce_builtin_format_overrides(
+                policy.get("builtin_format_overrides", {})
             )
             custom_formats = family_policy.coerce_custom_formats(
                 policy.get("custom_formats", []),
@@ -1250,8 +1308,7 @@ def _validate_policy_cross_fields(
             orphaned_custom_overrides = sorted(
                 format_id
                 for format_id in policy.get("format_overrides", {})
-                if str(format_id).startswith("custom-")
-                and format_id not in custom_ids
+                if str(format_id).startswith("custom-") and format_id not in custom_ids
             )
             if orphaned_custom_overrides:
                 raise LibraryFamilyPolicyError(
@@ -1456,10 +1513,18 @@ def _coerce_policy_value(key: str, value):
 
 
 def _normalize_workspace_slug(value) -> str:
-    slug = re.sub(r"[^a-z0-9-]+", "-", _coerce_string(value).lower()).strip("-")
-    slug = re.sub(r"-{2,}", "-", slug)[:80].strip("-")
+    validate_text(
+        _coerce_string(value),
+        field="slug",
+        max_length=WORKSPACE_SLUG_MAX_LENGTH,
+        min_length=1,
+    )
+    slug = slugify_workspace_text(_coerce_string(value))
     if not slug:
         raise SettingsPolicyUpdateRejected("workspace slug is required")
+    validate_text(
+        slug, field="slug", max_length=WORKSPACE_SLUG_MAX_LENGTH, min_length=1
+    )
     return slug
 
 
@@ -1497,9 +1562,7 @@ def normalized_library_policy(
         max_bytes=MAX_LIBRARY_WORKSPACE_UPLOAD_BYTES,
     )
     try:
-        policy_service = (
-            family_policy or get_default_library_family_policy_service()
-        )
+        policy_service = family_policy or get_default_library_family_policy_service()
         normalized["builtin_format_overrides"] = (
             policy_service.coerce_builtin_format_overrides(
                 source.get("builtin_format_overrides", {})
@@ -1516,9 +1579,7 @@ def normalized_library_policy(
         )
     except LibraryFamilyPolicyError as exc:
         raise LibraryPolicyValidationRejected(exc) from exc
-    custom_ids = {
-        str(item["format_id"]) for item in normalized["custom_formats"]
-    }
+    custom_ids = {str(item["format_id"]) for item in normalized["custom_formats"]}
     allowed_override_ids = LIBRARY_FORMATS | custom_ids
     normalized["format_overrides"] = {
         format_id: limit
@@ -1573,9 +1634,7 @@ def library_upload_limit_bytes(
                 normalized["format_families"],
                 format_id,
                 custom_formats=normalized["custom_formats"],
-                builtin_format_overrides=normalized[
-                    "builtin_format_overrides"
-                ],
+                builtin_format_overrides=normalized["builtin_format_overrides"],
             )
             if family is not None and family.max_upload_bytes is not None:
                 preference = family.max_upload_bytes
@@ -1620,9 +1679,7 @@ def library_upload_limit_sources(
                 normalized["format_families"],
                 format_id,
                 custom_formats=normalized["custom_formats"],
-                builtin_format_overrides=normalized[
-                    "builtin_format_overrides"
-                ],
+                builtin_format_overrides=normalized["builtin_format_overrides"],
             )
             if family is not None and family.max_upload_bytes is not None:
                 preference_source = "family"
@@ -1679,9 +1736,7 @@ def _coerce_library_upload_limit(
             f"{field_name} must be at least {MIN_LIBRARY_UPLOAD_BYTES}"
         )
     if value > max_bytes:
-        raise SettingsPolicyUpdateRejected(
-            f"{field_name} must be at most {max_bytes}"
-        )
+        raise SettingsPolicyUpdateRejected(f"{field_name} must be at most {max_bytes}")
     return value
 
 
@@ -1912,6 +1967,10 @@ def _is_system_mcp_client(client: MCPClient) -> bool:
     return client_type in SYSTEM_MCP_CLIENT_TYPES or name == "internal-agent"
 
 
+def _page_bindings(clients: list[MCPClient]) -> set[str]:
+    return {key for client in clients if (key := binding_key_for_client(client))}
+
+
 def _page_oauth_client_ids(clients: list[MCPClient]) -> list[str]:
     return [
         oauth_client_id
@@ -1922,62 +1981,53 @@ def _page_oauth_client_ids(clients: list[MCPClient]) -> list[str]:
     ]
 
 
+def _mcp_client_binding_expression():
+    metadata = MCPClient.token_metadata
+    fallback = case(
+        (
+            metadata["token_kind"].as_string() == "oauth_jwt",
+            "oauth_grant:" + metadata["token_id"].as_string(),
+        ),
+        (
+            metadata["token_kind"].as_string().in_(["api_token", "pat"]),
+            "api_token:" + metadata["token_id"].as_string(),
+        ),
+        else_=None,
+    )
+    return func.coalesce(MCPClient.runtime_binding_key, fallback)
+
+
 def _mcp_client_active_connection_predicate(health: WorkspaceOAuthHealth):
-    """SQL twin of ``oauth_service.classify_oauth_connection_state`` == "active",
-    over ``MCPClient`` columns ONLY.
+    """Use the same exact control-plane credential snapshot as row rendering.
 
-    The Active/Deactivated facet keys off connection health, not the physical
-    ``MCPClient.status`` column, so the split has to be expressible in SQL --
-    loading the page into Python to classify it would break the exact
-    server-filtered cursor contract this endpoint documents.
-
-    This used to be three correlated ``EXISTS`` subqueries against
-    ``OAuthClient``/``OAuthConsent``/``OAuthRefreshToken``, two of them
-    correlating a CONTROL table's ``workspace_id`` against a WORKSPACE table's
-    inside one statement -- not expressible once the planes are separate
-    databases. Both of those tables are workspace-scoped, so for ONE workspace
-    the healthy answer set is finite: ``health`` is that set, computed on the
-    control plane, and pushed back down here as literal keys.
-
-    The two arms below are the same disjunction the old EXISTS pairs spelled
-    out. A client with no issuing user matched ANY row for its client/workspace
-    pair (the aggregate key); one with an issuing user matched only its own.
-    They cannot be merged into a single row-value ``IN`` because SQL compares
-    NULL to nothing: ``(NULL, 'c') IN ((NULL, 'c'))`` is UNKNOWN, not TRUE.
-
-    The Deactivated facet is ``not_()`` of this, so it matters that the whole
-    expression is never UNKNOWN -- a row that is neither TRUE nor FALSE would
-    be counted in neither facet. The only UNKNOWN source is an ``IN`` over a
-    NULL ``oauth_client_id``, and every arm that contains one is reached only
-    when the first arm has already made the ``OR`` true (client id NULL) or
-    when ``status`` has already made that arm FALSE.
+    Literal key sets cross the database boundary; token tables never join the
+    workspace-plane query. Unknown identities belong to the inactive complement.
     """
 
-    oauth_client_id = MCPClient.token_metadata["oauth_client_id"].as_string()
-    aggregate_ids, exact_keys = health.active_connection_keys()
-    arms = [
-        # No OAuth identity: connection state mirrors the physical status.
-        and_(oauth_client_id.is_(None), MCPClient.status == "active"),
-    ]
-    if aggregate_ids:
+    metadata = MCPClient.token_metadata
+    binding = _mcp_client_binding_expression()
+    app_id = func.nullif(metadata["oauth_client_id"].as_string(), "")
+    groups: dict[str | None, list[tuple[UUID, str]]] = {}
+    for (user_id, key), credential in health.credential_health.items():
+        if credential.state == "active":
+            groups.setdefault(credential.oauth_client_id, []).append((user_id, key))
+    arms = []
+    for oauth_id, keys in groups.items():
         arms.append(
             and_(
-                MCPClient.status == "active",
-                MCPClient.issued_to_user_id.is_(None),
-                oauth_client_id.in_(sorted(aggregate_ids)),
-            )
-        )
-    if exact_keys:
-        arms.append(
-            and_(
-                MCPClient.status == "active",
-                MCPClient.issued_to_user_id.isnot(None),
-                tuple_(MCPClient.issued_to_user_id, oauth_client_id).in_(
-                    sorted(exact_keys)
+                or_(
+                    tuple_(MCPClient.issued_to_user_id, binding).in_(sorted(keys)),
+                    and_(
+                        MCPClient.issued_to_user_id.is_(None),
+                        MCPClient.runtime_binding_key.in_([key[1] for key in keys]),
+                    ),
                 ),
+                or_(app_id.is_(None), app_id == oauth_id)
+                if oauth_id is not None
+                else app_id.is_(None),
             )
         )
-    return or_(*arms)
+    return and_(MCPClient.status == "active", func.coalesce(or_(*arms, False), False))
 
 
 def _warn_if_pushdown_key_set_is_large(health: WorkspaceOAuthHealth) -> None:
@@ -1991,11 +2041,8 @@ def _warn_if_pushdown_key_set_is_large(health: WorkspaceOAuthHealth) -> None:
     bind count up was precisely the one that logged nothing.
     """
 
-    aggregate_ids, exact_keys = health.active_connection_keys()
-    key_count = (
-        len(aggregate_ids)
-        + len(exact_keys)
-        + len(health.name_matched_oauth_client_ids or ())
+    key_count = len(health.credential_health) + len(
+        health.name_matched_oauth_client_ids or ()
     )
     if key_count <= MCP_CLIENT_PUSHDOWN_KEY_WARNING_THRESHOLD:
         return
@@ -2032,8 +2079,14 @@ def _settings_mcp_client_payload(
         connection_state, next_expiry, oauth_client_id, oauth_client_name = (
             health.connection_state_for(client)
         )
+        credential = health.credential_for(client)
         payload.append(
             {
+                "credential_kind": "unknown"
+                if credential is None
+                else "oauth"
+                if credential.oauth_client_id
+                else "pat",
                 "id": client.id,
                 "name": client.name,
                 "client_name": oauth_client_name or client.name,
@@ -2082,6 +2135,7 @@ def _encode_mcp_client_cursor(
     query: str,
     created_at: datetime,
     client_id: UUID,
+    evaluated_at: datetime,
 ) -> str:
     if not secret:
         raise ValueError("MCP client cursor secret must not be empty")
@@ -2094,6 +2148,7 @@ def _encode_mcp_client_cursor(
             query=query,
         ),
         "created": created_at.isoformat(),
+        "evaluated": evaluated_at.isoformat(),
         "id": client_id.hex,
     }
     encoded = (
@@ -2120,7 +2175,7 @@ def _decode_mcp_client_cursor(
     actor_binding: str,
     status: str,
     query: str,
-) -> tuple[datetime, UUID]:
+) -> tuple[datetime, UUID, datetime]:
     try:
         if not secret:
             raise ValueError("missing cursor secret")
@@ -2142,7 +2197,7 @@ def _decode_mcp_client_cursor(
         payload = json.loads(
             base64.urlsafe_b64decode(encoded + padding).decode("utf-8")
         )
-        if set(payload) != {"v", "f", "created", "id"}:
+        if set(payload) != {"v", "f", "created", "id", "evaluated"}:
             raise ValueError("invalid cursor payload")
         if payload["v"] != MCP_CLIENT_CURSOR_VERSION:
             raise ValueError("unsupported cursor version")
@@ -2158,7 +2213,10 @@ def _decode_mcp_client_cursor(
         client_id = UUID(hex=payload["id"])
         if client_id.hex != payload["id"]:
             raise ValueError("invalid cursor client")
-        return created_at, client_id
+        evaluated_at = datetime.fromisoformat(payload["evaluated"])
+        if evaluated_at.tzinfo is None:
+            raise ValueError("missing evaluation timezone")
+        return created_at, client_id, evaluated_at
     except (
         ValueError,
         TypeError,

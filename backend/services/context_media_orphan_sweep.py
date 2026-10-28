@@ -1,9 +1,8 @@
 """Derived orphan discovery and reclamation for Context-owned media.
 
-P3.1/P3.4 (doc/design/api-surface-redesign.md §5.5): ContextMediaSession and
-its claim step are gone -- every asset is page-owned from the moment it is
-registered, via the caller's own open "editing" row
-(``created_for_version_id``). There is exactly one orphan shape now: a
+Every asset is page-owned from the moment it is registered, via the caller's
+own open "editing" row (``created_for_version_id``). There is exactly one
+orphan shape now: a
 page-owned asset with zero surviving ``ContextMediaUsage`` rows, i.e. an
 upload never (or no longer) written into any version's Markdown.
 
@@ -14,11 +13,10 @@ is actively being worked on, not orphaned. ``_page_orphan_statement``
 therefore excludes any asset whose ``created_for_version_id`` is currently
 status ``"editing"`` outright, not merely with a longer grace window:
 disconnects, MCP session teardown, and elapsed wall-clock time are not
-disposal signals for an open editing session (see R-09,
-review/2026-09-04-minor-fixes-vs-feature-epic1-code-review.md). Once that
-version is submitted (draft), published, or discarded, the protection lifts
-and the asset becomes an ordinary orphan candidate, subject to the same
-retention-hours grace period as before.
+disposal signals for an open editing session. Once that version is submitted
+(draft), published, or discarded, the protection lifts and the asset becomes
+an ordinary orphan candidate, subject to the same retention-hours grace period
+as before.
 
 ``CONTEXT_PAGE_LIFECYCLE_STATUSES`` has no hard-delete state (backend/
 models/context.py) and nothing in ``backend/`` deletes a ``ContextPageVersion``
@@ -30,10 +28,9 @@ retention-hours setting's comment and ``OrphanCandidate.orphaned_since``'s
 docstring before tuning this shape's window, because right now it is
 entirely an editing grace period, not a cleanup delay.
 
-Orphan state is not stored as a column (plan D-7 explicitly rejects a new
-"orphan" status: a derived query is the single source of truth). This
-module is that derived query, plus the sweep that reclaims orphans past a
-configurable retention threshold by tombstoning them through the existing
+Orphan state is not stored as a column; a derived query is the single source
+of truth. This module is that derived query, plus the sweep that reclaims orphans
+past a configurable retention threshold by tombstoning them through the existing
 ``context_media`` write path -- never a hand-written ``DELETE`` -- so the
 existing ``ContextMediaGcCandidate`` producer, quota release, and RESTRICT
 foreign keys stay intact.
@@ -92,8 +89,7 @@ class OrphanCandidate:
     right session for.
 
     The uploader's name is deliberately NOT resolved here. It lives on
-    ``users``, an identity-plane table (doc/design/
-    workspace-database-separation-plan.md §2), so reading it on this
+    ``users``, an identity-plane table, so reading it on this
     workspace-plane session would break the moment a routing overlay puts
     the two in different databases. The endpoints resolve it on the control
     session and pass it into ``orphan_read_projection`` instead.
@@ -147,7 +143,11 @@ def _page_orphan_statement(workspace_id: UUID):
 
 
 def list_orphans(
-    session: Session, *, workspace_id: UUID, now: datetime | None = None
+    session: Session,
+    *,
+    workspace_id: UUID,
+    now: datetime | None = None,
+    actor,
 ) -> tuple[OrphanCandidate, ...]:
     """All current orphans, regardless of age.
 
@@ -162,7 +162,24 @@ def list_orphans(
     """
 
     del now
-    page_assets = tuple(session.scalars(_page_orphan_statement(workspace_id)))
+    from backend.repositories.context_visibility import (
+        foreign_editing_version_exists,
+        visible_context_page_expression,
+    )
+
+    statement = (
+        _page_orphan_statement(workspace_id)
+        .join(ContextPage, ContextPage.id == ContextMediaAsset.page_id)
+        .where(
+            ContextPage.workspace_id == workspace_id,
+            visible_context_page_expression(actor),
+            ~foreign_editing_version_exists(
+                ContextMediaAsset.created_for_version_id,
+                None if actor is None else (actor.actor_kind, actor.actor_id),
+            ),
+        )
+    )
+    page_assets = tuple(session.scalars(statement))
     page_titles = _page_titles(
         session,
         workspace_id=workspace_id,

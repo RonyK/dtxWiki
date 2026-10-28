@@ -1,3 +1,4 @@
+import { inputTextError, textInputLimit } from "../../shared/lib/inputPolicy";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -254,6 +255,11 @@ export function ContextReconciliationWorkbench({
   }
 
   async function execute(dryRun: boolean) {
+    const reasonError = inputTextError(reason, 2000, false);
+    if (reasonError) {
+      setError(reasonError);
+      return;
+    }
     if (!detail || !canMutate) {
       return;
     }
@@ -645,6 +651,7 @@ export function ContextReconciliationWorkbench({
                       </button>
                     </span>
                     <textarea
+                      {...textInputLimit(1_000_000, false)}
                       aria-labelledby={`${titleId}-custom-editor-label`}
                       autoFocus
                       disabled={editingDisabled}
@@ -742,6 +749,7 @@ export function ContextReconciliationWorkbench({
               {t("reconciliation.reason", { defaultValue: "Reconciliation reason" })}
             </span>
             <textarea
+              {...textInputLimit(2000, false)}
               disabled={editingDisabled}
               required={detail.conflicts.length > 0}
               value={reason}
@@ -780,6 +788,7 @@ export function ContextReconciliationWorkbench({
                     })}
                   </span>
                   <textarea
+              {...textInputLimit(2000, false)}
                     autoFocus
                     required
                     value={discardReason}

@@ -17,14 +17,14 @@ class _DefaultContext:
 def test_normalized_keys_cover_constructor_order_and_later_assignments():
     user = User(
         email="Straße@example.com",
-        display_name="  Ａlice\tﬁ  ",
+        display_name="Ａlice\u2003ﬁ",
         password_hash="hash",
     )
     assert user.member_search_key == "alice fi strasse@example.com"
 
     user.email = "SECOND@example.com"
     assert user.member_search_key == "alice fi second@example.com"
-    user.display_name = "  Bob\n\nSmith  "
+    user.display_name = "Bob\u2003\u2003Smith"
     assert user.member_search_key == "bob smith second@example.com"
 
     workspace = Workspace(slug="unicode", title="Straße\tﬁ", name="Unicode")

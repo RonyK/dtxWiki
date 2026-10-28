@@ -98,13 +98,15 @@ def test_ambiguity_raises(session_factory):
             )
 
 
-def test_user_default_then_personal_precede_membership_picker(session_factory):
+def test_user_default_precedes_membership_picker(session_factory):
     with session_factory.begin() as session:
         user = _user(session, "pointer-priority@example.com")
         default_ws = _workspace(session, "pointer-default")
-        personal_ws = _workspace(session, "pointer-personal")
-        other_ws = _workspace(session, "pointer-other")
-        for workspace in (default_ws, personal_ws, other_ws):
+        for workspace in (
+            default_ws,
+            _workspace(session, "pointer-other-a"),
+            _workspace(session, "pointer-other-b"),
+        ):
             grant_workspace_membership(
                 session,
                 user_id=user.id,
@@ -112,7 +114,6 @@ def test_user_default_then_personal_precede_membership_picker(session_factory):
                 role="viewer",
             )
         user.default_workspace_id = default_ws.id
-        user.personal_workspace_id = personal_ws.id
 
         resolved = resolve_workspace_for_actor(
             session=session,
@@ -130,73 +131,13 @@ def test_user_default_then_personal_precede_membership_picker(session_factory):
         session.delete(default_membership)
         session.flush()
 
-        resolved = resolve_workspace_for_actor(
-            session=session,
-            actor=_actor(user.id),
-            requested_workspace_id=None,
-        )
-        assert resolved.workspace_id == personal_ws.id
-        assert resolved.source == "personal"
-        assert user.default_workspace_id == personal_ws.id
-
-        user_id = user.id
-        personal_workspace_id = personal_ws.id
-
-    with session_factory() as session:
-        persisted_user = session.get(User, user_id)
-        assert persisted_user is not None
-        assert persisted_user.default_workspace_id == personal_workspace_id
-
-
-def test_stale_personal_repair_does_not_overwrite_explicit_default_selection(
-    session_factory,
-):
-    with session_factory.begin() as session:
-        user = _user(session, "repair-race@example.com")
-        personal_ws = _workspace(session, "repair-race-personal")
-        explicit_ws = _workspace(session, "repair-race-explicit")
-        for workspace in (personal_ws, explicit_ws):
-            grant_workspace_membership(
-                session,
-                user_id=user.id,
-                workspace_id=workspace.id,
-                role="viewer",
-            )
-        user.personal_workspace_id = personal_ws.id
-        user.default_workspace_id = None
-        user_id = user.id
-        explicit_workspace_id = explicit_ws.id
-
-    # Keep an attached, deliberately stale User identity across transactions:
-    # this is the state a request that read the null pointer just before the
-    # explicit-selection transaction committed would carry into its repair.
-    stale_session = session_factory()
-    try:
-        stale_user = stale_session.get(User, user_id)
-        assert stale_user is not None
-        assert stale_user.default_workspace_id is None
-        stale_session.commit()
-
-        with session_factory.begin() as winner_session:
-            winner = winner_session.get(User, user_id)
-            assert winner is not None
-            winner.default_workspace_id = explicit_workspace_id
-
-        with stale_session.begin():
-            resolved = resolve_workspace_for_actor(
-                session=stale_session,
-                actor=_actor(user_id),
+        # An inaccessible default is not repaired to another membership.
+        with pytest.raises(WorkspaceAmbiguityError, match=r"picker"):
+            resolve_workspace_for_actor(
+                session=session,
+                actor=_actor(user.id),
                 requested_workspace_id=None,
             )
-            assert resolved.workspace_id == explicit_workspace_id
-            assert resolved.source == "user_default"
-    finally:
-        stale_session.close()
-
-    with session_factory() as session:
-        persisted_user = session.get(User, user_id)
-        assert persisted_user is not None
-        assert persisted_user.default_workspace_id == explicit_workspace_id
 
 
 def test_user_without_membership_requires_workspace_discovery(session_factory):

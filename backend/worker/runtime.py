@@ -26,6 +26,7 @@ from backend.repositories.workspace_scoped import get_in_workspace
 from backend.services.actor_identities import SYSTEM_FEEDBACK_RESOLVER_ACTOR_ID
 from backend.services.bundle_expiration import BundleExpirationService
 from backend.services.context_media_orphan_sweep import ContextMediaOrphanSweepService
+from backend.services.context_media_policy import read_context_media_policy
 from backend.services.context_reconciliation_reminder import (
     RECONCILIATION_REMINDER_JOB_TYPE,
     ContextReconciliationReminderService,
@@ -41,8 +42,19 @@ from backend.services.job_hints import (
 )
 from backend.services.job_queue import DEFAULT_JOB_MAX_ATTEMPTS, JobQueueService
 from backend.services.library_service import LibraryCandidateInput, LibraryService
-from backend.services.lint_service import LintService
 from backend.services.mail_delivery import EmailDeliveryService
+from backend.spi.plugins import (
+    JobFailure,
+    JobInput,
+    JobResult,
+    PermanentJobError,
+    PluginJobError,
+    RetryableJobError,
+    WorkerContext,
+)
+from backend.spi.plugins import (
+    JobHandler as PluginJobHandler,
+)
 from backend.worker.registry import JobHandler, get_handler, register
 
 logger = logging.getLogger(__name__)
@@ -69,7 +81,7 @@ if TYPE_CHECKING:
 # Everything else is treated as potentially transient and retried up to the
 # shared DEFAULT_JOB_MAX_ATTEMPTS budget (max-total-attempts semantics,
 # matching reclaim_stale_jobs).
-_TERMINAL_JOB_ERRORS = (FeedbackItemNotFoundError, ValueError)
+_TERMINAL_JOB_ERRORS = (FeedbackItemNotFoundError, ValueError, PermanentJobError)
 
 
 class WorkerShutdownRequested(BaseException):
@@ -84,6 +96,25 @@ class WorkerShutdownRequested(BaseException):
     def __init__(self, signal_name: str) -> None:
         super().__init__(signal_name)
         self.signal_name = signal_name
+
+
+@dataclass(frozen=True)
+class InitialRecoveryResult:
+    """Outcome of the first stale-lease pass, before worker readiness.
+
+    A control-plane failure means the pass could not run. Individual workspace
+    failures remain isolated, as they are during periodic recovery.
+    """
+
+    roster_available: bool
+    reclaimed_count: int = 0
+    failed_workspace_ids: tuple[UUID, ...] = ()
+
+    @property
+    def status(self) -> str:
+        if not self.roster_available:
+            return "roster_failed"
+        return "partial" if self.failed_workspace_ids else "complete"
 
 
 @dataclass(frozen=True)
@@ -184,6 +215,16 @@ class OneShotWorker:
         # The entrypoint's resolved settings (including --db overrides). A
         # fresh Settings() here would read the process env instead (R1′).
         self._settings = resolved_settings
+        self._plugin_handlers = {}
+        if resolved_settings is not None:
+            from backend.app.plugins import PluginConfigurationError, load_plugins
+
+            self._plugin_handlers = load_plugins(resolved_settings).worker_handlers()
+            for name in self._plugin_handlers:
+                if get_handler(name) is not None:
+                    raise PluginConfigurationError(
+                        f"plugin worker handler collides with core job type: {name}"
+                    )
         if resolved_settings is not None:
             self._services.settings = resolved_settings
         if database_provider is not None:
@@ -335,12 +376,14 @@ class OneShotWorker:
         wrote, so re-apply them once the job is terminally failed. Runs in its
         own savepoint so a marker failure cannot poison the caller's
         transaction or mask the dispatch outcome."""
-        handler = get_handler(job.job_type)
+        handler = self._plugin_handlers.get(job.job_type) or get_handler(job.job_type)
         if handler is None or handler.on_failure is None:
             return
         try:
             with session.begin_nested():
-                if job.job_type == "library_conversion":
+                if isinstance(handler, PluginJobHandler):
+                    self._notify_plugin_failure(handler, job, error, manual_retryable)
+                elif job.job_type == "library_conversion":
                     handler.on_failure(
                         self,
                         session,
@@ -406,6 +449,17 @@ class OneShotWorker:
         session_factory: sessionmaker,
         lease_timeout_seconds: int,
     ) -> int:
+        """Best-effort periodic recovery; preserve the reclaimed-count API."""
+        return self.recover_initial_stale_jobs_with_session_factory(
+            session_factory=session_factory,
+            lease_timeout_seconds=lease_timeout_seconds,
+        ).reclaimed_count
+
+    def recover_initial_stale_jobs_with_session_factory(
+        self,
+        session_factory: sessionmaker,
+        lease_timeout_seconds: int,
+    ) -> InitialRecoveryResult:
         """Requeue (or terminally fail) every workspace's jobs stuck in
         'running' past their lease.
 
@@ -435,28 +489,30 @@ class OneShotWorker:
         ``self._database_provider`` is injected (unit tests exercising a
         single un-sharded DB) -- unchanged from before Phase 6a in that case.
 
-        Returns the total number of jobs reclaimed across every workspace.
+        Report whether the required roster pass ran, and which workspaces
+        were deferred. The periodic wrapper keeps its existing integer API.
         """
-        control_session_factory = (
-            self._database_provider.control_session_factory()
-            if self._database_provider is not None
-            else session_factory
-        )
         try:
+            control_session_factory = (
+                self._database_provider.control_session_factory()
+                if self._database_provider is not None
+                else session_factory
+            )
             with control_session_factory.begin() as control_session:
                 workspace_ids = self._workspace_roster(control_session)
         except Exception:
             logger.exception("stale-job reclaim failed reading workspace roster")
-            return 0
+            return InitialRecoveryResult(roster_available=False)
 
         total_reclaimed = 0
+        failed_workspace_ids = []
         for workspace_id in workspace_ids:
-            workspace_session_factory = (
-                self._database_provider.session_for(workspace_id)
-                if self._database_provider is not None
-                else session_factory
-            )
             try:
+                workspace_session_factory = (
+                    self._database_provider.session_for(workspace_id)
+                    if self._database_provider is not None
+                    else session_factory
+                )
                 with workspace_session_factory.begin() as session:
                     reclaimed = self.job_queue.reclaim_stale_jobs(
                         session=session,
@@ -487,6 +543,7 @@ class OneShotWorker:
                         )
                     total_reclaimed += len(reclaimed)
             except Exception:
+                failed_workspace_ids.append(workspace_id)
                 logger.exception(
                     "stale-job reclaim failed for workspace %s; continuing "
                     "the sweep for the remaining workspaces",
@@ -509,7 +566,11 @@ class OneShotWorker:
                     job_type=job.job_type,
                     error=job.last_error or "worker lease expired",
                 )
-        return total_reclaimed
+        return InitialRecoveryResult(
+            roster_available=True,
+            reclaimed_count=total_reclaimed,
+            failed_workspace_ids=tuple(failed_workspace_ids),
+        )
 
     def _release_interrupted_claim(
         self,
@@ -1213,6 +1274,25 @@ class OneShotWorker:
                         workspace_session_factory,
                         claimed_job,
                     )
+                elif claimed_job.job_type == "context_media_orphan_sweep":
+                    if self._settings is None:
+                        raise RuntimeError(
+                            "Attachment retention settings are unavailable"
+                        )
+                    with control_session_factory() as policy_session:
+                        policy = read_context_media_policy(
+                            policy_session,
+                            claimed_job.workspace_id,
+                            self._settings.context_media_orphan_retention_hours,
+                        )
+                    run_at = datetime.now(UTC)
+                    with workspace_session_factory.begin() as work_session:
+                        detail = self._sweep_context_media(
+                            work_session,
+                            claimed_job.workspace_id,
+                            policy.effective_hours,
+                            run_at,
+                        )
                 else:
                     with workspace_session_factory.begin() as work_session:
                         detail = self._run_business_logic(
@@ -1368,13 +1448,58 @@ class OneShotWorker:
         handler without touching queue state (the orchestrator owns complete/fail).
         Returns the ``detail`` dict for ``WorkerDispatchResult``.
         """
-        return self._handler_for(job).business(self, session, job, None)
+        handler = self._handler_for(job)
+        if isinstance(handler, PluginJobHandler):
+            return self._run_plugin_job(handler, job)
+        return handler.business(self, session, job, None)
 
-    def _handler_for(self, job: Job | _ClaimedJob) -> JobHandler:
-        handler = get_handler(job.job_type)
+    def _handler_for(self, job: Job | _ClaimedJob) -> JobHandler | PluginJobHandler:
+        handler = self._plugin_handlers.get(job.job_type) or get_handler(job.job_type)
         if handler is None:
             raise ValueError(f"unsupported worker job type: {job.job_type}")
         return handler
+
+    @staticmethod
+    def _plugin_job_input(job: Job | _ClaimedJob) -> JobInput:
+        return JobInput(
+            job_id=job.id,
+            workspace_id=job.workspace_id,
+            job_type=job.job_type,
+            trigger_type=job.trigger_type,
+            payload=job.target_ref,
+            idempotency_key=job.idempotency_key,
+        )
+
+    def _run_plugin_job(
+        self, handler: PluginJobHandler, job: Job | _ClaimedJob
+    ) -> dict[str, Any]:
+        try:
+            request = self._plugin_job_input(job)
+        except ValueError:
+            raise PermanentJobError("plugin_job_input_invalid") from None
+        try:
+            result = handler.business(WorkerContext(datetime.now(UTC)), request)
+        except PluginJobError:
+            raise
+        except Exception:
+            raise RetryableJobError("plugin_job_failed") from None
+        if not isinstance(result, JobResult):
+            raise PermanentJobError("plugin_job_result_invalid")
+        return result.to_dict()
+
+    def _notify_plugin_failure(
+        self,
+        handler: PluginJobHandler,
+        job: Job | _ClaimedJob,
+        error: str,
+        retryable: bool,
+    ) -> None:
+        if handler.on_failure is not None:
+            handler.on_failure(
+                WorkerContext(datetime.now(UTC)),
+                self._plugin_job_input(job),
+                JobFailure(error, retryable),
+            )
 
     def _business_library_discovery(
         self, session: Session, job: Job | _ClaimedJob, queue_job: Job | None
@@ -1719,7 +1844,7 @@ class OneShotWorker:
         self, session: Session, job: Job | _ClaimedJob, queue_job: Job | None
     ) -> dict[str, Any]:
         run_id = job.target_ref.get("lint_run_id")
-        result = LintService().execute_queued_run(
+        result = self._services.lint.execute_queued_run(
             session,
             workspace_id=job.workspace_id,
             run_id=UUID(str(run_id)) if run_id else None,
@@ -1834,17 +1959,36 @@ class OneShotWorker:
     def _business_context_media_orphan_sweep(
         self, session: Session, job: Job | _ClaimedJob, queue_job: Job | None
     ) -> dict[str, Any]:
+        # Legacy single-DB dispatch only. Production resolves CONTROL before
+        # opening the workspace mutation transaction in the orchestrator.
         del queue_job
-        retention_hours = (
-            self._settings.context_media_orphan_retention_hours
-            if self._settings is not None
-            else 0
+        if self._settings is None:
+            raise RuntimeError("Attachment retention settings are unavailable")
+        if self._database_provider is not None:
+            with self._database_provider.control_session_factory()() as control_session:
+                policy = read_context_media_policy(
+                    control_session,
+                    job.workspace_id,
+                    self._settings.context_media_orphan_retention_hours,
+                )
+        else:
+            policy = read_context_media_policy(
+                session,
+                job.workspace_id,
+                self._settings.context_media_orphan_retention_hours,
+            )
+        return self._sweep_context_media(
+            session, job.workspace_id, policy.effective_hours, datetime.now(UTC)
         )
+
+    def _sweep_context_media(
+        self, session: Session, workspace_id: UUID, hours: int, now: datetime
+    ) -> dict[str, Any]:
         result = self._context_media_orphan_sweep_service().sweep(
             session,
-            workspace_id=job.workspace_id,
-            retention_hours=retention_hours,
-            now=self._datetime_target(job=job, key="scheduled_for"),
+            workspace_id=workspace_id,
+            retention_hours=hours,
+            now=now,
         )
         return {
             "inspected_count": result.inspected_count,
@@ -2081,12 +2225,14 @@ class OneShotWorker:
         the domain rows stay in their pre-job pending state forever. Errors are
         logged rather than raised so a marker write cannot mask the dispatch
         outcome."""
-        handler = get_handler(job.job_type)
+        handler = self._plugin_handlers.get(job.job_type) or get_handler(job.job_type)
         if handler is None or handler.on_failure is None:
             return
         try:
             with session_factory.begin() as marker_session:
-                if job.job_type == "library_conversion":
+                if isinstance(handler, PluginJobHandler):
+                    self._notify_plugin_failure(handler, job, error, manual_retryable)
+                elif job.job_type == "library_conversion":
                     handler.on_failure(
                         self,
                         marker_session,
@@ -2177,9 +2323,14 @@ class OneShotWorker:
         # Single-phase legacy path: extraction/bundle let the service own the
         # complete/fail transition (queue_job=job); discovery/feedback complete
         # here in the wrapper (their services do not take a job).
-        detail = handler.business(
-            self, session, job, job if handler.completes_in_service else None
-        )
+        if isinstance(handler, PluginJobHandler):
+            detail = self._run_plugin_job(handler, job)
+            completes_in_service = False
+        else:
+            detail = handler.business(
+                self, session, job, job if handler.completes_in_service else None
+            )
+            completes_in_service = handler.completes_in_service
         if (
             job.job_type == RECONCILIATION_REMINDER_JOB_TYPE
             and detail.get("unresolved") is True
@@ -2198,7 +2349,7 @@ class OneShotWorker:
                         ),
                     )
                 )
-        if not handler.completes_in_service:
+        if not completes_in_service:
             self.job_queue.complete(session=session, job=job)
         return WorkerDispatchResult(
             job_id=job.id,

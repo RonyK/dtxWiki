@@ -1,6 +1,7 @@
 import {
   expect,
   test as base,
+  type Locator,
   type Page,
   type Request,
 } from "@playwright/test";
@@ -9,7 +10,6 @@ export { expect };
 export type {
   APIRequestContext,
   APIResponse,
-  BoundingBox,
   Browser,
   BrowserContext,
   Locator,
@@ -18,6 +18,8 @@ export type {
   Response,
   TestInfo,
 } from "@playwright/test";
+
+export type BoundingBox = NonNullable<Awaited<ReturnType<Locator["boundingBox"]>>>;
 
 import {
   createFailedRequestLog,
@@ -284,6 +286,19 @@ export function isTransientNetworkImportError(page: Page, message: string) {
     networkChangeLog.get(page) ?? [],
     Date.now(),
   ).blocking;
+}
+
+/**
+ * Chromium reports every resource that fails with ERR_NETWORK_CHANGED twice:
+ * as a `requestfailed` event and again as this console error. The text IS the
+ * transport failure, not something that merely coincides with one, so a
+ * monitor that already treats the `requestfailed` half as transport must treat
+ * this echo the same way. Matched exactly: any other "Failed to load resource"
+ * (an HTTP status, a refused connection) and any message that only mentions
+ * the code stay blocking.
+ */
+export function isNetworkChangeConsoleEcho(message: string): boolean {
+  return message === "Failed to load resource: net::ERR_NETWORK_CHANGED";
 }
 
 async function recoverFromNetworkChange(page: Page) {

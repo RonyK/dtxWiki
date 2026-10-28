@@ -7,17 +7,17 @@
     "load": "Failed to search",
     "loadMore": "Failed to load more results",
     "capabilities": "Failed to load search capabilities",
-    "indexUnavailable": "Search index is not available in this build. Try Library, Context, or Agent navigation instead."
+    "indexUnavailable": "Search index is not available in this build. Use the navigation to browse documents."
   },
   "header": {
     "eyebrow": "Workspace search",
     "title": "Search",
-    "subtitle": "Search across Context pages, Library sources, Agent pages, and changes."
+    "subtitle": "Search documents in this workspace."
   },
   "form": {
     "query": "Query",
     "clear": "Clear search",
-    "queryPlaceholder": "Search Context, Library, Agent pages, changes",
+    "queryPlaceholder": "Search workspace documents",
     "scope": "Scope",
     "mode": "Mode",
     "submit": "Search"
@@ -27,8 +27,7 @@
     "context_page": "Context",
     "library_item": "Library",
     "library_artifact": "Artifacts",
-    "agent_page": "Agent",
-    "change": "Changes"
+    "agent_page": "Agent"
   },
   "modes": {
     "keyword": "Keyword retrieval",
@@ -60,17 +59,15 @@
     "count_other": "{{count}} results",
     "countPlus": "{{count}}+ results",
     "open": "Open {{title}}",
-    "openContext": "Open Context",
-    "openLibrary": "Open Library",
-    "openAgent": "Open Agent",
-    "openReview": "Open Review",
     "openUnavailable": "Open unavailable",
-    "noCitation": "No citation",
     "cannotOpen": "{{title}} cannot be opened from search yet",
     "serverOrder": "Results",
-    "disambiguation": "Multiple exact matches",
     "warningSummary": "{{warnings}}",
-    "matchedName": "Matched name: {{name}}"
+    "changeScopeMoved": "Showing all documents. For changes, use document History, Activity, or Review.",
+    "activity": "Activity",
+    "review": "Review",
+    "reviewLinkMissing": "Cannot open directly from search · Review link information unavailable",
+    "linkMissing": "Cannot open directly from search · Link information unavailable"
   },
   "examples": {
     "label": "Search examples",
@@ -81,7 +78,7 @@
   },
   "empty": {
     "unavailableTitle": "Search unavailable",
-    "unavailableDescription": "Use Library, Context, or Agent navigation while the search index is offline or not deployed in this build.",
+    "unavailableDescription": "Use the navigation to browse documents while the search index is offline or not deployed in this build.",
     "initialTitle": "Search your workspace",
     "initialDescription": "Set a scope to narrow the search, or start from one of the examples below.",
     "openLibrary": "Open Library",
@@ -95,20 +92,18 @@
   "loadingMore": "Loading…",
   "matchReasons": {
     "exact_id": "Exact ID",
-    "exact_slug": "Exact slug",
-    "exact_title": "Exact title",
-    "exact_alias": "Exact alias",
-    "trigram": "Fuzzy name",
-    "keyword": "Keyword",
-    "semantic": "Semantic",
-    "hybrid": "Hybrid",
-    "associative": "Associated"
+    "exact_slug": "Path match",
+    "exact_title": "Title match",
+    "semantic": "Similar meaning",
+    "associative": "Associated",
+    "titleContains": "Title contains the query",
+    "similarName": "Similar name: ‘{{name}}’",
+    "aliasMatch": "Alias ‘{{name}}’ matches"
   },
   "warningCodes": {
     "permission_limited": "Restricted Library items and artifacts are hidden for your current permissions",
     "unsupported_filter_tag": "Tag filter not applied yet",
     "unsupported_filter_date": "Date filter not applied yet",
-    "disambiguation_required": "Multiple exact matches — pick a candidate",
     "semantic_fallback_used": "Semantic fallback results",
     "keyword_lane_unavailable": "Local FTS5 search is unavailable for this database; exact and direct matches remain active",
     "coverage_gap_recorded": "No evidence found; coverage gap recorded",

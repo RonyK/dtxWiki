@@ -6,7 +6,12 @@ from sqlalchemy import func, select
 
 from backend.models.context import ContextPage
 from backend.models.tree import WorkspaceTreeNode
-from backend.services.lint.base import LintFindingDraft, register_rule
+from backend.services.lint.base import (
+    LintContext,
+    LintFindingDraft,
+    LintModule,
+    LintStage,
+)
 
 
 def _draft(rule_id, severity, target_type, target_id, message, message_args=None):
@@ -27,8 +32,10 @@ class _FanoutExceededRule:
     layer = "nav"
     default_enabled = True
     applies_to = frozenset({"workspace_tree_node"})
+    stages = frozenset({LintStage.RUN})
 
-    def check(self, *, session, workspace_id, target):
+    def check_target(self, target, ctx: LintContext):
+        session, workspace_id = ctx.session, ctx.workspace_id
         if target.node_kind != "folder" or target.visibility_status != "visible":
             return []
         count = session.scalar(
@@ -57,8 +64,10 @@ class _MissingSummaryRule:
     layer = "nav"
     default_enabled = True
     applies_to = frozenset({"workspace_tree_node"})
+    stages = frozenset({LintStage.RUN})
 
-    def check(self, *, session, workspace_id, target):
+    def check_target(self, target, ctx: LintContext):
+        session, workspace_id = ctx.session, ctx.workspace_id
         if (
             target.node_kind != "folder"
             or target.visibility_status != "visible"
@@ -120,8 +129,10 @@ class _UnreachableRule:
     layer = "nav"
     default_enabled = True
     applies_to = frozenset({"workspace_tree_node", "context_page"})
+    stages = frozenset({LintStage.RUN})
 
-    def check(self, *, session, workspace_id, target):
+    def check_target(self, target, ctx: LintContext):
+        session, workspace_id = ctx.session, ctx.workspace_id
         if isinstance(target, WorkspaceTreeNode):
             if (
                 target.visibility_status != "visible"
@@ -163,6 +174,12 @@ class _UnreachableRule:
         ]
 
 
-register_rule(_FanoutExceededRule())
-register_rule(_MissingSummaryRule())
-register_rule(_UnreachableRule())
+MODULE = LintModule(
+    "nav",
+    400,
+    (
+        _FanoutExceededRule(),
+        _MissingSummaryRule(),
+        _UnreachableRule(),
+    ),
+)

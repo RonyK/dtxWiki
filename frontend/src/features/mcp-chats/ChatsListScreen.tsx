@@ -32,14 +32,15 @@ import { SearchField } from "../../shared/components/SearchField";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { useMediaQuery } from "../../shared/hooks/useMediaQuery";
 import {
   formatGroupHeader,
   timeBucketFor,
   type TimeBucketKey,
 } from "../../shared/lib/datetime";
-import { domainLabel } from "../../shared/lib/domainLabel";
-import { chatFailureCounts, chatSummaryLine } from "./chatLabels";
+import { groupLinkedArtifacts } from "./chatArtifacts";
+import { artifactDisplayTitle, chatFailureCounts, chatSummaryLine } from "./chatLabels";
 import { chatPresentationLine } from "./chatPresentation";
 import { safeChatErrorMessage } from "./chatErrors";
 import { ClientChip } from "./ClientChip";
@@ -113,10 +114,30 @@ export function ChatsListScreen() {
     ],
     {
       errorMessage: t("errors.loadFailed"),
+      onSuccess: () => {
+        paginationGenerationRef.current += 1;
+        inFlightCursorRef.current = null;
+        autoAdvanceRef.current = { key: "", hops: 0, seen: new Set<string>() };
+        setLoadingMore(false);
+        setLoadMoreError(null);
+        setAutoAdvancePaused(false);
+      },
       formatError: (caught, fallback) =>
         safeChatErrorMessage(caught, fallback, [t("errors.workspaceNotFound")]),
     },
   );
+  useScreenEntryRefresh("/chats", reload, {
+    readArrivalNotice: readArchiveSuccess,
+    queryDeps: [
+      filters.q,
+      filters.client,
+      filters.period,
+      filters.writes_only,
+      filters.archived,
+      filters.sort,
+    ],
+  });
+
   const continuationKey = `${queryKey}\u001e${data?.workspaceId ?? ""}`;
   const previousContinuationKeyRef = useRef(continuationKey);
   useLayoutEffect(() => {
@@ -904,7 +925,13 @@ function ChatCard({ chat }: { chat: McpChatSessionRef }) {
           {artifactHint && !summaryLine?.artifactFallback ? (
             <span className="mcp-chat-card-artifacts" title={artifactHint.full}>
               <FileText size={13} aria-hidden="true" />
-              {artifactHint.label}
+              <span className="artifact-label">{artifactHint.title}</span>
+              {artifactHint.more ? (
+                <>
+                  {" "}
+                  <span className="artifact-more">{t("card.linkedArtifactsMore")}</span>
+                </>
+              ) : null}
             </span>
           ) : null}
           {chat.archived_at ? (
@@ -927,17 +954,18 @@ function linkedArtifactHint(
   if (!artifacts || artifacts.length === 0) {
     return null;
   }
-  const titles = artifacts.map(
-    (artifact) =>
-      artifact.artifact_title ??
-      domainLabel("chats", "artifactKind", artifact.resource_kind, t),
+  // The list response carries only a chat's few most recent non-search rows
+  // (link_limit in mcp_chat_service.py), so a count here would pass a sample
+  // off as a total. Name the newest artifact, mark that there are others, and
+  // offer the sampled titles as "recently linked".
+  const titles = groupLinkedArtifacts(artifacts).map(({ latest }) =>
+    artifactDisplayTitle(latest, t),
   );
-  if (titles.length === 1) {
-    return { label: titles[0], full: titles[0] };
-  }
+  const more = titles.length > 1;
   return {
-    label: t("counts.linked", { count: titles.length }),
-    full: titles.join(", "),
+    title: titles[0],
+    more,
+    full: more ? t("card.recentlyLinked", { titles: titles.join(", ") }) : titles[0],
   };
 }
 
@@ -997,9 +1025,6 @@ function ChatsEmptyState({
       <div className="empty-state-actions">
         <Link className="icon-button text-button" to="/settings/integrations">
           {t("empty.openMcpSetup")}
-        </Link>
-        <Link className="icon-button text-button" to="/ask">
-          {t("empty.openAsk")}
         </Link>
       </div>
     </div>

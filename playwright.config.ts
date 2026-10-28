@@ -48,7 +48,9 @@ const identityRecoveryEnv = {
 const backendServerScript = [
   "import uvicorn",
   "from backend.app.main import create_app",
-  `uvicorn.run(create_app(bootstrap_on_startup=True), host="127.0.0.1", port=${backendPort})`,
+  // Explicit response closure prevents Playwright's HTTP agent from reusing
+  // an idle socket whose peer FIN has not reached the client's event loop.
+  `uvicorn.run(create_app(bootstrap_on_startup=True), host="127.0.0.1", port=${backendPort}, headers=[("Connection", "close")])`,
 ].join("; ");
 // Single-origin E2E never issues a cross-origin request, so this list only has
 // to stay non-empty: Settings rejects an empty DTXWIKI_CORS_ORIGINS at startup.
@@ -117,6 +119,7 @@ export default defineConfig({
   testIgnore: "**/_*.spec.ts",
   timeout: 30_000,
   retries: 0,
+  captureGitInfo: { diff: false },
   reporter: process.env.CI
     ? [["dot"], ["html", { open: "never", outputFolder: "playwright-report" }]]
     : [["list"]],
@@ -125,6 +128,10 @@ export default defineConfig({
   // the host CPU count, which turns valid concurrent writes into lock cascades.
   workers: 1,
   use: {
+    // Fail at the operation that stalled, before a multi-step acceptance test
+    // exhausts its whole budget. Response-event waits inherit actionTimeout.
+    actionTimeout: 15_000,
+    navigationTimeout: 20_000,
     // One origin for the document, the bundle and the API — the shape the wheel
     // ships. A Vite dev server on a second port gave every page two Chromium
     // socket pools, so a host network-change notification flushed both and the
@@ -158,8 +165,8 @@ export default defineConfig({
     // reset-password test contains the one-time token and the new password
     // (proved by driving context.tracing directly and grepping trace.trace and
     // trace.network). The HTML reporter copies traces and attachment bodies
-    // into playwright-report/data/, and both e2e jobs -- ci.yml's `e2e` and
-    // e2e-browsers.yml's exhaustive matrix -- upload that report `if: always()`
+    // into playwright-report/data/, and both e2e jobs -- ci.yml's `e2e` matrix
+    // and e2e-browsers.yml's `exhaustive` -- upload that report `if: always()`
     // for 14 days. (Named by job rather than by line: the line numbers this
     // comment first carried were already stale one commit later.) Each job
     // scrubs the report with scripts/redact_evidence.sh --dir first;
@@ -183,8 +190,8 @@ export default defineConfig({
     // credential from the environment, so a published token authenticates
     // against a database that no longer exists. Treat it as a hygiene and
     // contract defect. The only mitigation that reaches index.html is a
-    // redaction step before upload-artifact in the e2e job -- see
-    // docs/reviews/phase5/FINAL-REVIEW.md S1.
+    // redaction step before upload-artifact in the e2e job; see
+    // scripts/redact_evidence.sh --dir playwright-report.
     trace: "retain-on-failure",
   },
   projects: [
@@ -200,6 +207,10 @@ export default defineConfig({
     // popups -- and those carry a @cross-browser tag and still run everywhere.
     // DTXWIKI_E2E_PROFILE=exhaustive drops the filter and runs the whole suite
     // on all three, which is what the weekly workflow does.
+    //
+    // PR CI runs these projects in two legs that name them one by one (the
+    // `e2e` matrix in .github/workflows/ci.yml). A project added here also
+    // needs a leg there, or no pull request ever runs it.
     {
       name: "firefox",
       use: { ...devices["Desktop Firefox"] },
@@ -233,57 +244,18 @@ export default defineConfig({
       timeout: 20_000,
     },
     {
-      name: "mail worker",
-      command: [
-        quoted(pythonExecutable),
-        "-m backend.worker.entry run",
-        "--skip-bootstrap",
-        "--job-type email_delivery",
-        "--poll-interval-seconds 0.5",
-      ].join(" "),
-      env: {
-        ...inheritedEnv,
-        ...identityRecoveryEnv,
-        DTXWIKI_DATABASE_URL: e2eDatabaseUrl,
-        DTXWIKI_LIBRARY_BLOB_ROOT: e2eLibraryBlobRoot,
-        DTXWIKI_SESSION_SECRET: "dtxwiki-e2e-session-secret",
-      },
-      reuseExistingServer: false,
-      stdout: "pipe",
-      wait: { stdout: /"status":\s*"idle"/ },
-      timeout: 20_000,
-    },
-    {
-      name: "library conversion worker",
+      name: "background worker",
       command: [
         quoted(pythonExecutable),
         "-m backend.worker.entry run",
         "--skip-bootstrap",
         "--job-type library_conversion",
-        "--poll-interval-seconds 0.5",
-      ].join(" "),
-      env: {
-        ...inheritedEnv,
-        DTXWIKI_DATABASE_URL: e2eDatabaseUrl,
-        DTXWIKI_LIBRARY_BLOB_ROOT: e2eLibraryBlobRoot,
-        DTXWIKI_SESSION_SECRET: "dtxwiki-e2e-session-secret",
-      },
-      reuseExistingServer: false,
-      stdout: "pipe",
-      wait: { stdout: /"status":\s*"idle"/ },
-      timeout: 20_000,
-    },
-    {
-      name: "library preview worker",
-      command: [
-        quoted(pythonExecutable),
-        "-m backend.worker.entry run",
-        "--skip-bootstrap",
         "--job-type library_preview",
         "--poll-interval-seconds 0.5",
       ].join(" "),
       env: {
         ...inheritedEnv,
+        ...identityRecoveryEnv,
         DTXWIKI_DATABASE_URL: e2eDatabaseUrl,
         DTXWIKI_LIBRARY_BLOB_ROOT: e2eLibraryBlobRoot,
         DTXWIKI_SESSION_SECRET: "dtxwiki-e2e-session-secret",

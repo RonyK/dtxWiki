@@ -116,9 +116,7 @@ def _edge(session, workspace_id, source, target, edge_kind, weight=1.0):
     )
 
 
-def test_extracted_kinds_all_have_hydrators_or_are_version_lineage(
-    session_factory,
-):
+def test_extracted_kinds_all_have_hydrators_or_are_version_lineage():
     """19.5.4-b: every kind an extractor can emit either hydrates (and is
     returnable) or is a deliberate label-only lineage kind."""
 

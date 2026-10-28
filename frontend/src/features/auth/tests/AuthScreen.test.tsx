@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -48,6 +48,52 @@ describe("AuthScreen", () => {
       }
       throw new Error(`Unexpected request: ${url}`);
     });
+  });
+
+  // Name and email wiring is proven by the normalized payload below; the
+  // password check is the only one that does not change the sent value.
+  it("blocks an invalid password before the authentication request", async () => {
+    render(<MemoryRouter initialEntries={["/login?mode=signup"]}><AuthProvider loadInstanceCapabilities><AuthScreen /></AuthProvider></MemoryRouter>);
+    await screen.findByRole("heading", { name: "Sign up" });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@example.com" } });
+    const password = screen.getByLabelText("Password");
+    fireEvent.change(password, { target: { value: "😀".repeat(129) } });
+    fireEvent.submit(password.closest("form")!);
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/auth/signup"))).toHaveLength(0);
+    expect(password).toHaveValue("😀".repeat(129));
+  });
+
+  it("accepts Unicode byte/code-point boundaries without native email or UTF-16 restrictions", async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    let sent: Record<string, unknown> | undefined;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input).endsWith("/auth/signup")) {
+        sent = JSON.parse(String(init?.body));
+        return jsonResponse({ data: sessionPayload("한글@example.com") });
+      }
+      return original(input, init);
+    });
+    render(<MemoryRouter initialEntries={["/login?mode=signup"]}><AuthProvider loadInstanceCapabilities><AuthScreen /></AuthProvider></MemoryRouter>);
+    await screen.findByRole("heading", { name: "Sign up" });
+    const email = screen.getByLabelText("Email");
+    expect(email).toHaveAttribute("type", "text");
+    fireEvent.change(email, { target: { value: " 한글@EXAMPLE.COM " } });
+    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: " " + "😀".repeat(32) + " " } });
+    const password = screen.getByLabelText("Password");
+    fireEvent.change(password, { target: { value: "😀".repeat(128) } });
+    fireEvent.submit(password.closest("form")!);
+    await waitFor(() => expect(sent).toEqual(expect.objectContaining({ email: "한글@example.com", display_name: "😀".repeat(32), password: "😀".repeat(128) })));
+  });
+
+  it("rejects raw multiline name paste without sanitizing it into another name", async () => {
+    render(<MemoryRouter initialEntries={["/login?mode=signup"]}><AuthProvider loadInstanceCapabilities><AuthScreen /></AuthProvider></MemoryRouter>);
+    await screen.findByRole("heading", { name: "Sign up" });
+    const name = screen.getByLabelText("Display name");
+    expect(fireEvent.paste(name, { clipboardData: { getData: () => "Alice\nBob" } })).toBe(false);
+    expect(name).toHaveValue("");
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(fireEvent.keyDown(name, { key: "Enter", isComposing: true })).toBe(false);
   });
 
   it("directs password recovery to the server operator, not a workspace admin", async () => {
@@ -124,11 +170,14 @@ describe("AuthScreen", () => {
       </MemoryRouter>,
     );
 
+    await user.click(screen.getByRole("checkbox", { name: "Keep me signed in on this browser" }));
     await user.type(screen.getByLabelText("Email"), "login@example.com");
     await user.type(screen.getByLabelText("Password"), "correct-password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
     expect(await screen.findByText("Signed in")).toBeInTheDocument();
+    const loginRequest = vi.mocked(fetch).mock.calls.find(([input]) => String(input).endsWith("/auth/login"));
+    expect(JSON.parse(String(loginRequest?.[1]?.body))).toMatchObject({ remember_me: false });
     // /oauth/* is served by the backend, so the redirect must be a full-page
     // load rather than SPA navigation onto the router catch-all.
     await waitFor(() =>
@@ -283,7 +332,7 @@ describe("AuthScreen", () => {
     expect(
       await screen.findByRole("heading", { name: "Sign up" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Signed out")).toBeInTheDocument();
+    expect(screen.getByText("Create an account to start working together.")).toBeInTheDocument();
     expect(
       screen.getByRole("checkbox", { name: /Keep me signed in/i }),
     ).toBeChecked();
@@ -303,14 +352,14 @@ describe("AuthScreen", () => {
     );
 
     await screen.findByRole("heading", { name: "Sign up" });
-    expect(screen.getByText("At least 8 characters.")).toBeInTheDocument();
+    expect(screen.getByText("8–128 characters.")).toBeInTheDocument();
 
     await userEvent.click(
       screen.getByRole("radio", { name: /^Sign in$/i }),
     );
 
     expect(
-      screen.queryByText("At least 8 characters."),
+      screen.queryByText("8–128 characters."),
     ).not.toBeInTheDocument();
   });
 

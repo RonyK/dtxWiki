@@ -9,8 +9,12 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from pydantic import ValidationError
 from sqlalchemy import and_, case, desc, or_, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session, aliased, load_only
 
+from backend.domain.input_policy import (
+    fit_generated_title,
+    validate_title,
+)
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.base import utc_now
 from backend.models.context import ContextClaim, ContextPage, ContextPageVersion
@@ -43,7 +47,10 @@ from backend.repositories.mcp_chat_repo import (
     list_call_artifact_edges,
     list_calls_naming_page,
 )
-from backend.repositories.workspace_scoped import get_in_workspace
+from backend.repositories.workspace_scoped import (
+    get_in_workspace,
+    select_in_workspace_by_ids,
+)
 from backend.schemas.agent import SENSITIVE_AGENT_PAGE_CATEGORIES
 from backend.schemas.mcp_chat import (
     McpChatAction,
@@ -856,8 +863,7 @@ class McpChatService:
                     and_(
                         media_created_for_version.created_by_actor_kind
                         == actor.actor_kind,
-                        media_created_for_version.created_by_actor_id
-                        == actor.actor_id,
+                        media_created_for_version.created_by_actor_id == actor.actor_id,
                     ),
                 ),
             )
@@ -898,7 +904,7 @@ class McpChatService:
     ) -> McpChatDetail:
         chat = self._get_chat(session, workspace_id, chat_session_id)
         previous_title = chat.title
-        chat.title = title.strip()
+        chat.title = validate_title(title, max_length=120)
         chat.title_user_edited = True
         self.audit_service.emit(
             session=session,
@@ -1108,8 +1114,10 @@ class McpChatService:
         # artifact title or the first tool action). Client identity and the
         # call count are surfaced separately in the UI (client chip + meta),
         # so they are intentionally omitted from the title here.
-        return self._title_anchor(
-            session, chat_session, actor, shared_only=shared_only
+        return fit_generated_title(
+            self._title_anchor(session, chat_session, actor, shared_only=shared_only),
+            max_length=120,
+            fallback="MCP activity",
         )
 
     def _title_anchor(
@@ -1153,13 +1161,12 @@ class McpChatService:
         )
         if not include_search_matches:
             links_query = links_query.where(
-                McpChatArtifactLink.verb
-                != McpChatArtifactVerb.SEARCH_MATCH.value
+                McpChatArtifactLink.verb != McpChatArtifactVerb.SEARCH_MATCH.value
             )
         links = session.scalars(
-            links_query
-            .order_by(desc(McpChatArtifactLink.last_occurred_at))
-            .limit(link_limit)
+            links_query.order_by(desc(McpChatArtifactLink.last_occurred_at)).limit(
+                link_limit
+            )
         ).all()
         # Generated labels are always re-derived from the same read-time,
         # actor-visible descriptor. This heals both legacy count titles and the
@@ -1604,6 +1611,16 @@ class McpChatService:
                     session_diff=session_diffs.get(row.id),
                 )
             )
+        # Enrich only after visibility/content projection has populated the
+        # request cache. Most edit versions need no additional read at all.
+        visible_pairs = [
+            (row, item)
+            for row, item in zip(rows, timeline, strict=True)
+            if item.input_availability != "redacted" and row.id not in discarded_edit
+        ]
+        gate.prime_input_versions([row for row, _ in visible_pairs])
+        for row, item in visible_pairs:
+            item.input_display_items.extend(gate.input_version_items(row))
         return timeline
 
     def _error_call_item(
@@ -1698,9 +1715,7 @@ class McpChatService:
             result_display_items=result_items,
             redaction_reason=None if is_caller else "error_restricted",
             edit_summary=edit_summary,
-            error_details=_stored_error_details(
-                row, shape_only=not content_visible
-            ),
+            error_details=_stored_error_details(row, shape_only=not content_visible),
             linked_verbs=[],
             linked_artifacts=[],
         )
@@ -2018,7 +2033,9 @@ class McpChatService:
                 source, actor, workspace_id=workspace_id
             ):
                 return None, None
-            return source.title or source.uri, f"/library?target={source.id}"
+            return source.title or fit_generated_title(
+                source.uri, fallback="Library item"
+            ), f"/library?target={source.id}"
         if resource_kind == McpChatArtifactKind.CONTEXT_MEDIA_ASSET.value:
             # ContextMediaAsset has no title column; original_filename is the
             # only author-controlled label, and it is already sanitized at
@@ -2157,6 +2174,7 @@ class _ReaderGate:
         self.actor = actor
         self._titles: dict[tuple[str, UUID], tuple[str | None, str | None]] = {}
         self._versions: dict[UUID, ContextPageVersion | None] = {}
+        self._input_version_candidates: dict[UUID, ContextPageVersion] = {}
         self._targets: dict[tuple[str, UUID], _ResolvedTarget | None] = {}
         self._discarded: dict[UUID, bool] = {}
 
@@ -2205,6 +2223,82 @@ class _ReaderGate:
             )
             self._versions[version_id] = version if visible else None
         return self._versions[version_id]
+
+    def prime_input_versions(self, rows: list[MCPToolCall]) -> None:
+        """Read missing version labels in bounded batches, without bodies."""
+        wanted: set[UUID] = set()
+        for row in rows:
+            for field in _CONTEXT_VERSION_ID_FIELDS:
+                if _target_kind_for_field(row.tool_name, field) != "context_version":
+                    continue
+                version_id = _parse_uuid_value(row.input_summary.get(field))
+                if version_id and version_id not in self._versions:
+                    wanted.add(version_id)
+        ids = list(wanted)
+        for start in range(0, len(ids), 500):
+            versions = self.session.scalars(
+                select_in_workspace_by_ids(
+                    ContextPageVersion,
+                    workspace_id=self.workspace_id,
+                    resource_ids=ids[start : start + 500],
+                )
+                .options(
+                    load_only(
+                        ContextPageVersion.id,
+                        ContextPageVersion.page_id,
+                        ContextPageVersion.version_no,
+                        ContextPageVersion.version_status,
+                        ContextPageVersion.created_by_actor_kind,
+                        ContextPageVersion.created_by_actor_id,
+                    )
+                )
+            ).all()
+            self._input_version_candidates.update(
+                (version.id, version) for version in versions
+            )
+
+    def input_version_items(self, row: MCPToolCall) -> list[McpChatDisplayItem]:
+        """Reuse Context versions already loaded by the reader's gate.
+
+        Only use actual input references, never a created/result version or
+        the page's latest version. Editing revisions remain captured inputs;
+        reading today's mutable revision would misdescribe a historical call.
+        This per-call step never queries. Batched candidates also require a
+        previously checked page title and the existing version visibility rule.
+        """
+        items: list[McpChatDisplayItem] = []
+        for field, key in (
+            ("version_id", "input_version"),
+            ("base_version_id", "base_version"),
+            ("editing_version_id", "editing_version"),
+            ("cited_context_page_version_id", "cited_version"),
+        ):
+            if _target_kind_for_field(row.tool_name, field) != "context_version":
+                continue
+            version_id = _parse_uuid_value(row.input_summary.get(field))
+            version = (
+                self._versions.get(version_id)
+                if version_id in self._versions
+                else self._input_version_candidates.get(version_id)
+            )
+            if version is not None and (
+                not self._titles.get(("context_page", version.page_id), (None, None))[0]
+                or (
+                    self.actor is not None
+                    and not context_version_is_visible(version, self.actor)
+                )
+            ):
+                version = None
+            if version is not None:
+                items.append(
+                    McpChatDisplayItem(
+                        key=key,
+                        kind="text",
+                        text=f"v{version.version_no}",
+                        resource_id=version.id,
+                    )
+                )
+        return items
 
     def call_content_visible(self, row: MCPToolCall, chat: McpChatSession) -> bool:
         """Whether the reader may see what a context-edit call wrote.
@@ -2593,9 +2687,7 @@ def _target_hidden_item(
         input_summary=input_summary,
         input_availability="redacted",
         input_display_items=(
-            _structural_display_items(input_summary, edit_summary)
-            if structural
-            else []
+            _structural_display_items(input_summary, edit_summary) if structural else []
         ),
         result_summary=None,
         result_availability="redacted",

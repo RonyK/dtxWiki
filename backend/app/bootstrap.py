@@ -1,7 +1,7 @@
 """First-run bootstrap for local single-user dtxWiki installs."""
 
 import logging
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,6 +12,7 @@ from alembic.script import ScriptDirectory
 from backend.app import versioning
 from backend.app.data_dir import db_dir, logs_dir
 from backend.app.db import make_engine, make_session_factory
+from backend.app.plugins import load_plugins
 from backend.app.settings import Settings
 from backend.services.ops import runtime_lock
 from backend.services.ops.migration_preflight import (
@@ -44,23 +45,53 @@ def bootstrap(settings: Settings, app=None) -> None:
     refused with the operator's next step.
     """
 
-    settings.validate_session_secret_invariant()
-    lock = _hold_runtime_lock(app) if app is not None else None
-    try:
-        if not settings.auto_bootstrap:
-            logger.info(
-                "auto_bootstrap=false; verifying the database without migrating"
+    if app is None:
+        # Commands that permit migration require quiescent storage. Verify-only
+        # admin commands can run beside the production API and worker.
+        # Update finalization calls bootstrap_core under the updater's guards.
+        from backend.app.runtime_resources import RuntimeResources
+
+        settings.validate_session_secret_invariant()
+        resources = RuntimeResources.for_settings(settings)
+        with ExitStack() as guards:
+            guards.enter_context(
+                resources.acquire_activity(
+                    "exclusive" if settings.auto_bootstrap else "shared"
+                )
             )
-            verify_database_current(settings)
-            if app is not None:
-                app.state.app_version_synced = True
-            return
-        ensure_data_dirs()
-        ensure_app_version_synced(settings, app)
+            if settings.auto_bootstrap:
+                guards.enter_context(resources.acquire_consumer())
+            bootstrap_core(settings)
+        return
+
+    lock = _hold_runtime_lock(app)
+    try:
+        bootstrap_core(settings)
+        if app is not None:
+            app.state.app_version_synced = True
     except BaseException:
         if lock is not None:
             lock.release()
         raise
+
+
+def bootstrap_core(settings: Settings) -> None:
+    """Prepare or verify storage under the caller's existing resource guards.
+
+    Serving initialization and maintenance commands deliberately share this
+    operation without sharing lock ownership or an ASGI application. Serving
+    validation belongs to the init entry; explicit maintenance may legitimately
+    enable migrations even when production serving forbids auto-bootstrap.
+    """
+    registry = load_plugins(settings)
+    settings.validate_session_secret_invariant()
+    if not settings.auto_bootstrap:
+        logger.info("auto_bootstrap=false; verifying the database without migrating")
+        verify_database_current(settings)
+        return
+    ensure_data_dirs()
+    ensure_app_version_synced(settings)
+    registry.migrate(settings, allow_upgrade=True)
 
 
 def _hold_runtime_lock(app) -> runtime_lock.RuntimeLock | None:
@@ -223,6 +254,7 @@ def verify_database_current(
             "implicitly when DTXWIKI_AUTO_BOOTSTRAP is false. Back up the "
             "database, then run 'dtxwiki bootstrap' (see DEPLOYMENT.md)."
         )
+    load_plugins(settings).migrate(settings, allow_upgrade=False)
 
 
 def _blocked_refusal(

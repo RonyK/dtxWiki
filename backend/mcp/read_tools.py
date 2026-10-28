@@ -79,6 +79,7 @@ from backend.services.coverage_service import (
 )
 from backend.services.grep_wiki import grep_wiki as grep_wiki_service
 from backend.services.maintenance_rounds import UNTRUSTED_CONTEXT_NOTICE
+from backend.services.mcp_read_projection import record_served_read
 from backend.services.okf import (
     build_workspace_index,
     parse_concept_path,
@@ -298,7 +299,6 @@ def list_my_workspaces(payload: dict, ctx: ToolCallContext) -> ListMyWorkspacesO
     session_factory = ctx.session_factory
     try:
         ListMyWorkspacesInput.model_validate(payload)
-        # The workspace list repairs a stale/null default to Personal.
         with session_factory.begin() as session:
             # D-01v2-f: PAT and OAuth actors alike see their credential's live
             # allowed set (``token_workspace_ids``) intersected with current
@@ -938,6 +938,7 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
             if version is None:
                 return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
         content = render_context_concept(page, version, workspace_slug=workspace_slug)
+        record_served_read("context_page", page.id, version)
         frontmatter = project_context_frontmatter(
             page, version, workspace_slug=workspace_slug
         )
@@ -1095,9 +1096,7 @@ def read_context_outline(
     with ctx.session_factory() as session:
         page, version = _resolve_outline_version(session, ctx, request, actor)
         if page is None or version is None:
-            return ReadContextOutlineOutput(
-                envelope=error_envelope(actor, "not_found")
-            )
+            return ReadContextOutlineOutput(envelope=error_envelope(actor, "not_found"))
         body_md = version.body_md
         outline = outline_for_body(body_md)
         headings = [
@@ -1148,9 +1147,7 @@ def read_context_outline(
                 heading_path=list(section.heading_path),
                 occurrence=section.occurrence,
                 line_start=section.line_start,
-                line_end=_outline_subtree_line_end(
-                    body_md, section.subtree_char_end
-                ),
+                line_end=_outline_subtree_line_end(body_md, section.subtree_char_end),
                 char_count=section.subtree_char_end - section.char_start,
                 section_hash=calculate_content_hash(
                     body_md[section.char_start : section.subtree_char_end]
@@ -1185,6 +1182,7 @@ def read_context_outline(
             char_count=len(body_md),
             section_count=len(headings),
         )
+        record_served_read("context_page", page.id, version)
         selected_output = None
         if request.select is not None:
             selected, anchor_status = _resolve_outline_selection(
@@ -1257,11 +1255,10 @@ def _structure_map_preview(lines: tuple[RawLine, ...], line_start: int) -> str:
 def read_structure_map(payload: dict, ctx: ToolCallContext) -> ReadStructureMapOutput:
     """Return a version's block-level structure map: one entry per top-level
     block (id/kind/hash/line_span/preview, plus row ids for tables) -- the
-    generalization and replacement of the tier-1 outline (design doc
-    doc/design/block-provenance-contract.md section 3).
+    generalization and replacement of the tier-1 outline.
 
     ``line_span`` and ``preview`` are computed fresh from the current body at
-    serve time, never persisted (section 2.1); ``id``/``hash`` come from the
+    serve time, never persisted; ``id``/``hash`` come from the
     stored, carried-forward block map.
     """
 
@@ -1407,6 +1404,7 @@ def read_structure_map(payload: dict, ctx: ToolCallContext) -> ReadStructureMapO
             ),
             map_repaired=map_repaired,
         )
+        record_served_read("context_page", page.id, version)
         blocks_omitted_count = max(0, block_total - (start_block + len(blocks)))
 
     return ReadStructureMapOutput(

@@ -10,6 +10,8 @@ import pytest
 from backend.scripts import export_mcp_schemas
 from backend.scripts.export_mcp_schemas import build_mcp_schemas
 from backend.scripts.export_openapi import (
+    ACCOUNT_REAUTHENTICATION_SECURITY,
+    LOGIN_TRANSACTION_SECURITY,
     OAUTH_REVOKE_SECURITY,
     OPTIONAL_SESSION_COOKIE_SECURITY,
     RECENT_REAUTHENTICATION_SECURITY,
@@ -115,6 +117,16 @@ def test_workspace_create_statuses_and_security_schemes_are_explicit(openapi_sch
         "in": "cookie",
         "name": "dtxwiki_session_reauth",
     }
+    for scheme, cookie in (
+        ("AccountEmailBindingCookie", "dtxwiki_email_reauth_account"),
+        ("AdminEmailBindingCookie", "dtxwiki_email_reauth_admin"),
+    ):
+        security = schema["components"]["securitySchemes"][scheme]
+        assert {key: security[key] for key in ("type", "in", "name")} == {
+            "type": "apiKey",
+            "in": "cookie",
+            "name": cookie,
+        }
     assert member_create["security"] == SESSION_COOKIE_SECURITY
     assert join_create["security"] == SESSION_COOKIE_SECURITY
     assert (
@@ -168,6 +180,35 @@ def test_openapi_security_matches_exhaustive_reviewed_route_matrix(openapi_schem
         OAUTH_REVOKE_SECURITY
     )
     assert "client_id" in schema["paths"]["/oauth/revoke"]["post"]["description"]
+    assert (
+        schema["paths"]["/api/v1/auth/identities/{identity_id}"]["delete"]["security"]
+        == ACCOUNT_REAUTHENTICATION_SECURITY
+    )
+    assert (
+        schema["paths"]["/api/v1/auth/sso/{slug}/link"]["post"]["security"]
+        == ACCOUNT_REAUTHENTICATION_SECURITY
+    )
+    assert (
+        schema["paths"]["/api/v1/auth/sso/{slug}/callback"]["get"]["security"]
+        == LOGIN_TRANSACTION_SECURITY
+    )
+    assert (
+        schema["paths"]["/api/v1/auth/sso/{slug}/callback/continue"]["post"]["security"]
+        == [{"LoginTransactionCookie": []}]
+    )
+    assert schema["paths"]["/api/v1/auth/sso/{slug}/callback"]["post"]["security"] == []
+    for method, path in (
+        ("get", "/api/v1/auth/verification"),
+        ("post", "/api/v1/auth/email-reauthentication/request"),
+    ):
+        assert schema["paths"][path][method]["security"] == [{"SessionCookie": []}]
+    confirmation = schema["paths"]["/api/v1/auth/email-reauthentication/confirm"][
+        "post"
+    ]
+    assert confirmation["security"] == [
+        {"SessionCookie": [], "AccountEmailBindingCookie": []},
+        {"SessionCookie": [], "AdminEmailBindingCookie": []},
+    ]
 
 
 def test_mcp_client_tombstone_delete_is_browser_session_only(openapi_schema):
@@ -328,6 +369,17 @@ def test_mcp_schema_export_covers_all_advertised_tools(mcp_schemas):
 
     advertised = {tool.name for tool in list_dtxwiki_tools()}
     assert advertised == set(mcp_schemas)
+    assert "disambiguation" not in mcp_schemas["search"]["output"]["$defs"][
+        "SearchPayload"
+    ]["properties"]
+    filters = mcp_schemas["search"]["input"]["$defs"]["SearchFilters"]
+    assert filters["properties"]["include_agents"]["type"] == "boolean"
+    assert filters["properties"]["include_agents"]["default"] is True
+    assert "include_agents" not in filters.get("required", [])
+    ranked = mcp_schemas["search"]["output"]["$defs"]["RankedResult"]
+    assert {"summary", "location"}.issubset(ranked["properties"])
+    assert {"summary", "location"}.isdisjoint(ranked.get("required", []))
+    assert ranked["properties"]["stale"]["deprecated"] is True
 
 
 def test_mcp_schema_export_includes_review_tools(mcp_schemas):

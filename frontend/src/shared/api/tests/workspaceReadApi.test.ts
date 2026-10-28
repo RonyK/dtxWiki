@@ -62,7 +62,6 @@ describe("workspace read api", () => {
       resolveSelectedWorkspaceId({
         current_workspace_id: null,
         default_workspace_id: "workspace-2",
-        personal_workspace_id: "workspace-1",
         workspaces: [alpha, beta],
       }),
     ).toBe("workspace-2");
@@ -72,17 +71,6 @@ describe("workspace read api", () => {
       resolveSelectedWorkspaceId({
         current_workspace_id: null,
         default_workspace_id: null,
-        personal_workspace_id: "workspace-1",
-        workspaces: [alpha, beta],
-      }),
-    ).toBe("workspace-1");
-
-    window.localStorage.clear();
-    expect(
-      resolveSelectedWorkspaceId({
-        current_workspace_id: null,
-        default_workspace_id: null,
-        personal_workspace_id: null,
         workspaces: [beta],
       }),
     ).toBe("workspace-2");
@@ -93,7 +81,6 @@ describe("workspace read api", () => {
       resolveSelectedWorkspaceId({
         current_workspace_id: null,
         default_workspace_id: null,
-        personal_workspace_id: null,
         workspaces: [
           workspacePayload("workspace-1", "default"),
           workspacePayload("workspace-2", "research"),
@@ -111,7 +98,6 @@ describe("workspace read api", () => {
         data: {
           current_workspace_id: null,
           default_workspace_id: null,
-          personal_workspace_id: null,
           workspaces: [
             workspacePayload("workspace-1", "default"),
             workspacePayload("workspace-2", "research"),
@@ -411,7 +397,6 @@ describe("workspace read api", () => {
         data: {
           current_workspace_id: "workspace-b",
           default_workspace_id: null,
-          personal_workspace_id: null,
           workspaces: [workspacePayload("workspace-b", "beta")],
         },
       }),
@@ -423,7 +408,6 @@ describe("workspace read api", () => {
         data: {
           current_workspace_id: "workspace-a",
           default_workspace_id: "workspace-a",
-          personal_workspace_id: "workspace-a",
           workspaces: [workspacePayload("workspace-a", "alpha")],
         },
       }),

@@ -67,7 +67,18 @@ function createUpdateManager({ app, autoUpdater, dialog, getWindow, beforeInstal
       cancelId: 1,
     });
     if (result.response === 0) {
-      await beforeInstall();
+      try {
+        await beforeInstall();
+      } catch (error) {
+        await message({
+          type: "error",
+          title: "dtxWiki 종료 실패",
+          message: "로컬 엔진 종료를 확인하지 못해 업데이트 설치를 보류했습니다.",
+          detail: error?.message ?? String(error),
+          buttons: ["확인"],
+        });
+        return;
+      }
       autoUpdater.quitAndInstall();
     }
   });

@@ -8,9 +8,8 @@ Desktop 설치 파일은 0.1.1에 포함되지 않습니다.
 이 릴리스의 storage topology는 `single_database` 하나뿐이며, workspace별 DB 물리 분리는
 지원하지 않습니다(자세한 내용은 [데이터베이스](#데이터베이스) 절).
 
-> 설치 빠른 경로(solo·systemd·Docker) 요약은 루트 [README](README.md#설치) 에 있다. 이
-> 문서는 그 production self-host 의 **전체 절차 + Day-2 운영 + 수동/디버그 + 트러블슈팅**
-> 정본이다. (install.sh 한 명령은 README·이 문서 동일 — 방법이 갈라지지 않는다.)
+> 개인 설치와 첫 사용은 루트 [README의 Get started](README.md#get-started)를 참고하세요.
+> 이 문서는 팀이 함께 사용할 서버의 설치, 설정 변경, 백업, 업데이트와 문제 해결을 다룹니다.
 
 ## 배포 전 체크리스트
 
@@ -21,6 +20,70 @@ Desktop 설치 파일은 0.1.1에 포함되지 않습니다.
   (`--tls internal`이면 Caddy의 `pki` 디렉터리 포함, 아래 [백업과 복구 점검](#백업과-복구-점검) 참고).
 - production은 SQLite 단일 노드입니다. app 1개 + worker 1개만 실행하고 DB를 NFS에 두거나
   app/worker를 수평 확장하지 않습니다.
+
+개인용 `dtxwiki`/`dtxwiki serve`와 Desktop 로컬 엔진은 서버와 worker를 함께
+시작하고 종료합니다. systemd 설치는 worker를 별도 서비스로 구성하고 env 파일에
+`DTXWIKI_WORKER_MODE=external`을 기록합니다. Docker 이미지는 기존 Compose의 별도
+worker 서비스와 호환되도록 image 자체에서 `external`을 기본값으로 사용합니다.
+일반 설치에서는 이 설정이나 별도 worker 명령이 필요하지 않습니다.
+
+개인용 실행은 API 부모 프로세스가 SPA를 제공하고 worker를 관리합니다. 시작 시에만
+별도 init 프로세스가 DB 준비를 수행하므로 DB 호출이 막혀도 부모는 중지와 시작 제한
+시간을 처리할 수 있습니다. init 성공과 실제 종료를 확인한 뒤 worker와 HTTP를 시작합니다.
+worker 준비는 최초 stale-job 복구 순회 완료를 뜻합니다. control DB의 workspace 목록을
+읽지 못하면 시작을 거절하며, 개별 workspace의 장애는 경고 후 다음 순회로 미룹니다.
+메일 전송 성공은 시작 조건이 아닙니다. external 모드의 `/health/ready`는 기존처럼
+worker를 별도로 감시하지 않고 `worker=n/a`로 표시합니다.
+
+managed 모드는 로컬의 일반 SQLite 파일만 지원합니다. `sqlite:///...`와
+`sqlite+pysqlite:///...`, `timeout` 등 연결 query는 같은 DB 소유권으로 취급합니다.
+동일 data directory를 사용하는 다른 DB 실행도 거절합니다. memory DB·SQLite URI·기타
+driver는 external 모드를 사용해야 하며, SQLite hard link는 경로 기반 소유권을 보장할 수
+없어 거절합니다. symlink는 실제 경로로 해석합니다. NFS/SMB 파일의 잠금 안전성을
+보장하지 않습니다. 직접 ASGI 실행이나 구 버전 프로세스와의 임의 혼용은 이 새 잠금 계약의
+대상이 아니므로 업그레이드·유지보수 전에 기존 writer를 모두 중지해야 합니다.
+DB 파일 기준의 소유권·consumer 단일성 보장은 일반 SQLite 파일에 적용됩니다.
+고급 external 경로의 URI/memory DB나 다른 DB backend는 data directory의 잠금만
+공유하므로, 운영자가 다른 경로·data directory를 통한 동시 소비와 유지보수를 조정해야 합니다.
+
+잠금은 data directory와 DB 옆의 별도 lock 파일에 유지됩니다. external API는 소유권과
+shared activity 잠금, external worker는 shared activity와 DB consumer 잠금을 보유합니다.
+따라서 준비된 DB의 `DTXWIKI_AUTO_BOOTSTRAP=false` API와 별도 worker는 어느 순서로도
+시작할 수 있지만 worker 소비자는 하나만 허용합니다. migration이 가능한 startup과 명시적
+`dtxwiki bootstrap`, `update`, `rollback`, `migrate-data`는 충돌하는 writer가 있으면
+거절합니다. writer를 중지한 후 maintenance bootstrap을 실행하세요. `migrate-data`는
+source와 target DB 모두를 보호합니다. 잠금 파일은 종료 뒤에도 남으며 삭제하지 마세요.
+준비된 production DB의 `DTXWIKI_AUTO_BOOTSTRAP=false` admin 명령은 shared 검증으로
+서비스와 공존합니다. 자동 migration을 허용한 사용자 설정에서는 admin 명령의 DB 준비도
+writer 중지를 요구하므로, 실행 중인 DB에 명령을 적용할 때는 먼저 maintenance bootstrap으로
+DB를 준비하고 `DTXWIKI_AUTO_BOOTSTRAP=false`로 실행하세요.
+부모가 강제 종료된 뒤 helper가 아직 살아 있으면 해당 작업이 끝나거나 정리될 때까지
+새 managed 시작과 maintenance가 거절됩니다.
+
+기본 `solo_local` 실행은 data directory의 `oauth-jwt.pem`과 기존 `session_secret`을
+재사용합니다. 기존 Desktop의 `desktop-oauth-jwt.pem`이 있으면 그 키를 먼저 재사용하며,
+명시한 key path·PEM·session secret이 우선합니다. 기존 키를 자동 회전하지 않습니다.
+
+이 관리 범위는 init·worker의 시작과 종료입니다. API 부모 자체가 native 호출에 완전히
+막힌 경우 standalone CLI의 coroutine이 이를 강제로 해제하지는 못합니다. Linux에서
+Ctrl+C/정상 종료가 처리되지 않으면 `ps -o pid,ppid,args -p <PID>`로 해당 실행인지
+확인하고 `kill -TERM <PID>`, 필요하면 `kill -KILL <PID>`로 종료할 수 있습니다.
+systemd와 container는 기존 관리자의 강제 종료 경로를 사용합니다. 지원하는 bundled
+helper는 parent-loss 감시와 activity 잠금을 가지며, 임의 third-party detached 변환기에는
+동일한 자동 정리를 보장하지 않습니다.
+기존 systemd 설치도 `dtxwiki update`의 마이그레이션 단계에서 env 파일에 이 설정을
+자동 반영합니다. 이전 updater가 custom env 경로를 전달하지 않으면 설치된 systemd unit의
+env 경로를 조회합니다. 경로를 하나로 확정할 수 없으면 서비스를 중지한 채 실패하므로
+출력된 `--env-file` 복구 명령으로 마이그레이션을 마친 뒤 서비스를 시작하세요.
+로컬 wheel을 수동 교체한다면 최신 `setup production --reconfigure`를
+실행해 서비스 설정을 갱신하거나, 기존 env 파일에 `DTXWIKI_WORKER_MODE=external`을
+추가한 뒤 서비스를 다시 시작하세요.
+다른 process manager에서 이미 `dtxwiki-worker run`을 실행 중이라면 새 버전의 웹 서버를
+처음 시작하기 전에 `DTXWIKI_WORKER_MODE=external` 또는 `--worker-mode external`을
+설정하세요. 이전 버전의 env 백업에는 이 설정을 추가하지 마세요.
+별도 worker 서비스가 없는 `--no-systemd` 설치와 Windows에서는 기본 `managed`를
+사용하며, `dtxwiki serve`가 worker도 실행합니다. 재구성 시에는 기존 worker-mode
+설정을 유지합니다.
 
 | 환경 | 권장 경로 | 비고 |
 | --- | --- | --- |
@@ -116,7 +179,24 @@ IP에서만 접근하게 제한하세요(`--tls external --forwarded-ip <proxy I
 
 `team`과 `solo_remote` 모드는 self-signup이 기본 off입니다. 조직 내 자유 가입이 의도라면
 `DTXWIKI_SIGNUP_ENABLED=true`를 명시하고 서비스를 재시작하세요. 가입이 허용된 `team` 모드의
-신규 사용자는 다른 공유 workspace에 자동 가입하지 않고 private `Personal Workspace`의 owner가 됩니다.
+신규 사용자는 다른 공유 workspace에 자동 가입하지 않고, 가입과 함께 만들어지는 private workspace
+하나의 owner가 됩니다. 이 workspace는 가입 직후 바로 쓰도록 만들어 주는 일반 private workspace이며,
+이후에는 다른 workspace와 똑같이 이름·slug·공개 범위를 바꾸거나 멤버를 초대하거나 삭제할 수
+있습니다. 삭제해도 다시 만들어지지 않으며, 필요하면 workspace 전환 메뉴에서 새로 만들면 됩니다.
+
+만들 때의 이름은 `<표시 이름>'s Personal Workspace`이고, slug는 `personal-<이메일 토큰>`입니다
+(예: `rony@example.com` → `personal-rony`). 이메일 토큰은 이메일 주소의 `@` 앞부분만 영문
+소문자·숫자·하이픈으로 정규화하여 최대 32자로 만들며, 도메인은 넣지 않습니다. 악센트가 붙은
+라틴 문자는 기본 문자로 바뀝니다(`josé` → `jose`). 이메일이 없거나 정규화 결과가 비면 임의의
+8자리 16진수를 사용합니다(예: `personal-82da8c7d`). 같은 slug가 이미 있으면 `personal-rony-2`,
+`personal-rony-3`처럼 2부터 숫자를 붙여 사용 가능한 slug를 선택합니다.
+이메일 앞부분이 slug에 들어가므로, 이 workspace를 public으로 바꾸기 전에 slug 변경을
+검토하세요. `personal-`로 시작하는 slug는 가입 시 만드는 workspace에만 붙습니다. 일반 workspace
+생성과 설정의 slug 변경은 이 prefix를 거부합니다. 제목에서 자동으로 만든 slug가 이 prefix로
+시작하면 앞에 `ws-`를 붙입니다(예: `Personal Notes` → `ws-personal-notes`, `Team Notes` →
+`team-notes`). 이미 쓰고 있는 slug는 그대로 둘 수 있습니다.
+이 규칙은 신규 생성에 적용하며 기존 workspace의 이름과 slug는 유지합니다.
+생성 후 표시 이름이나 이메일을 바꿔도 workspace의 이름과 slug는 자동 변경되지 않습니다.
 `solo_local`은 설정을 생략하면 기본 on이며,
 모든 모드에서 명시한 true/false 값이 mode 기본값보다 우선합니다. 외부에서는 80/443만 열고
 기본 설정에서는 app port 21080이 loopback에 남아 있는지 `ss -ltnp | grep 21080`으로 확인합니다.
@@ -158,9 +238,16 @@ sudo dtxwiki setup production --tls internal --domain wiki.lan --email admin@cor
 설치 후 CLI 가 출력하는 root CA 신뢰 절차를 **모든 클라이언트에 1회** 적용한다:
 `/etc/dtxwiki/dtxwiki-root-ca.crt` 를 배포하고 — Linux `update-ca-certificates`,
 macOS `security add-trusted-cert`, Windows `Import-Certificate … Cert:\LocalMachine\Root`,
-Firefox 는 별도 Authorities import. **MCP 클라이언트(Claude Desktop·Code 등 Node/Electron)**
-는 `NODE_EXTRA_CA_CERTS=/path/dtxwiki-root-ca.crt`, curl/python 은 `SSL_CERT_FILE`/
-`CURL_CA_BUNDLE`. Caddy 의 `pki/` (root CA) 는 백업 세트에 포함한다.
+Firefox 는 별도 Authorities import. **로컬에서 서버에 직접 접속하는 Node.js 기반 MCP
+클라이언트(예: Claude Code)** 에는 `NODE_EXTRA_CA_CERTS=/path/dtxwiki-root-ca.crt`를
+설정합니다. curl/python 은 `SSL_CERT_FILE`/`CURL_CA_BUNDLE`을 사용합니다.
+Caddy 의 `pki/` (root CA) 는 백업 세트에 포함한다.
+
+Claude 웹과 Claude Desktop의 **remote custom connector**는 Anthropic 클라우드에서
+서버에 접속합니다. PC에 내부 CA를 설치하거나 `NODE_EXTRA_CA_CERTS`를 설정해도 이
+클라우드 연결에는 적용되지 않습니다. 인터넷에서 접속할 수 있고 공인 인증서가 적용된
+HTTPS 주소가 필요합니다. 자세한 네트워크 조건은
+[Claude의 custom connector 안내](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)를 참고하세요.
 
 `custom` 은 Docker+IP 처럼 `internal` 의 IP-SAN 발급이 까다로운 환경에 권장한다.
 `external` 은 기존 도메인의 서브도메인을 붙일 때 Caddy 자동 ACME 와의 80/443·인증서
@@ -270,9 +357,148 @@ remembered 갱신은 `auth.session.renewed` audit event 로 Activity 에 남습�
 
 ## Identity & Recovery 설정
 
-기본 `DTXWIKI_MAIL_PROVIDER=none`은 공개 이메일 복구를 노출하지 않고 server-admin 지원만
-허용합니다. 비밀번호 원문은 저장되지 않으므로 운영자가 조회할 수 없습니다. 응급 복구는 다음처럼
-사용자 본인만 새 비밀번호를 선택하는 일회용 링크를 발급합니다.
+### 별도 로그인 플러그인과 OIDC provider
+
+공개 core는 비밀번호 로그인과 외부 로그인 SPI를 제공합니다. Google이나 사내 SSO
+provider는 별도 배포 패키지에서 구현하고, API·worker·CLI가 사용하는 **같은 Python
+환경**에 설치합니다. 패키지 설치만으로 플러그인이 활성화되지는 않습니다.
+`DTXWIKI_PLUGINS`에는 패키지 이름이 아닌 `dtxwiki.plugins` entry point 이름을
+쉼표로 나열합니다. 다음 예시는 `company_login` 플러그인이 `company.oidc` 로그인
+method를 제공하는 경우입니다.
+
+```dotenv
+DTXWIKI_PLUGINS=company_login
+DTXWIKI_AUTH_PROVIDERS_FILE=/etc/dtxwiki/auth-providers.toml
+DTXWIKI_PUBLIC_BASE_URL=https://wiki.example.com
+DTXWIKI_AUTH_PASSWORD_LOGIN_ENABLED=true
+```
+
+`auth-providers.toml`은 `[[providers]]` 목록입니다. 아래 issuer·client ID는
+실제 IdP 등록 값으로 바꾸고, client secret은 서비스 계정이 읽을 수 있는 별도 파일에
+보관합니다. `env:COMPANY_OIDC_CLIENT_SECRET` 형태의 환경변수 참조도 지원합니다.
+
+```toml
+[[providers]]
+slug = "company"
+method = "company.oidc"
+display_name = "Company SSO"
+issuer = "https://idp.example.com/tenant"
+client_id = "dtxwiki"
+client_secret_ref = "file:/etc/dtxwiki/oidc-client-secret"
+jit_provisioning = true
+link_policy = "confirm"
+trust_email_verified = false
+```
+
+IdP의 redirect URI는 대표 URL에서 고정적으로 만들어집니다. 위 예시에서는
+`https://wiki.example.com/api/v1/auth/sso/company/callback`을 등록합니다. 로그인
+provider 설정에는 HTTPS 대표 URL이 필요하며, `solo_local`의 loopback HTTP 개발
+설정만 예외입니다. 서버는 state·nonce·PKCE 거래와 사용자 연결, native 세션 발급을
+관리합니다. 새 계정 자동 생성은 `jit_provisioning = true`인 provider에서만
+허용됩니다. SSO 계정은 UUID와 검증된 `(issuer, subject)`로 즉시 생성하며 이메일·SMTP·
+로컬 비밀번호가 필요하지 않습니다. `users.email`은 NULL 또는 중복 없는 대표 계정
+이메일입니다. `trust_email_verified = true`이고 IdP가 해당 주소를 검증했다고 반환하면
+SMTP 없이 대표 이메일로 등록합니다. 없거나 신뢰하지 않는 주소는 identity 프로필에만
+기록하며 대표 이메일을 선점하지 않습니다. 신뢰·검증된 주소가 이미 등록돼 있으면 새
+계정을 만들지 않고 기존 계정으로 로그인한 뒤 명시적으로 연결하도록 안내합니다.
+이메일만으로 계정을 병합하거나 기존 주소를 덮어쓰지 않습니다.
+
+그 기존 계정의 이메일이 확인되지 않았다면(예: SMTP 없이 가입한 계정) 가입은 보류되고
+개인 워크스페이스도 만들지 않습니다. 계정 주인이면 그 계정으로 로그인해 연결합니다.
+본인 계정이 아니면 로그인 화면에서 서버 관리자에게 주소 해제를 요청할 수 있습니다.
+요청은 방금 SSO 로그인을 마친 브라우저만 보낼 수 있습니다. 서버 관리자가 보호된 사용자
+화면에서 승인하면 기존 계정을 비활성화하고 주소를 비우며 세션·자격 증명을 폐기합니다.
+데이터는 지우지 않습니다. 이후 요청자가 SSO로 다시 로그인하면 가입됩니다. provider에
+`email_collision_policy = "auto_release"`를 설정하면(기본값 `"admin_approval"`) 승인 없이
+같은 해제를 즉시 수행하며, `trust_email_verified = true`인 provider에서만 쓸 수 있습니다.
+서버 관리자 계정은 어떤 경우에도 자동 해제하지 않으므로 관리자 본인이 계정 설정에서
+SSO를 연결합니다. 비밀번호 로그인을 끄기 전에 먼저 연결해 두십시오. `auto_verified_email`
+설정은 시작 시 거부합니다. 이미 연결된 identity의 프로필 주소 변경도 대표 이메일을
+자동 교체하지 않습니다.
+`allowed_email_domains`를 설정하면 `trust_email_verified = true`와 IdP의 검증된 이메일이
+필요합니다. 이 조건을 충족하지 못하는 provider는 해당 가입 제한과 함께 사용할 수 없습니다.
+기존 계정에 연결하려면 그 계정으로 로그인한 뒤 명시적인 연결 절차를 사용합니다.
+
+SSO 전용 운영에서는 `DTXWIKI_AUTH_PASSWORD_LOGIN_ENABLED=false`로 설정할 수
+있습니다. 비밀번호 로그인과 활성 provider가 모두 없으면 웹 서버 시작을 거부합니다.
+SSO 사용자는 dtxWiki 비밀번호 없이 계정 관리와 부여받은 관리자 기능을 사용할 수
+있습니다. account/admin 민감 작업은 최근 로그인 또는 본인 확인부터 기본 60분 동안
+허용합니다. `DTXWIKI_AUTH_REAUTHENTICATION_MAX_AGE_SECONDS=3600`으로 기간을 조정할 수
+있으며 현재 설정·proof·세션 만료 중 가장 빠른 시각을 상한으로 사용합니다. 이 정책은
+비밀번호 관리자에게도 적용됩니다. 비밀번호로 방금 로그인했다면 별도 확인 없이 관리자
+작업이 가능하고 proof의 기본 유효기간도 이전 5분에서 60분으로 변경됩니다. 일반 세션의
+12시간/remembered 30일 수명은 별도이며 활동·자동 갱신·민감 작업으로 확인 기간을 늘리지
+않습니다. 기간이 지나면 사용 가능한 비밀번호·SSO·native 이메일 중에서 확인 방법을
+선택합니다. 강제 재인증을 지원하지 않는 IdP도 기존 identity와 브라우저 세션에 묶인
+SSO 왕복으로 확인할 수 있습니다. 이것은 IdP가 비밀번호나 MFA를 다시 물었다는 뜻은
+아닙니다. IdP나 SMTP 장애를 더 약한 확인 방식으로 자동 전환하지 않습니다. 이메일
+확인 링크는 별도로 5분 후 만료하며 account/admin 목적과 안정적인 세션 ID에 묶입니다.
+
+고유 사용자명 `username`은 UUID에서 `u_<UUID hex32>`로 자동 계산하며 표시 이름과
+구분합니다. 표시 이름은 동명이인을 허용하고 실제 계정·권한 식별은 계속 UUID입니다.
+사용자명 변경이나 사용자명을 이용한 비밀번호 로그인은 제공하지 않습니다.
+
+멤버 추가는 정확한 사용자 UUID를 기본으로 지원합니다. 등록된 대표 이메일로 추가하는
+방식도 지원하며 SMTP가 없던 기존 배포에 `email_verified_at`을 새 필수조건으로 요구하지
+않습니다. 검증되지 않은 IdP 프로필 주소는 멤버 검색·추가에 사용하지 않습니다. 회사 후보 검색은
+provider의 `directory_enabled = true`, `directory_tenant = "validated-tenant"`를 운영자가
+명시한 경우에만 켭니다. adapter가 검증해 반환한 tenant가 설정값과 일치해야 하며, 같은
+provider/tenant identity를 가진 소유자가 같은 범위의 후보만 검색합니다. 공개/social
+provider에는 기본적으로 끕니다. 후보의 이름은 표시용이며 UUID와 신뢰된 조직 표시를
+확인하고 선택합니다. IdP가 검증하지 않은 이메일을 가입 후 직접 등록하려면 SMTP와
+비밀번호 로그인이 켜져 있어야 하고 기존 계정 세션에서 해당 주소의 확인을 완료해야 합니다.
+
+이메일 없는 SSO 계정은 IdP에서 먼저 복구합니다. subject 변경 시에는 별도로 소유권을
+확인한 서버 관리자가 보호된 사용자 화면에서 UUID 기준 identity 재연결을 할 수 있습니다.
+CLI는 `dtxwiki users rebind-identity --help`를 참고하세요. 기존 issuer/subject가 예상값과
+다르거나 새 identity가 이미 연결돼 있으면 거부합니다. UUID·데이터·역할은 유지하고
+세션·대기 확인·복구 메일·API/OAuth 자격 증명은 폐기합니다. 이전 IdP 계정은 IdP에서
+퇴직·차단해야 합니다. 매핑 삭제만으로 이전 identity의 JIT 재가입을 영구 차단하지는
+않습니다. 유일한 IdP의 장애는 IdP 복구 또는 사전 승인된 다른 IdP가 필요합니다.
+SSO 서버 관리자 지정은 `dtxwiki admin grant --user-id <UUID>`를 사용합니다.
+
+서버 관리자 권한 부여·회수, setup의 초기 관리자 지정, `users add`, `users set-email`,
+`users set-display-name`, identity 재연결, 비밀번호 재설정과 이메일 충돌 해제 결정은 서버
+단위 감사 기록에 남습니다. CLI 작업은 `cli:<OS 사용자>`로 기록합니다. 이 기록은 서버
+관리자만 보호된 사용자 화면이나 `GET /api/v1/admin/audit-events`(최근 본인 확인 필요)로
+조회할 수 있고, 조회 자체도 기록됩니다. 워크스페이스 활동 화면에는 나타나지 않습니다.
+비활성 사용자에게는 서버 관리자 권한을 부여하지 않습니다.
+
+공개 OIDC helper로 사설망 IdP에 연결하려면 provider 설정의
+`allow_private_network = true`를 명시합니다. IdP URL은 여전히 HTTPS여야 합니다.
+
+플러그인 전용 환경변수는 해당 플러그인의 `settings_model`에 선언된 필드에 한해
+`DTXWIKI_PLUGIN_<ENTRY_POINT_NAME>_<FIELD>`로 설정합니다. 활성화되지 않은 플러그인의
+키, 선언되지 않은 필드, 누락·중복 entry point, core/SPI 버전 불일치는 시작을
+거부합니다. API·worker·CLI에는 같은 allowlist와 provider·secret 설정을 전달하세요.
+설정을 바꾼 뒤에는 프로세스를 다시 시작합니다.
+
+플러그인에 DB 변경이 있으면 기존 [백업 절차](#백업과-복구-점검)를 따른 뒤 API와
+worker를 종료하고 같은 환경에서 `dtxwiki bootstrap`을 실행합니다. core migration이
+먼저 실행되고, 플러그인별 독립 chain과 `alembic_version_<name>`이 이어서 적용됩니다.
+`DTXWIKI_AUTO_BOOTSTRAP=false`인 서버와 worker는 필요한 플러그인 migration이
+적용되지 않았으면 시작을 거부합니다. 현재 지원 토폴로지는 단일 DB이며 shard fleet
+migration은 제공하지 않습니다.
+
+이 schema migration과 SQLite→PostgreSQL의 `migrate-data`는 별개입니다.
+`migrate-data`는 source 또는 target에 플러그인 migration 기록이나 지원하지 않는
+추가 테이블·view가 있으면 target 쓰기 전에 거부합니다. 비활성 플러그인의 데이터도
+포함하며 `--force`나 `--dry-run`으로 우회할 수 없습니다. 자체 DB 상태가 없는 로그인
+플러그인은 이 제한의 대상이 아닙니다. 플러그인 데이터는 별도로 지원되는 이관 절차가
+필요합니다.
+
+로그인 UI는 `/api/v1/auth/capabilities`에서 활성 provider를 조회합니다. 계정의
+외부 identity 조회·연결·해제와 최초 비밀번호 설정 API도 core가 제공합니다. 마지막
+사용 가능한 로그인 방법의 해제는 거부하며, 비밀번호 로그인의 사용 여부는
+`DTXWIKI_AUTH_PASSWORD_LOGIN_ENABLED`로 제어합니다. 실제 IdP 연결 검증은 설치한
+플러그인 및 운영 IdP에서 별도로 수행해야 합니다.
+
+**SMTP 설정은 선택 사항입니다.** SMTP 없이도 회원가입·로그인·위키 기본 기능을 사용할
+수 있습니다. 기본 `DTXWIKI_MAIL_PROVIDER=none`에서는 이메일 인증, 이메일을 통한
+비밀번호 복구를 사용할 수 없습니다. SMTP 없이도 **HTTPS 대표 URL이 설정되어 있으면**
+server-admin이나 서버 운영자가 일회용 복구 링크를 발급할 수 있습니다. 비밀번호 원문은
+저장되지 않으므로 운영자가 조회할 수 없습니다. 사용자 본인이 새 비밀번호를 선택하는
+일회용 링크는 다음처럼 발급합니다.
 
 ```bash
 sudo dtxwiki users issue-password-reset user@example.com --delivery link
@@ -285,23 +511,91 @@ docker compose exec app dtxwiki users issue-password-reset user@example.com --de
 서버에서도 명시적으로 선택할 수 있고 TTY에 단 한 번만 표시됩니다. 재발급 시 사용되지 않은 이전
 토큰은 즉시 무효화됩니다.
 
-검증된 이메일의 self-service 복구를 켜려면 canonical HTTPS URL과 SMTP를 설정한 뒤 app과
-worker를 함께 재시작합니다. Reset URL은 요청의 `Host`가 아니라 `DTXWIKI_PUBLIC_BASE_URL`로만
-생성됩니다.
+### 로컬 설치에서 비밀번호를 잊은 경우
+
+`http://127.0.0.1:21080`처럼 HTTPS 대표 URL이 없는 설치에서는 위의 일회용 링크를
+발급할 수 없습니다. 먼저 dtxWiki를 종료하고 worker도 종료되었는지 확인하세요.
+기본 로컬 실행에서는 서버를 종료하면 관리되는 worker도 함께 종료됩니다.
+dtxWiki를 설치하고 실행한 **같은 OS 계정과 데이터 디렉터리 설정**으로 다음 명령을 실행합니다.
 
 ```bash
+dtxwiki users reset-password you@example.com
+```
+
+가입에 사용한 이메일을 지정하면 새 비밀번호를 숨김 입력으로 두 번 받습니다.
+완료 후 dtxWiki를 다시 시작하세요. 기존 브라우저
+세션은 무효화되므로 새 비밀번호로 다시 로그인합니다. 액세스 키와 AI 연결은 자동으로
+폐기하지 않습니다. 이 명령에는 `deprecated` 경고가 표시됩니다. HTTPS 대표 URL을
+사용하는 서버에서는 위의 일회용 링크 방식을 우선 사용하세요.
+
+### SMTP로 이메일 인증과 비밀번호 복구 켜기
+
+로그인 화면의 비밀번호 찾기를 통한 복구는 **이미 이메일 인증을 마친 계정**에만 메일을
+보냅니다. canonical HTTPS URL과 SMTP를 설정하고, 웹에서 요청한 이메일 인증·비밀번호
+복구 메일을 발송할 worker도 실행해야 합니다. Reset URL은 요청의 `Host`가 아니라
+`DTXWIKI_PUBLIC_BASE_URL`로만 생성됩니다.
+
+처음 설정할 때와 기존 SMTP 설정을 바꿀 때 모두, 먼저 provider를 `none`으로 저장하고
+공통 값을 설정합니다. 아래 예시의 주소와 인증 값은 메일 제공자가 허용하는 값으로
+교체하세요. HTTPS 대표 URL은 실제로 접속할 수 있는 주소여야 합니다.
+
+```bash
+sudo dtxwiki config set DTXWIKI_MAIL_PROVIDER=none
 sudo dtxwiki config set DTXWIKI_PUBLIC_BASE_URL=https://wiki.example.com
-sudo dtxwiki config set DTXWIKI_MAIL_PROVIDER=smtp
 sudo dtxwiki config set DTXWIKI_MAIL_FROM_ADDRESS=wiki@example.com
 sudo dtxwiki config set DTXWIKI_SMTP_HOST=smtp.example.com
-sudo dtxwiki config set DTXWIKI_SMTP_PORT=587
 sudo dtxwiki config set DTXWIKI_SMTP_USERNAME='<username>'
 sudo dtxwiki config set DTXWIKI_SMTP_PASSWORD='<secret>' --i-understand
+```
+
+그다음 메일 제공자가 지정한 포트에 따라 **아래 두 가지 중 하나**를 적용합니다.
+provider를 `smtp`로 바꾸는 명령은 항상 마지막 설정으로 실행합니다.
+
+**587 / STARTTLS:**
+
+```bash
+sudo dtxwiki config set DTXWIKI_SMTP_PORT=587
+sudo dtxwiki config set DTXWIKI_SMTP_STARTTLS=true
+sudo dtxwiki config set DTXWIKI_SMTP_USE_SSL=false
+sudo dtxwiki config set DTXWIKI_MAIL_PROVIDER=smtp
 sudo systemctl restart dtxwiki dtxwiki-worker
 ```
 
-복구 성공은 모든 브라우저 세션과 다른 재설정 토큰을 폐기합니다. PAT/MCP/OAuth 자격 증명은
-별도이며, 복구 화면이나 server-admin 조치에서 명시적으로 선택한 경우에만 전부 폐기합니다.
+**465 / TLS:** 위의 공통 설정부터 진행하고 다음을 적용합니다.
+
+```bash
+sudo dtxwiki config set DTXWIKI_SMTP_PORT=465
+sudo dtxwiki config set DTXWIKI_SMTP_STARTTLS=false
+sudo dtxwiki config set DTXWIKI_SMTP_USE_SSL=true
+sudo dtxwiki config set DTXWIKI_MAIL_PROVIDER=smtp
+sudo systemctl restart dtxwiki dtxwiki-worker
+```
+
+provider가 `smtp`일 때 두 TLS 플래그가 모두 `true`이거나 모두 `false`이면 설정 검증에
+실패하며 **서버와 worker가 시작하지 못합니다.** 중간 상태를 피하도록 provider를 잠시
+`none`으로 두고 TLS 값을 저장한 뒤 `smtp`를 마지막에 설정합니다. 실행 중인 프로세스는
+재시작 전까지 기존 설정을 사용합니다.
+
+메일 활성화에는 발신 주소·SMTP 호스트·TLS 설정뿐 아니라 실제 HTTPS 대표 URL도
+필요합니다. 대표 URL을 HTTP로 설정하면 현재 제품의 메일 기능은 켜지지 않습니다.
+설정 변경은 서버와 worker에 모두 적용해야 합니다. SMTP 인증 값은 제공자가 발급한
+값을 사용하고, SMTP가 허용하는 발신 주소를 지정하세요.
+
+Settings → Deployment → **Identity & Recovery**에서 `Mail configuration: Configured`
+(한국어 UI: 설정 → 배포 → 계정 및 복구 → 메일 설정: 설정됨)는 설정값 검사를 뜻하며
+SMTP 인증 확인이 아닙니다. `Last observed mail delivery`(마지막으로 관찰된 메일 전달)의
+`Last delivery succeeded`(마지막 전달 성공)와 outbox의 `sent`는 SMTP 서버가 전송을
+수락했다는 의미로, 수신함 도착을 보장하지 않습니다.
+설정 후 이메일 확인이나 복구 메일을 실제로 요청하고 발송 상태와 수신함을 함께 확인하세요.
+전용 SMTP 테스트 명령은 없습니다. `users issue-password-reset --delivery email`은
+실제 재설정 토큰을 발급·전송하므로 단순 연결 확인 명령으로 사용하지 않습니다.
+
+일회용 링크로 복구를 완료하면 모든 브라우저 세션과 다른 재설정 토큰을 폐기합니다.
+로그인 화면의 **비밀번호를 잊으셨나요?**에서 요청한 이메일 복구는 액세스 키와
+MCP/OAuth 자격 증명도 **항상 폐기**합니다. 연결된 AI 도구에서 새 자격 증명으로 다시
+연결해야 합니다. server-admin 또는 CLI가 발급한 링크는 발급 시 폐기를 지정하거나
+복구 화면에서 폐기를 선택했을 때 자격 증명도 폐기합니다. CLI에서는
+`--revoke-api-tokens` 옵션으로, server-admin 화면에서는 발급 시 선택으로 지정합니다.
 Settings → Deployment의 `Identity & Recovery`는 provider·발신자·canonical URL·outbox 상태만
 표시하며 SMTP 비밀번호 값은 절대 반환하지 않습니다.
 
@@ -338,6 +632,38 @@ sudo sha256sum "$BACKUP/dtxwiki.sqlite"
 같은 dtxWiki version을 설치한 뒤 `/health/ready`, 로그인, 첨부파일 읽기를 확인하세요. 복구할 때는
 서비스를 중지하고 `/var/lib/dtxwiki`와 `/etc/dtxwiki`를 함께 복원한 뒤 ownership을 확인하고
 `dtxwiki bootstrap`을 실행합니다.
+
+### 정기 작업 이력과 SQLite 파일 용량
+
+worker는 시작할 때와 정기 작업 등록 시점(기본 약 5분)에 완료된 정기 점검 이력을
+점진적으로 정리합니다. 완료 후 7일이 지났고 등록 키에 기록된 주기도 끝난 행만
+대상입니다. 실패·수동 실행, 알 수 없는 키, Library 처리와 임베딩 이력은 보존합니다.
+만료된 MCP 쓰기 재시도 결과 기록도 함께 정리합니다. 등록 주기는 유지하며 번들 만료,
+미디어 설치 복구·파일 정리, 자격증명 복제 점검은 처리 대상이 있을 때만 작업을 만듭니다.
+
+정리는 workspace마다 200개 단위로 짧게 커밋하고, 전체 정리 시간 예산은 등록 회차당
+1초입니다. 이미 시작한 배치는 마친 뒤 예산을 확인하므로 DB 응답이 느리면 1초를 넘을 수
+있습니다. 큰 기존 이력은 여러 회차에 걸쳐 줄어듭니다. 스키마 변경이나 자동 `VACUUM`은
+없습니다. 개발용 PostgreSQL의 삭제 공간은 autovacuum이 재사용하도록 정리합니다.
+사전 조회에서 삭제할 대상이 없으면 쓰기 잠금을 잡지 않습니다. 미디어 보존 정책이
+잘못된 workspace도 완료 작업과 만료 MCP 기록의 정리 대상에는 포함됩니다.
+
+SQLite는 삭제한 페이지를 재사용하므로 행 수가 줄어도 파일 크기가 바로 줄지는 않습니다.
+파일 용량 회수가 필요하면 위 백업 절차로 복구 가능한 백업을 만든 뒤, app·worker와
+같은 DB를 사용하는 모든 프로세스를 멈추고 실행합니다. 아래 경로는 이 문서의 systemd
+설치 예시이며 실제 `DTXWIKI_DATABASE_URL`의 SQLite 파일 경로에 맞춥니다. 재작성에
+필요한 여유 디스크 공간(최대 현재 DB 크기의 약 두 배)을 먼저 확보합니다.
+
+```bash
+sudo systemctl stop dtxwiki-worker dtxwiki
+sudo -u dtxwiki sqlite3 /var/lib/dtxwiki/dtxwiki.sqlite 'VACUUM;'
+sudo -u dtxwiki sqlite3 /var/lib/dtxwiki/dtxwiki.sqlite 'PRAGMA integrity_check;'
+# integrity_check가 ok인지 확인한 뒤 재시작한다.
+sudo systemctl start dtxwiki dtxwiki-worker
+```
+
+다른 프로세스가 DB를 열고 있으면 먼저 종료한 뒤 다시 진행합니다. 정기 점검 행 정리만
+목적이라면 `VACUUM`을 실행할 필요는 없습니다.
 
 ### Context History 정합성 복구
 
@@ -402,6 +728,32 @@ docker compose up -d app worker
 수 없는 설치는 다음 절차를 사용합니다. 어느 경로든 서버와 worker가 실행 중이면 `dtxwiki update`,
 `rollback`, `migrate-data`는 "stop dtxWiki (server and worker) first"로 거부합니다(systemd tier의
 `update`는 서비스를 스스로 멈췄다 다시 시작합니다).
+
+### 관리자 화면에서 버전 확인
+
+서버 관리자는 **Settings → 배포**에서 현재 버전과 새 배포 여부를 확인할 수 있습니다.
+화면을 열면 기존 24시간 캐시를 먼저 표시하고, 결과가 없거나 오래되었으면 한 번 확인합니다.
+**지금 확인**은 캐시와 관계없이 다시 조회합니다. 기본 출처는 PyPI이며,
+`DTXWIKI_UPDATE_INDEX_URL`을 설정한 서버는 해당 인덱스만 사용합니다.
+`DTXWIKI_NO_UPDATE_NOTIFIER=true`이면 자동·수동 외부 조회를 모두 하지 않습니다.
+외부 인덱스에 접근할 수 없는 오프라인·폐쇄망 서버에는 이 설정을 권장합니다.
+실패하거나 오래된 결과는 마지막 성공 시각과 함께 표시하며 최신 상태로 확정하지 않습니다.
+
+설치 방법은 직접 선택합니다. uv, pipx, pip 가상환경, npx, npm 전역 설치, Docker,
+서버 서비스/wheel별로 준비 → 갱신 → 시작·확인 순서를 안내합니다. 선택한 방법은 서버에
+저장하지 않습니다. 명령은 서버 터미널에서 실행하며, 기존 Python 환경과 패키지 인덱스·인증
+설정을 유지하세요. npm `@latest`는 npm 레지스트리에서 별도로 결정되는 런처 버전입니다.
+uv 기본 명령은 Python 버전을 고정하지 않습니다. Python 3.12 이상을 사용하고,
+특정 인터프리터가 필요할 때만 `--python <버전-또는-경로>` 옵션을 추가하세요.
+npx는 같은 npm 대상 버전을 지정하여 릴리스에서 요구하는 사전 검사 명령을 먼저 실행한 뒤
+서버를 시작하세요. 예를 들어 `inputs audit`은 `npx @dtxsuite/dtxwiki@<version> inputs audit`로
+실행하고, 통과하면 같은 `<version>`으로 서버를 시작합니다. 서버와 같은 OS 계정·환경·DB를
+사용하고 필요한 복구·migration은 상세 문서의 순서를 따르세요.
+
+화면의 안내는 설치·마이그레이션·복구 전체 절차를 대신하지 않습니다.
+[상세 유지보수 문서](https://docs.dtxwiki.com/docs/0.1/administration/backup-upgrades/)와
+[릴리스 변경 내역](https://github.com/dtxSuite/dtxWiki/releases)을 확인하고,
+실행 중인 서버와 별도로 관리하는 worker를 모두 중지한 뒤 DB·파일·설정을 백업하세요.
 
 ### 로컬 wheel로 systemd 업데이트
 
@@ -517,6 +869,12 @@ JWT 키·session secret(`DTXWIKI_SESSION_SECRET_FILE=/var/lib/dtxwiki/session_se
 전제는 self-host 와 동일: 도메인 DNS A 레코드 → 호스트, 80/443 개방.
 production 스택은 dtxWiki 이미지 + `caddy:2` 만 사용하며 개발 전용 사이드카는 포함하지
 않는다.
+
+기존 Compose 파일을 유지하고 이미지만 교체해도 새 이미지의 `external` 기본값으로
+app 내부 worker와 별도 worker가 중복 실행되지 않습니다. Compose의 app `environment`에
+`DTXWIKI_WORKER_MODE`를 추가하지 마세요. 이 설정을 모르는 0.1.2 이미지로 rollback할 때
+production 설정 검증이 실패할 수 있습니다. 별도 worker 서비스 없이 컨테이너 하나로
+실행하려면 `DTXWIKI_WORKER_MODE=managed`를 명시하고 worker 서비스를 실행하지 마세요.
 
 ---
 
@@ -770,17 +1128,37 @@ table: main.<parent>`). FK column 이 NULL 이어도 마찬가지입니다 — �
 
 ---
 
+## Context 첨부 파일 자동 회수
+
+`DTXWIKI_CONTEXT_MEDIA_ORPHAN_RETENTION_HOURS`는 미사용 첨부 파일의 서버
+기본 보존 기간입니다(기본 168시간). 워크스페이스 소유자는 Settings > 첨부
+파일에서 이를 재정의하거나 서버 기본값 상속으로 복원할 수 있습니다.
+DB의 명시적 워크스페이스 설정이 환경변수보다 우선하며 재시작 후에도 유지됩니다.
+서버 기본값이 `0`이어도 소유자가 양수 보존 기간을 설정한 공간은 자동 회수합니다.
+따라서 환경변수의 `0`은 전역 강제 금지가 아니라 상속 시의 비활성 기본값입니다.
+
+기간은 업로드 시각부터 계산하며, 열린 편집 세션과 현재·과거 버전에서 참조하는
+파일은 보호합니다. 변경은 저장 후 새로 시작하는 정리부터 적용되고, 이미 시작한
+정리는 시작 시 정책으로 완료될 수 있습니다. 회수를 꺼도 수동 삭제와 기존 삭제
+후보 정리는 계속됩니다. 새 migration은 기존 공간을 `{}` 상속 상태로 유지합니다.
+
 ## Cross-platform dev PC 참조
 
 외부 PC (Linux / Windows) 의 Claude Code / Codex CLI / Gemini CLI / Google Antigravity
-등록과 OS 경로 차이(`%USERPROFILE%\.claude.json`, `%USERPROFILE%\.codex\config.toml`,
-`%USERPROFILE%\.gemini\settings.json`, `%USERPROFILE%\.gemini\config\mcp_config.json` 등)는
-[README.md](README.md) 의 "팀원 PC 에서 MCP client 연결" 섹션을 참조하세요.
+등록은 dtxWiki의 **Settings → MCP access**에서 해당 앱의 설정 안내를 확인합니다.
+Claude Code와 Codex의 키 발급·등록·연결 확인은
+[README의 MCP 클라이언트 연결하기](README.ko.md#mcp-clients)를 참고하세요
+([English](README.md#mcp-clients)).
+앱과 OS에 따라 설정 파일 위치가 다르므로 화면에 표시된 명령을 연결할 PC에서 실행합니다.
+Codex의 기본 사용자 설정 파일은 Linux/macOS에서 `~/.codex/config.toml`, Windows에서
+`%USERPROFILE%\.codex\config.toml`입니다.
 Antigravity release evidence는 `agy mcp list`의 등록 inventory, `/mcp`의 client 상태/로그,
 인증된 dtxWiki MCP 읽기 호출을 별도로 기록합니다. 앞 단계의 성공은 뒤 단계의 성공을
 증명하지 않습니다.
 
 ---
+
+<a id="mcp-workspace-access"></a>
 
 ## MCP credential의 허용 workspace 집합
 

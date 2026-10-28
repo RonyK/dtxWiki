@@ -242,8 +242,7 @@ def create_context_media_router(
             actor = _target_scoped_route_actor(request, actor, workspace_id)
         except ContextMediaAccessError as exc:
             return _access_error_response(exc)
-        # D-7 (doc/design/workspace-database-separation-plan.md): Context
-        # media is workspace-owned data, so the write goes to the same plane
+        # Context media is workspace-owned data, so the write goes to the same plane
         # as the page/editing version it is registered against.
         session_factory = get_container_from_app(request).db.session_for(workspace_id)
         return await _register_upload(
@@ -494,8 +493,7 @@ def context_media_content_response(
     *,
     etag_scope: object | None = None,
 ) -> Response:
-    # D-5 (doc/design/workspace-database-separation-plan.md): route by the
-    # capability's own blob workspace_id rather than the removed
+    # Route by the capability's own blob workspace_id rather than the removed
     # library_blob_store singleton, so a workspace with its own store/bucket
     # is actually read from -- capability.blob is the authorized BlobReference
     # this response is serving, so its workspace_id is exactly the one to ask

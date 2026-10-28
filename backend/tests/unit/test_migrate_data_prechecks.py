@@ -6,6 +6,8 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from backend.app.db import make_engine
+from backend.app.runtime_resources import RuntimeResources, acquire_paths
+from backend.app.settings import Settings
 from backend.models import Base
 from backend.models.workspace import Workspace
 from backend.scripts.migrate_data import (
@@ -108,6 +110,23 @@ def test_rejects_same_source_and_target_url(tmp_path: Path) -> None:
         migrate_data(url, url)
 
 
+def test_rejects_same_sqlite_database_through_driver_and_query_alias(tmp_path):
+    database = tmp_path / "same.sqlite"
+    with pytest.raises(MigrationPrecheckError, match="same SQLite database"):
+        migrate_data(_url(database), f"sqlite+pysqlite:///{database}?timeout=8")
+
+
+@pytest.mark.parametrize("busy", ["source", "target"])
+def test_migrate_refuses_db_activity_outside_its_data_root(tmp_path, busy):
+    source = _url(tmp_path / "source.sqlite")
+    target = _url(tmp_path / "target.sqlite")
+    database_url = source if busy == "source" else target
+    resources = RuntimeResources.for_settings(Settings(database_url=database_url))
+    with acquire_paths([resources.activity_paths[1]], "shared"):
+        with pytest.raises(MigrationPrecheckError, match="dtxwiki-activity.lock"):
+            migrate_data(source, target, data_dir=tmp_path / "other-root")
+
+
 def test_rejects_missing_target_alembic_revision(tmp_path: Path) -> None:
     source_url = _url(tmp_path / "source.sqlite")
     target_url = _url(tmp_path / "target.sqlite")
@@ -184,3 +203,36 @@ def test_precheck_refusal_leaves_the_source_file_unconverted(
         migrate_data(source_url, target_url)
 
     assert _file_fingerprint(source_path) == before
+
+    # Persisted extension objects must be detected even while their plugin is
+    # disabled. This cannot use only the configured allowlist: either end can
+    # carry data from an earlier deployment, and --force must not discard it.
+    _create_schema_without_wal(target_url)
+    target_path = tmp_path / "target.sqlite"
+    for label, database_url in (("source", source_url), ("target", target_url)):
+        for ddl, name in (
+            (
+                "CREATE TABLE alembic_version_disabled (version_num TEXT)",
+                "alembic_version_disabled",
+            ),
+            ("CREATE TABLE disabled_records (id INTEGER)", "disabled_records"),
+            ("CREATE VIEW disabled_view AS SELECT 1 AS id", "disabled_view"),
+        ):
+            engine = create_engine(database_url)
+            try:
+                with engine.begin() as connection:
+                    connection.execute(text(ddl))
+                source_before = _file_fingerprint(source_path)
+                target_before = _file_fingerprint(target_path)
+                with pytest.raises(
+                    MigrationPrecheckError,
+                    match=f"{label} database contains plugin or unsupported",
+                ):
+                    migrate_data(source_url, target_url, force=True, dry_run=True)
+                assert _file_fingerprint(source_path) == source_before
+                assert _file_fingerprint(target_path) == target_before
+            finally:
+                with engine.begin() as connection:
+                    kind = "VIEW" if name == "disabled_view" else "TABLE"
+                    connection.execute(text(f"DROP {kind} {name}"))
+                engine.dispose()

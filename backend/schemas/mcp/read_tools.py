@@ -533,14 +533,41 @@ class WhatChangedInput(MCPConversationInput):
 
 
 class WhatChangedEntryModel(BaseModel):
+    # One move of a page's published version, like a ref update (before ->
+    # after). Why it moved is the reason, never an extra change_kind.
     concept_path: str
     title: str
-    change_kind: Literal["created", "updated", "archived"]
+    change_kind: Literal["created", "updated", "archived", "unpublished"] = Field(
+        description=(
+            "created: the page entered the published set, including publishing "
+            "again after it was unpublished or archived. updated: the published "
+            "version changed. unpublished: an undone first publication left "
+            "nothing published. archived: the page was archived."
+        )
+    )
     page_id: UUID
-    version_id: UUID | None = None
-    previous_version_id: UUID | None = None
+    version_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The version published from this entry on; null for unpublished. "
+            "For archived, the page's head when it was archived."
+        ),
+    )
+    previous_version_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The version published right before this entry, not the version's "
+            "parent; null when nothing was published."
+        ),
+    )
     changed_at: datetime
-    reason: str | None = None
+    reason: str | None = Field(
+        default=None,
+        description=(
+            "Why the published version moved, e.g. approved through Context "
+            "review, review decision undone, page restored from archive."
+        ),
+    )
     change_set_id: UUID
 
     model_config = ConfigDict(extra="forbid")

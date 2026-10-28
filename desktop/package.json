@@ -1,6 +1,6 @@
 {
   "name": "@dtxwiki/desktop",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "private": true,
   "license": "AGPL-3.0-only OR Elastic-2.0",
   "description": "dtxWiki desktop shell for local and remote servers",
@@ -8,6 +8,7 @@
   "main": "src/main.cjs",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
+    "test:engine-stop": "node --test tests/blocked-engine.integration.cjs",
     "pack": "electron-builder --config electron-builder.config.cjs --dir",
     "build:pack": "electron-builder --config electron-builder.config.cjs --dir",
     "build:win": "electron-builder --config electron-builder.config.cjs --win nsis --x64",
@@ -20,6 +21,7 @@
   "build": {
     "appId": "io.dtxsuite.dtxwiki",
     "productName": "dtxWiki",
+    "icon": "assets/icon.svg",
     "copyright": "Copyright © 2026 Minsoo Kim (dtxSuite)",
     "asar": true,
     "directories": {

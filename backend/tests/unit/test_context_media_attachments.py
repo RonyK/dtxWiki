@@ -71,6 +71,7 @@ def _attachment(**overrides) -> ContextMediaAttachmentProjection:
         kind=overrides.pop("kind", "image"),
         created_at=overrides.pop("created_at", CREATED_AT),
         is_orphan=overrides.pop("is_orphan", True),
+        preview_version_id=overrides.pop("preview_version_id", VERSION_ID),
     )
     assert not overrides, overrides
     return ContextMediaAttachmentProjection.from_snapshot(snapshot)

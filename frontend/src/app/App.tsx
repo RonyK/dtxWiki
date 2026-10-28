@@ -19,6 +19,7 @@ import {
   useWorkspaceContext,
   WorkspaceProvider,
 } from "../shared/workspace/WorkspaceContext";
+import { useLabsPreferences } from "../shared/hooks/useLabsPreferences";
 import { isEditorRole } from "../shared/workspace/permissions";
 
 const RoutedPageEditor = lazy(() =>
@@ -36,10 +37,18 @@ const ContextEditPermalinkResolver = lazy(() =>
     default: module.ContextEditPermalinkResolver,
   })),
 );
+const PagePermalinkRedirect = lazy(() =>
+  import("../features/pages/PagePermalinkRedirect").then((module) => ({
+    default: module.PagePermalinkRedirect,
+  })),
+);
 const PublishedPageReader = lazy(() =>
   import("../features/pages/PublishedPageReader").then((module) => ({
     default: module.PublishedPageReader,
   })),
+);
+const AskScreen = lazy(() =>
+  import("../features/ask/AskScreen").then((module) => ({ default: module.AskScreen })),
 );
 const AgentScreen = lazy(() =>
   import("../features/agent/AgentScreen").then((module) => ({ default: module.AgentScreen })),
@@ -82,8 +91,8 @@ const VerifyEmailScreen = lazy(() =>
     default: module.VerifyEmailScreen,
   })),
 );
-const AskScreen = lazy(() =>
-  import("../features/ask/AskScreen").then((module) => ({ default: module.AskScreen })),
+const IdentityVerificationScreen = lazy(() =>
+  import("../features/auth/IdentityVerificationScreen").then((module) => ({ default: module.IdentityVerificationScreen })),
 );
 const ContextScreen = lazy(() =>
   import("../features/context/ContextScreen").then((module) => ({ default: module.ContextScreen })),
@@ -121,6 +130,11 @@ const SettingsScreen = lazy(() =>
     default: module.SettingsScreen,
   })),
 );
+const WorkspaceScopedSettingsScreen = lazy(() =>
+  import("../features/settings/WorkspaceScopedSettingsScreen").then((module) => ({
+    default: module.WorkspaceScopedSettingsScreen,
+  })),
+);
 const SetupScreen = lazy(() =>
   import("../features/setup/SetupScreen").then((module) => ({ default: module.SetupScreen })),
 );
@@ -143,6 +157,9 @@ export const appRoutes = createRoutesFromElements(
       <Route element={<PublicFrame />}>
         <Route path="/w/:workspaceSlug/pages/:slug" element={<PublishedPageReader />} />
       </Route>
+      <Route element={<ScopedSettingsFrame />}>
+        <Route path="/workspaces/:workspaceId/settings" element={<RequireAuth><WorkspaceScopedSettingsScreen /></RequireAuth>} />
+      </Route>
       <Route element={<AppFrame />}>
       <Route
         path="/"
@@ -156,6 +173,7 @@ export const appRoutes = createRoutesFromElements(
       <Route path="/forgot-password" element={<ForgotPasswordScreen />} />
       <Route path="/reset-password" element={<ResetPasswordScreen />} />
       <Route path="/verify-email" element={<VerifyEmailScreen />} />
+      <Route path="/auth/verify" element={<IdentityVerificationScreen />} />
       <Route
         path="/account"
         element={
@@ -177,14 +195,6 @@ export const appRoutes = createRoutesFromElements(
         element={
           <RequireAuth>
             <WorkspaceDirectoryScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/ask"
-        element={
-          <RequireAuth>
-            <AskScreen />
           </RequireAuth>
         }
       />
@@ -216,10 +226,28 @@ export const appRoutes = createRoutesFromElements(
         }
       />
       <Route
+        path="/p/:pageId"
+        element={
+          <RequireAuth>
+            <PagePermalinkRedirect />
+          </RequireAuth>
+        }
+      />
+      <Route
         path="/agent"
         element={
           <RequireAuth>
             <AgentScreen />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/ask"
+        element={
+          <RequireAuth>
+            <RequireAskEnabled>
+              <AskScreen />
+            </RequireAskEnabled>
           </RequireAuth>
         }
       />
@@ -447,6 +475,14 @@ function PublicFrame() {
   );
 }
 
+function ScopedSettingsFrame() {
+  return (
+    <AuthProvider>
+      <Suspense fallback={<RouteLoading />}><Outlet /></Suspense>
+    </AuthProvider>
+  );
+}
+
 function AppFrame() {
   const location = useLocation();
   const skipInitialSessionCheck = isAuthBootstrapPath(location.pathname);
@@ -470,10 +506,16 @@ function AppFrame() {
 // reads the session identity and hands it to WorkspaceProvider as a prop —
 // WorkspaceProvider itself must stay callable without an AuthProvider
 // ancestor (see WorkspaceContext.test.tsx's bare renders).
-function WorkspaceScope({ children }: { children: ReactNode }) {
+export function WorkspaceScope({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  // Account switches can preserve the workspace ID. Remount the authenticated
+  // subtree so loaded personal flags and permission-dependent content cannot
+  // cross that identity boundary while the new actor's requests are pending.
   return (
-    <WorkspaceProvider sessionUserId={user?.user_id ?? null}>
+    <WorkspaceProvider
+      key={user?.user_id ?? "anonymous"}
+      sessionUserId={user?.user_id ?? null}
+    >
       {children}
     </WorkspaceProvider>
   );
@@ -486,6 +528,7 @@ export function isAuthBootstrapPath(pathname: string) {
     "/forgot-password",
     "/reset-password",
     "/verify-email",
+    "/auth/verify",
   ].includes(normalized);
 }
 
@@ -541,11 +584,16 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }
 
   if (status === "anonymous") {
-    const next = `${location.pathname}${location.search}`;
+    const next = `${location.pathname}${location.search}${location.hash}`;
     return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
   }
 
   return children;
+}
+
+export function RequireAskEnabled({ children }: { children: ReactNode }) {
+  const { preferences } = useLabsPreferences();
+  return preferences.ask ? children : <NotFoundScreen />;
 }
 
 // Codex #25: write routes (page/agent create + page edit) must not render the

@@ -124,7 +124,6 @@
     "error_other": "errors",
     "artifact_one": "artifact",
     "artifact_other": "artifacts",
-    "linked": "{{count}} linked",
     "failed_one": "failed",
     "failed_other": "failed",
     "rejected_one": "refused",
@@ -174,7 +173,9 @@
     "older": "Older"
   },
   "card": {
-    "archived": "Archived"
+    "archived": "Archived",
+    "linkedArtifactsMore": "and more",
+    "recentlyLinked": "Recently linked: {{titles}}"
   },
   "clientIdentity": {
     "unknown": "MCP client",
@@ -254,7 +255,8 @@
       "stepMetaNoLatency_other": "{{count}} calls"
     },
     "linkedArtifacts": "Linked artifacts",
-    "artifactLinks": "{{count}} links",
+    "artifactLinks_one": "{{count}} link",
+    "artifactLinks_other": "{{count}} links",
     "showAllArtifacts": "Show all {{count}} artifacts",
     "loading": "Loading chat detail",
     "breadcrumb": "Detail",
@@ -283,6 +285,10 @@
       }
     },
     "displayFields": {
+      "input_version": "Input version",
+      "base_version": "Base version",
+      "editing_version": "Editing version",
+      "cited_version": "Cited version",
       "search_query": "Search query",
       "query": "Search query",
       "context_page": "Document",
@@ -479,7 +485,45 @@
       "selected": "Selected — press Ctrl+C"
     },
     "recordNoticeTitle": "Tool activity, not a chat transcript.",
-    "recordNoticeBody": "dtxWiki records MCP tool calls and the inputs/results retained by its trace policy, plus linked artifacts. It does not receive a separate copy of the message typed in the external client."
+    "recordNoticeBody": "dtxWiki records MCP tool calls and the inputs/results retained by its trace policy, plus linked artifacts. It does not receive a separate copy of the message typed in the external client.",
+    "identifier": {
+      "conflictCheckHelp": "An internal number identifying the draft state this request was based on. If that state has changed, the change is rejected.",
+      "rawReferences": "Raw request details",
+      "copied": "ID copied",
+      "show": "Show full ID",
+      "hide": "Hide full ID",
+      "copy": "Copy full ID",
+      "showFor": "Show full ID: {{field}}",
+      "hideFor": "Hide full ID: {{field}}",
+      "copyFor": "Copy full ID: {{field}}"
+    },
+    "inputFields": {
+      "expected_editing_revision": "Overwrite protection number",
+      "title": "Title",
+      "body_md": "Body",
+      "workspace_id": "Workspace",
+      "type": "Type",
+      "target_type": "Target type",
+      "page_type": "Page type",
+      "id": "ID",
+      "target_id": "Target ID",
+      "page_id": "Page ID",
+      "version_id": "Version ID",
+      "resource_id": "Resource ID",
+      "target_kind": "Target kind",
+      "resource_kind": "Resource kind",
+      "resource_type": "Resource type"
+    },
+    "pageTypes": {
+      "overview": "Overview",
+      "source": "Source",
+      "entity": "Entity",
+      "concept": "Concept",
+      "synthesis": "Synthesis",
+      "comparison": "Comparison",
+      "decision": "Decision"
+    },
+    "unknownWorkspace": "Workspace name unavailable"
   },
   "intentSource": {
     "write_reason": "Agent's stated reason",

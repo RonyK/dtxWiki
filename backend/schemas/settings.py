@@ -23,7 +23,8 @@ class SettingsMcpClientData(BaseModel):
     client_type: str
     scopes: list[str]
     status: Literal["active", "disabled"]
-    connection_state: Literal["active", "expired", "revoked", "disabled"]
+    connection_state: Literal["active", "expired", "revoked", "disabled", "unknown"]
+    credential_kind: Literal["pat", "oauth", "unknown"] = "unknown"
     oauth_client_id: str | None = None
     last_used_at: datetime | None = None
     next_expiry: datetime | None = None
@@ -73,6 +74,7 @@ class SettingsMcpClientDeleteResponse(RESTResponseBase):
 
 class SettingsPolicies(BaseModel):
     workspace: PolicyCard
+    attachments: PolicyCard | None = None
     library: PolicyCard
     citation: PolicyCard
     context_write: PolicyCard
@@ -110,6 +112,7 @@ class SettingsPolicyUpdateRequest(BaseModel):
 class SettingsPolicyBatchUpdateRequest(BaseModel):
     group: Literal[
         "workspace",
+        "attachments",
         "library",
         "citation",
         "context_write",

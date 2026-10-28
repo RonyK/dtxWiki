@@ -100,7 +100,7 @@ function parseExplicitGroups(value: string): AliasGroupInputResult {
     const label = normalizeCustomFormatName(labelResult.value);
     if (
       !label ||
-      label.length > MAX_LIBRARY_CUSTOM_FORMAT_NAME_LENGTH ||
+      codePointLength(label) > MAX_LIBRARY_CUSTOM_FORMAT_NAME_LENGTH ||
       !validCustomFormatName(label)
     ) {
       return failure("invalid_label", { value: labelResult.value, groupIndex });
@@ -241,3 +241,4 @@ function firstSyntaxPosition(value: string) {
 function containsExplicitSyntax(value: string) {
   return firstSyntaxPosition(value) > 0 || "[]()".includes(value[0]);
 }
+import { codePointLength } from "../../../shared/lib/inputPolicy";

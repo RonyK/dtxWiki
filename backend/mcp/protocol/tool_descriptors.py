@@ -128,8 +128,12 @@ TOOL_META = {
     "search": (
         "Search workspace knowledge",
         "Resolve direct paths, ids, exact names, and fuzzy page names before "
-        "ranked retrieval across context, Library, feedback, changes, and "
-        "Agent pages. Keyword mode is always available; semantic and hybrid "
+        "ranked retrieval across Context, Library, and Agent pages. The all "
+        "scope excludes feedback and changes; use the explicit feedback or "
+        "change scope for authorized audit searches. All search hits use the "
+        "same ranked_results list. Set filters.include_agents=false to exclude "
+        "Agent pages before pagination. Keyword mode is always "
+        "available; semantic and hybrid "
         "modes are available when an embedding provider is configured. MRTR "
         "preview clients may optionally return a relevance ranking for large "
         "fallback result sets.",
@@ -155,10 +159,11 @@ TOOL_META = {
     ),
     "what_changed": (
         "What changed",
-        "Published-change delta since a timestamp: created/updated/archived "
-        "entries with paths, reasons and version ids. Re-sync with this "
-        "instead of re-crawling; use read_concept with as_of for "
-        "point-in-time content.",
+        "Published-change delta since a timestamp: created/updated/"
+        "archived/unpublished entries with paths, reasons and version ids. "
+        "created also marks a page published again after it was withdrawn "
+        "or archived; the reason says why. Re-sync with this instead of "
+        "re-crawling; use read_concept with as_of for point-in-time content.",
         True,
     ),
     "read": (

@@ -110,7 +110,7 @@ class WorkspaceAccess:
 @dataclass(frozen=True)
 class WorkspaceMembershipView:
     user_id: UUID
-    email: str
+    email: str | None
     display_name: str
     workspace_id: UUID
     workspace_slug: str
@@ -139,6 +139,11 @@ def get_workspace_access(
 ) -> WorkspaceAccess | None:
     membership = session.get(WorkspaceMembership, (user_id, workspace_id))
     if membership is None:
+        return None
+    workspace = session.get(Workspace, workspace_id)
+    if workspace is not None and workspace.account_deletion_user_id is not None:
+        # Held for an account's deletion: members have no access until an
+        # active admin is appointed, so landing picks another workspace.
         return None
     return WorkspaceAccess(
         workspace_id=workspace_id,
@@ -184,8 +189,7 @@ def _mcp_connection_is_disabled(
     bearer actor is known.
 
     ``session`` must already be scoped to ``workspace_id``'s own plane --
-    ``MCPClient`` is workspace-plane data (doc/design/
-    workspace-database-separation-plan.md D-1), not identity-plane like
+    ``MCPClient`` is workspace-plane data, not identity-plane like
     ``WorkspaceMembership``. ``require_workspace_role`` is the only caller;
     it opens this session from the required ``workspace_session_factory``
     kwarg rather than reusing its own (identity-plane) ``session`` argument,
@@ -387,8 +391,7 @@ def require_workspace_role(
 ) -> WorkspaceAccess:
     """Authorize ``actor`` for ``required_role`` on ``workspace_id``.
 
-    Two planes, two sessions, deliberately not merged (doc/design/
-    workspace-database-separation-plan.md D-1): ``session`` is the identity
+    Two planes, two sessions, deliberately not merged: ``session`` is the identity
     plane -- ``check_actor_can_access``/``get_workspace_access`` read
     ``WorkspaceMembership`` there. ``workspace_session_factory`` is a
     required keyword-only argument (no default -- a caller that forgets it
