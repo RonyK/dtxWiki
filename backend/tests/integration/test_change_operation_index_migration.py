@@ -17,7 +17,7 @@ INDEX_REVISION = "ef53a0a7061c"
 INDEX_NAME = "ix_change_operation_change_set_id"
 DELETION_REVISION = "eb86fdacb1bb"
 # The deletion revision's parent; the branch's one revision follows dev's head.
-DELETION_PARENT = "da94025713de"
+DELETION_PARENT = "333a67e22cd7"
 DELETION_COLUMNS = {
     "deletion_requested_at",
     "purge_after",

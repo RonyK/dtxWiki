@@ -220,6 +220,9 @@
     "password_policy_failed": "비밀번호는 8자 이상이어야 합니다.",
     "rate_limited": "요청이 너무 많습니다. 잠시 후 다시 시도하세요.",
     "review_already_claimed": "다른 검토자가 이미 이 항목을 처리하고 있습니다.",
+    "review_decision_undo_unavailable": "이 결정을 취소할 수 없습니다. 리뷰를 새로고침해 현재 상태를 확인하세요.",
+    "review_decision_id_conflict": "이 결정 요청이 이전 요청과 충돌합니다. 리뷰를 새로고침한 뒤 다시 시도하세요.",
+    "legacy_media_cutover_conflict": "첨부 파일 상태가 바뀌었습니다. 초안을 새로고침한 뒤 게시하세요.",
     "settings_policy_update_rejected": "허용되지 않는 정책 값입니다.",
     "signup_disabled": "계정 등록이 비활성화되어 있습니다.",
     "system_tree_node_protected": "시스템 폴더는 변경할 수 없습니다.",
@@ -388,7 +391,10 @@
     "member": "멤버",
     "private": "비공개",
     "public": "공개",
-    "team": "팀"
+    "team": "팀",
+    "approved": "승인됨",
+    "rejected": "거절됨",
+    "changes_requested": "변경 요청됨"
   },
   "time": {
     "unknownTime": "시간 정보 없음",
@@ -419,8 +425,8 @@
     "close": "차이 닫기",
     "closeAction": "닫기",
     "removedLine": "삭제된 줄",
-    "restore": "이 버전으로 복원",
-    "restoring": "복원 중"
+    "restore": "이 버전으로 새 초안 만들기",
+    "restoring": "새 초안 만드는 중"
   },
   "history": {
     "changes": "변경 내용",

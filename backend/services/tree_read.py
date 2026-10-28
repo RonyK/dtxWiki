@@ -11,6 +11,7 @@ from backend.models.favorite import UserFavorite
 from backend.models.library import LibraryItem
 from backend.models.review import ReviewItem
 from backend.models.tree import TreePolicy, WorkspaceTreeNode
+from backend.repositories.workspace_scoped import get_in_workspace
 from backend.schemas.read import (
     TreeListData,
     TreeNodePayload,
@@ -223,19 +224,38 @@ class TreeReadService:
         node: WorkspaceTreeNode,
         actor: "ActorContext",
     ) -> bool:
+        """``TreeProjectionService.load(...).is_visible`` for one node.
+
+        A node is visible iff its own target and its whole ancestor chain are
+        (``_ancestor_closure``), so evaluating that chain gives the projection's
+        answer without loading every node and target in the section.
+        """
         from backend.policy.trust_boundaries import actor_can_read_drafts
         from backend.services.tree_projection import TreeProjectionService
 
-        projection = TreeProjectionService().load(
-            session,
-            node.workspace_id,
-            actor,
-            sections=(node.section,),
-            # archived nodes are an editor affordance; a viewer's single-node
-            # read of an archived node degrades to not_found like the list.
-            include_archived=actor_can_read_drafts(actor),
-        )
-        return projection.is_visible(node.id)
+        # archived nodes are an editor affordance; a viewer's single-node
+        # read of an archived node degrades to not_found like the list.
+        include_archived = actor_can_read_drafts(actor)
+        chain: list[WorkspaceTreeNode] = []
+        current: WorkspaceTreeNode | None = node
+        while current is not None:
+            if (
+                any(member.id == current.id for member in chain)
+                or current.section != node.section
+                or (not include_archived and current.visibility_status != "visible")
+            ):
+                return False
+            chain.append(current)
+            if current.parent_id is None:
+                visible = TreeProjectionService._visible_ids(session, chain, actor)
+                return all(member.id in visible for member in chain)
+            current = get_in_workspace(
+                session,
+                WorkspaceTreeNode,
+                workspace_id=node.workspace_id,
+                resource_id=current.parent_id,
+            )
+        return False
 
     @staticmethod
     def visible_node_ids(

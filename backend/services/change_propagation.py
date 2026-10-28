@@ -27,6 +27,7 @@ def process_page_publish_maintenance(
     page: ContextPage,
     published_version_id: UUID,
     reason: str | None,
+    resolve_republished: bool = True,
 ) -> int:
     """Run every synchronous maintenance projection for one publish instant."""
 
@@ -36,6 +37,7 @@ def process_page_publish_maintenance(
         published_page_id=page.id,
         published_version_id=published_version_id,
         reason=reason,
+        resolve_republished=resolve_republished,
     )
     produce_page_meta_refresh_task(
         session,
@@ -56,12 +58,16 @@ def mark_dependent_pages_stale(
     published_page_id: UUID,
     published_version_id: UUID,
     reason: str | None,
+    resolve_republished: bool = True,
 ) -> int:
-    _resolve_stale_findings_for_republished_page(
-        session,
-        workspace_id=workspace_id,
-        page_id=published_page_id,
-    )
+    # A republished page answers its own stale warnings; an undone approval
+    # restores older content, so its warnings stand.
+    if resolve_republished:
+        _resolve_stale_findings_for_republished_page(
+            session,
+            workspace_id=workspace_id,
+            page_id=published_page_id,
+        )
     dependent_ids = list(
         session.scalars(
             select(EdgeProjection.source_id)

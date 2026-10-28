@@ -674,16 +674,19 @@ def _is_system_activity_item(item: ActivityItemRead) -> bool:
     )
 
 
+_REVIEW_DECISION_ACTIONS = ("review.decision", "review.decision.undo")
+
+
 def _review_decision_audit_event_clause():
     # RD-3: the audit-source half of _is_review_decision_activity_item, expressed
     # on AuditEvent so the kind split runs in SQL before the per-source limit.
-    return AuditEvent.action == "review.decision"
+    return AuditEvent.action.in_(_REVIEW_DECISION_ACTIONS)
 
 
 def _is_review_decision_activity_item(item: ActivityItemRead) -> bool:
     # RD-3: review-decision audit rows. The audit projection sets body=action,
-    # so an exact compare on the action string classifies the row.
-    return (item.body or "") == "review.decision"
+    # so exact action membership classifies decisions and their undo records.
+    return (item.body or "") in _REVIEW_DECISION_ACTIONS
 
 
 def lane_for_audit_event(event: AuditEvent) -> str:

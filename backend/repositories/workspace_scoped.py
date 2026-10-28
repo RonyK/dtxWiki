@@ -56,6 +56,27 @@ def select_in_workspace_by_ids[Model](
     )
 
 
+def select_in_workspace[Model](
+    model: type[Model],
+    *,
+    workspace_id: UUID,
+    criteria: Iterable[ColumnElement[bool]] = (),
+    conditions: Iterable[ColumnElement[bool]] = (),
+) -> Select[tuple[Model]]:
+    """Build a query whose workspace predicate cannot be omitted by its caller.
+
+    Both keyword forms narrow the required scope; even a contradictory
+    workspace criterion cannot widen it. Existing dev callers use conditions
+    and review callers use criteria on this one validated path.
+    """
+    _validate_workspace_model(model, operation="select_in_workspace")
+    return select(model).where(
+        model.workspace_id == workspace_id,  # type: ignore[attr-defined]
+        *criteria,
+        *conditions,
+    )
+
+
 def _validate_workspace_model(model: type, *, operation: str) -> None:
     _validate_workspace_scope(model, operation=operation)
     mapper = inspect(model)
@@ -75,21 +96,6 @@ def _validate_workspace_scope(model: type, *, operation: str) -> None:
 
     if "workspace_id" not in table.c or table.c.workspace_id.nullable:
         raise TypeError(f"{operation} requires a non-null workspace_id column")
-
-
-def select_in_workspace[Model](
-    model: type[Model],
-    *,
-    workspace_id: UUID,
-    conditions: Iterable[ColumnElement[bool]] = (),
-) -> Select[tuple[Model]]:
-    """Build a model read whose workspace predicate callers cannot omit.
-
-    Extra selectors only narrow the scope. Plane/PK validation is the same as
-    the single-row lookup; global audit records need their own mixed-plane API.
-    """
-    _validate_workspace_model(model, operation="select_in_workspace")
-    return select(model).where(model.workspace_id == workspace_id, *conditions)
 
 
 def list_in_workspace[Model](

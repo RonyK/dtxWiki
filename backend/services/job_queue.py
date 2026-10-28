@@ -134,12 +134,30 @@ def context_page_embed_idempotency_key(
     marker: str,
     version_id: UUID,
     content_hash: str,
+    *,
+    decision_id: UUID | None = None,
 ) -> str:
-    """Return a version-addressed key for a page-head embed trigger."""
+    """Address a page-head trigger by version or by a review transition.
+
+    After undo, a fresh decision can publish or reject the same version again.
+    Its decision ID distinguishes that transition from the earlier completed job.
+    """
 
     if marker not in {"draft", "published"}:
         raise ValueError("context embed marker must be draft or published")
+    if decision_id is not None:
+        return f"context_page:{page_id}:decision:{decision_id}"
     return f"context_page:{page_id}:{marker}:{version_id}:{content_hash}"
+
+
+def context_page_undo_embed_idempotency_key(page_id: UUID, undo_id: UUID) -> str:
+    """Return the key of the reindex an undone review decision queues.
+
+    The heads an undo restores were each indexed before, under keys a repeat
+    enqueue would match, so the undo addresses its own transition.
+    """
+
+    return f"context_page:{page_id}:undo:{undo_id}"
 
 
 class JobRetryUnsupportedTypeError(RuntimeError):

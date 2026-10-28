@@ -42,6 +42,7 @@ from backend.schemas.context_ingress import (
 from backend.schemas.input_policy import validate_request_inputs
 from backend.services.audit_service import AuditService
 from backend.services.body_preparer import BodyInput, BodyPreparer, WriteContext
+from backend.services.context_lifecycle import record_metadata_snapshot
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.page_service import refresh_page_links
 from backend.services.read_errors import (
@@ -287,6 +288,10 @@ class ContextIngressService:
             actor_provenance=actor.provenance if actor is not None else "internal",
         )
         review = None
+        coded_reason = bool(review_reason) and set(review_reason.split(",")) <= {
+            "low_confidence",
+            "page_type_decision",
+        }
         if risk_resolution.review_required:
             review = ReviewItem(
                 workspace_id=workspace_id,
@@ -295,7 +300,15 @@ class ContextIngressService:
                 status="pending",
                 risk_level=change_set.risk_level,
                 **review_risk_snapshot(risk_resolution),
-                decision_summary=review_reason or risk_resolution.summary,
+                # Coded reasons live in the risk signals; the summary is prose.
+                decision_summary=(
+                    "Ask capture requires review"
+                    if coded_reason
+                    else review_reason or risk_resolution.summary
+                ),
+                decision_summary_code=(
+                    "context_ingress_requires_review" if coded_reason else None
+                ),
             )
             session.add(review)
         proposal.status = "accepted"
@@ -507,6 +520,9 @@ class ContextIngressService:
                 diff_summary=f"{request.final_save_mode}: {request.final_title}",
                 diff_ref=f"context_page_version:{version.id}",
             )
+        )
+        record_metadata_snapshot(
+            session, change_set_id=change_set.id, page=page, version=version
         )
         if tree_node is not None:
             session.add(

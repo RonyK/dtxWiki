@@ -137,6 +137,56 @@ class ReviewAlreadyClaimedError(ReadServiceError):
     error_code = "review_already_claimed"
 
 
+class ReviewDecisionImpactChangedError(ReadServiceError):
+    """A rejection would now do more or less than the actor confirmed."""
+
+    error_code = "review_decision_impact_changed"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "the rejection's impact changed after it was previewed; "
+            "check the updated impact and decide again"
+        )
+
+
+class ReviewRejectBlockedError(ReadServiceError):
+    """A private edit sits on the drafts a rejection would retire."""
+
+    error_code = "review_reject_blocked_by_private_edit"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "a private edit is in progress on this draft; it must be submitted "
+            "or discarded before the review can be rejected"
+        )
+
+
+class ReviewDecisionUndoUnavailableError(ReadServiceError):
+    """The named decision cannot be undone (any longer)."""
+
+    error_code = "review_decision_undo_unavailable"
+
+    def __init__(self, reason_code: str) -> None:
+        self.reason_code = reason_code
+        super().__init__(
+            "something changed after this decision, so undoing it would discard "
+            "that work"
+            if reason_code == "later_changes"
+            else "this decision can no longer be undone"
+        )
+
+
+class ReviewDecisionIdConflictError(ReadServiceError):
+    """A decision receipt ID was reused for a different authenticated request."""
+
+    error_code = "decision_id_conflict"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "decision_id was already used for a different review decision"
+        )
+
+
 class RevisionSubmissionRequiredError(ReadServiceError):
     error_code = "revision_submission_required"
 

@@ -301,6 +301,8 @@ describe("mobile layout regression styles", () => {
     // `.topbar` carries no min-width:0/overflow firewall and `.topbar-actions`
     // floors itself at max-content, so a bare 1fr let intrinsic width push the
     // shell past the viewport, where overflow:hidden clipped it silently.
+    // Collapsed-shell overrides are confined to desktop media queries below;
+    // every mobile shell therefore uses this common, shrinkable track.
     expect(ruleBody(".app-shell", workspaceStyles)).toContain(
       "grid-template-columns: minmax(0, 1fr)",
     );

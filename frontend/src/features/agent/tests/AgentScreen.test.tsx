@@ -294,7 +294,7 @@ describe("AgentScreen", () => {
     expect(screen.queryByText("# Persona")).not.toBeInTheDocument();
     // An editor (owner) sees the restore affordance in History.
     expect(
-      screen.getByRole("button", { name: "Restore this version" }),
+      screen.getByRole("button", { name: "Start a new draft from this version" }),
     ).toBeInTheDocument();
 
     await userEvent.click(
@@ -712,7 +712,7 @@ describe("AgentScreen", () => {
     // and the History tab's restore (a write) is hidden for viewers (#2)
     await userEvent.click(screen.getByRole("tab", { name: /History/ }));
     expect(
-      screen.queryByRole("button", { name: "Restore this version" }),
+      screen.queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
   });
 
@@ -1790,10 +1790,10 @@ describe("AgentScreen", () => {
     expect(within(dialog).getByText("Original")).toBeInTheDocument();
     expect(within(dialog).getAllByText("Current").length).toBeGreaterThan(0);
 
-    await userEvent.click(within(dialog).getByRole("button", { name: "Restore this version" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start a new draft from this version" }));
 
     expect(confirm).toHaveBeenCalledWith(
-      "Restore Agent v2 as a new draft? The active version stays unchanged.",
+      "Create a new draft from Agent v2? The active version stays unchanged.",
     );
     const restoreCalls = () =>
       fetchMock.mock.calls.filter(
@@ -1813,7 +1813,7 @@ describe("AgentScreen", () => {
     expect(within(dialog).getByRole("combobox", { name: "Earlier version" })).toBeDisabled();
     fireEvent.change(later, { target: { value: "version-3" } });
     expect(dialog).toHaveAccessibleName("Changes in v2 since the previous version, v1");
-    expect(within(dialog).getByRole("button", { name: "Restoring" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Creating draft" })).toBeDisabled();
     expect(within(dialog).getByRole("button", { name: "Close diff" })).toBeDisabled();
 
     restoreResponse.resolve(
@@ -2072,7 +2072,7 @@ describe("AgentScreen", () => {
     // Changes (against v2), but restoring it would only stack an identical
     // version, so that action is dropped there.
     const v3 = within(panel).getByText("v3").closest(".history-card") as HTMLElement;
-    expect(within(v3).queryByRole("button", { name: "Restore this version" })).toBeNull();
+    expect(within(v3).queryByRole("button", { name: "Start a new draft from this version" })).toBeNull();
 
     await userEvent.click(
       within(v3).getByRole("button", {

@@ -1,14 +1,14 @@
 """Persist account deletion requests and their retention deadlines.
 
 Revision ID: eb86fdacb1bb
-Revises: da94025713de
+Revises: 333a67e22cd7
 """
 
 import sqlalchemy as sa
 from alembic import op
 
 revision = "eb86fdacb1bb"
-down_revision = "da94025713de"
+down_revision = "333a67e22cd7"
 branch_labels = None
 depends_on = None
 

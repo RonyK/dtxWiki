@@ -1271,7 +1271,7 @@ describe("ContextScreen", () => {
       within(draftHead).getByRole("button", { name: "Show changes in v8 since v7" }),
     ).toBeInTheDocument();
     expect(
-      within(draftHead).queryByRole("button", { name: "Restore this version" }),
+      within(draftHead).queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
     expect(publishedHead).not.toHaveAttribute("aria-current");
     expect(
@@ -1279,7 +1279,7 @@ describe("ContextScreen", () => {
     ).toBeInTheDocument();
     expect(
       within(publishedHead).getByRole("button", {
-        name: "Restore this version",
+        name: "Start a new draft from this version",
       }),
     ).toBeInTheDocument();
     expect(
@@ -1357,7 +1357,7 @@ describe("ContextScreen", () => {
       .getByText("v1")
       .closest(".history-card") as HTMLElement;
     expect(
-      within(alternative).queryByRole("button", { name: "Restore this version" }),
+      within(alternative).queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
     await userEvent.click(
       within(alternative).getByRole("button", { name: "Reconcile" }),
@@ -2464,7 +2464,7 @@ describe("ContextScreen", () => {
     expect(within(viewerHistory).queryByText("Alternative draft")).toBeNull();
     // restore is a write; viewers must not see it (backend re-enforces anyway).
     expect(
-      screen.queryByRole("button", { name: "Restore this version" }),
+      screen.queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
   });
 
@@ -2836,11 +2836,11 @@ describe("ContextScreen", () => {
     ).toHaveTextContent("Changes");
     expect(
       within(versionTwo).queryByRole("button", {
-        name: "Restore this version",
+        name: "Start a new draft from this version",
       }),
     ).toBeNull();
     expect(
-      within(versionOne).getByRole("button", { name: "Restore this version" }),
+      within(versionOne).getByRole("button", { name: "Start a new draft from this version" }),
     ).toBeInTheDocument();
 
     await userEvent.click(
@@ -2870,18 +2870,18 @@ describe("ContextScreen", () => {
       within(dialog).getByText("Current published v2 · visible to readers"),
     ).toBeInTheDocument();
     expect(
-      within(dialog).queryByRole("button", { name: "Restore this version" }),
+      within(dialog).queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
 
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Close diff" }),
     );
     await userEvent.click(
-      within(versionOne).getByRole("button", { name: "Restore this version" }),
+      within(versionOne).getByRole("button", { name: "Start a new draft from this version" }),
     );
 
     expect(confirmSpy).toHaveBeenCalledWith(
-      "Restore v1 as a new draft? The published version stays unchanged.",
+      "Create a new draft from v1? The published version stays unchanged.",
     );
     expect(fetchMock).toHaveBeenCalledWith(
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}/restore`,
@@ -3939,11 +3939,11 @@ describe("ContextScreen", () => {
       within(draftCard).getByRole("button", { name: "Show changes in v2 since v1" }),
     ).toBeInTheDocument();
     expect(
-      within(draftCard).queryByRole("button", { name: "Restore this version" }),
+      within(draftCard).queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
     expect(
       within(publishedCard).queryByRole("button", {
-        name: "Restore this version",
+        name: "Start a new draft from this version",
       }),
     ).toBeNull();
   });

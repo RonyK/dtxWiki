@@ -48,6 +48,7 @@ def build_rest_error_response(
 
 def rest_error_status(error_code: str) -> str:
     if error_code in {
+        "decision_id_conflict",
         "disambiguation_required",
         "legacy_media_cutover_conflict",
         "media_editing_not_open",

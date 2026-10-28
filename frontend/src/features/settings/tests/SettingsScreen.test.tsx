@@ -243,7 +243,7 @@ describe("SettingsScreen", () => {
     const user = userEvent.setup();
     const { fetchMock } = mockPolicyNavigationAndMcpClients();
 
-    render(
+    const view = render(
       <MemoryRouter>
         <SettingsScreen />
       </MemoryRouter>,
@@ -251,8 +251,15 @@ describe("SettingsScreen", () => {
 
     // The h1 names the destination now, not the screen; "Settings" survives
     // as the first breadcrumb.
+    // Wait for loaded content with a text query, then keep accessible-role
+    // assertions inside their UI region. Global role scans repeatedly compute
+    // visibility/names for unrelated navigation and MCP setup controls.
+    const workspaceBasics = await screen.findByText("Workspace basics");
+    const header = within(view.container.querySelector<HTMLElement>(".feature-header")!);
+    const workspaceCard = within(workspaceBasics.closest<HTMLElement>(".policy-card")!);
+    const navigation = within(screen.getByRole("navigation", { name: "Settings sections" }));
     expect(
-      await screen.findByRole("heading", { name: "Workspace", level: 1 }),
+      header.getByRole("heading", { name: "Workspace", level: 1 }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Settings" }),
@@ -262,9 +269,9 @@ describe("SettingsScreen", () => {
         "Name, owner, language, and visibility.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("Workspace basics")).toBeInTheDocument();
+    expect(workspaceBasics).toBeInTheDocument();
     expect(
-      screen.getByRole("combobox", { name: "Default language" }),
+      workspaceCard.getByRole("combobox", { name: "Default language" }),
     ).toHaveDisplayValue("English");
     // UI-04: visibility is no longer editable from this screen.
     expect(
@@ -280,10 +287,11 @@ describe("SettingsScreen", () => {
         input.toString().includes("/api/v1/auth/tokens"),
       ),
     ).toBe(true);
-    const rawSummary = screen.getByRole("button", { name: "Show raw values" });
+    const rawSummary = workspaceCard.getByRole("button", { name: "Show raw values" });
     expect(rawSummary).toHaveAttribute("aria-expanded", "false");
-    await openContentPolicies(user);
-    const agentInjectionNav = screen.getByRole("tab", {
+    await user.click(navigation.getByRole("button", { name: /^Content policies/ }));
+    const policyTabs = within(await screen.findByRole("tablist", { name: "Content policies" }));
+    const agentInjectionNav = policyTabs.getByRole("tab", {
       name: /Agent injection/i,
     });
     expect(within(agentInjectionNav).getByText("Preview")).toHaveClass(
@@ -295,19 +303,20 @@ describe("SettingsScreen", () => {
     );
 
     await user.click(
-      screen.getByRole("tab", { name: /Citation & write policy/i }),
+      policyTabs.getByRole("tab", { name: /Citation & write policy/i }),
     );
     expect(screen.getByText("Citation policy")).toBeInTheDocument();
+    const citationPanel = within(screen.getByRole("tabpanel", { name: /Citation & write policy/i }));
     // The server's "Context write policy" card had no fields and could not be
     // saved, so the tab names the two places the rules actually live.
     expect(
       screen.getByText("Publishing a knowledge page"),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Open Lint rules" }),
+      citationPanel.getByRole("button", { name: "Open Lint rules" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Open Review policy" }),
+      citationPanel.getByRole("button", { name: "Open Review policy" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByText("Agent injection policy"),
@@ -350,13 +359,16 @@ describe("SettingsScreen", () => {
     expect(screen.queryByText("internal-agent")).not.toBeInTheDocument();
     expect(screen.queryByText("System MCP clients")).not.toBeInTheDocument();
     expect(screen.getByText("Connected MCP clients")).toBeInTheDocument();
+    const clientSection = screen
+      .getByText("Connected MCP clients")
+      .closest(".mcp-clients-section") as HTMLElement;
     expect(
       fetchMock.mock.calls.some(([input]) =>
         input.toString().includes("/api/v1/auth/tokens"),
       ),
     ).toBe(true);
     // A39: the row Disable now opens a confirm before the PATCH fires.
-    await user.click(screen.getByRole("button", { name: /^Disable / }));
+    await user.click(within(clientSection).getByRole("button", { name: /^Disable / }));
     const disableDialog = screen.getByRole("dialog", {
       name: /Disable MCP client/,
     });
@@ -377,16 +389,13 @@ describe("SettingsScreen", () => {
       expect.objectContaining({ method: "PATCH" }),
     );
     // Reopen and confirm: the default Active projection removes the row.
-    await user.click(screen.getByRole("button", { name: /^Disable / }));
+    await user.click(within(clientSection).getByRole("button", { name: /^Disable / }));
     setMcpStatus("disabled");
     await user.click(
       within(
         screen.getByRole("dialog", { name: /Disable MCP client/ }),
       ).getByRole("button", { name: "Disable client" }),
     );
-    const clientSection = screen
-      .getByText("Connected MCP clients")
-      .closest(".mcp-clients-section") as HTMLElement;
     await user.click(
       within(clientSection).getByRole("radio", { name: /Other states/ }),
     );

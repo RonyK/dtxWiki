@@ -289,6 +289,9 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
     # are gated by role + a personal-queue projection in the handlers.
     ("GET", "/api/v1/workspaces/{workspace_id}/reviews"): ("review-read",),
     ("GET", "/api/v1/workspaces/{workspace_id}/reviews/counts"): ("review-read",),
+    # Captures a signed read-only selection; approval remains a separate
+    # draft-write operation with its own actor/provenance checks.
+    ("POST", "/api/v1/workspaces/{workspace_id}/reviews/selection"): ("review-read",),
     (
         "GET",
         "/api/v1/workspaces/{workspace_id}/reviews/decisions/recent",
@@ -522,6 +525,13 @@ REST_SESSION_ONLY_ROUTES: set[tuple[str, str]] = {
     (
         "POST",
         "/api/v1/workspaces/{workspace_id}/agent/pages/{agent_page_id}/activate",
+    ),
+    # Undoing a review decision reverses a person's judgement (and may
+    # withdraw a publication); no AI-held token may do it.
+    (
+        "POST",
+        "/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decisions/"
+        "{decision_id}/undo",
     ),
 }
 
