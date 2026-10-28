@@ -97,7 +97,12 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
                     users.c.default_workspace_id,
                 ).where(users.c.id == existing_id)
             ).one(),
-            connection.execute(sa.select(Workspace.__table__)).all(),
+            # Reflected: the current model maps workspace columns added later.
+            connection.execute(
+                sa.select(
+                    sa.Table("workspace", sa.MetaData(), autoload_with=connection)
+                )
+            ).all(),
             connection.execute(sa.select(WorkspaceMembership.__table__)).all(),
         )
 
@@ -489,9 +494,12 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
                 connection.scalar(sa.select(sa.func.count()).select_from(transactions))
                 == 0
             )
-            if dialect == "postgresql":
-                # SQLite model parity is already checked by the shared release
-                # head test. PostgreSQL types/constraints need this real DB.
+        if dialect == "postgresql":
+            # SQLite model parity is already checked by the shared release
+            # head test. PostgreSQL types/constraints need this real DB, at
+            # head because later revisions add their own user columns.
+            command.upgrade(config, "head")
+            with engine.connect() as connection:
                 context = MigrationContext.configure(
                     connection, opts={"include_object": include_auth_object}
                 )

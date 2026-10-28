@@ -6,10 +6,8 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from sqlalchemy import create_engine, inspect, select, text
-from sqlalchemy.orm import Session
 
-from backend.models.workspace import Workspace
-from backend.policy.rbac import grant_workspace_membership
+from backend.models.workspace import Workspace, WorkspaceMembership
 from backend.tests.integration.test_release_schema_migration import _config
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
@@ -45,22 +43,27 @@ def test_personal_pointer_round_trip_keeps_workspaces_and_defaults(
         command.upgrade(config, PARENT_REVISION)
         migrated = True
 
-        with Session(engine) as session, session.begin():
-            workspace = Workspace(
-                slug="personal-pointer", title="Pointer", name="Pointer"
+        with engine.begin() as connection:
+            # Core statements name only the columns this revision has: the
+            # current models map columns introduced after it.
+            workspace_id = uuid4()
+            connection.execute(
+                Workspace.__table__.insert(),
+                {
+                    "id": workspace_id,
+                    "slug": "personal-pointer",
+                    "title": "Pointer",
+                    "name": "Pointer",
+                },
             )
-            session.add(workspace)
-            session.flush()
-            # Use the historical table shape: the current User model includes
-            # authentication columns introduced after this revision.
-            users = sa.Table("users", sa.MetaData(), autoload_with=session.connection())
+            users = sa.Table("users", sa.MetaData(), autoload_with=connection)
             user_id = uuid4()
             stored_id = user_id.hex if dialect == "sqlite" else user_id
             stored_workspace_id = (
-                workspace.id.hex if dialect == "sqlite" else workspace.id
+                workspace_id.hex if dialect == "sqlite" else workspace_id
             )
             now = datetime.now(UTC)
-            session.execute(
+            connection.execute(
                 users.insert().values(
                     id=stored_id,
                     email="pointer@example.com",
@@ -74,11 +77,17 @@ def test_personal_pointer_round_trip_keeps_workspaces_and_defaults(
                     updated_at=now,
                 )
             )
-            grant_workspace_membership(
-                session, user_id=user_id, workspace_id=workspace.id, role="owner"
+            connection.execute(
+                Workspace.__table__.update().values(owner_user_id=user_id)
+            )
+            connection.execute(
+                WorkspaceMembership.__table__.insert(),
+                {"user_id": user_id, "workspace_id": workspace_id, "role": "owner"},
             )
             # The current model no longer maps the pointer, so set it in SQL.
-            session.execute(text(f"UPDATE users SET {POINTER} = default_workspace_id"))
+            connection.execute(
+                text(f"UPDATE users SET {POINTER} = default_workspace_id")
+            )
 
         metadata = sa.MetaData()
         with engine.connect() as connection:

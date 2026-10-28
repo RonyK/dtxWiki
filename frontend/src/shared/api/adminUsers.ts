@@ -6,6 +6,16 @@ export type AdminUserWorkspace = {
   slug: string;
   title: string;
   role: "viewer" | "editor" | "owner";
+  // Held with this user's pending deletion until an admin is appointed.
+  deletion_held?: boolean;
+};
+
+export type HeldWorkspaceMember = {
+  user_id: string;
+  email: string;
+  display_name: string;
+  status: string;
+  role: "viewer" | "editor" | "owner";
 };
 
 export type AdminUser = {
@@ -14,6 +24,10 @@ export type AdminUser = {
   display_name: string;
   status: string;
   email_verified_at: string | null;
+  deletion_requested_at: string | null;
+  purge_after: string | null;
+  deletion_failure_count?: number | null;
+  deletion_last_error?: string | null;
   workspaces: AdminUserWorkspace[];
   identities?: AdminUserIdentity[];
 };
@@ -87,6 +101,37 @@ export async function issueAdminPasswordReset(
     },
   );
   return response.data;
+}
+
+function heldMembersPath(workspaceId: string) {
+  return `/api/v1/admin/workspaces/${encodeURIComponent(workspaceId)}/members`;
+}
+
+/** Members of a workspace held for account deletion (server admins only). */
+export async function listHeldWorkspaceMembers(workspaceId: string) {
+  const response = await apiRequest<{ data: { items: HeldWorkspaceMember[] } }>(
+    `${heldMembersPath(workspaceId)}?limit=100`,
+  );
+  return response.data.items;
+}
+
+export async function addHeldWorkspaceMember(
+  workspaceId: string,
+  email: string,
+  role: "viewer" | "editor",
+) {
+  await apiRequest(heldMembersPath(workspaceId), {
+    method: "POST",
+    body: JSON.stringify({ email, role }),
+  });
+}
+
+/** Making an active member an admin reopens the held workspace. */
+export async function appointHeldWorkspaceAdmin(workspaceId: string, userId: string) {
+  await apiRequest(`${heldMembersPath(workspaceId)}/${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ role: "owner" }),
+  });
 }
 
 export type AdminEmailConflict = components["schemas"]["AdminEmailConflictData"];

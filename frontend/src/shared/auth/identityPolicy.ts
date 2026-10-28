@@ -17,6 +17,15 @@ export function normalizeAccountEmail(value: string): string {
   return normalized;
 }
 
+// Confirmation fields compare the way the server normalizes addresses.
+export function sameAccountEmail(input: string, email: string): boolean {
+  try {
+    return normalizeAccountEmail(input) === normalizeAccountEmail(email);
+  } catch {
+    return false;
+  }
+}
+
 export function normalizeAccountName(value: string): string | undefined {
   if (INVALID_LINE.test(value)) throw new Error("validation.displayName");
   const normalized = value.replace(ACCOUNT_TRIM, "");

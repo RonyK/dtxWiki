@@ -40,6 +40,7 @@ import { CountChip } from "../../shared/components/CountChip";
 import { RouteLoading } from "../../shared/components/RouteLoading";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
+import { AccountDeletionPanel } from "./AccountDeletionPanel";
 import { writeTextToClipboard } from "../../shared/lib/clipboard";
 import { LoginMethodsSection } from "./LoginMethodsSection";
 
@@ -473,6 +474,11 @@ export function AccountSecurityScreen() {
                 </Link>
               </div>
             </section>
+            <AccountDeletionPanel
+              email={user.email}
+              hasPassword={user.has_password !== false}
+              key={user.user_id}
+            />
           </div>
           </>
         ) : (

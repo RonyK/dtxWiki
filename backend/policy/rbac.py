@@ -140,6 +140,11 @@ def get_workspace_access(
     membership = session.get(WorkspaceMembership, (user_id, workspace_id))
     if membership is None:
         return None
+    workspace = session.get(Workspace, workspace_id)
+    if workspace is not None and workspace.account_deletion_user_id is not None:
+        # Held for an account's deletion: members have no access until an
+        # active admin is appointed, so landing picks another workspace.
+        return None
     return WorkspaceAccess(
         workspace_id=workspace_id,
         role=normalize_role(membership.role),

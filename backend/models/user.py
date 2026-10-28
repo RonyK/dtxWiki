@@ -46,6 +46,14 @@ class User(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         default=0,
     )
     email_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    deletion_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    purge_after: Mapped[datetime | None] = mapped_column(UTCDateTime(), index=True)
+    deletion_retention_days: Mapped[int | None] = mapped_column(Integer)
+    # Restoring a cancelled deletion returns the account to this status, so a
+    # disabled account cannot be reactivated through delete-then-restore.
+    deletion_prior_status: Mapped[str | None] = mapped_column(Text)
+    deletion_failure_count: Mapped[int | None] = mapped_column(Integer)
+    deletion_last_error: Mapped[str | None] = mapped_column(Text)
     default_workspace_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("workspace.id", ondelete="SET NULL"),
