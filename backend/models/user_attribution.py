@@ -23,6 +23,7 @@ from backend.models.auth_verification import (
 )
 from backend.models.context import ContextPageVersion
 from backend.models.favorite import UserFavorite
+from backend.models.inbox import AccountInboxEntry, WorkspaceInboxEntry
 from backend.models.mail import EmailOutbox
 from backend.models.mcp_chat import McpChatSession
 from backend.models.mcp_trace import MCPWriteIdempotency
@@ -132,6 +133,7 @@ USER_ATTRIBUTIONS: tuple[UserAttribution, ...] = (
         workspace_scoped=True,
     ),
     UserAttribution((UserFavorite.user_id,), "delete", workspace_scoped=True),
+    UserAttribution((WorkspaceInboxEntry.user_id,), "delete", workspace_scoped=True),
     UserAttribution(
         (MCPWriteIdempotency.actor_id,),
         "delete",
@@ -148,6 +150,7 @@ USER_ATTRIBUTIONS: tuple[UserAttribution, ...] = (
     # workspace rows but leave with the identity, before the owner projection
     # is recomputed from the remaining owners.
     UserAttribution((EmailOutbox.recipient_user_id,), "delete", False),
+    UserAttribution((AccountInboxEntry.user_id,), "delete", False),
     # External sign-in links, pending sign-ins and confirmations, and requests
     # to release this account's email leave with it.
     UserAttribution((UserIdentity.user_id,), "delete", False),

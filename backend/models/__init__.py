@@ -56,6 +56,7 @@ from backend.models.delegated_task import ClientDelegatedTask
 from backend.models.favorite import UserFavorite
 from backend.models.feedback import FeedbackItem
 from backend.models.graph import KnowledgeNodeStat
+from backend.models.inbox import AccountInboxEntry, WorkspaceInboxEntry
 from backend.models.job import Job, WorkspaceJobHint
 from backend.models.library import (
     LibraryArtifact,
@@ -149,6 +150,7 @@ def _verify_input_storage_encoding(_metadata, connection, **_kwargs):
 
 
 __all__ = [
+    "AccountInboxEntry",
     "ApiToken",
     "ApiTokenWorkspace",
     "AuditEvent",
@@ -257,6 +259,7 @@ __all__ = [
     "Workspace",
     "WorkspaceMembership",
     "WorkspaceCredentialGrant",
+    "WorkspaceInboxEntry",
     "WorkspaceJoinRequest",
     "WorkspacePurgeGrant",
 ]

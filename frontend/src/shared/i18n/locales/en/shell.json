@@ -32,6 +32,7 @@
     "lint": "Lint queue",
     "activity": "Activity",
     "search": "Search",
+    "inbox": "Inbox",
     "settings": "Settings"
   },
   "topbar": {
@@ -40,6 +41,7 @@
     "closeNavigation": "Close navigation",
     "openSearch": "Open Search",
     "searchTitle": "Search",
+    "inbox": "Inbox",
     "settings": "Settings",
     "myPage": "Account",
     "signIn": "Sign in",

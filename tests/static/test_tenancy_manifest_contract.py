@@ -51,7 +51,11 @@ def test_all_named_schema_objects_compile_for_postgres_identifier_limits():
     for table in Base.metadata.tables.values():
         for constraint in table.constraints:
             if constraint.name is not None:
-                compiled.append(str(AddConstraint(constraint).compile(dialect=dialect)))
+                # isolate_from_table=False: by default AddConstraint marks the
+                # shared constraint as created separately, so every later
+                # create_all in this process would omit it from CREATE TABLE.
+                statement = AddConstraint(constraint, isolate_from_table=False)
+                compiled.append(str(statement.compile(dialect=dialect)))
         for index in table.indexes:
             if index.name is not None:
                 compiled.append(str(CreateIndex(index).compile(dialect=dialect)))

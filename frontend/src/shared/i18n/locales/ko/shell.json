@@ -32,6 +32,7 @@
     "lint": "린트 큐",
     "activity": "활동",
     "search": "검색",
+    "inbox": "수신함",
     "settings": "설정"
   },
   "topbar": {
@@ -40,6 +41,7 @@
     "closeNavigation": "내비게이션 닫기",
     "openSearch": "검색 열기",
     "searchTitle": "검색",
+    "inbox": "수신함",
     "settings": "설정",
     "myPage": "계정",
     "signIn": "로그인",

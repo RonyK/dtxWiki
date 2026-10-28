@@ -112,6 +112,11 @@ const DashboardScreen = lazy(() =>
     default: module.DashboardScreen,
   })),
 );
+const InboxScreen = lazy(() =>
+  import("../features/inbox/InboxScreen").then((module) => ({
+    default: module.InboxScreen,
+  })),
+);
 const ReviewScreen = lazy(() =>
   import("../features/review/ReviewScreen").then((module) => ({
     default: module.ReviewScreen,
@@ -297,6 +302,14 @@ export const appRoutes = createRoutesFromElements(
         element={
           <RequireAuth>
             <ActivityLanePage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/inbox"
+        element={
+          <RequireAuth>
+            <InboxScreen />
           </RequireAuth>
         }
       />

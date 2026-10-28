@@ -1111,6 +1111,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/me/inbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Account Inbox */
+        get: operations["list_account_inbox_api_v1_users_me_inbox_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/me/inbox/marks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark Account Inbox Item */
+        post: operations["mark_account_inbox_item_api_v1_users_me_inbox_marks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspace-directory": {
         parameters: {
             query?: never;
@@ -2043,6 +2077,40 @@ export interface paths {
         put?: never;
         /** Submit Feedback */
         post: operations["submit_feedback_api_v1_workspaces__workspace_id__feedback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/inbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Workspace Inbox */
+        get: operations["list_workspace_inbox_api_v1_workspaces__workspace_id__inbox_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/inbox/marks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark Workspace Inbox Item */
+        post: operations["mark_workspace_inbox_item_api_v1_workspaces__workspace_id__inbox_marks_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6485,6 +6553,80 @@ export interface components {
         /** IdentityListResponse */
         IdentityListResponse: {
             data: components["schemas"]["IdentityListData"];
+        };
+        /** InboxDisplayPayload */
+        InboxDisplayPayload: {
+            /** Href */
+            href?: string | null;
+            /** Params */
+            params?: {
+                [key: string]: string | number | boolean | null;
+            };
+            /** Title */
+            title?: string | null;
+        };
+        /** InboxItemPayload */
+        InboxItemPayload: {
+            /** Archived */
+            archived: boolean;
+            display: components["schemas"]["InboxDisplayPayload"] | null;
+            /** Event At */
+            event_at: string | null;
+            /** Item Key */
+            item_key: string;
+            /** Kind */
+            kind: string;
+            /** Revision */
+            revision: string;
+            /** Unread */
+            unread: boolean;
+        };
+        /** InboxMarkPayload */
+        InboxMarkPayload: {
+            /** Applied */
+            applied: boolean;
+            item: components["schemas"]["InboxItemPayload"];
+        };
+        /** InboxMarkRequest */
+        InboxMarkRequest: {
+            /** Archived */
+            archived?: boolean | null;
+            /** Item Key */
+            item_key: string;
+            /** Kind */
+            kind: string;
+            /** Read */
+            read?: boolean | null;
+            /** Revision */
+            revision: string;
+        };
+        /** InboxMarkResponse */
+        InboxMarkResponse: {
+            data: components["schemas"]["InboxMarkPayload"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** InboxOverflowPayload */
+        InboxOverflowPayload: {
+            /** Kind */
+            kind: string;
+            /** Total */
+            total: number;
+        };
+        /** InboxPagePayload */
+        InboxPagePayload: {
+            /** Items */
+            items: components["schemas"]["InboxItemPayload"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Status Items */
+            status_items: components["schemas"]["InboxItemPayload"][];
+            /** Status Overflow */
+            status_overflow: components["schemas"]["InboxOverflowPayload"][];
+        };
+        /** InboxPageResponse */
+        InboxPageResponse: {
+            data: components["schemas"]["InboxPagePayload"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** InstructionArtifact */
         InstructionArtifact: {
@@ -15588,6 +15730,144 @@ export interface operations {
             };
         };
     };
+    list_account_inbox_api_v1_users_me_inbox_get: {
+        parameters: {
+            query?: {
+                state?: "all" | "unread" | "archived";
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxPageResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    mark_account_inbox_item_api_v1_users_me_inbox_marks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InboxMarkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxMarkResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
     list_workspace_directory_api_v1_workspace_directory_get: {
         parameters: {
             query?: {
@@ -20068,6 +20348,148 @@ export interface operations {
             };
             /** @description Unprocessable Entity */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    list_workspace_inbox_api_v1_workspaces__workspace_id__inbox_get: {
+        parameters: {
+            query?: {
+                state?: "all" | "unread" | "archived";
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxPageResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    mark_workspace_inbox_item_api_v1_workspaces__workspace_id__inbox_marks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InboxMarkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxMarkResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

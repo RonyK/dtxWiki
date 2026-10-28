@@ -1,0 +1,41 @@
+{
+  "title": "Inbox",
+  "description": "Messages addressed to you in this workspace and on your account.",
+  "loading": "Loading Inbox",
+  "loadMore": "Load more",
+  "scope": {
+    "label": "Inbox scope",
+    "workspace": "Current workspace",
+    "account": "Account"
+  },
+  "state": {
+    "label": "Show",
+    "all": "Inbox",
+    "unread": "Unread",
+    "archived": "Archived"
+  },
+  "status": {
+    "label": "Current status",
+    "overflow": "{{total}} in total; open the source for the rest."
+  },
+  "items": {
+    "label": "Messages"
+  },
+  "empty": {
+    "all": "No messages.",
+    "unread": "No unread messages.",
+    "archived": "No archived messages."
+  },
+  "item": {
+    "unknown": "A message this version cannot show",
+    "untitled": "Untitled message",
+    "unread": "Unread",
+    "read": "Read"
+  },
+  "actions": {
+    "markRead": "Mark as read",
+    "markUnread": "Mark as unread",
+    "archive": "Archive",
+    "unarchive": "Move back to Inbox"
+  }
+}
