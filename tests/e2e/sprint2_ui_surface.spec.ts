@@ -549,7 +549,6 @@ test.describe("Sprint 2 UI surface", () => {
     await expect(page.getByRole("button", { name: /^MCP access/i }))
       .toHaveAttribute("aria-current", "page");
 
-    await page.goto("/settings?section=mcp");
     const readScope = page.getByRole("checkbox", {
       name: /Read - view sources and pages/,
     });

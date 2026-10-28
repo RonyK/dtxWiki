@@ -139,12 +139,13 @@ test.describe("CSS cascade regressions @cross-browser", () => {
  *
  * jsdom applies no author stylesheets and implements no grid layout, so a
  * unit test asserting the JSX shape (or even the DOM class list) would pass
- * whether or not this regresses. Every assertion below reads real computed
- * geometry from a browser with the app's own stylesheets loaded, exactly
- * like the CSS cascade regressions above.
+ * whether or not this regresses. U-1 and U-5 read real computed geometry
+ * from a browser with the app's own stylesheets loaded, exactly like the CSS
+ * cascade regressions above, so they run on every engine. U-7 checks only
+ * which badge text renders and stays on Chromium.
  */
-test.describe("U-1/U-5/U-7: entity-row badge grid overflow @cross-browser", () => {
-  test("U-1: two badges in one Context row share a grid cell instead of overflowing it", async ({
+test.describe("U-1/U-5/U-7: entity-row badge grid overflow", () => {
+  test("U-1: two badges in one Context row share a grid cell instead of overflowing it @cross-browser", async ({
     page,
   }, testInfo) => {
     // DEV-05 was reported on the phone layout: at 390px the fifth grid child
@@ -358,7 +359,7 @@ test.describe("U-1/U-5/U-7: entity-row badge grid overflow @cross-browser", () =
     await expect(row.locator(".status-pill")).toHaveText(["Draft"]);
   });
 
-  test("U-5: C2 search cards keep desktop titles inline and mobile titles below the kind", async ({
+  test("U-5: C2 search cards keep desktop titles inline and mobile titles below the kind @cross-browser", async ({
     page,
   }, testInfo) => {
     await authenticatePage(page, testInfo, "u5-search-card");
