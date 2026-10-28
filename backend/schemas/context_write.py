@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from backend.schemas.common import DraftReviewReason, RESTResponseBase
+from backend.schemas.common import DraftReviewReason, RESTErrorBody, RESTResponseBase
 from backend.schemas.input_policy import InputRequest
 from backend.schemas.page import (
     BODY_MD_MAX_LENGTH,
@@ -623,6 +623,9 @@ class FeedbackListResponse(RESTResponseBase):
 
 
 class ReviewDecisionRequest(InputRequest):
+    # Reuse this ID when retrying an uncertain send. It becomes the durable
+    # decision ledger ID, so a retry cannot add another request_changes round.
+    decision_id: UUID | None = None
     decision_type: Literal["approve", "reject", "request_changes"]
     decision_reason: str | None = None
     # Optional routing target, only meaningful on request_changes (ⓐ/ⓒ).
@@ -633,6 +636,10 @@ class ReviewDecisionRequest(InputRequest):
     # current single "Request changes" button keeps working until the routing
     # picker ships in the T15 frontend.
     audience_kind: Literal["chat_owner", "requester", "workspace_editors"] | None = None
+    # Reject only: the impact_fingerprint of the previewed rejection. When the
+    # impact changed before the decision, the server refuses with 409
+    # review_decision_impact_changed instead of rejecting more than was shown.
+    expected_impact_fingerprint: str | None = Field(default=None, max_length=128)
 
     @model_validator(mode="after")
     def require_request_changes_reason(self) -> "ReviewDecisionRequest":
@@ -646,6 +653,11 @@ class ReviewDecisionRequest(InputRequest):
         # not allowed on approve/reject.
         if self.decision_type != "request_changes" and self.audience_kind is not None:
             raise ValueError("audience_kind is only allowed when requesting changes")
+        if (
+            self.decision_type != "reject"
+            and self.expected_impact_fingerprint is not None
+        ):
+            raise ValueError("expected_impact_fingerprint is only allowed on reject")
         return self
 
     model_config = ConfigDict(extra="forbid")
@@ -667,6 +679,139 @@ class ReviewDecisionPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ReviewDocumentTarget(BaseModel):
+    """Actor-visible document identity, independent of an operation's raw ID."""
+
+    document_kind: Literal["context", "agent", "library"]
+    document_id: UUID | None = None
+    title: str | None = None
+    slug: str | None = None
+    reader_href: str | None = None
+    can_open: bool = False
+    unavailable_reason: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReviewContentTarget(BaseModel):
+    """The exact reviewed version and its independently authorized baseline."""
+
+    mode: Literal["context_version", "metadata_only", "unsupported", "unavailable"]
+    candidate_version_id: UUID | None = None
+    candidate_version_no: int | None = None
+    baseline_kind: Literal["published", "parent", "empty", "unavailable"] = (
+        "unavailable"
+    )
+    baseline_version_id: UUID | None = None
+    baseline_version_no: int | None = None
+    can_read: bool = False
+    can_diff: bool = False
+    unavailable_reason: str | None = None
+    is_current_candidate: bool | None = None
+    # Set when the candidate was written on an earlier, still unpublished
+    # draft: comparing against it shows this draft's own change, while the
+    # baseline above shows what publishing it would change.
+    draft_parent_version_id: UUID | None = None
+    draft_parent_version_no: int | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReviewActionAvailability(BaseModel):
+    allowed: bool
+    reason_code: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReviewActionCapabilities(BaseModel):
+    approve: ReviewActionAvailability
+    reject: ReviewActionAvailability
+    request_changes: ReviewActionAvailability
+    edit_directly: ReviewActionAvailability
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReviewVersionRef(BaseModel):
+    version_id: UUID
+    version_no: int
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReviewRejectEffect(BaseModel):
+    effect: Literal[
+        "restore_published",
+        "hide_unpublished",
+        "no_head_change",
+        "restore_previous_draft",
+    ]
+    document_id: UUID | None = None
+    candidate_version_id: UUID | None = None
+    candidate_version_no: int | None = None
+    published_version_id: UUID | None = None
+    published_version_no: int | None = None
+    visible_sibling_review_ids: list[UUID] = Field(default_factory=list)
+    visible_sibling_count: int = Field(default=0, ge=0)
+    # Later drafts written on top of the candidate, oldest first. Rejecting the
+    # candidate rejects them too; their open reviews are settled with it.
+    cascaded_versions: list[ReviewVersionRef] = Field(default_factory=list)
+    visible_cascaded_review_ids: list[UUID] = Field(default_factory=list)
+    cascaded_review_count: int = Field(default=0, ge=0)
+    # restore_previous_draft: the earlier draft that becomes the edit head.
+    resulting_draft_version_id: UUID | None = None
+    resulting_draft_version_no: int | None = None
+    # That draft has no open review left, so rejecting opens a new one for it.
+    restores_review: bool = False
+    # Before a first publication, the earlier draft's page metadata could not
+    # be restored (it predates per-draft metadata), so the current values stay.
+    metadata_kept: bool = False
+    # Set when the rejection cannot run, e.g. a private edit sits on top.
+    blocked_reason: Literal["private_edit_in_progress"] | None = None
+    # Binds a confirmation to exactly this impact (see ReviewDecisionRequest).
+    impact_fingerprint: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReviewSettlement(BaseModel):
+    """Why a superseded review was closed, and by which decided review."""
+
+    reason_code: str
+    by_review_item_id: UUID | None = None
+    by_version_no: int | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReviewDecisionUndo(BaseModel):
+    """Undo of the review's latest decision, for an actor who may undo it.
+
+    The decider or an owner may undo a decision; any editor may undo an
+    automatic approval. Absent for actors without that permission. Decisions
+    without a recorded effect return available=False with not_recorded;
+    recorded effects that cannot be reversed use unsupported_effect.
+    """
+
+    decision_id: UUID
+    decision_type: str
+    available: bool
+    # later_changes: something changed after the decision, so undoing it would
+    # discard that work. not_recorded and unsupported_effect explain why a
+    # decision cannot be reversed even when no later change occurred.
+    reason_code: Literal[
+        "later_changes", "not_recorded", "unsupported_effect"
+    ] | None = None
+    # While unavailable: the version whose content a new draft can start from
+    # instead (the version an approval replaced, or the rejected draft).
+    restore_version_id: UUID | None = None
+    restore_version_no: int | None = None
+    page_id: UUID | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ReviewEvidenceOperation(BaseModel):
     operation_id: UUID
     target_type: str
@@ -677,6 +822,8 @@ class ReviewEvidenceOperation(BaseModel):
     operation: str
     diff_summary: str | None = None
     diff_ref: str | None = None
+    document: ReviewDocumentTarget | None = None
+    content: ReviewContentTarget | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -718,12 +865,16 @@ class ReviewItemDetail(BaseModel):
     claimed_at: datetime | None
     can_decide: bool
     can_claim: bool
+    actions: ReviewActionCapabilities | None = None
+    reject_effect: ReviewRejectEffect | None = None
     created_at: datetime
     updated_at: datetime
     evidence: ReviewEvidencePayload | None
     decisions: list[ReviewDecisionPayload]
     published_version_id: UUID | None = None
     superseded_review_count: int = 0
+    settlement: ReviewSettlement | None = None
+    undo: ReviewDecisionUndo | None = None
     reconciliation_available: bool = False
     reconciliation_page_id: UUID | None = None
     reconciliation_version_id: UUID | None = None
@@ -836,6 +987,7 @@ class ReviewBulkDecisionFilters(BaseModel):
     status: str | None = None
     risk_level: str | None = None
     scope: Literal["to_me", "from_me", "all"] = "all"
+    target_page_id: UUID | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -843,13 +995,20 @@ class ReviewBulkDecisionFilters(BaseModel):
 class ReviewBulkDecisionRequest(BaseModel):
     review_item_ids: list[UUID] | None = Field(default=None, max_length=500)
     filters: ReviewBulkDecisionFilters | None = None
+    selection_token: str | None = Field(default=None, max_length=1_500_000)
+    batch_limit: int = Field(default=500, ge=1, le=500)
     decision_type: Literal["approve"]
     dry_run: bool = False
 
     @model_validator(mode="after")
     def require_target(self) -> "ReviewBulkDecisionRequest":
-        if self.review_item_ids is None and self.filters is None:
-            raise ValueError("review_item_ids or filters is required")
+        if self.selection_token is not None:
+            if self.review_item_ids is not None or self.filters is not None:
+                raise ValueError(
+                    "selection_token cannot be combined with another target"
+                )
+        elif self.review_item_ids is None and self.filters is None:
+            raise ValueError("review_item_ids, filters or selection_token is required")
         return self
 
     model_config = ConfigDict(extra="forbid")
@@ -858,6 +1017,20 @@ class ReviewBulkDecisionRequest(BaseModel):
 class ReviewBulkSkippedItem(BaseModel):
     id: UUID
     reason: str
+    reason_code: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReviewBulkItemOutcome(BaseModel):
+    id: UUID
+    outcome: Literal["approved", "auto_settled", "excluded", "failed"]
+    reason_code: str | None = None
+    reason: str | None = None
+    target_title: str | None = None
+    target_version_no: int | None = None
+    # approved and undoable now: the decision a per-document undo names.
+    decision_id: UUID | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -865,6 +1038,14 @@ class ReviewBulkSkippedItem(BaseModel):
 class ReviewBulkDecisionPayload(BaseModel):
     approved: list[UUID]
     skipped: list[ReviewBulkSkippedItem]
+    auto_settled_review_item_ids: list[UUID] = Field(default_factory=list)
+    outcomes: list[ReviewBulkItemOutcome] = Field(default_factory=list)
+    next_selection_token: str | None = None
+    selection_complete: bool = True
+    processed_count: int = 0
+    remaining_count: int = 0
+    total: int = 0
+    requires_reconfirmation: bool = False
 
     model_config = ConfigDict(extra="forbid")
 
@@ -873,6 +1054,68 @@ class ReviewBulkDecisionResponse(RESTResponseBase):
     data: ReviewBulkDecisionPayload
 
     model_config = ConfigDict(extra="forbid")
+
+
+class ReviewSelectionRequest(BaseModel):
+    # The service reports an operational-limit refusal with total + limit;
+    # rejecting here would lose that actionable error body.
+    review_item_ids: list[UUID] | None = Field(
+        default=None, json_schema_extra={"maxItems": 5000}
+    )
+    filters: ReviewBulkDecisionFilters | None = None
+
+    @model_validator(mode="after")
+    def require_one_target(self) -> "ReviewSelectionRequest":
+        if (self.review_item_ids is None) == (self.filters is None):
+            raise ValueError("exactly one of review_item_ids or filters is required")
+        return self
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReviewSelectionItem(BaseModel):
+    id: UUID
+    eligible: bool
+    will_auto_settle: bool = False
+    # Only an eligible representative exposes its actor-visible same-candidate
+    # effect. The global impact list is the union of these per-item subsets.
+    auto_settled_review_item_ids: list[UUID] = Field(default_factory=list)
+    reason_code: str | None = None
+    reason: str | None = None
+    target_title: str | None = None
+    target_version_no: int | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReviewSelectionPayload(BaseModel):
+    selection_token: str
+    expires_at: datetime
+    total: int
+    limit: int = 5000
+    review_item_ids: list[UUID]
+    eligible_count: int
+    items: list[ReviewSelectionItem]
+    auto_settled_review_item_ids: list[UUID] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReviewSelectionResponse(RESTResponseBase):
+    data: ReviewSelectionPayload
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReviewSelectionLimitDetails(BaseModel):
+    total: int
+    limit: int
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReviewSelectionLimitErrorBody(RESTErrorBody):
+    details: ReviewSelectionLimitDetails
 
 
 class ReviewAutoApprovalSweepPayload(BaseModel):

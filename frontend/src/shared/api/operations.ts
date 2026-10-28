@@ -70,6 +70,8 @@ export type ReviewEvidence = components["schemas"]["ReviewEvidencePayload"];
 // Derived from the generated schema: the backend types both the audience and
 // reconciliation affordances, so this type no longer needs a manual overlay.
 export type ReviewItem = components["schemas"]["ReviewItemDetail"];
+export type ReviewDecisionUndo = components["schemas"]["ReviewDecisionUndo"];
+export type ReviewContentTarget = components["schemas"]["ReviewContentTarget"];
 export type ReviewItemListData =
   components["schemas"]["ReviewItemListPayload"];
 
@@ -81,7 +83,21 @@ export type ReviewBulkDecisionFilters = {
   status?: ReviewStatusFilter | string;
   risk_level?: string;
   scope?: ReviewScope;
+  target_page_id?: string;
 };
+
+export type ReviewSelection = components["schemas"]["ReviewSelectionPayload"];
+
+export async function createReviewSelection(
+  workspaceId: string,
+  input: { review_item_ids?: string[]; filters?: ReviewBulkDecisionFilters },
+) {
+  const response = await apiRequest<{ data: ReviewSelection }>(
+    `/api/v1/workspaces/${workspaceId}/reviews/selection`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+  return response.data;
+}
 
 export type ReviewBulkDecisionResult =
   components["schemas"]["ReviewBulkDecisionPayload"];
@@ -344,7 +360,11 @@ export async function decideReview(
   reviewItemId: string,
   decision_type: ReviewDecisionType,
   decision_reason?: string | null,
-  options: { audience_kind?: ReviewAudienceKind } = {},
+  options: {
+    audience_kind?: ReviewAudienceKind;
+    decision_id?: string;
+    expected_impact_fingerprint?: string | null;
+  } = {},
 ) {
   const response = await apiRequest<{ data: ReviewItem }>(
     `/api/v1/workspaces/${workspaceId}/reviews/${reviewItemId}/decision`,
@@ -353,6 +373,11 @@ export async function decideReview(
       body: JSON.stringify({
         decision_type,
         decision_reason: decision_reason || null,
+        ...(options.decision_id ? { decision_id: options.decision_id } : {}),
+        // Reject only: binds the decision to the impact the dialog showed.
+        ...(options.expected_impact_fingerprint
+          ? { expected_impact_fingerprint: options.expected_impact_fingerprint }
+          : {}),
         // Only include audience_kind when routing a request_changes decision;
         // omitting it preserves the server default for approve/reject.
         ...(options.audience_kind
@@ -364,6 +389,18 @@ export async function decideReview(
   return response.data;
 }
 
+export async function undoReviewDecision(
+  workspaceId: string,
+  reviewItemId: string,
+  decisionId: string,
+) {
+  const response = await apiRequest<{ data: ReviewItem }>(
+    `/api/v1/workspaces/${workspaceId}/reviews/${reviewItemId}/decisions/${decisionId}/undo`,
+    { method: "POST" },
+  );
+  return response.data;
+}
+
 export async function decideReviewsBulk(
   workspaceId: string,
   request: {
@@ -371,6 +408,8 @@ export async function decideReviewsBulk(
     filters?: ReviewBulkDecisionFilters | null;
     decision_type: "approve";
     dry_run?: boolean;
+    selection_token?: string;
+    batch_limit?: number;
   },
 ) {
   const response = await apiRequest<{ data: ReviewBulkDecisionResult }>(

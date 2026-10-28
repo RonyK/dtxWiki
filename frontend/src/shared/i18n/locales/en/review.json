@@ -90,13 +90,16 @@
       "approve": "Approved",
       "request_changes": "Requested changes",
       "reject": "Rejected",
-      "comment": "Commented"
+      "comment": "Commented",
+      "undo": "Undo"
     }
   },
   "decisionSummary": {
     "context_draft_requires_review": "Context draft requires review",
     "context_update_requires_review": "Context update draft requires review",
-    "context_update_workflow_sequence_incomplete": "Context update draft requires review because the workflow sequence is incomplete"
+    "context_update_workflow_sequence_incomplete": "Context update draft requires review because the workflow sequence is incomplete",
+    "context_ingress_requires_review": "Ask capture requires review",
+    "context_draft_restored_after_rejection": "Draft restored after a later draft was rejected"
   },
   "policy": {
     "title": "Review risk policy",
@@ -135,11 +138,10 @@
     "selectReview": "Select {{title}}",
     "approveSelected": "Approve selected",
     "confirmTitle": "Review bulk approval",
-    "confirmBody": "{{count}} reviews are eligible to approve under the current filters. Items that can no longer be approved are skipped and listed in the result.",
     "confirmApproveCount": "Approve {{count}}",
     "approving": "Approving",
-    "approvalImpact_one": "Approving the selected page versions will also settle {{count}} earlier pending review.",
-    "approvalImpact_other": "Approving the selected page versions will also settle {{count}} earlier pending reviews.",
+    "approvalImpact_one": "1 other review of this version or its earlier drafts will also be settled.",
+    "approvalImpact_other": "{{count}} other reviews of this version or its earlier drafts will also be settled.",
     "previewEligible": "{{count}} eligible",
     "previewSkipped": "{{count}} skipped",
     "result": "Approved {{approved}} reviews. Skipped {{skipped}}.",
@@ -149,10 +151,13 @@
     "discardTitle": "Discard selected reconciliation branches?",
     "discardBody": "Only explicitly eligible branches will be discarded. Ineligible or stale items are returned with an error code.",
     "discardReason": "Discard reason",
+    "discardBlocked": "The review state changed. Close this dialog and refresh the queue before continuing.",
     "discarding": "Discarding",
     "confirmDiscard": "Discard selected branches",
     "discardResult": "Discarded {{discarded}} branches. Skipped {{skipped}}.",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "approvalImpact": "{{count}} other reviews of this version or its earlier drafts will also be settled.",
+    "confirmSelectedBody": "{{count}} of {{total}} selected reviews can be approved. Review automatic settlements and excluded items below."
   },
   "routing": {
     "title": "Request changes",
@@ -176,7 +181,9 @@
   },
   "reject": {
     "confirmTitle": "Reject this review?",
-    "confirmBody": "Rejecting is final and removes the item from the queue.",
+    "confirmBody": "Confirm the target version and its document effect before rejecting.",
+    "checkingImpact": "Checking the current rejection impact…",
+    "recheckImpact": "Check again",
     "confirming": "Rejecting",
     "cancel": "Cancel"
   },
@@ -218,15 +225,16 @@
     "reasonPlaceholder": "Add context for this decision.",
     "reasonHint": "Required for Request changes. Optional for Approve and Reject.",
     "actionBusy": "Review action is already being submitted.",
-    "approvalImpact_one": "Approving will publish this version. {{count}} earlier pending review will be settled with it.",
-    "approvalImpact_other": "Approving will publish this version. {{count}} earlier pending reviews will be settled with it.",
+    "approvalImpact_one": "This version will be published; 1 other review of this version or its earlier drafts will also be settled.",
+    "approvalImpact_other": "This version will be published; {{count}} other reviews of this version or its earlier drafts will also be settled.",
     "summary": "Summary",
     "whyRisk": "Why this risk?",
     "policyVersion": "Policy",
     "decisionHistory": "Decision history",
     "previousDecision": "Previous decision",
     "submitted": "Submitted",
-    "enteredQueue": "Entered the decision queue"
+    "enteredQueue": "Entered the decision queue",
+    "approvalImpact": "This version will be published; {{count}} other reviews of this version or its earlier drafts will also be settled."
   },
   "actions": {
     "moreActivities": "View all activity",
@@ -262,7 +270,8 @@
       "request_changes": "Requested changes",
       "reject": "Rejected",
       "comment": "Commented",
-      "revision_submitted": "Revision submitted"
+      "revision_submitted": "Revision submitted",
+      "undo": "Decision undone"
     },
     "actorType": {
       "human": "Human",
@@ -283,7 +292,9 @@
       "tree_rename": "Tree rename",
       "tree_reorder": "Tree reorder",
       "tree_delete": "Tree delete",
-      "tree_place": "Tree place"
+      "tree_place": "Tree place",
+      "restore_after_rejection": "Restored after rejection",
+      "publish_revert": "Publication reverted"
     },
     "triggerType": {
       "mcp_write_draft": "MCP write draft",
@@ -298,7 +309,9 @@
       "tree_mutation": "Tree mutation",
       "library_registration": "Library registration",
       "source_deleted": "Source deleted",
-      "schedule": "Schedule"
+      "schedule": "Schedule",
+      "context_draft_restore": "Draft restored",
+      "context_page_publish_revert": "Publication reverted"
     },
     "changeSetStatus": {
       "draft_created": "Draft created",
@@ -312,5 +325,213 @@
       "accepted": "Accepted",
       "rejected": "Rejected"
     }
+  },
+  "workflow": {
+    "publicationNotice": "Approving publishes review version v{{version}}.",
+    "reviewOrdinal": "Review {{number}}",
+    "decisionSaved": "Decision saved",
+    "nextReview": "Next review",
+    "savedRefreshFailed": "The decision was saved, but the queue could not be refreshed. Reload the queue only.",
+    "refreshQueue": "Reload queue",
+    "outsideFilters": "This review is outside the current queue filters. The queue and its counts keep their filter scope.",
+    "optionalReason": "Add a decision reason (optional)",
+    "reviewInformation": "Review information",
+    "citationSkipped": "Recorded citation-call skip flag",
+    "yes": "Yes",
+    "no": "No",
+    "collapseAll": "Collapse all",
+    "expandAll": "Expand all",
+    "viewing": "Viewing",
+    "selectDocumentGroup": "Select all reviews matching this document’s filters: {{title}}",
+    "expandGroup": "Expand {{title}}",
+    "collapseGroup": "Collapse {{title}}",
+    "selectingGroup": "Loading the complete selection…",
+    "groupSelected": "{{count}} selected for this document",
+    "approveGroupSelection": "Approve selection",
+    "noFilterMatches": "No reviews match these filters.",
+    "bulkChanged": "The targets or automatic settlement impact changed. Completed decisions are preserved; preview the remaining items again.",
+    "bulkInterrupted": "Some decisions were saved before processing stopped. Check the results and preview the remaining items.",
+    "decisionOutcomeUnknown": "The decision result is unconfirmed. Decisions are locked to prevent duplicate requests. Refresh the queue to check the saved result.",
+    "decisionFailedKeepDraft": "The decision could not be saved. Your draft is preserved. Check the state before trying again.",
+    "fixedSelection": "Fixed selection: {{count}} items · expires {{expires}}",
+    "unavailableReview": "Review details unavailable",
+    "autoSettled": "Settled with the version being approved",
+    "eligible": "Eligible for approval",
+    "rejectCandidate": "Review version v{{version}}",
+    "rejectReviewOnly": "Effect of rejecting this review",
+    "rejectEffectUnavailable": "The document effect cannot be determined for this review. Check its operation type and evidence.",
+    "rejectSiblingImpact": "{{count}} visible reviews for the same candidate will also be settled.",
+    "itemResults": "Item results · {{processed}} / {{total}}",
+    "openReview": "Open review",
+    "moreResults": "Show {{count}} more results",
+    "selectionLimit": "The selection has {{count}} items, exceeding the {{limit}}-item limit. Narrow the filters.",
+    "documentKinds": {
+      "context": "Context",
+      "agent": "Agent",
+      "library": "Library",
+      "multiple": "Multiple targets",
+      "unknown": "Target type unavailable"
+    },
+    "rejectEffects": {
+      "restore_published": "The review draft is removed from the current document; published v{{version}} remains.",
+      "hide_unpublished": "There is no published version; the document will not appear in the normal reader after rejection.",
+      "no_head_change": "This rejection does not change the current document head.",
+      "restore_previous_draft": "The edit base returns to v{{version}}."
+    },
+    "outcomes": {
+      "approved": "Approved",
+      "auto_settled": "Automatically settled",
+      "excluded": "Excluded",
+      "failed": "Failed"
+    },
+    "reasons": {
+      "review_selection_invalid": "This selection is invalid or belongs to another reviewer. Preview again.",
+      "review_selection_expired": "The selection expired. Preview the remaining items again.",
+      "review_selection_changed": "The targets or settlement impact changed. Preview again.",
+      "review_selection_limit_exceeded": "The selection limit was exceeded. Narrow the filters.",
+      "representative_not_approved": "The representative review was not approved, so this review was not automatically settled.",
+      "not_eligible_for_approval": "This review is not eligible for approval.",
+      "superseded_by_approved_publish": "Settled because a version that includes these changes was approved.",
+      "review_resolved": "This review has already been decided.",
+      "reconciliation_required": "This review requires reconciliation or explicit draft discard.",
+      "insufficient_role": "You do not have permission to make this decision.",
+      "not_in_audience": "You are not in the current review audience.",
+      "claim_conflict": "Another editor is working on this review. Refresh its state.",
+      "human_approval_required": "Approval by a human reviewer is required.",
+      "change_set_unavailable": "The change set is unavailable.",
+      "candidate_unavailable": "The review candidate is unavailable.",
+      "stale_candidate": "This version can't be published as reviewed. Check the page's latest draft.",
+      "publication_blocked": "This candidate cannot currently be published. Check the evidence.",
+      "activation_not_allowed": "This Agent version cannot currently be activated.",
+      "not_requested_changes": "The review is not in the changes-requested state.",
+      "unsupported_revision": "This revision does not support that decision.",
+      "superseded_by_rejected_ancestor": "Settled because an earlier version it builds on was rejected.",
+      "review_decision_impact_changed": "The rejection's impact changed while you were confirming. Check the updated impact and reject again.",
+      "review_reject_blocked_by_private_edit": "This draft has another author’s private edit in progress and cannot be rejected. Try again after the edit is submitted or cancelled."
+    },
+    "savedDecision": "{{version}} · {{decision}} saved",
+    "queueComplete": "No reviews remain under these filters.",
+    "retrySameDecision": "Retry the same decision",
+    "currentCandidate": "Publishable",
+    "olderCandidate": "Not publishable",
+    "retryDetail": "Retry review detail",
+    "bulkStopped": "Processing stopped after {{processed}} of {{total}} reviews. Confirmed results are preserved. Reload the queue before previewing the remaining items.",
+    "versionCount": "{{versions}} ({{count}} versions)",
+    "rejectImpact": {
+      "candidate": "v{{version}} · this review",
+      "cascadedLabel": "Also rejected",
+      "cascaded": "{{versions}} · later drafts written on v{{version}}",
+      "cascadedReviews": " ({{count}} reviews settled)",
+      "editHeadLabel": "Edit head",
+      "reviewStaysOpen": "Its review stays open.",
+      "reviewReopens": "Its review was already closed, so a new review opens.",
+      "publishedLabel": "Published",
+      "published": "v{{version}} stays published",
+      "metadataKept": "This page was never published and v{{version}} has no recorded page details, so the current title, type and tags stay."
+    },
+    "settlement": {
+      "superseded_by_rejected_ancestor": "Settled when v{{version}}, which this draft was written on, was rejected.",
+      "superseded_by_approved_publish": "Settled when v{{version}}, which includes these changes, was approved.",
+      "superseded_by_rejected_candidate": "Settled when another review of the same version was rejected.",
+      "superseded_by_newer_draft": "Settled because a newer draft replaced this one.",
+      "generic": "This review was settled.",
+      "openReview": "Open the v{{version}} review",
+      "openDecidingReview": "Open the deciding review",
+      "superseded_by_decision_undo": "Closed because the decision that opened this review was undone."
+    },
+    "firstPublicationNotice": "First publication · nothing published yet → v{{version}}",
+    "replacePublicationNotice": "Approving publishes v{{version}} in place of v{{from}}.",
+    "reopenedByUndo": "Reopened by undo",
+    "settlementShort": {
+      "superseded_by_approved_publish": "Settled by approving v{{version}}",
+      "superseded_by_rejected_ancestor": "Settled by rejecting v{{version}}",
+      "superseded_by_rejected_candidate": "Settled when the same version was rejected",
+      "superseded_by_newer_draft": "Replaced by a newer draft",
+      "superseded_by_decision_undo": "Closed by an undone decision"
+    }
+  },
+  "document": {
+    "targets": "Review targets",
+    "unavailableTitle": "Review target",
+    "kind": {
+      "context": "Context",
+      "library": "Library",
+      "agent": "Agent",
+      "unknown": "Target type unavailable"
+    },
+    "openCurrentAria": "Open current document: {{title}} (new tab)",
+    "openCurrent": "Open current document",
+    "openUnavailable": "Current document unavailable"
+  },
+  "content": {
+    "title": "Change content",
+    "reviewVersion": "Review version v{{version}}",
+    "reviewVersionUnknown": "Review version",
+    "metadataOperation": "This review concerns the metadata changes described above.",
+    "unsupported": "Review version content and comparison are not supported for this target.",
+    "candidateUnavailable": "The reviewed version is unavailable. Check the review's current state and access.",
+    "noEvidence": "No change evidence is available for this review.",
+    "emptyBaseline": "Empty document",
+    "publishedBaseline": "Current published version v{{version}}",
+    "parentBaseline": "Parent version v{{version}}",
+    "originalUnavailable": "The exact review version could not be loaded. Refresh its content before approving.",
+    "tabsAria": "Review version content",
+    "compare": "Compare changes",
+    "original": "Review version content",
+    "showOriginal": "Read review version",
+    "emptyOriginal": "This review version has no body content.",
+    "tooLarge": "These versions are too large to compare here.",
+    "baselineUnavailable": "The comparison baseline is unavailable. Read the exact review version instead.",
+    "metadataChanged": "Changed metadata:",
+    "metadata": {
+      "title": "Title",
+      "tags": "Tags",
+      "aliases": "Aliases",
+      "pageType": "Page type",
+      "placement": "Placement"
+    },
+    "diffAria": "Changes from {{from}} to {{to}}",
+    "loading": "Loading review version…",
+    "versionMismatch": "The response does not match this review version. Refresh the review before continuing.",
+    "readUnavailable": "This version or its access is no longer available.",
+    "loadFailed": "Could not load this review version.",
+    "retry": "Reload content",
+    "unavailableBaseline": "Comparison baseline unavailable",
+    "comparisonMode": "Comparison baseline",
+    "draftChange": "This draft's change (v{{parent}} → v{{candidate}})",
+    "publishingChange": "What publishing changes (published v{{baseline}} → v{{candidate}})",
+    "publishingEmptyChange": "What publishing changes (empty document → v{{candidate}})",
+    "draftParentBaseline": "Previous draft v{{version}}"
+  },
+  "undo": {
+    "action": {
+      "approve": "Undo approval",
+      "reject": "Undo rejection",
+      "request_changes": "Withdraw change request"
+    },
+    "available": {
+      "approve": "Undoing this approval restores the page as it was before it was published, and this review and the reviews settled with it wait again.",
+      "reject": "Undoing this rejection restores the rejected draft and the drafts written on it, and this review waits again.",
+      "request_changes": "Withdrawing this change request takes it back from its recipients, and this review waits again."
+    },
+    "laterChanges": {
+      "approve": "The page changed after this approval, so it can no longer be undone.",
+      "reject": "The page changed after this rejection, so it can no longer be undone.",
+      "request_changes": "The page changed after this change request, so it can no longer be withdrawn."
+    },
+    "notRecorded": "This decision was made before decision undo was available, so it cannot be undone.",
+    "unsupportedEffect": "The changes included in this decision cannot be undone. Review the page history before starting another review.",
+    "unsupportedReviewType": "Decision undo is not supported for this review type.",
+    "viewLaterChanges": "Review later changes",
+    "viewHistory": "View page history",
+    "startDraft": "Start a new draft from v{{version}}",
+    "done": {
+      "approve": "Approval undone. The review is waiting again.",
+      "reject": "Rejection undone. The review is waiting again.",
+      "request_changes": "Change request withdrawn. The review is waiting again."
+    },
+    "failed": "Failed to undo the decision",
+    "startDraftFailed": "Failed to start a new draft",
+    "undone": "Undone"
   }
 }

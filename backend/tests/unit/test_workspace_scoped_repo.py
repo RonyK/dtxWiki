@@ -16,6 +16,7 @@ from backend.models.user import User
 from backend.models.workspace_join import WorkspaceJoinRequest
 from backend.repositories.workspace_scoped import (
     get_in_workspace,
+    select_in_workspace,
     select_in_workspace_by_ids,
 )
 from backend.scripts.seed_dev import seed_default_workspace
@@ -112,6 +113,28 @@ def test_scoped_batch_excludes_other_workspaces_and_handles_empty_ids():
             LibraryItem, workspace_id=home.id, resource_ids=[item.id for item in items]
         )
         assert list(session.scalars(statement)) == [items[0]]
+        assert list(
+            session.scalars(
+                select_in_workspace(
+                    LibraryItem,
+                    workspace_id=home.id,
+                    criteria=[LibraryItem.id.in_([item.id for item in items])],
+                )
+            )
+        ) == [items[0]]
+        # Caller-provided predicates can narrow the scope, never replace it.
+        assert (
+            list(
+                session.scalars(
+                    select_in_workspace(
+                        LibraryItem,
+                        workspace_id=home.id,
+                        criteria=[LibraryItem.workspace_id == other.id],
+                    )
+                )
+            )
+            == []
+        )
         assert (
             list(
                 session.scalars(
@@ -130,6 +153,8 @@ def test_scoped_batch_excludes_other_workspaces_and_handles_empty_ids():
 def test_scoped_batch_rejects_unsupported_model_shapes(model):
     with pytest.raises(TypeError):
         select_in_workspace_by_ids(model, workspace_id=uuid4(), resource_ids=[uuid4()])
+    with pytest.raises(TypeError):
+        select_in_workspace(model, workspace_id=uuid4())
 
 
 def test_get_in_workspace_rejects_workspace_plane_composite_identity():

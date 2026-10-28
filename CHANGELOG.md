@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+### Fixes
+
 - Show email sign-in before external providers. User search groups its controls
   and continuous account rows in one Settings panel, with ID copying beneath the
   email and recovery in an account menu. Workspace members
@@ -48,6 +50,53 @@
 - Apply MCP Access Key workspace edits to existing streamable MCP sessions
   on the next request instead of keeping the workspaces granted at
   initialize.
+- Review evidence now distinguishes the current document destination from the
+  exact reviewed Context version and its comparison baseline. Group approvals
+  use a fixed, signed selection and preserve individual results across batches;
+  single decisions accept a durable receipt ID for safe retries.
+- MCP tool contract revision 17 adds authorized document and content descriptors
+  to `list_requested_changes` evidence, including the earlier draft a candidate
+  was written on. Existing clients can ignore these additive fields and
+  continue using the existing target and `diff_ref` fields.
+- MCP tool contract revision 18 makes each `what_changed` entry one move of a
+  page's published version. It adds `unpublished` when an undone first
+  publication leaves no published version: invalidate the cached publication
+  by `page_id`; `version_id` is null. `created` also covers a page published
+  again after it was unpublished or archived, including restoring an archived
+  page, so treat it as an upsert. `previous_version_id` is the version
+  published right before the entry, not the version's parent, and is also set
+  on `unpublished` and `archived` entries. `reason` says why the version moved
+  (for example `review decision undone` or `page restored from archive`).
+  Draft visibility still applies, so readers without draft access receive no
+  unpublished-page metadata.
+- Approving a Context review publishes the changes up to that draft; rejecting
+  one also rejects the later drafts written on it and returns the edit head to
+  the draft below them. Earlier drafts and branched alternatives are untouched.
+  A reject confirmation whose impact changed meanwhile is refused with 409
+  `review_decision_impact_changed`.
+- A Context review decision can be undone while its recorded result is current:
+  an approval (including an automatic one), a rejection, or a first-round
+  change request. Undoing restores the published and draft heads, page
+  metadata and the reviews the decision settled or opened; the decision stays
+  in the history followed by an `undo` record. The decider (or an owner) may
+  undo a decision, any editor an automatic approval, which then waits for a
+  person. Browser sessions only:
+  `POST /api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decisions/{decision_id}/undo`,
+  refused with 409 `review_decision_undo_unavailable` after a newer version or
+  a change to the recorded result. Later metadata changes the decision did
+  not touch, such as a tree rename, are preserved. Claims on restored change
+  requests return with their original timestamps and expiry.
+  Decisions made before this release, and approvals that revived an archived
+  page, cannot be undone. Reading a page as of a later time follows the undone
+  publication, the page's own stale warning returns with its older content,
+  and a withdrawn change request leaves `list_requested_changes` and refuses
+  revisions.
+- Preserve restored drafts' mandatory human-review conditions and first-publish
+  metadata across page-first submissions and authenticated autosaves. Restart
+  rejected content only while its surviving head is unchanged, refresh rejection
+  previews when confirming, and compare draft parents independently of the
+  published version's diff limit.
+
 - Overlays can pass explicit lint modules to `assemble(lint_modules=...)`.
   Writers and readers share that container's registry. Workers passed the same
   `services` use it too; standalone CLI worker processes build their own builtin

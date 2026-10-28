@@ -90,7 +90,12 @@ from backend.services.context_editing import (
 )
 from backend.services.context_lifecycle import (
     apply_context_publication,
+    apply_page_metadata_snapshot,
     assert_context_publish_candidate,
+    effective_metadata_snapshot_records,
+    live_draft_chain,
+    record_metadata_snapshot,
+    rejected_draft_restart,
 )
 from backend.services.context_media_legacy_cutover import (
     require_no_visible_legacy_media,
@@ -742,12 +747,13 @@ class ContextWriteService:
         page: ContextPage,
         version: ContextPageVersion,
         marker: str,
+        decision_id: UUID | None = None,
     ) -> None:
         # Auto-index the page for vector retrieval (Epic-1 §6): the worker's
         # embed handler re-chunks + re-embeds the page's published + draft
         # scopes (a no-op when no embedding provider is configured). The key is
-        # version-addressed: a content revert must enqueue again because the
-        # worker resolves the current page head rather than a historical hash.
+        # version-addressed, or decision-addressed when review can undo and
+        # reapply that version. The worker resolves the current page head.
         # The enqueue shares the domain transaction so content and its trigger
         # commit atomically. In a split deployment the row is workspace-local;
         # S0 outbox/EventSink relays it to the control-side worker. Overlay jobs
@@ -762,6 +768,7 @@ class ContextWriteService:
                 marker,
                 version.id,
                 version.content_hash,
+                decision_id=decision_id,
             ),
             target_ref={"kind": "context_page", "id": str(page.id)},
         )
@@ -772,12 +779,12 @@ class ContextWriteService:
         *,
         page: ContextPage,
         transition_version: ContextPageVersion,
+        decision_id: UUID | None = None,
     ) -> None:
         """Queue the publish-path reindex after a visible-head transition.
 
-        A rejected draft was already queued with the ``draft`` marker. Using
-        its unused ``published`` marker makes this transition addressable and
-        idempotent while the worker still resolves the page's resulting head.
+        A review decision has its own key so a rejection repeated after undo
+        still runs. Other callers retain the version-addressed published key.
         """
 
         self._enqueue_embed(
@@ -785,6 +792,7 @@ class ContextWriteService:
             page=page,
             version=transition_version,
             marker="published",
+            decision_id=decision_id,
         )
 
     def count_workspace_pages(self, session: Session, workspace_id: UUID) -> int:
@@ -975,6 +983,9 @@ class ContextWriteService:
                 diff_ref=f"context_page_version:{version.id}",
             )
             session.add(operation)
+            record_metadata_snapshot(
+                session, change_set_id=change_set.id, page=page, version=version
+            )
             review = self._create_review_item(
                 session=session,
                 workspace_id=workspace_id,
@@ -1052,40 +1063,6 @@ class ContextWriteService:
             for review in cls._reviews_for_version(session, version)
         )
 
-    @classmethod
-    def _is_restartable_rejected_version(
-        cls,
-        session: Session,
-        page: ContextPage,
-        version: ContextPageVersion,
-    ) -> bool:
-        """Whether ``version`` can start a new lineage after head retirement."""
-
-        if (
-            page.latest_draft_version_id is not None
-            or version.version_status != "draft"
-        ):
-            return False
-        version_ref = f"context_page_version:{version.id}"
-        return (
-            session.scalar(
-                select(ReviewItem.id)
-                .join(ChangeSet, ChangeSet.id == ReviewItem.change_set_id)
-                .join(ChangeOperation, ChangeOperation.change_set_id == ChangeSet.id)
-                .where(
-                    ReviewItem.workspace_id == page.workspace_id,
-                    ChangeSet.workspace_id == page.workspace_id,
-                    ReviewItem.review_type == "context_update",
-                    ReviewItem.status == "rejected",
-                    ChangeOperation.target_type == "context_page",
-                    ChangeOperation.target_id == page.id,
-                    ChangeOperation.diff_ref == version_ref,
-                )
-                .limit(1)
-            )
-            is not None
-        )
-
     def update_draft(
         self,
         session: Session,
@@ -1122,12 +1099,14 @@ class ContextWriteService:
                 resource_id=request.base_version_id,
             )
             latest = self._latest_edit_base(session, page)
-            restart_after_reject = (
-                base_version is not None
+            restart = (
+                rejected_draft_restart(session, page, base_version)
+                if base_version is not None
                 and base_version.page_id == page.id
                 and base_version.content_hash == request.base_content_hash
-                and self._is_restartable_rejected_version(session, page, base_version)
+                else None
             )
+            restart_after_reject = restart is not None
             if (
                 base_version is None
                 or base_version.page_id != page.id
@@ -1166,6 +1145,10 @@ class ContextWriteService:
                     latest_content_hash=disclosed_hash,
                 )
 
+            if restart is not None:
+                for retired in restart.retired_versions:
+                    retired.graph_status = "discarded"
+
             new_body = self._body_for_update(base_version, request)
             classification = _ContextUpdateClassification(
                 measured_event=_measure_update_event(base_version.body_md, new_body),
@@ -1183,6 +1166,7 @@ class ContextWriteService:
                 page=page,
                 base_version=base_version,
                 restart_after_reject=restart_after_reject,
+                restart_parent_id=restart.parent_version_id if restart else None,
                 new_body=new_body,
                 metadata_patch=request.metadata_patch,
                 citations=request.citations,
@@ -2793,6 +2777,7 @@ class ContextWriteService:
         restart_after_reject: bool,
         new_body: str,
         metadata_patch: PageMetadataPatch | None,
+        restart_parent_id: UUID | None = None,
         citations: list[CitationInput],
         feedback_id: UUID | None,
         needs_review: bool,
@@ -2873,6 +2858,7 @@ class ContextWriteService:
                 and feedback_id is None
                 and not needs_review
                 and not force_new_version
+                and not restart_after_reject
                 and not self._identical_body_requires_fork(session, base_version)
             ):
                 no_effect_classification = replace(
@@ -3019,7 +3005,7 @@ class ContextWriteService:
             version = self._restart_rejected_draft(
                 session=session,
                 page=page,
-                rejected_version=base_version,
+                parent_version_id=restart_parent_id,
                 body=prepared_body,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
@@ -3084,6 +3070,9 @@ class ContextWriteService:
                 diff_summary=reason,
                 diff_ref=f"context_page_version:{version.id}",
             )
+        )
+        record_metadata_snapshot(
+            session, change_set_id=change_set.id, page=page, version=version
         )
         review = self._create_review_item(
             session=session,
@@ -3232,7 +3221,12 @@ class ContextWriteService:
         actor_id: str,
         *,
         publish_despite_findings: bool = False,
+        publish_chain_ancestor: bool = False,
+        review_decision_id: UUID | None = None,
     ) -> PublishContextPageResult:
+        # `publish_chain_ancestor` lets review approval publish an earlier
+        # linear draft of the chain (the changes up to the reviewed version)
+        # while newer drafts stay pending; it is never a request field.
         # `publish_despite_findings` is an argument rather than a request field
         # so that only a caller holding a reference to this service can set it.
         # The REST publish route and the review-approval path both bind
@@ -3385,6 +3379,7 @@ class ContextWriteService:
                 page=page,
                 version=version,
                 require_latest_draft=True,
+                allow_chain_ancestor=publish_chain_ancestor,
             )
             if version.version_status != "draft":
                 raise RejectedByPolicyError(
@@ -3457,11 +3452,18 @@ class ContextWriteService:
             )
 
             was_archived = page.lifecycle_status == "archived"
+            # A first publication of an earlier draft: the page's metadata
+            # still holds the newest draft's values, so the recorded ones apply.
+            publishes_recorded_metadata = (
+                page.current_published_version_id is None
+                and page.latest_draft_version_id not in (None, version.id)
+            )
             previous_published_version_id = apply_context_publication(
                 session,
                 page=page,
                 version=version,
                 require_latest_draft=True,
+                allow_chain_ancestor=publish_chain_ancestor,
             )
 
             change_set = self._create_change_set(
@@ -3485,10 +3487,10 @@ class ContextWriteService:
                     diff_ref=f"context_page_version:{version.id}",
                 )
             )
-            applied_metadata_patch = self._apply_pending_metadata_patches(
-                session,
-                page,
-                version,
+            applied_metadata_patch = (
+                self._publish_recorded_metadata(session, page, version)
+                if publishes_recorded_metadata
+                else self._apply_pending_metadata_patches(session, page, version)
             )
             # Publishing an archived page (draft created before the folder
             # cascade archived it, then approved) resurrects it — revive its
@@ -3554,7 +3556,10 @@ class ContextWriteService:
                 published_version_id=version.id,
                 reason=request.reason,
             )
-            self._enqueue_embed(session, page=page, version=version, marker="published")
+            self._enqueue_embed(
+                session, page=page, version=version, marker="published",
+                decision_id=review_decision_id,
+            )
             return PublishContextPageResult(
                 page_id=page.id,
                 published_version_id=version.id,
@@ -4206,7 +4211,7 @@ class ContextWriteService:
         *,
         session: Session,
         page: ContextPage,
-        rejected_version: ContextPageVersion,
+        parent_version_id: UUID | None,
         body: PreparedBody,
         actor_kind: str,
         actor_id: str,
@@ -4217,17 +4222,20 @@ class ContextWriteService:
         explicit_block_replacements: dict[str, str] | None = None,
         prepared_block_map: list[dict] | None = None,
     ) -> ContextPageVersion:
-        """Create a fresh actionable draft parented by retired evidence.
+        """Create a fresh actionable draft from a rejected draft's bytes.
 
-        The surrounding ``update_draft`` transition creates the fresh pending
-        review. The rejected version and its original decision are never
-        mutated, and this path is actor-kind agnostic for browser and agent use.
+        ``parent_version_id`` is the head the rejection left (see
+        ``rejected_draft_restart``); the update's audit names the rejected
+        source. The surrounding ``update_draft`` transition creates the fresh
+        pending review. The rejected version and its original decision are
+        never mutated, and this path is actor-kind agnostic for browser and
+        agent use.
         """
 
         version = self._insert_version(
             session=session,
             page=page,
-            parent_version_id=rejected_version.id,
+            parent_version_id=parent_version_id,
             body=body,
             actor_kind=actor_kind,
             actor_id=actor_id,
@@ -4381,6 +4389,48 @@ class ContextWriteService:
         )
         self._apply_metadata_patch(page, patch)
         return patch
+
+    def _publish_recorded_metadata(
+        self,
+        session: Session,
+        page: ContextPage,
+        version: ContextPageVersion,
+    ) -> dict[str, object]:
+        """Apply an earlier draft's recorded metadata at its first publication.
+
+        The newer drafts above it were written with their own values; from now
+        on they wait as staged patches in their own change sets, as any draft
+        of a published page does.
+        """
+
+        newer = live_draft_chain(session, page)
+        snapshots = effective_metadata_snapshot_records(
+            session, page, [version.id, *(draft.id for draft in newer)]
+        )
+        published_record = snapshots.get(version.id)
+        if published_record is None:
+            raise StaleContextDraftError(
+                "an earlier draft without recorded metadata cannot be first published"
+            )
+        published = published_record[0]
+        changed = apply_page_metadata_snapshot(page, published)
+        for draft in newer:
+            record = snapshots.get(draft.id)
+            if record is None:
+                continue
+            snapshot, change_set_id = record
+            # The whole snapshot, not a delta against this publication: each
+            # newer draft must publish its own values whatever lands between.
+            # Page-first versions need not own a change set; their snapshot
+            # operation owns the metadata ledger we must carry forward.
+            stage_page_metadata_patch(
+                session,
+                change_set_id=change_set_id,
+                page=page,
+                version=draft,
+                patch=snapshot,
+            )
+        return {field: published[field] for field in changed}
 
     @staticmethod
     def _apply_metadata_patch(

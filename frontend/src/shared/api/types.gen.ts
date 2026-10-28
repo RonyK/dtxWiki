@@ -2627,6 +2627,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/reviews/selection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Review Selection */
+        post: operations["create_review_selection_api_v1_workspaces__workspace_id__reviews_selection_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/reviews/sweep-auto-approvals": {
         parameters: {
             query?: never;
@@ -2689,6 +2706,23 @@ export interface paths {
         put?: never;
         /** Decide Review */
         post: operations["decide_review_api_v1_workspaces__workspace_id__reviews__review_item_id__decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decisions/{decision_id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Undo Review Decision */
+        post: operations["undo_review_decision_api_v1_workspaces__workspace_id__reviews__review_item_id__decisions__decision_id__undo_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9231,6 +9265,20 @@ export interface components {
         RedirectResponseBody: {
             data: components["schemas"]["RedirectData"];
         };
+        /** ReviewActionAvailability */
+        ReviewActionAvailability: {
+            /** Allowed */
+            allowed: boolean;
+            /** Reason Code */
+            reason_code?: string | null;
+        };
+        /** ReviewActionCapabilities */
+        ReviewActionCapabilities: {
+            approve: components["schemas"]["ReviewActionAvailability"];
+            edit_directly: components["schemas"]["ReviewActionAvailability"];
+            reject: components["schemas"]["ReviewActionAvailability"];
+            request_changes: components["schemas"]["ReviewActionAvailability"];
+        };
         /** ReviewAutoApprovalSweepPayload */
         ReviewAutoApprovalSweepPayload: {
             /** Approved */
@@ -9253,16 +9301,54 @@ export interface components {
             scope: "to_me" | "from_me" | "all";
             /** Status */
             status?: string | null;
+            /** Target Page Id */
+            target_page_id?: string | null;
         };
         /** ReviewBulkDecisionPayload */
         ReviewBulkDecisionPayload: {
             /** Approved */
             approved: string[];
+            /** Auto Settled Review Item Ids */
+            auto_settled_review_item_ids?: string[];
+            /** Next Selection Token */
+            next_selection_token?: string | null;
+            /** Outcomes */
+            outcomes?: components["schemas"]["ReviewBulkItemOutcome"][];
+            /**
+             * Processed Count
+             * @default 0
+             */
+            processed_count: number;
+            /**
+             * Remaining Count
+             * @default 0
+             */
+            remaining_count: number;
+            /**
+             * Requires Reconfirmation
+             * @default false
+             */
+            requires_reconfirmation: boolean;
+            /**
+             * Selection Complete
+             * @default true
+             */
+            selection_complete: boolean;
             /** Skipped */
             skipped: components["schemas"]["ReviewBulkSkippedItem"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
         };
         /** ReviewBulkDecisionRequest */
         ReviewBulkDecisionRequest: {
+            /**
+             * Batch Limit
+             * @default 500
+             */
+            batch_limit: number;
             /**
              * Decision Type
              * @constant
@@ -9276,11 +9362,36 @@ export interface components {
             filters?: components["schemas"]["ReviewBulkDecisionFilters"] | null;
             /** Review Item Ids */
             review_item_ids?: string[] | null;
+            /** Selection Token */
+            selection_token?: string | null;
         };
         /** ReviewBulkDecisionResponse */
         ReviewBulkDecisionResponse: {
             data: components["schemas"]["ReviewBulkDecisionPayload"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** ReviewBulkItemOutcome */
+        ReviewBulkItemOutcome: {
+            /** Decision Id */
+            decision_id?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "approved" | "auto_settled" | "excluded" | "failed";
+            /** Reason */
+            reason?: string | null;
+            /** Reason Code */
+            reason_code?: string | null;
+            /** Target Title */
+            target_title?: string | null;
+            /** Target Version No */
+            target_version_no?: number | null;
         };
         /** ReviewBulkSkippedItem */
         ReviewBulkSkippedItem: {
@@ -9291,6 +9402,51 @@ export interface components {
             id: string;
             /** Reason */
             reason: string;
+            /** Reason Code */
+            reason_code?: string | null;
+        };
+        /**
+         * ReviewContentTarget
+         * @description The exact reviewed version and its independently authorized baseline.
+         */
+        ReviewContentTarget: {
+            /**
+             * Baseline Kind
+             * @default unavailable
+             * @enum {string}
+             */
+            baseline_kind: "published" | "parent" | "empty" | "unavailable";
+            /** Baseline Version Id */
+            baseline_version_id?: string | null;
+            /** Baseline Version No */
+            baseline_version_no?: number | null;
+            /**
+             * Can Diff
+             * @default false
+             */
+            can_diff: boolean;
+            /**
+             * Can Read
+             * @default false
+             */
+            can_read: boolean;
+            /** Candidate Version Id */
+            candidate_version_id?: string | null;
+            /** Candidate Version No */
+            candidate_version_no?: number | null;
+            /** Draft Parent Version Id */
+            draft_parent_version_id?: string | null;
+            /** Draft Parent Version No */
+            draft_parent_version_no?: number | null;
+            /** Is Current Candidate */
+            is_current_candidate?: boolean | null;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "context_version" | "metadata_only" | "unsupported" | "unavailable";
+            /** Unavailable Reason */
+            unavailable_reason?: string | null;
         };
         /** ReviewCountsPayload */
         ReviewCountsPayload: {
@@ -9433,6 +9589,8 @@ export interface components {
         ReviewDecisionRequest: {
             /** Audience Kind */
             audience_kind?: ("chat_owner" | "requester" | "workspace_editors") | null;
+            /** Decision Id */
+            decision_id?: string | null;
             /** Decision Reason */
             decision_reason?: string | null;
             /**
@@ -9440,13 +9598,71 @@ export interface components {
              * @enum {string}
              */
             decision_type: "approve" | "reject" | "request_changes";
+            /** Expected Impact Fingerprint */
+            expected_impact_fingerprint?: string | null;
+        };
+        /**
+         * ReviewDecisionUndo
+         * @description Undo of the review's latest decision, for an actor who may undo it.
+         *
+         *     The decider or an owner may undo a decision; any editor may undo an
+         *     automatic approval. Absent for actors without that permission. Decisions
+         *     without a recorded effect return available=False with not_recorded;
+         *     recorded effects that cannot be reversed use unsupported_effect.
+         */
+        ReviewDecisionUndo: {
+            /** Available */
+            available: boolean;
+            /**
+             * Decision Id
+             * Format: uuid
+             */
+            decision_id: string;
+            /** Decision Type */
+            decision_type: string;
+            /** Page Id */
+            page_id?: string | null;
+            /** Reason Code */
+            reason_code?: ("later_changes" | "not_recorded" | "unsupported_effect") | null;
+            /** Restore Version Id */
+            restore_version_id?: string | null;
+            /** Restore Version No */
+            restore_version_no?: number | null;
+        };
+        /**
+         * ReviewDocumentTarget
+         * @description Actor-visible document identity, independent of an operation's raw ID.
+         */
+        ReviewDocumentTarget: {
+            /**
+             * Can Open
+             * @default false
+             */
+            can_open: boolean;
+            /** Document Id */
+            document_id?: string | null;
+            /**
+             * Document Kind
+             * @enum {string}
+             */
+            document_kind: "context" | "agent" | "library";
+            /** Reader Href */
+            reader_href?: string | null;
+            /** Slug */
+            slug?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Unavailable Reason */
+            unavailable_reason?: string | null;
         };
         /** ReviewEvidenceOperation */
         ReviewEvidenceOperation: {
+            content?: components["schemas"]["ReviewContentTarget"] | null;
             /** Diff Ref */
             diff_ref?: string | null;
             /** Diff Summary */
             diff_summary?: string | null;
+            document?: components["schemas"]["ReviewDocumentTarget"] | null;
             /** Operation */
             operation: string;
             /**
@@ -9483,6 +9699,7 @@ export interface components {
         };
         /** ReviewItemDetail */
         ReviewItemDetail: {
+            actions?: components["schemas"]["ReviewActionCapabilities"] | null;
             /** Can Claim */
             can_claim: boolean;
             /** Can Decide */
@@ -9548,6 +9765,7 @@ export interface components {
             reconciliation_page_id?: string | null;
             /** Reconciliation Version Id */
             reconciliation_version_id?: string | null;
+            reject_effect?: components["schemas"]["ReviewRejectEffect"] | null;
             /** Review Type */
             review_type: string;
             /** Risk Level */
@@ -9564,6 +9782,7 @@ export interface components {
             risk_signals?: {
                 [key: string]: unknown;
             } | null;
+            settlement?: components["schemas"]["ReviewSettlement"] | null;
             /** Status */
             status: string;
             /**
@@ -9571,6 +9790,7 @@ export interface components {
              * @default 0
              */
             superseded_review_count: number;
+            undo?: components["schemas"]["ReviewDecisionUndo"] | null;
             /**
              * Updated At
              * Format: date-time
@@ -9606,6 +9826,154 @@ export interface components {
             data: components["schemas"]["ReviewItemDetail"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
+        /** ReviewRejectEffect */
+        ReviewRejectEffect: {
+            /** Blocked Reason */
+            blocked_reason?: "private_edit_in_progress" | null;
+            /** Candidate Version Id */
+            candidate_version_id?: string | null;
+            /** Candidate Version No */
+            candidate_version_no?: number | null;
+            /**
+             * Cascaded Review Count
+             * @default 0
+             */
+            cascaded_review_count: number;
+            /** Cascaded Versions */
+            cascaded_versions?: components["schemas"]["ReviewVersionRef"][];
+            /** Document Id */
+            document_id?: string | null;
+            /**
+             * Effect
+             * @enum {string}
+             */
+            effect: "restore_published" | "hide_unpublished" | "no_head_change" | "restore_previous_draft";
+            /** Impact Fingerprint */
+            impact_fingerprint?: string | null;
+            /**
+             * Metadata Kept
+             * @default false
+             */
+            metadata_kept: boolean;
+            /** Published Version Id */
+            published_version_id?: string | null;
+            /** Published Version No */
+            published_version_no?: number | null;
+            /**
+             * Restores Review
+             * @default false
+             */
+            restores_review: boolean;
+            /** Resulting Draft Version Id */
+            resulting_draft_version_id?: string | null;
+            /** Resulting Draft Version No */
+            resulting_draft_version_no?: number | null;
+            /** Visible Cascaded Review Ids */
+            visible_cascaded_review_ids?: string[];
+            /**
+             * Visible Sibling Count
+             * @default 0
+             */
+            visible_sibling_count: number;
+            /** Visible Sibling Review Ids */
+            visible_sibling_review_ids?: string[];
+        };
+        /** ReviewSelectionItem */
+        ReviewSelectionItem: {
+            /** Auto Settled Review Item Ids */
+            auto_settled_review_item_ids?: string[];
+            /** Eligible */
+            eligible: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Reason */
+            reason?: string | null;
+            /** Reason Code */
+            reason_code?: string | null;
+            /** Target Title */
+            target_title?: string | null;
+            /** Target Version No */
+            target_version_no?: number | null;
+            /**
+             * Will Auto Settle
+             * @default false
+             */
+            will_auto_settle: boolean;
+        };
+        /** ReviewSelectionLimitDetails */
+        ReviewSelectionLimitDetails: {
+            /** Limit */
+            limit: number;
+            /** Total */
+            total: number;
+        };
+        /** ReviewSelectionLimitErrorBody */
+        ReviewSelectionLimitErrorBody: {
+            details: components["schemas"]["ReviewSelectionLimitDetails"];
+            envelope: components["schemas"]["RESTResultEnvelope"];
+            /** Error Code */
+            error_code: string;
+            /** Message */
+            message: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id?: string;
+            /** Warnings */
+            warnings?: components["schemas"]["EnvelopeWarning"][];
+        };
+        /** ReviewSelectionPayload */
+        ReviewSelectionPayload: {
+            /** Auto Settled Review Item Ids */
+            auto_settled_review_item_ids?: string[];
+            /** Eligible Count */
+            eligible_count: number;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Items */
+            items: components["schemas"]["ReviewSelectionItem"][];
+            /**
+             * Limit
+             * @default 5000
+             */
+            limit: number;
+            /** Review Item Ids */
+            review_item_ids: string[];
+            /** Selection Token */
+            selection_token: string;
+            /** Total */
+            total: number;
+        };
+        /** ReviewSelectionRequest */
+        ReviewSelectionRequest: {
+            filters?: components["schemas"]["ReviewBulkDecisionFilters"] | null;
+            /** Review Item Ids */
+            review_item_ids?: string[] | null;
+        };
+        /** ReviewSelectionResponse */
+        ReviewSelectionResponse: {
+            data: components["schemas"]["ReviewSelectionPayload"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /**
+         * ReviewSettlement
+         * @description Why a superseded review was closed, and by which decided review.
+         */
+        ReviewSettlement: {
+            /** By Review Item Id */
+            by_review_item_id?: string | null;
+            /** By Version No */
+            by_version_no?: number | null;
+            /** Reason Code */
+            reason_code: string;
+        };
         /** ReviewStatusByRiskBreakdown */
         ReviewStatusByRiskBreakdown: {
             changes_requested: components["schemas"]["ReviewStatusRiskBreakdown"];
@@ -9629,6 +9997,16 @@ export interface components {
              * @default 0
              */
             medium: number;
+        };
+        /** ReviewVersionRef */
+        ReviewVersionRef: {
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** Version No */
+            version_no: number;
         };
         /** SearchCapabilities */
         SearchCapabilities: {
@@ -22156,7 +22534,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["ReviewSelectionLimitErrorBody"] | components["schemas"]["RESTErrorBody"];
                 };
             };
         };
@@ -22297,6 +22675,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    create_review_selection_api_v1_workspaces__workspace_id__reviews_selection_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewSelectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewSelectionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewSelectionLimitErrorBody"] | components["schemas"]["RESTErrorBody"];
                 };
             };
         };
@@ -22519,6 +22968,75 @@ export interface operations {
                 "application/json": components["schemas"]["ReviewDecisionRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewItemResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    undo_review_decision_api_v1_workspaces__workspace_id__reviews__review_item_id__decisions__decision_id__undo_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                review_item_id: string;
+                decision_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
