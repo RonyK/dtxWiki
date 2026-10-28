@@ -2,6 +2,7 @@ import type { ActivityItem } from "../api/operations";
 import { TREE_TARGET_PARAM } from "../components/treeRouteState";
 import { i18n } from "../i18n";
 import { humanizeEnum } from "./domainLabel";
+import { contextActivityPresentation } from "./contextActivity";
 
 // F-8: deep-link an activity entry to the context/agent/library file it
 // touched. Audit-history items carry the entity target_kind + id; every tree
@@ -70,6 +71,23 @@ const ACTIVITY_LABELS: Record<string, { title: string; body: string }> = {
 const AUDIT_CODE_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+$/i;
 
 export function presentActivityItem(item: ActivityItem) {
+  const context = contextActivityPresentation(item);
+  if (context) {
+    return distinctPresentation({
+      title: item.event_key === "review.decision" && item.details?.decision_type
+        ? context.label
+        : !item.event_key && item.title !== item.body
+        && !AUDIT_CODE_PATTERN.test(item.title)
+        ? item.title
+        : item.event_key
+        ? presentActivityEventTitle(item)
+        : context.label,
+      body: [
+        context.pair ? `${context.pair.before} → ${context.pair.after}` : context.headline,
+        ...context.notes, context.reason,
+      ].filter(Boolean).join(" · "),
+    });
+  }
   if (item.event_key) {
     return distinctPresentation({
       title: presentActivityEventTitle(item),
@@ -251,7 +269,6 @@ export function isSystemActivityItem(item: ActivityItem) {
 
 export function isMcpActivityItem(item: ActivityItem) {
   return (
-    item.actor?.actor_kind === "mcp_client" ||
     item.target?.target_kind === "mcp_tool_call" ||
     item.title.startsWith("MCP ")
   );

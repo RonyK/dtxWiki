@@ -1745,7 +1745,11 @@ class PageService:
                 action="page.create",
                 target_kind="context_page",
                 target_id=page.id,
-                payload={"version_id": str(version.id)},
+                payload={
+                    "version_id": str(version.id),
+                    "editing_revision": version.editing_revision,
+                    "was_private_edit": True,
+                },
             )
             return self._payload_from_page(
                 session,
@@ -1863,9 +1867,9 @@ class PageService:
                     target_id=page.id,
                     payload={
                         "version_id": str(version.id),
-                        "base_version_id": (
-                            str(base.id) if base is not None else None
-                        ),
+                        "was_private_edit": True,
+                        "editing_revision": version.editing_revision,
+                        "base_version_id": (str(base.id) if base is not None else None),
                     },
                 )
                 return self._payload_from_page(
@@ -2410,6 +2414,8 @@ class PageService:
                     target_id=page.id,
                     payload={
                         "version_id": str(version.id),
+                        "was_private_edit": True,
+                        "editing_revision": version.editing_revision,
                         "operation_count": len(operations),
                     },
                 )
@@ -3568,6 +3574,14 @@ class PageService:
                         target_kind="context_page",
                         target_id=page.id,
                         payload={
+                            "version_id": str(version.id),
+                            "base_version_id": (
+                                str(version.parent_version_id)
+                                if version.parent_version_id
+                                else None
+                            ),
+                            "was_private_edit": True,
+                            "editing_revision": version.editing_revision,
                             "before_content_hash": current.content_hash,
                             "after_content_hash": version.content_hash,
                             "parent_version_id": str(current.id),

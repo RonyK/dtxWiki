@@ -66,6 +66,119 @@
         "title": "ActivityActor",
         "type": "object"
       },
+      "ActivityDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "base_version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityVersion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decision_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "approve",
+                  "reject",
+                  "request_changes"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Type"
+          },
+          "editing_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Editing Revision"
+          },
+          "move": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityMove"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "page_id": {
+            "format": "uuid",
+            "title": "Page Id",
+            "type": "string"
+          },
+          "previous_published_version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityVersion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "rename": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityRename"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "restored_from_version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityVersion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityVersion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "page_id"
+        ],
+        "title": "ActivityDetails",
+        "type": "object"
+      },
       "ActivityItemRead": {
         "additionalProperties": false,
         "properties": {
@@ -108,6 +221,16 @@
             "title": "Created At",
             "type": "string"
           },
+          "details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "event_args": {
             "additionalProperties": {
               "type": "string"
@@ -119,9 +242,31 @@
             "anyOf": [
               {
                 "enum": [
+                  "page.create",
+                  "page.update",
+                  "page.patch_context_edit",
+                  "page.begin_context_edit",
+                  "page.submit_context_edit_for_review",
+                  "page.discard_context_edit",
+                  "page.autosave.draft",
+                  "page.autosave.overwrite",
+                  "page.restore_version",
+                  "page.publish",
+                  "page.unpublish",
+                  "page.preserve_alternative",
+                  "page.inline_comment",
+                  "context_page.draft.create",
+                  "context_page.draft.update",
+                  "context_page.draft.diverged",
+                  "context_page.draft.diverged_discarded",
                   "context_page.draft.publish",
+                  "review.decision",
+                  "review.superseded_by_approved_publish",
+                  "review.superseded_by_rejected_candidate",
                   "tree.node.move",
                   "tree.node.rename",
+                  "tree.node.reorder",
+                  "tree.node.delete",
                   "workspace.join_request.requested",
                   "workspace.join_request.approved",
                   "workspace.join_request.rejected"
@@ -252,6 +397,79 @@
         "title": "ActivityListResponse",
         "type": "object"
       },
+      "ActivityLocation": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "provenance": {
+            "enum": [
+              "recorded",
+              "current",
+              "unavailable",
+              "root"
+            ],
+            "title": "Provenance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provenance"
+        ],
+        "title": "ActivityLocation",
+        "type": "object"
+      },
+      "ActivityMove": {
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "$ref": "#/components/schemas/ActivityLocation"
+          },
+          "before": {
+            "$ref": "#/components/schemas/ActivityLocation"
+          }
+        },
+        "required": [
+          "before",
+          "after"
+        ],
+        "title": "ActivityMove",
+        "type": "object"
+      },
+      "ActivityRename": {
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After"
+          },
+          "before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before"
+          }
+        },
+        "title": "ActivityRename",
+        "type": "object"
+      },
       "ActivityTarget": {
         "additionalProperties": false,
         "properties": {
@@ -276,6 +494,31 @@
           "target_kind"
         ],
         "title": "ActivityTarget",
+        "type": "object"
+      },
+      "ActivityVersion": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "immutable": {
+            "default": false,
+            "title": "Immutable",
+            "type": "boolean"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "number"
+        ],
+        "title": "ActivityVersion",
         "type": "object"
       },
       "AdminJobListData": {
@@ -19013,7 +19256,7 @@
       "name": "AGPL-3.0-only OR Elastic-2.0"
     },
     "title": "dtxWiki",
-    "version": "0.1.2"
+    "version": "0.1.4"
   },
   "openapi": "3.1.0",
   "paths": {

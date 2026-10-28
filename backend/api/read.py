@@ -2663,19 +2663,22 @@ def list_context_page_activity(
             return read_service_error_response(
                 ReadNotFoundError("context page not found")
             )
-        data = svc.activity.list_activity(
-            session=session,
-            workspace_id=workspace_id,
-            period=period,
-            lane="history",
-            limit=limit,
-            cursor=cursor,
-            audience_for=actor.user_id,
-            actor_role=access.role,
-            actor=actor,
-            page_id=page_id,
-            deferred_identity=deferred_identity,
-        )
+        try:
+            data = svc.activity.list_activity(
+                session=session,
+                workspace_id=workspace_id,
+                period=period,
+                lane="history",
+                limit=limit,
+                cursor=cursor,
+                audience_for=actor.user_id,
+                actor_role=access.role,
+                actor=actor,
+                page_id=page_id,
+                deferred_identity=deferred_identity,
+            )
+        except ReadServiceError as exc:
+            return read_service_error_response(exc)
     with control_session_factory() as identity_session:
         deferred_identity.apply(identity_session)
     return {"data": data}

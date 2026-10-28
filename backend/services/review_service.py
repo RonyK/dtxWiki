@@ -93,6 +93,23 @@ def _context_version_id_from_diff_ref(diff_ref: str | None) -> UUID | None:
     return parse_uuid_or_none(diff_ref[len(prefix) :])
 
 
+def review_decision_audience_clause(actor_role: str | None, audience_for: UUID | None):
+    """Shared decision disclosure for Review and Context activity readers."""
+    if not role_allows(actor_role or "viewer", "editor"):
+        return (
+            ReviewDecision.audience_user_id == audience_for
+            if audience_for is not None
+            else false()
+        )
+    if audience_for is None:
+        return ~false()
+    return or_(
+        ReviewDecision.audience_kind.is_(None),
+        ReviewDecision.audience_kind == ReviewAudienceKind.WORKSPACE_EDITORS.value,
+        ReviewDecision.audience_user_id == audience_for,
+    )
+
+
 class ReviewService:
     def __init__(
         self,
@@ -875,21 +892,9 @@ class ReviewService:
             .order_by(ReviewDecision.created_at.desc(), ReviewDecision.id.desc())
             .limit(limit)
         )
-        if not role_allows(actor_role or "viewer", "editor"):
-            # Codex #6: a sub-editor (viewer) sees ONLY decisions routed to them
-            # personally — never the workspace-wide approve/reject broadcast feed.
-            if audience_for is None:
-                return []
-            statement = statement.where(ReviewDecision.audience_user_id == audience_for)
-        elif audience_for is not None:
-            statement = statement.where(
-                or_(
-                    ReviewDecision.audience_kind.is_(None),
-                    ReviewDecision.audience_kind
-                    == ReviewAudienceKind.WORKSPACE_EDITORS.value,
-                    ReviewDecision.audience_user_id == audience_for,
-                )
-            )
+        statement = statement.where(
+            review_decision_audience_clause(actor_role, audience_for)
+        )
         decision_rows = list(session.execute(statement))
         actor_ids = {
             decision.actor_id

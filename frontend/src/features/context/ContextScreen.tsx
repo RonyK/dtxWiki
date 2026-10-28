@@ -133,7 +133,7 @@ import {
   copyTextWithReason,
   type CopyTextDetailedResult,
 } from "../../shared/lib/copyText";
-import { presentActivityItem } from "../../shared/lib/activityLabels";
+import { ActivityEventCard } from "../../shared/components/ActivityEventCard";
 import {
   contextHistoryPillTone,
   contextHistoryPresentation,
@@ -162,12 +162,7 @@ type ContextVersionEntry = VersionEntry & {
   prior_relation?: PriorRelation;
 };
 
-type ActivityActorPresentation = {
-  actor_kind: string;
-  actor_id?: string | null;
-  display_name?: string;
-  is_current_user?: boolean;
-};
+
 
 type ContextState = {
   workspaceId: string;
@@ -2958,7 +2953,7 @@ function ContextReader({
           tabIndex={0}
         >
           <ContextActivity
-            currentPageTitle={detail.title}
+            workspaceId={workspaceId}
             error={activityError}
             items={activityItems}
             loadingMore={activityLoadingMore}
@@ -3300,14 +3295,14 @@ function readerVersionNumber(
 }
 
 function ContextActivity({
-  currentPageTitle,
+  workspaceId,
   error,
   items,
   loadingMore,
   nextCursor,
   onLoadMore,
 }: {
-  currentPageTitle: string;
+  workspaceId: string | null;
   error: string | null;
   items: ActivityItem[] | null;
   loadingMore: boolean;
@@ -3365,35 +3360,11 @@ function ContextActivity({
                 })}
                 className="context-activity-card-list"
               >
-                {dayItems.map((item) => {
-                  const presented = presentActivityItem(item);
-                  const actor = item.actor as ActivityActorPresentation | null;
-                  const actorName = actor?.is_current_user
-                    ? t("reader.activityYou", { defaultValue: "You" })
-                    : (actor?.display_name ??
-                      t("reader.activityUnknownActor", {
-                        defaultValue: "Unknown actor",
-                      }));
-                  const body =
-                    presented.body && presented.body !== currentPageTitle
-                      ? presented.body
-                      : "";
-                  return (
-                    <li key={item.id}>
-                      <article className="context-activity-card">
-                        <div className="context-activity-card-copy">
-                          <strong>{presented.title}</strong>
-                          {body ? <p>{body}</p> : null}
-                        </div>
-                        <AvatarWithTimestamp
-                          actorType={actor?.actor_kind ?? "system"}
-                          name={actorName}
-                          timestamp={item.created_at}
-                        />
-                      </article>
-                    </li>
-                  );
-                })}
+                {dayItems.map((item) => (
+                  <li key={item.id}>
+                    <ActivityEventCard item={item} workspaceId={workspaceId} />
+                  </li>
+                ))}
               </ul>
             </section>
           ))}

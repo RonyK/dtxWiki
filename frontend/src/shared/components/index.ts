@@ -4,6 +4,7 @@
 // passes. Keep entries alphabetised.
 export * from "./ActionMenu";
 export * from "./ActivityActorBadge";
+export * from "./ActivityEventCard";
 export * from "./AdvancedSection";
 export * from "./Avatar";
 export * from "./BottomSheet";

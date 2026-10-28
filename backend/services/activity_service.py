@@ -1,6 +1,8 @@
 import base64
 import binascii
+import json
 from datetime import UTC, date, datetime, time, timedelta
+from typing import get_args
 from uuid import UUID
 
 from sqlalchemy import and_, desc, func, not_, or_, select
@@ -8,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.agent import AgentPage
 from backend.models.audit import AuditEvent
+from backend.models.change import ChangeOperation
 from backend.models.context import ContextPage
 from backend.models.job import Job
 from backend.models.library import LibraryItem
@@ -24,6 +27,7 @@ from backend.schemas.activity import (
     ActivityListData,
     ActivityTarget,
 )
+from backend.services.activity_projection import ContextActivityProjection
 from backend.services.actor_visible_read import (
     agent_page_visible,
     context_page_visible,
@@ -31,6 +35,7 @@ from backend.services.actor_visible_read import (
 )
 from backend.services.job_queue import HIDDEN_JOB_TYPES
 from backend.services.job_read_service import public_job_failure_code
+from backend.services.read_errors import ReadValidationError
 from backend.services.review_service import ReviewService
 from backend.services.tree_read import TreeReadService
 from backend.utils.actor_display import (
@@ -55,10 +60,13 @@ class PageActivityScope:
         self.tree_node_ids = tree_node_ids
 
     @classmethod
-    def for_page(cls, session: Session, page_id: UUID) -> "PageActivityScope":
+    def for_page(
+        cls, session: Session, workspace_id: UUID, page_id: UUID
+    ) -> "PageActivityScope":
         node_ids = tuple(
             session.scalars(
                 select(WorkspaceTreeNode.id).where(
+                    WorkspaceTreeNode.workspace_id == workspace_id,
                     WorkspaceTreeNode.target_kind == "context_page",
                     WorkspaceTreeNode.target_id == page_id,
                 )
@@ -71,13 +79,28 @@ class PageActivityScope:
             AuditEvent.target_kind == "context_page",
             AuditEvent.target_id == self.page_id,
         )
-        if not self.tree_node_ids:
-            return page_clause
         return or_(
             page_clause,
             and_(
                 AuditEvent.target_kind == "workspace_tree_node",
                 AuditEvent.target_id.in_(self.tree_node_ids),
+            ),
+            and_(
+                AuditEvent.target_kind == "review_item",
+                select(ReviewItem.id)
+                .where(
+                    ReviewItem.id == AuditEvent.target_id,
+                    ReviewItem.workspace_id == AuditEvent.workspace_id,
+                    select(ChangeOperation.id)
+                    .where(
+                        ChangeOperation.workspace_id == ReviewItem.workspace_id,
+                        ChangeOperation.change_set_id == ReviewItem.change_set_id,
+                        ChangeOperation.target_type == "context_page",
+                        ChangeOperation.target_id == self.page_id,
+                    )
+                    .exists(),
+                )
+                .exists(),
             ),
         )
 
@@ -127,11 +150,24 @@ class ActivityService:
         # the audit ledger: pending reviews, jobs and MCP traces are workspace
         # concerns and are not what "this page's activity" means.
         page_scope = (
-            PageActivityScope.for_page(session, page_id)
+            PageActivityScope.for_page(session, workspace_id, page_id)
             if page_id is not None
             else None
         )
         since, until = period_bounds(period)
+        if page_scope is not None:
+            return self._page_activity(
+                session,
+                workspace_id,
+                page_scope,
+                period,
+                since,
+                until,
+                limit,
+                cursor,
+                actor,
+                deferred_identity,
+            )
         # The dedicated lane pages paginate by recency (cursor / "Load more"); the
         # overview and Dashboard keep the review-reserved budget and never page.
         # For a lane page, over-fetch enough from EACH source to fill the
@@ -261,6 +297,96 @@ class ActivityService:
             next_cursor=None,
         )
 
+    def _page_activity(
+        self,
+        session,
+        workspace_id,
+        scope,
+        period,
+        since,
+        until,
+        limit,
+        cursor,
+        actor,
+        deferred_identity,
+    ) -> ActivityListData:
+        """One audit stream with a scope-bound, stable recency cursor."""
+        upper = datetime.now(UTC)
+        before = None
+        skip = 0
+        if cursor:
+            if len(cursor) > 2048:
+                raise ReadValidationError("invalid page activity cursor")
+            if cursor.startswith("page-activity-v2:"):
+                try:
+                    value = json.loads(
+                        base64.urlsafe_b64decode(cursor.split(":", 1)[1])
+                    )
+                    if value["scope"] != [
+                        str(workspace_id),
+                        str(scope.page_id),
+                        period,
+                    ]:
+                        raise ValueError("cursor scope")
+                    upper = datetime.fromisoformat(value["upper"])
+                    boundary = datetime.fromisoformat(value["time"])
+                    if (
+                        upper.tzinfo is None
+                        or boundary.tzinfo is None
+                        or boundary > upper
+                    ):
+                        raise ValueError("cursor time")
+                    before = (boundary, UUID(value["id"]))
+                except (ValueError, KeyError, TypeError, binascii.Error) as exc:
+                    raise ReadValidationError("invalid page activity cursor") from exc
+            else:
+                # Existing clients may finish an old offset page once, then
+                # receive the new cursor without changing workspace lanes.
+                skip = _decode_activity_cursor(cursor)
+        visible = []
+        while len(visible) <= limit:
+            batch = self._audit_history(
+                session=session,
+                workspace_id=workspace_id,
+                since=since,
+                until=until,
+                kind="all",
+                limit=limit + 1,
+                actor=actor,
+                page_scope=scope,
+                deferred_identity=deferred_identity,
+                before=before,
+                upper=upper,
+            )
+            if not batch:
+                break
+            for item in batch:
+                if item.target and item.target.target_id:
+                    if skip:
+                        skip -= 1
+                    else:
+                        visible.append(item)
+            before = (batch[-1].created_at, batch[-1].id)
+            if len(batch) < limit + 1:
+                break
+        more = len(visible) > limit
+        items = visible[:limit]
+        next_cursor = None
+        if more:
+            last = items[-1]
+            encoded = json.dumps(
+                {
+                    "scope": [str(workspace_id), str(scope.page_id), period],
+                    "upper": upper.isoformat(),
+                    "time": last.created_at.isoformat(),
+                    "id": str(last.id),
+                }
+            ).encode()
+            next_cursor = (
+                "page-activity-v2:" + base64.urlsafe_b64encode(encoded).decode()
+            )
+        return ActivityListData(items=items, unread_count=0, next_cursor=next_cursor)
+
     def _pending_reviews(
         self,
         session: Session,
@@ -322,6 +448,8 @@ class ActivityService:
         actor: ActorContext | None = None,
         page_scope: PageActivityScope | None = None,
         deferred_identity: DeferredIdentityLabels | None = None,
+        before: tuple[datetime, UUID] | None = None,
+        upper: datetime | None = None,
     ) -> list[ActivityItemRead]:
         statement = select(AuditEvent).where(
             AuditEvent.workspace_id == workspace_id,
@@ -333,6 +461,15 @@ class ActivityService:
             statement = statement.where(AuditEvent.created_at < until)
         if page_scope is not None:
             statement = statement.where(page_scope.audit_clause())
+        if upper is not None:
+            statement = statement.where(AuditEvent.created_at <= upper)
+        if before is not None:
+            statement = statement.where(
+                or_(
+                    AuditEvent.created_at < before[0],
+                    and_(AuditEvent.created_at == before[0], AuditEvent.id < before[1]),
+                )
+            )
         # Apply the workspace/system split IN the audit query, before the limit:
         # audit is the only source that produces system rows, so without this a
         # flood of newer auth/oauth rows fills this page and crowds out workspace
@@ -345,8 +482,11 @@ class ActivityService:
         elif kind == "review_decision":
             statement = statement.where(_review_decision_audit_event_clause())
         rows = session.scalars(
-            statement.order_by(AuditEvent.created_at.desc()).limit(limit)
+            statement.order_by(
+                AuditEvent.created_at.desc(), AuditEvent.id.desc()
+            ).limit(limit)
         ).all()
+        projection = ContextActivityProjection(session, workspace_id, actor, rows)
         # `users` is control-plane and `session` is the workspace plane, so the
         # human labels are either resolved here (single-database shape) or left
         # as placeholders for the caller's identity session -- never read off
@@ -365,11 +505,7 @@ class ActivityService:
         mcp_client_actors = resolve_mcp_client_actor_details(
             session,
             workspace_id,
-            (
-                event.actor_id
-                for event in rows
-                if event.actor_kind == "mcp_client"
-            ),
+            (event.actor_id for event in rows if event.actor_kind == "mcp_client"),
         )
         owner_names = (
             {}
@@ -389,8 +525,41 @@ class ActivityService:
             # EVERY name/identity the row would otherwise expose — the summary
             # (which can embed the target title, e.g. a tree rename), the target
             # title, and the target id — not just the resolved title.
-            visible = _audit_target_visible(session, event, actor)
+            review = projection.reviews.get(event.target_id)
+            context_review = review and any(
+                op.target_type == "context_page"
+                for op in projection.operations[review.change_set_id]
+            )
+            context_target = (
+                event.target_kind == "context_page"
+                or (event.target_kind == "review_item" and context_review)
+                or (
+                    event.target_kind == "workspace_tree_node"
+                    and projection.tree
+                    and event.target_id in projection.tree.nodes
+                )
+            )
+            visible = (
+                projection.visible(event)
+                if context_target
+                else _audit_target_visible(session, event, actor)
+            )
             event_key, event_args = activity_event_metadata(event, visible=visible)
+            page_id = projection.page_for_event(
+                event, page_scope.page_id if page_scope else None
+            )
+            details, review_id = (
+                projection.details(event, page_id) if visible else (None, None)
+            )
+            if details is not None:
+                event_args = (
+                    {
+                        "previous_title": details.rename.before or "",
+                        "title": details.rename.after or "",
+                    }
+                    if details.rename
+                    else {}
+                )
             client_actor = (
                 mcp_client_actors.get(event.actor_id)
                 if event.actor_kind == "mcp_client"
@@ -441,22 +610,27 @@ class ActivityService:
                     event_args=event_args,
                     title=(
                         (event.event_summary or event.action)
-                        if visible
+                        if visible and not projection.private_edit_hidden(event)
                         else event.action
                     ),
                     body=event.action,
                     target_title=(
-                        target_title_for_audit_event(session, event)
+                        (
+                            projection.pages[page_id].title
+                            if details
+                            else target_title_for_audit_event(session, event)
+                        )
                         if visible
                         else None
                     ),
                     actor=activity_actor,
+                    details=details,
                     target=ActivityTarget(
                         target_kind=event.target_kind,
                         target_id=event.target_id if visible else None,
                     ),
                     created_at=event.created_at,
-                    review_item_id=None,
+                    review_item_id=review_id,
                     affordances=["open"],
                 )
             )
@@ -684,6 +858,9 @@ _ACTIVITY_EVENT_ARGUMENTS: dict[str, tuple[ActivityEventKey, tuple[str, ...]]] =
         ("attempt_no",),
     ),
 }
+
+for _event_key in get_args(ActivityEventKey):
+    _ACTIVITY_EVENT_ARGUMENTS.setdefault(_event_key, (_event_key, ()))
 
 
 def activity_event_metadata(
