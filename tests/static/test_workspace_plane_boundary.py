@@ -85,7 +85,6 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
         "uploader labels, after shard sessions close. Metadata and cleanup route "
         "through session_for(workspace_id); split-database API tests cover both."
     ),
-
     # -- WorkspaceDirectory thin-lookup pattern:
     # resolve workspace_id + membership role on the control session, then do
     # the actual page read/write through session_for(workspace_id).
@@ -410,6 +409,21 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
 # separate allowlist rather than folded into CONTROL_SESSION_FACTORY_
 # ALLOWLIST above). Each entry records which identity-plane reads are allowed.
 SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
+    "backend/api/auth_verification.py": (
+        "Identity-plane only: browser-bound purpose-bound "
+        "reauthentication challenges use global users/identity/outbox records, "
+        "never workspace document or membership data."
+    ),
+    "backend/api/auth_sso.py": (
+        "Identity-plane only: an SSO email-conflict release request reads the "
+        "holder user, identity and auth_email_conflict_requests control-plane "
+        "rows; it never resolves a workspace or reads workspace content."
+    ),
+    "backend/api/auth_dependencies.py": (
+        "Builds the external-login broker over control-plane users, identities "
+        "and browser login transactions. Provisioning uses the existing Personal "
+        "workspace account-creation boundary; no workspace content is queried."
+    ),
     "backend/api/deps.py": (
         "Defines SessionFactoryDep itself. Its own use, in "
         "check_workspace_access, is the identity-plane require_workspace_"
@@ -1080,7 +1094,6 @@ ACTOR_DISPLAY_IDENTITY_READERS: dict[str, str] = {
         "uploader labels, after shard sessions close. Metadata and cleanup route "
         "through session_for(workspace_id); split-database API tests cover both."
     ),
-
     "backend/api/admin.py": (
         "FIXED. admin_list_context_media_orphans lists the orphans on "
         "WorkspaceSessionFactoryDep, closes it, and resolves uploader names on "

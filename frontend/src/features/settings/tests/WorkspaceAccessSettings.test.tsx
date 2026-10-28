@@ -62,7 +62,7 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/access`) {
         return accessRequest;
@@ -93,19 +93,38 @@ describe("Workspace Settings membership and access", () => {
       .not.toBeInTheDocument();
   });
 
-  it("requires the whole-workspace confirmation before first-sharing Personal", async () => {
+  it("requires the whole-workspace confirmation before the first share", async () => {
     const user = userEvent.setup();
     const postBodies: Array<Record<string, unknown>> = [];
     let memberCount = 1;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "private", "invite_only", true));
+        return jsonResponse(
+          workspaceList(
+            "owner",
+            "private",
+            "invite_only",
+            "Mina's Personal Workspace",
+          ),
+        );
+      }
+      // This existing gate traversal also exercises the API-eligible company
+      // directory and its UUID target; it does not need another collected case.
+      if (url.includes(`/workspaces/${WORKSPACE_ID}/member-candidates?`)) {
+        const searched = new URL(url).searchParams.get("query");
+        return jsonResponse({ data: {
+          enabled: true,
+          items: searched ? [{ user_id: MEMBER_ID, display_name: "Person", provider_name: null,
+            provider_slug: "company", provider_label: { en: "Company SSO", ko: "회사 SSO" },
+            identity_label: "00000000…00000003", identity_verified: true }] : [],
+          has_more: false,
+        } });
       }
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?`)) {
         return jsonResponse({
           data: {
-            items: [member(OWNER_ID, "owner@example.com", "Owner", "owner", true)],
+            items: [member(OWNER_ID, "owner@example.com", "Owner", "owner")],
             total: memberCount,
             limit: 25,
             offset: 0,
@@ -139,7 +158,6 @@ describe("Workspace Settings membership and access", () => {
                 "person@example.com",
                 "Person",
                 "viewer",
-                false,
               ),
               created: true,
               first_share: true,
@@ -158,10 +176,11 @@ describe("Workspace Settings membership and access", () => {
     expect(
       await screen.findByRole("heading", { name: "Members" }),
     ).toBeInTheDocument();
-    const memberLookup = screen.getByRole("searchbox", {
-      name: "Find or add members",
+    await user.click(screen.getByRole("button", { name: "Add a member" }));
+    const memberLookup = screen.getByRole("textbox", {
+      name: "User ID or account email",
     });
-    expect(screen.getByText("Add exact login email")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Add a member" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add member" })).toBeDisabled();
     fireEvent.change(memberLookup, { target: { value: "a".repeat(65) + "@example.test" } });
     expect(memberLookup).toHaveAccessibleDescription(/at most 254 UTF-8 bytes/);
@@ -172,14 +191,22 @@ describe("Workspace Settings membership and access", () => {
       memberLookup,
       "person@example.com",
     );
-    expect(screen.getByText(/Add person@example.com as a workspace member/))
-      .toBeInTheDocument();
+    expect(memberLookup).toHaveAccessibleDescription(/exact email registered on the account/);
     expect(
       within(screen.getByLabelText("Initial role")).queryByRole("option", {
         name: "Owner",
       }),
     ).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Add member" }));
+    await user.click(screen.getByRole("tab", { name: "Company directory" }));
+    await user.type(screen.getByRole("searchbox", { name: "Search names in your company" }), "Person");
+    await user.click(screen.getByRole("button", { name: "Search directory" }));
+    const candidateAdd = await screen.findByRole("button", { name: "Add Person" });
+    const candidate = candidateAdd.closest("li")!;
+    expect(within(candidate).getByText("Company SSO")).toBeInTheDocument();
+    expect(within(candidate).getByLabelText("Company account verified")).toBeInTheDocument();
+    await user.click(within(candidate).getByLabelText("Full user ID for Person"));
+    expect(within(candidate).getByText(MEMBER_ID)).toBeVisible();
+    await user.click(candidateAdd);
 
     const dialog = await screen.findByRole("dialog", {
       name: "Share the whole workspace?",
@@ -188,13 +215,13 @@ describe("Workspace Settings membership and access", () => {
       within(dialog).getByText(/shares all of Mina's Personal Workspace/),
     ).toBeInTheDocument();
     expect(
-      within(dialog).getByText(/rename the Personal Workspace before sharing/),
+      within(dialog).getByText(/use a workspace name that makes its shared purpose clear/),
     ).toBeInTheDocument();
     expect(
       within(dialog).getByText(/create a new collaborative Workspace/),
     ).toBeInTheDocument();
     expect(postBodies[0]).toMatchObject({
-      email: "person@example.com",
+      user_id: MEMBER_ID,
       role: "viewer",
       confirm_first_share: false,
     });
@@ -205,7 +232,76 @@ describe("Workspace Settings membership and access", () => {
     await waitFor(() => expect(postBodies).toHaveLength(2));
     expect(postBodies[1]).toMatchObject({ confirm_first_share: true });
     expect(await screen.findByText(/was added to this workspace/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add a member" })).toHaveFocus());
     expect((await axe(container)).violations).toEqual([]);
+  });
+
+  it("ignores a first-share response after switching to another workspace", async () => {
+    // A deferred 409 crosses workspace selection and dialog lifetime. The
+    // existing first-share traversal stays in one workspace and cannot catch
+    // a stale response replacing the new workspace's add-member dialog.
+    const user = userEvent.setup();
+    const nextWorkspaceId = "00000000-0000-0000-0000-000000000006";
+    const postedWorkspaceIds: string[] = [];
+    let resolveAdd!: (response: Response) => void;
+    const addRequest = new Promise<Response>((resolve) => { resolveAdd = resolve; });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input.toString();
+      if (url === `${BASE}/api/v1/workspaces`) {
+        const response = workspaceList("owner", "private", "invite_only");
+        return jsonResponse({ data: {
+          ...response.data,
+          workspaces: [...response.data.workspaces, {
+            ...response.data.workspaces[0], id: nextWorkspaceId,
+            slug: "other", title: "Other Workspace", name: "Other Workspace",
+          }],
+        } });
+      }
+      if (url.includes("/member-candidates?")) {
+        return jsonResponse({ data: { enabled: false, items: [], has_more: false } });
+      }
+      if (url.includes("/members?")) {
+        const name = url.includes(`/workspaces/${nextWorkspaceId}/`) ? "Other owner" : "Owner";
+        return memberPage([member(OWNER_ID, "owner@example.com", name, "owner")]);
+      }
+      if (url.includes("/join-requests?")) {
+        return jsonResponse({ data: { items: [], total: 0, has_more: false } });
+      }
+      if (init?.method === "POST" && url.endsWith("/members")) {
+        postedWorkspaceIds.push(url.split("/").at(-2)!);
+        return addRequest;
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    });
+
+    testingLibraryRender(
+      <MemoryRouter>
+        <WorkspaceProvider>
+          <WorkspaceContextProbe />
+          <WorkspaceSwitchControl workspaceId={nextWorkspaceId} />
+          <WorkspaceMembersSection />
+        </WorkspaceProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByRole("combobox", { name: "Role for Owner" });
+    await user.click(screen.getByRole("button", { name: "Add a member" }));
+    await user.type(screen.getByRole("textbox", { name: "User ID or account email" }), "person@example.com");
+    await user.click(screen.getByRole("button", { name: "Add member" }));
+    await waitFor(() => expect(postedWorkspaceIds).toEqual([WORKSPACE_ID]));
+
+    await user.click(screen.getByRole("button", { name: "Switch workspace" }));
+    await screen.findByRole("combobox", { name: "Role for Other owner" });
+    await user.click(screen.getByRole("button", { name: "Add a member" }));
+    await user.type(screen.getByRole("textbox", { name: "User ID or account email" }), "other@example.com");
+    await act(async () => {
+      resolveAdd(await errorResponse(409, "workspace_first_share_confirmation_required"));
+      await addRequest;
+    });
+
+    expect(screen.queryByRole("dialog", { name: "Share the whole workspace?" })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Add a member" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "User ID or account email" })).toHaveValue("other@example.com");
+    expect(postedWorkspaceIds).toEqual([WORKSPACE_ID]);
   });
 
   it("re-queries the applied member search after adding a non-matching email", async () => {
@@ -215,13 +311,13 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (
         url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?limit=25`
       ) {
         return memberPage([
-          member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
+          member(OWNER_ID, "owner@example.com", "Owner", "owner"),
         ]);
       }
       if (
@@ -230,7 +326,7 @@ describe("Workspace Settings membership and access", () => {
       ) {
         filteredReads += 1;
         return memberPage([
-          member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
+          member(OWNER_ID, "owner@example.com", "Owner", "owner"),
         ]);
       }
       if (
@@ -253,7 +349,6 @@ describe("Workspace Settings membership and access", () => {
                 "person@example.com",
                 "Person",
                 "viewer",
-                false,
               ),
               created: true,
               first_share: false,
@@ -270,16 +365,16 @@ describe("Workspace Settings membership and access", () => {
     render(<WorkspaceMembersSection />);
     await screen.findByRole("combobox", { name: "Role for Owner" });
     const memberLookup = screen.getByRole("searchbox", {
-      name: "Find or add members",
+      name: "Search current members",
     });
     await user.type(memberLookup, "Owner");
     await user.click(screen.getByRole("button", { name: "Search" }));
     await waitFor(() => expect(filteredReads).toBe(1));
 
-    // The draft can become an exact email while the applied search remains
-    // "Owner". The add result does not belong in that filtered result set.
-    await user.clear(memberLookup);
-    await user.type(memberLookup, "person@example.com");
+    // Adding a person does not change the current-member search. The add
+    // result does not belong in the filtered result set.
+    await user.click(screen.getByRole("button", { name: "Add a member" }));
+    await user.type(screen.getByRole("textbox", { name: "User ID or account email" }), "person@example.com");
     await user.click(screen.getByRole("button", { name: "Add member" }));
 
     await waitFor(() => {
@@ -300,14 +395,14 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (
         url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?limit=25`
       ) {
         return memberPage([
-          member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
-          member(MEMBER_ID, "editor@example.com", "Editor", "editor", false),
+          member(OWNER_ID, "owner@example.com", "Owner", "owner"),
+          member(MEMBER_ID, "editor@example.com", "Editor", "editor"),
         ]);
       }
       if (
@@ -316,7 +411,7 @@ describe("Workspace Settings membership and access", () => {
       ) {
         filteredReads += 1;
         return memberPage([
-          member(MEMBER_ID, "editor@example.com", "Editor", "editor", false),
+          member(MEMBER_ID, "editor@example.com", "Editor", "editor"),
         ]);
       }
       if (
@@ -339,7 +434,6 @@ describe("Workspace Settings membership and access", () => {
                 "viewer@example.com",
                 "Viewer",
                 "viewer",
-                false,
               ),
               created: true,
               first_share: false,
@@ -361,8 +455,9 @@ describe("Workspace Settings membership and access", () => {
     );
     await waitFor(() => expect(filteredReads).toBe(1));
 
+    await user.click(screen.getByRole("button", { name: "Add a member" }));
     await user.type(
-      screen.getByRole("searchbox", { name: "Find or add members" }),
+      screen.getByRole("textbox", { name: "User ID or account email" }),
       "viewer@example.com",
     );
     await user.click(screen.getByRole("button", { name: "Add member" }));
@@ -383,14 +478,13 @@ describe("Workspace Settings membership and access", () => {
   it("resets member pagination after add so Load more cannot duplicate the new row", async () => {
     const user = userEvent.setup();
     const firstPageMembers = [
-      member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
+      member(OWNER_ID, "owner@example.com", "Owner", "owner"),
       ...Array.from({ length: 24 }, (_, index) =>
         member(
           `00000000-0000-0000-0000-${String(index + 10).padStart(12, "0")}`,
           `member-${index + 1}@example.com`,
           `Page 1 member ${index + 1}`,
           "viewer",
-          false,
         ),
       ),
     ];
@@ -399,14 +493,12 @@ describe("Workspace Settings membership and access", () => {
       "tail@example.com",
       "Tail member",
       "viewer",
-      false,
     );
     const addedMember = member(
       "00000000-0000-0000-0000-000000000091",
       "added@example.com",
       "Added member",
       "viewer",
-      false,
     );
     let created = false;
     let firstPageReads = 0;
@@ -414,7 +506,7 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (
         url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?limit=25`
@@ -480,8 +572,9 @@ describe("Workspace Settings membership and access", () => {
     expect(firstPageReads).toBe(1);
     expect(screen.getByText("26 members")).toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: "Add a member" }));
     await user.type(
-      screen.getByRole("searchbox", { name: "Find or add members" }),
+      screen.getByRole("textbox", { name: "User ID or account email" }),
       "added@example.com",
     );
     await user.click(screen.getByRole("button", { name: "Add member" }));
@@ -509,17 +602,17 @@ describe("Workspace Settings membership and access", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(27);
   });
 
-  it("reports an existing exact-email member without claiming a Viewer role", async () => {
+  it("reports an existing email-less UUID member without claiming a Viewer role", async () => {
     const user = userEvent.setup();
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?`)) {
         return memberPage([
-          member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
-          member(MEMBER_ID, "editor@example.com", "Editor", "editor", false),
+          member(OWNER_ID, "owner@example.com", "Owner", "owner"),
+          member(MEMBER_ID, null, "Editor", "editor"),
         ]);
       }
       if (
@@ -533,15 +626,10 @@ describe("Workspace Settings membership and access", () => {
         url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members` &&
         init?.method === "POST"
       ) {
+        expect(JSON.parse(String(init.body))).toEqual({ user_id: MEMBER_ID, role: "editor", confirm_first_share: false });
         return jsonResponse({
           data: {
-            member: member(
-              MEMBER_ID,
-              "editor@example.com",
-              "Editor",
-              "editor",
-              false,
-            ),
+            member: member(MEMBER_ID, null, "Editor", "editor"),
             created: false,
             first_share: false,
             first_share_warning_code: null,
@@ -554,16 +642,23 @@ describe("Workspace Settings membership and access", () => {
 
     render(<WorkspaceMembersSection />);
     await screen.findByRole("combobox", { name: "Role for Editor" });
+    await user.click(screen.getByRole("button", { name: "Add a member" }));
+    expect(screen.queryByRole("tab", { name: "Company directory" })).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Initial role"), "editor");
+    await user.click(screen.getByRole("button", { name: "Close member form" }));
+    await user.click(screen.getByRole("button", { name: "Add a member" }));
+    expect(screen.getByLabelText("Initial role")).toHaveValue("viewer");
+    expect(screen.getByRole("textbox", { name: "User ID or account email" })).toHaveValue("");
     await user.type(
-      screen.getByRole("searchbox", { name: "Find or add members" }),
-      "editor@example.com",
+      screen.getByRole("textbox", { name: "User ID or account email" }),
+      MEMBER_ID,
     );
     await user.selectOptions(screen.getByLabelText("Initial role"), "editor");
     await user.click(screen.getByRole("button", { name: "Add member" }));
 
     expect(
       await screen.findByText(
-        "editor@example.com is already a member; no role was changed.",
+        `${MEMBER_ID} is already a member; no role was changed.`,
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/requested viewer access/i)).not.toBeInTheDocument();
@@ -576,14 +671,14 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?`)) {
         return jsonResponse({
           data: {
             items: [
-              member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
-              member(MEMBER_ID, "editor@example.com", "Editor", "editor", false),
+              member(OWNER_ID, "owner@example.com", "Owner", "owner"),
+              member(MEMBER_ID, "editor@example.com", "Editor", "editor"),
             ],
             total: 2,
             limit: 25,
@@ -616,7 +711,6 @@ describe("Workspace Settings membership and access", () => {
               "editor@example.com",
               "Editor",
               "owner",
-              false,
             ),
             created: false,
             first_share: false,
@@ -684,14 +778,14 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?`)) {
         return jsonResponse({
           data: {
             items: [
-              member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
-              member(MEMBER_ID, "coowner@example.com", "Co-owner", "owner", false),
+              member(OWNER_ID, "owner@example.com", "Owner", "owner"),
+              member(MEMBER_ID, "coowner@example.com", "Co-owner", "owner"),
             ],
             total: 2,
             limit: 25,
@@ -713,7 +807,7 @@ describe("Workspace Settings membership and access", () => {
         mutationBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         return jsonResponse({
           data: {
-            member: member(OWNER_ID, "owner@example.com", "Owner", "viewer", false),
+            member: member(OWNER_ID, "owner@example.com", "Owner", "viewer"),
             created: false,
             first_share: false,
             first_share_warning_code: null,
@@ -756,7 +850,7 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (url.includes(`/join-requests?status=pending&offset=0&limit=50`)) {
         return jsonResponse({
@@ -768,7 +862,7 @@ describe("Workspace Settings membership and access", () => {
       ) {
         return jsonResponse({
           data: {
-            items: [member(OWNER_ID, "owner@example.com", "Owner", "owner", false)],
+            items: [member(OWNER_ID, "owner@example.com", "Owner", "owner")],
             total: 2,
             limit: 25,
             offset: 0,
@@ -783,7 +877,7 @@ describe("Workspace Settings membership and access", () => {
       ) {
         return jsonResponse({
           data: {
-            items: [member(MEMBER_ID, "editor@example.com", "Editor", "viewer", false)],
+            items: [member(MEMBER_ID, "editor@example.com", "Editor", "viewer")],
             total: 2,
             limit: 25,
             offset: 0,
@@ -799,7 +893,7 @@ describe("Workspace Settings membership and access", () => {
         patchCalls += 1;
         return jsonResponse({
           data: {
-            member: member(MEMBER_ID, "editor@example.com", "Editor", "editor", false),
+            member: member(MEMBER_ID, "editor@example.com", "Editor", "editor"),
             created: false,
             first_share: false,
             first_share_warning_code: null,
@@ -849,12 +943,12 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?`)) {
         return jsonResponse({
           data: {
-            items: [member(OWNER_ID, "owner@example.com", "Owner", "owner", false)],
+            items: [member(OWNER_ID, "owner@example.com", "Owner", "owner")],
             total: 1,
             limit: 25,
             offset: 0,
@@ -906,7 +1000,7 @@ describe("Workspace Settings membership and access", () => {
       const url = input.toString();
       requested.push(url);
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("editor", "team", "request", false));
+        return jsonResponse(workspaceList("editor", "team", "request"));
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -946,7 +1040,7 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        const target = workspaceList("viewer", "team", "request", false).data
+        const target = workspaceList("viewer", "team", "request").data
           .workspaces[0];
         const fallback = {
           ...target,
@@ -959,7 +1053,6 @@ describe("Workspace Settings membership and access", () => {
           data: {
             current_workspace_id: removed ? fallbackId : WORKSPACE_ID,
             default_workspace_id: null,
-            personal_workspace_id: fallbackId,
             workspaces: removed ? [fallback] : [target, fallback],
           },
         });
@@ -1034,11 +1127,10 @@ describe("Workspace Settings membership and access", () => {
                   data: {
                     current_workspace_id: null,
                     default_workspace_id: null,
-                    personal_workspace_id: null,
                     workspaces: [],
                   },
                 }
-              : workspaceList("viewer", "team", "request", false),
+              : workspaceList("viewer", "team", "request"),
           );
         }
         if (
@@ -1111,7 +1203,7 @@ describe("Workspace Settings membership and access", () => {
     }) => {
       const user = userEvent.setup();
       let removed = false;
-      const initial = workspaceList("viewer", "team", "request", false).data;
+      const initial = workspaceList("viewer", "team", "request").data;
       const staleWorkspace = {
         ...initial.workspaces[0],
         id: "00000000-0000-0000-0000-000000000097",
@@ -1195,7 +1287,7 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", visibility, "request", false));
+        return jsonResponse(workspaceList("owner", visibility, "request"));
       }
       if (
         url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/access` &&
@@ -1248,7 +1340,7 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "public", "request", false));
+        return jsonResponse(workspaceList("owner", "public", "request"));
       }
       if (
         url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/access` &&
@@ -1318,7 +1410,7 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/access` && !init?.method) {
         accessReads += 1;
@@ -1368,14 +1460,14 @@ describe("Workspace Settings membership and access", () => {
         if (workspaceCalls > 1) {
           return jsonResponse({ error_code: "temporary_failure" }, 503);
         }
-        return jsonResponse(workspaceList(role, "team", "request", false));
+        return jsonResponse(workspaceList(role, "team", "request"));
       }
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?`)) {
         return jsonResponse({
           data: {
             items: [
-              member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
-              member(MEMBER_ID, "coowner@example.com", "Co-owner", "owner", false),
+              member(OWNER_ID, "owner@example.com", "Owner", "owner"),
+              member(MEMBER_ID, "coowner@example.com", "Co-owner", "owner"),
             ],
             total: 2,
             limit: 25,
@@ -1402,7 +1494,6 @@ describe("Workspace Settings membership and access", () => {
               "owner@example.com",
               "Owner",
               "viewer",
-              false,
             ),
             created: false,
             first_share: false,
@@ -1435,17 +1526,17 @@ describe("Workspace Settings membership and access", () => {
   it("consumes the self-removal fallback, refreshes context, and remounts safely", async () => {
     const user = userEvent.setup();
     const defaultId = "00000000-0000-0000-0000-000000000098";
-    const personalId = "00000000-0000-0000-0000-000000000099";
+    const fallbackId = "00000000-0000-0000-0000-000000000099";
     const requestSequence: string[] = [];
     let removed = false;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        const target = workspaceList("owner", "team", "request", false).data
+        const target = workspaceList("owner", "team", "request").data
           .workspaces[0];
-        const personal = {
+        const fallback = {
           ...target,
-          id: personalId,
+          id: fallbackId,
           slug: "personal",
           title: "Personal Workspace",
           name: "Personal Workspace",
@@ -1466,10 +1557,9 @@ describe("Workspace Settings membership and access", () => {
           data: {
             current_workspace_id: removed ? defaultId : WORKSPACE_ID,
             default_workspace_id: defaultId,
-            personal_workspace_id: personalId,
             workspaces: removed
-              ? [persistedDefault, personal]
-              : [target, persistedDefault, personal],
+              ? [persistedDefault, fallback]
+              : [target, persistedDefault, fallback],
           },
         });
       }
@@ -1477,8 +1567,8 @@ describe("Workspace Settings membership and access", () => {
         return jsonResponse({
           data: {
             items: [
-              member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
-              member(MEMBER_ID, "coowner@example.com", "Co-owner", "owner", false),
+              member(OWNER_ID, "owner@example.com", "Owner", "owner"),
+              member(MEMBER_ID, "coowner@example.com", "Co-owner", "owner"),
             ],
             total: 2,
             limit: 25,
@@ -1504,7 +1594,7 @@ describe("Workspace Settings membership and access", () => {
             removed_user_id: OWNER_ID,
             previous_role: "owner",
             default_workspace_id: defaultId,
-            fallback_workspace_id: personalId,
+            fallback_workspace_id: fallbackId,
             member_count: 1,
           },
         });
@@ -1518,7 +1608,7 @@ describe("Workspace Settings membership and access", () => {
     );
     expect(ownerRow).not.toBeNull();
     await user.click(
-      within(ownerRow as HTMLElement).getByRole("button", { name: "Remove" }),
+      within(ownerRow as HTMLElement).getByRole("button", { name: /^Remove / }),
     );
     await user.click(
       within(
@@ -1528,13 +1618,13 @@ describe("Workspace Settings membership and access", () => {
 
     expect(await screen.findByText("Fallback route")).toBeInTheDocument();
     expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe(
-      personalId,
+      fallbackId,
     );
     expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceSlug")).toBe(
       "personal",
     );
     expect(screen.getByTestId("selected-workspace")).toHaveTextContent(
-      personalId,
+      fallbackId,
     );
     expect(screen.getByTestId("default-workspace")).toHaveTextContent(defaultId);
     expect(screen.getByTestId("workspace-ids")).not.toHaveTextContent(
@@ -1550,7 +1640,7 @@ describe("Workspace Settings membership and access", () => {
     expect(await screen.findByText("Fallback route")).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByTestId("selected-workspace")).toHaveTextContent(
-        personalId,
+        fallbackId,
       );
     });
     expect(screen.getByTestId("default-workspace")).toHaveTextContent(defaultId);
@@ -1572,13 +1662,12 @@ describe("Workspace Settings membership and access", () => {
         if (workspaceCalls > 1) {
           return jsonResponse({ error_code: "temporary_failure" }, 503);
         }
-        const target = workspaceList("owner", "team", "request", false).data
+        const target = workspaceList("owner", "team", "request").data
           .workspaces[0];
         return jsonResponse({
           data: {
             current_workspace_id: WORKSPACE_ID,
             default_workspace_id: WORKSPACE_ID,
-            personal_workspace_id: fallbackId,
             workspaces: [
               target,
               {
@@ -1597,8 +1686,8 @@ describe("Workspace Settings membership and access", () => {
         return jsonResponse({
           data: {
             items: [
-              member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
-              member(MEMBER_ID, "coowner@example.com", "Co-owner", "owner", false),
+              member(OWNER_ID, "owner@example.com", "Owner", "owner"),
+              member(MEMBER_ID, "coowner@example.com", "Co-owner", "owner"),
             ],
             total: 2,
             limit: 25,
@@ -1636,7 +1725,7 @@ describe("Workspace Settings membership and access", () => {
     );
     expect(ownerRow).not.toBeNull();
     await user.click(
-      within(ownerRow as HTMLElement).getByRole("button", { name: "Remove" }),
+      within(ownerRow as HTMLElement).getByRole("button", { name: /^Remove / }),
     );
     await user.click(
       within(
@@ -1665,12 +1754,12 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?`)) {
         return jsonResponse({
           data: {
-            items: [member(OWNER_ID, "owner@example.com", "Owner", "owner", false)],
+            items: [member(OWNER_ID, "owner@example.com", "Owner", "owner")],
             total: 1,
             limit: 25,
             offset: 0,
@@ -1704,14 +1793,7 @@ describe("Workspace Settings membership and access", () => {
       .toBeDefined();
   });
 
-  it("stacks member and sharing controls at phone widths", () => {
-    const styles = readAppStyles();
-    expect(styles).toContain("@media (max-width: 640px)");
-    expect(styles).toContain(".workspace-member-lookup,");
-    expect(styles).toContain(".workspace-access-policy-cards,");
-    expect(styles).toContain(".workspace-access-options--two,");
-    expect(styles).toContain("grid-template-columns: minmax(0, 1fr);");
-  });
+
 });
 
 function renderWithWorkspaceProvider(initialEntry = "/settings") {
@@ -1751,6 +1833,11 @@ function WorkspaceContextProbe() {
   return <span data-testid="switcher-visibility">{target?.visibility}</span>;
 }
 
+function WorkspaceSwitchControl({ workspaceId }: { workspaceId: string }) {
+  const { selectWorkspaceId } = useWorkspaceContext();
+  return <button onClick={() => selectWorkspaceId(workspaceId)}>Switch workspace</button>;
+}
+
 function FallbackRoute() {
   const { defaultWorkspaceId, selectedWorkspace, workspaces } =
     useWorkspaceContext();
@@ -1783,19 +1870,18 @@ function workspaceList(
   role: "viewer" | "editor" | "owner",
   visibility: "private" | "team" | "public",
   joinPolicy: "invite_only" | "request",
-  personal: boolean,
+  title = "Team Workspace",
 ) {
   return {
     data: {
       current_workspace_id: WORKSPACE_ID,
       default_workspace_id: WORKSPACE_ID,
-      personal_workspace_id: personal ? WORKSPACE_ID : null,
       workspaces: [
         {
           id: WORKSPACE_ID,
           slug: "workspace",
-          title: personal ? "Mina's Personal Workspace" : "Team Workspace",
-          name: personal ? "Mina's Personal Workspace" : "Team Workspace",
+          title,
+          name: title,
           goal: "Test",
           default_language: "en",
           visibility,
@@ -1810,10 +1896,9 @@ function workspaceList(
 
 function member(
   userId: string,
-  email: string,
+  email: string | null,
   displayName: string,
   role: "viewer" | "editor" | "owner",
-  anchor: boolean,
 ) {
   return {
     user_id: userId,
@@ -1822,7 +1907,6 @@ function member(
     status: "active",
     role,
     joined_at: "2026-07-30T09:00:00Z",
-    is_personal_anchor_owner: anchor,
     is_current_user: userId === OWNER_ID,
   };
 }

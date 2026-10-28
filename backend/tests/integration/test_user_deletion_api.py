@@ -55,8 +55,9 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
     outsider = users.add_user(email="outsider@example.com", password="outsider-pw")
     with factory.begin() as session:
         grant_server_admin(session, admin.user_id)
-        personal_id = session.get(User, target.user_id).personal_workspace_id
-        admin_personal_id = session.get(User, admin.user_id).personal_workspace_id
+        personal_id = _starter_workspace_id(session, target.user_id)
+        admin_personal_id = _starter_workspace_id(session, admin.user_id)
+        teamlead_personal_id = _starter_workspace_id(session, teamlead.user_id)
         personal_title = session.get(Workspace, personal_id).title
         shared = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         shared_id = shared.id
@@ -112,7 +113,6 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
                 ),
             ]
         )
-        teamlead_personal_id = session.get(User, teamlead.user_id).personal_workspace_id
         page = ContextPage(
             workspace_id=shared_id,
             slug="shared-history",
@@ -320,18 +320,7 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
                 reference_count=1,
             )
         )
-    assert (
-        admin_client.patch(
-            "/api/v1/admin/user-deletion-policy", json={"retention_days": 1}
-        ).status_code
-        == 401
-    )
-    assert (
-        admin_client.post(
-            "/api/v1/auth/reauthenticate", json={"current_password": "admin-password"}
-        ).status_code
-        == 200
-    )
+    # A fresh password login counts as recent confirmation for admin actions.
     assert (
         admin_client.patch(
             "/api/v1/admin/user-deletion-policy", json={"retention_days": 1}
@@ -676,3 +665,13 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
     assert not store.path_for_key(stored.storage_key).exists()
     recreated = users.add_user(email=target.email, password="replacement-password")
     assert isinstance(recreated.user_id, UUID) and recreated.user_id != target.user_id
+
+
+def _starter_workspace_id(session, user_id):
+    # A new account owns exactly the one workspace it starts with.
+    return session.scalar(
+        select(WorkspaceMembership.workspace_id).where(
+            WorkspaceMembership.user_id == user_id,
+            WorkspaceMembership.role == "owner",
+        )
+    )

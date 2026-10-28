@@ -392,7 +392,7 @@ export function Shell({ children }: ShellProps) {
   const shellScrollGuardRef = useScrollLeftGuardRef<HTMLDivElement>();
   const isAuthenticated = status === "authenticated" && Boolean(user);
   const needsCapabilitiesForNotice =
-    isAuthenticated && user?.email_verified_at === null;
+    isAuthenticated && Boolean(user?.email) && user?.email_verified_at === null;
   // M-14 (260908 UI audit): Account already shows its own "Email not
   // verified · Verify email" control inline, in context with the rest of the
   // account's connected-tools/security surface. Repeating the same CTA in the
@@ -706,7 +706,6 @@ function WorkspaceRouteBoundary({ children }: { children: ReactNode }) {
     error,
     initialized,
     loading,
-    personalWorkspaceId,
     refreshWorkspaces,
     selectedWorkspace,
     selectWorkspaceId,
@@ -831,43 +830,40 @@ function WorkspaceRouteBoundary({ children }: { children: ReactNode }) {
         })}
       </p>
       <ul className="workspace-resolution-list">
-        {workspaces.map((workspace) => {
-          const isPersonal = workspace.id === personalWorkspaceId;
-          return (
-            <li key={workspace.id}>
-              <button
-                className="workspace-resolution-option"
-                onClick={() => chooseWorkspace(workspace)}
-                type="button"
-              >
-                <span className="workspace-initials">
-                  {workspaceInitials(workspace.title)}
-                </span>
-                <span>
-                  <strong>{workspace.title}</strong>
-                  <small>
-                    {t(`status.${workspace.role ?? "member"}`, {
-                      defaultValue: workspace.role ?? "member",
-                    })}
-                    {" · "}
-                    {t(`status.${workspace.visibility}`, {
-                      defaultValue: workspace.visibility,
-                    })}
-                    {!isPersonal && workspace.owner_display_name ? (
-                      <>
-                        {" · "}
-                        {t("workspace.ownedBy", {
-                          defaultValue: "Owned by {{name}}",
-                          name: workspace.owner_display_name,
-                        })}
-                      </>
-                    ) : null}
-                  </small>
-                </span>
-              </button>
-            </li>
-          );
-        })}
+        {workspaces.map((workspace) => (
+          <li key={workspace.id}>
+            <button
+              className="workspace-resolution-option"
+              onClick={() => chooseWorkspace(workspace)}
+              type="button"
+            >
+              <span className="workspace-initials">
+                {workspaceInitials(workspace.title)}
+              </span>
+              <span>
+                <strong>{workspace.title}</strong>
+                <small>
+                  {t(`status.${workspace.role ?? "member"}`, {
+                    defaultValue: workspace.role ?? "member",
+                  })}
+                  {" · "}
+                  {t(`status.${workspace.visibility}`, {
+                    defaultValue: workspace.visibility,
+                  })}
+                  {workspace.owner_display_name ? (
+                    <>
+                      {" · "}
+                      {t("workspace.ownedBy", {
+                        defaultValue: "Owned by {{name}}",
+                        name: workspace.owner_display_name,
+                      })}
+                    </>
+                  ) : null}
+                </small>
+              </span>
+            </button>
+          </li>
+        ))}
       </ul>
     </section>
   );
@@ -1470,7 +1466,6 @@ function WorkspaceControls({
     refreshWorkspaces,
     selectWorkspaceId,
     defaultWorkspaceId,
-    personalWorkspaceId,
     selectedId,
     selectedWorkspace,
     workspaces,
@@ -1710,27 +1705,9 @@ function WorkspaceControls({
         workspace.title.toLowerCase().includes(normalizedFilter),
       )
     : pendingJoinWorkspaces;
-  const personalWorkspace = personalWorkspaceId
-    ? (visibleWorkspaces.find(
-        (workspace) => workspace.id === personalWorkspaceId,
-      ) ?? null)
-    : null;
-  const workspaceGroups = [
-    {
-      key: "personal",
-      label: t("workspace.personalGroup", {
-        defaultValue: "Personal workspace",
-      }),
-      workspaces: personalWorkspace ? [personalWorkspace] : [],
-    },
-    {
-      key: "member",
-      label: t("workspace.memberGroup", { defaultValue: "My workspaces" }),
-      workspaces: visibleWorkspaces.filter(
-        (workspace) => workspace.id !== personalWorkspace?.id,
-      ),
-    },
-  ].filter((group) => group.workspaces.length > 0);
+  const memberGroupLabel = t("workspace.memberGroup", {
+    defaultValue: "My workspaces",
+  });
   const showWorkspaceFilter =
     workspaces.length + pendingJoinWorkspaces.length > 7;
 
@@ -1878,140 +1855,127 @@ function WorkspaceControls({
               })}
               className="workspace-menu-list"
             >
-              {workspaceGroups.map((group) => (
-                <div
-                  aria-label={group.label}
-                  className="workspace-menu-group"
-                  key={group.key}
-                  role="group"
-                >
-                  <p aria-hidden="true" className="workspace-menu-group-label">
-                    {group.label}
-                  </p>
-                  <div role="list">
-                    {group.workspaces.map((workspace) => {
-                      const isPersonal = workspace.id === personalWorkspaceId;
-                      return (
-                        <div
-                          className="workspace-menu-row"
-                          key={workspace.id}
-                          role="listitem"
-                        >
-                          <button
-                            aria-pressed={workspace.id === selectedId}
-                            className={`workspace-menu-item ${
-                              workspace.id === selectedId ? "active" : ""
-                            }`}
-                            onClick={() => selectWorkspace(workspace.id)}
-                            type="button"
-                          >
-                            <span className="workspace-initials">
-                              {workspaceInitials(workspace.title)}
-                            </span>
-                            <span className="workspace-menu-item-copy">
-                              <strong>{workspace.title}</strong>
-                              <small className="workspace-menu-meta">
-                                {isPersonal ? (
-                                  <span className="workspace-mini-badge">
-                                    {t("workspace.personalBadge", {
-                                      defaultValue: "Personal",
-                                    })}
-                                  </span>
-                                ) : null}
-                                {!isPersonal && workspace.owner_display_name ? (
-                                  <span>
-                                    {t("workspace.ownedBy", {
-                                      defaultValue: "Owned by {{name}}",
-                                      name: workspace.owner_display_name,
-                                    })}
-                                  </span>
-                                ) : null}
-                                <span>
-                                  {t(`status.${workspace.role ?? "member"}`, {
-                                    defaultValue: workspace.role ?? "member",
-                                  })}
-                                </span>
-                                <span>
-                                  {t(`status.${workspace.visibility}`, {
-                                    defaultValue: workspace.visibility,
-                                  })}
-                                </span>
-                                {(workspace.member_count ?? 0) >= 2 ? (
-                                  <span>
-                                    {t("workspace.memberCount", {
-                                      count: workspace.member_count,
-                                      defaultValue:
-                                        "Shared · {{count}} members",
-                                    })}
-                                  </span>
-                                ) : null}
-                                {workspace.id === defaultWorkspaceId ? (
-                                  <span className="workspace-default-mini-badge">
-                                    <CheckCircle2
-                                      size={10}
-                                      aria-hidden="true"
-                                    />
-                                    {t("workspace.defaultBadge", {
-                                      defaultValue: "Default",
-                                    })}
-                                  </span>
-                                ) : null}
-                              </small>
-                            </span>
-                          </button>
-                          <div
-                            aria-label={t("workspace.rowActions", {
-                              defaultValue: "Actions for {{title}}",
-                              title: workspace.title,
-                            })}
-                            className="workspace-menu-item-actions"
-                            role="group"
-                          >
-                            <Link
-                              state={workspaceRouteNavigationState(
-                                workspace.id,
-                                "settings",
-                              )}
-                              to="/settings?section=workspace"
-                            >
-                              <Settings aria-hidden="true" size={12} />
-                              {t("workspace.settingsAction", {
-                                defaultValue: "Settings",
-                              })}
-                            </Link>
-                            {workspace.role === "owner" ? (
-                              <Link
-                                state={workspaceRouteNavigationState(
-                                  workspace.id,
-                                  "sharing",
-                                )}
-                                to="/settings?section=access-sharing"
-                              >
-                                <Share2 aria-hidden="true" size={12} />
-                                {t("workspace.shareAction", {
-                                  defaultValue: "Share",
+              <div
+                aria-label={memberGroupLabel}
+                className="workspace-menu-group"
+                role="group"
+              >
+                <p aria-hidden="true" className="workspace-menu-group-label">
+                  {memberGroupLabel}
+                </p>
+                <div role="list">
+                  {visibleWorkspaces.map((workspace) => (
+                    <div
+                      className="workspace-menu-row"
+                      key={workspace.id}
+                      role="listitem"
+                    >
+                      <button
+                        aria-pressed={workspace.id === selectedId}
+                        className={`workspace-menu-item ${
+                          workspace.id === selectedId ? "active" : ""
+                        }`}
+                        onClick={() => selectWorkspace(workspace.id)}
+                        type="button"
+                      >
+                        <span className="workspace-initials">
+                          {workspaceInitials(workspace.title)}
+                        </span>
+                        <span className="workspace-menu-item-copy">
+                          <strong>{workspace.title}</strong>
+                          <small className="workspace-menu-meta">
+                            {workspace.owner_display_name ? (
+                              <span>
+                                {t("workspace.ownedBy", {
+                                  defaultValue: "Owned by {{name}}",
+                                  name: workspace.owner_display_name,
                                 })}
-                              </Link>
+                              </span>
                             ) : null}
-                            <Link
-                              state={workspaceRouteNavigationState(
-                                workspace.id,
-                                "members",
-                              )}
-                              to="/settings?section=members"
-                            >
-                              <Users aria-hidden="true" size={12} />
-                              {t("workspace.membersAction", {
-                                defaultValue: "Members",
+                            <span>
+                              {t(`status.${workspace.role ?? "member"}`, {
+                                defaultValue: workspace.role ?? "member",
                               })}
-                            </Link>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                            </span>
+                            <span>
+                              {t(`status.${workspace.visibility}`, {
+                                defaultValue: workspace.visibility,
+                              })}
+                            </span>
+                            {(workspace.member_count ?? 0) >= 2 ? (
+                              <span>
+                                {t("workspace.memberCount", {
+                                  count: workspace.member_count,
+                                  defaultValue:
+                                    "Shared · {{count}} members",
+                                })}
+                              </span>
+                            ) : null}
+                            {workspace.id === defaultWorkspaceId ? (
+                              <span className="workspace-default-mini-badge">
+                                <CheckCircle2
+                                  size={10}
+                                  aria-hidden="true"
+                                />
+                                {t("workspace.defaultBadge", {
+                                  defaultValue: "Default",
+                                })}
+                              </span>
+                            ) : null}
+                          </small>
+                        </span>
+                      </button>
+                      <div
+                        aria-label={t("workspace.rowActions", {
+                          defaultValue: "Actions for {{title}}",
+                          title: workspace.title,
+                        })}
+                        className="workspace-menu-item-actions"
+                        role="group"
+                      >
+                        <Link
+                          state={workspaceRouteNavigationState(
+                            workspace.id,
+                            "settings",
+                          )}
+                          to="/settings?section=workspace"
+                        >
+                          <Settings aria-hidden="true" size={12} />
+                          {t("workspace.settingsAction", {
+                            defaultValue: "Settings",
+                          })}
+                        </Link>
+                        {workspace.role === "owner" ? (
+                          <Link
+                            state={workspaceRouteNavigationState(
+                              workspace.id,
+                              "sharing",
+                            )}
+                            to="/settings?section=access-sharing"
+                          >
+                            <Share2 aria-hidden="true" size={12} />
+                            {t("workspace.shareAction", {
+                              defaultValue: "Share",
+                            })}
+                          </Link>
+                        ) : null}
+                        <Link
+                          state={workspaceRouteNavigationState(
+                            workspace.id,
+                            "members",
+                          )}
+                          to="/settings?section=members"
+                        >
+                          <Users aria-hidden="true" size={12} />
+                          {t("workspace.membersAction", {
+                            defaultValue: "Members",
+                          })}
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
             </div>
           ) : null}
           <div className="workspace-menu-actions">

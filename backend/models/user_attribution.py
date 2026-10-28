@@ -16,6 +16,11 @@ from sqlalchemy.orm import InstrumentedAttribute
 
 from backend.models.agent import AgentPageVersion
 from backend.models.api_token import ApiToken
+from backend.models.auth_identity import AuthLoginTransaction, UserIdentity
+from backend.models.auth_verification import (
+    EmailConflictRequest,
+    EmailReauthenticationChallenge,
+)
 from backend.models.context import ContextPageVersion
 from backend.models.favorite import UserFavorite
 from backend.models.mail import EmailOutbox
@@ -143,6 +148,12 @@ USER_ATTRIBUTIONS: tuple[UserAttribution, ...] = (
     # workspace rows but leave with the identity, before the owner projection
     # is recomputed from the remaining owners.
     UserAttribution((EmailOutbox.recipient_user_id,), "delete", False),
+    # External sign-in links, pending sign-ins and confirmations, and requests
+    # to release this account's email leave with it.
+    UserAttribution((UserIdentity.user_id,), "delete", False),
+    UserAttribution((AuthLoginTransaction.user_id,), "delete", False),
+    UserAttribution((EmailReauthenticationChallenge.user_id,), "delete", False),
+    UserAttribution((EmailConflictRequest.target_user_id,), "delete", False),
     UserAttribution((OAuthAccessTokenJti.user_id,), "delete", False),
     UserAttribution((OAuthCode.user_id,), "delete", False),
     UserAttribution((OAuthConsent.user_id,), "delete", False),

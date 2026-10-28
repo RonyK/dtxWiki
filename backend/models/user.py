@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Integer, Text, UniqueConstraint, Uuid
+from sqlalchemy import ForeignKey, Integer, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from backend.domain.identity_policy import normalize_email, validate_display_name
@@ -28,15 +28,10 @@ if TYPE_CHECKING:
 
 class User(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "users"
-    __table_args__ = (
-        UniqueConstraint(
-            "personal_workspace_id",
-            name="uq_users_personal_workspace_id",
-        ),
-    )
 
-    email: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
+    pending_email: Mapped[str | None] = mapped_column(Text)
+    password_hash: Mapped[str | None] = mapped_column(Text)
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
     member_search_key: Mapped[str] = mapped_column(
         Text,
@@ -63,10 +58,6 @@ class User(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         Uuid(as_uuid=True),
         ForeignKey("workspace.id", ondelete="SET NULL"),
     )
-    personal_workspace_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("workspace.id", ondelete="SET NULL"),
-    )
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(),
         default=utc_now,
@@ -90,16 +81,15 @@ class User(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     default_workspace: Mapped[Workspace | None] = relationship(
         foreign_keys=[default_workspace_id],
     )
-    personal_workspace: Mapped[Workspace | None] = relationship(
-        foreign_keys=[personal_workspace_id],
-    )
 
     @validates("email", "display_name")
-    def _maintain_member_search_key(self, key: str, value: str) -> str:
+    def _maintain_member_search_key(self, key: str, value: str | None) -> str | None:
         value = (
-            normalize_email(value) if key == "email" else validate_display_name(value)
+            (normalize_email(value) if value is not None else None)
+            if key == "email"
+            else validate_display_name(value)
         )
-        email = value if key == "email" else (getattr(self, "email", "") or "")
+        email = (value or "") if key == "email" else (getattr(self, "email", "") or "")
         display_name = (
             value
             if key == "display_name"

@@ -110,7 +110,7 @@ class WorkspaceAccess:
 @dataclass(frozen=True)
 class WorkspaceMembershipView:
     user_id: UUID
-    email: str
+    email: str | None
     display_name: str
     workspace_id: UUID
     workspace_slug: str

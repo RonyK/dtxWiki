@@ -17,7 +17,7 @@ from backend.services.mail_delivery import (
     OutboundMail,
 )
 from backend.services.password_recovery_service import PasswordRecoveryService
-from backend.services.personal_workspace_service import ensure_personal_workspace
+from backend.services.personal_workspace_service import create_personal_workspace
 from backend.tests.utils.postgres import drop_reflected_postgres_metadata
 
 # Every test here reflects and drops the tables of whatever PostgreSQL database
@@ -81,7 +81,7 @@ def test_postgres_outbox_lock_prevents_cli_worker_double_send():
             )
             session.add(user)
             session.flush()
-            ensure_personal_workspace(session, user=user)
+            create_personal_workspace(session, user=user)
         recovery = PasswordRecoveryService(
             session_factory=session_factory,
             credential_hasher=CredentialHasher(),

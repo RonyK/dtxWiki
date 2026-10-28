@@ -718,6 +718,123 @@
         "title": "ActivityTarget",
         "type": "object"
       },
+      "AdminAuditEventData": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "actor_kind": {
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "event_id": {
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_kind": {
+            "title": "Target Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "created_at",
+          "action",
+          "actor_kind",
+          "actor_id",
+          "target_kind",
+          "target_id",
+          "summary",
+          "payload"
+        ],
+        "title": "AdminAuditEventData",
+        "type": "object"
+      },
+      "AdminAuditEventListData": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminAuditEventData"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "AdminAuditEventListData",
+        "type": "object"
+      },
+      "AdminAuditEventListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminAuditEventListData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "AdminAuditEventListResponse",
+        "type": "object"
+      },
       "AdminContextMediaAttachmentListData": {
         "additionalProperties": false,
         "properties": {
@@ -941,6 +1058,348 @@
         "title": "AdminContextMediaAttachmentPayload",
         "type": "object"
       },
+      "AdminEmailConflictData": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided By"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "provider_slug": {
+            "title": "Provider Slug",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "resolved",
+              "auto_released"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/AdminEmailConflictTargetData"
+          }
+        },
+        "required": [
+          "request_id",
+          "status",
+          "email",
+          "provider_slug",
+          "subject",
+          "created_at",
+          "decided_at",
+          "decided_by",
+          "reason",
+          "target"
+        ],
+        "title": "AdminEmailConflictData",
+        "type": "object"
+      },
+      "AdminEmailConflictDecisionData": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "approved",
+              "rejected",
+              "resolved"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "status"
+        ],
+        "title": "AdminEmailConflictDecisionData",
+        "type": "object"
+      },
+      "AdminEmailConflictDecisionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision",
+          "reason"
+        ],
+        "title": "AdminEmailConflictDecisionRequest",
+        "type": "object"
+      },
+      "AdminEmailConflictDecisionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminEmailConflictDecisionData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "AdminEmailConflictDecisionResponse",
+        "type": "object"
+      },
+      "AdminEmailConflictListData": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminEmailConflictData"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "AdminEmailConflictListData",
+        "type": "object"
+      },
+      "AdminEmailConflictListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminEmailConflictListData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "AdminEmailConflictListResponse",
+        "type": "object"
+      },
+      "AdminEmailConflictTargetData": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "display_name",
+          "status",
+          "created_at"
+        ],
+        "title": "AdminEmailConflictTargetData",
+        "type": "object"
+      },
+      "AdminIdentityRebindData": {
+        "properties": {
+          "identity_id": {
+            "format": "uuid",
+            "title": "Identity Id",
+            "type": "string"
+          },
+          "issuer": {
+            "title": "Issuer",
+            "type": "string"
+          },
+          "provider_slug": {
+            "title": "Provider Slug",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "identity_id",
+          "provider_slug",
+          "issuer",
+          "subject",
+          "user_id"
+        ],
+        "title": "AdminIdentityRebindData",
+        "type": "object"
+      },
+      "AdminIdentityRebindRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_issuer": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Expected Issuer",
+            "type": "string"
+          },
+          "expected_subject": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Expected Subject",
+            "type": "string"
+          },
+          "identity_id": {
+            "format": "uuid",
+            "title": "Identity Id",
+            "type": "string"
+          },
+          "issuer": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Issuer",
+            "type": "string"
+          },
+          "provider_slug": {
+            "maxLength": 127,
+            "minLength": 1,
+            "title": "Provider Slug",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "subject": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "identity_id",
+          "expected_issuer",
+          "expected_subject",
+          "provider_slug",
+          "issuer",
+          "subject",
+          "reason"
+        ],
+        "title": "AdminIdentityRebindRequest",
+        "type": "object"
+      },
+      "AdminIdentityRebindResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminIdentityRebindData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "AdminIdentityRebindResponse",
+        "type": "object"
+      },
       "AdminJobListData": {
         "additionalProperties": false,
         "description": "Server-admin cross-workspace job listing.\n\nAdds the incompleteness signal the workspace-scoped listing has no use\nfor: that route reads exactly one workspace, so it can never come back\npartially answered and keeps the plain JobListData shape above.",
@@ -1130,8 +1589,15 @@
             "type": "string"
           },
           "email": {
-            "title": "Email",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
           },
           "email_verified_at": {
             "anyOf": [
@@ -1144,6 +1610,13 @@
               }
             ],
             "title": "Email Verified At"
+          },
+          "identities": {
+            "items": {
+              "$ref": "#/components/schemas/AdminUserIdentityData"
+            },
+            "title": "Identities",
+            "type": "array"
           },
           "purge_after": {
             "anyOf": [
@@ -1179,7 +1652,8 @@
           "email",
           "display_name",
           "status",
-          "workspaces"
+          "workspaces",
+          "identities"
         ],
         "title": "AdminUserData",
         "type": "object"
@@ -1215,6 +1689,35 @@
           "approved_workspaces"
         ],
         "title": "AdminUserDeletionRequest",
+        "type": "object"
+      },
+      "AdminUserIdentityData": {
+        "properties": {
+          "identity_id": {
+            "format": "uuid",
+            "title": "Identity Id",
+            "type": "string"
+          },
+          "issuer": {
+            "title": "Issuer",
+            "type": "string"
+          },
+          "provider_slug": {
+            "title": "Provider Slug",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "identity_id",
+          "provider_slug",
+          "issuer",
+          "subject"
+        ],
+        "title": "AdminUserIdentityData",
         "type": "object"
       },
       "AdminUserListData": {
@@ -3003,6 +3506,16 @@
       "AuthCapabilitiesData": {
         "additionalProperties": false,
         "properties": {
+          "login_methods": {
+            "items": {
+              "$ref": "#/components/schemas/LoginMethodCapability"
+            },
+            "title": "Login Methods",
+            "type": "array"
+          },
+          "password_login": {
+            "$ref": "#/components/schemas/PasswordLoginCapability"
+          },
           "password_recovery": {
             "$ref": "#/components/schemas/PasswordRecoveryCapabilities"
           },
@@ -3013,7 +3526,9 @@
         },
         "required": [
           "signup_enabled",
-          "password_recovery"
+          "password_recovery",
+          "password_login",
+          "login_methods"
         ],
         "title": "AuthCapabilitiesData",
         "type": "object"
@@ -3118,8 +3633,15 @@
             "type": "string"
           },
           "email": {
-            "title": "Email",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
           },
           "email_verified_at": {
             "anyOf": [
@@ -3132,6 +3654,11 @@
               }
             ],
             "title": "Email Verified At"
+          },
+          "has_password": {
+            "default": true,
+            "title": "Has Password",
+            "type": "boolean"
           },
           "is_server_admin": {
             "default": false,
@@ -3182,6 +3709,28 @@
             ],
             "title": "Oauth Unavailable Reason"
           },
+          "session_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Method"
+          },
+          "session_provider_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Provider Slug"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -3190,10 +3739,16 @@
             "format": "uuid",
             "title": "User Id",
             "type": "string"
+          },
+          "username": {
+            "description": "Stable system-generated handle; display_name need not be unique.",
+            "title": "Username",
+            "type": "string"
           }
         },
         "required": [
           "user_id",
+          "username",
           "email",
           "display_name",
           "status"
@@ -3517,6 +4072,42 @@
           "priority"
         ],
         "title": "BundleItemEntry",
+        "type": "object"
+      },
+      "CapabilitiesData": {
+        "properties": {
+          "auth": {
+            "$ref": "#/components/schemas/AuthCapabilitiesData"
+          },
+          "plugins": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Plugins",
+            "type": "array"
+          }
+        },
+        "required": [
+          "auth",
+          "plugins"
+        ],
+        "title": "CapabilitiesData",
+        "type": "object"
+      },
+      "CapabilitiesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CapabilitiesData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "CapabilitiesResponse",
         "type": "object"
       },
       "ChangeSetEntry": {
@@ -7046,6 +7637,166 @@
         "title": "DraftReviewReason",
         "type": "object"
       },
+      "EmailConflictRequestData": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "status": {
+            "description": "resolved means a new SSO login now decides without an admin.",
+            "enum": [
+              "pending",
+              "resolved"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "request_id"
+        ],
+        "title": "EmailConflictRequestData",
+        "type": "object"
+      },
+      "EmailConflictRequestResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EmailConflictRequestData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "EmailConflictRequestResponse",
+        "type": "object"
+      },
+      "EmailReauthenticationConfirmData": {
+        "properties": {
+          "reauthenticated_until": {
+            "format": "date-time",
+            "title": "Reauthenticated Until",
+            "type": "string"
+          },
+          "return_to": {
+            "title": "Return To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reauthenticated_until",
+          "return_to"
+        ],
+        "title": "EmailReauthenticationConfirmData",
+        "type": "object"
+      },
+      "EmailReauthenticationConfirmRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "enum": [
+              "account",
+              "admin"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 128,
+            "minLength": 32,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "scope"
+        ],
+        "title": "EmailReauthenticationConfirmRequest",
+        "type": "object"
+      },
+      "EmailReauthenticationConfirmResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EmailReauthenticationConfirmData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "EmailReauthenticationConfirmResponse",
+        "type": "object"
+      },
+      "EmailReauthenticationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "return_to": {
+            "default": "/account",
+            "maxLength": 2048,
+            "title": "Return To",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "account",
+              "admin"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope"
+        ],
+        "title": "EmailReauthenticationRequest",
+        "type": "object"
+      },
+      "EmailReauthenticationRequestData": {
+        "properties": {
+          "status": {
+            "const": "email_sent",
+            "default": "email_sent",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "EmailReauthenticationRequestData",
+        "type": "object"
+      },
+      "EmailReauthenticationRequestResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EmailReauthenticationRequestData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "EmailReauthenticationRequestResponse",
+        "type": "object"
+      },
       "EmailVerificationConfirmRequest": {
         "additionalProperties": false,
         "properties": {
@@ -7077,6 +7828,27 @@
           }
         },
         "title": "EmailVerificationData",
+        "type": "object"
+      },
+      "EmailVerificationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
+                "type": "string",
+                "x-localPart-maxBytes": 64,
+                "x-normalized-maxBytes": 254
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          }
+        },
+        "title": "EmailVerificationRequest",
         "type": "object"
       },
       "EmailVerificationResponse": {
@@ -7531,6 +8303,95 @@
           "components"
         ],
         "title": "HealthReadyResponse",
+        "type": "object"
+      },
+      "IdentityData": {
+        "properties": {
+          "can_unlink": {
+            "title": "Can Unlink",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Email"
+          },
+          "last_login_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login At"
+          },
+          "provider_slug": {
+            "title": "Provider Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider_slug",
+          "last_email",
+          "last_login_at",
+          "can_unlink"
+        ],
+        "title": "IdentityData",
+        "type": "object"
+      },
+      "IdentityListData": {
+        "properties": {
+          "available_providers": {
+            "items": {
+              "$ref": "#/components/schemas/LoginMethodCapability"
+            },
+            "title": "Available Providers",
+            "type": "array"
+          },
+          "has_password": {
+            "title": "Has Password",
+            "type": "boolean"
+          },
+          "identities": {
+            "items": {
+              "$ref": "#/components/schemas/IdentityData"
+            },
+            "title": "Identities",
+            "type": "array"
+          }
+        },
+        "required": [
+          "has_password",
+          "identities",
+          "available_providers"
+        ],
+        "title": "IdentityListData",
+        "type": "object"
+      },
+      "IdentityListResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/IdentityListData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "IdentityListResponse",
         "type": "object"
       },
       "InstructionArtifact": {
@@ -10268,6 +11129,85 @@
           "ko"
         ],
         "title": "LocalizedText",
+        "type": "object"
+      },
+      "LoginMethodCapability": {
+        "properties": {
+          "background": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Background"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "foreground": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Foreground"
+          },
+          "icon_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon Url"
+          },
+          "label": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Label",
+            "type": "object"
+          },
+          "method_id": {
+            "title": "Method Id",
+            "type": "string"
+          },
+          "protocol": {
+            "title": "Protocol",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "start_url": {
+            "title": "Start Url",
+            "type": "string"
+          },
+          "supports_reauthentication": {
+            "title": "Supports Reauthentication",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "slug",
+          "method_id",
+          "protocol",
+          "display_name",
+          "label",
+          "start_url",
+          "supports_reauthentication"
+        ],
+        "title": "LoginMethodCapability",
         "type": "object"
       },
       "LoginRequest": {
@@ -14477,6 +15417,24 @@
         "title": "PasswordChangeRequest",
         "type": "object"
       },
+      "PasswordLoginCapability": {
+        "properties": {
+          "email_enrollment_enabled": {
+            "title": "Email Enrollment Enabled",
+            "type": "boolean"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "email_enrollment_enabled"
+        ],
+        "title": "PasswordLoginCapability",
+        "type": "object"
+      },
       "PasswordRecoveryCapabilities": {
         "additionalProperties": false,
         "properties": {
@@ -15820,6 +16778,31 @@
           "compose_command"
         ],
         "title": "RecoveryConfigurationStatus",
+        "type": "object"
+      },
+      "RedirectData": {
+        "properties": {
+          "redirect_url": {
+            "title": "Redirect Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "redirect_url"
+        ],
+        "title": "RedirectData",
+        "type": "object"
+      },
+      "RedirectResponseBody": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RedirectData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "RedirectResponseBody",
         "type": "object"
       },
       "ReviewAutoApprovalSweepPayload": {
@@ -17382,6 +18365,22 @@
         "title": "ServerNameAtom",
         "type": "object"
       },
+      "SetPasswordRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "new_password": {
+            "maxLength": 1024,
+            "minLength": 8,
+            "title": "New Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "new_password"
+        ],
+        "title": "SetPasswordRequest",
+        "type": "object"
+      },
       "SettingsMcpClientData": {
         "additionalProperties": false,
         "properties": {
@@ -17868,6 +18867,19 @@
           "password"
         ],
         "title": "SignupRequest",
+        "type": "object"
+      },
+      "StartAccountRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "return_to": {
+            "default": "/account",
+            "maxLength": 2048,
+            "title": "Return To",
+            "type": "string"
+          }
+        },
+        "title": "StartAccountRequest",
         "type": "object"
       },
       "SubmitContextEditRequest": {
@@ -18845,6 +19857,88 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VerificationData": {
+        "properties": {
+          "allowed_methods": {
+            "items": {
+              "enum": [
+                "password",
+                "sso",
+                "email"
+              ],
+              "type": "string"
+            },
+            "title": "Allowed Methods",
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "password",
+              "sso",
+              "email",
+              "session"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/LoginMethodCapability"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "reauthenticated_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reauthenticated Until"
+          },
+          "scope": {
+            "enum": [
+              "account",
+              "admin"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "verified": {
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "scope",
+          "mode",
+          "verified",
+          "allowed_methods",
+          "providers"
+        ],
+        "title": "VerificationData",
+        "type": "object"
+      },
+      "VerificationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/VerificationData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "VerificationResponse",
         "type": "object"
       },
       "VersionEntry": {
@@ -20002,8 +21096,15 @@
             "type": "string"
           },
           "requester_email": {
-            "title": "Requester Email",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requester Email"
           },
           "requester_user_id": {
             "format": "uuid",
@@ -20135,18 +21236,6 @@
             "title": "Other Membership Count",
             "type": "integer"
           },
-          "personal_workspace_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Personal Workspace Id"
-          },
           "workspaces": {
             "items": {
               "$ref": "#/components/schemas/WorkspaceSummary"
@@ -20186,11 +21275,18 @@
             "type": "boolean"
           },
           "email": {
-            "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
-            "title": "Email",
-            "type": "string",
-            "x-localPart-maxBytes": 64,
-            "x-normalized-maxBytes": 254
+            "anyOf": [
+              {
+                "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
+                "type": "string",
+                "x-localPart-maxBytes": 64,
+                "x-normalized-maxBytes": 254
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
           },
           "role": {
             "default": "viewer",
@@ -20198,12 +21294,118 @@
             "minLength": 1,
             "title": "Role",
             "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "title": "WorkspaceMemberAddRequest",
+        "type": "object"
+      },
+      "WorkspaceMemberCandidateItem": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "identity_label": {
+            "title": "Identity Label",
+            "type": "string"
+          },
+          "identity_verified": {
+            "const": true,
+            "default": true,
+            "title": "Identity Verified",
+            "type": "boolean"
+          },
+          "provider_label": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Provider Label",
+            "type": "object"
+          },
+          "provider_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Name"
+          },
+          "provider_slug": {
+            "title": "Provider Slug",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
           }
         },
         "required": [
-          "email"
+          "user_id",
+          "display_name",
+          "provider_name",
+          "provider_slug",
+          "provider_label",
+          "identity_label"
         ],
-        "title": "WorkspaceMemberAddRequest",
+        "title": "WorkspaceMemberCandidateItem",
+        "type": "object"
+      },
+      "WorkspaceMemberCandidatesData": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceMemberCandidateItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "items",
+          "has_more"
+        ],
+        "title": "WorkspaceMemberCandidatesData",
+        "type": "object"
+      },
+      "WorkspaceMemberCandidatesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WorkspaceMemberCandidatesData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "WorkspaceMemberCandidatesResponse",
         "type": "object"
       },
       "WorkspaceMemberItem": {
@@ -20214,15 +21416,18 @@
             "type": "string"
           },
           "email": {
-            "title": "Email",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
           },
           "is_current_user": {
             "title": "Is Current User",
-            "type": "boolean"
-          },
-          "is_personal_anchor_owner": {
-            "title": "Is Personal Anchor Owner",
             "type": "boolean"
           },
           "joined_at": {
@@ -20256,7 +21461,6 @@
           "status",
           "role",
           "joined_at",
-          "is_personal_anchor_owner",
           "is_current_user"
         ],
         "title": "WorkspaceMemberItem",
@@ -20550,9 +21754,37 @@
       }
     },
     "securitySchemes": {
+      "AccountEmailBindingCookie": {
+        "description": "Browser binding for an email confirmation with scope=account.",
+        "in": "cookie",
+        "name": "dtxwiki_email_reauth_account",
+        "type": "apiKey"
+      },
+      "AccountReauthenticationCookie": {
+        "in": "cookie",
+        "name": "dtxwiki_session_reauth_account",
+        "type": "apiKey"
+      },
+      "AdminEmailBindingCookie": {
+        "description": "Browser binding for an email confirmation with scope=admin.",
+        "in": "cookie",
+        "name": "dtxwiki_email_reauth_admin",
+        "type": "apiKey"
+      },
+      "EmailConflictTicketCookie": {
+        "description": "Signed ticket from an SSO login whose address collided.",
+        "in": "cookie",
+        "name": "dtxwiki_email_conflict",
+        "type": "apiKey"
+      },
       "HTTPBearer": {
         "scheme": "bearer",
         "type": "http"
+      },
+      "LoginTransactionCookie": {
+        "in": "cookie",
+        "name": "dtxwiki_login_txn",
+        "type": "apiKey"
       },
       "RecentReauthenticationCookie": {
         "in": "cookie",
@@ -20634,6 +21866,189 @@
         "tags": [
           "oauth"
         ]
+      }
+    },
+    "/api/v1/admin/audit-events": {
+      "get": {
+        "operationId": "admin_list_audit_events_api_v1_admin_audit_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "action_prefix",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action Prefix"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target User Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actor_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Actor Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Until"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAuditEventListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin List Audit Events",
+        "tags": [
+          "admin"
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
       }
     },
     "/api/v1/admin/context-media/attachments": {
@@ -21122,6 +22537,205 @@
         "tags": [
           "admin"
         ]
+      }
+    },
+    "/api/v1/admin/email-conflicts": {
+      "get": {
+        "operationId": "admin_list_email_conflicts_api_v1_admin_email_conflicts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(pending|approved|rejected|resolved|auto_released)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "pending",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminEmailConflictListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin List Email Conflicts",
+        "tags": [
+          "admin"
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
+      }
+    },
+    "/api/v1/admin/email-conflicts/{request_id}/decision": {
+      "post": {
+        "operationId": "admin_decide_email_conflict_api_v1_admin_email_conflicts__request_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminEmailConflictDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminEmailConflictDecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin Decide Email Conflict",
+        "tags": [
+          "admin"
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
       }
     },
     "/api/v1/admin/jobs": {
@@ -21613,14 +23227,14 @@
         },
         "security": [
           {
-            "RecentReauthenticationCookie": [],
             "SessionCookie": []
           }
         ],
         "summary": "Admin Set User Deletion Policy",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
       }
     },
     "/api/v1/admin/users": {
@@ -21716,14 +23330,14 @@
         },
         "security": [
           {
-            "RecentReauthenticationCookie": [],
             "SessionCookie": []
           }
         ],
         "summary": "Admin Search Users",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
       }
     },
     "/api/v1/admin/users/{user_id}": {
@@ -21825,14 +23439,14 @@
         },
         "security": [
           {
-            "RecentReauthenticationCookie": [],
             "SessionCookie": []
           }
         ],
         "summary": "Admin Delete User",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
       }
     },
     "/api/v1/admin/users/{user_id}/deletion-preview": {
@@ -21924,14 +23538,14 @@
         },
         "security": [
           {
-            "RecentReauthenticationCookie": [],
             "SessionCookie": []
           }
         ],
         "summary": "Admin User Deletion Preview",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
       }
     },
     "/api/v1/admin/users/{user_id}/deletion-restore": {
@@ -22023,14 +23637,103 @@
         },
         "security": [
           {
-            "RecentReauthenticationCookie": [],
             "SessionCookie": []
           }
         ],
         "summary": "Admin Restore User Deletion",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
+      }
+    },
+    "/api/v1/admin/users/{user_id}/identities/rebind": {
+      "post": {
+        "operationId": "admin_rebind_identity_api_v1_admin_users__user_id__identities_rebind_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminIdentityRebindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminIdentityRebindResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin Rebind Identity",
+        "tags": [
+          "admin"
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
       }
     },
     "/api/v1/admin/users/{user_id}/password-reset": {
@@ -22112,14 +23815,14 @@
         },
         "security": [
           {
-            "RecentReauthenticationCookie": [],
             "SessionCookie": []
           }
         ],
         "summary": "Admin Issue Password Reset",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
       }
     },
     "/api/v1/admin/workspaces/{workspace_id}/members": {
@@ -22221,14 +23924,14 @@
         },
         "security": [
           {
-            "RecentReauthenticationCookie": [],
             "SessionCookie": []
           }
         ],
         "summary": "Admin List Held Workspace Members",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
       },
       "post": {
         "description": "Add a viewer or editor to a held workspace before appointing an admin.",
@@ -22319,14 +24022,14 @@
         },
         "security": [
           {
-            "RecentReauthenticationCookie": [],
             "SessionCookie": []
           }
         ],
         "summary": "Admin Add Held Workspace Member",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
       }
     },
     "/api/v1/admin/workspaces/{workspace_id}/members/{user_id}": {
@@ -22419,14 +24122,14 @@
         },
         "security": [
           {
-            "RecentReauthenticationCookie": [],
             "SessionCookie": []
           }
         ],
         "summary": "Admin Change Held Workspace Member Role",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
       }
     },
     "/api/v1/auth/capabilities": {
@@ -22589,6 +24292,103 @@
         ]
       }
     },
+    "/api/v1/auth/email-reauthentication/confirm": {
+      "post": {
+        "operationId": "confirm_email_api_v1_auth_email_reauthentication_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailReauthenticationConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailReauthenticationConfirmResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "AccountEmailBindingCookie": [],
+            "SessionCookie": []
+          },
+          {
+            "AdminEmailBindingCookie": [],
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Confirm Email",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/email-reauthentication/request": {
+      "post": {
+        "operationId": "request_email_api_v1_auth_email_reauthentication_request_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailReauthenticationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailReauthenticationRequestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Request Email",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/email-verification/confirm": {
       "post": {
         "operationId": "confirm_email_verification_api_v1_auth_email_verification_confirm_post",
@@ -22694,6 +24494,23 @@
     "/api/v1/auth/email-verification/request": {
       "post": {
         "operationId": "request_email_verification_api_v1_auth_email_verification_request_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/EmailVerificationRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request Body"
+              }
+            }
+          }
+        },
         "responses": {
           "202": {
             "content": {
@@ -22785,6 +24602,81 @@
         "tags": [
           "auth"
         ]
+      }
+    },
+    "/api/v1/auth/identities": {
+      "get": {
+        "operationId": "identities_api_v1_auth_identities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Identities",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/identities/{identity_id}": {
+      "delete": {
+        "operationId": "unlink_api_v1_auth_identities__identity_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identity_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Identity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Unlink",
+        "tags": [
+          "auth"
+        ],
+        "x-dtxwiki-confirmation-scope": "account"
       }
     },
     "/api/v1/auth/login": {
@@ -23072,6 +24964,47 @@
           }
         ],
         "summary": "Me",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/methods/{method_id}/icon.png": {
+      "get": {
+        "operationId": "icon_api_v1_auth_methods__method_id__icon_png_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "method_id",
+            "required": true,
+            "schema": {
+              "title": "Method Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [],
+        "summary": "Icon",
         "tags": [
           "auth"
         ]
@@ -23490,6 +25423,53 @@
         ]
       }
     },
+    "/api/v1/auth/password/set": {
+      "post": {
+        "operationId": "set_password_api_v1_auth_password_set_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Set Password",
+        "tags": [
+          "auth"
+        ],
+        "x-dtxwiki-confirmation-scope": "account"
+      }
+    },
     "/api/v1/auth/reauthenticate": {
       "post": {
         "operationId": "reauthenticate_api_v1_auth_reauthenticate_post",
@@ -23693,6 +25673,344 @@
         },
         "security": [],
         "summary": "Signup",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/email-conflict/request": {
+      "post": {
+        "description": "Ask a server admin to release the unverified account holding this address.\n\nOnly the browser that completed the colliding IdP login holds the ticket.",
+        "operationId": "request_email_conflict_release_api_v1_auth_sso_email_conflict_request_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailConflictRequestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "EmailConflictTicketCookie": []
+          }
+        ],
+        "summary": "Request Email Conflict Release",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/{slug}/callback": {
+      "get": {
+        "operationId": "callback_api_v1_auth_sso__slug__callback_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "LoginTransactionCookie": []
+          }
+        ],
+        "summary": "Callback",
+        "tags": [
+          "auth"
+        ]
+      },
+      "post": {
+        "operationId": "form_callback_api_v1_auth_sso__slug__callback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [],
+        "summary": "Form Callback",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/{slug}/callback/continue": {
+      "post": {
+        "operationId": "form_callback_continue_api_v1_auth_sso__slug__callback_continue_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "LoginTransactionCookie": []
+          }
+        ],
+        "summary": "Form Callback Continue",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/{slug}/link": {
+      "post": {
+        "operationId": "link_api_v1_auth_sso__slug__link_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedirectResponseBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Link",
+        "tags": [
+          "auth"
+        ],
+        "x-dtxwiki-confirmation-scope": "account"
+      }
+    },
+    "/api/v1/auth/sso/{slug}/reauthenticate": {
+      "post": {
+        "operationId": "reauthenticate_api_v1_auth_sso__slug__reauthenticate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedirectResponseBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Reauthenticate",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/{slug}/start": {
+      "get": {
+        "operationId": "start_api_v1_auth_sso__slug__start_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "next",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next"
+            }
+          },
+          {
+            "in": "query",
+            "name": "remember_me",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Remember Me",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [],
+        "summary": "Start",
         "tags": [
           "auth"
         ]
@@ -24291,6 +26609,91 @@
         "summary": "Delete Revoked Api Token",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/verification": {
+      "get": {
+        "operationId": "verification_api_v1_auth_verification_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "account",
+              "enum": [
+                "account",
+                "admin"
+              ],
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "return_to",
+            "required": false,
+            "schema": {
+              "default": "/account",
+              "maxLength": 2048,
+              "title": "Return To",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Verification",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/capabilities": {
+      "get": {
+        "operationId": "capabilities_api_v1_capabilities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilitiesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [],
+        "summary": "Capabilities",
+        "tags": [
+          "capabilities"
         ]
       }
     },
@@ -37065,6 +39468,117 @@
         "summary": "Unarchive Mcp Chat",
         "tags": [
           "mcp-chats"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/member-candidates": {
+      "get": {
+        "operationId": "list_workspace_member_candidates_api_v1_workspaces__workspace_id__member_candidates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 320,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMemberCandidatesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "List Workspace Member Candidates",
+        "tags": [
+          "workspace-members"
         ]
       }
     },

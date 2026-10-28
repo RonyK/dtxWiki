@@ -170,11 +170,14 @@ describe("AuthScreen", () => {
       </MemoryRouter>,
     );
 
+    await user.click(screen.getByRole("checkbox", { name: "Keep me signed in on this browser" }));
     await user.type(screen.getByLabelText("Email"), "login@example.com");
     await user.type(screen.getByLabelText("Password"), "correct-password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
     expect(await screen.findByText("Signed in")).toBeInTheDocument();
+    const loginRequest = vi.mocked(fetch).mock.calls.find(([input]) => String(input).endsWith("/auth/login"));
+    expect(JSON.parse(String(loginRequest?.[1]?.body))).toMatchObject({ remember_me: false });
     // /oauth/* is served by the backend, so the redirect must be a full-page
     // load rather than SPA navigation onto the router catch-all.
     await waitFor(() =>
@@ -329,7 +332,7 @@ describe("AuthScreen", () => {
     expect(
       await screen.findByRole("heading", { name: "Sign up" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Signed out")).toBeInTheDocument();
+    expect(screen.getByText("Create an account to start working together.")).toBeInTheDocument();
     expect(
       screen.getByRole("checkbox", { name: /Keep me signed in/i }),
     ).toBeChecked();

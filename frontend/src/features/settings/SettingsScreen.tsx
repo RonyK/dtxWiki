@@ -3537,7 +3537,7 @@ function SettingsScreenBody() {
   return (
     <div className="workspace-screen single-column">
       <section
-        className="feature-main feature-main--reader"
+        className="feature-main feature-main--reader settings-screen"
         ref={settingsMainRef}
       >
         {/* Two items, so this renders at all: Breadcrumbs returns null for a
@@ -3726,7 +3726,7 @@ function SettingsScreenBody() {
                   ) : null}
                 </header>
                 <WorkspaceMembersSection />
-                <WorkspaceAccessSharingSection />
+                <WorkspaceAccessSharingSection collapsible />
               </section>
             ) : null}
             {activeSection === "workspace" ? (

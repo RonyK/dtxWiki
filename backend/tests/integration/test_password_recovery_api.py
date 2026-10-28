@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models.api_token import ApiToken
+from backend.models.auth_identity import UserIdentity
 from backend.models.mail import EmailOutbox, PasswordRecoveryRateLimitSlot
 from backend.models.password_reset import PasswordResetToken
 from backend.models.user import User
@@ -270,9 +271,7 @@ def test_email_verification_request_and_single_use_confirm(page_service):
     assert "dtxe_" not in requested.text
     with page_service.session_factory() as session:
         outbox = session.scalar(
-            select(EmailOutbox).where(
-                EmailOutbox.message_kind == "email_verification"
-            )
+            select(EmailOutbox).where(EmailOutbox.message_kind == "email_verification")
         )
         assert outbox is not None and outbox.encrypted_token is not None
         raw_token = delivery.cipher.decrypt(
@@ -280,6 +279,25 @@ def test_email_verification_request_and_single_use_confirm(page_service):
             message_kind=outbox.message_kind,
             envelope=outbox.encrypted_token,
         )
+
+    # A no-mail external account can later receive verification mail. Possession
+    # of that mailbox must not authorize verifying someone else's IdP binding.
+    with page_service.session_factory.begin() as session:
+        session.add(
+            UserIdentity(
+                user_id=UUID(user_id),
+                provider_slug="company",
+                issuer="https://idp.example.test",
+                subject="bound-account",
+                linked_via="jit",
+            )
+        )
+    other = TestClient(client.app)
+    refused = other.post(
+        "/api/v1/auth/email-verification/confirm", json={"token": raw_token}
+    )
+    assert refused.status_code == 401
+    assert refused.json()["error_code"] == "email_verification_session_required"
 
     confirmed = client.post(
         "/api/v1/auth/email-verification/confirm",

@@ -3,15 +3,31 @@ import { invalidateWorkspaceListCache } from "./workspace";
 
 export type WorkspaceMemberRole = "viewer" | "editor" | "owner";
 export type WorkspaceMemberInviteRole = Exclude<WorkspaceMemberRole, "owner">;
+export type WorkspaceMemberSelector = { user_id: string; email?: never } | { email: string; user_id?: never };
+
+export type WorkspaceMemberCandidate = {
+  user_id: string;
+  display_name: string;
+  provider_name: string | null;
+  provider_slug: string;
+  provider_label: Record<string, string>;
+  identity_label: string;
+  identity_verified: true;
+};
+
+export type WorkspaceMemberCandidates = {
+  enabled: boolean;
+  items: WorkspaceMemberCandidate[];
+  has_more: boolean;
+};
 
 export type WorkspaceMember = {
   user_id: string;
-  email: string;
+  email: string | null;
   display_name: string;
   status: string;
   role: WorkspaceMemberRole;
   joined_at: string;
-  is_personal_anchor_owner: boolean;
   is_current_user: boolean;
 };
 
@@ -65,7 +81,7 @@ export type WorkspaceJoinRequest = {
   request_id: string;
   workspace_id: string;
   requester_user_id: string;
-  requester_email: string;
+  requester_email: string | null;
   requester_display_name: string;
   status: WorkspaceJoinRequestStatus;
   attempt_no: number;
@@ -121,8 +137,7 @@ export async function listWorkspaceMembers(
 
 export async function addWorkspaceMember(
   workspaceId: string,
-  input: {
-    email: string;
+  input: WorkspaceMemberSelector & {
     role: WorkspaceMemberInviteRole;
     confirm_first_share?: boolean;
   },
@@ -136,6 +151,14 @@ export async function addWorkspaceMember(
   );
   invalidateWorkspaceListCache();
   return response.data;
+}
+
+export async function listWorkspaceMemberCandidates(workspaceId: string, query: string, signal?: AbortSignal) {
+  const params = new URLSearchParams({ query, limit: "10" });
+  return apiRequest<{ data: WorkspaceMemberCandidates }>(
+    `/api/v1/workspaces/${workspaceId}/member-candidates?${params}`,
+    { signal },
+  ).then((response) => response.data);
 }
 
 export async function updateWorkspaceMemberRole(

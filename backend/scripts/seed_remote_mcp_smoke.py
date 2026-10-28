@@ -29,7 +29,7 @@ from backend.services.credential_hashing import CredentialHasher
 from backend.services.extraction_service import ExtractionService
 from backend.services.library_service import LibraryService
 from backend.services.page_service import PageNotFoundError, PageService
-from backend.services.personal_workspace_service import ensure_personal_workspace
+from backend.services.personal_workspace_service import create_personal_workspace
 from backend.services.session_service import (
     normalize_display_name,
     normalize_email,
@@ -294,15 +294,15 @@ def _upsert_user(
             status="active",
         )
         session.add(user)
-    else:
-        user.password_hash = hasher.hash_password(password)
-        user.display_name = normalize_display_name(user.display_name, email)
-        user.status = "active"
+        session.flush()
+        # Like signup, only account creation gives a user a starter workspace;
+        # a re-run never recreates one the user has since deleted.
+        create_personal_workspace(session, user=user)
+        return user
+    user.password_hash = hasher.hash_password(password)
+    user.display_name = normalize_display_name(user.display_name, email)
+    user.status = "active"
     session.flush()
-    # The remote smoke seeder is a real user-provisioning path, not a fixture
-    # exemption. Re-running it also repairs rows created by older seeders that
-    # predate the Personal anchor invariant.
-    ensure_personal_workspace(session, user=user)
     return user
 
 

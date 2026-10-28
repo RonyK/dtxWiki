@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/audit-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin List Audit Events */
+        get: operations["admin_list_audit_events_api_v1_admin_audit_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/context-media/attachments": {
         parameters: {
             query?: never;
@@ -143,6 +160,40 @@ export interface paths {
          * @description Check the package index for a release without applying any update.
          */
         post: operations["admin_deployment_update_check_api_v1_admin_deployment_update_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/email-conflicts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin List Email Conflicts */
+        get: operations["admin_list_email_conflicts_api_v1_admin_email_conflicts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/email-conflicts/{request_id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin Decide Email Conflict */
+        post: operations["admin_decide_email_conflict_api_v1_admin_email_conflicts__request_id__decision_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -325,6 +376,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/users/{user_id}/identities/rebind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin Rebind Identity */
+        post: operations["admin_rebind_identity_api_v1_admin_users__user_id__identities_rebind_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/users/{user_id}/password-reset": {
         parameters: {
             query?: never;
@@ -420,6 +488,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/email-reauthentication/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Email */
+        post: operations["confirm_email_api_v1_auth_email_reauthentication_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/email-reauthentication/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Email */
+        post: operations["request_email_api_v1_auth_email_reauthentication_request_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/email-verification/confirm": {
         parameters: {
             query?: never;
@@ -449,6 +551,40 @@ export interface paths {
         /** Request Email Verification */
         post: operations["request_email_verification_api_v1_auth_email_verification_request_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/identities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Identities */
+        get: operations["identities_api_v1_auth_identities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/identities/{identity_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Unlink */
+        delete: operations["unlink_api_v1_auth_identities__identity_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -497,6 +633,23 @@ export interface paths {
         };
         /** Me */
         get: operations["me_api_v1_auth_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/methods/{method_id}/icon.png": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Icon */
+        get: operations["icon_api_v1_auth_methods__method_id__icon_png_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -576,6 +729,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/password/set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Password */
+        post: operations["set_password_api_v1_auth_password_set_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/reauthenticate": {
         parameters: {
             query?: never;
@@ -604,6 +774,114 @@ export interface paths {
         put?: never;
         /** Signup */
         post: operations["signup_api_v1_auth_signup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/email-conflict/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Email Conflict Release
+         * @description Ask a server admin to release the unverified account holding this address.
+         *
+         *     Only the browser that completed the colliding IdP login holds the ticket.
+         */
+        post: operations["request_email_conflict_release_api_v1_auth_sso_email_conflict_request_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/{slug}/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Callback */
+        get: operations["callback_api_v1_auth_sso__slug__callback_get"];
+        put?: never;
+        /** Form Callback */
+        post: operations["form_callback_api_v1_auth_sso__slug__callback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/{slug}/callback/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Form Callback Continue */
+        post: operations["form_callback_continue_api_v1_auth_sso__slug__callback_continue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/{slug}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Link */
+        post: operations["link_api_v1_auth_sso__slug__link_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/{slug}/reauthenticate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reauthenticate */
+        post: operations["reauthenticate_api_v1_auth_sso__slug__reauthenticate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/{slug}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Start */
+        get: operations["start_api_v1_auth_sso__slug__start_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -658,6 +936,40 @@ export interface paths {
         post?: never;
         /** Delete Revoked Api Token */
         delete: operations["delete_revoked_api_token_api_v1_auth_tokens__token_id__record_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Verification */
+        get: operations["verification_api_v1_auth_verification_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Capabilities */
+        get: operations["capabilities_api_v1_capabilities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2324,6 +2636,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/member-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Workspace Member Candidates */
+        get: operations["list_workspace_member_candidates_api_v1_workspaces__workspace_id__member_candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/members": {
         parameters: {
             query?: never;
@@ -3196,6 +3525,50 @@ export interface components {
             /** Target Kind */
             target_kind: string;
         };
+        /** AdminAuditEventData */
+        AdminAuditEventData: {
+            /** Action */
+            action: string;
+            /** Actor Id */
+            actor_id: string;
+            /** Actor Kind */
+            actor_kind: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Event Id
+             * Format: uuid
+             */
+            event_id: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            } | null;
+            /** Summary */
+            summary: string | null;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /** Target Kind */
+            target_kind: string;
+        };
+        /** AdminAuditEventListData */
+        AdminAuditEventListData: {
+            /** Items */
+            items: components["schemas"]["AdminAuditEventData"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** AdminAuditEventListResponse */
+        AdminAuditEventListResponse: {
+            data: components["schemas"]["AdminAuditEventListData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
         /** AdminContextMediaAttachmentListData */
         AdminContextMediaAttachmentListData: {
             /** Items */
@@ -3291,6 +3664,142 @@ export interface components {
             /** Workspace Title */
             workspace_title: string;
         };
+        /** AdminEmailConflictData */
+        AdminEmailConflictData: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Decided At */
+            decided_at: string | null;
+            /** Decided By */
+            decided_by: string | null;
+            /** Email */
+            email: string;
+            /** Provider Slug */
+            provider_slug: string;
+            /** Reason */
+            reason: string | null;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "approved" | "rejected" | "resolved" | "auto_released";
+            /** Subject */
+            subject: string;
+            target: components["schemas"]["AdminEmailConflictTargetData"];
+        };
+        /** AdminEmailConflictDecisionData */
+        AdminEmailConflictDecisionData: {
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "approved" | "rejected" | "resolved";
+        };
+        /** AdminEmailConflictDecisionRequest */
+        AdminEmailConflictDecisionRequest: {
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approve" | "reject";
+            /** Reason */
+            reason: string;
+        };
+        /** AdminEmailConflictDecisionResponse */
+        AdminEmailConflictDecisionResponse: {
+            data: components["schemas"]["AdminEmailConflictDecisionData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** AdminEmailConflictListData */
+        AdminEmailConflictListData: {
+            /** Items */
+            items: components["schemas"]["AdminEmailConflictData"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /** AdminEmailConflictListResponse */
+        AdminEmailConflictListResponse: {
+            data: components["schemas"]["AdminEmailConflictListData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** AdminEmailConflictTargetData */
+        AdminEmailConflictTargetData: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Display Name */
+            display_name: string;
+            /** Status */
+            status: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+        };
+        /** AdminIdentityRebindData */
+        AdminIdentityRebindData: {
+            /**
+             * Identity Id
+             * Format: uuid
+             */
+            identity_id: string;
+            /** Issuer */
+            issuer: string;
+            /** Provider Slug */
+            provider_slug: string;
+            /** Subject */
+            subject: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+        };
+        /** AdminIdentityRebindRequest */
+        AdminIdentityRebindRequest: {
+            /** Expected Issuer */
+            expected_issuer: string;
+            /** Expected Subject */
+            expected_subject: string;
+            /**
+             * Identity Id
+             * Format: uuid
+             */
+            identity_id: string;
+            /** Issuer */
+            issuer: string;
+            /** Provider Slug */
+            provider_slug: string;
+            /** Reason */
+            reason: string;
+            /** Subject */
+            subject: string;
+        };
+        /** AdminIdentityRebindResponse */
+        AdminIdentityRebindResponse: {
+            data: components["schemas"]["AdminIdentityRebindData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
         /**
          * AdminJobListData
          * @description Server-admin cross-workspace job listing.
@@ -3368,9 +3877,11 @@ export interface components {
             /** Display Name */
             display_name: string;
             /** Email */
-            email: string;
+            email: string | null;
             /** Email Verified At */
             email_verified_at?: string | null;
+            /** Identities */
+            identities: components["schemas"]["AdminUserIdentityData"][];
             /** Purge After */
             purge_after?: string | null;
             /** Status */
@@ -3394,6 +3905,20 @@ export interface components {
             confirmation_email: string;
             /** Expected Retention Days */
             expected_retention_days: number;
+        };
+        /** AdminUserIdentityData */
+        AdminUserIdentityData: {
+            /**
+             * Identity Id
+             * Format: uuid
+             */
+            identity_id: string;
+            /** Issuer */
+            issuer: string;
+            /** Provider Slug */
+            provider_slug: string;
+            /** Subject */
+            subject: string;
         };
         /** AdminUserListData */
         AdminUserListData: {
@@ -4046,6 +4571,9 @@ export interface components {
         };
         /** AuthCapabilitiesData */
         AuthCapabilitiesData: {
+            /** Login Methods */
+            login_methods: components["schemas"]["LoginMethodCapability"][];
+            password_login: components["schemas"]["PasswordLoginCapability"];
             password_recovery: components["schemas"]["PasswordRecoveryCapabilities"];
             /** Signup Enabled */
             signup_enabled: boolean;
@@ -4092,9 +4620,14 @@ export interface components {
             /** Display Name */
             display_name: string;
             /** Email */
-            email: string;
+            email: string | null;
             /** Email Verified At */
             email_verified_at?: string | null;
+            /**
+             * Has Password
+             * @default true
+             */
+            has_password: boolean;
             /**
              * Is Server Admin
              * @default false
@@ -4108,6 +4641,10 @@ export interface components {
             oauth_dcr_enabled?: boolean | null;
             /** Oauth Unavailable Reason */
             oauth_unavailable_reason?: string | null;
+            /** Session Method */
+            session_method?: string | null;
+            /** Session Provider Slug */
+            session_provider_slug?: string | null;
             /** Status */
             status: string;
             /**
@@ -4115,6 +4652,11 @@ export interface components {
              * Format: uuid
              */
             user_id: string;
+            /**
+             * Username
+             * @description Stable system-generated handle; display_name need not be unique.
+             */
+            username: string;
         };
         /**
          * BeginContextEditRequest
@@ -4245,6 +4787,17 @@ export interface components {
              * @enum {string}
              */
             source_kind: "agent_page" | "context_page_excerpt" | "library_artifact_excerpt";
+        };
+        /** CapabilitiesData */
+        CapabilitiesData: {
+            auth: components["schemas"]["AuthCapabilitiesData"];
+            /** Plugins */
+            plugins: string[];
+        };
+        /** CapabilitiesResponse */
+        CapabilitiesResponse: {
+            data: components["schemas"]["CapabilitiesData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** ChangeSetEntry */
         ChangeSetEntry: {
@@ -5610,6 +6163,74 @@ export interface components {
             /** Message */
             message: string;
         };
+        /** EmailConflictRequestData */
+        EmailConflictRequestData: {
+            /** Request Id */
+            request_id: string | null;
+            /**
+             * Status
+             * @description resolved means a new SSO login now decides without an admin.
+             * @enum {string}
+             */
+            status: "pending" | "resolved";
+        };
+        /** EmailConflictRequestResponse */
+        EmailConflictRequestResponse: {
+            data: components["schemas"]["EmailConflictRequestData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** EmailReauthenticationConfirmData */
+        EmailReauthenticationConfirmData: {
+            /**
+             * Reauthenticated Until
+             * Format: date-time
+             */
+            reauthenticated_until: string;
+            /** Return To */
+            return_to: string;
+        };
+        /** EmailReauthenticationConfirmRequest */
+        EmailReauthenticationConfirmRequest: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "account" | "admin";
+            /** Token */
+            token: string;
+        };
+        /** EmailReauthenticationConfirmResponse */
+        EmailReauthenticationConfirmResponse: {
+            data: components["schemas"]["EmailReauthenticationConfirmData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** EmailReauthenticationRequest */
+        EmailReauthenticationRequest: {
+            /**
+             * Return To
+             * @default /account
+             */
+            return_to: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "account" | "admin";
+        };
+        /** EmailReauthenticationRequestData */
+        EmailReauthenticationRequestData: {
+            /**
+             * Status
+             * @default email_sent
+             * @constant
+             */
+            status: "email_sent";
+        };
+        /** EmailReauthenticationRequestResponse */
+        EmailReauthenticationRequestResponse: {
+            data: components["schemas"]["EmailReauthenticationRequestData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
         /** EmailVerificationConfirmRequest */
         EmailVerificationConfirmRequest: {
             /** Token */
@@ -5627,6 +6248,11 @@ export interface components {
              * @default false
              */
             verified: boolean;
+        };
+        /** EmailVerificationRequest */
+        EmailVerificationRequest: {
+            /** Email */
+            email?: string | null;
         };
         /** EmailVerificationResponse */
         EmailVerificationResponse: {
@@ -5799,6 +6425,35 @@ export interface components {
              * @enum {string}
              */
             status: "ready" | "unhealthy";
+        };
+        /** IdentityData */
+        IdentityData: {
+            /** Can Unlink */
+            can_unlink: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Last Email */
+            last_email: string | null;
+            /** Last Login At */
+            last_login_at: string | null;
+            /** Provider Slug */
+            provider_slug: string;
+        };
+        /** IdentityListData */
+        IdentityListData: {
+            /** Available Providers */
+            available_providers: components["schemas"]["LoginMethodCapability"][];
+            /** Has Password */
+            has_password: boolean;
+            /** Identities */
+            identities: components["schemas"]["IdentityData"][];
+        };
+        /** IdentityListResponse */
+        IdentityListResponse: {
+            data: components["schemas"]["IdentityListData"];
         };
         /** InstructionArtifact */
         InstructionArtifact: {
@@ -6765,6 +7420,31 @@ export interface components {
             en: string;
             /** Ko */
             ko: string;
+        };
+        /** LoginMethodCapability */
+        LoginMethodCapability: {
+            /** Background */
+            background?: string | null;
+            /** Display Name */
+            display_name: string;
+            /** Foreground */
+            foreground?: string | null;
+            /** Icon Url */
+            icon_url?: string | null;
+            /** Label */
+            label: {
+                [key: string]: string;
+            };
+            /** Method Id */
+            method_id: string;
+            /** Protocol */
+            protocol: string;
+            /** Slug */
+            slug: string;
+            /** Start Url */
+            start_url: string;
+            /** Supports Reauthentication */
+            supports_reauthentication: boolean;
         };
         /** LoginRequest */
         LoginRequest: {
@@ -8222,6 +8902,13 @@ export interface components {
             /** New Password */
             new_password: string;
         };
+        /** PasswordLoginCapability */
+        PasswordLoginCapability: {
+            /** Email Enrollment Enabled */
+            email_enrollment_enabled: boolean;
+            /** Enabled */
+            enabled: boolean;
+        };
         /** PasswordRecoveryCapabilities */
         PasswordRecoveryCapabilities: {
             /** Admin Assisted */
@@ -8720,6 +9407,15 @@ export interface components {
             systemd_command: string;
             /** Worker Required */
             worker_required: boolean;
+        };
+        /** RedirectData */
+        RedirectData: {
+            /** Redirect Url */
+            redirect_url: string;
+        };
+        /** RedirectResponseBody */
+        RedirectResponseBody: {
+            data: components["schemas"]["RedirectData"];
         };
         /** ReviewAutoApprovalSweepPayload */
         ReviewAutoApprovalSweepPayload: {
@@ -9249,6 +9945,11 @@ export interface components {
              */
             slot: "server-name";
         };
+        /** SetPasswordRequest */
+        SetPasswordRequest: {
+            /** New Password */
+            new_password: string;
+        };
         /** SettingsMcpClientData */
         SettingsMcpClientData: {
             /** Client Name */
@@ -9425,6 +10126,14 @@ export interface components {
              * @default false
              */
             remember_me: boolean;
+        };
+        /** StartAccountRequest */
+        StartAccountRequest: {
+            /**
+             * Return To
+             * @default /account
+             */
+            return_to: string;
         };
         /** SubmitContextEditRequest */
         SubmitContextEditRequest: {
@@ -9821,6 +10530,32 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** VerificationData */
+        VerificationData: {
+            /** Allowed Methods */
+            allowed_methods: ("password" | "sso" | "email")[];
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "password" | "sso" | "email" | "session";
+            /** Providers */
+            providers: components["schemas"]["LoginMethodCapability"][];
+            /** Reauthenticated Until */
+            reauthenticated_until?: string | null;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "account" | "admin";
+            /** Verified */
+            verified: boolean;
+        };
+        /** VerificationResponse */
+        VerificationResponse: {
+            data: components["schemas"]["VerificationData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** VersionEntry */
         VersionEntry: {
@@ -10270,7 +11005,7 @@ export interface components {
             /** Requester Display Name */
             requester_display_name: string;
             /** Requester Email */
-            requester_email: string;
+            requester_email: string | null;
             /**
              * Requester User Id
              * Format: uuid
@@ -10321,8 +11056,6 @@ export interface components {
              * @default 0
              */
             other_membership_count: number;
-            /** Personal Workspace Id */
-            personal_workspace_id?: string | null;
             /** Workspaces */
             workspaces: components["schemas"]["WorkspaceSummary"][];
         };
@@ -10338,27 +11071,64 @@ export interface components {
              * @default false
              */
             confirm_first_share: boolean;
-            /**
-             * Email
-             * @description One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.
-             */
-            email: string;
+            /** Email */
+            email?: string | null;
             /**
              * Role
              * @default viewer
              */
             role: string;
+            /** User Id */
+            user_id?: string | null;
+        };
+        /** WorkspaceMemberCandidateItem */
+        WorkspaceMemberCandidateItem: {
+            /** Display Name */
+            display_name: string;
+            /** Identity Label */
+            identity_label: string;
+            /**
+             * Identity Verified
+             * @default true
+             * @constant
+             */
+            identity_verified: true;
+            /** Provider Label */
+            provider_label: {
+                [key: string]: string;
+            };
+            /** Provider Name */
+            provider_name: string | null;
+            /** Provider Slug */
+            provider_slug: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+        };
+        /** WorkspaceMemberCandidatesData */
+        WorkspaceMemberCandidatesData: {
+            /** Enabled */
+            enabled: boolean;
+            /** Has More */
+            has_more: boolean;
+            /** Items */
+            items: components["schemas"]["WorkspaceMemberCandidateItem"][];
+        };
+        /** WorkspaceMemberCandidatesResponse */
+        WorkspaceMemberCandidatesResponse: {
+            data: components["schemas"]["WorkspaceMemberCandidatesData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** WorkspaceMemberItem */
         WorkspaceMemberItem: {
             /** Display Name */
             display_name: string;
             /** Email */
-            email: string;
+            email: string | null;
             /** Is Current User */
             is_current_user: boolean;
-            /** Is Personal Anchor Owner */
-            is_personal_anchor_owner: boolean;
             /**
              * Joined At
              * Format: date-time
@@ -10548,6 +11318,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    admin_list_audit_events_api_v1_admin_audit_events_get: {
+        parameters: {
+            query?: {
+                action_prefix?: string | null;
+                target_user_id?: string | null;
+                actor_id?: string | null;
+                since?: string | null;
+                until?: string | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAuditEventListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
                 };
             };
         };
@@ -10846,6 +11680,128 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeploymentUpdateStatusResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    admin_list_email_conflicts_api_v1_admin_email_conflicts_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminEmailConflictListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    admin_decide_email_conflict_api_v1_admin_email_conflicts__request_id__decision_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminEmailConflictDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminEmailConflictDecisionResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -11509,6 +12465,68 @@ export interface operations {
             };
         };
     };
+    admin_rebind_identity_api_v1_admin_users__user_id__identities_rebind_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminIdentityRebindRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminIdentityRebindResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
     admin_issue_password_reset_api_v1_admin_users__user_id__password_reset_post: {
         parameters: {
             query?: never;
@@ -11873,6 +12891,72 @@ export interface operations {
             };
         };
     };
+    confirm_email_api_v1_auth_email_reauthentication_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailReauthenticationConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailReauthenticationConfirmResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_email_api_v1_auth_email_reauthentication_request_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailReauthenticationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailReauthenticationRequestResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     confirm_email_verification_api_v1_auth_email_verification_confirm_post: {
         parameters: {
             query?: never;
@@ -11967,7 +13051,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmailVerificationRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             202: {
@@ -12039,6 +13127,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    identities_api_v1_auth_identities_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityListResponse"];
+                };
+            };
+        };
+    };
+    unlink_api_v1_auth_identities__identity_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                identity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthSessionResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -12292,6 +13431,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    icon_api_v1_auth_methods__method_id__icon_png_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                method_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -12644,6 +13814,39 @@ export interface operations {
             };
         };
     };
+    set_password_api_v1_auth_password_set_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthSessionResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     reauthenticate_api_v1_auth_reauthenticate_post: {
         parameters: {
             query?: never;
@@ -12814,6 +14017,223 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    request_email_conflict_release_api_v1_auth_sso_email_conflict_request_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailConflictRequestResponse"];
+                };
+            };
+        };
+    };
+    callback_api_v1_auth_sso__slug__callback_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    form_callback_api_v1_auth_sso__slug__callback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    form_callback_continue_api_v1_auth_sso__slug__callback_continue_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    link_api_v1_auth_sso__slug__link_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RedirectResponseBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reauthenticate_api_v1_auth_sso__slug__reauthenticate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RedirectResponseBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_api_v1_auth_sso__slug__start_get: {
+        parameters: {
+            query?: {
+                next?: string | null;
+                remember_me?: boolean;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -13248,6 +14668,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    verification_api_v1_auth_verification_get: {
+        parameters: {
+            query?: {
+                scope?: "account" | "admin";
+                return_to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VerificationResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    capabilities_api_v1_capabilities_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilitiesResponse"];
                 };
             };
         };
@@ -21105,6 +22577,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["McpChatArchiveResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    list_workspace_member_candidates_api_v1_workspaces__workspace_id__member_candidates_get: {
+        parameters: {
+            query?: {
+                query?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMemberCandidatesResponse"];
                 };
             };
             /** @description Unauthorized */

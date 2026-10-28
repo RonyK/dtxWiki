@@ -21,6 +21,7 @@ from backend.app.db import make_engine
 from backend.app.runtime_resources import RuntimeResources, acquire_paths
 from backend.app.settings import Settings
 from backend.models import Base
+from backend.models.search_index import is_fts5_projection_table
 from backend.services.ops import runtime_lock
 from backend.services.ops.db_lock import SqliteLockedError, probe_sqlite_writable
 from backend.services.ops.migration_preflight import (
@@ -230,6 +231,22 @@ def verify_alembic_revision(source_url: str, target_url: str) -> tuple[str, str]
                 f"{label} database stamp/schema evidence is "
                 f"{preflight.consistency}; refusing to copy a database whose "
                 "schema identity cannot be proven"
+            )
+        unsupported = [
+            name
+            for name in preflight.user_objects
+            if name not in Base.metadata.tables and not is_fts5_projection_table(name)
+        ]
+        if unsupported:
+            # This inspects the persisted catalog, not the enabled-plugin
+            # list: disabling a plugin does not remove its data or stamp.
+            # Refuse even an empty stamp; core's copy cannot certify a plugin
+            # chain or transfer an unknown table/view. --force only resumes
+            # core row copies and must never bypass this boundary.
+            raise MigrationPrecheckError(
+                f"{label} database contains plugin or unsupported tables/views; "
+                "DB-to-DB transfer currently supports core data only "
+                f"({', '.join(sorted(unsupported))})"
             )
     assert source.revision is not None
     assert target.revision is not None

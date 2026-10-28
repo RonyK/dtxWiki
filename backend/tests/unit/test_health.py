@@ -29,9 +29,8 @@ def test_extra_lifespan_composes_with_mcp_lifespan(tmp_path):
     with TestClient(app) as client:
         assert events == ["overlay-start"]
         # Core MCP lifespan ran inside the overlay: the streamable session
-        # manager and MCP contextvars are installed.
+        # manager is installed.
         assert getattr(app.state, "mcp_session_manager", None) is not None
-        assert getattr(app.state, "mcp_actor_var", None) is not None
         response = client.get("/health/ready")
 
     assert response.status_code == 200

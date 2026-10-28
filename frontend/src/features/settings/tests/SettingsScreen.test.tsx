@@ -1235,7 +1235,6 @@ describe("SettingsScreen", () => {
               data: {
                 current_workspace_id: "workspace-1",
                 default_workspace_id: null,
-                personal_workspace_id: null,
                 workspaces: [
                   workspaceSummary(
                     "workspace-1",
@@ -1330,10 +1329,10 @@ describe("SettingsScreen", () => {
     { caseName: "the authoritative empty list loads", refreshFails: false },
     { caseName: "the authoritative refresh fails", refreshFails: true },
   ])(
-    "deletes the only Personal workspace and opens discovery when $caseName",
+    "deletes the only workspace and opens discovery when $caseName",
     async ({ refreshFails }) => {
       const user = userEvent.setup();
-      const personalWorkspaceId = "workspace-personal";
+      const onlyWorkspaceId = "workspace-personal";
       let workspaceListReads = 0;
       const fetchMock = mockFetch({
         [`${BASE}/api/v1/workspaces`]: () => {
@@ -1341,12 +1340,11 @@ describe("SettingsScreen", () => {
           if (workspaceListReads === 1) {
             return {
               data: {
-                current_workspace_id: personalWorkspaceId,
-                default_workspace_id: personalWorkspaceId,
-                personal_workspace_id: personalWorkspaceId,
+                current_workspace_id: onlyWorkspaceId,
+                default_workspace_id: onlyWorkspaceId,
                 workspaces: [
                   workspaceSummary(
-                    personalWorkspaceId,
+                    onlyWorkspaceId,
                     "Personal Workspace",
                     "personal-space",
                   ),
@@ -1361,12 +1359,11 @@ describe("SettingsScreen", () => {
             data: {
               current_workspace_id: null,
               default_workspace_id: null,
-              personal_workspace_id: null,
               workspaces: [],
             },
           };
         },
-        [`${BASE}/api/v1/workspaces/${personalWorkspaceId}/settings/policies`]: {
+        [`${BASE}/api/v1/workspaces/${onlyWorkspaceId}/settings/policies`]: {
           data: {
             workspace: policy("workspace", "Workspace policy", {
               default_language: "en",
@@ -1383,8 +1380,8 @@ describe("SettingsScreen", () => {
             mcp_clients: [],
           },
         },
-        [`DELETE ${BASE}/api/v1/workspaces/${personalWorkspaceId}`]: {
-          data: { deleted_workspace_id: personalWorkspaceId },
+        [`DELETE ${BASE}/api/v1/workspaces/${onlyWorkspaceId}`]: {
+          data: { deleted_workspace_id: onlyWorkspaceId },
         },
         [`${BASE}/api/v1/auth/tokens`]: {
           data: [],
@@ -1432,15 +1429,12 @@ describe("SettingsScreen", () => {
         ).toHaveTextContent("REPLACE");
       });
       expect(fetchMock).toHaveBeenCalledWith(
-        `${BASE}/api/v1/workspaces/${personalWorkspaceId}`,
+        `${BASE}/api/v1/workspaces/${onlyWorkspaceId}`,
         expect.objectContaining({ method: "DELETE" }),
       );
       expect(screen.getByTestId("settings-workspace-count")).toHaveTextContent(
         "0",
       );
-      expect(
-        screen.getByTestId("settings-personal-workspace"),
-      ).toHaveTextContent("none");
       expect(
         window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
       ).toBeNull();
@@ -2496,17 +2490,6 @@ describe("SettingsScreen", () => {
     );
     expect(styles).toMatch(
       /\.settings-subnav-title > \.settings-subnav-label \{[^}]*text-overflow: ellipsis;/s,
-    );
-  });
-
-  it("keeps Members & access as one visual surface with nested subsections", () => {
-    const styles = readAppStyles();
-
-    expect(styles).toMatch(
-      /\.workspace-members-access-unified\s*\{[^}]*border:\s*1px solid var\(--border\);[^}]*box-shadow:\s*var\(--shadow-1\);/,
-    );
-    expect(styles).toMatch(
-      /\.workspace-members-access-unified \.workspace-settings-card\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/,
     );
   });
 
@@ -10205,15 +10188,12 @@ describe("SettingsScreen", () => {
 function WorkspaceDeletionProbe() {
   const location = useLocation();
   const navigationType = useNavigationType();
-  const { personalWorkspaceId, workspaces } = useWorkspaceContext();
+  const { workspaces } = useWorkspaceContext();
   return (
     <>
       <span data-testid="settings-location">{location.pathname}</span>
       <span data-testid="settings-navigation-type">{navigationType}</span>
       <span data-testid="settings-workspace-count">{workspaces.length}</span>
-      <span data-testid="settings-personal-workspace">
-        {personalWorkspaceId ?? "none"}
-      </span>
     </>
   );
 }

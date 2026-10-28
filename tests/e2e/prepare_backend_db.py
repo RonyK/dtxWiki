@@ -67,7 +67,7 @@ def _seed_identity_recovery_accounts(session_factory) -> None:
     viewport-only account. Context media also needs a verified owner whose
     password remains stable while the recovery spec runs in parallel. The
     normal signup domain service is used so every seeded account receives the
-    same Personal Workspace anchor as a real browser signup.
+    same starter workspace as a real browser signup.
     """
 
     service = SessionService(
@@ -145,7 +145,7 @@ def _seed_mcp_access_account(session_factory) -> None:
         with session_factory.begin() as session:
             user = session.get(User, signed_up.user_id)
             assert user is not None
-            workspace_id = user.personal_workspace_id
+            workspace_id = user.default_workspace_id
             assert workspace_id is not None
 
             # P10.3 T1 (D-01v2): ApiToken.workspace_id is gone -- a PAT's

@@ -33,6 +33,7 @@ from backend.cli.commands import prod as prod_commands
 from backend.cli.commands import rerank as rerank_commands
 from backend.cli.commands import update as update_commands
 from backend.cli.integrations import detect
+from backend.cli.invocation import PluginCommandGroup, invocation_settings
 from backend.scripts.migrate_data import (
     MigrationPrecheckError,
     ProgressEvent,
@@ -42,6 +43,7 @@ from backend.scripts.migrate_data import (
 )
 
 app = typer.Typer(
+    cls=PluginCommandGroup,
     invoke_without_command=True,
     no_args_is_help=False,
     help="Run dtxWiki and manage authenticated HTTP MCP connections.",
@@ -78,6 +80,7 @@ def root(
         None, help="Background worker mode: managed (default) or external."
     ),
 ) -> None:
+    invocation_settings()
     if ctx.invoked_subcommand is None:
         serve(
             host=host,
@@ -131,7 +134,7 @@ def run_server(
                 "must be managed or external", param_hint="--worker-mode"
             )
         overrides["worker_mode"] = worker_mode
-    settings = Settings(**overrides)
+    settings = invocation_settings(**overrides)
     resolved_port = port if port is not None else settings.backend_port
     if settings.app_mode == "solo_local" and not is_loopback_bind_host(host):
         _warn_solo_local_network_bind(host, settings)
@@ -214,9 +217,9 @@ def bootstrap_command(
     db: str | None = typer.Option(None, help="Override database URL."),
 ) -> None:
     if db:
-        settings = Settings(database_url=db, auto_bootstrap=True)
+        settings = invocation_settings(database_url=db, auto_bootstrap=True)
     else:
-        settings = Settings(auto_bootstrap=True)
+        settings = invocation_settings(auto_bootstrap=True)
     bootstrap_app(settings)
     typer.echo(f"bootstrapped {_redact(settings.database_url)}")
 
@@ -242,7 +245,7 @@ def reindex(
         reindex_workspace,
     )
 
-    settings = Settings(database_url=db) if db else Settings()
+    settings = invocation_settings(database_url=db) if db else invocation_settings()
     embedder = build_embedding_provider(settings)
     session_factory = make_session_factory_from_settings(settings)
     database_provider = DatabaseProvider(settings, session_factory=session_factory)
@@ -300,7 +303,7 @@ def reindex(
 
 @app.command()
 def info(json_output: bool = typer.Option(False, "--json")) -> None:
-    settings = Settings()
+    settings = invocation_settings()
     status = migration_status(settings)
     payload = {
         "data_dir": str(data_dir()),

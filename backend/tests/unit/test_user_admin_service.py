@@ -28,8 +28,7 @@ def test_cli_user_creation_reuses_personal_provisioner(session_factory):
     with session_factory() as session:
         user = session.get(User, created.user_id)
         assert user is not None
-        assert user.personal_workspace_id is not None
-        assert user.default_workspace_id == user.personal_workspace_id
+        assert user.default_workspace_id is not None
         roles = dict(
             session.execute(
                 select(Workspace.slug, WorkspaceMembership.role)
@@ -40,7 +39,7 @@ def test_cli_user_creation_reuses_personal_provisioner(session_factory):
                 .where(WorkspaceMembership.user_id == user.id)
             ).all()
         )
-        personal = session.get(Workspace, user.personal_workspace_id)
+        personal = session.get(Workspace, user.default_workspace_id)
         assert personal is not None
         assert roles == {personal.slug: "owner"}
 
@@ -58,7 +57,7 @@ def test_cli_user_creation_rolls_back_when_personal_provisioning_fails(
         raise RuntimeError("simulated Personal provisioning failure")
 
     monkeypatch.setattr(
-        "backend.services.user_admin_service.ensure_personal_workspace",
+        "backend.services.user_admin_service.create_personal_workspace",
         fail_provisioning,
     )
 
@@ -76,14 +75,18 @@ def test_cli_user_creation_rolls_back_when_personal_provisioning_fails(
 
 def test_admin_password_reset_rolls_back_when_audit_fails(session_factory):
     hasher = CredentialHasher()
+    # Account creation is audited too; create the target with a working audit
+    # sink so only the reset below meets the failure.
+    created = UserAdminService(
+        session_factory=session_factory, credential_hasher=hasher
+    ).add_user(
+        email="rollback@example.com",
+        password="original-password",
+    )
     service = UserAdminService(
         session_factory=session_factory,
         credential_hasher=hasher,
         audit_service=_FailingAuditService(),
-    )
-    created = service.add_user(
-        email="rollback@example.com",
-        password="original-password",
     )
 
     with pytest.raises(RuntimeError, match="simulated audit failure"):

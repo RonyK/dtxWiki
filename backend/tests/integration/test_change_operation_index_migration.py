@@ -16,6 +16,8 @@ PARENT_REVISION = "19db79d3e622"
 INDEX_REVISION = "ef53a0a7061c"
 INDEX_NAME = "ix_change_operation_change_set_id"
 DELETION_REVISION = "eb86fdacb1bb"
+# The deletion revision's parent; the branch's one revision follows dev's head.
+DELETION_PARENT = "da94025713de"
 DELETION_COLUMNS = {
     "deletion_requested_at",
     "purge_after",
@@ -131,6 +133,7 @@ def test_change_operation_index_round_trip_preserves_existing_rows(
         # Extend this released-boundary traversal for the next revision rather
         # than creating another SQLite/PostgreSQL database scenario. Existing
         # identity data must survive the nullable retention-column migration.
+        command.upgrade(config, DELETION_PARENT)
         users = Table("users", MetaData(), autoload_with=engine)
         now = datetime.now(UTC)
         user_id = uuid4().hex if dialect == "sqlite" else uuid4()
@@ -193,7 +196,7 @@ def test_change_operation_index_round_trip_preserves_existing_rows(
                 )
             )
         with pytest.raises(RuntimeError, match="deletion requests are pending"):
-            command.downgrade(config, INDEX_REVISION)
+            command.downgrade(config, DELETION_PARENT)
         with engine.begin() as connection:
             pending = connection.execute(
                 select(migrated_users).where(migrated_users.c.id == user_id)
@@ -210,7 +213,7 @@ def test_change_operation_index_round_trip_preserves_existing_rows(
                 .where(migrated_users.c.id == user_id)
                 .values(status="active")
             )
-        command.downgrade(config, INDEX_REVISION)
+        command.downgrade(config, DELETION_PARENT)
         assert DELETION_COLUMNS.isdisjoint(
             column["name"] for column in inspect(engine).get_columns("users")
         )

@@ -18,7 +18,10 @@ import {
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { UserDeletionImpact } from "../../shared/components/UserDeletionImpact";
 
-export function AccountDeletionPanel({ email }: { email: string }) {
+export function AccountDeletionPanel({ email, hasPassword = true }: {
+  email: string | null;
+  hasPassword?: boolean;
+}) {
   const { t } = useTranslation("auth");
   const { signOut } = useAuth();
   const navigate = useNavigate();
@@ -33,7 +36,10 @@ export function AccountDeletionPanel({ email }: { email: string }) {
   const [canReload, setCanReload] = useState(false);
   const [policyAttempt, setPolicyAttempt] = useState(0);
   const retentionDays = preview?.retention_days ?? null;
-  const emailConfirmed = sameAccountEmail(confirmationEmail, email);
+  const emailConfirmed = email !== null && sameAccountEmail(confirmationEmail, email);
+  // Withdrawal is confirmed with the account email and its password. An
+  // account signed in only through an external provider has neither yet.
+  const canConfirm = email !== null && hasPassword;
   // Workspaces with other active members must be deleted (or given another
   // admin) in their own Settings first; withdrawal waits for a re-check.
   const blocked = (preview?.blocking_workspaces.length ?? 0) > 0;
@@ -116,7 +122,9 @@ export function AccountDeletionPanel({ email }: { email: string }) {
         <h2 id="account-deletion-title">{t("deletion.title")}</h2>
       </div>
       <p className="account-panel-hint">{t("deletion.description")}</p>
-      {open ? (
+      {!canConfirm ? (
+        <p className="meta-line">{t("deletion.adminOnly")}</p>
+      ) : open ? (
         <form
           className="account-deletion-form"
           onSubmit={onSubmit}

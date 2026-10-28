@@ -9,16 +9,20 @@ import type { components } from "./types.gen";
 
 export type AuthUser = {
   user_id: string;
-  email: string;
+  username?: string;
+  email: string | null;
   display_name: string;
   status: string;
   email_verified_at?: string | null;
+  has_password?: boolean;
+  session_method?: string | null;
+  session_provider_slug?: string | null;
   // Instance (server) admin flag — populated authoritatively by GET /auth/me.
   // Gates system/deployment settings; absent on older/non-/me responses.
   is_server_admin?: boolean;
   // Authoritative MCP OAuth availability (https issuer only) from GET /auth/me;
   // the MCP-access UI uses this server truth instead of a client URL heuristic.
-  oauth_available?: boolean;
+  oauth_available?: boolean | null;
   oauth_unavailable_reason?: string | null;
   // The canonical MCP endpoint under the server's configured public origin.
   // The screen shows and copies this rather than deriving one from the
@@ -28,7 +32,7 @@ export type AuthUser = {
   // client using a URL client identifier authorizes without DCR). Absent on
   // older/non-/me responses; treat undefined as "unknown, assume enabled"
   // the same way oauth_available's own default does.
-  oauth_dcr_enabled?: boolean;
+  oauth_dcr_enabled?: boolean | null;
 };
 
 export type AuthSession = {
@@ -71,9 +75,27 @@ type ReauthenticateResponse = {
   };
 };
 
+export type LoginMethod = components["schemas"]["LoginMethodCapability"];
+
+export type LoginIdentity = {
+  id: string;
+  provider_slug: string;
+  last_email: string | null;
+  last_login_at: string | null;
+  can_unlink: boolean;
+};
+
+export type LoginIdentities = {
+  has_password: boolean;
+  identities: LoginIdentity[];
+  available_providers: LoginMethod[];
+};
+
 type AuthCapabilitiesResponse = {
   data: {
     signup_enabled: boolean;
+    password_login?: { enabled: boolean; email_enrollment_enabled?: boolean };
+    login_methods?: LoginMethod[];
     password_recovery: {
       mode: "email" | "admin_assisted" | "disabled";
       admin_assisted: boolean;
@@ -179,6 +201,63 @@ export function getAuthCapabilities() {
   );
 }
 
+export function getLoginIdentities() {
+  return apiRequest<{ data: LoginIdentities }>("/api/v1/auth/identities").then(
+    (response) => response.data,
+  );
+}
+
+export function startIdentityFlow(slug: string, action: "link" | "reauthenticate", returnTo: string) {
+  return apiRequest<{ data: { redirect_url: string } }>(
+    `/api/v1/auth/sso/${encodeURIComponent(slug)}/${action}`,
+    { method: "POST", body: JSON.stringify({ return_to: returnTo }) },
+  ).then((response) => response.data);
+}
+
+export function unlinkLoginIdentity(id: string) {
+  return apiRequest<AuthSessionResponse>(`/api/v1/auth/identities/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  }).then((response) => response.data);
+}
+
+export function setAccountPassword(newPassword: string) {
+  return apiRequest<AuthSessionResponse>("/api/v1/auth/password/set", {
+    method: "POST", body: JSON.stringify({ new_password: newPassword }),
+  }).then((response) => response.data);
+}
+
+export type EmailConflictRequest = components["schemas"]["EmailConflictRequestData"];
+
+// Only the browser that just finished the colliding SSO login holds the
+// HttpOnly ticket this request presents.
+export function requestEmailConflictRelease() {
+  return apiRequest<{ data: EmailConflictRequest }>(
+    "/api/v1/auth/sso/email-conflict/request",
+    { method: "POST" },
+  ).then((response) => response.data);
+}
+
+export type IdentityVerification = components["schemas"]["VerificationData"];
+export type VerificationScope = IdentityVerification["scope"];
+
+export function getIdentityVerification(scope: VerificationScope, returnTo: string) {
+  const query = new URLSearchParams({ scope, return_to: returnTo });
+  return apiRequest<components["schemas"]["VerificationResponse"]>(`/api/v1/auth/verification?${query}`)
+    .then((response) => response.data);
+}
+
+export function requestEmailReauthentication(scope: VerificationScope, returnTo: string) {
+  return apiRequest<components["schemas"]["EmailReauthenticationRequestResponse"]>("/api/v1/auth/email-reauthentication/request", {
+    method: "POST", body: JSON.stringify({ scope, return_to: returnTo }),
+  }).then((response) => response.data);
+}
+
+export function confirmEmailReauthentication(token: string, scope: VerificationScope) {
+  return apiRequest<components["schemas"]["EmailReauthenticationConfirmResponse"]>("/api/v1/auth/email-reauthentication/confirm", {
+    method: "POST", body: JSON.stringify({ token, scope }),
+  }).then((response) => response.data);
+}
+
 export function confirmPasswordReset(input: {
   token: string;
   new_password: string;
@@ -218,10 +297,10 @@ export function requestPasswordReset(input: { email: string }) {
   ).then((response) => response.data);
 }
 
-export function requestEmailVerification() {
+export function requestEmailVerification(email?: string) {
   return apiRequest<EmailVerificationResponse>(
     "/api/v1/auth/email-verification/request",
-    { method: "POST" },
+    { method: "POST", ...(email ? { body: JSON.stringify({ email }) } : {}) },
   ).then((response) => response.data);
 }
 

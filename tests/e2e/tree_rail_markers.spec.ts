@@ -361,8 +361,6 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
     test.setTimeout(90_000);
     await page.setViewportSize({ width: 1280, height: 900 });
     await authenticatePage(page, testInfo, "tree-favorite-sections");
-    // Personal workspaces provision Context and Library only. A regular
-    // workspace supplies the Agent roots required by its write contract.
     const workspace = await responseData<{ id: string; slug: string }>(await page.request.post(
       `${backendBaseUrl}/api/v1/workspaces`,
       { data: { title: `TreeRail all sections ${randomUUID()}` } },

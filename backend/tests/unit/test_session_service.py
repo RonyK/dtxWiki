@@ -1,3 +1,6 @@
+import base64
+import hashlib
+import hmac
 import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -9,6 +12,7 @@ from sqlalchemy import select
 
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
+from backend.services.auth.password_method import DUMMY_PASSWORD_HASH
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.session_service import (
     SESSION_TOKEN_KIND,
@@ -106,11 +110,10 @@ def test_signup_creates_user_and_session_without_plaintext_password(
         assert user is not None
         assert user.password_hash.startswith("$argon2id$")
         assert "correct-password" not in user.password_hash
-        assert user.personal_workspace_id is not None
-        assert user.default_workspace_id == user.personal_workspace_id
-        personal = session.get(Workspace, user.personal_workspace_id)
+        assert user.default_workspace_id is not None
+        personal = session.get(Workspace, user.default_workspace_id)
         assert personal is not None
-        assert personal.title == "Personal Workspace"
+        assert personal.title == "Example User's Personal Workspace"
         assert personal.visibility == "private"
         assert personal.join_policy == "invite_only"
 
@@ -193,9 +196,10 @@ def test_signup_disabled_rejects_new_signup(session_factory, session_service):
         )
 
     with session_factory() as session:
-        assert session.scalar(
-            select(User).where(User.email == "blocked@example.com")
-        ) is None
+        assert (
+            session.scalar(select(User).where(User.email == "blocked@example.com"))
+            is None
+        )
 
 
 def test_signup_enabled_defaults_to_false(session_factory):
@@ -223,7 +227,7 @@ def test_signup_rolls_back_user_when_personal_provisioning_fails(
         raise RuntimeError("simulated Personal provisioning failure")
 
     monkeypatch.setattr(
-        "backend.services.session_service.ensure_personal_workspace",
+        "backend.services.session_service.create_personal_workspace",
         fail_provisioning,
     )
 
@@ -234,12 +238,13 @@ def test_signup_rolls_back_user_when_personal_provisioning_fails(
         )
 
     with session_factory() as session:
-        assert session.scalar(
-            select(User).where(User.email == "rolled-back@example.com")
-        ) is None
+        assert (
+            session.scalar(select(User).where(User.email == "rolled-back@example.com"))
+            is None
+        )
 
 
-def test_login_rejects_unknown_or_wrong_password(session_service):
+def test_login_rejects_unknown_or_wrong_password(session_factory, session_service):
     session_service.signup(email="login@example.com", password="right-password-123")
 
     with pytest.raises(InvalidCredentialsError):
@@ -248,6 +253,39 @@ def test_login_rejects_unknown_or_wrong_password(session_service):
         )
     with pytest.raises(InvalidCredentialsError):
         session_service.login(email="login@example.com", password="wrong-pass")
+
+    with session_factory.begin() as session:
+        passwordless = session_service.provision_user(
+            session, email="external@example.com"
+        )
+        passwordless_id = passwordless.id
+
+    hashes = []
+
+    class AcceptingHasher:
+        def verify_password(self, _password, password_hash):
+            # A matching dummy hash cannot authenticate an absent credential.
+            hashes.append(password_hash)
+            return True
+
+    accepting = replace(session_service, credential_hasher=AcceptingHasher())
+    with pytest.raises(InvalidCredentialsError):
+        accepting.login(email="external@example.com", password="correct-password")
+    with pytest.raises(InvalidCredentialsError):
+        accepting.login(email="missing@example.com", password="correct-password")
+    with pytest.raises(InvalidCredentialsError):
+        accepting.change_password(
+            user_id=passwordless_id,
+            current_password="correct-password",
+            new_password="replacement-password",
+        )
+    with pytest.raises(InvalidCredentialsError):
+        accepting.reauthenticate(
+            user_id=passwordless_id, current_password="correct-password"
+        )
+    assert hashes == [DUMMY_PASSWORD_HASH] * 4
+    with session_factory() as session:
+        assert session.get(User, passwordless_id).password_hash is None
 
 
 def test_login_and_password_change_rotate_credentials(session_service):
@@ -322,8 +360,10 @@ def test_remembered_and_session_only_tokens_use_distinct_absolute_ttls(
     )
     assert session_only.remember_me is False
     assert session_only.expires_at - session_only.issued_at == timedelta(hours=1)
+    assert session_only_verified.session_id
+    assert session_only_verified.session_id != remembered_verified.session_id
     assert session_only_verified.remember_me is False
-    assert session_only_verified.authenticated_at is None
+    assert session_only_verified.authenticated_at == session_only.issued_at
     assert remembered.remember_me is True
     assert remembered.expires_at - remembered.issued_at == timedelta(days=30)
     assert remembered_verified.remember_me is True
@@ -345,11 +385,28 @@ def test_remembered_session_refresh_window_overlap_and_absolute_cap(
             now=clock.now,
         ),
     )
-    initial = service.signup(
-        email="remembered-refresh@example.com",
-        password="correct-password",
-        remember_me=True,
+    with service.session_factory.begin() as session:
+        user = service.provision_user(session, email="remembered-refresh@example.com")
+        initial = service.issue_session(
+            user, remember_me=True, amr=("ext", "mfa"), idp="example-sso-"
+        )
+    # Published remembered tokens had no SID. Derive it only after signature
+    # verification, then preserve it through renewal and proof verification.
+    encoded, _ = initial.session_token.split(".")
+    payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+    payload.pop("sid")
+    encoded = _base64url_encode(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
     )
+    legacy = (
+        f"{encoded}.{_base64url_encode(service.token_codec._sign(encoded.encode()))}"
+    )
+    initial = replace(initial, session_token=legacy)
+    initial_verified = service.token_codec.verify_session(legacy)
+    with service.session_factory.begin() as session:
+        proof = service.issue_external_reauthentication(
+            session, user_id=user.id, session_generation=0, session_token=legacy
+        )
     original_authentication_time = initial.issued_at
 
     clock.advance(timedelta(seconds=79))
@@ -362,6 +419,15 @@ def test_remembered_session_refresh_window_overlap_and_absolute_cap(
     assert first_refresh.expires_at == clock.value + timedelta(seconds=100)
     first_verified = service.token_codec.verify_session(first_refresh.session_token)
     assert first_verified.authenticated_at == original_authentication_time
+    assert first_verified.amr == ("ext", "mfa")
+    assert first_verified.idp == "example-sso-"
+    assert first_verified.session_id == initial_verified.session_id
+    service.verify_recent_reauthentication(
+        proof_token=proof.proof_token,
+        user_id=user.id,
+        scope="admin",
+        session_token=first_refresh.session_token,
+    )
 
     # Stateless cookies cannot revoke the prior token during rotation. Renewal
     # starts only inside the final threshold window, so this overlap is <=20s.
@@ -376,6 +442,10 @@ def test_remembered_session_refresh_window_overlap_and_absolute_cap(
     assert capped_refresh.expires_at == original_authentication_time + timedelta(
         seconds=250
     )
+    capped_verified = service.token_codec.verify_session(capped_refresh.session_token)
+    assert capped_verified.amr == first_verified.amr
+    assert capped_verified.idp == first_verified.idp
+    assert capped_verified.session_id == first_verified.session_id
 
     clock.advance(timedelta(seconds=70))
     _, no_rotation_at_cap = service.authenticate_session_with_refresh(
@@ -450,7 +520,10 @@ def test_legacy_v1_session_without_renewal_claims_stays_valid_without_refresh(
         verified = session_service.token_codec.verify_session(token)
         user, refreshed = session_service.authenticate_session_with_refresh(token)
         assert verified.remember_me is False
-        assert verified.authenticated_at is None
+        assert verified.authenticated_at == (
+            clock.value if claims.get("auth_time") == issued_at else None
+        )
+        assert verified.amr is None and verified.idp is None
         assert user == signed_up.user
         assert refreshed is None
 
@@ -535,25 +608,118 @@ def test_recent_reauthentication_proof_rejects_tamper_expiry_and_wrong_password(
     proof = session_service.reauthenticate(
         user_id=result.user.user_id,
         current_password="correct-password",
+        session_token=result.session_token,
     )
     verified = session_service.verify_recent_reauthentication(
         proof_token=proof.proof_token,
         user_id=result.user.user_id,
+        scope="admin",
+        session_token=result.session_token,
     )
     assert verified.user_id == result.user.user_id
     assert verified.session_generation == 0
+    another = session_service.login(
+        email="reauth@example.com", password="correct-password"
+    )
+    with pytest.raises(
+        RecentReauthenticationRequiredError, match="another purpose or session"
+    ):
+        session_service.verify_recent_reauthentication(
+            proof_token=proof.proof_token,
+            user_id=result.user.user_id,
+            scope="admin",
+            session_token=another.session_token,
+        )
+    old_payload, old_signature = proof.proof_token.split(".")
+    old_key = (
+        f"dtxwiki.recent_reauthentication.v1\0{session_service.token_codec.secret}"
+    ).encode()
+    assert not hmac.compare_digest(
+        old_signature,
+        _base64url_encode(hmac.digest(old_key, old_payload.encode(), hashlib.sha256)),
+    )
+    with session_service.session_factory.begin() as session:
+        scoped = session_service.issue_external_reauthentication(
+            session,
+            user_id=result.user.user_id,
+            session_generation=0,
+            scope="account",
+            session_token=result.session_token,
+        )
+    assert (
+        session_service.verify_recent_reauthentication(
+            proof_token=scoped.proof_token,
+            user_id=result.user.user_id,
+            scope="account",
+            session_token=result.session_token,
+        ).scope
+        == "account"
+    )
+    scoped_payload, scoped_signature = scoped.proof_token.split(".")
+    # Pin the historical reader's signing domain: a rollback must reject an
+    # email account proof instead of treating it as unrestricted admin proof.
+    legacy_signature = _base64url_encode(
+        hmac.digest(
+            old_key,
+            scoped_payload.encode(),
+            hashlib.sha256,
+        )
+    )
+    assert not hmac.compare_digest(scoped_signature, legacy_signature)
     payload, signature = proof.proof_token.split(".", maxsplit=1)
     with pytest.raises(RecentReauthenticationRequiredError):
         session_service.verify_recent_reauthentication(
             proof_token=f"{payload}x.{signature}",
             user_id=result.user.user_id,
+            scope="admin",
+            session_token=result.session_token,
         )
 
-    clock.advance(timedelta(minutes=5))
+    # A valid signature does not make a missing, malformed or future issue
+    # time an acceptable confirmation deadline.
+    signed_payload = json.loads(
+        base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
+    )
+    codec = session_service._reauthentication_codec()
+    for issued_at in (None, True, int(clock.value.timestamp()) + 1):
+        invalid = {**signed_payload, "iat": issued_at}
+        encoded = _base64url_encode(json.dumps(invalid, separators=(",", ":")).encode())
+        signature = _base64url_encode(
+            codec._sign(encoded.encode(), version=invalid["v"])
+        )
+        with pytest.raises(RecentReauthenticationRequiredError, match="lifetime"):
+            codec.verify(f"{encoded}.{signature}")
+
+    shortened = replace(session_service, reauthentication_max_age_seconds=60)
+    clipped = shortened.verify_recent_reauthentication(
+        proof_token=proof.proof_token,
+        user_id=result.user.user_id,
+        scope="account",
+        session_token=result.session_token,
+    )
+    assert clipped.expires_at == clock.value + timedelta(seconds=60)
+    clock.advance(timedelta(seconds=60))
+    with pytest.raises(RecentReauthenticationRequiredError, match="expired"):
+        shortened.verify_recent_reauthentication(
+            proof_token=proof.proof_token,
+            user_id=result.user.user_id,
+            scope="account",
+            session_token=result.session_token,
+        )
+    session_service.verify_recent_reauthentication(
+        proof_token=proof.proof_token,
+        user_id=result.user.user_id,
+        scope="admin",
+        session_token=result.session_token,
+    )
+
+    clock.advance(timedelta(minutes=60))
     with pytest.raises(RecentReauthenticationRequiredError):
         session_service.verify_recent_reauthentication(
             proof_token=proof.proof_token,
             user_id=result.user.user_id,
+            scope="admin",
+            session_token=result.session_token,
         )
 
 

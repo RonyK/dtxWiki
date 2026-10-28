@@ -1,3 +1,6 @@
+from dataclasses import replace as _replace
+
+from sqlalchemy import CheckConstraint as _CheckConstraint
 from sqlalchemy import event as _event
 from sqlalchemy.engine import Connection as _Connection
 
@@ -5,10 +8,10 @@ from backend.migrations.revision_modules.v0_1.input_restrictions_v1 import (
     RULES as _INPUT_RULES,
 )
 from backend.migrations.revision_modules.v0_1.input_restrictions_v1 import (
-    check_encoding as _check_input_encoding,
+    StoredInputCheck as _StoredInputCheck,
 )
 from backend.migrations.revision_modules.v0_1.input_restrictions_v1 import (
-    constraints_for as _input_constraints_for,
+    check_encoding as _check_input_encoding,
 )
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.api_token import ApiToken, ApiTokenWorkspace
@@ -21,6 +24,11 @@ from backend.models.ask import (
     ProposalSourceItem,
 )
 from backend.models.audit import AuditEvent
+from backend.models.auth_identity import AuthLoginTransaction, UserIdentity
+from backend.models.auth_verification import (
+    EmailConflictRequest,
+    EmailReauthenticationChallenge,
+)
 from backend.models.base import Base
 from backend.models.bundle import AgentInputBundle, AgentInputBundleItem
 from backend.models.change import ChangeOperation, ChangeSet
@@ -122,9 +130,15 @@ from backend.models.workspace_purge_grant import WorkspacePurgeGrant
 
 # A single versioned storage contract is shared by create_all and Alembic.
 # Historical snapshots/versions deliberately have no retrospective CHECK.
-for _table_name in {rule.table for rule in _INPUT_RULES}:
-    for _constraint in _input_constraints_for(_table_name):
-        Base.metadata.tables[_table_name].append_constraint(_constraint)
+for _rule in _INPUT_RULES:
+    _current_rule = (
+        _replace(_rule, nullable=True)
+        if (_rule.table, _rule.field) == ("users", "email")
+        else _rule
+    )
+    Base.metadata.tables[_rule.table].append_constraint(
+        _CheckConstraint(_StoredInputCheck(_current_rule), name=_rule.name)
+    )
 
 
 @_event.listens_for(Base.metadata, "before_create")
@@ -138,6 +152,9 @@ __all__ = [
     "ApiToken",
     "ApiTokenWorkspace",
     "AuditEvent",
+    "AuthLoginTransaction",
+    "EmailConflictRequest",
+    "EmailReauthenticationChallenge",
     "AgentPage",
     "AgentPageVersion",
     "AppMetadata",
@@ -234,6 +251,7 @@ __all__ = [
     "UploadAsset",
     "UploadAssetBinding",
     "User",
+    "UserIdentity",
     "UserFavorite",
     "WorkspaceTreeNode",
     "Workspace",

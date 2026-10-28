@@ -1,6 +1,6 @@
 """Workspace-scoped reads and mutations for workspace-plane models.
 
-This helper is deliberately narrower than "any model with an ``id`` and a
+These helpers are deliberately narrower than "any model with an ``id`` and a
 ``workspace_id`` column". The table must be explicitly classified on the
 workspace plane, its workspace scope must be required, and its exact primary
 key must be the single ``id`` column. Batch mutations also support composite
@@ -89,18 +89,6 @@ def select_in_workspace[Model](
     the single-row lookup; global audit records need their own mixed-plane API.
     """
     _validate_workspace_model(model, operation="select_in_workspace")
-    return select(model).where(model.workspace_id == workspace_id, *conditions)
-
-
-def select_rows_in_workspace[Model](
-    model: type[Model],
-    *,
-    workspace_id: UUID,
-    conditions: Iterable[ColumnElement[bool]] = (),
-) -> Select[tuple[Model]]:
-    """Build a scoped batch read, including composite workspace identities."""
-
-    _validate_workspace_scope(model, operation="select_rows_in_workspace")
     return select(model).where(model.workspace_id == workspace_id, *conditions)
 
 
