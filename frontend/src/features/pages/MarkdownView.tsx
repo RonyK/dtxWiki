@@ -68,6 +68,7 @@ import {
   type MarkdownImageProps,
 } from "./MarkdownImage";
 import { MermaidZoomViewer } from "./MermaidZoomViewer";
+import { hasUnsafeCss, resolveMermaidStylesheet } from "./mermaidStylesheet";
 import { parsePageDocument } from "./pageFrontmatter";
 
 type MarkdownViewProps = {
@@ -132,6 +133,7 @@ const MERMAID_LANGUAGE = "mermaid";
 const MERMAID_FONT_FAMILY =
   'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 const MERMAID_FONT_SIZE = "13px";
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const SVG_NUMBER_PATTERN = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
 // The shared anchor namespace. rehype-sanitize clobber-prefixes every id/name
 // with this so user-authored markup can never claim (clobber) the app's own
@@ -1465,6 +1467,10 @@ async function renderMermaidDiagram(source: string, diagramId: string) {
       rankSpacing: 36,
       useMaxWidth: false,
     },
+    // Renderers with their own typeface settings (sequence actors, notes and
+    // messages) take this one, so every label is measured in the face it is
+    // shown in.
+    fontFamily: MERMAID_FONT_FAMILY,
     htmlLabels: false,
     securityLevel: "strict",
     startOnLoad: false,
@@ -1473,6 +1479,11 @@ async function renderMermaidDiagram(source: string, diagramId: string) {
     themeVariables: {
       fontFamily: MERMAID_FONT_FAMILY,
       fontSize: MERMAID_FONT_SIZE,
+      // Notes stay the yellow they have always been here, in every diagram
+      // type; the neutral theme would draw them dark grey with white text.
+      noteBkgColor: "#EDF2AE",
+      noteBorderColor: "#666",
+      noteTextColor: "#333",
     },
   });
   // Validate syntax WITHOUT touching the DOM before rendering. mermaid.render()
@@ -1486,14 +1497,25 @@ async function renderMermaidDiagram(source: string, diagramId: string) {
   if (!parsed) {
     throw new Error("Invalid Mermaid diagram");
   }
+  // Render into a container we own. Mermaid declares the xlink namespace only
+  // on that path, and C4 writes `xlink:href`: without the declaration the
+  // strict XML parse in sanitizeMermaidSvg rejects the whole diagram. The
+  // container spans the page because renderers such as gantt size themselves
+  // against their parent's width; it stays hidden while Mermaid measures.
+  const container = document.createElement("div");
+  container.setAttribute("aria-hidden", "true");
+  container.style.cssText =
+    "position:absolute;top:0;left:0;width:100%;visibility:hidden;pointer-events:none";
+  document.body.append(container);
   try {
-    const result = await mermaid.render(diagramId, source);
+    const result = await mermaid.render(diagramId, source, container);
     return sanitizeMermaidSvg(result.svg);
   } finally {
     // Defense-in-depth for the rare case where parse() passes but render()
     // still throws after appending its temporary node (id `d${diagramId}`,
-    // holding the `${diagramId}` svg) to <body>. A no-op on success (mermaid
-    // already cleaned up) and on the invalid path above (render never ran).
+    // holding the `${diagramId}` svg). A no-op on success (mermaid already
+    // cleaned up) and on the invalid path above (render never ran).
+    container.remove();
     document.getElementById(`d${diagramId}`)?.remove();
     document.getElementById(diagramId)?.remove();
   }
@@ -1511,10 +1533,10 @@ function sanitizeMermaidSvg(svg: string) {
   if (root.localName.toLowerCase() !== "svg") {
     throw new Error("Mermaid returned a non-SVG document");
   }
+  resolveMermaidStylesheet(root);
   sanitizeMermaidElement(root);
   normalizeMermaidSvgDimensions(root);
-  normalizeMermaidSvgTypography(root);
-  applyMermaidFallbackStyles(root);
+  constrainMermaidSequenceNumbers(root);
   return String(
     DOMPurify.sanitize(new window.XMLSerializer().serializeToString(root), {
       USE_PROFILES: { svg: true, svgFilters: true },
@@ -1522,27 +1544,42 @@ function sanitizeMermaidSvg(svg: string) {
   );
 }
 
+function constrainMermaidSequenceNumbers(root: Element) {
+  if (root.getAttribute("aria-roledescription")?.trim().toLowerCase() !== "sequence") {
+    return;
+  }
+  // Native long numbers can exceed the 24px badge even at Mermaid's smallest
+  // font size. Leave 2px inside each edge while keeping its adaptive sizes.
+  for (const number of Array.from(root.querySelectorAll("text.sequenceNumber"))) {
+    if ((number.textContent?.length ?? 0) <= 3) {
+      continue;
+    }
+    if (!number.hasAttribute("textLength")) {
+      number.setAttribute("textLength", "20");
+    }
+    if (!number.hasAttribute("lengthAdjust")) {
+      number.setAttribute("lengthAdjust", "spacingAndGlyphs");
+    }
+  }
+}
+
 // Mermaid's diagram-specific renderers do not agree on intrinsic sizing.
 // Flowcharts respect `flowchart.useMaxWidth: false`, while sequence, state,
 // class, ER, and future diagram types can still emit `width="100%"` plus an
 // inline max-width. Our scroll viewport deliberately renders SVGs at their
 // intrinsic size, so a percentage-only root collapses to 0 x 0 in Chromium.
-// Every Mermaid renderer does provide its measured geometry in viewBox; use
-// that single, type-independent source when it is well formed.
+// Renderers provide their measured geometry in viewBox; use that single,
+// type-independent source when it is well formed. A renderer that omits it
+// (`info` sizes itself with only `width="100%"`) is measured instead.
 function normalizeMermaidSvgDimensions(root: Element) {
-  const viewBoxTokens = root
-    .getAttribute("viewBox")
-    ?.trim()
-    .split(/[\s,]+/);
-  const viewBox = viewBoxTokens?.map(Number);
-  if (
-    viewBoxTokens?.length !== 4 ||
-    !viewBoxTokens.every((token) => SVG_NUMBER_PATTERN.test(token)) ||
-    viewBox?.length !== 4 ||
-    !viewBox.every(Number.isFinite) ||
-    viewBox[2] <= 0 ||
-    viewBox[3] <= 0
-  ) {
+  let viewBox = parseMermaidViewBox(root.getAttribute("viewBox"));
+  if (!viewBox && !root.hasAttribute("viewBox")) {
+    viewBox = measureMermaidSvgContent(root);
+    if (viewBox) {
+      root.setAttribute("viewBox", viewBox.join(" "));
+    }
+  }
+  if (!viewBox) {
     throw new Error("Mermaid returned SVG without positive intrinsic geometry");
   }
 
@@ -1552,55 +1589,63 @@ function normalizeMermaidSvgDimensions(root: Element) {
   removeMermaidInlineStyleProperties(root, ["width", "max-width", "height"]);
 }
 
-function normalizeMermaidSvgTypography(root: Element) {
-  setMermaidSvgTypography(root);
-  const isSequence = mermaidDiagramFamily(root) === "sequence";
-
-  for (const element of Array.from(root.querySelectorAll("text, tspan"))) {
-    let fontSize = MERMAID_FONT_SIZE;
-    if (isSequence && element.matches("text.sequenceNumber")) {
-      // Mermaid shrinks long numbers to fit a fixed-size badge. Keep those
-      // renderer sizes while normalizing the font family with other labels.
-      const badgeFontSize = element.getAttribute("font-size") ?? "";
-      const size = Number.parseFloat(badgeFontSize);
-      if (
-        /^\d+(?:\.\d+)?px$/.test(badgeFontSize) &&
-        size > 0 && size <= Number.parseFloat(MERMAID_FONT_SIZE)
-      ) {
-        fontSize = badgeFontSize;
-      }
-    }
-    setMermaidSvgTypography(element, fontSize);
+function parseMermaidViewBox(value: string | null) {
+  const tokens = value?.trim().split(/[\s,]+/);
+  if (
+    tokens?.length !== 4 ||
+    !tokens.every((token) => SVG_NUMBER_PATTERN.test(token))
+  ) {
+    return null;
   }
+  const viewBox = tokens.map(Number);
+  return viewBox.every(Number.isFinite) && viewBox[2] > 0 && viewBox[3] > 0
+    ? viewBox
+    : null;
 }
 
-function setMermaidSvgTypography(element: Element, fontSize = MERMAID_FONT_SIZE) {
-  const style = (element as SVGElement).style;
-  const preservedFontProperties = [
-    "font-style",
-    "font-variant",
-    "font-weight",
-    "font-stretch",
-    "line-height",
-  ].map((property) => ({
-    property,
-    priority: style.getPropertyPriority(property),
-    value: style.getPropertyValue(property),
-  }));
-  removeMermaidInlineStyleProperties(element, [
-    "font",
-    "font-family",
-    "font-size",
-  ]);
-  for (const { property, priority, value } of preservedFontProperties) {
-    if (value) {
-      style.setProperty(property, value, priority);
-    }
+// Mermaid's own margin around a diagram's content.
+const MERMAID_MEASURED_PADDING = 8;
+
+// Measure the content of an SVG that carries no viewBox. Only markup that has
+// already been through DOMPurify is mounted, hidden, for one getBBox() call.
+function measureMermaidSvgContent(root: Element) {
+  const fragment = DOMPurify.sanitize(
+    new window.XMLSerializer().serializeToString(root),
+    { RETURN_DOM_FRAGMENT: true, USE_PROFILES: { svg: true, svgFilters: true } },
+  );
+  const probe = fragment.firstElementChild;
+  if (!(probe instanceof window.SVGSVGElement)) {
+    return null;
   }
-  element.setAttribute("font-family", MERMAID_FONT_FAMILY);
-  element.setAttribute("font-size", fontSize);
-  style.setProperty("font-family", MERMAID_FONT_FAMILY);
-  style.setProperty("font-size", fontSize);
+  const host = window.document.createElement("div");
+  host.setAttribute("aria-hidden", "true");
+  host.style.cssText =
+    "position:absolute;top:0;left:0;visibility:hidden;pointer-events:none";
+  host.append(probe);
+  window.document.body.append(host);
+  try {
+    const box = probe.getBBox();
+    if (!(box.width > 0 && box.height > 0)) {
+      return null;
+    }
+    // getBBox() leaves out strokes: widen Mermaid's margin by half the widest
+    // one painted.
+    const padding = MERMAID_MEASURED_PADDING + Math.max(
+      0,
+      ...Array.from(probe.querySelectorAll("*"), (element) =>
+        Number.parseFloat(window.getComputedStyle(element).strokeWidth) / 2 || 0),
+    );
+    return parseMermaidViewBox(
+      [
+        box.x - padding,
+        box.y - padding,
+        box.width + 2 * padding,
+        box.height + 2 * padding,
+      ].join(" "),
+    );
+  } finally {
+    host.remove();
+  }
 }
 
 function removeMermaidInlineStyleProperties(
@@ -1616,333 +1661,88 @@ function removeMermaidInlineStyleProperties(
   }
 }
 
-// Every shape Mermaid uses for a node body, not just rectangles: decision
-// diamonds are polygons, circles/ellipses back circle nodes, and paths back
-// cylinders and the v11 expanded shape set. Without a repaint they inherit
-// the SVG default black fill once the gradient style block is stripped.
-const MERMAID_NODE_SHAPE_TAGS = new Set([
-  "rect",
-  "polygon",
-  "circle",
-  "ellipse",
-  "path",
-]);
-
-// Mermaid stamps the parsed diagram type on the SVG root for every family.
-// The root `class` attribute is the obvious alternative and does not work:
-// sequence diagrams ship no class at all.
-function mermaidDiagramFamily(root: Element) {
-  return root.getAttribute("aria-roledescription")?.trim().toLowerCase() ?? "";
-}
-
-// Only flowcharts centre their node labels, so only flowcharts may have the
-// centring restored after their stylesheet is stripped.
-//
-// Measured against Mermaid 11.16.1 under this module's `htmlLabels: false`
-// config. Flowchart ships `.node .label text { text-anchor: middle }` and
-// places the label group at x 0, so the label is centred by the anchor.
-// ER, class and state ship no such rule: they pre-shift the group left by
-// half the label's width and rely on the SVG default `start`
-// (`WORKSPACE_MEMBERSHIPS`, a 147px label, sits at `translate(-73.5, …)`).
-// Injecting `middle` there moves every label left by a second half-width,
-// which is what pushed ER table names and attribute rows off their left edge.
-const MERMAID_CENTRED_LABEL_FAMILIES = new Set(["flowchart-v2", "flowchart"]);
-
-// The shared colour for connectors and the marker heads drawn on them.
-const MERMAID_CONNECTOR_STROKE = "#64748b";
-
-const MERMAID_SEQUENCE_MESSAGE_CLASSES = new Set(["messageLine0", "messageLine1"]);
-const MERMAID_SEQUENCE_MESSAGE_STROKE_WIDTH = "1.5";
-const MERMAID_SEQUENCE_NUMBER_STROKE_WIDTH = "2";
-// The restored badge has a 24px diameter; leave 2px inside each edge.
-const MERMAID_SEQUENCE_NUMBER_TEXT_LENGTH = "20";
-
-// Mermaid 11.16.1 neutral-theme values for the sequence chrome its stylesheet
-// painted. Actors and lifelines already carry Mermaid's own greys as
-// attributes, so frames and activation bars stay in that palette; only the
-// signal colour (messages and their heads) maps to the shared connector.
-const MERMAID_SEQUENCE_ACTIVATION_CLASSES = new Set([
-  "activation0",
-  "activation1",
-  "activation2",
-]);
-const MERMAID_SEQUENCE_ACTIVATION_FILL = "#f4f4f4";
-const MERMAID_SEQUENCE_ACTIVATION_STROKE = "#666";
-const MERMAID_SEQUENCE_ACTOR_FILL = "#eee";
-const MERMAID_SEQUENCE_ACTOR_STROKE = "#d4d4d4";
-const MERMAID_SEQUENCE_FRAME_STROKE = "#d4d4d4";
-const MERMAID_SEQUENCE_FRAME_STROKE_WIDTH = "2";
-const MERMAID_SEQUENCE_FRAME_DASHARRAY = "2, 2";
-
-function hasMermaidClass(element: Element, classes: Set<string>) {
-  return Array.from(element.classList).some((name) => classes.has(name));
-}
-
-type MermaidFallbackRule = {
-  applies: (element: Element) => boolean;
-  apply: (element: Element) => void;
-};
-
-const MERMAID_SEQUENCE_FALLBACK_RULES: MermaidFallbackRule[] = [
-  {
-    applies: (element) =>
-      ["line", "path"].includes(element.localName.toLowerCase()) &&
-      hasMermaidClass(element, MERMAID_SEQUENCE_MESSAGE_CLASSES),
-    apply: (element) => {
-      // Sequence messages use `stroke="none"` as a placeholder for CSS.
-      // Remove it so the shared connector fallback supplies the colour.
-      // Restore the stylesheet's width too: markers scale with stroke width.
-      // Intentional `none` elsewhere (gantt text, wardley markers, cynefin
-      // domains) and explicit message colours keep their attributes.
-      if (element.getAttribute("stroke") === "none") {
-        element.removeAttribute("stroke");
-      }
-      element.setAttribute("stroke-width", MERMAID_SEQUENCE_MESSAGE_STROKE_WIDTH);
-    },
-  },
-  {
-    applies: (element) =>
-      element.localName.toLowerCase() === "line" &&
-      (element.getAttribute("marker-start") ?? "").endsWith("-sequencenumber)"),
-    apply: (element) => {
-      // Autonumber circles sit on zero-length lines. Mermaid emits width 0
-      // then overrides it with CSS; without that width the marker vanishes.
-      if (element.getAttribute("stroke-width") === "0") {
-        element.removeAttribute("stroke-width");
-      }
-      setSvgAttributeIfMissing(
-        element,
-        "stroke-width",
-        MERMAID_SEQUENCE_NUMBER_STROKE_WIDTH,
-      );
-    },
-  },
-  {
-    applies: (element) => element.matches("text.sequenceNumber"),
-    apply: (element) => {
-      setSvgAttributeIfMissing(element, "fill", "#fff");
-      // Inter's digits are wider than Mermaid's sans-serif digits. Even the
-      // renderer's reduced font sizes can overflow with four or more digits.
-      if ((element.textContent?.length ?? 0) > 3) {
-        setSvgAttributeIfMissing(element, "textLength", MERMAID_SEQUENCE_NUMBER_TEXT_LENGTH);
-        setSvgAttributeIfMissing(element, "lengthAdjust", "spacingAndGlyphs");
-      }
-    },
-  },
-  {
-    // Sequence message heads, control-participant heads, and autonumber
-    // badges use the connector colour. Two hard-code black instead:
-    // the crosshead (`#000000`, which that stylesheet overrode) and the stick
-    // half-arrows (`black`, close to Mermaid's dark signal but not to ours).
-    applies: (element) =>
-      MERMAID_MARKER_SHAPE_TAGS.has(element.localName.toLowerCase()) &&
-      element.closest("marker") !== null,
-    apply: (element) => element.setAttribute("stroke", MERMAID_CONNECTOR_STROKE),
-  },
-  {
-    applies: (element) => element.matches("g.actor"),
-    apply: (element) => {
-      // Queue and database bodies are plain paths that inherit `.actor`
-      // styles. Restore the group so their bodies do not default to black,
-      // and keep inline group styles ahead of the fallback attributes.
-      setSvgAttributeIfMissing(element, "fill", MERMAID_SEQUENCE_ACTOR_FILL);
-      setSvgAttributeIfMissing(element, "stroke", MERMAID_SEQUENCE_ACTOR_STROKE);
-    },
-  },
-  {
-    applies: (element) =>
-      element.localName.toLowerCase() === "rect" &&
-      hasMermaidClass(element, MERMAID_SEQUENCE_ACTIVATION_CLASSES),
-    apply: (element) => {
-      // Activation bars come from the note rectangle helper, whose `#EDF2AE`
-      // fill the stylesheet replaced; left as is they read as notes.
-      element.setAttribute("fill", MERMAID_SEQUENCE_ACTIVATION_FILL);
-      element.setAttribute("stroke", MERMAID_SEQUENCE_ACTIVATION_STROKE);
-    },
-  },
-  {
-    applies: (element) => element.matches("line.loopLine"),
-    apply: (element) => {
-      // `.loopLine` drew every alt/opt/loop/par/critical/break frame dashed
-      // at 2px. Section dividers carry an inline `3, 3` dash, which still
-      // wins over these attributes just as it won over the stylesheet.
-      setSvgAttributeIfMissing(element, "stroke", MERMAID_SEQUENCE_FRAME_STROKE);
-      setSvgAttributeIfMissing(
-        element,
-        "stroke-width",
-        MERMAID_SEQUENCE_FRAME_STROKE_WIDTH,
-      );
-      setSvgAttributeIfMissing(
-        element,
-        "stroke-dasharray",
-        MERMAID_SEQUENCE_FRAME_DASHARRAY,
-      );
-    },
-  },
-  {
-    applies: (element) => element.matches("polygon.labelBox"),
-    apply: (element) =>
-      setSvgAttributeIfMissing(element, "stroke", MERMAID_SEQUENCE_FRAME_STROKE),
-  },
-  {
-    // `rect rgb(...)` highlight blocks have no stroke, and the stylesheet's
-    // `g rect.rect` border never reached them: they are not inside a <g>.
-    applies: (element) => element.matches("rect.rect"),
-    apply: (element) => setSvgAttributeIfMissing(element, "stroke", "none"),
-  },
-  {
-    // The stylesheet set `stroke: none` on every sequence text class. Actor
-    // figures carry an inline group stroke, which their labels otherwise
-    // inherit as an outline that blurs the name.
-    applies: (element) => element.localName.toLowerCase() === "text",
-    apply: (element) => setSvgAttributeIfMissing(element, "stroke", "none"),
-  },
-];
-
-// The marker shapes Mermaid deliberately leaves unfilled, and the tags it
-// draws them with. Matched on the marker's SEMANTIC CLASS rather than its
-// id: Mermaid stamps `class="marker aggregation class"` identically under
-// both `look: classic` and `look: neo`, while the ids diverge (`neo` appends
-// `-margin`, and it is the `-margin` ids the edges actually reference). The
-// id is still checked as a second signal in case a future renderer drops the
-// class, and `includes` rather than `endsWith` so it survives that suffix.
-const MERMAID_HOLLOW_MARKER_WORDS = ["aggregation", "extension"];
-
-// Every tag a marker can be drawn with. `neo` draws the inheritance triangle
-// as a <polygon> where `classic` uses a <path>, so a path-only rule misses it
-// entirely -- and the generic node-shape rule then paints it like a node box.
-const MERMAID_MARKER_SHAPE_TAGS = new Set([
-  "path",
-  "polygon",
-  "circle",
-  "ellipse",
-  "rect",
-]);
-
-function mermaidMarkerFill(marker: Element, isEntityRelationship: boolean) {
-  // ER hollows out every cardinality end at once: its stylesheet overrides
-  // the shared base with `.marker { fill: none !important }`.
-  if (isEntityRelationship) {
-    return "none";
-  }
-  const classes = (marker.getAttribute("class") ?? "").split(/\s+/);
-  const id = marker.getAttribute("id") ?? "";
-  const hollow = MERMAID_HOLLOW_MARKER_WORDS.some(
-    (word) => classes.includes(word) || id.includes(word),
-  );
-  return hollow ? "transparent" : MERMAID_CONNECTOR_STROKE;
-}
-
-function applyMermaidFallbackStyles(root: Element) {
-  const family = mermaidDiagramFamily(root);
-  const centresNodeLabels = MERMAID_CENTRED_LABEL_FAMILIES.has(family);
-  const isEntityRelationship = family === "er";
-  const sequenceRules = family === "sequence" ? MERMAID_SEQUENCE_FALLBACK_RULES : [];
-  for (const element of Array.from(root.querySelectorAll("*"))) {
-    const tagName = element.localName.toLowerCase();
-    const className = element.getAttribute("class") ?? "";
-    // Family rules first: they restore what the stripped stylesheet painted,
-    // marker heads included, so the generic rules below fill only the rest.
-    for (const rule of sequenceRules) {
-      if (rule.applies(element)) {
-        rule.apply(element);
-      }
-    }
-    // Marker shapes next, and then skip the node rules below. A marker is not
-    // a node: without the `continue` the generic shape rule claims `neo`'s
-    // <polygon> inheritance triangle and paints it like a node box, and
-    // whichever rule runs first wins because these all write only if the
-    // attribute is absent.
-    //
-    // Markers are painted only by the stylesheet this sanitiser strips, so
-    // without a repaint they fall back to the browser default `fill: black`.
-    // "Filled" is not a safe blanket answer: in UML a hollow diamond is
-    // aggregation and a filled one is composition, and a hollow triangle is
-    // inheritance, so flattening them states a different model rather than
-    // merely looking wrong. Mermaid's own `.marker { fill: #666 }` is the base
-    // rule, so filled is the default and only the shapes it hollows out are
-    // listed. An ER marker's <circle> carries its own `fill` already and keeps
-    // it, since these never overwrite an attribute Mermaid set.
-    const markerAncestor = MERMAID_MARKER_SHAPE_TAGS.has(tagName)
-      ? element.closest("marker")
-      : null;
-    if (markerAncestor) {
-      setSvgAttributeIfMissing(
-        element,
-        "fill",
-        mermaidMarkerFill(markerAncestor, isEntityRelationship),
-      );
-      setSvgAttributeIfMissing(element, "stroke", MERMAID_CONNECTOR_STROKE);
-      setSvgAttributeIfMissing(element, "stroke-width", "1");
-      continue;
-    }
-    if (tagName === "rect" && className.includes("background")) {
-      setSvgAttributeIfMissing(element, "fill", "transparent");
-    }
-    if (
-      MERMAID_NODE_SHAPE_TAGS.has(tagName) &&
-      className.includes("label-container")
-    ) {
-      setSvgAttributeIfMissing(element, "fill", "#f8fafc");
-      setSvgAttributeIfMissing(element, "stroke", "#334155");
-    }
-    if (
-      ["line", "polyline"].includes(tagName) ||
-      (tagName === "path" &&
-        /flowchart-link|transition|relation|relationship|messageline|actor-line|edgepath/i.test(
-          className,
-        ))
-    ) {
-      setSvgAttributeIfMissing(element, "stroke", MERMAID_CONNECTOR_STROKE);
-      setSvgAttributeIfMissing(element, "fill", "none");
-    }
-    if (
-      ["rect", "polygon", "circle", "ellipse"].includes(tagName) &&
-      !className.includes("background")
-    ) {
-      setSvgAttributeIfMissing(element, "fill", "#f8fafc");
-      setSvgAttributeIfMissing(element, "stroke", "#334155");
-    }
-    if (tagName === "path" && className.includes("arrowMarkerPath")) {
-      setSvgAttributeIfMissing(element, "fill", MERMAID_CONNECTOR_STROKE);
-      setSvgAttributeIfMissing(element, "stroke", MERMAID_CONNECTOR_STROKE);
-    }
-    if (tagName === "text") {
-      setSvgAttributeIfMissing(element, "fill", "#0f172a");
-      if (centresNodeLabels && element.closest(".node")) {
-        setSvgAttributeIfMissing(element, "text-anchor", "middle");
-      }
-    }
-  }
-}
-
-function setSvgAttributeIfMissing(element: Element, name: string, value: string) {
-  if (!element.hasAttribute(name)) {
-    element.setAttribute(name, value);
-  }
-}
-
 function sanitizeMermaidElement(root: Element) {
   for (const element of [root, ...Array.from(root.querySelectorAll("*"))]) {
     const tagName = element.localName.toLowerCase();
     if (isForbiddenMermaidSvgElement(tagName)) {
+      if (tagName === "foreignobject") {
+        carryMermaidLabelColour(element);
+      }
       element.remove();
       continue;
     }
     // SVG style blocks are document-global once inserted with innerHTML. Even
     // syntactically safe CSS can escape the diagram and hide or restyle the
-    // application shell (for example `body { display:none }`). Mermaid's
-    // generated geometry is preserved with presentation attributes below, so
-    // no authored or generated style element is allowed across this boundary.
+    // application shell (for example `body { display:none }`). What Mermaid's
+    // stylesheet drew was resolved onto the elements already, so no authored
+    // or generated style element is allowed across this boundary.
     if (tagName === "style") {
       element.remove();
       continue;
     }
+    // A raster image embedded in the SVG itself (C4's person icon) loads
+    // nothing and runs nothing. An image with any other source goes.
+    if (tagName === "image" && !hasOnlyEmbeddedMermaidRaster(element)) {
+      element.remove();
+      continue;
+    }
     for (const attribute of Array.from(element.attributes)) {
-      if (isUnsafeMermaidSvgAttribute(attribute.name, attribute.value)) {
+      if (isUnsafeMermaidSvgAttribute(attribute.name, attribute.value, root.ownerDocument, tagName)) {
         element.removeAttribute(attribute.name);
       }
     }
+  }
+}
+
+// A <switch> shows only its first child the browser can render. With the HTML
+// label removed, Mermaid's SVG <text> fallback shows instead, so it takes the
+// label's text colour: journey sections give that fallback the box's own
+// class, which would paint it in the box's fill. The fallback lines move into
+// one group so every line shows, not just the first.
+function carryMermaidLabelColour(foreignObject: Element) {
+  const parent = foreignObject.parentElement;
+  if (parent?.localName.toLowerCase() !== "switch") {
+    return;
+  }
+  const label = Array.from(foreignObject.querySelectorAll("*"))
+    .reverse()
+    .find((element) => (element as HTMLElement).style?.getPropertyValue("color"));
+  const lines = Array.from(parent.children).filter(
+    (child) => child.localName.toLowerCase() === "text",
+  );
+  const document = parent.ownerDocument;
+  const colour = (label as HTMLElement | undefined)?.style.getPropertyValue("color") ?? "";
+  // The label was never validated: it was about to be removed.
+  if (!label || lines.length === 0 || hasUnsafeCss(colour, document)) {
+    return;
+  }
+  // The colour may use custom properties declared inside the label. Each
+  // level that declares some becomes a nested group, so every var() resolves
+  // at the level it did before.
+  const outer = document.createElementNS(SVG_NAMESPACE, "g");
+  let inner = outer;
+  const levels: Element[] = [];
+  for (let element: Element | null = label; element && element !== parent; element = element.parentElement) {
+    levels.unshift(element);
+  }
+  for (const level of levels) {
+    const source = (level as HTMLElement).style;
+    const properties = Array.from(source ?? []).filter((property) =>
+      property.startsWith("--") && !hasUnsafeCss(source.getPropertyValue(property), document));
+    if (properties.length === 0) {
+      continue;
+    }
+    const group = document.createElementNS(SVG_NAMESPACE, "g");
+    for (const property of properties) {
+      group.style.setProperty(property, source.getPropertyValue(property));
+    }
+    inner.append(group);
+    inner = group;
+  }
+  parent.insertBefore(outer, lines[0]);
+  for (const line of lines) {
+    (line as SVGElement).style.setProperty("fill", colour);
+    inner.append(line);
   }
 }
 
@@ -1959,7 +1759,6 @@ function isForbiddenMermaidSvgElement(tagName: string) {
     "filter",
     "foreignobject",
     "iframe",
-    "image",
     "object",
     "script",
     "set",
@@ -1968,30 +1767,54 @@ function isForbiddenMermaidSvgElement(tagName: string) {
   ].includes(tagName);
 }
 
-function isUnsafeMermaidSvgAttribute(name: string, value: string) {
+function isUnsafeMermaidSvgAttribute(
+  name: string,
+  value: string,
+  owner: Document,
+  tagName: string,
+) {
   const normalizedName = name.toLowerCase();
   const normalizedValue = value.trim().toLowerCase();
   if (normalizedName.startsWith("on")) {
     return true;
   }
-  if (normalizedName === "style" && hasUnsafeCss(normalizedValue)) {
+  // Every presentation attribute is parsed as CSS, not only `style`.
+  if (
+    (normalizedName === "style" || /\\|url\s*\(/i.test(normalizedValue)) &&
+    hasUnsafeCss(value.trim(), owner)
+  ) {
     return true;
   }
   if (
     ["href", "xlink:href", "src"].includes(normalizedName) &&
-    !isSafeMermaidSvgReference(normalizedValue)
+    !isSafeMermaidSvgReference(normalizedValue) &&
+    !(tagName === "image" && isEmbeddedMermaidRaster(value))
   ) {
     return true;
   }
   return false;
 }
 
-function hasUnsafeCss(value: string) {
-  return /@import|expression\s*\(|url\s*\(/i.test(value);
-}
-
 function isSafeMermaidSvgReference(value: string) {
   return value.startsWith("#");
+}
+
+// PNG, JPEG, GIF or WebP data only: SVG data could carry its own references.
+const MERMAID_EMBEDDED_RASTER = /^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/]+={0,2}$/i;
+// Far above C4's 3 KB icon; bounds what one diagram can make the browser decode.
+const MERMAID_EMBEDDED_RASTER_MAX_LENGTH = 200_000;
+
+function isEmbeddedMermaidRaster(value: string) {
+  const source = value.trim();
+  return source.length <= MERMAID_EMBEDDED_RASTER_MAX_LENGTH &&
+    MERMAID_EMBEDDED_RASTER.test(source);
+}
+
+function hasOnlyEmbeddedMermaidRaster(image: Element) {
+  const sources = ["href", "xlink:href", "src"]
+    .map((name) => image.getAttribute(name))
+    .filter((source): source is string => source !== null);
+  return sources.length > 0 && sources.every(isEmbeddedMermaidRaster);
 }
 
 type AnchorHighlight = {

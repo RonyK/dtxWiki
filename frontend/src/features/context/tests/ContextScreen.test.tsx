@@ -1798,6 +1798,7 @@ describe("ContextScreen", () => {
       expect(contextMermaid.render).toHaveBeenCalledWith(
         expect.stringMatching(/^dtxwiki-mermaid-/),
         expect.stringContaining("viewA[View diagram]"),
+        expect.any(HTMLElement),
       ),
     );
 
@@ -1811,6 +1812,7 @@ describe("ContextScreen", () => {
       expect(contextMermaid.render).toHaveBeenCalledWith(
         expect.stringMatching(/^dtxwiki-mermaid-/),
         expect.stringContaining('seed["Decision Log"]'),
+        expect.any(HTMLElement),
       ),
     );
 

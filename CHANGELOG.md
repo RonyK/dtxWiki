@@ -173,6 +173,14 @@
 - Enlarged images in Context and Settings > Attachments open in the same zoom
   and pan viewer as Mermaid diagrams: toolbar, wheel, `+`/`-`/`0`, drag and
   pinch. The viewer, Mermaid's included, now stays inside the screen on phones.
+- Mermaid diagrams keep the colours, dashes, line weights and label sizes of
+  Mermaid's own stylesheet for every diagram type. gitGraph branches, mindmap,
+  timeline, journey and radar shapes no longer render as solid black or
+  unreadable; gantt keeps its task status colours; architecture services stay
+  visible; dotted and thick flowchart links and dashed class and state links
+  are no longer drawn as plain lines. C4 diagrams render with their person
+  icon, and `info` diagrams render instead of failing. Notes stay yellow in
+  every diagram type.
 
 ## 0.1.4 — 2026-10-23
 

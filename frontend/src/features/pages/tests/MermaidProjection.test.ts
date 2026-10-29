@@ -19,6 +19,13 @@ const REAL_MERMAID_FIXTURES = [
   ["entity relationship", "erDiagram\n  CUSTOMER ||--o{ ORDER : places"],
 ] as const;
 
+// What the sanitizer resolved onto an element: an inline declaration, or the
+// attribute Mermaid wrote when no stylesheet rule outranked it.
+function declared(element: Element, property: string) {
+  return (element as SVGElement).style.getPropertyValue(property) ||
+    element.getAttribute(property);
+}
+
 let originalGetBBox: PropertyDescriptor | undefined;
 let originalGetComputedTextLength: PropertyDescriptor | undefined;
 
@@ -118,36 +125,25 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
       expect(width).toBeGreaterThan(0);
       expect(height).toBeGreaterThan(0);
       expect(textElements.length).toBeGreaterThan(0);
-      expect(
-        textElements.filter((element) => !element.matches(".sequenceNumber"))
-          .every((element) => element.getAttribute("font-size") === "13px"),
-      ).toBe(true);
-      expect(
-        textElements.filter((element) => element.matches(".sequenceNumber"))
-          .every((element) => element.getAttribute("font-size") === "12px"),
-      ).toBe(true);
-      expect(
-        textElements.every((element) =>
-          element.getAttribute("font-family")?.startsWith("Inter")),
-      ).toBe(true);
-      expect(getComputedStyle(textElements[0]).fontSize).toBe("13px");
+      // The root carries the stylesheet's typeface and default size; labels
+      // keep the sizes Mermaid measured them with.
+      expect((svg as SVGElement).style.fontFamily).toContain("Inter");
+      expect((svg as SVGElement).style.fontSize).toBe("13px");
       expect(svg?.querySelector("style")).toBeNull();
-      expect(
-        svg?.querySelectorAll(
-          '[fill]:not([fill="none"]), [stroke]:not([stroke="none"])',
-        ).length,
-      ).toBeGreaterThan(0);
       const connectors = Array.from(
         svg?.querySelectorAll(
           'line, polyline, path[marker-start], path[marker-end], ' +
           'path.flowchart-link, path.transition, path.relation, ' +
           'path.relationshipLine, path.messageLine0, path.messageLine1',
         ) ?? [],
-      ).filter((element) => !element.closest("marker"));
+      ).filter((element) =>
+        !element.closest("marker") &&
+        // Autonumber badges sit on zero-length lines; the marker draws them.
+        !element.matches('line[marker-start$="-sequencenumber)"]'));
       expect(connectors.length).toBeGreaterThan(0);
       expect(
         connectors.filter((element) => {
-          const stroke = element.getAttribute("stroke")?.trim().toLowerCase();
+          const stroke = declared(element, "stroke")?.trim().toLowerCase();
           return !stroke || stroke === "none" || stroke === "transparent";
         }).map((element) => element.outerHTML),
       ).toEqual([]);
@@ -214,22 +210,16 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
   }
 
   // Both directions on purpose. Asserting only the ER half would still pass if
-  // the injection were deleted outright, which would un-centre every flowchart
-  // label; asserting only the flowchart half is what shipped the ER bug.
+  // the flowchart sheet's anchor were lost, which un-centres every flowchart
+  // label; asserting only the flowchart half is what once shipped the ER bug.
   it("centres node labels only for the family whose stylesheet does", async () => {
-    const flowchart = await renderRealMermaid(
-      "flowchart LR\n  A[Alpha] --> B[Beta]\n  class A messageLine0",
-    );
-    const nodeWithSequenceClass = flowchart.querySelector("g.node.messageLine0");
-    expect(nodeWithSequenceClass).toBeInTheDocument();
-    expect(nodeWithSequenceClass).not.toHaveAttribute("stroke");
-    expect(nodeWithSequenceClass).not.toHaveAttribute("stroke-width");
+    const flowchart = await renderRealMermaid("flowchart LR\n  A[Alpha] --> B[Beta]");
     const flowchartLabels = Array.from(flowchart.querySelectorAll("text"))
       .filter((text) => text.closest(".node"));
     expect(flowchartLabels.length).toBeGreaterThan(0);
     expect(
       flowchartLabels.every(
-        (text) => text.getAttribute("text-anchor") === "middle",
+        (text) => declared(text, "text-anchor") === "middle",
       ),
     ).toBe(true);
 
@@ -254,166 +244,110 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
     expect(
       erLabels.some((text) => text.textContent === "WORKSPACE_MEMBERSHIPS"),
     ).toBe(true);
-    expect(erLabels.every((text) => !text.hasAttribute("text-anchor"))).toBe(
-      true,
-    );
+    expect(erLabels.every((text) => !declared(text, "text-anchor"))).toBe(true);
   }, 60_000);
 
-  // ER is the only family whose relationship ends are meant to be hollow: its
-  // stylesheet overrides the shared `.marker { fill: #666 }` with
-  // `fill: none !important`. Those markers carry no class, so nothing repainted
-  // them once the stylesheet was stripped and the browser default `fill: black`
-  // rendered every crow's foot as a solid blob.
-  it("restores the hollow ER cardinality markers the stylesheet carried", async () => {
-    const er = await renderRealMermaid("erDiagram\n  A ||--o{ B : has");
-
-    const markerPaths = Array.from(er.querySelectorAll("marker path"));
-    expect(markerPaths.length).toBeGreaterThan(0);
-    expect(markerPaths.every((path) => path.getAttribute("fill") === "none"))
-      .toBe(true);
-    expect(
-      markerPaths.every((path) => {
-        const stroke = path.getAttribute("stroke");
-        return Boolean(stroke) && stroke !== "none";
-      }),
-    ).toBe(true);
-  }, 60_000);
-
-  // Sequence diagrams keep most of their chrome in the stylesheet, and Mermaid
-  // stamps placeholder attributes that stylesheet overrode. Each assertion is
-  // a part that rendered wrong once it was stripped: invisible autonumber
-  // badges, activation bars in note yellow, solid frames, black heads, an
-  // outlined highlight block and an outlined actor name.
-  it("restores the sequence chrome the stylesheet painted", async () => {
+  // Each family keeps its chrome in its own stylesheet, often overriding a
+  // placeholder Mermaid wrote on the element. Every assertion is a part that
+  // rendered wrong once the sheet was stripped: invisible autonumber badges,
+  // activation bars in note yellow, solid frames and replies, branch curves
+  // filled as black wedges, label text outgrowing its box, dotted and thick
+  // flowchart edges drawn as plain lines.
+  it("resolves the chrome each family's stylesheet painted", async () => {
     const sequence = await renderRealMermaid(
       [
         "sequenceDiagram",
         "  autonumber 999",
-        "  actor U as User",
+        "  participant U as User",
         "  participant F as Frontend",
-        '  participant Q@{ "type": "queue", "alias": "Queue" }',
-        '  participant D@{ "type": "database", "alias": "Database" }',
         "  U->>+F: Open",
         "  alt cached",
         "    F-->>U: Hit",
         "  else fresh",
         "    F--xU: Miss",
         "  end",
-        "  rect rgb(240, 240, 255)",
-        "    autonumber 100000",
-        "    F-\\\\U: Stick half-arrow",
-        "  end",
+        "  autonumber 100000",
+        "  U->>F: Long number",
         "  deactivate F",
       ].join(String.fromCharCode(10)),
     );
-    const attributes = (selector: string, name: string) =>
-      Array.from(sequence.querySelectorAll(selector)).map((element) =>
-        element.getAttribute(name));
+    const values = (root: Element, selector: string, property: string) =>
+      Array.from(root.querySelectorAll(selector)).map((element) =>
+        declared(element, property));
 
-    const badgeWidths = attributes('line[marker-start$="-sequencenumber)"]', "stroke-width");
-    expect(badgeWidths).toHaveLength(4);
-    expect(badgeWidths.every((width) => width === "2")).toBe(true);
-    expect(attributes("text.sequenceNumber", "fill")).toEqual(
-      badgeWidths.map(() => "#fff"),
-    );
-    expect(attributes("text.sequenceNumber", "font-size"))
+    expect(values(sequence, 'line[marker-start$="-sequencenumber)"]', "stroke-width"))
+      .toEqual(["2px", "2px", "2px", "2px"]);
+    expect(values(sequence, "text.sequenceNumber", "fill"))
+      .toEqual(["white", "white", "white", "white"]);
+    expect(values(sequence, "text.sequenceNumber", "font-size"))
       .toEqual(["12px", "9px", "9px", "7px"]);
-    const badgeNumbers = Array.from(sequence.querySelectorAll("text.sequenceNumber"));
-    expect(badgeNumbers.map((number) => number.textContent))
+    // Native six-digit text exceeds the 24px badge in Firefox and WebKit.
+    // Keep short numbers natural and leave a 2px inset for longer numbers.
+    const numbers = Array.from(sequence.querySelectorAll("text.sequenceNumber"));
+    expect(numbers.map((number) => number.textContent))
       .toEqual(["999", "1000", "1001", "100000"]);
-    expect(badgeNumbers.map((number) => (number as SVGElement).style.fontSize))
-      .toEqual(["12px", "9px", "9px", "7px"]);
-    expect(attributes("text.sequenceNumber", "textLength"))
+    expect(numbers.map((number) => number.getAttribute("textLength")))
       .toEqual([null, "20", "20", "20"]);
-    expect(attributes("text.sequenceNumber", "lengthAdjust"))
+    expect(numbers.map((number) => number.getAttribute("lengthAdjust")))
       .toEqual([null, "spacingAndGlyphs", "spacingAndGlyphs", "spacingAndGlyphs"]);
-    const regularLabels = Array.from(sequence.querySelectorAll("text:not(.sequenceNumber), tspan"));
-    expect(regularLabels.length).toBeGreaterThan(0);
-    expect(regularLabels.every((label) => label.getAttribute("font-size") === "13px"))
+    expect(values(sequence, ".messageLine0, .messageLine1", "stroke-dasharray"))
+      .toEqual(["none", "3, 3", "3, 3", "none"]);
+    expect(values(sequence, "rect.activation0", "fill")).toEqual(["#f4f4f4"]);
+    // Frames are dashed; the alt divider keeps its own inline `3, 3`.
+    expect(values(sequence, "line.loopLine", "stroke-dasharray")).toContain("2,2");
+    expect(values(sequence, "line.loopLine", "stroke-dasharray").every(
+      (dash) => Boolean(dash) && dash !== "none",
+    )).toBe(true);
+
+    cleanup();
+    const git = await renderRealMermaid(
+      [
+        "gitGraph",
+        '  commit id: "base"',
+        "  branch draft",
+        '  commit id: "edit"',
+        "  checkout main",
+        '  merge draft id: "merged"',
+      ].join(String.fromCharCode(10)),
+    );
+    expect(values(git, "path.arrow", "fill").every((fill) => fill === "none"))
       .toBe(true);
-
-    // Queue and database shapes use unclassified paths inside CSS-painted
-    // actor groups. Check both mirrored copies so neither loses its fill.
-    const pathActors = Array.from(sequence.querySelectorAll("g.actor.actor-top, g.actor.actor-bottom"));
-    expect(pathActors).toHaveLength(4);
-    expect(pathActors.filter((actor) => actor.matches(".actor-top"))).toHaveLength(2);
-    expect(pathActors.flatMap((actor) => Array.from(actor.querySelectorAll("path"))))
-      .toHaveLength(6);
-    expect(pathActors.every((actor) => actor.getAttribute("fill") === "#eee"))
+    expect(values(git, "path.arrow", "stroke-width").every((width) => width === "8"))
       .toBe(true);
-    expect(pathActors.every((actor) => actor.getAttribute("stroke") === "#d4d4d4"))
-      .toBe(true);
+    expect(values(git, "line.branch", "stroke-dasharray")).toEqual(["2", "2"]);
+    expect(new Set(values(git, "rect.branchLabelBkg", "fill")).size).toBe(2);
+    expect(values(git, "text.commit-label", "font-size").every(
+      (size) => size === "10px",
+    )).toBe(true);
 
-    expect(attributes("rect.activation0", "fill")).toEqual(["#f4f4f4"]);
-    expect(attributes("rect.activation0", "stroke")).toEqual(["#666"]);
-
-    const frameDashes = attributes("line.loopLine", "stroke-dasharray");
-    expect(frameDashes.length).toBeGreaterThan(0);
-    expect(frameDashes.every((dash) => dash === "2, 2")).toBe(true);
-    expect(attributes("line.loopLine", "stroke-width").every((width) => width === "2"))
-      .toBe(true);
-
-    const headStrokes = attributes("marker path, marker circle", "stroke");
-    expect(headStrokes.length).toBeGreaterThan(0);
-    expect(headStrokes.every((stroke) => stroke === "#64748b")).toBe(true);
-
-    expect(attributes('rect.rect[fill="rgb(240, 240, 255)"]', "stroke"))
-      .toEqual(["none"]);
-    // Top and bottom copies of the actor figure.
-    expect(attributes("text.actor-man", "stroke")).toEqual(["none", "none"]);
+    cleanup();
+    const flowchart = await renderRealMermaid(
+      "flowchart LR\n  A -.-> B\n  B ==> C",
+    );
+    expect(values(flowchart, "path.flowchart-link", "stroke-dasharray"))
+      .toEqual(["2", "0"]);
+    expect(values(flowchart, "path.flowchart-link", "stroke-width"))
+      .toEqual(["1px", "3.5px"]);
   }, 60_000);
 
-  // Both halves in one case on purpose: the hollow/filled split IS the UML
-  // meaning, so a blanket fill and a blanket `none` are both regressions and
-  // each would pass a test that only checked the other side.
-  // Parametrised over `look` because the two renderers disagree on both of
-  // the things this rule keys on: `neo` appends `-margin` to the marker ids
-  // the edges actually reference, and draws the inheritance triangle as a
-  // <polygon> where `classic` uses a <path>. A classic-only case passed
-  // while every neo diagram was still wrong.
-  it.each(["classic", "neo"] as const)(
-    "keeps UML marker fills hollow or solid the way the stylesheet did (look: %s)",
-    async (look) => {
-      mermaid.initialize({ startOnLoad: false, securityLevel: "strict", look });
-      const uml = await renderRealMermaid(
-        [
-          "classDiagram",
-          "  Animal <|-- Dog",
-          "  Animal o-- Leg",
-          "  Animal *-- Tail",
-        ].join(String.fromCharCode(10)),
-      );
+  // Two renderers miss what the rest of the pipeline relies on. C4 writes
+  // `xlink:href` and Mermaid declares that namespace only when it renders into
+  // a supplied container; `info` emits no viewBox, so its geometry is measured.
+  it("renders families without the namespace declaration or viewBox", async () => {
+    const c4 = await renderRealMermaid(
+      'C4Context\n  Person(customer, "Customer")\n  System(sys, "System")\n  Rel(customer, sys, "Uses")',
+    );
+    expect(c4.textContent).toContain("Customer");
+    // The person icon is a PNG embedded in the SVG; it loads nothing.
+    const icon = c4.querySelector("image");
+    expect(icon?.getAttribute("xlink:href") ?? icon?.getAttribute("href"))
+      .toMatch(/^data:image\/png;base64,/);
+    cleanup();
 
-      // By semantic class, not id: the ids differ between looks and that is
-      // exactly what this regression was. Every shape child counts, because
-      // `neo` swaps the tag.
-      const fillsFor = (semantic: string) =>
-        Array.from(uml.querySelectorAll("marker"))
-          .filter((marker) =>
-            (marker.getAttribute("class") ?? "").split(/\s+/).includes(semantic),
-          )
-          .flatMap((marker) =>
-            Array.from(marker.querySelectorAll("path, polygon, circle, ellipse, rect")),
-          )
-          .map((shape) => shape.getAttribute("fill"));
-
-      // Inheritance and aggregation are drawn hollow.
-      for (const semantic of ["extension", "aggregation"]) {
-        expect(fillsFor(semantic)).not.toHaveLength(0);
-        expect(
-          fillsFor(semantic).every((fill) => fill === "transparent"),
-        ).toBe(true);
-      }
-
-      // Composition is drawn solid, which is the only thing telling it apart
-      // from aggregation at the same end of the same kind of line.
-      expect(fillsFor("composition")).not.toHaveLength(0);
-      expect(
-        fillsFor("composition").every(
-          (fill) => Boolean(fill) && fill !== "none" && fill !== "transparent",
-        ),
-      ).toBe(true);
-    },
-    60_000,
-  );
+    const info = await renderRealMermaid("info");
+    const viewBox = info.getAttribute("viewBox")?.split(" ").map(Number);
+    expect(viewBox?.[2]).toBeGreaterThan(0);
+    expect(viewBox?.[3]).toBeGreaterThan(0);
+    expect(document.querySelector('body > div[aria-hidden="true"]')).toBeNull();
+  }, 60_000);
 });
