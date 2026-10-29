@@ -65,19 +65,30 @@ test("reads review evidence, approves a document group and a single review, and 
     expect.objectContaining({ event: expect.objectContaining({
       body: "review.decision",
       target: expect.objectContaining({ target_kind: "review_item", target_id: decided.id }),
+      details: expect.objectContaining({
+        decision_type: "approve", reason: "Cross-screen workflow reviewed",
+      }),
     }) }),
   ]));
-  // This journey also records the group approval. Inspect the latest decision
-  // row; the API assertion above identifies the exact single-review decision.
+  // The decision names the reviewed document and records the actual reason,
+  // with a link to that exact review instead of a generic activity fallback.
   const decisionRow = page.getByRole("article").filter({
-    has: page.getByText("Review decision", { exact: true }),
-  }).first();
+    has: page.getByRole("link", { name: second.title, exact: true }),
+    hasText: "Cross-screen workflow reviewed",
+  });
+  await expect(decisionRow).toHaveCount(1);
   await expect(decisionRow).toBeVisible();
-  await decisionRow.getByRole("link", { name: "View activity list", exact: true }).click();
+  await expect(decisionRow.getByText("Reviewed", { exact: true })).toBeVisible();
+  await expect(decisionRow.getByRole("link", { name: second.title, exact: true }))
+    .toHaveAttribute("href", `/review?review=${decided.id}`);
+  await page.getByRole("link", { name: "View all history activity", exact: true }).click();
   await expect(page).toHaveURL((url) => url.pathname === "/activity/history"
     && url.searchParams.get("period") === "all" && url.searchParams.get("kind") === "all"
     && url.searchParams.get("subtype") === "all" && url.searchParams.get("group_reads") === "1");
   await expect(decisionRow).toBeVisible();
+  await decisionRow.getByRole("link", { name: second.title, exact: true }).click();
+  await expect(page).toHaveURL(`/review?review=${decided.id}`);
+  await expect(page.locator("#review-detail-title")).toHaveText(second.title);
 });
 
 // Engine behavior: a sticky decision header must not cover keyboard focus,

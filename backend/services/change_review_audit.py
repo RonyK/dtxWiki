@@ -163,7 +163,12 @@ class ChangeReviewAuditRecorder:
             action=action,
             target_kind="context_page",
             target_id=page_id,
-            payload=payload,
+            payload={
+                **(payload or {}),
+                "version_id": str(version_id),
+                "change_set_id": str(change_set.id),
+                "review_item_id": str(review.id),
+            },
             event_summary=action,
             retention_class="standard",
         )

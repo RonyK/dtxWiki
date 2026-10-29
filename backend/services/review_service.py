@@ -145,16 +145,24 @@ def _audience_falls_back_to_owners(decision):
 
 
 def _decision_audience_predicate(
-    decision, *, principal: UUID, principal_role: str | None
+    decision,
+    *,
+    principal: UUID,
+    principal_role: str | None,
+    include_owner_fallback: bool = True,
 ):
     return or_(
         and_(
             decision.audience_kind.in_(_INDIVIDUAL_AUDIENCE_KINDS),
             decision.audience_user_id == principal,
         ),
-        and_(
-            role_allows(principal_role or "viewer", "owner"),
-            _audience_falls_back_to_owners(decision),
+        (
+            and_(
+                role_allows(principal_role or "viewer", "owner"),
+                _audience_falls_back_to_owners(decision),
+            )
+            if include_owner_fallback
+            else false()
         ),
         and_(
             role_allows(principal_role or "viewer", "editor"),
@@ -206,6 +214,23 @@ def _context_version_id_from_diff_ref(diff_ref: str | None) -> UUID | None:
     if not isinstance(diff_ref, str) or not diff_ref.startswith(prefix):
         return None
     return parse_uuid_or_none(diff_ref[len(prefix) :])
+
+
+def review_decision_audience_clause(
+    actor_role: str | None,
+    audience_for: UUID | None,
+    *,
+    include_owner_fallback: bool = True,
+):
+    """Shared decision disclosure for Review and Context activity readers."""
+    if audience_for is None:
+        return ~false() if role_allows(actor_role or "viewer", "editor") else false()
+    return _decision_audience_predicate(
+        ReviewDecision,
+        principal=audience_for,
+        principal_role=actor_role,
+        include_owner_fallback=include_owner_fallback,
+    )
 
 
 class ReviewService:
@@ -973,19 +998,9 @@ class ReviewService:
             .order_by(ReviewDecision.created_at.desc(), ReviewDecision.id.desc())
             .limit(limit)
         )
-        if not role_allows(actor_role or "viewer", "editor"):
-            # Codex #6: a sub-editor (viewer) sees ONLY decisions routed to them
-            # personally — never the workspace-wide approve/reject broadcast feed.
-            if audience_for is None:
-                return []
-        if audience_for is not None:
-            statement = statement.where(
-                _decision_audience_predicate(
-                    ReviewDecision,
-                    principal=audience_for,
-                    principal_role=actor_role,
-                )
-            )
+        statement = statement.where(
+            review_decision_audience_clause(actor_role, audience_for)
+        )
         decision_rows = list(session.execute(statement))
         actor_ids = {
             decision.actor_id

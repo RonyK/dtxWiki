@@ -3539,6 +3539,7 @@ class ContextWriteService:
                 target_kind="context_page",
                 target_id=page.id,
                 payload={
+                    "reason": request.reason,
                     "version_id": str(version.id),
                     "previous_published_version_id": (
                         str(previous_published_version_id)

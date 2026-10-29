@@ -104,7 +104,7 @@ export function presentActivityFeedEvent(event: ActivityFeedEvent, count = 1) {
     ({ title, body } = presentActivityItem(event));
     const targetTitle = event.navigation?.title ?? event.target_title;
     if (event.event_key && targetTitle && targetTitle !== title) {
-      body = title;
+      body = event.details && body ? body : title;
       title = targetTitle;
     }
   }

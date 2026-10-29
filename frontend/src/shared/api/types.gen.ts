@@ -3434,6 +3434,26 @@ export interface components {
              */
             is_current_user: boolean;
         };
+        /** ActivityDetails */
+        ActivityDetails: {
+            base_version?: components["schemas"]["ActivityVersion"] | null;
+            /** Decision Type */
+            decision_type?: ("approve" | "reject" | "request_changes") | null;
+            /** Editing Revision */
+            editing_revision?: number | null;
+            move?: components["schemas"]["ActivityMove"] | null;
+            /**
+             * Page Id
+             * Format: uuid
+             */
+            page_id: string;
+            previous_published_version?: components["schemas"]["ActivityVersion"] | null;
+            /** Reason */
+            reason?: string | null;
+            rename?: components["schemas"]["ActivityRename"] | null;
+            restored_from_version?: components["schemas"]["ActivityVersion"] | null;
+            version?: components["schemas"]["ActivityVersion"] | null;
+        };
         /** ActivityFeedData */
         ActivityFeedData: {
             /** Entries */
@@ -3490,6 +3510,7 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            details?: components["schemas"]["ActivityDetails"] | null;
             /** Duration Ms */
             duration_ms?: number | null;
             /** Event Args */
@@ -3497,7 +3518,7 @@ export interface components {
                 [key: string]: string;
             };
             /** Event Key */
-            event_key: ("context_page.draft.publish" | "tree.node.move" | "tree.node.rename" | "workspace.join_request.requested" | "workspace.join_request.approved" | "workspace.join_request.rejected") | null;
+            event_key: ("page.create" | "page.update" | "page.patch_context_edit" | "page.begin_context_edit" | "page.submit_context_edit_for_review" | "page.discard_context_edit" | "page.autosave.draft" | "page.autosave.overwrite" | "page.restore_version" | "page.publish" | "page.unpublish" | "page.preserve_alternative" | "page.inline_comment" | "context_page.draft.create" | "context_page.draft.update" | "context_page.draft.diverged" | "context_page.draft.diverged_discarded" | "context_page.draft.publish" | "review.decision" | "review.superseded_by_approved_publish" | "review.superseded_by_rejected_candidate" | "tree.node.move" | "tree.node.rename" | "tree.node.reorder" | "tree.node.delete" | "workspace.join_request.requested" | "workspace.join_request.approved" | "workspace.join_request.rejected") | null;
             /**
              * Id
              * Format: uuid
@@ -3554,12 +3575,13 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            details?: components["schemas"]["ActivityDetails"] | null;
             /** Event Args */
             event_args: {
                 [key: string]: string;
             };
             /** Event Key */
-            event_key: ("context_page.draft.publish" | "tree.node.move" | "tree.node.rename" | "workspace.join_request.requested" | "workspace.join_request.approved" | "workspace.join_request.rejected") | null;
+            event_key: ("page.create" | "page.update" | "page.patch_context_edit" | "page.begin_context_edit" | "page.submit_context_edit_for_review" | "page.discard_context_edit" | "page.autosave.draft" | "page.autosave.overwrite" | "page.restore_version" | "page.publish" | "page.unpublish" | "page.preserve_alternative" | "page.inline_comment" | "context_page.draft.create" | "context_page.draft.update" | "context_page.draft.diverged" | "context_page.draft.diverged_discarded" | "context_page.draft.publish" | "review.decision" | "review.superseded_by_approved_publish" | "review.superseded_by_rejected_candidate" | "tree.node.move" | "tree.node.rename" | "tree.node.reorder" | "tree.node.delete" | "workspace.join_request.requested" | "workspace.join_request.approved" | "workspace.join_request.rejected") | null;
             /**
              * Id
              * Format: uuid
@@ -3592,6 +3614,21 @@ export interface components {
             data: components["schemas"]["ActivityListData"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
+        /** ActivityLocation */
+        ActivityLocation: {
+            /** Path */
+            path?: string[];
+            /**
+             * Provenance
+             * @enum {string}
+             */
+            provenance: "recorded" | "current" | "unavailable" | "root";
+        };
+        /** ActivityMove */
+        ActivityMove: {
+            after: components["schemas"]["ActivityLocation"];
+            before: components["schemas"]["ActivityLocation"];
+        };
         /** ActivityNavigation */
         ActivityNavigation: {
             /** Href */
@@ -3620,12 +3657,34 @@ export interface components {
             data: components["schemas"]["ActivityReadGroupData"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
+        /** ActivityRename */
+        ActivityRename: {
+            /** After */
+            after?: string | null;
+            /** Before */
+            before?: string | null;
+        };
         /** ActivityTarget */
         ActivityTarget: {
             /** Target Id */
             target_id?: string | null;
             /** Target Kind */
             target_kind: string;
+        };
+        /** ActivityVersion */
+        ActivityVersion: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Immutable
+             * @default false
+             */
+            immutable: boolean;
+            /** Number */
+            number: number;
         };
         /** AdminAuditEventData */
         AdminAuditEventData: {

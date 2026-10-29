@@ -298,6 +298,30 @@ class TreeService:
         reason = (request.reason or "").strip() or DEFAULT_TREE_MOVE_REASON
         previous_parent_id = node.parent_id
         previous_sort_key = node.sort_key
+        previous_parent = (
+            get_in_workspace(
+                session,
+                WorkspaceTreeNode,
+                workspace_id=workspace_id,
+                resource_id=previous_parent_id,
+            )
+            if previous_parent_id
+            else None
+        )
+        previous_parent_path = (
+            [
+                {"id": str(entry.id), "title": entry.title}
+                for entry in self.tree_read_service.path_for_node(
+                    session, previous_parent
+                )
+            ]
+            if previous_parent
+            else []
+        )
+        new_parent_path = [
+            {"id": str(entry.id), "title": entry.title}
+            for entry in self.tree_read_service.path_for_node(session, parent)
+        ]
         node.parent_id = parent.id
         node.sort_key = request.sort_key or next_child_sort_key(
             session=session,
@@ -339,6 +363,8 @@ class TreeService:
                     str(previous_parent_id) if previous_parent_id else None
                 ),
                 "new_parent_id": str(parent.id),
+                "previous_parent_path": previous_parent_path,
+                "new_parent_path": new_parent_path,
                 "reason": reason,
             },
         )
