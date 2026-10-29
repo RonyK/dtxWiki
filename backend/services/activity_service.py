@@ -19,7 +19,11 @@ from backend.models.review import ReviewItem
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import MCPClient
 from backend.policy.auth import ActorContext
-from backend.repositories.workspace_scoped import get_in_workspace, where_in_workspace
+from backend.repositories.workspace_scoped import (
+    get_in_workspace,
+    select_in_workspace,
+    where_in_workspace,
+)
 from backend.schemas.activity import (
     ActivityActor,
     ActivityEventKey,
@@ -65,11 +69,14 @@ class PageActivityScope:
     ) -> "PageActivityScope":
         node_ids = tuple(
             session.scalars(
-                select(WorkspaceTreeNode.id).where(
-                    WorkspaceTreeNode.workspace_id == workspace_id,
-                    WorkspaceTreeNode.target_kind == "context_page",
-                    WorkspaceTreeNode.target_id == page_id,
-                )
+                select_in_workspace(
+                    WorkspaceTreeNode,
+                    workspace_id=workspace_id,
+                    criteria=(
+                        WorkspaceTreeNode.target_kind == "context_page",
+                        WorkspaceTreeNode.target_id == page_id,
+                    ),
+                ).with_only_columns(WorkspaceTreeNode.id)
             ).all()
         )
         return cls(page_id, node_ids)
@@ -87,19 +94,26 @@ class PageActivityScope:
             ),
             and_(
                 AuditEvent.target_kind == "review_item",
-                select(ReviewItem.id)
-                .where(
-                    ReviewItem.id == AuditEvent.target_id,
-                    ReviewItem.workspace_id == AuditEvent.workspace_id,
-                    select(ChangeOperation.id)
-                    .where(
-                        ChangeOperation.workspace_id == ReviewItem.workspace_id,
-                        ChangeOperation.change_set_id == ReviewItem.change_set_id,
-                        ChangeOperation.target_type == "context_page",
-                        ChangeOperation.target_id == self.page_id,
-                    )
-                    .exists(),
+                select_in_workspace(
+                    ReviewItem,
+                    workspace_id=AuditEvent.workspace_id,
+                    criteria=(
+                        ReviewItem.id == AuditEvent.target_id,
+                        select_in_workspace(
+                            ChangeOperation,
+                            workspace_id=ReviewItem.workspace_id,
+                            criteria=(
+                                ChangeOperation.change_set_id
+                                == ReviewItem.change_set_id,
+                                ChangeOperation.target_type == "context_page",
+                                ChangeOperation.target_id == self.page_id,
+                            ),
+                        )
+                        .with_only_columns(ChangeOperation.id)
+                        .exists(),
+                    ),
                 )
+                .with_only_columns(ReviewItem.id)
                 .exists(),
             ),
         )

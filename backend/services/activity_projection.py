@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import get_args
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, load_only, selectinload
 
 from backend.models.audit import AuditEvent
@@ -13,6 +13,10 @@ from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.review import ReviewDecision, ReviewItem
 from backend.policy.auth import ActorContext
 from backend.policy.rbac import role_allows
+from backend.repositories.workspace_scoped import (
+    select_in_workspace,
+    select_in_workspace_by_ids,
+)
 from backend.schemas.activity import (
     ActivityDetails,
     ActivityEventKey,
@@ -75,11 +79,14 @@ class ContextActivityProjection:
             {
                 r.id: r
                 for r in session.scalars(
-                    select(ReviewItem).where(
-                        ReviewItem.workspace_id == workspace_id,
-                        or_(
-                            ReviewItem.id.in_(review_ids - {None}),
-                            ReviewItem.change_set_id.in_(change_ids - {None}),
+                    select_in_workspace(
+                        ReviewItem,
+                        workspace_id=workspace_id,
+                        criteria=(
+                            or_(
+                                ReviewItem.id.in_(review_ids - {None}),
+                                ReviewItem.change_set_id.in_(change_ids - {None}),
+                            ),
                         ),
                     )
                 )
@@ -106,10 +113,11 @@ class ContextActivityProjection:
                     session.scalars(
                         policy._apply_scope_predicate(
                             session=session,
-                            statement=select(ReviewItem.id).where(
-                                ReviewItem.workspace_id == workspace_id,
-                                ReviewItem.id.in_(self.reviews),
-                            ),
+                            statement=select_in_workspace_by_ids(
+                                ReviewItem,
+                                workspace_id=workspace_id,
+                                resource_ids=self.reviews,
+                            ).with_only_columns(ReviewItem.id),
                             workspace_id=workspace_id,
                             principal=principal,
                             scope=scope,
@@ -121,9 +129,10 @@ class ContextActivityProjection:
             {
                 c.id: c
                 for c in session.scalars(
-                    select(ChangeSet).where(
-                        ChangeSet.workspace_id == workspace_id,
-                        ChangeSet.id.in_(change_ids),
+                    select_in_workspace_by_ids(
+                        ChangeSet,
+                        workspace_id=workspace_id,
+                        resource_ids=change_ids,
                     )
                 )
             }
@@ -133,9 +142,10 @@ class ContextActivityProjection:
         self.operations = defaultdict(list)
         if change_ids:
             for op in session.scalars(
-                select(ChangeOperation).where(
-                    ChangeOperation.workspace_id == workspace_id,
-                    ChangeOperation.change_set_id.in_(change_ids),
+                select_in_workspace(
+                    ChangeOperation,
+                    workspace_id=workspace_id,
+                    criteria=(ChangeOperation.change_set_id.in_(change_ids),),
                 )
             ):
                 self.operations[op.change_set_id].append(op)
@@ -158,8 +168,11 @@ class ContextActivityProjection:
             {
                 v.id: v
                 for v in session.scalars(
-                    select(ContextPageVersion)
-                    .options(
+                    select_in_workspace_by_ids(
+                        ContextPageVersion,
+                        workspace_id=workspace_id,
+                        resource_ids=version_ids,
+                    ).options(
                         load_only(
                             ContextPageVersion.id,
                             ContextPageVersion.page_id,
@@ -168,10 +181,6 @@ class ContextActivityProjection:
                             ContextPageVersion.created_by_actor_kind,
                             ContextPageVersion.created_by_actor_id,
                         )
-                    )
-                    .where(
-                        ContextPageVersion.workspace_id == workspace_id,
-                        ContextPageVersion.id.in_(version_ids),
                     )
                 )
             }
@@ -215,12 +224,11 @@ class ContextActivityProjection:
             {
                 p.id: p
                 for p in session.scalars(
-                    select(ContextPage)
-                    .where(
-                        ContextPage.workspace_id == workspace_id,
-                        ContextPage.id.in_(page_ids - {None}),
-                    )
-                    .options(
+                    select_in_workspace_by_ids(
+                        ContextPage,
+                        workspace_id=workspace_id,
+                        resource_ids=page_ids - {None},
+                    ).options(
                         selectinload(ContextPage.current_version),
                         selectinload(ContextPage.latest_draft_version),
                     )
@@ -242,13 +250,16 @@ class ContextActivityProjection:
             {
                 d.id: d
                 for d in session.scalars(
-                    select(ReviewDecision).where(
-                        ReviewDecision.workspace_id == workspace_id,
-                        ReviewDecision.id.in_(decision_ids),
-                        review_decision_audience_clause(
-                            role,
-                            principal,
-                            include_owner_fallback=include_owner_fallback,
+                    select_in_workspace(
+                        ReviewDecision,
+                        workspace_id=workspace_id,
+                        criteria=(
+                            ReviewDecision.id.in_(decision_ids),
+                            review_decision_audience_clause(
+                                role,
+                                principal,
+                                include_owner_fallback=include_owner_fallback,
+                            ),
                         ),
                     )
                 )
