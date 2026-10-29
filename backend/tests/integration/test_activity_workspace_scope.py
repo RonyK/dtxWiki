@@ -378,6 +378,7 @@ def test_context_activity_never_reconstructs_private_or_foreign_details(
                 ],
                 "reason": "Organize docs",
             },
+            {"review_item_id": str(uuid4())},
         ]
         events = [
             AuditEvent(
@@ -393,6 +394,7 @@ def test_context_activity_never_reconstructs_private_or_foreign_details(
                 ("page.autosave.draft", "context_page", page.id, payloads[0]),
                 ("page.update", "context_page", page.id, payloads[1]),
                 ("tree.node.move", "workspace_tree_node", node.id, payloads[2]),
+                ("page.autosave.overwrite", "context_page", page.id, payloads[3]),
             ]
         ]
         events[0].event_summary = "Private summary from a former edit"
@@ -407,13 +409,10 @@ def test_context_activity_never_reconstructs_private_or_foreign_details(
             actor=_owner(workspace.id),
         )
         by_action = {i.body: i for i in result.items}
-        private = by_action["page.autosave.draft"].details
-        assert by_action["page.autosave.draft"].title == "page.autosave.draft"
-        assert (
-            private.version is None
-            and private.reason is None
-            and private.editing_revision is None
-        )
+        # Another author's private edit is absent, not a redacted row; an
+        # autosave bound to a review is a shared staged draft and stays.
+        assert "page.autosave.draft" not in by_action
+        assert "page.autosave.overwrite" in by_action
         invalid = by_action["page.update"].details
         assert invalid.version is None and invalid.reason is None
         moved = by_action["tree.node.move"].details

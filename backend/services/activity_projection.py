@@ -30,6 +30,7 @@ from backend.services.actor_visible_read import (
     context_version_is_visible,
 )
 from backend.services.tree_projection import TreeProjectionService
+from backend.services.tree_service import DEFAULT_TREE_MOVE_REASON
 
 
 def audit_uuid(value) -> UUID | None:
@@ -406,22 +407,6 @@ class ContextActivityProjection:
             return ActivityLocation(provenance="unavailable")
         return ActivityLocation(path=[title for _, title in path], provenance="current")
 
-    def private_edit_hidden(self, event: AuditEvent) -> bool:
-        private = (event.payload or {}).get(
-            "was_private_edit"
-        ) is True or event.action in {
-            "page.begin_context_edit",
-            "page.patch_context_edit",
-            "page.discard_context_edit",
-            "page.autosave.draft",
-            "page.autosave.overwrite",
-        }
-        own = self.actor and (event.actor_kind, event.actor_id) == (
-            self.actor.actor_kind,
-            self.actor.actor_id,
-        )
-        return bool(private and not own)
-
     def details(
         self, event: AuditEvent, page_id: UUID | None
     ) -> tuple[ActivityDetails | None, UUID | None]:
@@ -433,8 +418,8 @@ class ContextActivityProjection:
             and (event.actor_kind, event.actor_id)
             == (self.actor.actor_kind, self.actor.actor_id)
         )
-        if self.private_edit_hidden(event):
-            return ActivityDetails(page_id=page_id), None
+        # Another reader's private editing records never reach this projection:
+        # the audit query drops them (activity_service._private_editing_visible).
         review = self.reviews.get(
             event.target_id
             if event.target_kind == "review_item"
@@ -480,7 +465,11 @@ class ContextActivityProjection:
         if reason and (
             reason in get_args(ActivityEventKey)
             or reason
-            in {"approved through Context review", "author submitted for review"}
+            in {
+                "approved through Context review",
+                "author submitted for review",
+                DEFAULT_TREE_MOVE_REASON,
+            }
         ):
             reason = None
         decision_type = None

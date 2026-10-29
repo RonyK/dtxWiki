@@ -2548,6 +2548,18 @@ function ContextReader({
     loadedHistory,
     tab,
   ]);
+  // Activity is read the first time its tab opens for a page, not on every
+  // page view; the tab shows its count once that load has finished.
+  const activityPageKey = `${workspaceId ?? ""}:${detail.id}`;
+  const [activityRequestedKey, setActivityRequestedKey] = useState<
+    string | null
+  >(null);
+  useEffect(() => {
+    if (tab === "activity") {
+      setActivityRequestedKey(activityPageKey);
+    }
+  }, [activityPageKey, tab]);
+  const activityRequested = activityRequestedKey === activityPageKey;
   useEffect(() => {
     let active = true;
     const generation = ++activityLoadGenerationRef.current;
@@ -2555,6 +2567,11 @@ function ContextReader({
     setActivityNextCursor(null);
     setActivityLoadingMore(false);
     setActivityError(null);
+    if (!activityRequested) {
+      return () => {
+        active = false;
+      };
+    }
     if (!workspaceId) {
       setActivityItems([]);
       return () => {
@@ -2584,7 +2601,7 @@ function ContextReader({
     return () => {
       active = false;
     };
-  }, [detail.id, workspaceId, t]);
+  }, [activityRequested, detail.id, workspaceId, t]);
 
   const loadMoreActivity = useCallback(async () => {
     if (!workspaceId || !activityNextCursor || activityLoadingMore) {

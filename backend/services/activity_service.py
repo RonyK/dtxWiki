@@ -482,6 +482,7 @@ class ActivityService:
         statement = select(AuditEvent).where(
             AuditEvent.workspace_id == workspace_id,
             not_(_audit_only_observation_event_clause()),
+            _private_editing_visible(actor),
         )
         if item_ids is not None:
             statement = statement.where(AuditEvent.id.in_(item_ids))
@@ -640,7 +641,7 @@ class ActivityService:
                     event_args=event_args,
                     title=(
                         (event.event_summary or event.action)
-                        if visible and not projection.private_edit_hidden(event)
+                        if visible
                         else event.action
                     ),
                     body=event.action,
@@ -834,6 +835,40 @@ _AUDIT_ONLY_OBSERVATION_ACTIONS = (
 
 def _audit_only_observation_event_clause():
     return AuditEvent.action.in_(_AUDIT_ONLY_OBSERVATION_ACTIONS)
+
+
+# Opening, saving into and discarding an editing row all describe its author's
+# private working state until it is submitted. An autosave bound to a review is
+# a shared staged draft, so it is not private.
+_PRIVATE_EDITING_ACTIONS = (
+    "page.begin_context_edit",
+    "page.patch_context_edit",
+    "page.discard_context_edit",
+    "page.autosave.draft",
+    "page.autosave.overwrite",
+)
+
+
+def _private_editing_event_clause():
+    return and_(
+        AuditEvent.action.in_(_PRIVATE_EDITING_ACTIONS),
+        AuditEvent.payload["review_item_id"].as_string().is_(None),
+    )
+
+
+def _private_editing_visible(actor: ActorContext | None):
+    # Absent rather than redacted: another reader learns neither that a
+    # private edit exists nor who made it, on every Activity surface.
+    private = _private_editing_event_clause()
+    if actor is None or not actor.actor_kind or not actor.actor_id:
+        return ~private
+    return or_(
+        ~private,
+        and_(
+            AuditEvent.actor_kind == actor.actor_kind,
+            AuditEvent.actor_id == str(actor.actor_id),
+        ),
+    )
 
 
 def _system_audit_event_clause():
