@@ -223,10 +223,12 @@ def test_context_link_contract_and_source_decisions(monkeypatch):
     # Budget exception: canonical/stable paths, foreign workspace authority and
     # identity overrides take separate query-classification branches. A plain
     # navigation URL cannot expose loss of a pinned version during lint fixes.
-    # Safe Context view queries are accepted by the Context reader but are
-    # not target-existence claims for lint. Preserve their exact query bytes;
+    # Safe Context view queries are judged by their path like any Context
+    # link: a live local target is kept, a foreign one is never read, and a
+    # missing one is unresolved. Their exact query bytes are never rewritten;
     # identity overrides still fail closed and remain unresolved.
     version_id = "44444444-4444-4444-8444-444444444444"
+    missing_target = "55555555-5555-4555-8555-555555555555"
     safe_context_hrefs = (
         f"/workspaces/{navigation_workspace}/context/pages/{navigation_target}"
         f"?version={version_id}",
@@ -234,20 +236,39 @@ def test_context_link_contract_and_source_decisions(monkeypatch):
         f"/workspaces/{foreign_workspace_id}/context/pages/{navigation_target}"
         f"?version={version_id}",
     )
+    missing_context_href = (
+        f"/workspaces/{navigation_workspace}/context/pages/{missing_target}"
+        f"?version={version_id}"
+    )
     safe_context_body = "\n".join(
-        f"[Version]({item})" for item in safe_context_hrefs
+        f"[Version]({item})" for item in (*safe_context_hrefs, missing_context_href)
     )
-    for safe_context_href in safe_context_hrefs:
-        safe_locator, safe_resolution, safe_decision = decide_link(
-            safe_context_href, navigation_context
+
+    def resolve_view_target(locator, context, **_kwargs):
+        if locator.workspace_id not in {None, context.workspace_id}:
+            return Resolution("foreign")
+        if str(locator.page_id) == missing_target:
+            return Resolution("unavailable")
+        return resolved
+
+    with monkeypatch.context() as patched:
+        patched.setattr(
+            "backend.services.context_links.resolve", resolve_view_target
         )
-        assert safe_locator.kind in {"canonical_route", "stable_full"}
-        assert safe_resolution is None
-        assert safe_decision.action == "keep"
-        assert safe_decision.finding is None
-    rewritten_context, context_fixes, _ = rewrite_links_with_report(
-        safe_context_body, navigation_context
-    )
+        for safe_context_href in safe_context_hrefs:
+            safe_locator, _safe_resolution, safe_decision = decide_link(
+                safe_context_href, navigation_context
+            )
+            assert safe_locator.kind in {"canonical_route", "stable_full"}
+            assert safe_decision.action == "keep"
+            assert safe_decision.finding is None
+        _missing_locator, _missing_resolution, missing_decision = decide_link(
+            missing_context_href, navigation_context
+        )
+        assert missing_decision.finding == "link.unresolved"
+        rewritten_context, context_fixes, _ = rewrite_links_with_report(
+            safe_context_body, navigation_context
+        )
     assert rewritten_context == safe_context_body
     assert context_fixes == ()
 

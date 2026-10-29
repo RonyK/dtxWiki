@@ -1285,11 +1285,12 @@ def decide_link(
             has_query = False
         if has_query:
             # Context readers accept a small set of presentation-state query
-            # parameters (for example a pinned version). Keep such authored
-            # routes opaque after the Context navigation classifier proves
-            # their path and query grammar; lint must not strip view state or
-            # treat it as a target-existence lookup. Identity overrides fail
-            # that classifier and continue through the unresolved path.
+            # parameters (for example a pinned version). Once the Context
+            # navigation classifier proves the path and query grammar, the
+            # target is judged by its path like any other Context link, but
+            # the authored bytes are never rewritten: a canonical fix would
+            # strip the view state. Identity overrides fail that classifier
+            # and continue through the unresolved path.
             from backend.services.context_link_targets import (
                 _classify_context_navigation,
             )
@@ -1300,7 +1301,16 @@ def decide_link(
                 "stable_full",
                 "stable_short",
             }:
-                return view_locator, None, LinkDecision("keep")
+                resolution = resolve(view_locator, ctx)
+                decision = decide(
+                    view_locator,
+                    resolution,
+                    context_workspace_id=ctx.workspace_id,
+                    source_is_published=ctx.source_is_published,
+                )
+                if decision.action == "fix":
+                    decision = LinkDecision("keep")
+                return view_locator, resolution, decision
         if locator.kind == "unknown":
             handled, target = _workspace_route(href, ctx)
             if handled:
