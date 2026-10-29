@@ -17,9 +17,35 @@ from backend.app.settings import Settings
 from backend.spi.context import ToolCallContext
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from backend.services.lint.base import LintModule
 
 logger = logging.getLogger(__name__)
+
+
+def has_due_media_install_work(
+    session: Session, *, workspace_id: UUID, now: datetime
+) -> bool:
+    """Compose the read-only install probe without creating storage adapters."""
+    from backend.media.adapters.sqlalchemy.reconcile import (
+        SqlAlchemyMediaInstallReconciler,
+    )
+
+    return SqlAlchemyMediaInstallReconciler.has_due_work(
+        session, workspace_id=workspace_id, now=now
+    )
+
+
+def has_due_media_gc_work(
+    session: Session, *, workspace_id: UUID, now: datetime
+) -> bool:
+    """Compose the read-only GC probe independently of filesystem services."""
+    from backend.media.adapters.sqlalchemy.gc import SqlAlchemyBlobGcService
+
+    return SqlAlchemyBlobGcService.has_due_work(
+        session, workspace_id=workspace_id, now=now
+    )
 
 __all__ = [
     "PER_WORKSPACE_DATABASE_TOPOLOGY",
@@ -341,6 +367,10 @@ class ServiceRegistry:
 
     settings: Settings | None = None
     lint_modules: tuple[LintModule, ...] = ()
+    # Overlay-supplied Inbox kinds and delivery listeners, added to the
+    # built-in ones before the Inbox service is first constructed.
+    inbox_kinds: tuple = ()
+    inbox_listeners: tuple = ()
     # Context media is workspace-owned data, so this holds a routing callable
     # (Callable[[UUID], sessionmaker[Session]]) -- get_services() stamps
     # self.db.session_for -- not one session_factory pinned to a plane.
@@ -959,6 +989,19 @@ class ServiceRegistry:
         from backend.services.lint.registry import LintRegistry
 
         return LintRegistry((*BUILTIN_LINT_MODULES, *self.lint_modules))
+
+    @cached_property
+    def inbox(self):
+        from backend.services.inbox import (
+            BUILTIN_INBOX_KINDS,
+            InboxRegistry,
+            InboxService,
+        )
+
+        return InboxService(
+            InboxRegistry((*BUILTIN_INBOX_KINDS, *self.inbox_kinds)),
+            self.inbox_listeners,
+        )
 
     @cached_property
     def lint(self):

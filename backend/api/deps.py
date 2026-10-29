@@ -192,6 +192,10 @@ def status_code_for_read_error(exc: ReadServiceError) -> int:
         "legacy_media_cutover_conflict",
         "stale_context_draft",
         "idempotency_key_conflict",
+        "decision_id_conflict",
+        "review_decision_impact_changed",
+        "review_reject_blocked_by_private_edit",
+        "review_decision_undo_unavailable",
     }:
         return 409
     if exc.error_code == "operation_outcome_unknown":

@@ -102,6 +102,12 @@ export function useRegisterSettingsDirty(id: string, dirty: boolean) {
   }, [id, registry]);
 }
 
+/** A background read must not replace the baseline of an unsaved policy form. */
+export function useSettingsDirtyCheck() {
+  const registry = useContext(SettingsDirtyContext);
+  return useCallback(() => registry?.anyDirty() ?? false, [registry]);
+}
+
 /**
  * Run `change` unless a pane is holding edits and the reader declines.
  *

@@ -16,6 +16,7 @@ export function ForgotPasswordScreen() {
     capabilitiesChecked,
     capabilitiesError,
     passwordRecoveryMode,
+    passwordLoginEnabled,
     refreshCapabilities,
   } = useAuth();
   const [email, setEmail] = useState("");
@@ -43,6 +44,7 @@ export function ForgotPasswordScreen() {
   const emailRecoveryAvailable =
     capabilitiesChecked &&
     capabilitiesError === null &&
+    passwordLoginEnabled &&
     passwordRecoveryMode === "email";
 
   return (

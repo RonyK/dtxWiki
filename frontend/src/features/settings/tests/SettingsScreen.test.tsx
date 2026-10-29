@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { type ReactNode, useEffect } from "react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationType } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readAppStyles } from "../../../test-support/appStyles";
@@ -20,6 +20,7 @@ import {
 } from "../../../shared/workspace/WorkspaceContext";
 import { i18n, setLocale } from "../../../shared/i18n";
 import { SettingsScreen } from "../SettingsScreen";
+import { WorkspaceScopedSettingsScreen } from "../WorkspaceScopedSettingsScreen";
 
 const BASE = "https://wiki.example.test";
 const LOOPBACK_BASE = "http://127.0.0.1:21080";
@@ -79,6 +80,41 @@ describe("SettingsScreen", () => {
     cleanup();
     vi.unstubAllEnvs();
     await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  it("renders the URL workspace without changing the ambient selection", async () => {
+    window.localStorage.setItem("dtxwiki.selectedWorkspaceId", "ambient");
+    window.localStorage.setItem("dtxwiki.selectedWorkspaceSlug", "ambient-slug");
+    const scrollIntoView = vi.fn();
+    const originalScroll = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView")!;
+    Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
+    const fetchMock = mockFetch({
+      [`${BASE}/api/v1/workspaces`]: { data: {
+        current_workspace_id: "ambient",
+        default_workspace_id: "ambient",
+        workspaces: [workspaceSummary("ambient", "Ambient", "ambient-slug"), workspaceSummary("target", "Target workspace", "target-slug", "viewer")],
+      } },
+      [`${BASE}/api/v1/workspaces/target/settings/policies`]: { data: {
+        ...basicSettingsPolicies(),
+        workspace: policy("workspace", "Workspace policy", { title: "Target workspace", slug: "target-slug" }),
+      } },
+    });
+
+    render(<MemoryRouter initialEntries={["/workspaces/target/settings?section=workspace#workspace-danger-title"]}>
+      <Routes><Route path="/workspaces/:workspaceId/settings" element={<WorkspaceScopedSettingsScreen />} /></Routes>
+    </MemoryRouter>);
+
+    expect(await screen.findByRole("heading", { name: "Target workspace" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to Settings" })).toHaveAttribute(
+      "href",
+      "/workspaces/target/settings?section=workspace",
+    );
+    expect(screen.getByRole("button", { name: "Delete workspace…" })).toBeDisabled();
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(`${BASE}/api/v1/workspaces/target/settings/policies`, expect.anything());
+    expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe("ambient");
+    expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceSlug")).toBe("ambient-slug");
+    Object.defineProperty(Element.prototype, "scrollIntoView", originalScroll);
   });
 
   function mockPolicyNavigationAndMcpClients() {
@@ -210,7 +246,7 @@ describe("SettingsScreen", () => {
     const user = userEvent.setup();
     const { fetchMock } = mockPolicyNavigationAndMcpClients();
 
-    render(
+    const view = render(
       <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings`]}>
         <SettingsScreen />
       </MemoryRouter>,
@@ -218,8 +254,15 @@ describe("SettingsScreen", () => {
 
     // The h1 names the destination now, not the screen; "Settings" survives
     // as the first breadcrumb.
+    // Wait for loaded content with a text query, then keep accessible-role
+    // assertions inside their UI region. Global role scans repeatedly compute
+    // visibility/names for unrelated navigation and MCP setup controls.
+    const workspaceBasics = await screen.findByText("Workspace basics");
+    const header = within(view.container.querySelector<HTMLElement>(".feature-header")!);
+    const workspaceCard = within(workspaceBasics.closest<HTMLElement>(".policy-card")!);
+    const navigation = within(screen.getByRole("navigation", { name: "Settings sections" }));
     expect(
-      await screen.findByRole("heading", { name: "Workspace", level: 1 }),
+      header.getByRole("heading", { name: "Workspace", level: 1 }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Settings" }),
@@ -229,9 +272,9 @@ describe("SettingsScreen", () => {
         "Name, owner, language, and visibility.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("Workspace basics")).toBeInTheDocument();
+    expect(workspaceBasics).toBeInTheDocument();
     expect(
-      screen.getByRole("combobox", { name: "Default language" }),
+      workspaceCard.getByRole("combobox", { name: "Default language" }),
     ).toHaveDisplayValue("English");
     // UI-04: visibility is no longer editable from this screen.
     expect(
@@ -247,10 +290,11 @@ describe("SettingsScreen", () => {
         input.toString().includes("/api/v1/auth/tokens"),
       ),
     ).toBe(true);
-    const rawSummary = screen.getByRole("button", { name: "Show raw values" });
+    const rawSummary = workspaceCard.getByRole("button", { name: "Show raw values" });
     expect(rawSummary).toHaveAttribute("aria-expanded", "false");
-    await openContentPolicies(user);
-    const agentInjectionNav = screen.getByRole("tab", {
+    await user.click(navigation.getByRole("button", { name: /^Content policies/ }));
+    const policyTabs = within(await screen.findByRole("tablist", { name: "Content policies" }));
+    const agentInjectionNav = policyTabs.getByRole("tab", {
       name: /Agent injection/i,
     });
     expect(within(agentInjectionNav).getByText("Preview")).toHaveClass(
@@ -262,19 +306,20 @@ describe("SettingsScreen", () => {
     );
 
     await user.click(
-      screen.getByRole("tab", { name: /Citation & write policy/i }),
+      policyTabs.getByRole("tab", { name: /Citation & write policy/i }),
     );
     expect(screen.getByText("Citation policy")).toBeInTheDocument();
+    const citationPanel = within(screen.getByRole("tabpanel", { name: /Citation & write policy/i }));
     // The server's "Context write policy" card had no fields and could not be
     // saved, so the tab names the two places the rules actually live.
     expect(
       screen.getByText("Publishing a knowledge page"),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Open Lint rules" }),
+      citationPanel.getByRole("button", { name: "Open Lint rules" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Open Review policy" }),
+      citationPanel.getByRole("button", { name: "Open Review policy" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByText("Agent injection policy"),
@@ -317,13 +362,16 @@ describe("SettingsScreen", () => {
     expect(screen.queryByText("internal-agent")).not.toBeInTheDocument();
     expect(screen.queryByText("System MCP clients")).not.toBeInTheDocument();
     expect(screen.getByText("Connected MCP clients")).toBeInTheDocument();
+    const clientSection = screen
+      .getByText("Connected MCP clients")
+      .closest(".mcp-clients-section") as HTMLElement;
     expect(
       fetchMock.mock.calls.some(([input]) =>
         input.toString().includes("/api/v1/auth/tokens"),
       ),
     ).toBe(true);
     // A39: the row Disable now opens a confirm before the PATCH fires.
-    await user.click(screen.getByRole("button", { name: /^Disable / }));
+    await user.click(within(clientSection).getByRole("button", { name: /^Disable / }));
     const disableDialog = screen.getByRole("dialog", {
       name: /Disable MCP client/,
     });
@@ -344,16 +392,13 @@ describe("SettingsScreen", () => {
       expect.objectContaining({ method: "PATCH" }),
     );
     // Reopen and confirm: the default Active projection removes the row.
-    await user.click(screen.getByRole("button", { name: /^Disable / }));
+    await user.click(within(clientSection).getByRole("button", { name: /^Disable / }));
     setMcpStatus("disabled");
     await user.click(
       within(
         screen.getByRole("dialog", { name: /Disable MCP client/ }),
       ).getByRole("button", { name: "Disable client" }),
     );
-    const clientSection = screen
-      .getByText("Connected MCP clients")
-      .closest(".mcp-clients-section") as HTMLElement;
     await user.click(
       within(clientSection).getByRole("radio", { name: /Other states/ }),
     );
@@ -393,6 +438,105 @@ describe("SettingsScreen", () => {
     expect(
       screen.getByText(/Read - view sources and pages/),
     ).toBeInTheDocument();
+  });
+
+
+
+  it("adopts a conflicting save's server revision while the form is dirty and retries with that revision", async () => {
+    const revisions = ["a".repeat(64), "b".repeat(64), "c".repeat(64)];
+    let policyReads = 0;
+    const saves: Array<{ expected_revision: string; changes: { title: string } }> = [];
+    const policies = (title: string, revision: string) => ({
+      ...basicSettingsPolicies(),
+      workspace: {
+        ...policy("workspace", "Workspace basics", {
+          title, goal: "Existing goal", default_language: "en", visibility: "private",
+        }),
+        revision,
+      },
+    });
+    const fetchMock = mockFetch({
+      [`${BASE}/api/v1/workspaces`]: { data: {
+        current_workspace_id: WORKSPACE_ID,
+        workspaces: [workspaceSummary(WORKSPACE_ID, "Original workspace", "default")],
+      } },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: () => {
+        policyReads += 1;
+        return { data: policyReads === 1
+          ? policies("Original workspace", revisions[0])
+          : policies("New server workspace", revisions[1]) };
+      },
+      [`${BASE}/api/v1/auth/tokens`]: { data: [] },
+      [`${BASE}/oauth/consents`]: { data: [] },
+    });
+    const originalFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (input.toString().endsWith("/settings/policies/batch") && init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body));
+        saves.push(body);
+        return saves.length === 1
+          ? jsonResponse({ error_code: "settings_revision_conflict", message: "Conflict", request_id: "conflict-probe", warnings: [] }, 409)
+          : jsonResponse({ data: policies(body.changes.title, revisions[2]) });
+      }
+      return originalFetch(input, init);
+    });
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings`]}>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+    const title = await screen.findByDisplayValue("Original workspace");
+    await userEvent.clear(title);
+    await userEvent.type(title, "Conflicting local title");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    const current = await screen.findByDisplayValue("New server workspace");
+    expect(policyReads).toBe(2);
+    await userEvent.clear(current);
+    await userEvent.type(current, "Retried local title");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled());
+    expect(saves.map((save) => save.expected_revision)).toEqual(revisions.slice(0, 2));
+    expect(screen.getByDisplayValue("Retried local title")).toBeInTheDocument();
+  });
+
+  it("preserves unsaved settings when a menu refresh is pending or requested again", async () => {
+    let policyReads = 0;
+    let releaseRefresh!: (value: unknown) => void;
+    const refresh = new Promise((resolve) => { releaseRefresh = resolve; });
+    const policies = (title: string) => ({
+      ...basicSettingsPolicies(),
+      workspace: policy("workspace", "Workspace basics", {
+        title, goal: "Existing goal", default_language: "en", visibility: "private",
+      }),
+    });
+    mockFetch({
+      [`${BASE}/api/v1/workspaces`]: { data: {
+        current_workspace_id: WORKSPACE_ID,
+        workspaces: [workspaceSummary(WORKSPACE_ID, "Original workspace", "default")],
+      } },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: () => {
+        policyReads += 1;
+        return policyReads === 1 ? { data: policies("Original workspace") } : refresh;
+      },
+      [`${BASE}/api/v1/auth/tokens`]: { data: [] },
+      [`${BASE}/oauth/consents`]: { data: [] },
+    });
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=workspace`]}>
+        <Link to={`/workspaces/${WORKSPACE_ID}/settings?section=workspace`}>Main menu Settings</Link>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+    const title = await screen.findByDisplayValue("Original workspace");
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Settings" }));
+    await waitFor(() => expect(policyReads).toBe(2));
+    await userEvent.clear(title);
+    await userEvent.type(title, "Unsaved local title");
+    await act(async () => releaseRefresh({ data: policies("Remote workspace") }));
+    expect(title).toHaveValue("Unsaved local title");
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Settings" }));
+    expect(policyReads).toBe(2);
+    expect(title).toHaveValue("Unsaved local title");
   });
 
   it("localizes system policy titles and edit states without changing workspace data", async () => {
@@ -1103,7 +1247,6 @@ describe("SettingsScreen", () => {
               data: {
                 current_workspace_id: "workspace-1",
                 default_workspace_id: null,
-                personal_workspace_id: null,
                 workspaces: [
                   workspaceSummary(
                     "workspace-1",
@@ -1198,10 +1341,10 @@ describe("SettingsScreen", () => {
     { caseName: "the authoritative empty list loads", refreshFails: false },
     { caseName: "the authoritative refresh fails", refreshFails: true },
   ])(
-    "deletes the only Personal workspace and opens discovery when $caseName",
+    "deletes the only workspace and opens discovery when $caseName",
     async ({ refreshFails }) => {
       const user = userEvent.setup();
-      const personalWorkspaceId = "workspace-personal";
+      const onlyWorkspaceId = "workspace-personal";
       let workspaceListReads = 0;
       const fetchMock = mockFetch({
         [`${BASE}/api/v1/workspaces`]: () => {
@@ -1209,12 +1352,11 @@ describe("SettingsScreen", () => {
           if (workspaceListReads === 1) {
             return {
               data: {
-                current_workspace_id: personalWorkspaceId,
-                default_workspace_id: personalWorkspaceId,
-                personal_workspace_id: personalWorkspaceId,
+                current_workspace_id: onlyWorkspaceId,
+                default_workspace_id: onlyWorkspaceId,
                 workspaces: [
                   workspaceSummary(
-                    personalWorkspaceId,
+                    onlyWorkspaceId,
                     "Personal Workspace",
                     "personal-space",
                   ),
@@ -1229,12 +1371,11 @@ describe("SettingsScreen", () => {
             data: {
               current_workspace_id: null,
               default_workspace_id: null,
-              personal_workspace_id: null,
               workspaces: [],
             },
           };
         },
-        [`${BASE}/api/v1/workspaces/${personalWorkspaceId}/settings/policies`]: {
+        [`${BASE}/api/v1/workspaces/${onlyWorkspaceId}/settings/policies`]: {
           data: {
             workspace: policy("workspace", "Workspace policy", {
               default_language: "en",
@@ -1251,8 +1392,8 @@ describe("SettingsScreen", () => {
             mcp_clients: [],
           },
         },
-        [`DELETE ${BASE}/api/v1/workspaces/${personalWorkspaceId}`]: {
-          data: { deleted_workspace_id: personalWorkspaceId },
+        [`DELETE ${BASE}/api/v1/workspaces/${onlyWorkspaceId}`]: {
+          data: { deleted_workspace_id: onlyWorkspaceId },
         },
         [`${BASE}/api/v1/auth/tokens`]: {
           data: [],
@@ -1263,7 +1404,7 @@ describe("SettingsScreen", () => {
       });
 
       render(
-        <MemoryRouter initialEntries={[`/workspaces/${personalWorkspaceId}/settings?section=workspace`]}>
+        <MemoryRouter initialEntries={[`/workspaces/${onlyWorkspaceId}/settings?section=workspace`]}>
           <WorkspaceProvider>
             <WorkspaceRefreshGate>
               <Routes>
@@ -1305,15 +1446,12 @@ describe("SettingsScreen", () => {
         ).toHaveTextContent("REPLACE");
       });
       expect(fetchMock).toHaveBeenCalledWith(
-        `${BASE}/api/v1/workspaces/${personalWorkspaceId}`,
+        `${BASE}/api/v1/workspaces/${onlyWorkspaceId}`,
         expect.objectContaining({ method: "DELETE" }),
       );
       expect(screen.getByTestId("settings-workspace-count")).toHaveTextContent(
         "0",
       );
-      expect(
-        screen.getByTestId("settings-personal-workspace"),
-      ).toHaveTextContent("none");
       expect(
         window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
       ).toBeNull();
@@ -2374,17 +2512,6 @@ describe("SettingsScreen", () => {
     );
     expect(styles).toMatch(
       /\.settings-subnav-title > \.settings-subnav-label \{[^}]*text-overflow: ellipsis;/s,
-    );
-  });
-
-  it("keeps Members & access as one visual surface with nested subsections", () => {
-    const styles = readAppStyles();
-
-    expect(styles).toMatch(
-      /\.workspace-members-access-unified\s*\{[^}]*border:\s*1px solid var\(--border\);[^}]*box-shadow:\s*var\(--shadow-1\);/,
-    );
-    expect(styles).toMatch(
-      /\.workspace-members-access-unified \.workspace-settings-card\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/,
     );
   });
 
@@ -4363,12 +4490,16 @@ describe("SettingsScreen", () => {
     ) as HTMLElement;
     expect(delayRow).toHaveTextContent("Low");
 
-    fireEvent.change(delay, { target: { value: "14" } });
-
     const reviewCard = delay.closest(".policy-card") as HTMLElement;
-    await user.click(
-      within(reviewCard).getByRole("button", { name: "Save changes" }),
-    );
+    const save = within(reviewCard).getByRole("button", { name: "Save changes" });
+    // Erasing must leave the field empty, not "0" ("no wait"): typing after a
+    // forced 0 read "014", and an empty delay must not be savable.
+    await user.clear(delay);
+    expect(delay).toHaveDisplayValue("");
+    expect(save).toBeDisabled();
+    await user.type(delay, "14");
+    expect(delay).toHaveDisplayValue("14");
+    await user.click(save);
 
     await waitFor(() => {
       expect(
@@ -4454,7 +4585,14 @@ describe("SettingsScreen", () => {
   });
 
   it("gates High Review auto-approval behind a danger acknowledgement", async () => {
-    mockFetch({
+    const byRisk = (highAllowed: boolean) => ({
+      auto_approve_by_risk: {
+        low: { allowed: false, delay_days: 1 },
+        medium: { allowed: false, delay_days: 3 },
+        high: { allowed: highAllowed, delay_days: 7 },
+      },
+    });
+    const fetchMock = mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
         data: {
           current_workspace_id: WORKSPACE_ID,
@@ -4464,21 +4602,10 @@ describe("SettingsScreen", () => {
         },
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {
-        data: {
-          workspace: policy("workspace", "Workspace policy"),
-          library: policy("library", "Library policy"),
-          citation: policy("citation", "Citation policy"),
-          context_write: policy("context_write", "Context write policy"),
-          agent_injection: policy("agent_injection", "Agent injection policy"),
-          review: reviewPolicy({
-            auto_approve_by_risk: {
-              low: { enabled: false, delay_days: 1 },
-              medium: { enabled: false, delay_days: 3 },
-              high: { enabled: false, delay_days: 7 },
-            },
-          }),
-          mcp_clients: [],
-        },
+        data: { ...basicSettingsPolicies(), review: reviewPolicy(byRisk(false)) },
+      },
+      [`PATCH ${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies/batch`]: {
+        data: { ...basicSettingsPolicies(), review: reviewPolicy(byRisk(true)) },
       },
       [`${BASE}/api/v1/auth/tokens`]: { data: [] },
       [`${BASE}/oauth/consents`]: { data: [] },
@@ -4503,6 +4630,31 @@ describe("SettingsScreen", () => {
     const ack = within(card).getByRole("checkbox", { name: /Danger noted/i });
     await userEvent.click(ack);
     expect(highAllowed).not.toBeDisabled();
+
+    await userEvent.click(highAllowed);
+    const save = within(card).getByRole("button", { name: "Save changes" });
+    await userEvent.click(save);
+    expect(
+      lastJsonBody(
+        fetchMock,
+        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies/batch`,
+        "PATCH",
+      )?.changes,
+    ).toEqual({ "automation.auto_approve_by_risk.high.allowed": true });
+    // The saved opt-in must become the new baseline: reading high back as
+    // false left the card dirty and showed it unchecked after a reload.
+    await waitFor(() => expect(save).toBeDisabled());
+    expect(highAllowed).toBeChecked();
+    expect(ack).toBeChecked();
+
+    // Discard restores the ack with the drafts; otherwise the saved High came
+    // back checked but locked behind an unchecked acknowledgement.
+    await userEvent.click(ack);
+    expect(highAllowed).not.toBeChecked();
+    await userEvent.click(within(card).getByRole("button", { name: "Discard" }));
+    expect(highAllowed).toBeChecked();
+    expect(highAllowed).toBeEnabled();
+    expect(ack).toBeChecked();
   });
 
   it("locks Medium auto-approval above the Manual-review-from level", async () => {
@@ -10083,15 +10235,12 @@ describe("SettingsScreen", () => {
 function WorkspaceDeletionProbe() {
   const location = useLocation();
   const navigationType = useNavigationType();
-  const { personalWorkspaceId, workspaces } = useWorkspaceContext();
+  const { workspaces } = useWorkspaceContext();
   return (
     <>
       <span data-testid="settings-location">{location.pathname}</span>
       <span data-testid="settings-navigation-type">{navigationType}</span>
       <span data-testid="settings-workspace-count">{workspaces.length}</span>
-      <span data-testid="settings-personal-workspace">
-        {personalWorkspaceId ?? "none"}
-      </span>
     </>
   );
 }

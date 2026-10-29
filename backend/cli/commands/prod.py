@@ -22,6 +22,7 @@ from backend.app.bootstrap import bootstrap as bootstrap_app
 from backend.app.db import make_engine, make_session_factory
 from backend.app.settings import Settings, default_signup_enabled
 from backend.cli import prod_setup
+from backend.cli.commands.admin import cli_operator_actor_id
 from backend.models.user import User
 from backend.services import deployment, server_admin_service
 from backend.services.credential_hashing import CredentialHasher
@@ -840,7 +841,9 @@ def _ensure_admin_user(email: str, settings: Settings) -> None:
         )
         temp_password = secrets.token_urlsafe(16)
         try:
-            service.add_user(email=email, password=temp_password)
+            service.add_user(
+                email=email, password=temp_password, actor_id=cli_operator_actor_id()
+            )
             typer.echo(f"    admin {email} created")
             typer.echo(f"    temporary password: {temp_password}")
             typer.echo(
@@ -857,7 +860,10 @@ def _ensure_admin_user(email: str, settings: Settings) -> None:
             )
             if user is not None:
                 server_admin_service.grant_server_admin(
-                    session, user.id, granted_by="setup"
+                    session,
+                    user.id,
+                    granted_by="setup",
+                    actor_id=cli_operator_actor_id(),
                 )
                 typer.echo(f"    granted server-admin to {email}")
     finally:

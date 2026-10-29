@@ -42,6 +42,7 @@
     "lint": "린트 큐",
     "activity": "활동",
     "search": "검색",
+    "inbox": "수신함",
     "settings": "설정"
   },
   "topbar": {
@@ -50,6 +51,7 @@
     "closeNavigation": "내비게이션 닫기",
     "openSearch": "검색 열기",
     "searchTitle": "검색",
+    "inbox": "수신함",
     "settings": "설정",
     "myPage": "계정",
     "signIn": "로그인",
@@ -94,11 +96,9 @@
     "switcherAria": "워크스페이스 전환",
     "current": "현재 워크스페이스",
     "filterAria": "워크스페이스 필터",
-    "personalGroup": "개인 워크스페이스",
     "memberGroup": "내 워크스페이스",
     "pendingGroup": "가입 요청 대기 중",
     "pendingBadge": "요청 대기 중",
-    "personalBadge": "개인",
     "ownedBy": "{{name}} 소유",
     "memberCount_one": "공유 중 · {{count}}명",
     "memberCount_other": "공유 중 · {{count}}명",
@@ -142,7 +142,7 @@
     "breadcrumb": "워크스페이스 찾기",
     "eyebrow": "워크스페이스 디렉터리",
     "title": "워크스페이스 찾기",
-    "description": "검색 가능한 워크스페이스를 살펴보세요. 비공개 개인 워크스페이스와 멤버 전용 정보는 여기에 표시되지 않습니다.",
+    "description": "검색 가능한 워크스페이스를 살펴보세요. 비공개 워크스페이스와 멤버 전용 정보는 여기에 표시되지 않습니다.",
     "search": {
       "label": "워크스페이스 검색",
       "placeholder": "워크스페이스 이름으로 검색",
@@ -232,6 +232,9 @@
     "password_policy_failed": "비밀번호는 8자 이상이어야 합니다.",
     "rate_limited": "요청이 너무 많습니다. 잠시 후 다시 시도하세요.",
     "review_already_claimed": "다른 검토자가 이미 이 항목을 처리하고 있습니다.",
+    "review_decision_undo_unavailable": "이 결정을 취소할 수 없습니다. 리뷰를 새로고침해 현재 상태를 확인하세요.",
+    "review_decision_id_conflict": "이 결정 요청이 이전 요청과 충돌합니다. 리뷰를 새로고침한 뒤 다시 시도하세요.",
+    "legacy_media_cutover_conflict": "첨부 파일 상태가 바뀌었습니다. 초안을 새로고침한 뒤 게시하세요.",
     "settings_policy_update_rejected": "허용되지 않는 정책 값입니다.",
     "signup_disabled": "계정 등록이 비활성화되어 있습니다.",
     "system_tree_node_protected": "시스템 폴더는 변경할 수 없습니다.",
@@ -287,7 +290,6 @@
     "workspace_member_inactive": "활성 계정만 워크스페이스에 추가할 수 있습니다.",
     "workspace_role_invalid": "뷰어, 편집자 또는 소유자를 선택하세요.",
     "workspace_last_owner_required": "워크스페이스에는 활성 소유자가 한 명 이상 있어야 합니다.",
-    "personal_workspace_owner_locked": "개인 워크스페이스 소유자는 제거하거나 강등할 수 없습니다. 대신 워크스페이스를 삭제하세요.",
     "workspace_first_share_confirmation_required": "이 멤버를 추가하면 워크스페이스 전체가 공유됨을 확인하세요.",
     "workspace_join_not_allowed": "이 워크스페이스는 초대가 필요하며 가입 요청을 받지 않습니다.",
     "workspace_join_request_not_found": "해당 가입 요청이 더 이상 존재하지 않습니다.",
@@ -296,14 +298,31 @@
     "workspace_join_request_requester_inactive": "가입을 요청한 계정이 활성 상태가 아닙니다.",
     "workspace_public_sharing_disabled": "페이지를 익명 공개하려면 먼저 워크스페이스를 외부 공개로 설정하세요.",
     "workspace_access_confirmation_required": "접근 설정 변경의 영향을 검토하고 확인하세요.",
-    "recent_reauthentication_required": "계속하려면 현재 비밀번호를 입력하세요.",
+    "recent_reauthentication_required": "계속하려면 본인 인증을 다시 진행하세요.",
+    "account_link_required": "같은 이메일을 사용하는 계정이 있습니다. 해당 계정으로 로그인한 뒤 계정에서 이 제공자를 연결하세요.",
+    "email_verification_invalid": "이 확인 링크는 잘못되었거나 만료되었거나 이미 사용되었습니다. 요청을 시작한 브라우저에서 최신 링크를 열어 주세요.",
+    "email_policy_failed": "이 로그인 제공자에서 허용하는 이메일 주소를 입력해 주세요.",
+    "sso_transaction_invalid": "로그인 시도가 만료되었거나 이미 사용되었습니다. 로그인을 다시 시작해 주세요.",
+    "sso_provider_unavailable": "이 로그인 제공자를 사용할 수 없습니다. 서버 관리자에게 문의하세요.",
+    "signup_not_allowed": "이 제공자로 계정을 만들 수 없습니다. 서버 관리자에게 문의하세요.",
+    "server_admin_required": "이 작업에는 서버 관리자 권한이 필요합니다.",
     "context_history_state_inconsistent": "게시하기 전에 서버 운영자가 이 페이지 기록을 복구해야 합니다.",
     "workspace_user_required": "워크스페이스를 관리하려면 사용자 계정으로 로그인하세요.",
     "database_schema_mismatch": "데이터베이스 업데이트가 필요합니다. 서버 관리자에게 데이터베이스 업그레이드를 요청한 뒤 다시 시도하세요.",
     "database_schema_mismatch_admin": "데이터베이스 업데이트가 필요합니다. SQLite 데이터베이스를 백업하고 dtxWiki 서버에서 설치 방식에 맞는 명령을 실행한 뒤 다시 시도하세요. systemd: `sudo systemctl stop dtxwiki-worker dtxwiki && sudo -u dtxwiki bash -c 'set -a; source /etc/dtxwiki/dtxwiki.env; /opt/dtxwiki/.venv/bin/dtxwiki bootstrap' && sudo systemctl start dtxwiki dtxwiki-worker`. Docker: `infra/prod`에서 `docker compose stop app worker && docker compose run --rm init && docker compose up -d app worker caddy`를 실행하세요. 소스 체크아웃: app과 worker를 중지하고 동일한 실행 환경을 로드한 뒤 `.venv/bin/dtxwiki bootstrap`을 실행하고 두 프로세스를 재시작하세요. 다시 시도하기 전에 `/health/ready`가 HTTP 200을 반환하는지 확인하세요.",
     "internal_error": "서버가 요청을 완료하지 못했습니다. 다시 시도하세요.",
     "workspace_not_selected": "워크스페이스가 선택되지 않았습니다. 워크스페이스를 선택한 뒤 다시 시도하세요.",
-    "invalid_request_path": "앱이 잘못된 요청을 만들었습니다. 페이지를 새로고침한 뒤 다시 시도하세요."
+    "invalid_request_path": "앱이 잘못된 요청을 만들었습니다. 페이지를 새로고침한 뒤 다시 시도하세요.",
+    "native_email_required": "비밀번호를 설정하려면 native 이메일 로그인을 연결하고 주소를 확인하세요. SSO는 계속 사용할 수 있습니다.",
+    "invalid_identity_recovery": "새 제공자, issuer, subject와 별도 본인 확인 근거를 확인하세요.",
+    "identity_not_found": "선택한 SSO identity가 이 계정에 없습니다. 새로고침 후 다시 선택하세요.",
+    "identity_changed": "선택한 뒤 SSO identity가 변경됐습니다. 새로고침하여 현재 연결을 확인하세요.",
+    "identity_unchanged": "다시 연결할 다른 SSO identity를 확인하고 입력하세요.",
+    "identity_already_linked": "이미 연결된 SSO identity입니다. 정확한 계정과 제공자를 확인하세요.",
+    "email_conflict_ticket_invalid": "요청 시간이 지났습니다. 제공자로 다시 로그인한 뒤 요청하세요.",
+    "email_conflict_already_decided": "이미 처리된 요청입니다. 목록을 새로고침하세요.",
+    "email_conflict_not_found": "요청이 더 이상 없습니다. 목록을 새로고침하세요.",
+    "invalid_email_conflict_decision": "사유를 1,000자 이내로 입력하세요."
   },
   "preview": {
     "badge": "미리보기",
@@ -384,7 +403,10 @@
     "member": "멤버",
     "private": "비공개",
     "public": "공개",
-    "team": "팀"
+    "team": "팀",
+    "approved": "승인됨",
+    "rejected": "거절됨",
+    "changes_requested": "변경 요청됨"
   },
   "time": {
     "unknownTime": "시간 정보 없음",
@@ -415,8 +437,8 @@
     "close": "차이 닫기",
     "closeAction": "닫기",
     "removedLine": "삭제된 줄",
-    "restore": "이 버전으로 복원",
-    "restoring": "복원 중"
+    "restore": "이 버전으로 새 초안 만들기",
+    "restoring": "새 초안 만드는 중"
   },
   "history": {
     "changes": "변경 내용",
@@ -447,5 +469,12 @@
     "versionDisabledEarlier": "v{{version}} — 선택 불가: 이미 이전 버전으로 선택됨",
     "versionDisabledLater": "v{{version}} — 선택 불가: 이미 이후 버전으로 선택됨",
     "selectorHelp": "같은 버전끼리는 비교할 수 없습니다. 쌍은 자동으로 오래된 버전부터 정렬됩니다."
+  },
+  "zoomViewer": {
+    "controls": "확대/축소 도구",
+    "out": "축소",
+    "current": "현재 배율 {{percent}}%",
+    "in": "확대",
+    "reset": "배율 초기화"
   }
 }

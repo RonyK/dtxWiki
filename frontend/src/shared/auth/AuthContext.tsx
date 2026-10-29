@@ -21,10 +21,12 @@ import {
   logout as logoutRequest,
   type AuthSession,
   type AuthUser,
+  type LoginMethod,
 } from "../api/auth";
 import { clearPersistedWorkspaceId, invalidateWorkspaceListCache } from "../api/workspace";
 import { setTreeFavoriteActor } from "../api/treeFavorites";
 import { isAbortError } from "../lib/abortError";
+import { clearReviewDrafts } from "../lib/reviewDraftStorage";
 
 type AuthStatus = "checking" | "authenticated" | "anonymous" | "transient_error";
 type PasswordRecoveryMode = "email" | "admin_assisted" | "disabled";
@@ -39,6 +41,9 @@ type AuthContextValue = {
   sessionError: string | null;
   capabilitiesChecked: boolean;
   signupEnabled: boolean;
+  passwordLoginEnabled: boolean;
+  emailEnrollmentEnabled: boolean;
+  loginMethods: LoginMethod[];
   passwordRecoveryMode: PasswordRecoveryMode;
   passwordRecoveryAdminAssisted: boolean;
   capabilitiesError: string | null;
@@ -68,6 +73,9 @@ export function AuthProvider({
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [capabilitiesChecked, setCapabilitiesChecked] = useState(false);
   const [signupEnabled, setSignupEnabled] = useState(false);
+  const [passwordLoginEnabled, setPasswordLoginEnabled] = useState(true);
+  const [emailEnrollmentEnabled, setEmailEnrollmentEnabled] = useState(false);
+  const [loginMethods, setLoginMethods] = useState<LoginMethod[]>([]);
   const [passwordRecoveryMode, setPasswordRecoveryMode] =
     useState<PasswordRecoveryMode>("disabled");
   const [passwordRecoveryAdminAssisted, setPasswordRecoveryAdminAssisted] =
@@ -139,6 +147,7 @@ export function AuthProvider({
       // log the user out — surface them as sessionError so the UI can show
       // a banner without redirecting to /login (review §6.3 FA-H4).
       if (error instanceof ApiError && error.status === 401) {
+        clearReviewDrafts();
         setApiErrorViewerIsServerAdmin(false);
         commitUser(null);
         setStatus("anonymous");
@@ -168,12 +177,17 @@ export function AuthProvider({
     // form visible after the server disables self-service registration.
     setCapabilitiesChecked(false);
     setSignupEnabled(false);
+    setEmailEnrollmentEnabled(false);
+    setLoginMethods([]);
     setPasswordRecoveryMode("disabled");
     setPasswordRecoveryAdminAssisted(false);
     setCapabilitiesError(null);
     try {
       const capabilities = await getAuthCapabilities();
       setSignupEnabled(capabilities.signup_enabled === true);
+      setPasswordLoginEnabled(capabilities.password_login?.enabled ?? true);
+      setEmailEnrollmentEnabled(capabilities.password_login?.email_enrollment_enabled === true);
+      setLoginMethods(capabilities.login_methods ?? []);
       setPasswordRecoveryMode(
         capabilities.password_recovery?.mode ?? "disabled",
       );
@@ -184,6 +198,7 @@ export function AuthProvider({
       return capabilities.signup_enabled === true;
     } catch (error) {
       setSignupEnabled(false);
+      setLoginMethods([]);
       setPasswordRecoveryMode("disabled");
       setPasswordRecoveryAdminAssisted(false);
       setCapabilitiesChecked(true);
@@ -271,6 +286,7 @@ export function AuthProvider({
       // workspace title/id/role via WorkspaceRouteBoundary's stale
       // selectedWorkspace before the fresh workspace list resolves.
       clearPersistedWorkspaceId();
+      clearReviewDrafts();
       commitUser(null, true);
       setStatus("anonymous");
       setSessionChecked(true);
@@ -286,6 +302,9 @@ export function AuthProvider({
       sessionError,
       capabilitiesChecked,
       signupEnabled,
+      passwordLoginEnabled,
+      emailEnrollmentEnabled,
+      loginMethods,
       passwordRecoveryMode,
       passwordRecoveryAdminAssisted,
       capabilitiesError,
@@ -307,6 +326,9 @@ export function AuthProvider({
       signOut,
       status,
       signupEnabled,
+      passwordLoginEnabled,
+      emailEnrollmentEnabled,
+      loginMethods,
       passwordRecoveryMode,
       passwordRecoveryAdminAssisted,
       user,

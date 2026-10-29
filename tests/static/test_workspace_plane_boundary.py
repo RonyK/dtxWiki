@@ -80,7 +80,6 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
         "uploader labels, after shard sessions close. Metadata and cleanup route "
         "through session_for(workspace_id); split-database API tests cover both."
     ),
-
     # -- WorkspaceDirectory thin-lookup pattern:
     # resolve workspace_id + membership role on the control session, then do
     # the actual page read/write through session_for(workspace_id).
@@ -207,6 +206,9 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
         "terminal-failure notification email does. The factory is passed to "
         "sweep_due whole rather than opened here, so no provider send ever "
         "runs inside a transaction (MAIL-01)."
+        " Account deletion additionally calls the control factory only after "
+        "requiring declared single_database topology: cleanup spans identity "
+        "and workspace resources atomically and is disabled on split providers."
     ),
     "backend/worker/runtime.py": (
         "Fan-out only, Phase 6a: dispatch_once_with_session_factory's claim/"
@@ -402,6 +404,21 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
 # separate allowlist rather than folded into CONTROL_SESSION_FACTORY_
 # ALLOWLIST above). Each entry records which identity-plane reads are allowed.
 SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
+    "backend/api/auth_verification.py": (
+        "Identity-plane only: browser-bound purpose-bound "
+        "reauthentication challenges use global users/identity/outbox records, "
+        "never workspace document or membership data."
+    ),
+    "backend/api/auth_sso.py": (
+        "Identity-plane only: an SSO email-conflict release request reads the "
+        "holder user, identity and auth_email_conflict_requests control-plane "
+        "rows; it never resolves a workspace or reads workspace content."
+    ),
+    "backend/api/auth_dependencies.py": (
+        "Builds the external-login broker over control-plane users, identities "
+        "and browser login transactions. Provisioning uses the existing Personal "
+        "workspace account-creation boundary; no workspace content is queried."
+    ),
     "backend/api/deps.py": (
         "Defines SessionFactoryDep itself. Its own use, in "
         "check_workspace_access, is the identity-plane require_workspace_"
@@ -414,6 +431,11 @@ SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
         "require_server_admin's server-admin grant check -- all "
         "identity-plane by construction; nothing in this file resolves a "
         "workspace_id to read a domain table."
+    ),
+    "backend/api/inbox.py": (
+        "Identity-plane only: the account inbox reads and marks "
+        "account_inbox_entry, a control-plane table keyed by the authenticated "
+        "user. The workspace inbox routes use WorkspaceSessionFactoryDep."
     ),
     "backend/api/oauth.py": (
         "MIXED. Every route delegates through oauth_service.py, which reads "
@@ -563,6 +585,9 @@ SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
         "default_workspace (backend/services/workspace_write.py), which "
         "writes User.default_workspace_id after a WorkspaceMembership check "
         "-- identity-plane."
+        " Account withdrawal is session-only, with password confirmation; its "
+        "cleanup service requires declared single_database topology before "
+        "touching identity and workspace resources in one transaction."
     ),
     "backend/api/workspace_access.py": (
         "Workspace visibility/join-policy settings and join-request "
@@ -591,6 +616,9 @@ SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
         "actual per-workspace reads/writes, with SessionFactoryDep in the "
         "orphans endpoint reserved for the identity-plane uploader-name "
         "lookup only -- same split as backend/api/read.py's twin endpoint."
+        " Account deletion policy is identity-plane AppMetadata. Scheduling "
+        "account deletion requires declared single_database topology for its "
+        "atomic credential and workspace-resource revocation."
     ),
 }
 
@@ -1066,7 +1094,6 @@ ACTOR_DISPLAY_IDENTITY_READERS: dict[str, str] = {
         "uploader labels, after shard sessions close. Metadata and cleanup route "
         "through session_for(workspace_id); split-database API tests cover both."
     ),
-
     "backend/api/admin.py": (
         "FIXED. admin_list_context_media_orphans lists the orphans on "
         "WorkspaceSessionFactoryDep, closes it, and resolves uploader names on "

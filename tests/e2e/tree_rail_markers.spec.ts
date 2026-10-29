@@ -52,9 +52,14 @@ const VIEWPORTS = [
 // Firefox DOMRect rounding is below 1/65536 CSS px.
 const GEOMETRY_EPSILON = 0.001;
 
-test.describe("TreeRail document states and personal favorites @cross-browser", () => {
+// Only the viewport tests below carry @cross-browser. The six-combination test
+// preserves shared row geometry and Context marker styling on every engine.
+// Favorite persistence, Library/Agent marker colors, live 72-hour expiry and
+// viewer isolation are checked on Chromium in the standard profile; exhaustive
+// runs retain these checks on every engine.
+test.describe("TreeRail document states and personal favorites", () => {
   for (const viewport of VIEWPORTS) {
-    test(`${viewport.key}: status tooltip never takes the pointer, leaves a downward sweep to the next row, dismisses with Escape, and follows native scrolling`, async ({ page }, testInfo) => {
+    test(`${viewport.key}: status tooltip never takes the pointer, leaves a downward sweep to the next row, dismisses with Escape, and follows native scrolling @cross-browser`, async ({ page }, testInfo) => {
       test.setTimeout(90_000);
       await page.setViewportSize(viewport);
       await authenticatePage(page, testInfo, `tree-tooltip-${viewport.key}`);
@@ -170,7 +175,7 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
       await evidenceScreenshot(page, testInfo, `${viewport.key}-tooltip-after-native-scroll-and-resize`, { animations: "disabled" });
     });
 
-    test(`${viewport.key}: favorite-only editor folders keep keyboard focus and never open an empty menu`, async ({ page }, testInfo) => {
+    test(`${viewport.key}: favorite-only editor folders keep keyboard focus and never open an empty menu @cross-browser`, async ({ page }, testInfo) => {
       await page.setViewportSize(viewport);
       await authenticatePage(page, testInfo, `tree-folder-menu-${viewport.key}`);
       const workspace = await currentWorkspace(page.request);
@@ -202,7 +207,7 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
       await expect(documentRow).toBeFocused();
     });
 
-    test(`${viewport.key}: six real Context state/favorite combinations preserve title space`, async ({ page }, testInfo) => {
+    test(`${viewport.key}: six real Context state/favorite combinations preserve title space @cross-browser`, async ({ page }, testInfo) => {
       test.setTimeout(90_000);
       await page.setViewportSize(viewport);
       await authenticatePage(page, testInfo, `tree-markers-${viewport.key}`);
@@ -365,8 +370,6 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
     test.setTimeout(90_000);
     await page.setViewportSize({ width: 1280, height: 900 });
     await authenticatePage(page, testInfo, "tree-favorite-sections");
-    // Personal workspaces provision Context and Library only. A regular
-    // workspace supplies the Agent roots required by its write contract.
     const workspace = await responseData<{ id: string; slug: string }>(await page.request.post(
       `${backendBaseUrl}/api/v1/workspaces`,
       { data: { title: `TreeRail all sections ${randomUUID()}` } },

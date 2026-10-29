@@ -203,3 +203,36 @@ def test_precheck_refusal_leaves_the_source_file_unconverted(
         migrate_data(source_url, target_url)
 
     assert _file_fingerprint(source_path) == before
+
+    # Persisted extension objects must be detected even while their plugin is
+    # disabled. This cannot use only the configured allowlist: either end can
+    # carry data from an earlier deployment, and --force must not discard it.
+    _create_schema_without_wal(target_url)
+    target_path = tmp_path / "target.sqlite"
+    for label, database_url in (("source", source_url), ("target", target_url)):
+        for ddl, name in (
+            (
+                "CREATE TABLE alembic_version_disabled (version_num TEXT)",
+                "alembic_version_disabled",
+            ),
+            ("CREATE TABLE disabled_records (id INTEGER)", "disabled_records"),
+            ("CREATE VIEW disabled_view AS SELECT 1 AS id", "disabled_view"),
+        ):
+            engine = create_engine(database_url)
+            try:
+                with engine.begin() as connection:
+                    connection.execute(text(ddl))
+                source_before = _file_fingerprint(source_path)
+                target_before = _file_fingerprint(target_path)
+                with pytest.raises(
+                    MigrationPrecheckError,
+                    match=f"{label} database contains plugin or unsupported",
+                ):
+                    migrate_data(source_url, target_url, force=True, dry_run=True)
+                assert _file_fingerprint(source_path) == source_before
+                assert _file_fingerprint(target_path) == target_before
+            finally:
+                with engine.begin() as connection:
+                    kind = "VIEW" if name == "disabled_view" else "TABLE"
+                    connection.execute(text(f"DROP {kind} {name}"))
+                engine.dispose()

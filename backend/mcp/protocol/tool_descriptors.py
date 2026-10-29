@@ -163,10 +163,11 @@ TOOL_META = {
     ),
     "what_changed": (
         "What changed",
-        "Published-change delta since a timestamp: created/updated/archived "
-        "entries with paths, reasons and version ids. Re-sync with this "
-        "instead of re-crawling; use read_concept with as_of for "
-        "point-in-time content.",
+        "Published-change delta since a timestamp: created/updated/"
+        "archived/unpublished entries with stable links, reasons and version ids. "
+        "created also marks a page published again after it was withdrawn "
+        "or archived; the reason says why. Re-sync with this instead of "
+        "re-crawling; use read_concept with as_of for point-in-time content.",
         True,
     ),
     "read": (

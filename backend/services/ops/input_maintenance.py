@@ -7,7 +7,7 @@ an older database. Identifiers are fixed below; values remain bound parameters.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from packaging.version import Version
@@ -21,6 +21,7 @@ from backend.migrations.revision_modules.v0_1.input_restrictions_v1 import (
     REVISION,
     RULES,
     audit,
+    rule_sql,
 )
 from backend.models.normalized_keys import normalize_search_key
 from backend.repositories.input_metadata_repair import InputMetadataRepairRepository
@@ -31,13 +32,24 @@ from backend.services.ops.migration_preflight import (
     make_non_mutating_engine,
 )
 
-SUPPORTED = frozenset(
+# These explicit revisions retain the complete input CHECK contract; the
+# auth revision allows absent native email; all present addresses retain the
+# frozen scalar policy, and every named CHECK remains required.
+CONSTRAINED_REVISIONS = frozenset(
+    {
+        REVISION,
+        "ef53a0a7061c",
+        "5c3395a75eb0",
+        "da94025713de",
+    }
+)
+SUPPORTED = CONSTRAINED_REVISIONS | frozenset(
     {
         "bd62193d5cf6",
         "efcbcf724889",
-        REVISION,
     }
 )
+_OPTIONAL_NATIVE_EMAIL_REVISIONS = frozenset({"da94025713de"})
 FIELDS = {
     "api-token": ("api_tokens", {"name": 128}),
     "workspace": ("workspace", {"title": 128, "name": 128, "goal": 512, "slug": 80}),
@@ -71,8 +83,8 @@ def _preflight(connection):
         for check in inspector.get_check_constraints(table)
         if check.get("name") in expected
     }
-    if (preflight.revision == REVISION and actual != expected) or (
-        preflight.revision != REVISION and actual
+    if (preflight.revision in CONSTRAINED_REVISIONS and actual != expected) or (
+        preflight.revision not in CONSTRAINED_REVISIONS and actual
     ):
         raise InputMaintenanceError(
             "input maintenance refused: stamp/schema constraint conflict"
@@ -110,8 +122,10 @@ def audit_inputs(database_url: str) -> list[dict]:
     engine = make_non_mutating_engine(database_url)
     try:
         with engine.connect() as connection:
-            _preflight(connection)
+            revision = _preflight(connection)
             report = audit(connection, allow_missing=True)
+            if revision in _OPTIONAL_NATIVE_EMAIL_REVISIONS:
+                report = _audit_optional_native_email(connection, report)
             report.extend(audit_preserved_inputs(connection))
             if "email_outbox" in sa.inspect(connection).get_table_names():
                 outbox = _table(connection, "email_outbox")
@@ -143,8 +157,39 @@ def audit_inputs(database_url: str) -> list[dict]:
         engine.dispose()
 
 
+def _audit_optional_native_email(connection, report):
+    """Keep frozen audits exact for old schemas without rejecting SSO NULLs."""
+    rule = next(
+        rule for rule in RULES if (rule.table, rule.field) == ("users", "email")
+    )
+    if not any(item["rule"] == rule.name for item in report):
+        return report
+    predicate = f"email IS NOT NULL AND NOT ({rule_sql(rule, connection.dialect.name)})"
+    count = connection.scalar(sa.text(f"SELECT count(*) FROM users WHERE {predicate}"))
+    current = [item for item in report if item["rule"] != rule.name]
+    if count:
+        identities = connection.scalars(
+            sa.text(f"SELECT id FROM users WHERE {predicate} ORDER BY id LIMIT 5")
+        )
+        current.append(
+            {
+                "rule": rule.name,
+                "classification": "blocking_scalar",
+                "count": count,
+                "ids": [str(identity) for identity in identities],
+            }
+        )
+    return current
+
+
 def repair_input(
-    database_url: str, entity: str, identity: UUID, field: str, value: str | None
+    database_url: str,
+    entity: str,
+    identity: UUID,
+    field: str,
+    value: str | None,
+    *,
+    actor_id: str = "system",
 ) -> None:
     if entity == "user":
         if field not in {"display_name", "email"} or value is None:
@@ -241,7 +286,7 @@ def repair_input(
                     name = value if field == "display_name" else row["display_name"]
                     email = value if field == "email" else row["email"]
                     changes["member_search_key"] = (
-                        normalize_search_key(f"{name} {email}")
+                        normalize_search_key(f"{name} {email or ''}")
                         if "member_search_key" in table.c
                         else None
                     )
@@ -251,6 +296,9 @@ def repair_input(
                         _invalidate_email_credentials(
                             connection, table, key, changes, now
                         )
+                    _audit_user_repair(
+                        connection, key, field, row[field], value, now, actor_id
+                    )
                 if entity == "workspace" and field in {"title", "name"}:
                     changes.update(title=value, name=value)
                     if "directory_title_key" in table.c:
@@ -282,6 +330,31 @@ def repair_input(
                     )
         finally:
             engine.dispose()
+
+
+def _audit_user_repair(connection, key, field, previous, value, now, actor_id):
+    """Record an operator's account change for server-admin-only review."""
+    audit = _table(connection, "audit_event")
+    values = {
+        "id": _key(connection, uuid4()),
+        "created_at": now,
+        "workspace_id": None,
+        "actor_kind": "system",
+        "actor_id": actor_id,
+        "actor_type": "system",
+        "action": "auth.user.repaired",
+        "target_kind": "user",
+        "target_type": "user",
+        "target_id": key,
+        "payload": {"field": field, "previous": previous, "value": value},
+        "event_summary": "A server operator changed account metadata",
+        "retention_class": "sensitive",
+    }
+    connection.execute(
+        audit.insert().values(
+            **{name: item for name, item in values.items() if name in audit.c}
+        )
+    )
 
 
 def _invalidate_email_credentials(connection, users, key, changes, now):

@@ -39,6 +39,22 @@ describe("activity feed presenter", () => {
     expect(presentActivityFeedEvent(feedEvent({ lane: "pending", review_item_id: "review-1" })).pendingReview).toBe(true);
     expect(presentActivityFeedEvent(feedEvent({ lane: "history", review_item_id: "review-1" })).pendingReview).toBe(false);
   });
+  it("retains the recorded move and reason when promoting its Context target to the heading", () => {
+    const shown = presentActivityFeedEvent(feedEvent({
+      event_key: "tree.node.move", title: "tree.node.move", body: "tree.node.move",
+      target: { target_kind: "workspace_tree_node", target_id: "node-1" },
+      target_title: "Guide", operation: "edit",
+      details: {
+        page_id: "page-1", reason: "Consolidate runbooks",
+        move: {
+          before: { path: ["Inbox"], provenance: "recorded" },
+          after: { path: ["Operations"], provenance: "recorded" },
+        },
+      },
+    }));
+    expect(shown.title).toBe("Guide");
+    expect(shown.body).toBe("Inbox → Operations · Consolidate runbooks");
+  });
 });
 
 describe("activity navigation and query scope", () => {

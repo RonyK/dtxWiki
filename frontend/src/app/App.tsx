@@ -89,6 +89,9 @@ const VerifyEmailScreen = lazy(() =>
     default: module.VerifyEmailScreen,
   })),
 );
+const IdentityVerificationScreen = lazy(() =>
+  import("../features/auth/IdentityVerificationScreen").then((module) => ({ default: module.IdentityVerificationScreen })),
+);
 const ContextScreen = lazy(() =>
   import("../features/context/ContextScreen").then((module) => ({ default: module.ContextScreen })),
 );
@@ -105,6 +108,11 @@ const ChatsDetailScreen = lazy(() =>
 const DashboardScreen = lazy(() =>
   import("../features/dashboard/DashboardScreen").then((module) => ({
     default: module.DashboardScreen,
+  })),
+);
+const InboxScreen = lazy(() =>
+  import("../features/inbox/InboxScreen").then((module) => ({
+    default: module.InboxScreen,
   })),
 );
 const ReviewScreen = lazy(() =>
@@ -149,6 +157,7 @@ export const appRoutes = createRoutesFromElements(
       <Route path="/forgot-password" element={<ForgotPasswordScreen />} />
       <Route path="/reset-password" element={<ResetPasswordScreen />} />
       <Route path="/verify-email" element={<VerifyEmailScreen />} />
+      <Route path="/auth/verify" element={<IdentityVerificationScreen />} />
       <Route path="/account" element={<RequireAuth><AccountSecurityScreen /></RequireAuth>} />
       <Route path="/account/password" element={<RequireAuth><AccountPasswordScreen /></RequireAuth>} />
       <Route path="/account/integrations" element={<RequireAuth><SettingsScreen scope="account" /></RequireAuth>} />
@@ -157,40 +166,46 @@ export const appRoutes = createRoutesFromElements(
       <Route path="/p/:workspaceId/:pageId" element={<RequireAuth><PagePermalinkRedirect /></RequireAuth>} />
       <Route path="/p/:pageId" element={<RequireAuth><NotFoundScreen /></RequireAuth>} />
       <Route path="/workspaces/:workspaceId" element={<RequireAuth><WorkspaceHomeRedirect /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/dashboard" element={<RequireAuth><DashboardScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/context" element={<RequireAuth><ContextScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/context/folders/new" element={<RequireAuth><RequireEditor><ContextScreen /></RequireEditor></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/context/folders/:nodeId" element={<RequireAuth><ContextScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/context/pages/new" element={<RequireAuth><RequireEditor><RoutedPageEditor mode="create" /></RequireEditor></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/context/pages/:pageId" element={<RequireAuth><ContextScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RequireAuth><RequireEditor><RoutedPageEditor mode="edit" /></RequireEditor></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/library" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/library/items/new" element={<RequireAuth><RequireEditor><LibraryScreen /></RequireEditor></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/library/items/:itemId" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/library/artifacts/:artifactId" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/library/folders/new" element={<RequireAuth><RequireEditor><LibraryScreen /></RequireEditor></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/library/folders/:nodeId" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/agent" element={<RequireAuth><AgentScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/agent/pages/new" element={<RequireAuth><RequireEditor><AgentScreen /></RequireEditor></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/agent/pages/:agentPageId" element={<RequireAuth><AgentScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/agent/pages/:agentPageId/edit" element={<RequireAuth><RequireEditor><AgentScreen /></RequireEditor></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/agent/folders/new" element={<RequireAuth><RequireEditor><AgentScreen /></RequireEditor></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/agent/folders/:nodeId" element={<RequireAuth><AgentScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/activity" element={<RequireAuth><ActivityScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/activity/:lane" element={<RequireAuth><ActivityLanePage /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/review" element={<RequireAuth><ReviewScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/review/:reviewItemId" element={<RequireAuth><ReviewScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/lint" element={<RequireAuth><LintScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/lint/findings/:findingId" element={<RequireAuth><LintScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/chats" element={<RequireAuth><RequireEditor><ChatsListScreen /></RequireEditor></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/chats/:chatId" element={<RequireAuth><RequireEditor><ChatsDetailScreen /></RequireEditor></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/ask" element={<RequireAuth><RequireAskEnabled><AskScreen /></RequireAskEnabled></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/ask/:askSessionId" element={<RequireAuth><RequireAskEnabled><AskScreen /></RequireAskEnabled></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/search" element={<RequireAuth><SearchScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/settings" element={<RequireAuth><SettingsScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/settings/integrations" element={<RequireAuth><SettingsScreen /></RequireAuth>} />
-        <Route path="/workspaces/:workspaceId/setup" element={<RequireAuth><SetupScreen /></RequireAuth>} />
-      {["/", "/dashboard", "/context", "/library", "/agent", "/ask", "/chats", "/activity", "/activity/:lane", "/review", "/lint", "/search", "/settings", "/settings/integrations", "/setup"].map(path => (
+      <Route path="/workspaces/:workspaceId/dashboard" element={<RequireAuth><DashboardScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/context" element={<RequireAuth><ContextScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/context/folders/new" element={<RequireAuth><RequireEditor><ContextScreen /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/context/folders/:nodeId" element={<RequireAuth><ContextScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/context/pages/new" element={<RequireAuth><RequireEditor><RoutedPageEditor mode="create" /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId" element={<RequireAuth><ContextScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RequireAuth><RequireEditor><RoutedPageEditor mode="edit" /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/library" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/library/items/new" element={<RequireAuth><RequireEditor><LibraryScreen /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/library/items/:itemId" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/library/artifacts/:artifactId" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/library/folders/new" element={<RequireAuth><RequireEditor><LibraryScreen /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/library/folders/:nodeId" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent" element={<RequireAuth><AgentScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent/pages/new" element={<RequireAuth><RequireEditor><AgentScreen /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent/pages/:agentPageId" element={<RequireAuth><AgentScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent/pages/:agentPageId/edit" element={<RequireAuth><RequireEditor><AgentScreen /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent/folders/new" element={<RequireAuth><RequireEditor><AgentScreen /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent/folders/:nodeId" element={<RequireAuth><AgentScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/activity" element={<RequireAuth><ActivityScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/activity/:lane" element={<RequireAuth><ActivityLanePage /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/review" element={<RequireAuth><ReviewScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/review/:reviewItemId" element={<RequireAuth><ReviewScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/lint" element={<RequireAuth><LintScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/lint/findings/:findingId" element={<RequireAuth><LintScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/chats" element={<RequireAuth><RequireEditor><ChatsListScreen /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/chats/:chatId" element={<RequireAuth><RequireEditor><ChatsDetailScreen /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/ask" element={<RequireAuth><RequireAskEnabled><AskScreen /></RequireAskEnabled></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/ask/:askSessionId" element={<RequireAuth><RequireAskEnabled><AskScreen /></RequireAskEnabled></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/search" element={<RequireAuth><SearchScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/settings" element={<RequireAuth><SettingsScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/settings/integrations" element={<RequireAuth><SettingsScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/setup" element={<RequireAuth><SetupScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/inbox" element={<RequireAuth><InboxScreen /></RequireAuth>} />
+      <Route path="/inbox" element={<RequireAuth><InboxScreen /></RequireAuth>} />
+      {[
+        "/", "/dashboard", "/context", "/library", "/agent", "/ask",
+        "/chats", "/activity", "/activity/:lane", "/review", "/lint",
+        "/search", "/settings", "/settings/integrations", "/setup",
+      ].map((path) => (
         <Route key={path} path={path} element={<RequireAuth><LegacyWorkspaceLanding /></RequireAuth>} />
       ))}
       <Route path="*" element={<RequireAuth><NotFoundScreen /></RequireAuth>} />
@@ -338,6 +353,7 @@ export function isAuthBootstrapPath(pathname: string) {
     "/forgot-password",
     "/reset-password",
     "/verify-email",
+    "/auth/verify",
   ].includes(normalized);
 }
 

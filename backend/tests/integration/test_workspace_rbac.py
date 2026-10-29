@@ -299,17 +299,17 @@ def test_workspace_delete_detaches_audit_history_instead_of_blocking(
     assert recreated.json()["data"]["slug"] == original_slug
 
 
-def test_workspace_delete_allows_last_personal_and_rejects_non_empty_workspace(
+def test_workspace_delete_allows_starter_workspace_and_rejects_non_empty_workspace(
     page_service,
 ):
     client = make_client(page_service, "owner-delete@example.com")
-    personal_workspace_id = client.get("/api/v1/workspaces").json()["data"][
+    starter_workspace_id = client.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
     ]
-    personal_delete = client.delete(f"/api/v1/workspaces/{personal_workspace_id}")
-    assert personal_delete.status_code == 200
-    assert personal_delete.json()["data"]["deleted_workspace_id"] == (
-        personal_workspace_id
+    starter_delete = client.delete(f"/api/v1/workspaces/{starter_workspace_id}")
+    assert starter_delete.status_code == 200
+    assert starter_delete.json()["data"]["deleted_workspace_id"] == (
+        starter_workspace_id
     )
     with page_service.session_factory() as session:
         user = session.scalar(
@@ -317,7 +317,6 @@ def test_workspace_delete_allows_last_personal_and_rejects_non_empty_workspace(
         )
         assert user is not None
         assert user.default_workspace_id is None
-        assert user.personal_workspace_id is None
     empty_list = client.get("/api/v1/workspaces")
     assert empty_list.status_code == 200
     assert empty_list.json()["data"]["workspaces"] == []
@@ -335,7 +334,6 @@ def test_workspace_delete_allows_last_personal_and_rejects_non_empty_workspace(
     after_relogin = client.get("/api/v1/workspaces")
     assert after_relogin.status_code == 200
     assert after_relogin.json()["data"]["workspaces"] == []
-    assert after_relogin.json()["data"]["personal_workspace_id"] is None
 
     created = client.post(
         "/api/v1/workspaces",
@@ -395,33 +393,6 @@ def test_purge_is_refused_before_anything_is_deleted_when_the_store_cannot_purge
     assert still_there.status_code == 200
 
 
-def test_workspace_delete_allows_personal_after_default_changes(page_service):
-    client = make_client(page_service, "personal-delete@example.com")
-    listed = client.get("/api/v1/workspaces").json()["data"]
-    personal_id = listed["current_workspace_id"]
-    created = client.post(
-        "/api/v1/workspaces",
-        json={"title": "Replacement Default"},
-    ).json()["data"]
-    changed = client.patch(
-        "/api/v1/users/me/default-workspace",
-        json={"workspace_id": created["id"]},
-    )
-    assert changed.status_code == 200
-
-    deleted = client.delete(f"/api/v1/workspaces/{personal_id}")
-
-    assert deleted.status_code == 200
-    assert deleted.json()["data"]["deleted_workspace_id"] == personal_id
-    with page_service.session_factory() as session:
-        user = session.scalar(
-            select(User).where(User.email == "personal-delete@example.com")
-        )
-        assert user is not None
-        assert user.personal_workspace_id is None
-        assert user.default_workspace_id == UUID(created["id"])
-
-
 def test_workspace_with_default_slug_has_no_special_delete_protection(page_service):
     client = make_client(page_service, "legacy-default-delete@example.com")
     with page_service.session_factory.begin() as session:
@@ -431,9 +402,8 @@ def test_workspace_with_default_slug_has_no_special_delete_protection(page_servi
         workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         assert user is not None
         assert workspace is not None
-        personal_workspace_id = user.personal_workspace_id
         default_workspace_id = user.default_workspace_id
-        assert personal_workspace_id is not None
+        assert default_workspace_id is not None
         grant_workspace_membership(
             session,
             user_id=user.id,
@@ -452,7 +422,6 @@ def test_workspace_with_default_slug_has_no_special_delete_protection(page_servi
         )
         assert user is not None
         assert session.get(Workspace, workspace_id) is None
-        assert user.personal_workspace_id == personal_workspace_id
         assert user.default_workspace_id == default_workspace_id
 
 
@@ -716,6 +685,25 @@ def test_request_changes_routes_to_me_scope(page_service):
     )
     assert to_me.status_code == 200
     assert review_item_id in [item["id"] for item in to_me.json()["data"]["items"]]
+
+    # Withdrawing the request takes the item out of every recipient's queue; a
+    # retry reads the result, and a decision that is not the latest is refused.
+    decision_id = decided.json()["data"]["undo"]["decision_id"]
+    undo_path = (
+        f"/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}"
+        f"/decisions/{decision_id}/undo"
+    )
+    withdrawn = owner.post(undo_path)
+    assert withdrawn.status_code == 200
+    assert withdrawn.json()["data"]["status"] == "pending"
+    assert owner.post(undo_path).status_code == 200
+    to_me = owner.get(f"/api/v1/workspaces/{workspace_id}/reviews?scope=to_me")
+    assert review_item_id not in [item["id"] for item in to_me.json()["data"]["items"]]
+    stale = owner.post(undo_path.replace(decision_id, str(uuid4())))
+    assert (stale.status_code, stale.json()["error_code"]) == (
+        409,
+        "review_decision_undo_unavailable",
+    )
 
 
 def test_claim_and_second_claimer_conflicts(page_service):

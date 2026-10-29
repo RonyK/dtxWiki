@@ -2096,6 +2096,33 @@ body:has(.tree-node-menu) .tree-row-tooltip {
   bottom: -2px;
 }
 
+/* Below an expanded row the drop lands as its first child, so the line starts
+   at the children's indent instead of the row's own. */
+.tree-row.tree-row-insert-first-child::after {
+  left: calc(2px + var(--tree-level) * var(--tree-indent-step));
+}
+
+/* Touch drags only: the finger hides the insertion line, so the outcome is
+   spelled out above it. Portaled to the document root like .tree-row-tooltip,
+   whose layer and colours it shares. */
+.tree-drop-hint {
+  position: fixed;
+  z-index: 80;
+  max-width: min(320px, calc(100vw - 16px));
+  overflow: hidden;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--surface);
+  box-shadow: 0 2px 8px rgb(15 23 42 / 18%);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .tree-row.active,
 .nav-item.active {
   background: var(--surface-active);
@@ -2550,6 +2577,41 @@ body:has(.tree-node-menu) .tree-row-tooltip {
 
 .account-grid .auth-panel {
   align-content: start;
+}
+
+.account-deletion-panel {
+  grid-column: 1 / -1;
+}
+
+.account-deletion-panel h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.account-deletion-form {
+  display: grid;
+  gap: 12px;
+}
+
+.user-deletion-workspaces ul,
+.admin-user-held-workspaces ul,
+.admin-held-members {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.user-deletion-workspaces li,
+.admin-user-held-workspaces li,
+.admin-held-members li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .account-panel-hint {

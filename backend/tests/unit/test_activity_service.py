@@ -20,6 +20,60 @@ from backend.services.job_read_service import (
 from backend.services.review_service import ReviewService
 
 
+def test_context_activity_owner_recovery_requires_declared_colocation():
+    # One SQL-boundary scenario, contrasting undeclared and declared topology:
+    # an owner fallback can fail on a workspace shard with no Users table even
+    # when every returned decision is public. Unified-DB integration fixtures
+    # cannot expose that missing-table failure, so inspect the actual compiled
+    # projection query here rather than adding another database/E2E fixture.
+    from sqlalchemy.dialects import sqlite
+
+    from backend.app.container import SINGLE_DATABASE_TOPOLOGY
+    from backend.services.activity_projection import ContextActivityProjection
+
+    class RecordingSession:
+        def __init__(self):
+            self.info = {}
+            self.statements = []
+
+        def scalars(self, statement):
+            self.statements.append(statement)
+            return []
+
+        def last_sql(self):
+            return str(self.statements[-1].compile(dialect=sqlite.dialect()))
+
+    session = RecordingSession()
+    workspace_id, principal = uuid4(), uuid4()
+    actor = ActorContext(
+        actor_kind="human",
+        actor_id=str(principal),
+        user_id=principal,
+        workspace_id=workspace_id,
+        workspace_role="owner",
+        role="owner",
+    )
+    rows = [
+        SimpleNamespace(
+            target_kind="system",
+            target_id=None,
+            payload={"decision_id": str(uuid4())},
+        )
+    ]
+
+    ContextActivityProjection(session, workspace_id, actor, rows)
+    shard_sql = session.last_sql()
+    assert "FROM users" not in shard_sql
+    assert "review_decision.audience_user_id =" in shard_sql
+    assert "review_decision.audience_kind IS NULL" in shard_sql
+
+    session.info["database_provider"] = SimpleNamespace(
+        storage_topology=SINGLE_DATABASE_TOPOLOGY
+    )
+    ContextActivityProjection(session, workspace_id, actor, rows)
+    assert "FROM users" in session.last_sql()
+
+
 def test_activity_event_metadata_keys_known_actions_and_leaves_unknown_unkeyed():
     keyed = SimpleNamespace(
         action="tree.node.rename",

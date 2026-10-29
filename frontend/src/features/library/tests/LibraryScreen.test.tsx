@@ -1,7 +1,7 @@
 import { EditorView } from "@codemirror/view";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
+import { Link, MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TreeNodePayload } from "../../../shared/api/workspace";
@@ -90,6 +90,48 @@ describe("LibraryScreen", () => {
     await waitFor(() => expect(document.title).toBe(`${expected} - dtxWiki`));
     unmount();
     expect(document.title).toBe(previousTitle);
+  });
+
+  it("refreshes the overview and tree after leaving the reader and clicking its menu again", async () => {
+    let pages = [libraryItemSummary("item-1", "Existing item", "https://example.com/existing")];
+    let listReads = 0;
+    let treeReads = 0;
+    mockFetch({
+      [`${BASE}/api/v1/workspaces`]: { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items`]: () => {
+        listReads += 1;
+        return { data: pages, total: pages.length };
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=library`]: () => {
+        treeReads += 1;
+        return { data: treeResponse("library", pages.map((page) =>
+          treeNode(`node-${page.id}`, page.id, page.title),
+        )) };
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/item-1`]: { data: libraryItemDetail("item-1", "Existing item", "https://example.com/existing", "sha256:existing", "Selected reader body") },
+    });
+    const view = render(
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library/items/item-1"]}>
+        <Link to="/workspaces/workspace-1/library">Main menu library</Link>
+        <LibraryScreen />
+      </MemoryRouter>,
+    );
+    await screen.findByText("Selected reader body");
+    const main = within(view.container.querySelector(".feature-main") as HTMLElement);
+    expect([listReads, treeReads]).toEqual([1, 1]);
+
+    pages = [libraryItemSummary("fresh-1", "Fresh after reader", "https://example.com/fresh-1"), ...pages];
+    await userEvent.click(screen.getByRole("link", { name: "Main menu library" }));
+    await screen.findByRole("treeitem", { name: "Fresh after reader" });
+    expect(await main.findByRole("button", { name: /Fresh after reader/ })).toBeInTheDocument();
+    expect(screen.queryByText("Selected reader body")).not.toBeInTheDocument();
+    expect([listReads, treeReads]).toEqual([2, 2]);
+
+    pages = [libraryItemSummary("fresh-2", "Fresh while home", "https://example.com/fresh-2"), ...pages];
+    await userEvent.click(screen.getByRole("link", { name: "Main menu library" }));
+    await screen.findByRole("treeitem", { name: "Fresh while home" });
+    expect(await main.findByRole("button", { name: /Fresh while home/ })).toBeInTheDocument();
+    expect([listReads, treeReads]).toEqual([3, 3]);
   });
 
   it("renders library items, current version, and extracted view", async () => {
@@ -2018,7 +2060,7 @@ describe("LibraryScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items`]: () => ({
         data: [
           {
             ...libraryItemSummary(
@@ -2028,18 +2070,18 @@ describe("LibraryScreen", () => {
               "docx",
               "manual_upload",
             ),
-            processing_status: "failed",
+            processing_status: retryRequests > 0 ? "queued" : "failed",
           },
         ],
-      },
+      }),
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=library`]: {
         data: treeResponse("library", [
           treeNode("node-1", LIBRARY_ITEM_ID, "Failed conversion"),
         ]),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]: {
-        data: failed,
-      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]: () => ({
+        data: retryRequests > 0 ? queued : failed,
+      }),
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/versions/${failed.current_version.id}/conversion/retry`]: (
         _input: RequestInfo | URL,
         init?: RequestInit,
@@ -2509,7 +2551,7 @@ describe("LibraryScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items`]: () => ({
         data: [
           {
             ...libraryItemSummary(
@@ -2517,10 +2559,10 @@ describe("LibraryScreen", () => {
               "Converting Notes",
               "https://example.com/converting.md",
             ),
-            processing_status: "converting",
+            processing_status: detailCalls >= 2 ? "ready" : "converting",
           },
         ],
-      },
+      }),
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=library`]: {
         data: treeResponse("library", [
           treeNode("node-1", LIBRARY_ITEM_ID, "Converting Notes"),
@@ -2723,6 +2765,8 @@ describe("LibraryScreen", () => {
       ],
     };
     let detailReads = 0;
+    let retried = false;
+    let readyOnServer = false;
     mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
@@ -2739,7 +2783,7 @@ describe("LibraryScreen", () => {
         total: 2,
         has_more: true,
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items?limit=10&cursor=cursor-2`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items?limit=10&cursor=cursor-2`]: () => ({
         data: [
           {
             ...libraryItemSummary(
@@ -2749,21 +2793,23 @@ describe("LibraryScreen", () => {
               "docx",
               "manual_upload",
             ),
-            processing_status: "failed",
+            processing_status: readyOnServer ? "ready" : retried ? "queued" : "failed",
           },
         ],
         next_cursor: null,
         total: 2,
         has_more: false,
-      },
+      }),
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=library`]: {
         data: treeResponse("library", [folderNode("references", "References")]),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${SECOND_LIBRARY_ITEM_ID}`]: () => ({
-        data: detailReads++ === 0 ? failed : detailReads === 2 ? queued : ready,
-      }),
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/versions/${failed.current_version.id}/conversion/retry`]: {
-        data: queued,
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${SECOND_LIBRARY_ITEM_ID}`]: () => {
+        detailReads += 1;
+        return { data: readyOnServer ? ready : retried ? queued : failed };
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/versions/${failed.current_version.id}/conversion/retry`]: () => {
+        retried = true;
+        return { data: queued };
       },
     });
 
@@ -2788,6 +2834,9 @@ describe("LibraryScreen", () => {
         name: "Library",
       }),
     );
+    // Home visits reload page one. Fetch its tail again from the server so
+    // conversion state is checked against the fresh collection as well.
+    await userEvent.click(await screen.findByRole("button", { name: "Load more" }));
     let overview = screen.getByText("Recent updates").closest("section");
     expect(overview).not.toBeNull();
     let overviewRow = within(overview as HTMLElement).getByRole("button", {
@@ -2797,6 +2846,8 @@ describe("LibraryScreen", () => {
       .toBeInTheDocument();
 
     await userEvent.click(overviewRow);
+    await screen.findByRole("heading", { name: title, level: 2 });
+    readyOnServer = true;
     await waitFor(() => expect(detailReads).toBeGreaterThanOrEqual(3), {
       timeout: 4_000,
     });
@@ -2808,6 +2859,7 @@ describe("LibraryScreen", () => {
         name: "Library",
       }),
     );
+    await userEvent.click(await screen.findByRole("button", { name: "Load more" }));
     overview = screen.getByText("Recent updates").closest("section");
     expect(overview).not.toBeNull();
     overviewRow = within(overview as HTMLElement).getByRole("button", {

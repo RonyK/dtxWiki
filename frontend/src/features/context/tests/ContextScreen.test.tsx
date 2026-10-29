@@ -9,6 +9,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { useCallback, useEffect, useState } from "react";
 import {
+  Link,
   MemoryRouter,
   Route,
   Routes,
@@ -17,6 +18,7 @@ import {
 } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { setTreeFavoriteActor } from "../../../shared/api/treeFavorites";
 import type { TreeNodePayload } from "../../../shared/api/workspace";
 import { i18n } from "../../../shared/i18n";
 import type { ContextHistoryStatus } from "../../../shared/lib/contextHistory";
@@ -32,6 +34,9 @@ const { ctxWorkspace } = vi.hoisted(() => ({
       unknown
     >,
   },
+}));
+const { ctxAuth } = vi.hoisted(() => ({
+  ctxAuth: { current: null as { user: { user_id: string } } | null },
 }));
 const { contextMermaid } = vi.hoisted(() => ({
   contextMermaid: {
@@ -49,6 +54,10 @@ vi.mock(
     useOptionalWorkspaceContext: () => ctxWorkspace.current,
   }),
 );
+vi.mock("../../../shared/auth/AuthContext", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useOptionalAuth: () => ctxAuth.current,
+}));
 vi.mock("mermaid", () => ({ default: contextMermaid }));
 
 const BASE = "http://127.0.0.1:21080";
@@ -69,6 +78,8 @@ describe("ContextScreen", () => {
       workspaceSlug: "demo",
       workspaces: [{ id: WORKSPACE_ID, role: "owner", visibility: "public", slug: "demo" }],
     };
+    ctxAuth.current = null;
+    setTreeFavoriteActor(null);
   });
 
   afterEach(() => {
@@ -505,6 +516,98 @@ describe("ContextScreen", () => {
   // The former single mega-test drove every surface in one 5s budget and timed
   // out under full-suite load (review R-9 / Codex F-8). Each surface now keeps
   // its own budget over the same fixture.
+  it("refreshes the overview and tree after leaving the reader and clicking its menu again", async () => {
+    const fetchMock = mockDecisionLogRoutes();
+    const originalFetch = fetchMock.getMockImplementation()!;
+    let pages = [contextPage(PAGE_ID, "Decision Log", "decision-log")];
+    let listReads = 0;
+    let treeReads = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(input.toString());
+      if (url.pathname === `/api/v1/workspaces/${WORKSPACE_ID}/context/pages`) {
+        listReads += 1;
+        return jsonResponse({ data: pages, total: pages.length });
+      }
+      if (url.pathname === `/api/v1/workspaces/${WORKSPACE_ID}/tree`) {
+        treeReads += 1;
+        return jsonResponse({ data: treeResponse("context", pages.map((page) =>
+          treeNode(`node-${page.id}`, page.id, page.title),
+        )) });
+      }
+      return originalFetch(input, init);
+    });
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
+        <Link to={`/workspaces/${WORKSPACE_ID}/context`}>Main menu Context</Link>
+        <Routes>
+          <Route path="/workspaces/:workspaceId/context" element={<ContextScreen />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId" element={<ContextScreen />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText("Needle body");
+    expect([listReads, treeReads]).toEqual([1, 1]);
+
+    pages = [contextPage("fresh-1", "Fresh after reader", "fresh-1"), ...pages];
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Context" }));
+    await screen.findByRole("treeitem", { name: "Fresh after reader" });
+    expect(await screen.findAllByText("Fresh after reader")).toHaveLength(2);
+    expect(screen.queryByText("Needle body")).not.toBeInTheDocument();
+    expect([listReads, treeReads]).toEqual([3, 3]);
+
+    pages = [contextPage("fresh-2", "Fresh while home", "fresh-2"), ...pages];
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Context" }));
+    await screen.findByRole("treeitem", { name: "Fresh while home" });
+    expect(await screen.findAllByText("Fresh while home")).toHaveLength(2);
+    expect([listReads, treeReads]).toEqual([4, 4]);
+  });
+
+  it("drops appended and in-flight pages when a menu refresh returns the same first page and cursor", async () => {
+    const fetchMock = mockDecisionLogRoutes();
+    const originalFetch = fetchMock.getMockImplementation()!;
+    const stalePage = deferredResponse();
+    let firstPageReads = 0;
+    let moreReads = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(input.toString());
+      if (url.pathname === `/api/v1/workspaces/${WORKSPACE_ID}/context/pages`) {
+        if (url.searchParams.has("cursor")) {
+          moreReads += 1;
+          return moreReads === 1 ? jsonResponse({
+            data: [contextPage("old-tail", "Previously loaded tail", "old-tail")],
+            next_cursor: null, total: 3, has_more: false,
+          }) : stalePage.promise;
+        }
+        firstPageReads += 1;
+        const response = await originalFetch(input, init);
+        const body = await response.json();
+        return jsonResponse({ ...body, next_cursor: "same-cursor", total: 3, has_more: true });
+      }
+      return originalFetch(input, init);
+    });
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
+        <Link to={`/workspaces/${WORKSPACE_ID}/context`}>Main menu Context</Link>
+        <ContextScreen />
+      </MemoryRouter>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Load more" }));
+    await screen.findByText("Previously loaded tail");
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Context" }));
+    await waitFor(() => expect(screen.queryByText("Previously loaded tail")).not.toBeInTheDocument());
+    expect(firstPageReads).toBe(2);
+    await userEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Context" }));
+    await waitFor(() => expect(firstPageReads).toBe(3));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Load more" })).toBeEnabled());
+    await act(async () => stalePage.resolve(jsonResponse({
+      data: [contextPage("stale-tail", "Stale in-flight tail", "stale-tail")],
+      next_cursor: null, total: 3, has_more: false,
+    })));
+    expect(screen.queryByText("Stale in-flight tail")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Load more" })).toBeEnabled();
+  });
+
   it("renders the tree and hides the Details rail before any selection", async () => {
     await renderDecisionLog();
     expect(document.title).toBe("dtxWiki");
@@ -922,9 +1025,23 @@ describe("ContextScreen", () => {
     ).toBe(true);
   });
 
-  it("renders selected markdown with page actions and copy link", async () => {
+  it("renders selected markdown with page actions, favorite, and copy link", async () => {
     const writeText = installClipboardStub();
-    mockDecisionLogRoutes();
+    ctxAuth.current = { user: { user_id: "viewer-1" } };
+    setTreeFavoriteActor("viewer-1");
+    const fetchMock = mockDecisionLogRoutes();
+    const routeFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) =>
+      init?.method === "PUT"
+        ? jsonResponse({
+            data: {
+              target_kind: "context_page",
+              target_id: PAGE_ID,
+              is_favorite: true,
+            },
+          })
+        : routeFetch(input, init),
+    );
     render(
       <MemoryRouter
         initialEntries={[`/workspaces/${WORKSPACE_ID}/context/folders/ancestor-0?expanded=ancestor-0&view=reader`]}
@@ -965,6 +1082,21 @@ describe("ContextScreen", () => {
     expect(
       screen.getByRole("menuitem", { name: "Delete" }),
     ).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("menuitem", { name: "Add to my favorites" }),
+    );
+    expect(
+      fetchMock.mock.calls.find(([, init]) => init?.method === "PUT"),
+    ).toEqual([
+      `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/favorites/context_page/${PAGE_ID}`,
+      expect.objectContaining({ body: JSON.stringify({ is_favorite: true }) }),
+    ]);
+    // The reader menu and the rail share one favorite store.
+    expect(document.querySelectorAll(".tree-row-favorite")).toHaveLength(1);
+    await userEvent.click(moreAction);
+    expect(
+      await screen.findByRole("menuitem", { name: "Remove from my favorites" }),
+    ).toBeEnabled();
     await userEvent.click(screen.getByRole("menuitem", { name: "Copy link" }));
     expect(writeText).toHaveBeenCalledWith(
       `${window.location.origin}/p/${WORKSPACE_ID}/${PAGE_ID}`,
@@ -983,9 +1115,14 @@ describe("ContextScreen", () => {
     const readerTabs = within(
       screen.getByRole("tablist", { name: "Context reader views" }),
     );
+    // Activity loads when its tab opens, so a plain page view neither requests
+    // it nor shows its count.
     expect(
       readerTabs.getAllByRole("tab").map((tab) => tab.textContent),
-    ).toEqual(["View", "History1", "GraphPreview", "Activity1"]);
+    ).toEqual(["View", "History1", "GraphPreview", "Activity"]);
+    expect(
+      fetchMock.mock.calls.some((call) => String(call[0]).includes("/activity")),
+    ).toBe(false);
     expect(readerTabs.queryByRole("tab", { name: "Bundle" })).toBeNull();
     await userEvent.click(
       screen.getByRole("treeitem", { name: "Architecture Notes" }),
@@ -1268,7 +1405,7 @@ describe("ContextScreen", () => {
       within(draftHead).getByRole("button", { name: "Show changes in v8 since v7" }),
     ).toBeInTheDocument();
     expect(
-      within(draftHead).queryByRole("button", { name: "Restore this version" }),
+      within(draftHead).queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
     expect(publishedHead).not.toHaveAttribute("aria-current");
     expect(
@@ -1276,7 +1413,7 @@ describe("ContextScreen", () => {
     ).toBeInTheDocument();
     expect(
       within(publishedHead).getByRole("button", {
-        name: "Restore this version",
+        name: "Start a new draft from this version",
       }),
     ).toBeInTheDocument();
     expect(
@@ -1354,7 +1491,7 @@ describe("ContextScreen", () => {
       .getByText("v1")
       .closest(".history-card") as HTMLElement;
     expect(
-      within(alternative).queryByRole("button", { name: "Restore this version" }),
+      within(alternative).queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
     await userEvent.click(
       within(alternative).getByRole("button", { name: "Reconcile" }),
@@ -1749,6 +1886,7 @@ describe("ContextScreen", () => {
       expect(contextMermaid.render).toHaveBeenCalledWith(
         expect.stringMatching(/^dtxwiki-mermaid-/),
         expect.stringContaining("viewA[View diagram]"),
+        expect.any(HTMLElement),
       ),
     );
 
@@ -1762,6 +1900,7 @@ describe("ContextScreen", () => {
       expect(contextMermaid.render).toHaveBeenCalledWith(
         expect.stringMatching(/^dtxwiki-mermaid-/),
         expect.stringContaining('seed["Decision Log"]'),
+        expect.any(HTMLElement),
       ),
     );
 
@@ -2456,7 +2595,7 @@ describe("ContextScreen", () => {
     expect(within(viewerHistory).queryByText("Alternative draft")).toBeNull();
     // restore is a write; viewers must not see it (backend re-enforces anyway).
     expect(
-      screen.queryByRole("button", { name: "Restore this version" }),
+      screen.queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
   });
 
@@ -2827,11 +2966,11 @@ describe("ContextScreen", () => {
     ).toHaveTextContent("Changes");
     expect(
       within(versionTwo).queryByRole("button", {
-        name: "Restore this version",
+        name: "Start a new draft from this version",
       }),
     ).toBeNull();
     expect(
-      within(versionOne).getByRole("button", { name: "Restore this version" }),
+      within(versionOne).getByRole("button", { name: "Start a new draft from this version" }),
     ).toBeInTheDocument();
 
     await userEvent.click(
@@ -2861,23 +3000,29 @@ describe("ContextScreen", () => {
       within(dialog).getByText("Current published v2 · visible to readers"),
     ).toBeInTheDocument();
     expect(
-      within(dialog).queryByRole("button", { name: "Restore this version" }),
+      within(dialog).queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
 
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Close diff" }),
     );
     await userEvent.click(
-      within(versionOne).getByRole("button", { name: "Restore this version" }),
+      within(versionOne).getByRole("button", { name: "Start a new draft from this version" }),
     );
 
     expect(confirmSpy).toHaveBeenCalledWith(
-      "Restore v1 as a new draft? The published version stays unchanged.",
+      "Create a new draft from v1? The published version stays unchanged.",
     );
     expect(fetchMock).toHaveBeenCalledWith(
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}/restore`,
       expect.objectContaining({ method: "POST" }),
     );
+
+    // The restore action stays disabled while its post-restore reload is pending.
+    const restoreButton = screen.getByRole("button", {
+      name: "Start a new draft from this version",
+    });
+    expect(restoreButton).toBeDisabled();
 
     // A newer route query must survive the asynchronous post-restore reload.
     await userEvent.click(screen.getByRole("button", { name: "Change query while restoring" }));
@@ -2886,9 +3031,7 @@ describe("ContextScreen", () => {
         data: treeResponse("context", [treeNode("node-1", PAGE_ID, "Decision Log")]),
       }));
     });
-    await waitFor(() => expect(
-      screen.getByRole("button", { name: "Restore this version" }),
-    ).toBeEnabled());
+    await waitFor(() => expect(restoreButton).toBeEnabled());
     expect(screen.getByTestId("context-location")).toHaveTextContent(
       `/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}?tab=history&expanded=node-1&view=updated`,
     );
@@ -3961,11 +4104,11 @@ describe("ContextScreen", () => {
       within(draftCard).getByRole("button", { name: "Show changes in v2 since v1" }),
     ).toBeInTheDocument();
     expect(
-      within(draftCard).queryByRole("button", { name: "Restore this version" }),
+      within(draftCard).queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
     expect(
       within(publishedCard).queryByRole("button", {
-        name: "Restore this version",
+        name: "Start a new draft from this version",
       }),
     ).toBeNull();
   });

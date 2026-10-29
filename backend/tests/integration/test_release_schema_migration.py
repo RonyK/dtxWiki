@@ -357,15 +357,18 @@ def test_release_head_matches_current_model_schema(head_engine):
     try:
         Base.metadata.create_all(fresh)
 
-        def input_checks(database, table_name):
+        def contract_checks(database, table_name):
             return {
                 check["name"]: " ".join(check["sqltext"].split())
                 for check in inspect(database).get_check_constraints(table_name)
                 if (check["name"] or "").endswith("_input_v1")
+                or table_name in {"email_outbox", "email_reauthentication_challenges"}
             }
 
         for table in Base.metadata.tables.values():
-            assert input_checks(engine, table.name) == input_checks(fresh, table.name)
+            assert contract_checks(engine, table.name) == contract_checks(
+                fresh, table.name
+            )
     finally:
         fresh.dispose()
 

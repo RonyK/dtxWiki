@@ -66,8 +66,12 @@ from backend.models.base import Base
 # its per-(user, client, workspace) row and IS purged.
 GLOBAL_TABLES = frozenset(
     {
+        "account_inbox_entry",
         "api_tokens",
         "app_metadata",
+        "auth_email_conflict_requests",
+        "auth_login_transactions",
+        "email_reauthentication_challenges",
         "email_outbox",
         "oauth_access_token_jti",
         "oauth_clients",
@@ -77,6 +81,7 @@ GLOBAL_TABLES = frozenset(
         "password_reset_tokens",
         "server_admins",
         "users",
+        "user_identities",
         "workspace",
     }
 )
@@ -446,8 +451,7 @@ def build_purge_plan(
             if not edge.nullable_columns:
                 continue
             if not any(
-                edge.table_name in component
-                and edge.parent_table_name in component
+                edge.table_name in component and edge.parent_table_name in component
                 for component in components
             ):
                 continue

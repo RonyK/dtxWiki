@@ -54,7 +54,10 @@ const EXPECTED_SIDEBAR_NAV: Array<{
   },
   {
     group: "Workspace",
-    links: [["Settings", "/workspaces/11111111-1111-4111-8111-111111111111/settings"]],
+    links: [
+      ["Inbox", "/workspaces/11111111-1111-4111-8111-111111111111/inbox"],
+      ["Settings", "/workspaces/11111111-1111-4111-8111-111111111111/settings"],
+    ],
   },
 ];
 
@@ -116,6 +119,10 @@ describe("Shell", () => {
     expect(
       screen.getAllByRole("link", { name: "Settings" })[0],
     ).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/settings");
+    expect(screen.getAllByRole("link", { name: "Inbox" })[0]).toHaveAttribute(
+      "href",
+      "/workspaces/11111111-1111-4111-8111-111111111111/inbox",
+    );
     expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute(
       "href",
       "/account",
@@ -667,7 +674,7 @@ describe("Shell", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("separates the Personal anchor without duplicating it and links to discovery", async () => {
+  it("lists every membership in one group with its badges and links to discovery", async () => {
     const user = userEvent.setup();
     mockSession(
       true,
@@ -686,7 +693,6 @@ describe("Shell", () => {
       [],
       {
         default_workspace_id: "22222222-2222-4222-8222-000000000005",
-        personal_workspace_id: "22222222-2222-4222-8222-000000000005",
       },
     );
     renderShell();
@@ -695,23 +701,14 @@ describe("Shell", () => {
       await screen.findByRole("button", { name: /Switch workspace/ }),
     );
 
-    const personalGroup = screen.getByRole("group", {
-      name: "Personal workspace",
-    });
     const memberGroup = screen.getByRole("group", { name: "My workspaces" });
-    expect(within(personalGroup).getAllByRole("button")).toHaveLength(1);
+    expect(within(memberGroup).getAllByRole("button")).toHaveLength(2);
     expect(
-      within(personalGroup).getByRole("button", { name: /Personal Workspace/ }),
-    ).toHaveTextContent("Personal");
-    expect(
-      within(personalGroup).getByRole("button", { name: /Personal Workspace/ }),
+      within(memberGroup).getByRole("button", { name: /Personal Workspace/ }),
     ).toHaveTextContent("Default");
     expect(
-      within(personalGroup).getByRole("button", { name: /Personal Workspace/ }),
+      within(memberGroup).getByRole("button", { name: /Personal Workspace/ }),
     ).not.toHaveTextContent("Shared");
-    expect(
-      within(memberGroup).queryByText("Personal Workspace"),
-    ).not.toBeInTheDocument();
     expect(
       within(memberGroup).getByRole("button", { name: /Research Guild/ }),
     ).toHaveTextContent("Editor");
@@ -726,11 +723,10 @@ describe("Shell", () => {
     ).toHaveAttribute("href", "/workspaces/find");
   });
 
-  it("distinguishes another member's shared Personal workspace by its owner (WS-09)", async () => {
-    // Every Personal workspace defaults to the identical title "Personal
-    // Workspace" and the same "PW" initials. Without an owner name, two
-    // such rows in "My workspaces" are pixel-identical, risking a write to
-    // the wrong person's private space.
+  it("distinguishes same-titled workspaces by their owners (WS-09)", async () => {
+    // Two workspaces can share a title such as "Personal Workspace" and the
+    // same "PW" initials. Without an owner name, the rows in "My workspaces"
+    // are pixel-identical, risking a write to the wrong person's space.
     const user = userEvent.setup();
     mockSession(
       true,
@@ -738,6 +734,7 @@ describe("Shell", () => {
         {
           ...workspace("22222222-2222-4222-8222-000000000010", "Personal Workspace", "en"),
           member_count: 1,
+          owner_display_name: "User",
         },
         {
           ...workspace("22222222-2222-4222-8222-000000000006", "Personal Workspace", "en"),
@@ -749,7 +746,6 @@ describe("Shell", () => {
       [],
       {
         default_workspace_id: "22222222-2222-4222-8222-000000000010",
-        personal_workspace_id: "22222222-2222-4222-8222-000000000010",
       },
     );
     renderShell();
@@ -759,19 +755,13 @@ describe("Shell", () => {
     );
 
     const memberGroup = screen.getByRole("group", { name: "My workspaces" });
-    const sharedRow = within(memberGroup).getByRole("button", {
+    const [ownRow, sharedRow] = within(memberGroup).getAllByRole("button", {
       name: /Personal Workspace/,
     });
+    // The viewer's own starter workspace is an ordinary row: it carries the
+    // same owner label as any other workspace.
+    expect(ownRow).toHaveTextContent("Owned by User");
     expect(sharedRow).toHaveTextContent("Owned by Alex Rivera");
-    // The viewer's own Personal workspace lives in the separate "Personal
-    // workspace" group and must not grow an "Owned by" label pointing at
-    // itself.
-    const personalGroup = screen.getByRole("group", {
-      name: "Personal workspace",
-    });
-    expect(
-      within(personalGroup).getByRole("button", { name: /Personal Workspace/ }),
-    ).not.toHaveTextContent("Owned by");
   });
 
   it("groups pending join requests and exposes scoped row actions", async () => {
@@ -818,13 +808,13 @@ describe("Shell", () => {
     });
     expect(
       within(ownedActions).getByRole("link", { name: "Settings" }),
-    ).toHaveAttribute("href", "/workspaces/22222222-2222-4222-8222-000000000009/settings?section=workspace");
+    ).toHaveAttribute("href", "/workspaces/22222222-2222-4222-8222-000000000009/settings");
     expect(
       within(ownedActions).getByRole("link", { name: "Share" }),
-    ).toHaveAttribute("href", "/workspaces/22222222-2222-4222-8222-000000000009/settings?section=access-sharing");
+    ).toHaveAttribute("href", "/workspaces/22222222-2222-4222-8222-000000000009/settings/integrations?section=access-sharing");
     expect(
       within(ownedActions).getByRole("link", { name: "Members" }),
-    ).toHaveAttribute("href", "/workspaces/22222222-2222-4222-8222-000000000009/settings?section=members");
+    ).toHaveAttribute("href", "/workspaces/22222222-2222-4222-8222-000000000009/settings/integrations?section=members");
 
     const viewedActions = screen.getByRole("group", {
       name: "Actions for Viewed",
@@ -841,7 +831,7 @@ describe("Shell", () => {
       within(ownedActions).getByRole("link", { name: "Members" }),
     );
     expect(screen.getByTestId("location")).toHaveTextContent(
-      "/workspaces/22222222-2222-4222-8222-000000000009/settings?section=members",
+      "/workspaces/22222222-2222-4222-8222-000000000009/settings/integrations?section=members",
     );
     expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe(
       "22222222-2222-4222-8222-000000000009",
@@ -861,7 +851,6 @@ describe("Shell", () => {
       {
         current_workspace_id: null,
         default_workspace_id: null,
-        personal_workspace_id: null,
       },
     );
     const { container } = renderShell();
@@ -940,7 +929,6 @@ describe("Shell", () => {
     mockSession(true, [], [], {
       current_workspace_id: null,
       default_workspace_id: null,
-      personal_workspace_id: null,
     });
     renderShell(["/workspaces/find"]);
     await waitFor(() => expect(screen.getByText("content")).toBeInTheDocument());
@@ -959,7 +947,6 @@ describe("Shell", () => {
       mockSession(true, [], [], {
         current_workspace_id: null,
         default_workspace_id: null,
-        personal_workspace_id: null,
       });
       renderShell([pathname]);
 

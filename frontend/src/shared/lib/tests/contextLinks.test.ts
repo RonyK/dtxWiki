@@ -50,5 +50,11 @@ describe("Context link locators", () => {
       `/workspaces/${workspaceId}/library/items/not-an-id`,
       { allowWorkspaceNavigation: true },
     ).kind).toBe("unknown");
+    const inbox = `/workspaces/${workspaceId}/inbox`;
+    expect(classifyContextLink(inbox, { allowWorkspaceNavigation: true })).toMatchObject({
+      kind: "workspace_navigation",
+      stableUrl: inbox,
+    });
+    expect(classifyContextLink(inbox).kind).toBe("unknown");
   });
 });

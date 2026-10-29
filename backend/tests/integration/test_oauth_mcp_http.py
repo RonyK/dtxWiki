@@ -435,7 +435,7 @@ def test_mcp_transport_defers_missing_workspace_without_repairing_default(
     client = make_client(page_service)
     with page_service.session_factory.begin() as session:
         user = session.scalar(select(User).where(User.email == "test@example.com"))
-        assert user is not None and user.personal_workspace_id is not None
+        assert user is not None
         user_id = user.id
         user.default_workspace_id = None
 
@@ -482,7 +482,7 @@ def test_mcp_transport_defers_missing_workspace_without_repairing_default(
         assert persisted_user.default_workspace_id is None
 
 
-def test_mcp_workspace_list_personal_default_repair_survives_new_session(
+def test_mcp_workspace_list_keeps_missing_default_after_pointer_drop(
     page_service,
     monkeypatch,
 ):
@@ -493,16 +493,13 @@ def test_mcp_workspace_list_personal_default_repair_survives_new_session(
     client = make_client(page_service)
     with page_service.session_factory.begin() as session:
         user = session.scalar(select(User).where(User.email == "test@example.com"))
-        assert user is not None and user.personal_workspace_id is not None
+        assert user is not None and user.default_workspace_id is not None
         user_id = user.id
-        personal_workspace_id = user.personal_workspace_id
         user.default_workspace_id = None
-    # D-01: a PAT/OAuth actor's workspace claim is authoritative -- an empty
-    # claim now denies outright rather than falling through to the personal-
-    # default-repair path this test exercises (see
-    # test_mcp_transport_personal_default_repair_survives_new_session's own
-    # comment above, a few lines up in this file). Only a plain user_session
-    # actor (no token_kind) legitimately reaches it.
+    # Account creation sets an ordinary default-workspace pointer, but after it
+    # is cleared the new lifecycle does not reconstruct it from a special
+    # personal-workspace pointer. This global list route must also avoid the
+    # explicit-target preflight and leave that cleared preference untouched.
     actor = ActorContext(
         actor_kind="human",
         actor_id=str(user_id),
@@ -532,11 +529,11 @@ def test_mcp_workspace_list_personal_default_repair_survives_new_session(
     assert response.status_code == 200
     assert response.json()["result"]["structuredContent"]["data"][
         "default_workspace_id"
-    ] == str(personal_workspace_id)
+    ] is None
     with page_service.session_factory() as session:
         persisted_user = session.get(User, user_id)
         assert persisted_user is not None
-        assert persisted_user.default_workspace_id == personal_workspace_id
+        assert persisted_user.default_workspace_id is None
 
 
 @pytest.mark.parametrize(
@@ -1089,95 +1086,6 @@ def test_consent_skip_reprompt_is_group_scoped_not_per_workspace(page_service):
         client_id="never-registered-client",
         scope="mcp:read",
     )
-
-
-def test_oauth_authorization_personal_default_repair_survives_new_session(
-    page_service,
-):
-    """P10.3 T3 supersedes the pre-T3 pin against the now-deleted
-    ``backend.api.oauth.resolve_authorization_workspace``. Its personal-
-    default repair (clearing a stale/inaccessible ``default_workspace_id``
-    and pointing it at the user's Personal recovery workspace) now happens
-    inside ``OAuthService.authorize_workspace_options`` instead (via
-    ``resolve_workspace_for_actor``'s single-membership fallback, section
-    2.3) -- pin that the repair still persists across a fresh session the
-    same way."""
-    from backend.app.settings import Settings
-    from backend.models.user import User
-    from backend.services.oauth_service import OAuthService
-
-    make_client(page_service)
-    with page_service.session_factory.begin() as session:
-        user = session.scalar(select(User).where(User.email == "test@example.com"))
-        assert user is not None and user.personal_workspace_id is not None
-        user_id = user.id
-        personal_workspace_id = user.personal_workspace_id
-        user.default_workspace_id = None
-
-    service = OAuthService(
-        session_factory=page_service.session_factory,
-        settings=Settings(
-            database_url="sqlite+pysqlite:///:memory:",
-            session_secret="test-session-secret",
-            public_base_url="http://testserver",
-        ),
-        public_base_url="http://testserver",
-    )
-    options = service.authorize_workspace_options(
-        user_id=user_id,
-        client_id="repair-probe-client",
-    )
-
-    assert any(
-        option.id == personal_workspace_id and option.checked for option in options
-    )
-    with page_service.session_factory() as session:
-        persisted_user = session.get(User, user_id)
-        assert persisted_user is not None
-        assert persisted_user.default_workspace_id == personal_workspace_id
-
-
-def test_existing_consent_lookup_has_no_workspace_resolution_side_effect(
-    page_service,
-):
-    """P10.3 T3 (section 2.3) supersedes the pre-T3 'existing-consent lookup
-    triggers/preserves the personal-default repair' pin. ``has_existing_
-    consent`` is a pure (user, client, scope) existence check over
-    ``oauth_consents`` now -- it dropped the ``workspace_id`` parameter and,
-    unlike the pre-T3 combined lookup, performs no workspace resolution (and
-    therefore no personal-default repair) as a side effect. That repair now
-    lives only in ``authorize_workspace_options`` (see
-    test_oauth_authorization_personal_default_repair_survives_new_session),
-    which the GET handler only calls once ``existing_consent`` is False."""
-    from backend.app.settings import Settings
-    from backend.models.user import User
-    from backend.services.oauth_service import OAuthService
-
-    make_client(page_service)
-    with page_service.session_factory.begin() as session:
-        user = session.scalar(select(User).where(User.email == "test@example.com"))
-        assert user is not None and user.personal_workspace_id is not None
-        user_id = user.id
-        user.default_workspace_id = None
-    service = OAuthService(
-        session_factory=page_service.session_factory,
-        settings=Settings(
-            database_url="sqlite+pysqlite:///:memory:",
-            session_secret="test-session-secret",
-            public_base_url="http://testserver",
-        ),
-        public_base_url="http://testserver",
-    )
-
-    assert not service.has_existing_consent(
-        user_id=user_id,
-        client_id="missing-client",
-        scope="mcp:read",
-    )
-    with page_service.session_factory() as session:
-        persisted_user = session.get(User, user_id)
-        assert persisted_user is not None
-        assert persisted_user.default_workspace_id is None
 
 
 def test_oauth_refresh_rejects_legacy_null_hashed_token(page_service):
@@ -2954,6 +2862,7 @@ def test_consent_form_preselects_resolved_workspace_when_no_hint_given(page_serv
     from datetime import timedelta
 
     from backend.models.user import User
+    from backend.models.workspace import WorkspaceMembership
 
     client = make_client(page_service)
     registered = client.post(
@@ -2974,7 +2883,11 @@ def test_consent_form_preselects_resolved_workspace_when_no_hint_given(page_serv
     with page_service.session_factory.begin() as session:
         user = session.scalars(select(User)).first()
         seeded = session.scalar(select(Workspace).where(Workspace.slug == "default"))
-        personal = session.get(Workspace, user.personal_workspace_id)
+        personal = session.scalars(
+            select(Workspace)
+            .join(WorkspaceMembership, WorkspaceMembership.workspace_id == Workspace.id)
+            .where(WorkspaceMembership.user_id == user.id, Workspace.id != seeded.id)
+        ).one()
         personal.created_at = seeded.created_at - timedelta(seconds=1)
         default_workspace_id = seeded.id
 
@@ -3461,11 +3374,9 @@ def _seed_second_workspace_for_w2(page_service, *, slug: str):
     """Add a second workspace membership for the seeded test user so the user
     has multi-membership ambiguity at consent time.
 
-    The general legacy client fixture explicitly selects ``default``, while a
-    normal v3 user also has a Personal recovery fallback. These picker tests
-    intentionally model a migrated multi-membership user whose pointers have
-    not been repaired yet, so clear both choices after adding the extra
-    membership rather than accidentally testing either automatic fast path.
+    The general legacy client fixture explicitly selects ``default``. These
+    picker tests clear that choice after adding the extra membership rather
+    than accidentally testing the persisted-default fast path.
     """
     from backend.models.user import User
     from backend.models.workspace import Workspace
@@ -3490,7 +3401,6 @@ def _seed_second_workspace_for_w2(page_service, *, slug: str):
             role="owner",
         )
         user.default_workspace_id = None
-        user.personal_workspace_id = None
         return user.id, second_workspace.id
 
 
@@ -3511,8 +3421,8 @@ def test_oauth_authorize_GET_multi_membership_without_workspace_id_prompts_picke
 
     P10.3 T3 (section 2.3) replaced the old single-``<select>``/hidden-field
     design with a checkbox checklist (``workspace_ids``): with no existing
-    consent and genuine membership ambiguity (both default/personal
-    pointers cleared, see ``_seed_second_workspace_for_w2``), nothing is
+    consent and genuine membership ambiguity (default pointer cleared, see
+    ``_seed_second_workspace_for_w2``), nothing is
     auto-checked; a GET ``workspace_id`` hint only pre-checks the matching
     row, it does not bypass the checklist or pin a hidden field.
     """

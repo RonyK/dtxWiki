@@ -18,9 +18,13 @@ from typing import NamedTuple
 
 CONTROL_PLANE_TABLES: frozenset[str] = frozenset(
     {
+        "account_inbox_entry",
         "api_token_workspaces",
         "api_tokens",
         "app_metadata",
+        "auth_email_conflict_requests",
+        "auth_login_transactions",
+        "email_reauthentication_challenges",
         "email_outbox",
         "oauth_access_token_jti",
         "oauth_clients",
@@ -31,6 +35,7 @@ CONTROL_PLANE_TABLES: frozenset[str] = frozenset(
         "password_reset_tokens",
         "server_admins",
         "users",
+        "user_identities",
         "workspace",
         "workspace_join_requests",
         "workspace_job_hint",
@@ -131,6 +136,7 @@ WORKSPACE_PLANE_TABLES: frozenset[str] = frozenset(
         "upload_asset",
         "upload_asset_binding",
         "workspace_credential_grant",
+        "workspace_inbox_entry",
         "workspace_media_quota_usage",
         "workspace_media_write_intent",
         "workspace_purge_grant",
@@ -260,8 +266,7 @@ def physical_split_blockers() -> tuple[str, ...]:
         parent_edges = [edge for edge in edges if edge.parent == parent]
         children = {edge.child for edge in parent_edges}
         lines.append(
-            f"  {parent}: {len(parent_edges)} edge(s) blocking "
-            f"{len(children)} table(s)"
+            f"  {parent}: {len(parent_edges)} edge(s) blocking {len(children)} table(s)"
         )
     return tuple(lines)
 

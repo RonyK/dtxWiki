@@ -203,6 +203,16 @@ def test_list_requested_changes_shows_request_to_owner_principal(
     assert item.reason == "Add a citation."
     assert item.audience_kind == "requester"
     assert item.target is not None
+    assert item.target.stable_url == (
+        f"/p/{workspace_id}/{item.target.target_id}"
+    )
+    assert item.target.link_markdown == (
+        f"[Self Routed Page]({item.target.stable_url})"
+    )
+    assert item.evidence is not None
+    assert item.evidence.operations[0].document.reader_href == (
+        f"/workspaces/{workspace_id}/context/pages/{item.target.target_id}"
+    )
 
 
 def test_list_requested_changes_owner_less_caller_is_empty(

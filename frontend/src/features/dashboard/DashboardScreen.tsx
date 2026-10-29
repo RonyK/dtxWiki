@@ -43,6 +43,7 @@ import { RouteLoading } from "../../shared/components/RouteLoading";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { useActivityGroupLoader } from "../../shared/hooks/useActivityGroupLoader";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
 import { activityCountLabel, activityEntryCounts, activityHref, parseActivityQuery, reconcileActivityReadGroup } from "../../shared/lib/activityFeed";
 import { iconForActivityLane } from "../../shared/lib/activityLanes";
@@ -139,6 +140,8 @@ export function DashboardScreen() {
       errorMessage: t("errors.load", { defaultValue: "Failed to load Dashboard" }),
     },
   );
+
+  useScreenEntryRefresh(workspacePath(routeWorkspaceId, "dashboard"), reload, { queryDeps: [period, groupReads] });
 
   function updatePeriod(nextPeriod: ActivityPeriod) {
     setSearchParams(
@@ -478,14 +481,14 @@ function DashboardWelcome({
           <div className="dashboard-welcome-workspaces">
             <div>
               <strong>
-                {t("setup.personalWorkspaceTitle", {
-                  defaultValue: "Make your Personal Workspace yours",
+                {t("setup.customizeWorkspaceTitle", {
+                  defaultValue: "Make this workspace yours",
                 })}
               </strong>
               <p>
-                {t("setup.personalWorkspaceDescription", {
+                {t("setup.customizeWorkspaceDescription", {
                   defaultValue:
-                    "You can rename your Personal Workspace. For ongoing team work, create a separate collaborative workspace from the workspace switcher.",
+                    "You can rename this workspace. For ongoing team work, create a separate collaborative workspace from the workspace switcher.",
                 })}
               </p>
             </div>
@@ -493,8 +496,8 @@ function DashboardWelcome({
               className="icon-button text-button"
               to={`${workspacePath(routeWorkspaceId, "settings")}?section=workspace`}
             >
-              {t("setup.renamePersonalAction", {
-                defaultValue: "Rename Personal",
+              {t("setup.renameWorkspaceAction", {
+                defaultValue: "Rename workspace",
               })}
             </Link>
           </div>

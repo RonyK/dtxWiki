@@ -55,6 +55,7 @@ function isWorkspaceNavigationPath(pathname: string, query: string): boolean {
     case "search":
     case "settings":
     case "setup":
+    case "inbox":
       valid = suffix.length === 1;
       break;
   }

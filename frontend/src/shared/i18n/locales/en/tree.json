@@ -7,6 +7,12 @@
   "landedAfter": "{{title}} moved after {{anchor}}.",
   "landedInside": "{{title}} moved into {{parent}}.",
   "moveFailed": "Could not move {{title}}.",
+  "dropHint": {
+    "before": "Before {{anchor}}",
+    "after": "After {{anchor}}",
+    "inside": "Into {{parent}}",
+    "firstChild": "Top of {{parent}}"
+  },
   "counts": "{{visible}}/{{total}}",
   "createItem": "Create {{title}} item",
   "createFolder": "Create {{title}} folder",

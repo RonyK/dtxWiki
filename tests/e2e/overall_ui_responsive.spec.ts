@@ -52,9 +52,17 @@ const VIEWPORTS: ViewportCase[] = [
   { key: "desktop-1280x720", width: 1280, height: 720 },
 ];
 
+// The usability journey branches on width > 1024, width <= 1024 and width ===
+// 390, so the phone and desktop cases reach every branch. The tablet cases
+// take the <= 1024 branch and add only the 641-1024px CSS bands; they run on
+// Chromium here and on every engine in the weekly exhaustive run.
+const CROSS_BROWSER_USABILITY_KEYS = new Set(["phone-390x844", "desktop-1280x720"]);
+
+// The dialog is min(720px, 100vw - 32px) wide and min(88dvh, 820px) tall.
+// 1920x1080 reaches the 820px cap; a 1440x900 case would repeat 1280x720,
+// where the height follows the viewport.
 const FAMILY_DIALOG_VIEWPORTS: ViewportCase[] = [
   ...VIEWPORTS,
-  { key: "desktop-1440x900", width: 1440, height: 900 },
   { key: "desktop-1920x1080", width: 1920, height: 1080 },
 ];
 
@@ -62,11 +70,13 @@ const FAMILY_DIALOG_VIEWPORTS: ViewportCase[] = [
 // spacing contract while tolerating that engine-level geometry rounding.
 const CSS_GEOMETRY_EPSILON_PX = 0.001;
 
-test.describe("Overall UI responsive acceptance @cross-browser", () => {
+// @cross-browser is set per test, so the tablet usability cases can stay on
+// Chromium.
+test.describe("Overall UI responsive acceptance", () => {
   test.describe("foldable viewport", () => {
     test.use({ hasTouch: true });
 
-    test("persisted collapsed sidebar keeps full width after folding and reload", async ({
+    test("persisted collapsed sidebar keeps full width after folding and reload @cross-browser", async ({
       page,
     }, testInfo) => {
       await page.setViewportSize({ width: 1280, height: 850 });
@@ -117,7 +127,7 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
   });
 
   for (const viewport of VIEWPORTS) {
-    test(`${viewport.key}: Context, Library policy, Lint, Chats, and Activity stay usable`, async ({
+    test(`${viewport.key}: Context, Library policy, Lint, Chats, and Activity stay usable${CROSS_BROWSER_USABILITY_KEYS.has(viewport.key) ? " @cross-browser" : ""}`, async ({
       page,
     }, testInfo) => {
       test.setTimeout(120_000);
@@ -790,7 +800,7 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
   // them. Every authenticated surface stayed clean, which is why the account
   // recovery screens were the only place this ever showed.
   for (const width of [280, 320, 360]) {
-    test(`signed-out shell fits a ${width}px viewport`, async ({ page }) => {
+    test(`signed-out shell fits a ${width}px viewport @cross-browser`, async ({ page }) => {
       test.setTimeout(60_000);
       await page.setViewportSize({ width, height: 844 });
       for (const path of [
@@ -821,7 +831,7 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
   // same shape of bug that let the topbar break twice already in this branch
   // (Shell.test.tsx's own "wires the .feature-main scrollLeft guard" comment
   // makes the same point about a different guard). This drives the real DOM.
-  test("signed-out desktop topbar placeholder paints nothing", async ({ page }) => {
+  test("signed-out desktop topbar placeholder paints nothing @cross-browser", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto("/login");
     const placeholder = page.locator(".topbar-search[aria-hidden='true']");
@@ -841,7 +851,7 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
     expect(painted.pointerEvents).toBe("none");
   });
 
-  test("the horizontal-overflow guard can still fail", async ({ page }, testInfo) => {
+  test("the horizontal-overflow guard can still fail @cross-browser", async ({ page }, testInfo) => {
     // This suite's entire value rests on expectNoHorizontalOverflow being able
     // to fail, and it has silently lost that ability once already: the
     // document-level check cannot detect a blown-out layout inside
@@ -917,7 +927,7 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
     });
   });
 
-  test("Fold-down resize clears a residual shell offset without a scroll event", async ({
+  test("Fold-down resize clears a residual shell offset without a scroll event @cross-browser", async ({
     page,
   }, testInfo) => {
     // A Galaxy Fold can go from its 690px unfolded viewport to 344px without
@@ -990,7 +1000,7 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
     }
   });
 
-  test("phone-390x844-ko: Library policy stays localized and usable", async ({
+  test("phone-390x844-ko: Library policy stays localized and usable @cross-browser", async ({
     page,
   }, testInfo) => {
     test.setTimeout(60_000);
@@ -1051,7 +1061,7 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
     );
   });
 
-  test("phone-390x844: preset and custom families persist and reject duplicate formats", async ({
+  test("phone-390x844: preset and custom families persist and reject duplicate formats @cross-browser", async ({
     page,
   }, testInfo) => {
     test.setTimeout(120_000);
@@ -1299,7 +1309,7 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
     }
   });
 
-  test("Context page Children tab deep-links, paginates, and restores through browser history", async ({
+  test("Context page Children tab deep-links, paginates, and restores through browser history @cross-browser", async ({
     page,
   }, testInfo) => {
     test.setTimeout(120_000);

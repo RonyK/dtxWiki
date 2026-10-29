@@ -995,6 +995,7 @@ describe("SearchScreen", () => {
   });
 
   it("drops appended Load more pages when the same query is re-submitted", async () => {
+    let firstPageRequests = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -1018,6 +1019,10 @@ describe("SearchScreen", () => {
             },
           });
         }
+        firstPageRequests += 1;
+        // Bound a broken revision/query feedback loop so the regression fails
+        // as an observable request-count error instead of running forever.
+        if (firstPageRequests > 2) throw new Error("Unexpected repeated search load");
         // page 1, returned for both the initial submit and the re-submit. The
         // keyset cursor is an opaque offset, identical across re-runs.
         return jsonResponse({
@@ -1038,14 +1043,14 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search?q=needle"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
 
-    await userEvent.type(screen.getByLabelText("Query"), "needle");
-    await userEvent.click(screen.getByRole("button", { name: "Search" }));
     expect(await screen.findByText("Page1 Alpha")).toBeInTheDocument();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(firstPageRequests).toBe(1);
 
     await userEvent.click(screen.getByRole("button", { name: "Load more" }));
     expect(await screen.findByText("Page2 Alpha")).toBeInTheDocument();
@@ -1060,6 +1065,7 @@ describe("SearchScreen", () => {
     );
     expect(screen.queryByText("Page2 Beta")).not.toBeInTheDocument();
     expect(screen.getByText("Page1 Alpha")).toBeInTheDocument();
+    expect(firstPageRequests).toBe(2);
   });
 
   it("shows an error when Load more fails and keeps the button for retry", async () => {

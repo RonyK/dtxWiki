@@ -1,6 +1,8 @@
 import json
 import sys
 
+from backend.api.auth_sso import BINDING_COOKIE, EMAIL_CONFLICT_COOKIE
+from backend.api.auth_verification import email_binding_name
 from backend.app.main import create_app
 from backend.policy.rest_scopes import (
     REST_REQUIRED_SCOPES,
@@ -15,11 +17,16 @@ SESSION_OR_BEARER_SECURITY = [
     {"SessionCookie": []},
     {"HTTPBearer": []},
 ]
-RECENT_REAUTHENTICATION_SECURITY = [
-    {
-        "SessionCookie": [],
-        "RecentReauthenticationCookie": [],
-    }
+# Fresh primary authentication also satisfies confirmation without a proof
+# cookie. OpenAPI describes the required credential; the scope extension below
+# records the additional server-side freshness policy.
+RECENT_REAUTHENTICATION_SECURITY = SESSION_COOKIE_SECURITY
+ACCOUNT_REAUTHENTICATION_SECURITY = SESSION_COOKIE_SECURITY
+LOGIN_TRANSACTION_SECURITY = [{"LoginTransactionCookie": []}]
+EMAIL_CONFLICT_SECURITY = [{"EmailConflictTicketCookie": []}]
+EMAIL_REAUTHENTICATION_SECURITY = [
+    {"SessionCookie": [], "AccountEmailBindingCookie": []},
+    {"SessionCookie": [], "AdminEmailBindingCookie": []},
 ]
 OPTIONAL_SESSION_COOKIE_SECURITY = [{}, {"SessionCookie": []}]
 OAUTH_REVOKE_SECURITY = [
@@ -53,6 +60,12 @@ FASTAPI_DEFAULT_HTTP_RESPONSE_DESCRIPTIONS = {
 # These handlers authenticate by reading the session cookie directly instead of
 # using RestActorDep, so FastAPI cannot infer their actual security contract.
 OPENAPI_SESSION_COOKIE_ROUTES: set[RouteKey] = {
+    ("GET", "/api/v1/users/me/deletion-preview"),
+    ("GET", "/api/v1/admin/user-deletion-policy"),
+    ("GET", "/api/v1/auth/verification"),
+    ("POST", "/api/v1/auth/email-reauthentication/request"),
+    ("GET", "/api/v1/auth/identities"),
+    ("POST", "/api/v1/auth/sso/{slug}/reauthenticate"),
     ("POST", "/api/v1/auth/reauthenticate"),
     ("GET", "/api/v1/auth/me"),
     ("POST", "/api/v1/auth/password"),
@@ -84,8 +97,41 @@ OPENAPI_SESSION_COOKIE_ROUTES: set[RouteKey] = {
 }
 
 OPENAPI_RECENT_REAUTHENTICATION_ROUTES: set[RouteKey] = {
+    ("PATCH", "/api/v1/admin/user-deletion-policy"),
+    ("DELETE", "/api/v1/admin/users/{user_id}"),
+    ("GET", "/api/v1/admin/users/{user_id}/deletion-preview"),
+    ("POST", "/api/v1/admin/users/{user_id}/deletion-restore"),
+    ("GET", "/api/v1/admin/workspaces/{workspace_id}/members"),
+    ("POST", "/api/v1/admin/workspaces/{workspace_id}/members"),
+    ("PATCH", "/api/v1/admin/workspaces/{workspace_id}/members/{user_id}"),
     ("GET", "/api/v1/admin/users"),
     ("POST", "/api/v1/admin/users/{user_id}/password-reset"),
+    ("POST", "/api/v1/admin/users/{user_id}/identities/rebind"),
+    ("GET", "/api/v1/admin/email-conflicts"),
+    ("POST", "/api/v1/admin/email-conflicts/{request_id}/decision"),
+    ("GET", "/api/v1/admin/audit-events"),
+}
+
+OPENAPI_ACCOUNT_REAUTHENTICATION_ROUTES: set[RouteKey] = {
+    ("POST", "/api/v1/auth/sso/{slug}/link"),
+    ("DELETE", "/api/v1/auth/identities/{identity_id}"),
+    ("POST", "/api/v1/auth/password/set"),
+    # Accounts without a password confirm their withdrawal this way.
+    ("DELETE", "/api/v1/users/me"),
+}
+
+OPENAPI_LOGIN_TRANSACTION_ROUTES: set[RouteKey] = {
+    ("GET", "/api/v1/auth/sso/{slug}/callback"),
+    ("POST", "/api/v1/auth/sso/{slug}/callback/continue"),
+}
+
+OPENAPI_EMAIL_REAUTHENTICATION_ROUTES: set[RouteKey] = {
+    ("POST", "/api/v1/auth/email-reauthentication/confirm"),
+}
+
+# Only the browser that completed a colliding IdP login holds this ticket.
+OPENAPI_EMAIL_CONFLICT_ROUTES: set[RouteKey] = {
+    ("POST", "/api/v1/auth/sso/email-conflict/request"),
 }
 
 OPENAPI_OPTIONAL_SESSION_ROUTES: set[RouteKey] = {
@@ -100,6 +146,12 @@ OPENAPI_OAUTH_REVOKE_ROUTES: set[RouteKey] = {
 # Explicitly reviewed unauthenticated operations. Logout is deliberately
 # idempotent and public: a missing or invalid cookie still clears browser state.
 OPENAPI_PUBLIC_ROUTES: set[RouteKey] = {
+    # The external POST landing page only returns a same-origin continuation
+    # form; it neither consumes the transaction nor authenticates an account.
+    ("POST", "/api/v1/auth/sso/{slug}/callback"),
+    ("GET", "/api/v1/capabilities"),
+    ("GET", "/api/v1/auth/sso/{slug}/start"),
+    ("GET", "/api/v1/auth/methods/{method_id}/icon.png"),
     ("GET", "/health/live"),
     ("GET", "/health/ready"),
     ("GET", "/api/v1/auth/capabilities"),
@@ -156,6 +208,27 @@ def reviewed_openapi_security() -> dict[RouteKey, list[dict[str, list]]]:
         {route: OAUTH_REVOKE_SECURITY for route in OPENAPI_OAUTH_REVOKE_ROUTES}
     )
     route_security.update({route: [] for route in OPENAPI_PUBLIC_ROUTES})
+    route_security.update(
+        {
+            route: ACCOUNT_REAUTHENTICATION_SECURITY
+            for route in OPENAPI_ACCOUNT_REAUTHENTICATION_ROUTES
+        }
+    )
+    route_security.update(
+        {
+            route: LOGIN_TRANSACTION_SECURITY
+            for route in OPENAPI_LOGIN_TRANSACTION_ROUTES
+        }
+    )
+    route_security.update(
+        {
+            route: EMAIL_REAUTHENTICATION_SECURITY
+            for route in OPENAPI_EMAIL_REAUTHENTICATION_ROUTES
+        }
+    )
+    route_security.update(
+        {route: EMAIL_CONFLICT_SECURITY for route in OPENAPI_EMAIL_CONFLICT_ROUTES}
+    )
     return route_security
 
 
@@ -175,10 +248,42 @@ def build_openapi_schema() -> dict:
         "in": "cookie",
         "name": f"{app.state.settings.session_cookie_name}_reauth",
     }
+    security_schemes["AccountReauthenticationCookie"] = {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": f"{app.state.settings.session_cookie_name}_reauth_account",
+    }
+    security_schemes["LoginTransactionCookie"] = {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": BINDING_COOKIE,
+    }
+    security_schemes["EmailConflictTicketCookie"] = {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": EMAIL_CONFLICT_COOKIE,
+        "description": "Signed ticket from an SSO login whose address collided.",
+    }
+    security_schemes["AccountEmailBindingCookie"] = {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": email_binding_name("account"),
+        "description": "Browser binding for an email confirmation with scope=account.",
+    }
+    security_schemes["AdminEmailBindingCookie"] = {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": email_binding_name("admin"),
+        "description": "Browser binding for an email confirmation with scope=admin.",
+    }
     for (method, path), security in reviewed_openapi_security().items():
         operation = schema.get("paths", {}).get(path, {}).get(method.lower())
         if operation is not None:
             operation["security"] = security
+            if (method, path) in OPENAPI_RECENT_REAUTHENTICATION_ROUTES:
+                operation["x-dtxwiki-confirmation-scope"] = "admin"
+            elif (method, path) in OPENAPI_ACCOUNT_REAUTHENTICATION_ROUTES:
+                operation["x-dtxwiki-confirmation-scope"] = "account"
     _pin_http_response_descriptions(schema)
     return schema
 

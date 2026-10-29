@@ -74,12 +74,37 @@ def list_requested_changes(
             envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
         )
     for item in data.items:
-        if item.target is not None and item.target.target_type == "context_page":
-            links = page_links(
-                ctx.workspace_id, item.target.target_id, item.target.title or ""
-            )
-            item.target.stable_url = links["stable_url"]
-            item.target.link_markdown = links["link_markdown"]
+        target = item.target
+        if target is None or target.target_type not in {
+            "context_page",
+            "context_page_version",
+        }:
+            continue
+        # A page-version operation identifies a version, not a page. Use only
+        # the document identity already projected by the actor-authorized
+        # review evidence; never reinterpret the version UUID as a page UUID.
+        document = next(
+            (
+                operation.document
+                for operation in (item.evidence.operations if item.evidence else [])
+                if operation.target_type == target.target_type
+                and operation.target_id == target.target_id
+                and operation.document is not None
+                and operation.document.document_kind == "context"
+                and operation.document.can_open
+                and operation.document.document_id is not None
+            ),
+            None,
+        )
+        if document is None:
+            continue
+        links = page_links(
+            ctx.workspace_id,
+            document.document_id,
+            document.title or target.title or "",
+        )
+        target.stable_url = links["stable_url"]
+        target.link_markdown = links["link_markdown"]
     return ListRequestedChangesOutput(envelope=ok_envelope(actor), data=data)
 
 

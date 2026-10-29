@@ -18,6 +18,7 @@ import {
   useRef,
   useState,
   useLayoutEffect,
+  useSyncExternalStore,
   type ComponentProps,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -54,6 +55,14 @@ import {
   listContextPages,
   readContextPage,
 } from "../../shared/api/context";
+import {
+  favoriteTargetKind,
+  getTreeFavoriteSnapshot,
+  subscribeTreeFavorites,
+  toggleTreeFavorite,
+  treeFavoriteKey,
+  type TreeFavoriteScope,
+} from "../../shared/api/treeFavorites";
 import {
   decideReview,
   getReview,
@@ -133,17 +142,19 @@ import { contextNewHref, contextPageHref, contextEditHref, workspacePath, worksp
 import {
   resolveExpandedNodeIds,
   TREE_EXPANDED_PARAM,
+  TREE_NEW_FOLDER_PARAM,
   updateTreeSearchParams,
   writeExpandedNodeIdsToStorage,
 } from "../../shared/components/treeRouteState";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { useDocumentTitle } from "../../shared/hooks/useDocumentTitle";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import {
   copyTextWithReason,
   type CopyTextDetailedResult,
 } from "../../shared/lib/copyText";
-import { presentActivityItem } from "../../shared/lib/activityLabels";
+import { ActivityEventCard } from "../../shared/components/ActivityEventCard";
 import {
   contextHistoryNodes,
   contextHistoryPillTone,
@@ -174,13 +185,6 @@ type PublishedVersionInfo = {
 
 type ContextDetailWithPublishedVersion = ContextPageDetail & {
   published_version_info?: PublishedVersionInfo | null;
-};
-
-type ActivityActorPresentation = {
-  actor_kind: string;
-  actor_id?: string | null;
-  display_name?: string;
-  is_current_user?: boolean;
 };
 
 type ContextState = {
@@ -286,6 +290,7 @@ export function ContextScreen() {
   useEffect(() => { setRouteUnavailable(false); }, [routeWorkspaceId, requestedTargetId]);
   const {
     data: state,
+    revision: overviewRevision,
     error,
     reload,
     setData: setState,
@@ -415,6 +420,12 @@ export function ContextScreen() {
     },
   );
 
+  useScreenEntryRefresh(routeWorkspaceId ? workspacePath(routeWorkspaceId, "context") : "", reload, {
+    isHome: requestedTargetId === null && !searchParams.has(TREE_NEW_FOLDER_PARAM),
+    queryDeps: [pageSize, draftFilter, routeWorkspaceId],
+    readArrivalNotice: readContextPublishNotice,
+  });
+
   const workspaceId = state?.workspaceId ?? "";
   const replaceContextRouteTarget = useCallback(
     (targetId: string | null, nodes = state?.tree ?? []) => {
@@ -443,7 +454,7 @@ export function ContextScreen() {
   // pages on top of it. Keyed on the base page so a fresh first page (page-size
   // change / reload) drops the appended tail. Derived synchronously so Load
   // more always reads the live cursor rather than a one-render-stale one.
-  const overviewBaseKey = `${workspaceId}:${pageSize}:${draftFilter}:${
+  const overviewBaseKey = `${workspaceId}:${pageSize}:${draftFilter}:${overviewRevision}:${
     state?.pages.length ?? 0
   }:${state?.pages[0]?.id ?? ""}`;
   const [appended, setAppended] = useState<{
@@ -452,13 +463,16 @@ export function ContextScreen() {
     cursor: string | null;
   }>({ key: overviewBaseKey, items: [], cursor: state?.pagesCursor ?? null });
   const [loadingMore, setLoadingMore] = useState(false);
+  const overviewGenerationRef = useRef(0);
   useEffect(() => {
+    overviewGenerationRef.current += 1;
+    setLoadingMore(false);
     setAppended({
       key: overviewBaseKey,
       items: [],
       cursor: state?.pagesCursor ?? null,
     });
-  }, [overviewBaseKey, state?.pagesCursor]);
+  }, [overviewBaseKey, state?.pages, state?.pagesCursor]);
 
   // When the accumulator key matches the current base its cursor is
   // authoritative (it starts at the base cursor and advances/exhausts to null);
@@ -513,6 +527,7 @@ export function ContextScreen() {
       return;
     }
     const requestCursor = overviewCursor;
+    const requestGeneration = overviewGenerationRef.current;
     setLoadingMore(true);
     try {
       const next = await listContextPages(workspaceId, {
@@ -521,12 +536,10 @@ export function ContextScreen() {
         cursor: requestCursor,
       });
       setAppended((current) =>
-        // Skip the append when a fresh first page replaced the base mid-flight.
-        // The base key must still match AND the live cursor must still be the
-        // one this request paged from: the key alone is a length+first-id
-        // heuristic, so a reload that preserves it while advancing the cursor
-        // would otherwise graft a stale page on. Matches useLoadMore's
-        // next_cursor guard so all four list surfaces gate identically.
+        // The successful-load revision distinguishes refreshes even when the
+        // first item and cursor are unchanged. Older requests belong to that
+        // prior first page and must not append to the refreshed overview.
+        overviewGenerationRef.current === requestGeneration &&
         current.key === overviewBaseKey && current.cursor === requestCursor
           ? {
               key: current.key,
@@ -535,8 +548,14 @@ export function ContextScreen() {
             }
           : current,
       );
+    } catch (exc) {
+      if (requestGeneration === overviewGenerationRef.current) {
+        setError(apiErrorMessage(exc, t("errors.load")));
+      }
     } finally {
-      setLoadingMore(false);
+      if (requestGeneration === overviewGenerationRef.current) {
+        setLoadingMore(false);
+      }
     }
   }
 
@@ -666,7 +685,7 @@ export function ContextScreen() {
     if (pageData) {
       const pages = pageData.data;
       setAppended({
-        key: `${state.workspaceId}:${pageSize}:${draftFilter}:${pages.length}:${pages[0]?.id ?? ""}`,
+        key: `${state.workspaceId}:${pageSize}:${draftFilter}:${overviewRevision}:${pages.length}:${pages[0]?.id ?? ""}`,
         items: [],
         cursor: pageData.next_cursor,
       });
@@ -719,7 +738,7 @@ export function ContextScreen() {
     setTreeRefreshing(true);
     setError(null);
     try {
-      await refreshTree();
+      await refreshTree({ refreshOverview: true });
     } catch (exc) {
       setError(
         apiErrorMessage(
@@ -991,7 +1010,6 @@ export function ContextScreen() {
     if (!targetNodeId) {
       routeRevealKeyRef.current = `${state.workspaceId}:${requestedTargetId ?? ""}:${searchParams.get(TREE_EXPANDED_PARAM) ?? ""}`;
       if (
-        (requestedTargetId || searchChangedRef.current) &&
         (state.selectedNodeId ||
           state.detail ||
           state.history ||
@@ -1176,8 +1194,10 @@ export function ContextScreen() {
   const routeIdentityMatches = Boolean(
     state &&
       state.workspaceId === routedWorkspaceId &&
-      (state.routeTargetId === requestedTargetId ||
-        (routedPageId && state.detail?.id === routedPageId)),
+      (routedPageId
+        ? state.detail?.id === routedPageId
+        : state.routeTargetId === requestedTargetId &&
+          (requestedTargetId !== null || state.detail === null)),
   );
   if (error && !routeIdentityMatches) {
     return <section className="feature-main"><StatusBanner tone="warning" action={<button className="icon-button" onClick={reload} type="button">{t("shell:workspaceResolution.retry")}</button>}>{error}</StatusBanner></section>;
@@ -1217,6 +1237,10 @@ export function ContextScreen() {
   const activeNewItemDialog = newItemDialog ?? (folderCreateRoute && (!routeFolderParentId || routeFolderParent)
     ? { initialItemType: "folder" as const, parentNodeId: routeFolderParentId }
     : null);
+  const favoriteScope =
+    auth?.user && state.workspaceId
+      ? { actorId: auth.user.user_id, workspaceId: state.workspaceId }
+      : undefined;
   const contextRoot =
     state.tree.find((node) =>
       isSemanticSectionRoot(node, t("rail.title", { defaultValue: "Context" })),
@@ -1270,7 +1294,7 @@ export function ContextScreen() {
           onExpandWidth,
         }) => (
           <TreeRail
-            favoriteScope={auth?.user && state.workspaceId ? { actorId: auth.user.user_id, workspaceId: state.workspaceId } : undefined}
+            favoriteScope={favoriteScope}
             title={t("rail.title", { defaultValue: "Context" })}
             accent="context"
             nodes={state.tree}
@@ -1397,6 +1421,7 @@ export function ContextScreen() {
               <ContextReader
                 canEdit={canEdit}
                 detail={state.detail}
+                favoriteScope={favoriteScope}
                 history={state.history}
                 neighbors={state.neighbors}
                 neighborsFailed={state.neighborsFailed}
@@ -2149,6 +2174,7 @@ function pendingReviewCompareCandidate(
 function ContextReader({
   canEdit,
   detail,
+  favoriteScope,
   history,
   neighbors,
   neighborsFailed,
@@ -2167,6 +2193,7 @@ function ContextReader({
 }: {
   canEdit: boolean;
   detail: ContextPageDetail;
+  favoriteScope?: TreeFavoriteScope;
   history: ContextChangeHistory | null;
   neighbors: GraphNeighborsPayload | null;
   neighborsFailed: boolean;
@@ -2613,6 +2640,18 @@ function ContextReader({
     loadedHistory,
     tab,
   ]);
+  // Activity is read the first time its tab opens for a page, not on every
+  // page view; the tab shows its count once that load has finished.
+  const activityPageKey = `${workspaceId ?? ""}:${detail.id}`;
+  const [activityRequestedKey, setActivityRequestedKey] = useState<
+    string | null
+  >(null);
+  useEffect(() => {
+    if (tab === "activity") {
+      setActivityRequestedKey(activityPageKey);
+    }
+  }, [activityPageKey, tab]);
+  const activityRequested = activityRequestedKey === activityPageKey;
   useEffect(() => {
     let active = true;
     const generation = ++activityLoadGenerationRef.current;
@@ -2620,6 +2659,11 @@ function ContextReader({
     setActivityNextCursor(null);
     setActivityLoadingMore(false);
     setActivityError(null);
+    if (!activityRequested) {
+      return () => {
+        active = false;
+      };
+    }
     if (!workspaceId) {
       setActivityItems([]);
       return () => {
@@ -2649,7 +2693,7 @@ function ContextReader({
     return () => {
       active = false;
     };
-  }, [detail.id, workspaceId, t]);
+  }, [activityRequested, detail.id, workspaceId, t]);
 
   const loadMoreActivity = useCallback(async () => {
     if (!workspaceId || !activityNextCursor || activityLoadingMore) {
@@ -2737,6 +2781,7 @@ function ContextReader({
           {node ? (
             <ContextReaderNodeMenu
               canEdit={canEdit}
+              favoriteScope={favoriteScope}
               node={node}
               onCopyNodeLink={onCopyNodeLink}
               onDeleteNode={onDeleteNode}
@@ -3015,7 +3060,7 @@ function ContextReader({
           tabIndex={0}
         >
           <ContextActivity
-            currentPageTitle={detail.title}
+            workspaceId={workspaceId}
             error={activityError}
             items={activityItems}
             loadingMore={activityLoadingMore}
@@ -3221,6 +3266,7 @@ function ContextShareDialog({
 
 function ContextReaderNodeMenu({
   canEdit,
+  favoriteScope,
   node,
   onCopyNodeLink,
   onDeleteNode,
@@ -3228,6 +3274,7 @@ function ContextReaderNodeMenu({
   onRenameNode,
 }: {
   canEdit: boolean;
+  favoriteScope?: TreeFavoriteScope;
   node: TreeNodePayload;
   onCopyNodeLink: (node: TreeNodePayload) => Promise<CopyTextDetailedResult>;
   onDeleteNode: (node: TreeNodePayload) => void;
@@ -3235,24 +3282,39 @@ function ContextReaderNodeMenu({
   onRenameNode: (node: TreeNodePayload) => void;
 }) {
   const { t } = useTranslation("context");
+  const { t: tTree } = useTranslation("tree");
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [menuPosition, setMenuPosition] = useState<{
     left: number;
     top: number;
   } | null>(null);
-  const [copyStatus, setCopyStatus] =
-    useState<CopyTextDetailedResult | null>(null);
+  const [actionStatus, setActionStatus] = useState<{
+    message: string;
+    timeoutMs: number;
+  } | null>(null);
+  // The rail and this menu share one favorite store, so a toggle here also
+  // updates the rail star and vice versa.
+  const favoriteSnapshot = useSyncExternalStore(
+    subscribeTreeFavorites,
+    getTreeFavoriteSnapshot,
+  );
+  const canFavorite = Boolean(favoriteScope && favoriteTargetKind(node));
+  const favorite =
+    favoriteScope && canFavorite
+      ? favoriteSnapshot.get(treeFavoriteKey(favoriteScope, node))
+      : undefined;
+  const menuNode = favorite ? { ...node, is_favorite: favorite.isFavorite } : node;
 
   useEffect(() => {
-    if (!copyStatus) {
+    if (!actionStatus) {
       return undefined;
     }
     const timeout = window.setTimeout(
-      () => setCopyStatus(null),
-      copyStatus.status === "copied" ? 1800 : 5000,
+      () => setActionStatus(null),
+      actionStatus.timeoutMs,
     );
     return () => window.clearTimeout(timeout);
-  }, [copyStatus]);
+  }, [actionStatus]);
 
   function openMenu() {
     const rect = triggerRef.current?.getBoundingClientRect();
@@ -3281,8 +3343,30 @@ function ContextReaderNodeMenu({
       onDeleteNode(action.node);
       return;
     }
+    if (action.type === "favorite") {
+      if (favoriteScope) {
+        setActionStatus(null);
+        void toggleTreeFavorite(favoriteScope, action.node).catch(() =>
+          setActionStatus({
+            message: tTree("favorite.failed", { title: action.node.title }),
+            timeoutMs: 5000,
+          }),
+        );
+      }
+      return;
+    }
     if (action.type === "copy-link") {
-      void onCopyNodeLink(action.node).then(setCopyStatus);
+      void onCopyNodeLink(action.node).then((result) =>
+        setActionStatus({
+          message:
+            result.status === "copied"
+              ? t("actions.linkCopied")
+              : result.status === "selected"
+                ? t("actions.linkSelected")
+                : t(`actions.linkCopyReasons.${result.reason ?? "selection"}`),
+          timeoutMs: result.status === "copied" ? 1800 : 5000,
+        }),
+      );
     }
   }
 
@@ -3301,15 +3385,9 @@ function ContextReaderNodeMenu({
       >
         <MoreHorizontal size={16} aria-hidden="true" />
       </button>
-      {copyStatus ? (
+      {actionStatus ? (
         <span className="reader-action-status" role="status">
-          {copyStatus.status === "copied"
-            ? t("actions.linkCopied")
-            : copyStatus.status === "selected"
-              ? t("actions.linkSelected")
-              : t(
-                  `actions.linkCopyReasons.${copyStatus.reason ?? "selection"}`,
-                )}
+          {actionStatus.message}
         </span>
       ) : null}
       {menuPosition ? (
@@ -3318,9 +3396,11 @@ function ContextReaderNodeMenu({
           canCreateFolder={false}
           canCreatePage={false}
           canDelete={canEdit && !node.is_system_node}
+          canFavorite={canFavorite}
           canMove={canEdit && !node.is_system_node}
           canRename={canEdit}
-          node={node}
+          favoritePending={Boolean(favorite?.pending)}
+          node={menuNode}
           position={menuPosition}
           onAction={handleAction}
           onClose={() => setMenuPosition(null)}
@@ -3356,14 +3436,14 @@ function readerVersionNumber(
 }
 
 function ContextActivity({
-  currentPageTitle,
+  workspaceId,
   error,
   items,
   loadingMore,
   nextCursor,
   onLoadMore,
 }: {
-  currentPageTitle: string;
+  workspaceId: string | null;
   error: string | null;
   items: ActivityItem[] | null;
   loadingMore: boolean;
@@ -3421,35 +3501,11 @@ function ContextActivity({
                 })}
                 className="context-activity-card-list"
               >
-                {dayItems.map((item) => {
-                  const presented = presentActivityItem(item);
-                  const actor = item.actor as ActivityActorPresentation | null;
-                  const actorName = actor?.is_current_user
-                    ? t("reader.activityYou", { defaultValue: "You" })
-                    : (actor?.display_name ??
-                      t("reader.activityUnknownActor", {
-                        defaultValue: "Unknown actor",
-                      }));
-                  const body =
-                    presented.body && presented.body !== currentPageTitle
-                      ? presented.body
-                      : "";
-                  return (
-                    <li key={item.id}>
-                      <article className="context-activity-card">
-                        <div className="context-activity-card-copy">
-                          <strong>{presented.title}</strong>
-                          {body ? <p>{body}</p> : null}
-                        </div>
-                        <AvatarWithTimestamp
-                          actorType={actor?.actor_kind ?? "system"}
-                          name={actorName}
-                          timestamp={item.created_at}
-                        />
-                      </article>
-                    </li>
-                  );
-                })}
+                {dayItems.map((item) => (
+                  <li key={item.id}>
+                    <ActivityEventCard item={item} workspaceId={workspaceId} />
+                  </li>
+                ))}
               </ul>
             </section>
           ))}

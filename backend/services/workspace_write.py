@@ -6,7 +6,6 @@ workspace create/delete/default orchestration in its overlay so control-plane
 and data-plane work can be coordinated explicitly.
 """
 
-import re
 from uuid import UUID
 
 from sqlalchemy import delete, func, select, update
@@ -14,6 +13,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.domain.input_policy import validate_text
+from backend.domain.workspace_slug_policy import (
+    RESERVED_WORKSPACE_SLUG_MESSAGE,
+    WORKSPACE_SLUG_MAX_LENGTH,
+    is_reserved_workspace_slug,
+    slugify_workspace_text,
+)
 from backend.models import (
     AgentInputBundle,
     AgentPage,
@@ -44,6 +49,7 @@ from backend.models import (
     UserFavorite,
     Workspace,
     WorkspaceCredentialGrant,
+    WorkspaceInboxEntry,
     WorkspaceMediaQuotaUsage,
     WorkspaceMediaWriteIntent,
     WorkspaceMembership,
@@ -57,17 +63,16 @@ from backend.models.mcp_chat import (
 )
 from backend.policy.auth import ActorContext
 from backend.policy.rbac import (
-    grant_workspace_membership,
     normalize_role,
 )
 from backend.repositories.audit_repo import insert_audit_event
-from backend.repositories.workspace_repo import get_workspace_by_slug, insert_workspace
+from backend.repositories.workspace_repo import get_workspace_by_slug
 from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.read import WorkspaceCreateRequest, WorkspaceSummary
-from backend.scripts.seed_dev import DEFAULT_AGENT_PAGE_SLUG, seed_default_workspace
+from backend.scripts.seed_dev import DEFAULT_AGENT_PAGE_SLUG
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.read_errors import ReadNotFoundError, RejectedByPolicyError
-from backend.services.tree_service import ensure_context_inbox_node
+from backend.services.workspace_provisioning import create_owned_workspace
 from backend.services.workspace_purge import purge_workspace_data
 from backend.services.workspace_read import WorkspaceReadService
 from backend.utils.database_errors import is_single_column_unique_violation
@@ -163,16 +168,12 @@ class WorkspaceWriteService:
         if get_workspace_by_slug(session, slug) is not None:
             raise WorkspaceCreateConflictError("workspace slug already exists")
         try:
-            # Insert before seeding: seeding is get-or-create by slug, so a
-            # competitor that committed after the check above would otherwise
-            # be adopted and re-owned instead of failing the UNIQUE slug.
-            insert_workspace(session, slug=slug, title=request.title.strip())
-            workspace = seed_default_workspace(
+            workspace = create_owned_workspace(
                 session,
+                owner_user_id=actor.user_id,
                 slug=slug,
                 title=request.title.strip(),
             )
-            ensure_context_inbox_node(session, workspace.id)
             if request.goal is not None:
                 workspace.goal = request.goal.strip()
             if request.default_language is not None:
@@ -185,14 +186,6 @@ class WorkspaceWriteService:
                 workspace.default_language = default_language
             if request.visibility is not None:
                 workspace.visibility = request.visibility.strip()
-            workspace.created_by_actor_id = actor.user_id
-            workspace.owner_actor_id = actor.user_id
-            grant_workspace_membership(
-                session,
-                user_id=actor.user_id,
-                workspace_id=workspace.id,
-                role="owner",
-            )
             session.flush()
         except IntegrityError as exc:
             if not is_single_column_unique_violation(
@@ -278,6 +271,58 @@ class WorkspaceWriteService:
             media_intent=media_intent,
         )
         return workspace_id
+
+    @staticmethod
+    def purge_account_deletion_target(
+        *,
+        session: Session,
+        user: User,
+        workspace_id: UUID,
+    ) -> bool:
+        """Purge a workspace held for ``user``'s account deletion.
+
+        The account lifecycle service owns authorization, due-date validation,
+        and the durable post-commit blob-purge manifest. This narrow worker
+        path deletes only a workspace still held for this account with no
+        active admin. It returns False and leaves the workspace alone once an
+        admin was appointed, and True when the workspace is gone.
+        """
+
+        if user.status != "deletion_pending":
+            raise RuntimeError("account_deletion_pending_required")
+        acquire_write_intent(session)
+        intent = WorkspaceWriteService._lock_media_delete_intent(
+            session=session, workspace_id=workspace_id
+        )
+        workspace = session.scalar(
+            select(Workspace).where(Workspace.id == workspace_id).with_for_update()
+        )
+        if workspace is None:
+            return True
+        active_admin = session.scalar(
+            select(WorkspaceMembership.user_id)
+            .join(User, User.id == WorkspaceMembership.user_id)
+            .where(
+                WorkspaceMembership.workspace_id == workspace_id,
+                WorkspaceMembership.role == "owner",
+                User.status == "active",
+            )
+            .limit(1)
+        )
+        if workspace.account_deletion_user_id != user.id or active_admin is not None:
+            return False
+        if intent is None:
+            raise RuntimeError("workspace_media_intent_not_configured")
+        media_intent = WorkspaceWriteService._begin_media_delete(
+            session=session, workspace_id=workspace_id
+        )
+        purge_workspace_data(session, workspace_id)
+        WorkspaceWriteService._delete_seed_workspace(
+            session=session,
+            workspace_id=workspace_id,
+            media_intent=media_intent,
+        )
+        return True
 
     @staticmethod
     def require_delete_authorization(
@@ -472,11 +517,6 @@ class WorkspaceWriteService:
             .where(User.default_workspace_id == workspace_id)
             .values(default_workspace_id=None)
         )
-        session.execute(
-            update(User)
-            .where(User.personal_workspace_id == workspace_id)
-            .values(personal_workspace_id=None)
-        )
         agent_page_ids = session.scalars(
             select(AgentPage.id).where(AgentPage.workspace_id == workspace_id)
         ).all()
@@ -554,6 +594,11 @@ class WorkspaceWriteService:
             delete(UserFavorite).where(UserFavorite.workspace_id == workspace_id)
         )
         session.execute(
+            delete(WorkspaceInboxEntry).where(
+                WorkspaceInboxEntry.workspace_id == workspace_id
+            )
+        )
+        session.execute(
             delete(WorkspaceTreeNode).where(
                 WorkspaceTreeNode.workspace_id == workspace_id
             )
@@ -603,15 +648,24 @@ class WorkspaceWriteService:
 
 def normalize_workspace_slug(value: str, *, generated: bool = False) -> str:
     if not generated:
-        validate_text(value, field="slug", max_length=80, min_length=1)
-    slug = re.sub(r"[^a-z0-9-]+", "-", value.lower()).strip("-")
-    slug = re.sub(r"-{2,}", "-", slug)
+        validate_text(
+            value, field="slug", max_length=WORKSPACE_SLUG_MAX_LENGTH, min_length=1
+        )
+    slug = slugify_workspace_text(value)
     if generated:
-        slug = slug[:80].strip("-")
+        # The create form has no slug field, so a title such as "Personal
+        # Notes" must still yield a creatable slug instead of a reserved one.
+        if is_reserved_workspace_slug(slug):
+            slug = f"ws-{slug}"
+        slug = slug[:WORKSPACE_SLUG_MAX_LENGTH].strip("-")
     if not slug:
         raise WorkspaceCreateConflictError("workspace slug is required")
     if not generated:
-        validate_text(slug, field="slug", max_length=80, min_length=1)
+        validate_text(
+            slug, field="slug", max_length=WORKSPACE_SLUG_MAX_LENGTH, min_length=1
+        )
+        if is_reserved_workspace_slug(slug):
+            raise WorkspaceCreateConflictError(RESERVED_WORKSPACE_SLUG_MESSAGE)
     return slug
 
 

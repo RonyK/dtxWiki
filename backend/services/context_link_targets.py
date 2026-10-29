@@ -818,6 +818,7 @@ def _parse_workspace_navigation_reference(
         valid_overviews = {
             None,
             "dashboard",
+            "inbox",
             "context",
             "library",
             "agent",

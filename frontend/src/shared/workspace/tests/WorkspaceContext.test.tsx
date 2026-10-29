@@ -201,7 +201,6 @@ describe("WorkspaceProvider", () => {
         data: {
           current_workspace_id: null,
           default_workspace_id: null,
-          personal_workspace_id: null,
           workspaces: [
             workspace("workspace-1", "Alpha"),
             workspace("workspace-2", "Beta"),
@@ -232,9 +231,8 @@ describe("WorkspaceProvider", () => {
       jsonResponse({
         data: {
           current_workspace_id: "removed-workspace",
-          default_workspace_id: "personal-workspace",
-          personal_workspace_id: "personal-workspace",
-          workspaces: [workspace("personal-workspace", "Personal")],
+          default_workspace_id: "fallback-workspace",
+          workspaces: [workspace("fallback-workspace", "Fallback")],
         },
       }),
     );
@@ -246,15 +244,15 @@ describe("WorkspaceProvider", () => {
     let selected: WorkspaceSummary | null = null;
     await act(async () => {
       const refreshed =
-        await result.current.refreshWorkspaces("personal-workspace");
+        await result.current.refreshWorkspaces("fallback-workspace");
       selected = refreshed?.selectedWorkspace ?? null;
     });
 
-    expect((selected as WorkspaceSummary | null)?.id).toBe("personal-workspace");
-    expect(result.current.selectedId).toBe("personal-workspace");
-    expect(result.current.selectedWorkspace?.id).toBe("personal-workspace");
+    expect((selected as WorkspaceSummary | null)?.id).toBe("fallback-workspace");
+    expect(result.current.selectedId).toBe("fallback-workspace");
+    expect(result.current.selectedWorkspace?.id).toBe("fallback-workspace");
     expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe(
-      "personal-workspace",
+      "fallback-workspace",
     );
   });
 
@@ -264,7 +262,6 @@ describe("WorkspaceProvider", () => {
         data: {
           current_workspace_id: null,
           default_workspace_id: null,
-          personal_workspace_id: null,
           workspaces: [
             workspace("workspace-1", "Alpha"),
             workspace("workspace-2", "Beta"),
@@ -411,41 +408,6 @@ describe("WorkspaceProvider", () => {
     expect(result.current.workspaces).toHaveLength(1);
     expect(result.current.defaultWorkspaceId).toBeNull();
     expect(result.current.selectedWorkspace?.id).toBe("workspace-1");
-  });
-
-  it("tracks the Personal anchor by server identity and clears it only when removed", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      jsonResponse({
-        data: {
-          current_workspace_id: "workspace-personal",
-          default_workspace_id: null,
-          personal_workspace_id: "workspace-personal",
-          workspaces: [
-            workspace("workspace-personal", "Personal Workspace"),
-            workspace("workspace-team", "Team Workspace"),
-          ],
-        },
-      }),
-    );
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <WorkspaceProvider>{children}</WorkspaceProvider>
-    );
-    const { result } = renderHook(() => useWorkspaceContext(), { wrapper });
-
-    await act(async () => {
-      await result.current.refreshWorkspaces();
-    });
-    expect(result.current.personalWorkspaceId).toBe("workspace-personal");
-
-    act(() => {
-      result.current.removeWorkspace("workspace-team");
-    });
-    expect(result.current.personalWorkspaceId).toBe("workspace-personal");
-
-    act(() => {
-      result.current.removeWorkspace("workspace-personal");
-    });
-    expect(result.current.personalWorkspaceId).toBeNull();
   });
 
   it("resets on logout and account switch but not on the initial session resolution (WS-05)", async () => {
@@ -614,7 +576,6 @@ describe("WorkspaceProvider", () => {
         data: {
           current_workspace_id: null,
           default_workspace_id: null,
-          personal_workspace_id: null,
           workspaces: [],
         },
       }),
@@ -690,7 +651,6 @@ describe("WorkspaceProvider", () => {
         data: {
           current_workspace_id: "workspace-b",
           default_workspace_id: "workspace-b",
-          personal_workspace_id: null,
           workspaces: [
             workspace("workspace-a", "Alpha"),
             workspace("workspace-b", "Beta"),
@@ -709,7 +669,6 @@ describe("WorkspaceProvider", () => {
         data: {
           current_workspace_id: "workspace-a",
           default_workspace_id: "workspace-a",
-          personal_workspace_id: null,
           workspaces: [
             workspace("workspace-a", "Alpha"),
             workspace("workspace-b", "Beta"),

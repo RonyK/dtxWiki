@@ -288,6 +288,9 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
     # are gated by role + a personal-queue projection in the handlers.
     ("GET", "/api/v1/workspaces/{workspace_id}/reviews"): ("review-read",),
     ("GET", "/api/v1/workspaces/{workspace_id}/reviews/counts"): ("review-read",),
+    # Captures a signed read-only selection; approval remains a separate
+    # draft-write operation with its own actor/provenance checks.
+    ("POST", "/api/v1/workspaces/{workspace_id}/reviews/selection"): ("review-read",),
     (
         "GET",
         "/api/v1/workspaces/{workspace_id}/reviews/decisions/recent",
@@ -463,6 +466,8 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
 # callers still pass through workspace/role checks below. DEC-018 keeps
 # AgentPage activation out of MCP/PAT/OAuth scope surfaces entirely.
 REST_SESSION_ONLY_ROUTES: set[tuple[str, str]] = {
+    ("GET", "/api/v1/users/me/deletion-preview"),
+    ("DELETE", "/api/v1/users/me"),
     ("PATCH", "/api/v1/users/me/default-workspace"),
     # PURGE_AUTHZ_PLAN S-1: workspace deletion (and the purge it can trigger)
     # is reachable only by the owner's own browser session -- no PAT/OAuth
@@ -506,6 +511,7 @@ REST_SESSION_ONLY_ROUTES: set[tuple[str, str]] = {
         "/api/v1/workspaces/{workspace_id}/join-requests/{request_id}",
     ),
     ("GET", "/api/v1/workspaces/{workspace_id}/members"),
+    ("GET", "/api/v1/workspaces/{workspace_id}/member-candidates"),
     ("POST", "/api/v1/workspaces/{workspace_id}/members"),
     (
         "PATCH",
@@ -519,6 +525,19 @@ REST_SESSION_ONLY_ROUTES: set[tuple[str, str]] = {
         "POST",
         "/api/v1/workspaces/{workspace_id}/agent/pages/{agent_page_id}/activate",
     ),
+    # Undoing a review decision reverses a person's judgement (and may
+    # withdraw a publication); no AI-held token may do it.
+    (
+        "POST",
+        "/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decisions/"
+        "{decision_id}/undo",
+    ),
+    # The Inbox is the signed-in person's own message box. Whether agents may
+    # read or mark it is a later MCP decision, so bearer tokens stay out.
+    ("GET", "/api/v1/users/me/inbox"),
+    ("POST", "/api/v1/users/me/inbox/marks"),
+    ("GET", "/api/v1/workspaces/{workspace_id}/inbox"),
+    ("POST", "/api/v1/workspaces/{workspace_id}/inbox/marks"),
 }
 
 # These browser-session routes intentionally operate before membership exists.
@@ -550,6 +569,7 @@ REST_SESSION_UNSCOPED_ROUTES: set[tuple[str, str]] = {
 # truth — and keep this comment in sync with the dispatcher when adding
 # new MCP tools.
 SCOPE_EXEMPT_PREFIXES: tuple[str, ...] = (
+    "/api/v1/capabilities",  # Public instance feature/login metadata.
     "/api/v1/auth",
     # Instance server-admin surface is session-only (gated by
     # require_server_admin); bearer tokens carry no session and get 401, so no

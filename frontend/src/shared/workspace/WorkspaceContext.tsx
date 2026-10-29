@@ -22,7 +22,6 @@ import { translate } from "../i18n";
 
 type WorkspaceContextValue = {
   defaultWorkspaceId: string | null;
-  personalWorkspaceId: string | null;
   error: string | null;
   loading: boolean;
   // True once the workspace list has been fetched at least once. Distinguishes
@@ -73,15 +72,11 @@ export function WorkspaceProvider({
   const [defaultWorkspaceId, setDefaultWorkspaceId] = useState<string | null>(
     null,
   );
-  const [personalWorkspaceId, setPersonalWorkspaceId] = useState<string | null>(
-    null,
-  );
   const [loading, setLoading] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const workspacesRef = useRef<WorkspaceSummary[]>(workspaces);
   const defaultWorkspaceIdRef = useRef<string | null>(defaultWorkspaceId);
-  const personalWorkspaceIdRef = useRef<string | null>(personalWorkspaceId);
   const refreshGenerationRef = useRef(0);
   useEffect(() => {
     workspacesRef.current = workspaces;
@@ -89,9 +84,6 @@ export function WorkspaceProvider({
   useEffect(() => {
     defaultWorkspaceIdRef.current = defaultWorkspaceId;
   }, [defaultWorkspaceId]);
-  useEffect(() => {
-    personalWorkspaceIdRef.current = personalWorkspaceId;
-  }, [personalWorkspaceId]);
   const activeId = routeWorkspaceId ?? selectedId;
   const selectedWorkspace = useMemo(
     () => workspaces.find((workspace) => workspace.id === activeId) ?? null,
@@ -123,11 +115,9 @@ export function WorkspaceProvider({
     clearPersistedWorkspaceId();
     workspacesRef.current = [];
     defaultWorkspaceIdRef.current = null;
-    personalWorkspaceIdRef.current = null;
     setWorkspaces([]);
     setSelectedId("");
     setDefaultWorkspaceId(null);
-    setPersonalWorkspaceId(null);
     setLoading(false);
     setError(null);
     setInitialized(false);
@@ -135,7 +125,6 @@ export function WorkspaceProvider({
 
   const applyWorkspaces = useCallback((nextWorkspaces: WorkspaceSummary[]) => {
     const defaultId = defaultWorkspaceIdRef.current;
-    const personalId = personalWorkspaceIdRef.current;
     const resolved = resolveSelectedWorkspaceId({
       current_workspace_id:
         defaultId &&
@@ -143,7 +132,6 @@ export function WorkspaceProvider({
           ? defaultId
           : null,
       default_workspace_id: defaultId,
-      personal_workspace_id: personalId,
       workspaces: nextWorkspaces,
     });
     setWorkspaces(nextWorkspaces);
@@ -156,15 +144,8 @@ export function WorkspaceProvider({
       nextWorkspaces.some((workspace) => workspace.id === defaultId)
         ? defaultId
         : null;
-    const nextPersonalId =
-      personalId &&
-      nextWorkspaces.some((workspace) => workspace.id === personalId)
-        ? personalId
-        : null;
     defaultWorkspaceIdRef.current = nextDefaultId;
-    personalWorkspaceIdRef.current = nextPersonalId;
     setDefaultWorkspaceId(nextDefaultId);
-    setPersonalWorkspaceId(nextPersonalId);
     setSelectedId(resolved ?? "");
     return (
       nextWorkspaces.find((workspace) => workspace.id === resolved) ?? null
@@ -197,11 +178,8 @@ export function WorkspaceProvider({
         // moving landing/fallback workspace the user never pinned (backend S2/C9).
         // Selection still uses resolveSelectedWorkspaceId (current_workspace_id).
         const nextDefaultId = response.data.default_workspace_id ?? null;
-        const nextPersonalId = response.data.personal_workspace_id ?? null;
         defaultWorkspaceIdRef.current = nextDefaultId;
-        personalWorkspaceIdRef.current = nextPersonalId;
         setDefaultWorkspaceId(nextDefaultId);
-        setPersonalWorkspaceId(nextPersonalId);
         setSelectedId(resolved ?? "");
         if (preferred) {
           setSelectedWorkspace(preferred);
@@ -299,7 +277,6 @@ export function WorkspaceProvider({
       error,
       loading,
       initialized,
-      personalWorkspaceId,
       refreshWorkspaces,
       removeWorkspace,
       selectWorkspaceId,
@@ -314,7 +291,6 @@ export function WorkspaceProvider({
       error,
       loading,
       initialized,
-      personalWorkspaceId,
       refreshWorkspaces,
       removeWorkspace,
       selectWorkspaceId,

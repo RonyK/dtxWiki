@@ -5,11 +5,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AUTH_EXPIRED_EVENT, ApiError } from "../../api/client";
 import { AuthProvider, useAuth } from "../AuthContext";
+import { reviewDraftKey } from "../../lib/reviewDraftStorage";
 
 describe("AuthContext", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     window.localStorage.clear();
+    window.sessionStorage.clear();
   });
 
   it("keeps an authenticated session when a later refresh returns 5xx", async () => {
@@ -407,6 +409,10 @@ describe("AuthContext", () => {
     // stale localStorage key and in-memory snapshot, which outlive the
     // authenticated workspace subtree's identity-keyed remount.
     const user = userEvent.setup();
+    const draftKey = reviewDraftKey("user-1", "workspace-1", "review-1");
+    sessionStorage.setItem(draftKey, "Private review note");
+    sessionStorage.setItem(`${draftKey}.pending`, JSON.stringify({ decisionId: "pending-decision" }));
+    sessionStorage.setItem("unrelated.session.preference", "preserve");
     window.localStorage.setItem(
       "dtxwiki.selectedWorkspaceId",
       "00000000-0000-0000-0000-000000000abc",
@@ -432,6 +438,9 @@ describe("AuthContext", () => {
       expect(screen.getByTestId("status")).toHaveTextContent("anonymous");
     });
     expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBeNull();
+    expect(sessionStorage.getItem(draftKey)).toBeNull();
+    expect(sessionStorage.getItem(`${draftKey}.pending`)).toBeNull();
+    expect(sessionStorage.getItem("unrelated.session.preference")).toBe("preserve");
   });
 });
 

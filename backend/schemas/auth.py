@@ -275,10 +275,16 @@ class ApiTokenUpdateRequest(BaseModel):
 
 class AuthUserData(BaseModel):
     user_id: UUID
-    email: str
+    username: str = Field(
+        description="Stable system-generated handle; display_name need not be unique."
+    )
+    email: str | None
     display_name: str
     status: str
     email_verified_at: datetime | None = None
+    has_password: bool = True
+    session_method: str | None = None
+    session_provider_slug: str | None = None
     # Instance-level (server) admin flag — populated authoritatively by GET
     # /auth/me (the SPA's startup load) to gate system/deployment surfaces.
     # Other auth responses leave it at the default; the SPA reads /me.
@@ -345,6 +351,11 @@ class PasswordResetRequestData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class EmailVerificationRequest(BaseModel):
+    email: EmailInput | None = None
+    model_config = ConfigDict(extra="forbid")
+
+
 class EmailVerificationData(BaseModel):
     requested: bool = False
     verified: bool = False
@@ -359,9 +370,29 @@ class PasswordRecoveryCapabilities(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class PasswordLoginCapability(BaseModel):
+    enabled: bool
+    email_enrollment_enabled: bool
+
+
+class LoginMethodCapability(BaseModel):
+    slug: str
+    method_id: str
+    protocol: str
+    display_name: str
+    label: dict[str, str]
+    background: str | None = None
+    foreground: str | None = None
+    icon_url: str | None = None
+    start_url: str
+    supports_reauthentication: bool
+
+
 class AuthCapabilitiesData(BaseModel):
     signup_enabled: bool
     password_recovery: PasswordRecoveryCapabilities
+    password_login: PasswordLoginCapability
+    login_methods: list[LoginMethodCapability]
 
     model_config = ConfigDict(extra="forbid")
 
@@ -530,6 +561,18 @@ class AuthSessionResponse(RESTResponseBase):
     data: AuthSessionData
 
 
+class EmailConflictRequestData(BaseModel):
+    status: Literal["pending", "resolved"] = Field(
+        description="resolved means a new SSO login now decides without an admin."
+    )
+    request_id: UUID | None
+    model_config = ConfigDict(extra="forbid")
+
+
+class EmailConflictRequestResponse(RESTResponseBase):
+    data: EmailConflictRequestData
+
+
 class AuthMeResponse(RESTResponseBase):
     data: AuthUserData
 
@@ -560,6 +603,15 @@ class EmailVerificationResponse(RESTResponseBase):
 
 class AuthCapabilitiesResponse(RESTResponseBase):
     data: AuthCapabilitiesData
+
+
+class CapabilitiesData(BaseModel):
+    auth: AuthCapabilitiesData
+    plugins: list[str]
+
+
+class CapabilitiesResponse(RESTResponseBase):
+    data: CapabilitiesData
 
 
 class ApiTokenListResponse(RESTResponseBase):

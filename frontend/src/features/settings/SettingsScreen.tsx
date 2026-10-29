@@ -127,6 +127,7 @@ import {
   SettingsDirtyProvider,
   useGuardedSettingsChange,
   useRegisterSettingsDirty,
+  useSettingsDirtyCheck,
 } from "./SettingsDirtyRegistry";
 import type { PolicyEditState } from "./SettingsPaneParts";
 import {
@@ -159,6 +160,7 @@ import {
   type WorkspaceScopeOption,
 } from "../../shared/components/WorkspaceScopePicker";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { useCursorPage } from "../../shared/hooks/useCursorPage";
 import { writeTextToClipboard, selectText } from "../../shared/lib/clipboard";
 import { i18n, setLocale, translate } from "../../shared/i18n";
@@ -350,7 +352,7 @@ const REVIEW_RISK_RANK: Record<ReviewRiskLevel, number> = {
 // RO-3: risk-aware factory defaults shown for a workspace that has not yet set
 // these explicitly. They mirror the backend factory defaults (Codex #16): a
 // workspace never auto-approves until an admin opts in, so every level falls
-// back to allowed=false. High stays manual-only.
+// back to allowed=false. High stays manual until an admin acknowledges the risk.
 const REVIEW_AUTO_APPROVE_DEFAULTS: Record<
   ReviewRiskLevel,
   { allowed: boolean; delayDays: number }
@@ -421,6 +423,7 @@ export function SettingsScreen({ scope = "workspace" }: { scope?: "workspace" | 
 function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "server" }) {
   const routeWorkspaceId = useWorkspaceRoute()?.workspaceId ?? null;
   const { t } = useTranslation("settings");
+  const hasUnsavedSettings = useSettingsDirtyCheck();
   const workspaceContext = useOptionalWorkspaceContext();
   const selectedWorkspaceId = routeWorkspaceId ?? scope;
   // The line above is a STATE-BUCKET KEY, not a workspace id -- it falls back
@@ -650,6 +653,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
     error,
     reload: reloadPolicies,
     setData: setPolicies,
+    setError: setPoliciesError,
   } = useAsyncLoad<SettingsPolicies | null>(
     async () => {
       if (scope !== "workspace") return null;
@@ -759,6 +763,53 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
       ),
     queryKey: `access-keys:${accessKeyFilter}:${accessKeySearch}`,
   });
+  const entryPolicyGenerationRef = useRef(0);
+  const policiesSnapshotRef = useRef(policies);
+  useEffect(() => {
+    policiesSnapshotRef.current = policies;
+  }, [policies]);
+  // Workspace is the Settings home; returning to it refreshes the shared data.
+  useScreenEntryRefresh(
+    scope === "workspace" && routeWorkspaceId
+      ? workspacePath(routeWorkspaceId, "settings")
+      : "/account/integrations",
+    () => {
+    if (!hasUnsavedSettings()) {
+      const snapshot = policies;
+      const workspaceKey = selectedWorkspaceId;
+      const generation = ++entryPolicyGenerationRef.current;
+      const canApply = () =>
+        settingsMountedRef.current &&
+        generation === entryPolicyGenerationRef.current &&
+        workspaceKey === selectedWorkspaceKeyRef.current &&
+        policiesSnapshotRef.current === snapshot &&
+        !hasUnsavedSettings();
+      // Only this passive read preserves unsaved edits. Save-conflict recovery
+      // uses reloadPolicies and must adopt the server's current revision.
+      const workspaceId = routeWorkspaceId;
+      if (!workspaceId) {
+        setPoliciesError(new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable).message);
+      } else {
+        void getSettingsPolicies(workspaceId)
+          .then((next) => {
+            if (canApply()) {
+              setPolicies(next);
+              setPoliciesError(null);
+            }
+          })
+          .catch((caught) => {
+            if (canApply()) {
+              setPoliciesError(errorMessage(caught));
+            }
+          });
+      }
+    }
+      // The key count also appears in the section navigation, including Workspace.
+      void accessKeyPages.reload();
+    },
+    { isHome: activeSection === "workspace" },
+  );
+
   const tokens = useMemo(
     () => accessKeyPages.page?.data ?? [],
     [accessKeyPages.page],
@@ -3496,7 +3547,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
   return (
     <div className="workspace-screen single-column">
       <section
-        className="feature-main feature-main--reader"
+        className="feature-main feature-main--reader settings-screen"
         ref={settingsMainRef}
       >
         {/* Two items, so this renders at all: Breadcrumbs returns null for a
@@ -3685,7 +3736,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
                   ) : null}
                 </header>
                 <WorkspaceMembersSection />
-                <WorkspaceAccessSharingSection />
+                <WorkspaceAccessSharingSection collapsible />
               </section>
             ) : null}
             {activeSection === "workspace" && policies ? (
@@ -3694,24 +3745,32 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
               // Account-level or per-user preferences — e.g. the user's default
               // workspace — live on the Account page (Workspace access panel),
               // NOT here. Do not reintroduce per-user prefs into this section.
-              <section className="feature-section">
-                <CurrentWorkspaceDefaultStatus />
-                <PolicyGroupView
-                  card={policies.workspace}
-                  fields={workspacePolicyFields(policies.workspace.policy)}
-                  group="workspace"
-                  busyKey={policyBusyKey}
-                  onFieldsSave={onPolicyFieldsSave}
-                  saveNotice={policySaved}
-                  readOnly={!canEditPolicies}
-                  summary={t("summary.workspace")}
-                />
-                <WorkspaceDangerZone
-                  currentSlug={workspaceSlugFromPolicy(policies.workspace.policy)}
-                  onPoliciesChanged={setPolicies}
-                  readOnly={!canEditPolicies}
-                />
-              </section>
+              <WorkspaceSettingsSection
+                workspace={workspaceContext?.selectedWorkspace ?? null}
+                workspaceLoading={workspaceContext?.loading ?? false}
+                defaultWorkspaceId={workspaceContext?.defaultWorkspaceId ?? null}
+                workspaces={workspaceContext?.workspaces ?? []}
+                onDefaultChanged={async (id) => {
+                  await setDefaultWorkspace(id);
+                  await workspaceContext?.refreshWorkspaces();
+                }}
+                policies={policies}
+                busyKey={policyBusyKey}
+                onFieldsSave={onPolicyFieldsSave}
+                saveNotice={policySaved}
+                readOnly={!canEditPolicies}
+                onPoliciesChanged={setPolicies}
+                onSlugChanged={async () => { await workspaceContext?.refreshWorkspaces(); }}
+                onDelete={async (workspace, options) => {
+                  if (!workspaceContext) return;
+                  const deleted = await deleteWorkspace(workspace.id, options);
+                  const remaining = workspaceContext.workspaces.filter((candidate) => candidate.id !== deleted.deleted_workspace_id);
+                  const localFallback = workspaceContext.removeWorkspace(deleted.deleted_workspace_id)?.id;
+                  const refreshed = await workspaceContext.refreshWorkspaces();
+                  const fallbackId = refreshed?.selectedWorkspace?.id ?? localFallback ?? remaining[0]?.id ?? null;
+                  navigate(fallbackId ? workspacePath(fallbackId, "dashboard") : "/workspaces/find", { replace: true });
+                }}
+              />
             ) : null}
             {activeSection === "policies" && policies ? (
               <>
@@ -5430,14 +5489,69 @@ function McpClientList({
   );
 }
 
+export function WorkspaceSettingsSection({
+  workspace, workspaceLoading, defaultWorkspaceId, workspaces, onDefaultChanged,
+  policies, busyKey, onFieldsSave, saveNotice, readOnly, onPoliciesChanged,
+  onSlugChanged, onDelete,
+}: {
+  workspace: WorkspaceSummary | null;
+  workspaceLoading: boolean;
+  defaultWorkspaceId: string | null;
+  workspaces: WorkspaceSummary[];
+  onDefaultChanged: (id: string) => Promise<void>;
+  policies: SettingsPolicies;
+  busyKey: string | null;
+  onFieldsSave: (group: SettingsPolicyGroup, updates: PolicyFieldUpdate[], successLabel: string) => Promise<boolean>;
+  saveNotice: PolicySaveNotice | null;
+  readOnly: boolean;
+  onPoliciesChanged: (policies: SettingsPolicies) => void;
+  onSlugChanged: (slug: string) => Promise<void>;
+  onDelete: (workspace: WorkspaceSummary, options: { purgeContents?: boolean; purgeGrant?: string }) => Promise<void>;
+}) {
+  const { t } = useTranslation("settings");
+  return (
+    <section className="feature-section">
+      <CurrentWorkspaceDefaultStatus
+        workspace={workspace}
+        defaultWorkspaceId={defaultWorkspaceId}
+        workspaces={workspaces}
+        onDefaultChanged={onDefaultChanged}
+      />
+      <PolicyGroupView
+        card={policies.workspace}
+        fields={workspacePolicyFields(policies.workspace.policy)}
+        group="workspace"
+        busyKey={busyKey}
+        onFieldsSave={onFieldsSave}
+        saveNotice={saveNotice}
+        readOnly={readOnly}
+        summary={t("summary.workspace")}
+      />
+      <WorkspaceDangerZone
+        workspace={workspace}
+        workspaceLoading={workspaceLoading}
+        currentSlug={workspaceSlugFromPolicy(policies.workspace.policy)}
+        onPoliciesChanged={onPoliciesChanged}
+        readOnly={readOnly}
+        onSlugChanged={onSlugChanged}
+        onDelete={onDelete}
+      />
+    </section>
+  );
+}
+
 // S1: Settings > Workspace is scoped to the CURRENT workspace only. It shows
 // whether this workspace is the user's default and offers a single action to
 // make it the default (with a confirm step). The full cross-workspace default
 // picker lives in Account > Workspace access — do not reintroduce a workspace
 // list here.
-function CurrentWorkspaceDefaultStatus() {
+function CurrentWorkspaceDefaultStatus({ workspace: currentWorkspace, defaultWorkspaceId, workspaces, onDefaultChanged }: {
+  workspace: WorkspaceSummary | null;
+  defaultWorkspaceId: string | null;
+  workspaces: WorkspaceSummary[];
+  onDefaultChanged: (id: string) => Promise<void>;
+}) {
   const { t } = useTranslation("settings");
-  const workspaceContext = useOptionalWorkspaceContext();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -5456,9 +5570,6 @@ function CurrentWorkspaceDefaultStatus() {
     }
   }, [confirmOpen]);
 
-  const currentWorkspace = workspaceContext?.selectedWorkspace ?? null;
-  const defaultWorkspaceId = workspaceContext?.defaultWorkspaceId ?? null;
-  const workspaces = workspaceContext?.workspaces ?? [];
   const isCurrentDefault =
     currentWorkspace != null && currentWorkspace.id === defaultWorkspaceId;
   const defaultWorkspace =
@@ -5472,8 +5583,7 @@ function CurrentWorkspaceDefaultStatus() {
     setError(null);
     setStatus(null);
     try {
-      await setDefaultWorkspace(currentWorkspace.id);
-      await workspaceContext?.refreshWorkspaces();
+      await onDefaultChanged(currentWorkspace.id);
       setStatus(
         t("workspaceDefault.statusChanged", {
           title: currentWorkspace.title,
@@ -5628,16 +5738,21 @@ export function WorkspaceDangerZone({
   currentSlug,
   onPoliciesChanged,
   readOnly,
+  workspace,
+  workspaceLoading = false,
+  onSlugChanged,
+  onDelete,
 }: {
   currentSlug: string;
   onPoliciesChanged: (policies: SettingsPolicies) => void;
   readOnly: boolean;
+  workspace: WorkspaceSummary | null;
+  workspaceLoading?: boolean;
+  onSlugChanged: (slug: string) => Promise<void>;
+  onDelete: (workspace: WorkspaceSummary, options: { purgeContents?: boolean; purgeGrant?: string }) => Promise<void>;
 }) {
   const routeWorkspaceId = useRouteWorkspaceId();
   const { t } = useTranslation("settings");
-  const navigate = useNavigate();
-  const workspaceContext = useOptionalWorkspaceContext();
-  const workspace = workspaceContext?.selectedWorkspace ?? null;
   const activeSlug = workspace?.slug ?? currentSlug;
   const [slugDraft, setSlugDraft] = useState(activeSlug);
   const [slugBusy, setSlugBusy] = useState(false);
@@ -5656,7 +5771,7 @@ export function WorkspaceDangerZone({
           defaultValue: disabledReasonCode,
         })
       : null
-    : workspaceContext?.loading
+    : workspaceLoading
       ? t("dangerZone.loadingWorkspace", {
           defaultValue: "Workspace is still loading.",
         })
@@ -5697,7 +5812,7 @@ export function WorkspaceDangerZone({
         value: normalizedSlug,
       });
       onPoliciesChanged(updatedPolicies);
-      await workspaceContext?.refreshWorkspaces();
+      await onSlugChanged(normalizedSlug);
       setSlugStatus(
         t("dangerZone.slugUpdated", {
           defaultValue: "Workspace slug updated",
@@ -5711,7 +5826,7 @@ export function WorkspaceDangerZone({
   }
 
   async function onConfirmDelete() {
-    if (!workspace || disabledReason || !workspaceContext) {
+    if (!workspace || disabledReason) {
       return;
     }
     // `grant_expired` is deliberately excluded: it has no grant left to
@@ -5725,22 +5840,8 @@ export function WorkspaceDangerZone({
         : undefined;
     setDeleteBusy(true);
     try {
-      const deleted = await deleteWorkspace(workspace.id, {
-        purgeContents,
-        purgeGrant,
-      });
-      const localRemainingWorkspaces = workspaceContext.workspaces.filter(
-        (candidate) => candidate.id !== deleted.deleted_workspace_id,
-      );
-      workspaceContext.removeWorkspace(deleted.deleted_workspace_id);
-      const refreshed = await workspaceContext.refreshWorkspaces();
+      await onDelete(workspace, { purgeContents, purgeGrant });
       setDeleteFlow({ kind: "closed" });
-      navigate(
-        (refreshed?.workspaces ?? localRemainingWorkspaces).length === 0
-          ? "/workspaces/find"
-          : refreshed?.selectedWorkspace?.id ? workspacePath(refreshed.selectedWorkspace.id, "dashboard") : "/workspaces/find",
-        { replace: true },
-      );
     } catch (caught) {
       const blockers = workspaceDeleteBlockers(caught);
       const grant = workspaceDeletePurgeGrant(caught);
@@ -8222,19 +8323,18 @@ export function ReviewAutoApproveByRiskSettings({
 }) {
   const { t } = useTranslation("settings");
   const rows = reviewAutoApproveRows(policy);
+  const savedHighAllowed =
+    rows.find((row) => row.risk === "high")?.allowed ?? false;
   const [drafts, setDrafts] = useState(rows);
   // F-9: high auto-approval is gated by an explicit "danger noted" ack. If high
   // is already allowed (saved), the ack is considered given.
-  const [highDangerAck, setHighDangerAck] = useState(
-    () => rows.find((row) => row.risk === "high")?.allowed ?? false,
-  );
+  const [highDangerAck, setHighDangerAck] = useState(savedHighAllowed);
   const baselineKey = useMemo(() => JSON.stringify(rows), [rows]);
   // Re-baseline while rendering rather than from an effect: see PolicyGroupView.
   const [draftsBaselineKey, setDraftsBaselineKey] = useState(baselineKey);
   if (draftsBaselineKey !== baselineKey) {
     setDraftsBaselineKey(baselineKey);
-    setDrafts(rows);
-    setHighDangerAck(rows.find((row) => row.risk === "high")?.allowed ?? false);
+    resetDrafts();
   }
   const savedLabel = savedLabelFor(saveNotice, (key) =>
     key.includes("auto_approve_by_risk"),
@@ -8259,7 +8359,11 @@ export function ReviewAutoApproveByRiskSettings({
       REVIEW_RISK_RANK[draft.risk] > REVIEW_RISK_RANK[fromRisk],
   );
   const saveDisabled =
-    readOnly || busy || dirtyRows.length === 0 || Boolean(conflictingDraft);
+    readOnly ||
+    busy ||
+    dirtyRows.length === 0 ||
+    Boolean(conflictingDraft) ||
+    drafts.some((draft) => Number.isNaN(draft.delayDays));
   useRegisterSettingsDirty("policy:reviewAutoApprove", dirtyRows.length > 0);
 
   // RO-4: when the overview deep-links to /settings?section=review#auto-approve-<risk>,
@@ -8288,6 +8392,13 @@ export function ReviewAutoApproveByRiskSettings({
       window.clearTimeout(timeout);
     };
   }, [location.hash]);
+
+  // The ack is restored with the drafts: resetting the drafts alone brought a
+  // saved High back allowed but locked behind an unchecked ack.
+  function resetDrafts() {
+    setDrafts(rows);
+    setHighDangerAck(savedHighAllowed);
+  }
 
   function updateDraft(
     risk: ReviewRiskLevel,
@@ -8462,14 +8573,20 @@ export function ReviewAutoApproveByRiskSettings({
                   min={0}
                   onChange={(event) =>
                     updateDraft(row.risk, {
-                      delayDays: Math.min(
-                        REVIEW_AUTO_APPROVE_MAX_DAYS,
-                        Math.max(0, Number(event.target.value) || 0),
-                      ),
+                      // An emptied field stays empty until a number is typed.
+                      // Coercing it to 0 put "0" under the caret, so typing 5
+                      // read "05", and saving it meant "no wait" unasked.
+                      delayDays:
+                        event.target.value === ""
+                          ? Number.NaN
+                          : Math.min(
+                              REVIEW_AUTO_APPROVE_MAX_DAYS,
+                              Math.max(0, Math.trunc(Number(event.target.value))),
+                            ),
                     })
                   }
                   type="number"
-                  value={row.delayDays}
+                  value={Number.isNaN(row.delayDays) ? "" : row.delayDays}
                 />
               </label>
             </div>
@@ -8496,7 +8613,7 @@ export function ReviewAutoApproveByRiskSettings({
           <button
             className="icon-button"
             disabled={busy || dirtyRows.length === 0}
-            onClick={() => setDrafts(rows)}
+            onClick={resetDrafts}
             type="button"
           >
             {t("actions.discard")}
@@ -9376,15 +9493,13 @@ function reviewAutoApproveRows(policy: Record<string, unknown>) {
         : def.delayDays;
     // RO-3: read the new "allowed" key, falling back to the legacy "enabled"
     // key for one release, then to the risk-aware factory default. High is
-    // always manual.
+    // read like the others (F-9): forcing it to false hid a saved opt-in,
+    // so the form never re-baselined and a reload showed it unchecked while
+    // the server kept auto-approving.
     const rawAllowed =
       row.allowed !== undefined ? row.allowed : row.enabled;
     const allowed =
-      risk === "high"
-        ? false
-        : rawAllowed === undefined
-          ? def.allowed
-          : rawAllowed === true;
+      rawAllowed === undefined ? def.allowed : rawAllowed === true;
     return {
       risk,
       allowed,

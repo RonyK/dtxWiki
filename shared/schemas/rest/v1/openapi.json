@@ -66,6 +66,119 @@
         "title": "ActivityActor",
         "type": "object"
       },
+      "ActivityDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "base_version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityVersion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decision_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "approve",
+                  "reject",
+                  "request_changes"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Type"
+          },
+          "editing_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Editing Revision"
+          },
+          "move": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityMove"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "page_id": {
+            "format": "uuid",
+            "title": "Page Id",
+            "type": "string"
+          },
+          "previous_published_version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityVersion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "rename": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityRename"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "restored_from_version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityVersion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityVersion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "page_id"
+        ],
+        "title": "ActivityDetails",
+        "type": "object"
+      },
       "ActivityFeedData": {
         "additionalProperties": false,
         "properties": {
@@ -227,6 +340,16 @@
             "title": "Created At",
             "type": "string"
           },
+          "details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "duration_ms": {
             "anyOf": [
               {
@@ -249,9 +372,31 @@
             "anyOf": [
               {
                 "enum": [
+                  "page.create",
+                  "page.update",
+                  "page.patch_context_edit",
+                  "page.begin_context_edit",
+                  "page.submit_context_edit_for_review",
+                  "page.discard_context_edit",
+                  "page.autosave.draft",
+                  "page.autosave.overwrite",
+                  "page.restore_version",
+                  "page.publish",
+                  "page.unpublish",
+                  "page.preserve_alternative",
+                  "page.inline_comment",
+                  "context_page.draft.create",
+                  "context_page.draft.update",
+                  "context_page.draft.diverged",
+                  "context_page.draft.diverged_discarded",
                   "context_page.draft.publish",
+                  "review.decision",
+                  "review.superseded_by_approved_publish",
+                  "review.superseded_by_rejected_candidate",
                   "tree.node.move",
                   "tree.node.rename",
+                  "tree.node.reorder",
+                  "tree.node.delete",
                   "workspace.join_request.requested",
                   "workspace.join_request.approved",
                   "workspace.join_request.rejected"
@@ -469,6 +614,16 @@
             "title": "Created At",
             "type": "string"
           },
+          "details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "event_args": {
             "additionalProperties": {
               "type": "string"
@@ -480,9 +635,31 @@
             "anyOf": [
               {
                 "enum": [
+                  "page.create",
+                  "page.update",
+                  "page.patch_context_edit",
+                  "page.begin_context_edit",
+                  "page.submit_context_edit_for_review",
+                  "page.discard_context_edit",
+                  "page.autosave.draft",
+                  "page.autosave.overwrite",
+                  "page.restore_version",
+                  "page.publish",
+                  "page.unpublish",
+                  "page.preserve_alternative",
+                  "page.inline_comment",
+                  "context_page.draft.create",
+                  "context_page.draft.update",
+                  "context_page.draft.diverged",
+                  "context_page.draft.diverged_discarded",
                   "context_page.draft.publish",
+                  "review.decision",
+                  "review.superseded_by_approved_publish",
+                  "review.superseded_by_rejected_candidate",
                   "tree.node.move",
                   "tree.node.rename",
+                  "tree.node.reorder",
+                  "tree.node.delete",
                   "workspace.join_request.requested",
                   "workspace.join_request.approved",
                   "workspace.join_request.rejected"
@@ -613,6 +790,50 @@
         "title": "ActivityListResponse",
         "type": "object"
       },
+      "ActivityLocation": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "provenance": {
+            "enum": [
+              "recorded",
+              "current",
+              "unavailable",
+              "root"
+            ],
+            "title": "Provenance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provenance"
+        ],
+        "title": "ActivityLocation",
+        "type": "object"
+      },
+      "ActivityMove": {
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "$ref": "#/components/schemas/ActivityLocation"
+          },
+          "before": {
+            "$ref": "#/components/schemas/ActivityLocation"
+          }
+        },
+        "required": [
+          "before",
+          "after"
+        ],
+        "title": "ActivityMove",
+        "type": "object"
+      },
       "ActivityNavigation": {
         "additionalProperties": false,
         "properties": {
@@ -692,6 +913,35 @@
         "title": "ActivityReadGroupResponse",
         "type": "object"
       },
+      "ActivityRename": {
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After"
+          },
+          "before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before"
+          }
+        },
+        "title": "ActivityRename",
+        "type": "object"
+      },
       "ActivityTarget": {
         "additionalProperties": false,
         "properties": {
@@ -716,6 +966,148 @@
           "target_kind"
         ],
         "title": "ActivityTarget",
+        "type": "object"
+      },
+      "ActivityVersion": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "immutable": {
+            "default": false,
+            "title": "Immutable",
+            "type": "boolean"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "number"
+        ],
+        "title": "ActivityVersion",
+        "type": "object"
+      },
+      "AdminAuditEventData": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "actor_kind": {
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "event_id": {
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_kind": {
+            "title": "Target Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "created_at",
+          "action",
+          "actor_kind",
+          "actor_id",
+          "target_kind",
+          "target_id",
+          "summary",
+          "payload"
+        ],
+        "title": "AdminAuditEventData",
+        "type": "object"
+      },
+      "AdminAuditEventListData": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminAuditEventData"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "AdminAuditEventListData",
+        "type": "object"
+      },
+      "AdminAuditEventListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminAuditEventListData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "AdminAuditEventListResponse",
         "type": "object"
       },
       "AdminContextMediaAttachmentListData": {
@@ -941,6 +1333,348 @@
         "title": "AdminContextMediaAttachmentPayload",
         "type": "object"
       },
+      "AdminEmailConflictData": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided By"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "provider_slug": {
+            "title": "Provider Slug",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "resolved",
+              "auto_released"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/AdminEmailConflictTargetData"
+          }
+        },
+        "required": [
+          "request_id",
+          "status",
+          "email",
+          "provider_slug",
+          "subject",
+          "created_at",
+          "decided_at",
+          "decided_by",
+          "reason",
+          "target"
+        ],
+        "title": "AdminEmailConflictData",
+        "type": "object"
+      },
+      "AdminEmailConflictDecisionData": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "approved",
+              "rejected",
+              "resolved"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "status"
+        ],
+        "title": "AdminEmailConflictDecisionData",
+        "type": "object"
+      },
+      "AdminEmailConflictDecisionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision",
+          "reason"
+        ],
+        "title": "AdminEmailConflictDecisionRequest",
+        "type": "object"
+      },
+      "AdminEmailConflictDecisionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminEmailConflictDecisionData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "AdminEmailConflictDecisionResponse",
+        "type": "object"
+      },
+      "AdminEmailConflictListData": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminEmailConflictData"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "AdminEmailConflictListData",
+        "type": "object"
+      },
+      "AdminEmailConflictListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminEmailConflictListData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "AdminEmailConflictListResponse",
+        "type": "object"
+      },
+      "AdminEmailConflictTargetData": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "display_name",
+          "status",
+          "created_at"
+        ],
+        "title": "AdminEmailConflictTargetData",
+        "type": "object"
+      },
+      "AdminIdentityRebindData": {
+        "properties": {
+          "identity_id": {
+            "format": "uuid",
+            "title": "Identity Id",
+            "type": "string"
+          },
+          "issuer": {
+            "title": "Issuer",
+            "type": "string"
+          },
+          "provider_slug": {
+            "title": "Provider Slug",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "identity_id",
+          "provider_slug",
+          "issuer",
+          "subject",
+          "user_id"
+        ],
+        "title": "AdminIdentityRebindData",
+        "type": "object"
+      },
+      "AdminIdentityRebindRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_issuer": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Expected Issuer",
+            "type": "string"
+          },
+          "expected_subject": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Expected Subject",
+            "type": "string"
+          },
+          "identity_id": {
+            "format": "uuid",
+            "title": "Identity Id",
+            "type": "string"
+          },
+          "issuer": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Issuer",
+            "type": "string"
+          },
+          "provider_slug": {
+            "maxLength": 127,
+            "minLength": 1,
+            "title": "Provider Slug",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "subject": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "identity_id",
+          "expected_issuer",
+          "expected_subject",
+          "provider_slug",
+          "issuer",
+          "subject",
+          "reason"
+        ],
+        "title": "AdminIdentityRebindRequest",
+        "type": "object"
+      },
+      "AdminIdentityRebindResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminIdentityRebindData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "AdminIdentityRebindResponse",
+        "type": "object"
+      },
       "AdminJobListData": {
         "additionalProperties": false,
         "description": "Server-admin cross-workspace job listing.\n\nAdds the incompleteness signal the workspace-scoped listing has no use\nfor: that route reads exactly one workspace, so it can never come back\npartially answered and keeps the plain JobListData shape above.",
@@ -1091,13 +1825,54 @@
       "AdminUserData": {
         "additionalProperties": false,
         "properties": {
+          "deletion_failure_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deletion Failure Count"
+          },
+          "deletion_last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deletion Last Error"
+          },
+          "deletion_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deletion Requested At"
+          },
           "display_name": {
             "title": "Display Name",
             "type": "string"
           },
           "email": {
-            "title": "Email",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
           },
           "email_verified_at": {
             "anyOf": [
@@ -1110,6 +1885,25 @@
               }
             ],
             "title": "Email Verified At"
+          },
+          "identities": {
+            "items": {
+              "$ref": "#/components/schemas/AdminUserIdentityData"
+            },
+            "title": "Identities",
+            "type": "array"
+          },
+          "purge_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purge After"
           },
           "status": {
             "title": "Status",
@@ -1133,9 +1927,78 @@
           "email",
           "display_name",
           "status",
-          "workspaces"
+          "workspaces",
+          "identities"
         ],
         "title": "AdminUserData",
+        "type": "object"
+      },
+      "AdminUserDeletionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "approved_workspaces": {
+            "items": {
+              "$ref": "#/components/schemas/UserDeletionApprovedWorkspace"
+            },
+            "maxItems": 1000,
+            "title": "Approved Workspaces",
+            "type": "array"
+          },
+          "confirmation_email": {
+            "anyOf": [
+              {
+                "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
+                "type": "string",
+                "x-localPart-maxBytes": 64,
+                "x-normalized-maxBytes": 254
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmation Email"
+          },
+          "expected_retention_days": {
+            "maximum": 36500.0,
+            "minimum": 0.0,
+            "title": "Expected Retention Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_retention_days",
+          "approved_workspaces"
+        ],
+        "title": "AdminUserDeletionRequest",
+        "type": "object"
+      },
+      "AdminUserIdentityData": {
+        "properties": {
+          "identity_id": {
+            "format": "uuid",
+            "title": "Identity Id",
+            "type": "string"
+          },
+          "issuer": {
+            "title": "Issuer",
+            "type": "string"
+          },
+          "provider_slug": {
+            "title": "Provider Slug",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "identity_id",
+          "provider_slug",
+          "issuer",
+          "subject"
+        ],
+        "title": "AdminUserIdentityData",
         "type": "object"
       },
       "AdminUserListData": {
@@ -1189,6 +2052,11 @@
       "AdminUserWorkspaceData": {
         "additionalProperties": false,
         "properties": {
+          "deletion_held": {
+            "default": false,
+            "title": "Deletion Held",
+            "type": "boolean"
+          },
           "role": {
             "enum": [
               "viewer",
@@ -2926,6 +3794,16 @@
       "AuthCapabilitiesData": {
         "additionalProperties": false,
         "properties": {
+          "login_methods": {
+            "items": {
+              "$ref": "#/components/schemas/LoginMethodCapability"
+            },
+            "title": "Login Methods",
+            "type": "array"
+          },
+          "password_login": {
+            "$ref": "#/components/schemas/PasswordLoginCapability"
+          },
           "password_recovery": {
             "$ref": "#/components/schemas/PasswordRecoveryCapabilities"
           },
@@ -2936,7 +3814,9 @@
         },
         "required": [
           "signup_enabled",
-          "password_recovery"
+          "password_recovery",
+          "password_login",
+          "login_methods"
         ],
         "title": "AuthCapabilitiesData",
         "type": "object"
@@ -3041,8 +3921,15 @@
             "type": "string"
           },
           "email": {
-            "title": "Email",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
           },
           "email_verified_at": {
             "anyOf": [
@@ -3055,6 +3942,11 @@
               }
             ],
             "title": "Email Verified At"
+          },
+          "has_password": {
+            "default": true,
+            "title": "Has Password",
+            "type": "boolean"
           },
           "is_server_admin": {
             "default": false,
@@ -3105,6 +3997,28 @@
             ],
             "title": "Oauth Unavailable Reason"
           },
+          "session_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Method"
+          },
+          "session_provider_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Provider Slug"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -3113,10 +4027,16 @@
             "format": "uuid",
             "title": "User Id",
             "type": "string"
+          },
+          "username": {
+            "description": "Stable system-generated handle; display_name need not be unique.",
+            "title": "Username",
+            "type": "string"
           }
         },
         "required": [
           "user_id",
+          "username",
           "email",
           "display_name",
           "status"
@@ -3440,6 +4360,42 @@
           "priority"
         ],
         "title": "BundleItemEntry",
+        "type": "object"
+      },
+      "CapabilitiesData": {
+        "properties": {
+          "auth": {
+            "$ref": "#/components/schemas/AuthCapabilitiesData"
+          },
+          "plugins": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Plugins",
+            "type": "array"
+          }
+        },
+        "required": [
+          "auth",
+          "plugins"
+        ],
+        "title": "CapabilitiesData",
+        "type": "object"
+      },
+      "CapabilitiesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CapabilitiesData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "CapabilitiesResponse",
         "type": "object"
       },
       "ChangeSetEntry": {
@@ -6991,6 +7947,166 @@
         "title": "DraftReviewReason",
         "type": "object"
       },
+      "EmailConflictRequestData": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "status": {
+            "description": "resolved means a new SSO login now decides without an admin.",
+            "enum": [
+              "pending",
+              "resolved"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "request_id"
+        ],
+        "title": "EmailConflictRequestData",
+        "type": "object"
+      },
+      "EmailConflictRequestResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EmailConflictRequestData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "EmailConflictRequestResponse",
+        "type": "object"
+      },
+      "EmailReauthenticationConfirmData": {
+        "properties": {
+          "reauthenticated_until": {
+            "format": "date-time",
+            "title": "Reauthenticated Until",
+            "type": "string"
+          },
+          "return_to": {
+            "title": "Return To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reauthenticated_until",
+          "return_to"
+        ],
+        "title": "EmailReauthenticationConfirmData",
+        "type": "object"
+      },
+      "EmailReauthenticationConfirmRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "enum": [
+              "account",
+              "admin"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 128,
+            "minLength": 32,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "scope"
+        ],
+        "title": "EmailReauthenticationConfirmRequest",
+        "type": "object"
+      },
+      "EmailReauthenticationConfirmResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EmailReauthenticationConfirmData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "EmailReauthenticationConfirmResponse",
+        "type": "object"
+      },
+      "EmailReauthenticationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "return_to": {
+            "default": "/account",
+            "maxLength": 2048,
+            "title": "Return To",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "account",
+              "admin"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope"
+        ],
+        "title": "EmailReauthenticationRequest",
+        "type": "object"
+      },
+      "EmailReauthenticationRequestData": {
+        "properties": {
+          "status": {
+            "const": "email_sent",
+            "default": "email_sent",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "EmailReauthenticationRequestData",
+        "type": "object"
+      },
+      "EmailReauthenticationRequestResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EmailReauthenticationRequestData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "EmailReauthenticationRequestResponse",
+        "type": "object"
+      },
       "EmailVerificationConfirmRequest": {
         "additionalProperties": false,
         "properties": {
@@ -7022,6 +8138,27 @@
           }
         },
         "title": "EmailVerificationData",
+        "type": "object"
+      },
+      "EmailVerificationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
+                "type": "string",
+                "x-localPart-maxBytes": 64,
+                "x-normalized-maxBytes": 254
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          }
+        },
+        "title": "EmailVerificationRequest",
         "type": "object"
       },
       "EmailVerificationResponse": {
@@ -7476,6 +8613,368 @@
           "components"
         ],
         "title": "HealthReadyResponse",
+        "type": "object"
+      },
+      "IdentityData": {
+        "properties": {
+          "can_unlink": {
+            "title": "Can Unlink",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Email"
+          },
+          "last_login_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login At"
+          },
+          "provider_slug": {
+            "title": "Provider Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider_slug",
+          "last_email",
+          "last_login_at",
+          "can_unlink"
+        ],
+        "title": "IdentityData",
+        "type": "object"
+      },
+      "IdentityListData": {
+        "properties": {
+          "available_providers": {
+            "items": {
+              "$ref": "#/components/schemas/LoginMethodCapability"
+            },
+            "title": "Available Providers",
+            "type": "array"
+          },
+          "has_password": {
+            "title": "Has Password",
+            "type": "boolean"
+          },
+          "identities": {
+            "items": {
+              "$ref": "#/components/schemas/IdentityData"
+            },
+            "title": "Identities",
+            "type": "array"
+          }
+        },
+        "required": [
+          "has_password",
+          "identities",
+          "available_providers"
+        ],
+        "title": "IdentityListData",
+        "type": "object"
+      },
+      "IdentityListResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/IdentityListData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "IdentityListResponse",
+        "type": "object"
+      },
+      "InboxDisplayPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Href"
+          },
+          "params": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Params",
+            "type": "object"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "InboxDisplayPayload",
+        "type": "object"
+      },
+      "InboxItemPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "archived": {
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "display": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxDisplayPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "event_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event At"
+          },
+          "item_key": {
+            "title": "Item Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "string"
+          },
+          "unread": {
+            "title": "Unread",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "item_key",
+          "revision",
+          "event_at",
+          "unread",
+          "archived",
+          "display"
+        ],
+        "title": "InboxItemPayload",
+        "type": "object"
+      },
+      "InboxMarkPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "boolean"
+          },
+          "item": {
+            "$ref": "#/components/schemas/InboxItemPayload"
+          }
+        },
+        "required": [
+          "applied",
+          "item"
+        ],
+        "title": "InboxMarkPayload",
+        "type": "object"
+      },
+      "InboxMarkRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "archived": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived"
+          },
+          "item_key": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Item Key",
+            "type": "string"
+          },
+          "kind": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "read": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read"
+          },
+          "revision": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Revision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "item_key",
+          "revision"
+        ],
+        "title": "InboxMarkRequest",
+        "type": "object"
+      },
+      "InboxMarkResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/InboxMarkPayload"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "InboxMarkResponse",
+        "type": "object"
+      },
+      "InboxOverflowPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "total"
+        ],
+        "title": "InboxOverflowPayload",
+        "type": "object"
+      },
+      "InboxPagePayload": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InboxItemPayload"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "status_items": {
+            "items": {
+              "$ref": "#/components/schemas/InboxItemPayload"
+            },
+            "title": "Status Items",
+            "type": "array"
+          },
+          "status_overflow": {
+            "items": {
+              "$ref": "#/components/schemas/InboxOverflowPayload"
+            },
+            "title": "Status Overflow",
+            "type": "array"
+          }
+        },
+        "required": [
+          "status_items",
+          "status_overflow",
+          "items",
+          "next_cursor"
+        ],
+        "title": "InboxPagePayload",
+        "type": "object"
+      },
+      "InboxPageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/InboxPagePayload"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "InboxPageResponse",
         "type": "object"
       },
       "InstructionArtifact": {
@@ -10213,6 +11712,85 @@
           "ko"
         ],
         "title": "LocalizedText",
+        "type": "object"
+      },
+      "LoginMethodCapability": {
+        "properties": {
+          "background": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Background"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "foreground": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Foreground"
+          },
+          "icon_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon Url"
+          },
+          "label": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Label",
+            "type": "object"
+          },
+          "method_id": {
+            "title": "Method Id",
+            "type": "string"
+          },
+          "protocol": {
+            "title": "Protocol",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "start_url": {
+            "title": "Start Url",
+            "type": "string"
+          },
+          "supports_reauthentication": {
+            "title": "Supports Reauthentication",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "slug",
+          "method_id",
+          "protocol",
+          "display_name",
+          "label",
+          "start_url",
+          "supports_reauthentication"
+        ],
+        "title": "LoginMethodCapability",
         "type": "object"
       },
       "LoginRequest": {
@@ -14422,6 +16000,24 @@
         "title": "PasswordChangeRequest",
         "type": "object"
       },
+      "PasswordLoginCapability": {
+        "properties": {
+          "email_enrollment_enabled": {
+            "title": "Email Enrollment Enabled",
+            "type": "boolean"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "email_enrollment_enabled"
+        ],
+        "title": "PasswordLoginCapability",
+        "type": "object"
+      },
       "PasswordRecoveryCapabilities": {
         "additionalProperties": false,
         "properties": {
@@ -15077,6 +16673,32 @@
         "title": "RESTBlocker",
         "type": "object"
       },
+      "RESTBlockingWorkspace": {
+        "additionalProperties": false,
+        "properties": {
+          "other_member_count": {
+            "minimum": 0.0,
+            "title": "Other Member Count",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "title",
+          "other_member_count"
+        ],
+        "title": "RESTBlockingWorkspace",
+        "type": "object"
+      },
       "RESTConflictErrorBody": {
         "additionalProperties": false,
         "properties": {
@@ -15093,6 +16715,20 @@
               }
             ],
             "title": "Blockers"
+          },
+          "blocking_workspaces": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RESTBlockingWorkspace"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocking Workspaces"
           },
           "candidates": {
             "anyOf": [
@@ -15734,6 +17370,81 @@
         "title": "RecoveryConfigurationStatus",
         "type": "object"
       },
+      "RedirectData": {
+        "properties": {
+          "redirect_url": {
+            "title": "Redirect Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "redirect_url"
+        ],
+        "title": "RedirectData",
+        "type": "object"
+      },
+      "RedirectResponseBody": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RedirectData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "RedirectResponseBody",
+        "type": "object"
+      },
+      "ReviewActionAvailability": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          }
+        },
+        "required": [
+          "allowed"
+        ],
+        "title": "ReviewActionAvailability",
+        "type": "object"
+      },
+      "ReviewActionCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "approve": {
+            "$ref": "#/components/schemas/ReviewActionAvailability"
+          },
+          "edit_directly": {
+            "$ref": "#/components/schemas/ReviewActionAvailability"
+          },
+          "reject": {
+            "$ref": "#/components/schemas/ReviewActionAvailability"
+          },
+          "request_changes": {
+            "$ref": "#/components/schemas/ReviewActionAvailability"
+          }
+        },
+        "required": [
+          "approve",
+          "reject",
+          "request_changes",
+          "edit_directly"
+        ],
+        "title": "ReviewActionCapabilities",
+        "type": "object"
+      },
       "ReviewAutoApprovalSweepPayload": {
         "additionalProperties": false,
         "properties": {
@@ -15799,6 +17510,18 @@
               }
             ],
             "title": "Status"
+          },
+          "target_page_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Page Id"
           }
         },
         "title": "ReviewBulkDecisionFilters",
@@ -15815,12 +17538,63 @@
             "title": "Approved",
             "type": "array"
           },
+          "auto_settled_review_item_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Auto Settled Review Item Ids",
+            "type": "array"
+          },
+          "next_selection_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Selection Token"
+          },
+          "outcomes": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewBulkItemOutcome"
+            },
+            "title": "Outcomes",
+            "type": "array"
+          },
+          "processed_count": {
+            "default": 0,
+            "title": "Processed Count",
+            "type": "integer"
+          },
+          "remaining_count": {
+            "default": 0,
+            "title": "Remaining Count",
+            "type": "integer"
+          },
+          "requires_reconfirmation": {
+            "default": false,
+            "title": "Requires Reconfirmation",
+            "type": "boolean"
+          },
+          "selection_complete": {
+            "default": true,
+            "title": "Selection Complete",
+            "type": "boolean"
+          },
           "skipped": {
             "items": {
               "$ref": "#/components/schemas/ReviewBulkSkippedItem"
             },
             "title": "Skipped",
             "type": "array"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
           }
         },
         "required": [
@@ -15833,6 +17607,13 @@
       "ReviewBulkDecisionRequest": {
         "additionalProperties": false,
         "properties": {
+          "batch_limit": {
+            "default": 500,
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Batch Limit",
+            "type": "integer"
+          },
           "decision_type": {
             "const": "approve",
             "title": "Decision Type",
@@ -15868,6 +17649,18 @@
               }
             ],
             "title": "Review Item Ids"
+          },
+          "selection_token": {
+            "anyOf": [
+              {
+                "maxLength": 1500000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selection Token"
           }
         },
         "required": [
@@ -15892,6 +17685,88 @@
         "title": "ReviewBulkDecisionResponse",
         "type": "object"
       },
+      "ReviewBulkItemOutcome": {
+        "additionalProperties": false,
+        "properties": {
+          "decision_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "approved",
+              "auto_settled",
+              "excluded",
+              "failed"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "target_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Title"
+          },
+          "target_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Version No"
+          }
+        },
+        "required": [
+          "id",
+          "outcome"
+        ],
+        "title": "ReviewBulkItemOutcome",
+        "type": "object"
+      },
       "ReviewBulkSkippedItem": {
         "additionalProperties": false,
         "properties": {
@@ -15903,6 +17778,17 @@
           "reason": {
             "title": "Reason",
             "type": "string"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
           }
         },
         "required": [
@@ -15910,6 +17796,139 @@
           "reason"
         ],
         "title": "ReviewBulkSkippedItem",
+        "type": "object"
+      },
+      "ReviewContentTarget": {
+        "additionalProperties": false,
+        "description": "The exact reviewed version and its independently authorized baseline.",
+        "properties": {
+          "baseline_kind": {
+            "default": "unavailable",
+            "enum": [
+              "published",
+              "parent",
+              "empty",
+              "unavailable"
+            ],
+            "title": "Baseline Kind",
+            "type": "string"
+          },
+          "baseline_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Version Id"
+          },
+          "baseline_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Version No"
+          },
+          "can_diff": {
+            "default": false,
+            "title": "Can Diff",
+            "type": "boolean"
+          },
+          "can_read": {
+            "default": false,
+            "title": "Can Read",
+            "type": "boolean"
+          },
+          "candidate_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Version Id"
+          },
+          "candidate_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Version No"
+          },
+          "draft_parent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Parent Version Id"
+          },
+          "draft_parent_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Parent Version No"
+          },
+          "is_current_candidate": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Current Candidate"
+          },
+          "mode": {
+            "enum": [
+              "context_version",
+              "metadata_only",
+              "unsupported",
+              "unavailable"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "ReviewContentTarget",
         "type": "object"
       },
       "ReviewCountsPayload": {
@@ -16310,6 +18329,18 @@
             ],
             "title": "Audience Kind"
           },
+          "decision_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Id"
+          },
           "decision_reason": {
             "anyOf": [
               {
@@ -16330,6 +18361,18 @@
             ],
             "title": "Decision Type",
             "type": "string"
+          },
+          "expected_impact_fingerprint": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Impact Fingerprint"
           }
         },
         "required": [
@@ -16338,9 +18381,177 @@
         "title": "ReviewDecisionRequest",
         "type": "object"
       },
+      "ReviewDecisionUndo": {
+        "additionalProperties": false,
+        "description": "Undo of the review's latest decision, for an actor who may undo it.\n\nThe decider or an owner may undo a decision; any editor may undo an\nautomatic approval. Absent for actors without that permission. Decisions\nwithout a recorded effect return available=False with not_recorded;\nrecorded effects that cannot be reversed use unsupported_effect.",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "decision_id": {
+            "format": "uuid",
+            "title": "Decision Id",
+            "type": "string"
+          },
+          "decision_type": {
+            "title": "Decision Type",
+            "type": "string"
+          },
+          "page_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Id"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "later_changes",
+                  "not_recorded",
+                  "unsupported_effect"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "restore_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restore Version Id"
+          },
+          "restore_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restore Version No"
+          }
+        },
+        "required": [
+          "decision_id",
+          "decision_type",
+          "available"
+        ],
+        "title": "ReviewDecisionUndo",
+        "type": "object"
+      },
+      "ReviewDocumentTarget": {
+        "additionalProperties": false,
+        "description": "Actor-visible document identity, independent of an operation's raw ID.",
+        "properties": {
+          "can_open": {
+            "default": false,
+            "title": "Can Open",
+            "type": "boolean"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          },
+          "document_kind": {
+            "enum": [
+              "context",
+              "agent",
+              "library"
+            ],
+            "title": "Document Kind",
+            "type": "string"
+          },
+          "reader_href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reader Href"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          }
+        },
+        "required": [
+          "document_kind"
+        ],
+        "title": "ReviewDocumentTarget",
+        "type": "object"
+      },
       "ReviewEvidenceOperation": {
         "additionalProperties": false,
         "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewContentTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "diff_ref": {
             "anyOf": [
               {
@@ -16362,6 +18573,16 @@
               }
             ],
             "title": "Diff Summary"
+          },
+          "document": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewDocumentTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "operation": {
             "title": "Operation",
@@ -16471,6 +18692,16 @@
       "ReviewItemDetail": {
         "additionalProperties": false,
         "properties": {
+          "actions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewActionCapabilities"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "can_claim": {
             "title": "Can Claim",
             "type": "boolean"
@@ -16529,7 +18760,8 @@
                 "enum": [
                   "chat_owner",
                   "requester",
-                  "workspace_editors"
+                  "workspace_editors",
+                  "workspace_owners"
                 ],
                 "type": "string"
               },
@@ -16694,6 +18926,16 @@
             ],
             "title": "Reconciliation Version Id"
           },
+          "reject_effect": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewRejectEffect"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "review_type": {
             "title": "Review Type",
             "type": "string"
@@ -16748,6 +18990,16 @@
             ],
             "title": "Risk Signals"
           },
+          "settlement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewSettlement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -16756,6 +19008,16 @@
             "default": 0,
             "title": "Superseded Review Count",
             "type": "integer"
+          },
+          "undo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewDecisionUndo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "updated_at": {
             "format": "date-time",
@@ -16868,6 +19130,457 @@
         "title": "ReviewItemResponse",
         "type": "object"
       },
+      "ReviewRejectEffect": {
+        "additionalProperties": false,
+        "properties": {
+          "blocked_reason": {
+            "anyOf": [
+              {
+                "const": "private_edit_in_progress",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Reason"
+          },
+          "candidate_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Version Id"
+          },
+          "candidate_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Version No"
+          },
+          "cascaded_review_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cascaded Review Count",
+            "type": "integer"
+          },
+          "cascaded_versions": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewVersionRef"
+            },
+            "title": "Cascaded Versions",
+            "type": "array"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          },
+          "effect": {
+            "enum": [
+              "restore_published",
+              "hide_unpublished",
+              "no_head_change",
+              "restore_previous_draft"
+            ],
+            "title": "Effect",
+            "type": "string"
+          },
+          "impact_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact Fingerprint"
+          },
+          "metadata_kept": {
+            "default": false,
+            "title": "Metadata Kept",
+            "type": "boolean"
+          },
+          "published_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Version Id"
+          },
+          "published_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Version No"
+          },
+          "restores_review": {
+            "default": false,
+            "title": "Restores Review",
+            "type": "boolean"
+          },
+          "resulting_draft_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resulting Draft Version Id"
+          },
+          "resulting_draft_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resulting Draft Version No"
+          },
+          "visible_cascaded_review_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Visible Cascaded Review Ids",
+            "type": "array"
+          },
+          "visible_sibling_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Visible Sibling Count",
+            "type": "integer"
+          },
+          "visible_sibling_review_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Visible Sibling Review Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "effect"
+        ],
+        "title": "ReviewRejectEffect",
+        "type": "object"
+      },
+      "ReviewSelectionItem": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_settled_review_item_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Auto Settled Review Item Ids",
+            "type": "array"
+          },
+          "eligible": {
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "target_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Title"
+          },
+          "target_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Version No"
+          },
+          "will_auto_settle": {
+            "default": false,
+            "title": "Will Auto Settle",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "eligible"
+        ],
+        "title": "ReviewSelectionItem",
+        "type": "object"
+      },
+      "ReviewSelectionLimitDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "limit"
+        ],
+        "title": "ReviewSelectionLimitDetails",
+        "type": "object"
+      },
+      "ReviewSelectionLimitErrorBody": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "$ref": "#/components/schemas/ReviewSelectionLimitDetails"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          },
+          "error_code": {
+            "title": "Error Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/EnvelopeWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "envelope",
+          "error_code",
+          "message",
+          "details"
+        ],
+        "title": "ReviewSelectionLimitErrorBody",
+        "type": "object"
+      },
+      "ReviewSelectionPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_settled_review_item_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Auto Settled Review Item Ids",
+            "type": "array"
+          },
+          "eligible_count": {
+            "title": "Eligible Count",
+            "type": "integer"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewSelectionItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "default": 5000,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "review_item_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Review Item Ids",
+            "type": "array"
+          },
+          "selection_token": {
+            "title": "Selection Token",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "selection_token",
+          "expires_at",
+          "total",
+          "review_item_ids",
+          "eligible_count",
+          "items"
+        ],
+        "title": "ReviewSelectionPayload",
+        "type": "object"
+      },
+      "ReviewSelectionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "filters": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewBulkDecisionFilters"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review_item_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "maxItems": 5000,
+            "title": "Review Item Ids"
+          }
+        },
+        "title": "ReviewSelectionRequest",
+        "type": "object"
+      },
+      "ReviewSelectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReviewSelectionPayload"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ReviewSelectionResponse",
+        "type": "object"
+      },
+      "ReviewSettlement": {
+        "additionalProperties": false,
+        "description": "Why a superseded review was closed, and by which decided review.",
+        "properties": {
+          "by_review_item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By Review Item Id"
+          },
+          "by_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By Version No"
+          },
+          "reason_code": {
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_code"
+        ],
+        "title": "ReviewSettlement",
+        "type": "object"
+      },
       "ReviewStatusByRiskBreakdown": {
         "additionalProperties": false,
         "properties": {
@@ -16909,6 +19622,26 @@
           }
         },
         "title": "ReviewStatusRiskBreakdown",
+        "type": "object"
+      },
+      "ReviewVersionRef": {
+        "additionalProperties": false,
+        "properties": {
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "version_no": {
+            "title": "Version No",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version_id",
+          "version_no"
+        ],
+        "title": "ReviewVersionRef",
         "type": "object"
       },
       "SearchCapabilities": {
@@ -17238,6 +19971,58 @@
         "title": "SearchResponse",
         "type": "object"
       },
+      "SelfUserDeletionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "approved_workspaces": {
+            "items": {
+              "$ref": "#/components/schemas/UserDeletionApprovedWorkspace"
+            },
+            "maxItems": 1000,
+            "title": "Approved Workspaces",
+            "type": "array"
+          },
+          "confirmation_email": {
+            "anyOf": [
+              {
+                "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
+                "type": "string",
+                "x-localPart-maxBytes": 64,
+                "x-normalized-maxBytes": 254
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmation Email"
+          },
+          "current_password": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Password"
+          },
+          "expected_retention_days": {
+            "maximum": 36500.0,
+            "minimum": 0.0,
+            "title": "Expected Retention Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_retention_days",
+          "approved_workspaces"
+        ],
+        "title": "SelfUserDeletionRequest",
+        "type": "object"
+      },
       "ServerNameAtom": {
         "additionalProperties": false,
         "properties": {
@@ -17251,6 +20036,22 @@
           "slot"
         ],
         "title": "ServerNameAtom",
+        "type": "object"
+      },
+      "SetPasswordRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "new_password": {
+            "maxLength": 1024,
+            "minLength": 8,
+            "title": "New Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "new_password"
+        ],
+        "title": "SetPasswordRequest",
         "type": "object"
       },
       "SettingsMcpClientData": {
@@ -17739,6 +20540,19 @@
           "password"
         ],
         "title": "SignupRequest",
+        "type": "object"
+      },
+      "StartAccountRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "return_to": {
+            "default": "/account",
+            "maxLength": 2048,
+            "title": "Return To",
+            "type": "string"
+          }
+        },
+        "title": "StartAccountRequest",
         "type": "object"
       },
       "SubmitContextEditRequest": {
@@ -18451,6 +21265,7 @@
       },
       "TreeReorderByAnchorRequest": {
         "additionalProperties": false,
+        "description": "Place the node immediately before or after the anchor node.\n\nAn anchor under another parent moves the node to that parent at that\nposition, under the same rules as ``POST /tree/move``.",
         "properties": {
           "anchor_node_id": {
             "format": "uuid",
@@ -18534,6 +21349,226 @@
         "title": "TreeSectionPolicyPayload",
         "type": "object"
       },
+      "UserDeletionApprovedWorkspace": {
+        "additionalProperties": false,
+        "properties": {
+          "other_member_count": {
+            "minimum": 0.0,
+            "title": "Other Member Count",
+            "type": "integer"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "other_member_count"
+        ],
+        "title": "UserDeletionApprovedWorkspace",
+        "type": "object"
+      },
+      "UserDeletionData": {
+        "additionalProperties": false,
+        "properties": {
+          "purge_after": {
+            "format": "date-time",
+            "title": "Purge After",
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "retention_days": {
+            "title": "Retention Days",
+            "type": "integer"
+          },
+          "status": {
+            "const": "deletion_pending",
+            "title": "Status",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "status",
+          "requested_at",
+          "purge_after",
+          "retention_days"
+        ],
+        "title": "UserDeletionData",
+        "type": "object"
+      },
+      "UserDeletionPolicyData": {
+        "additionalProperties": false,
+        "properties": {
+          "retention_days": {
+            "maximum": 36500.0,
+            "minimum": 0.0,
+            "title": "Retention Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "retention_days"
+        ],
+        "title": "UserDeletionPolicyData",
+        "type": "object"
+      },
+      "UserDeletionPolicyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/UserDeletionPolicyData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "UserDeletionPolicyResponse",
+        "type": "object"
+      },
+      "UserDeletionPreviewData": {
+        "additionalProperties": false,
+        "properties": {
+          "blocking_workspaces": {
+            "items": {
+              "$ref": "#/components/schemas/UserDeletionWorkspaceData"
+            },
+            "title": "Blocking Workspaces",
+            "type": "array"
+          },
+          "retention_days": {
+            "maximum": 36500.0,
+            "minimum": 0.0,
+            "title": "Retention Days",
+            "type": "integer"
+          },
+          "target_workspaces": {
+            "items": {
+              "$ref": "#/components/schemas/UserDeletionWorkspaceData"
+            },
+            "title": "Target Workspaces",
+            "type": "array"
+          }
+        },
+        "required": [
+          "retention_days",
+          "target_workspaces",
+          "blocking_workspaces"
+        ],
+        "title": "UserDeletionPreviewData",
+        "type": "object"
+      },
+      "UserDeletionPreviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/UserDeletionPreviewData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "UserDeletionPreviewResponse",
+        "type": "object"
+      },
+      "UserDeletionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/UserDeletionData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "UserDeletionResponse",
+        "type": "object"
+      },
+      "UserDeletionRestoreData": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "active",
+              "disabled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "status"
+        ],
+        "title": "UserDeletionRestoreData",
+        "type": "object"
+      },
+      "UserDeletionRestoreResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/UserDeletionRestoreData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "UserDeletionRestoreResponse",
+        "type": "object"
+      },
+      "UserDeletionWorkspaceData": {
+        "additionalProperties": false,
+        "properties": {
+          "other_member_count": {
+            "title": "Other Member Count",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "title",
+          "other_member_count"
+        ],
+        "title": "UserDeletionWorkspaceData",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -18572,6 +21607,88 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VerificationData": {
+        "properties": {
+          "allowed_methods": {
+            "items": {
+              "enum": [
+                "password",
+                "sso",
+                "email"
+              ],
+              "type": "string"
+            },
+            "title": "Allowed Methods",
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "password",
+              "sso",
+              "email",
+              "session"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/LoginMethodCapability"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "reauthenticated_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reauthenticated Until"
+          },
+          "scope": {
+            "enum": [
+              "account",
+              "admin"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "verified": {
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "scope",
+          "mode",
+          "verified",
+          "allowed_methods",
+          "providers"
+        ],
+        "title": "VerificationData",
+        "type": "object"
+      },
+      "VerificationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/VerificationData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "VerificationResponse",
         "type": "object"
       },
       "VersionEntry": {
@@ -19729,8 +22846,15 @@
             "type": "string"
           },
           "requester_email": {
-            "title": "Requester Email",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requester Email"
           },
           "requester_user_id": {
             "format": "uuid",
@@ -19862,18 +22986,6 @@
             "title": "Other Membership Count",
             "type": "integer"
           },
-          "personal_workspace_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Personal Workspace Id"
-          },
           "workspaces": {
             "items": {
               "$ref": "#/components/schemas/WorkspaceSummary"
@@ -19913,11 +23025,18 @@
             "type": "boolean"
           },
           "email": {
-            "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
-            "title": "Email",
-            "type": "string",
-            "x-localPart-maxBytes": 64,
-            "x-normalized-maxBytes": 254
+            "anyOf": [
+              {
+                "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
+                "type": "string",
+                "x-localPart-maxBytes": 64,
+                "x-normalized-maxBytes": 254
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
           },
           "role": {
             "default": "viewer",
@@ -19925,12 +23044,118 @@
             "minLength": 1,
             "title": "Role",
             "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "title": "WorkspaceMemberAddRequest",
+        "type": "object"
+      },
+      "WorkspaceMemberCandidateItem": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "identity_label": {
+            "title": "Identity Label",
+            "type": "string"
+          },
+          "identity_verified": {
+            "const": true,
+            "default": true,
+            "title": "Identity Verified",
+            "type": "boolean"
+          },
+          "provider_label": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Provider Label",
+            "type": "object"
+          },
+          "provider_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Name"
+          },
+          "provider_slug": {
+            "title": "Provider Slug",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
           }
         },
         "required": [
-          "email"
+          "user_id",
+          "display_name",
+          "provider_name",
+          "provider_slug",
+          "provider_label",
+          "identity_label"
         ],
-        "title": "WorkspaceMemberAddRequest",
+        "title": "WorkspaceMemberCandidateItem",
+        "type": "object"
+      },
+      "WorkspaceMemberCandidatesData": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceMemberCandidateItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "items",
+          "has_more"
+        ],
+        "title": "WorkspaceMemberCandidatesData",
+        "type": "object"
+      },
+      "WorkspaceMemberCandidatesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WorkspaceMemberCandidatesData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "WorkspaceMemberCandidatesResponse",
         "type": "object"
       },
       "WorkspaceMemberItem": {
@@ -19941,15 +23166,18 @@
             "type": "string"
           },
           "email": {
-            "title": "Email",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
           },
           "is_current_user": {
             "title": "Is Current User",
-            "type": "boolean"
-          },
-          "is_personal_anchor_owner": {
-            "title": "Is Personal Anchor Owner",
             "type": "boolean"
           },
           "joined_at": {
@@ -19983,7 +23211,6 @@
           "status",
           "role",
           "joined_at",
-          "is_personal_anchor_owner",
           "is_current_user"
         ],
         "title": "WorkspaceMemberItem",
@@ -20277,9 +23504,37 @@
       }
     },
     "securitySchemes": {
+      "AccountEmailBindingCookie": {
+        "description": "Browser binding for an email confirmation with scope=account.",
+        "in": "cookie",
+        "name": "dtxwiki_email_reauth_account",
+        "type": "apiKey"
+      },
+      "AccountReauthenticationCookie": {
+        "in": "cookie",
+        "name": "dtxwiki_session_reauth_account",
+        "type": "apiKey"
+      },
+      "AdminEmailBindingCookie": {
+        "description": "Browser binding for an email confirmation with scope=admin.",
+        "in": "cookie",
+        "name": "dtxwiki_email_reauth_admin",
+        "type": "apiKey"
+      },
+      "EmailConflictTicketCookie": {
+        "description": "Signed ticket from an SSO login whose address collided.",
+        "in": "cookie",
+        "name": "dtxwiki_email_conflict",
+        "type": "apiKey"
+      },
       "HTTPBearer": {
         "scheme": "bearer",
         "type": "http"
+      },
+      "LoginTransactionCookie": {
+        "in": "cookie",
+        "name": "dtxwiki_login_txn",
+        "type": "apiKey"
       },
       "RecentReauthenticationCookie": {
         "in": "cookie",
@@ -20361,6 +23616,189 @@
         "tags": [
           "oauth"
         ]
+      }
+    },
+    "/api/v1/admin/audit-events": {
+      "get": {
+        "operationId": "admin_list_audit_events_api_v1_admin_audit_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "action_prefix",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action Prefix"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target User Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actor_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Actor Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Until"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAuditEventListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin List Audit Events",
+        "tags": [
+          "admin"
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
       }
     },
     "/api/v1/admin/context-media/attachments": {
@@ -20851,6 +24289,205 @@
         ]
       }
     },
+    "/api/v1/admin/email-conflicts": {
+      "get": {
+        "operationId": "admin_list_email_conflicts_api_v1_admin_email_conflicts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(pending|approved|rejected|resolved|auto_released)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "pending",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminEmailConflictListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin List Email Conflicts",
+        "tags": [
+          "admin"
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
+      }
+    },
+    "/api/v1/admin/email-conflicts/{request_id}/decision": {
+      "post": {
+        "operationId": "admin_decide_email_conflict_api_v1_admin_email_conflicts__request_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminEmailConflictDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminEmailConflictDecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin Decide Email Conflict",
+        "tags": [
+          "admin"
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
+      }
+    },
     "/api/v1/admin/jobs": {
       "get": {
         "description": "Cross-workspace job listing for the operator screen: terminal\nfailures with a stable ``error_code``, jobs running past their lease, and\neverything ``manual retry`` needs. Not workspace-scoped -- that is\n``GET /workspaces/{id}/jobs`` -- this is the server-admin surface.\n\nA workspace whose data store cannot be reached is skipped rather than\nfailing the whole listing; its id is returned in\n``unreachable_workspace_ids`` alongside a ``job_fanout_incomplete``\nenvelope warning, so the caller can tell \"short because that is all there\nis\" apart from \"short because part of the fleet did not answer\".",
@@ -21169,6 +24806,187 @@
         ]
       }
     },
+    "/api/v1/admin/user-deletion-policy": {
+      "get": {
+        "operationId": "admin_get_user_deletion_policy_api_v1_admin_user_deletion_policy_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDeletionPolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin Get User Deletion Policy",
+        "tags": [
+          "admin"
+        ]
+      },
+      "patch": {
+        "operationId": "admin_set_user_deletion_policy_api_v1_admin_user_deletion_policy_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserDeletionPolicyData"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDeletionPolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin Set User Deletion Policy",
+        "tags": [
+          "admin"
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
+      }
+    },
     "/api/v1/admin/users": {
       "get": {
         "operationId": "admin_search_users_api_v1_admin_users_get",
@@ -21262,14 +25080,410 @@
         },
         "security": [
           {
-            "RecentReauthenticationCookie": [],
             "SessionCookie": []
           }
         ],
         "summary": "Admin Search Users",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
+      }
+    },
+    "/api/v1/admin/users/{user_id}": {
+      "delete": {
+        "operationId": "admin_delete_user_api_v1_admin_users__user_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminUserDeletionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDeletionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin Delete User",
+        "tags": [
+          "admin"
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
+      }
+    },
+    "/api/v1/admin/users/{user_id}/deletion-preview": {
+      "get": {
+        "operationId": "admin_user_deletion_preview_api_v1_admin_users__user_id__deletion_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDeletionPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin User Deletion Preview",
+        "tags": [
+          "admin"
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
+      }
+    },
+    "/api/v1/admin/users/{user_id}/deletion-restore": {
+      "post": {
+        "operationId": "admin_restore_user_deletion_api_v1_admin_users__user_id__deletion_restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDeletionRestoreResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin Restore User Deletion",
+        "tags": [
+          "admin"
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
+      }
+    },
+    "/api/v1/admin/users/{user_id}/identities/rebind": {
+      "post": {
+        "operationId": "admin_rebind_identity_api_v1_admin_users__user_id__identities_rebind_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminIdentityRebindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminIdentityRebindResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin Rebind Identity",
+        "tags": [
+          "admin"
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
       }
     },
     "/api/v1/admin/users/{user_id}/password-reset": {
@@ -21351,14 +25565,321 @@
         },
         "security": [
           {
-            "RecentReauthenticationCookie": [],
             "SessionCookie": []
           }
         ],
         "summary": "Admin Issue Password Reset",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
+      }
+    },
+    "/api/v1/admin/workspaces/{workspace_id}/members": {
+      "get": {
+        "description": "Members of a workspace held for account deletion (server admins only).",
+        "operationId": "admin_list_held_workspace_members_api_v1_admin_workspaces__workspace_id__members_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMemberListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin List Held Workspace Members",
+        "tags": [
+          "admin"
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
+      },
+      "post": {
+        "description": "Add a viewer or editor to a held workspace before appointing an admin.",
+        "operationId": "admin_add_held_workspace_member_api_v1_admin_workspaces__workspace_id__members_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMemberAddRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMemberMutationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMemberMutationResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin Add Held Workspace Member",
+        "tags": [
+          "admin"
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
+      }
+    },
+    "/api/v1/admin/workspaces/{workspace_id}/members/{user_id}": {
+      "patch": {
+        "description": "Change a role in a held workspace; an active admin reopens it.",
+        "operationId": "admin_change_held_workspace_member_role_api_v1_admin_workspaces__workspace_id__members__user_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMemberRoleUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMemberMutationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin Change Held Workspace Member Role",
+        "tags": [
+          "admin"
+        ],
+        "x-dtxwiki-confirmation-scope": "admin"
       }
     },
     "/api/v1/auth/capabilities": {
@@ -21521,6 +26042,103 @@
         ]
       }
     },
+    "/api/v1/auth/email-reauthentication/confirm": {
+      "post": {
+        "operationId": "confirm_email_api_v1_auth_email_reauthentication_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailReauthenticationConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailReauthenticationConfirmResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "AccountEmailBindingCookie": [],
+            "SessionCookie": []
+          },
+          {
+            "AdminEmailBindingCookie": [],
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Confirm Email",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/email-reauthentication/request": {
+      "post": {
+        "operationId": "request_email_api_v1_auth_email_reauthentication_request_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailReauthenticationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailReauthenticationRequestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Request Email",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/email-verification/confirm": {
       "post": {
         "operationId": "confirm_email_verification_api_v1_auth_email_verification_confirm_post",
@@ -21626,6 +26244,23 @@
     "/api/v1/auth/email-verification/request": {
       "post": {
         "operationId": "request_email_verification_api_v1_auth_email_verification_request_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/EmailVerificationRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request Body"
+              }
+            }
+          }
+        },
         "responses": {
           "202": {
             "content": {
@@ -21717,6 +26352,81 @@
         "tags": [
           "auth"
         ]
+      }
+    },
+    "/api/v1/auth/identities": {
+      "get": {
+        "operationId": "identities_api_v1_auth_identities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Identities",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/identities/{identity_id}": {
+      "delete": {
+        "operationId": "unlink_api_v1_auth_identities__identity_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identity_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Identity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Unlink",
+        "tags": [
+          "auth"
+        ],
+        "x-dtxwiki-confirmation-scope": "account"
       }
     },
     "/api/v1/auth/login": {
@@ -22004,6 +26714,47 @@
           }
         ],
         "summary": "Me",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/methods/{method_id}/icon.png": {
+      "get": {
+        "operationId": "icon_api_v1_auth_methods__method_id__icon_png_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "method_id",
+            "required": true,
+            "schema": {
+              "title": "Method Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [],
+        "summary": "Icon",
         "tags": [
           "auth"
         ]
@@ -22422,6 +27173,53 @@
         ]
       }
     },
+    "/api/v1/auth/password/set": {
+      "post": {
+        "operationId": "set_password_api_v1_auth_password_set_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Set Password",
+        "tags": [
+          "auth"
+        ],
+        "x-dtxwiki-confirmation-scope": "account"
+      }
+    },
     "/api/v1/auth/reauthenticate": {
       "post": {
         "operationId": "reauthenticate_api_v1_auth_reauthenticate_post",
@@ -22625,6 +27423,344 @@
         },
         "security": [],
         "summary": "Signup",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/email-conflict/request": {
+      "post": {
+        "description": "Ask a server admin to release the unverified account holding this address.\n\nOnly the browser that completed the colliding IdP login holds the ticket.",
+        "operationId": "request_email_conflict_release_api_v1_auth_sso_email_conflict_request_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailConflictRequestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "EmailConflictTicketCookie": []
+          }
+        ],
+        "summary": "Request Email Conflict Release",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/{slug}/callback": {
+      "get": {
+        "operationId": "callback_api_v1_auth_sso__slug__callback_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "LoginTransactionCookie": []
+          }
+        ],
+        "summary": "Callback",
+        "tags": [
+          "auth"
+        ]
+      },
+      "post": {
+        "operationId": "form_callback_api_v1_auth_sso__slug__callback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [],
+        "summary": "Form Callback",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/{slug}/callback/continue": {
+      "post": {
+        "operationId": "form_callback_continue_api_v1_auth_sso__slug__callback_continue_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "LoginTransactionCookie": []
+          }
+        ],
+        "summary": "Form Callback Continue",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/{slug}/link": {
+      "post": {
+        "operationId": "link_api_v1_auth_sso__slug__link_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedirectResponseBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Link",
+        "tags": [
+          "auth"
+        ],
+        "x-dtxwiki-confirmation-scope": "account"
+      }
+    },
+    "/api/v1/auth/sso/{slug}/reauthenticate": {
+      "post": {
+        "operationId": "reauthenticate_api_v1_auth_sso__slug__reauthenticate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedirectResponseBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Reauthenticate",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/{slug}/start": {
+      "get": {
+        "operationId": "start_api_v1_auth_sso__slug__start_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "next",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next"
+            }
+          },
+          {
+            "in": "query",
+            "name": "remember_me",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Remember Me",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [],
+        "summary": "Start",
         "tags": [
           "auth"
         ]
@@ -23226,6 +28362,91 @@
         ]
       }
     },
+    "/api/v1/auth/verification": {
+      "get": {
+        "operationId": "verification_api_v1_auth_verification_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "account",
+              "enum": [
+                "account",
+                "admin"
+              ],
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "return_to",
+            "required": false,
+            "schema": {
+              "default": "/account",
+              "maxLength": 2048,
+              "title": "Return To",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Verification",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/capabilities": {
+      "get": {
+        "operationId": "capabilities_api_v1_capabilities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilitiesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [],
+        "summary": "Capabilities",
+        "tags": [
+          "capabilities"
+        ]
+      }
+    },
     "/api/v1/public/w/{workspace_slug}": {
       "get": {
         "operationId": "read_public_workspace_api_v1_public_w__workspace_slug__get",
@@ -23496,6 +28717,113 @@
         ]
       }
     },
+    "/api/v1/users/me": {
+      "delete": {
+        "operationId": "delete_my_account_api_v1_users_me_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelfUserDeletionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDeletionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Delete My Account",
+        "tags": [
+          "users"
+        ],
+        "x-dtxwiki-confirmation-scope": "account"
+      }
+    },
     "/api/v1/users/me/default-workspace": {
       "patch": {
         "operationId": "update_my_default_workspace_api_v1_users_me_default_workspace_patch",
@@ -23579,6 +28907,309 @@
         "summary": "Update My Default Workspace",
         "tags": [
           "users"
+        ]
+      }
+    },
+    "/api/v1/users/me/deletion-preview": {
+      "get": {
+        "operationId": "my_deletion_preview_api_v1_users_me_deletion_preview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDeletionPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "My Deletion Preview",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/me/inbox": {
+      "get": {
+        "operationId": "list_account_inbox_api_v1_users_me_inbox_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "unread",
+                "archived"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "List Account Inbox",
+        "tags": [
+          "inbox"
+        ]
+      }
+    },
+    "/api/v1/users/me/inbox/marks": {
+      "post": {
+        "operationId": "mark_account_inbox_item_api_v1_users_me_inbox_marks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxMarkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMarkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Mark Account Inbox Item",
+        "tags": [
+          "inbox"
         ]
       }
     },
@@ -31007,6 +36638,235 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/inbox": {
+      "get": {
+        "operationId": "list_workspace_inbox_api_v1_workspaces__workspace_id__inbox_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "unread",
+                "archived"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "List Workspace Inbox",
+        "tags": [
+          "inbox"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/inbox/marks": {
+      "post": {
+        "operationId": "mark_workspace_inbox_item_api_v1_workspaces__workspace_id__inbox_marks_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxMarkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMarkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Mark Workspace Inbox Item",
+        "tags": [
+          "inbox"
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/jobs": {
       "get": {
         "operationId": "list_workspace_jobs_api_v1_workspaces__workspace_id__jobs_get",
@@ -35707,6 +41567,117 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/member-candidates": {
+      "get": {
+        "operationId": "list_workspace_member_candidates_api_v1_workspaces__workspace_id__member_candidates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 320,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMemberCandidatesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "List Workspace Member Candidates",
+        "tags": [
+          "workspace-members"
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/members": {
       "get": {
         "operationId": "list_workspace_members_api_v1_workspaces__workspace_id__members_get",
@@ -36565,7 +42536,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ReviewSelectionLimitErrorBody"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RESTErrorBody"
+                    }
+                  ],
+                  "title": "Response 422 Decide Reviews Bulk Api V1 Workspaces  Workspace Id  Reviews Decide Bulk Post"
                 }
               }
             },
@@ -36785,6 +42764,115 @@
           }
         ],
         "summary": "Discard Reconciliations Bulk",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/reviews/selection": {
+      "post": {
+        "operationId": "create_review_selection_api_v1_workspaces__workspace_id__reviews_selection_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewSelectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewSelectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ReviewSelectionLimitErrorBody"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RESTErrorBody"
+                    }
+                  ],
+                  "title": "Response 422 Create Review Selection Api V1 Workspaces  Workspace Id  Reviews Selection Post"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Review Selection",
         "tags": [
           "read"
         ]
@@ -37189,6 +43277,114 @@
           }
         ],
         "summary": "Decide Review",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decisions/{decision_id}/undo": {
+      "post": {
+        "operationId": "undo_review_decision_api_v1_workspaces__workspace_id__reviews__review_item_id__decisions__decision_id__undo_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "review_item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Review Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "decision_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Decision Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewItemResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Undo Review Decision",
         "tags": [
           "read"
         ]

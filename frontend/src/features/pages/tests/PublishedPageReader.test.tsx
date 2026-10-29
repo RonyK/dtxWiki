@@ -304,9 +304,14 @@ describe("PublishedPageReader", () => {
       "/w/acme/pages/missing",
     );
     expect(screen.queryByText("Login screen")).not.toBeInTheDocument();
-    expect(
-      document.head.querySelector('meta[name="robots"]')?.getAttribute("content"),
-    ).toBe("noindex, nofollow");
+    // The heading can commit before the passive effect installs its metadata.
+    await waitFor(() => {
+      expect(
+        document.head.querySelector(
+          'meta[name="robots"][data-dtx-public-page-robots="true"]',
+        )?.getAttribute("content"),
+      ).toBe("noindex, nofollow");
+    });
   });
 
   it("localizes the Korean not-found state and reader Sign in action", async () => {

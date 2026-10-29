@@ -578,7 +578,7 @@ describe("DashboardScreen", () => {
       "href",
       "/workspaces/find",
     );
-    expect(screen.getByRole("link", { name: "Rename Personal" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Rename workspace" })).toHaveAttribute(
       "href",
       "/workspaces/workspace-1/settings?section=workspace",
     );

@@ -607,11 +607,22 @@ def test_ask_turn_feedback_only_accept_creates_feedback_without_context_page(
             "final_parent_node_id": ask_captures["id"],
             "final_page_type": "guide",
             "final_title": "Feedback Only Note",
+            "review_required": True,
         },
     )
 
     assert accepted.status_code == 200
     result = accepted.json()["data"]
+    detail = client.get(
+        f"/api/v1/workspaces/{workspace_id}/reviews/{result['review_item_id']}"
+    ).json()["data"]
+    # The coded placement reason stays a risk signal, not the review's title.
+    assert detail["decision_summary_code"] == "context_ingress_requires_review"
+    evidence = detail["evidence"]
+    assert evidence["reason"] == f"accept context ingress proposal {proposal['id']}"
+    assert evidence["operations"][0]["diff_summary"] == (
+        "feedback_only: Feedback Only Note"
+    )
     assert result["context_page_id"] is None
     assert result["context_page_version_id"] is None
     assert result["tree_node_id"] is None

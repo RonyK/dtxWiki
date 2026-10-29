@@ -80,7 +80,7 @@ TOOL_CONTRACT_DIGESTS = {
     # descriptions, never released on its own.
     17: "5dcb74dc06ee",
     18: "a31838390269",
-    19: "6597b3d146a7",
+    19: "e01c0e2148ea",
 }
 
 

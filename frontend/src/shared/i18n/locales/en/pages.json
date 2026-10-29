@@ -550,10 +550,6 @@
     "diagram": "Mermaid diagram",
     "zoom": {
       "controls": "Mermaid zoom controls",
-      "out": "Zoom out",
-      "current": "Current zoom {{percent}}%",
-      "in": "Zoom in",
-      "reset": "Reset zoom",
       "close": "Close Mermaid zoom"
     }
   },

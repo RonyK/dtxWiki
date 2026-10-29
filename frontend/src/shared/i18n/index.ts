@@ -7,6 +7,7 @@ import agentEn from "./locales/en/agent.json";
 import activityEn from "./locales/en/activity.json";
 import contextEn from "./locales/en/context.json";
 import dashboardEn from "./locales/en/dashboard.json";
+import inboxEn from "./locales/en/inbox.json";
 import libraryEn from "./locales/en/library.json";
 import lintEn from "./locales/en/lint.json";
 import chatsEn from "./locales/en/chats.json";
@@ -21,6 +22,7 @@ import agentKo from "./locales/ko/agent.json";
 import activityKo from "./locales/ko/activity.json";
 import contextKo from "./locales/ko/context.json";
 import dashboardKo from "./locales/ko/dashboard.json";
+import inboxKo from "./locales/ko/inbox.json";
 import libraryKo from "./locales/ko/library.json";
 import lintKo from "./locales/ko/lint.json";
 import chatsKo from "./locales/ko/chats.json";
@@ -42,6 +44,7 @@ const resources = {
     auth: authEn,
     context: contextEn,
     dashboard: dashboardEn,
+    inbox: inboxEn,
     library: libraryEn,
     lint: lintEn,
     chats: chatsEn,
@@ -58,6 +61,7 @@ const resources = {
     auth: authKo,
     context: contextKo,
     dashboard: dashboardKo,
+    inbox: inboxKo,
     library: libraryKo,
     lint: lintKo,
     chats: chatsKo,

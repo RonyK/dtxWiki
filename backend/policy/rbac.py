@@ -110,7 +110,7 @@ class WorkspaceAccess:
 @dataclass(frozen=True)
 class WorkspaceMembershipView:
     user_id: UUID
-    email: str
+    email: str | None
     display_name: str
     workspace_id: UUID
     workspace_slug: str
@@ -139,6 +139,11 @@ def get_workspace_access(
 ) -> WorkspaceAccess | None:
     membership = session.get(WorkspaceMembership, (user_id, workspace_id))
     if membership is None:
+        return None
+    workspace = session.get(Workspace, workspace_id)
+    if workspace is not None and workspace.account_deletion_user_id is not None:
+        # Held for an account's deletion: members have no access until an
+        # active admin is appointed, so landing picks another workspace.
         return None
     return WorkspaceAccess(
         workspace_id=workspace_id,

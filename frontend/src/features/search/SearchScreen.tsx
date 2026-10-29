@@ -92,6 +92,7 @@ export function SearchScreen() {
   const requestIdRef = useRef(0);
   const {
     data: searchResponse,
+    revision: searchRevision,
     error,
     loading,
     reload,
@@ -155,6 +156,9 @@ export function SearchScreen() {
   );
   const payload = searchResponse?.key === searchBaseKey ? searchResponse.payload : null;
   const searchLoading = loading && Boolean(debouncedQuery);
+  // A successful reload resets only appended rows. Query identity must remain
+  // stable because searchBaseKey is also a loader dependency and response key.
+  const searchRowsKey = `${searchBaseKey}:${searchRevision}`;
 
   // A5: search is keyset-paged. Accumulate appended pages on top of the loader's
   // first page, keyed by the search parameters and enabled features to drop the stale
@@ -163,8 +167,9 @@ export function SearchScreen() {
     key: string;
     items: RankedSearchResult[];
     cursor: string | null;
-  }>({ key: searchBaseKey, items: [], cursor: payload?.next_cursor ?? null });
+  }>({ key: searchRowsKey, items: [], cursor: payload?.next_cursor ?? null });
   const [loadingMore, setLoadingMore] = useState(false);
+  const paginationGenerationRef = useRef(0);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   // Reset the appended tail whenever a fresh first page lands. We key on the
   // `payload` object identity, not `next_cursor`: the keyset cursor is an opaque
@@ -174,15 +179,17 @@ export function SearchScreen() {
   // reset and leave stale page-2+ rows mixed under a refreshed first page after
   // content/index changes.
   useEffect(() => {
+    paginationGenerationRef.current += 1;
+    setLoadingMore(false);
     setAppended({
-      key: searchBaseKey,
+      key: searchRowsKey,
       items: [],
       cursor: payload?.next_cursor ?? null,
     });
     setLoadMoreError(null);
-  }, [payload, searchBaseKey]);
+  }, [payload, searchRowsKey]);
 
-  const appendedForBase = appended.key === searchBaseKey ? appended : null;
+  const appendedForBase = appended.key === searchRowsKey ? appended : null;
   const loadedResults = [
     ...(payload?.ranked_results ?? []),
     ...(appendedForBase?.items ?? []),
@@ -199,6 +206,7 @@ export function SearchScreen() {
       return;
     }
     const requestCursor = searchCursor;
+    const requestGeneration = paginationGenerationRef.current;
     setLoadingMore(true);
     setLoadMoreError(null);
     try {
@@ -211,7 +219,7 @@ export function SearchScreen() {
         cursor: requestCursor,
       });
       setAppended((current) =>
-        current.key === searchBaseKey && current.cursor === requestCursor
+        current.key === searchRowsKey && current.cursor === requestCursor
           ? {
               key: current.key,
               items: [...current.items, ...next.ranked_results],
@@ -223,11 +231,15 @@ export function SearchScreen() {
       // The cursor only advances on success, so the Load more button stays
       // available for retry; surface a localized error instead of a silent
       // unhandled rejection (mirrors the Agent overview Load more).
-      setLoadMoreError(
-        t("errors.loadMore", { defaultValue: "Failed to load more results" }),
-      );
+      if (requestGeneration === paginationGenerationRef.current) {
+        setLoadMoreError(
+          t("errors.loadMore", { defaultValue: "Failed to load more results" }),
+        );
+      }
     } finally {
-      setLoadingMore(false);
+      if (requestGeneration === paginationGenerationRef.current) {
+        setLoadingMore(false);
+      }
     }
   }
 

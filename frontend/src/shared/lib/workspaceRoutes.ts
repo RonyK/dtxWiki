@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import type { TreeNodePayload } from "../api/workspace";
 import { formatCanonicalContextUrl, isContextId } from "./contextLinks";
 
-export type WorkspaceSection = "dashboard" | "context" | "library" | "agent" | "activity" | "review" | "lint" | "chats" | "ask" | "search" | "settings" | "setup";
+export type WorkspaceSection = "dashboard" | "context" | "library" | "agent" | "activity" | "review" | "lint" | "chats" | "ask" | "search" | "settings" | "setup" | "inbox";
 export type WorkspaceRoute = {
   workspaceId: string;
   section: WorkspaceSection;
@@ -14,7 +14,7 @@ export type WorkspaceRoute = {
   suffix: string;
 };
 
-const sections = new Set<WorkspaceSection>(["dashboard", "context", "library", "agent", "activity", "review", "lint", "chats", "ask", "search", "settings", "setup"]);
+const sections = new Set<WorkspaceSection>(["dashboard", "context", "library", "agent", "activity", "review", "lint", "chats", "ask", "search", "settings", "setup", "inbox"]);
 const identityQueries = ["target", "edit", "review", "finding", "new", "newFolder", "parentNodeId", "parentId", "workspaceId", "workspace_id", "ws"];
 
 export function workspacePath(workspaceId: string, path = ""): string {

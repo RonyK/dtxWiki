@@ -42,10 +42,10 @@ HIDDEN_JOB_TYPES = frozenset(
         "embed",
         "email_delivery",
         "context_reconciliation_reminder",
-        # P10.3 T4.6: credential_replica_reconcile is seeded once per
-        # workspace per MINUTE and does nothing at all on a healthy
-        # workspace, so its successes are pure feed noise (1440 silent rows
-        # per workspace per day) -- exactly the flood this constant exists
+        # P10.3 T4.6: credential_replica_reconcile is checked per workspace at each
+        # registration tick (normally every five minutes), with a read-only
+        # precheck skipping healthy workspaces. Its routine successes are
+        # feed noise -- exactly the flood this constant exists
         # to keep out of Activity. Its FAILURES are surfaced instead through
         # NOISY_UNTIL_FAILED_JOB_TYPES below and the owner failure email, the
         # same split embed already has.
@@ -84,7 +84,7 @@ ALWAYS_HIDDEN_JOB_TYPES = frozenset({"email_delivery"})
 # failed reconcile therefore means "MCP access to this workspace may be
 # silently broken and nothing is fixing it" -- while the Settings sync chip
 # only reports rows the reconcile managed to reach, so it cannot report the
-# reconcile itself dying. Its per-minute successes stay hidden (see
+# reconcile itself dying. Its routine successes stay hidden (see
 # HIDDEN_JOB_TYPES).
 NOISY_UNTIL_FAILED_JOB_TYPES = frozenset(
     {"embed", "context_reconciliation_reminder", "credential_replica_reconcile"}
@@ -134,12 +134,30 @@ def context_page_embed_idempotency_key(
     marker: str,
     version_id: UUID,
     content_hash: str,
+    *,
+    decision_id: UUID | None = None,
 ) -> str:
-    """Return a version-addressed key for a page-head embed trigger."""
+    """Address a page-head trigger by version or by a review transition.
+
+    After undo, a fresh decision can publish or reject the same version again.
+    Its decision ID distinguishes that transition from the earlier completed job.
+    """
 
     if marker not in {"draft", "published"}:
         raise ValueError("context embed marker must be draft or published")
+    if decision_id is not None:
+        return f"context_page:{page_id}:decision:{decision_id}"
     return f"context_page:{page_id}:{marker}:{version_id}:{content_hash}"
+
+
+def context_page_undo_embed_idempotency_key(page_id: UUID, undo_id: UUID) -> str:
+    """Return the key of the reindex an undone review decision queues.
+
+    The heads an undo restores were each indexed before, under keys a repeat
+    enqueue would match, so the undo addresses its own transition.
+    """
+
+    return f"context_page:{page_id}:undo:{undo_id}"
 
 
 class JobRetryUnsupportedTypeError(RuntimeError):

@@ -42,6 +42,7 @@ from backend.services.activity_service import (
     _audit_only_observation_event_clause,
     _is_review_decision_activity_item,
     _is_system_activity_item,
+    _private_editing_visible,
     period_bounds,
 )
 from backend.services.job_queue import HIDDEN_JOB_TYPES
@@ -87,13 +88,6 @@ _PREFIX_SUBTYPE = {
     "review": "review",
     "mcp_chat_session": "chat",
 }
-# Opening, patching and discarding an editing session all describe a private
-# editing row. Like the matching MCP calls, they stay with their author.
-_PRIVATE_EDITING_ACTIONS = (
-    "page.begin_context_edit",
-    "page.patch_context_edit",
-    "page.discard_context_edit",
-)
 # Feed operations for MCP tools whose presentation verb ("edit") would
 # misdescribe the transition; these match the audit vocabulary below.
 _MCP_OPERATIONS = {
@@ -939,19 +933,6 @@ class ActivityFeedService:
 
 def _reader(actor):
     return f"{actor.actor_kind}:{actor.actor_id}:{actor.user_id or ''}"
-
-
-def _private_editing_visible(actor):
-    private = AuditEvent.action.in_(_PRIVATE_EDITING_ACTIONS)
-    if not actor.actor_kind or not actor.actor_id:
-        return ~private
-    return or_(
-        ~private,
-        and_(
-            AuditEvent.actor_kind == actor.actor_kind,
-            AuditEvent.actor_id == str(actor.actor_id),
-        ),
-    )
 
 
 def _aware(value):

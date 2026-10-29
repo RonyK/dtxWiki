@@ -1,4 +1,4 @@
-import { useRouteWorkspaceId, useWorkspaceRoute, workspacePath } from "../../shared/lib/workspaceRoutes";
+import { useRouteWorkspaceId, useWorkspaceRoute, workspacePath, withWorkspaceQuery } from "../../shared/lib/workspaceRoutes";
 import { NotFoundScreen } from "../errors/NotFoundScreen";
 import {
   Check,
@@ -15,7 +15,7 @@ import type { TFunction } from "i18next";
 import type { FormEvent } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { MarkdownView } from "../pages/MarkdownView";
 import { apiErrorMessage } from "../../shared/api/client";
@@ -51,6 +51,7 @@ import { RelativeTime } from "../../shared/components/RelativeTime";
 import { StatusPill } from "../../shared/components/StatusPill";
 import { WorkspaceLayout } from "../../shared/components/WorkspaceLayout";
 import { WorkspacePanelChrome } from "../../shared/components/WorkspacePanelChrome";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { resolveInitialLocale } from "../../shared/i18n";
 import { displayConceptPath } from "../../shared/lib/conceptPath";
 import type { TimeBucketKey } from "../../shared/lib/datetime";
@@ -569,6 +570,7 @@ export function AskScreen() {
   const routeIdentity = `${routeWorkspaceId ?? ""}\u0000${requestedSessionId ?? ""}`;
   const [notFound, setNotFound] = useState(false);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { t } = useTranslation("search");
   const workspaceContext = useOptionalWorkspaceContext();
   const canEdit = isEditorRole(workspaceContext?.selectedWorkspace?.role);
@@ -587,6 +589,7 @@ export function AskScreen() {
   const [selectingSessionId, setSelectingSessionId] = useState<string | null>(null);
   const [sendingTurn, setSendingTurn] = useState(false);
   const [loadingMoreSessions, setLoadingMoreSessions] = useState(false);
+  const consumedNewRequestRef = useRef<string | null>(null);
   const loadGenerationRef = useRef(0);
   // Mutation completions may arrive after browser navigation changes the
   // route without unmounting AskScreen. The URL remains authoritative even
@@ -596,6 +599,7 @@ export function AskScreen() {
     routeIdentityRef.current = routeIdentity;
     return () => { routeIdentityRef.current = ""; };
   }, [routeIdentity]);
+  const entryRefreshGenerationRef = useRef(0);
   // Tracks whether the component is still mounted. Async handlers below
   // (`startSession`, `load`, `sendTurn`, `acceptPlacement`,
   // `rejectPlacement`) chain multiple awaits and would otherwise race
@@ -644,6 +648,67 @@ export function AskScreen() {
     return true;
   }
 
+  useScreenEntryRefresh(routeWorkspaceId ? workspacePath(routeWorkspaceId, "ask") : "", () => {
+    if (!state?.workspaceId) return;
+    const workspaceId = state.workspaceId;
+    const generation = ++entryRefreshGenerationRef.current;
+    const loadGeneration = loadGenerationRef.current;
+    void Promise.all([listAskSessions(workspaceId), listTree(workspaceId, "context")])
+      .then(([next, contextTree]) => {
+        if (
+          !mountedRef.current ||
+          generation !== entryRefreshGenerationRef.current ||
+          loadGeneration !== loadGenerationRef.current
+        ) return;
+        setState((current) => current?.workspaceId === workspaceId ? {
+          ...current,
+          contextTree,
+          sessions: sortSessionsByActivity(next.items),
+          sessionsCursor: next.next_cursor,
+          sessionsHasMore: next.has_more,
+        } : current);
+      })
+      .catch((exc) => {
+        if (
+          mountedRef.current &&
+          generation === entryRefreshGenerationRef.current &&
+          loadGeneration === loadGenerationRef.current
+        ) {
+          setError(errorMessage(exc, ASK_COPY[state.workspaceLanguage].errors.load));
+        }
+      });
+  }, { isHome: requestedSessionId === null && !searchParams.has("new") });
+
+  // `new` is a create intent, while session identity stays in the typed URL.
+  // Strip the intent before starting so refresh/back navigation cannot submit
+  // it again; the mutation route fence still protects a subsequent navigation.
+  useEffect(() => {
+    const newRequestKey = searchParams.get("new");
+    if (!newRequestKey) {
+      consumedNewRequestRef.current = null;
+      return;
+    }
+    if (
+      !state?.workspaceId ||
+      !canEdit ||
+      startingSession ||
+      consumedNewRequestRef.current === newRequestKey
+    ) {
+      return;
+    }
+    consumedNewRequestRef.current = newRequestKey;
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("new");
+    navigate(
+      withWorkspaceQuery(workspacePath(routeWorkspaceId, "ask"), nextParams),
+      { replace: true },
+    );
+    void startSession();
+    // The guard is a URL/state transition; do not restart it after inline
+    // callbacks change during the session-creation state update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canEdit, navigate, routeWorkspaceId, searchParams, startingSession, state]);
+
   // Append the next keyset page of older sessions to the history rail. Guarded
   // against double-fire and unmount; a reload (create/select/send) resets back
   // to the first page, which is the intended fresh-recency behavior.
@@ -657,7 +722,7 @@ export function AskScreen() {
     ) {
       return;
     }
-    const { workspaceId, sessionsCursor, workspaceLanguage } = state;
+    const { workspaceId, sessionsCursor, workspaceLanguage, sessions } = state;
     setLoadingMoreSessions(true);
     try {
       const next = await listAskSessions(workspaceId, { cursor: sessionsCursor });
@@ -673,6 +738,7 @@ export function AskScreen() {
         if (
           !prev ||
           prev.workspaceId !== workspaceId ||
+          prev.sessions !== sessions ||
           prev.sessionsCursor !== sessionsCursor
         ) {
           return prev;

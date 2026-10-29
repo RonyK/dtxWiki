@@ -766,6 +766,121 @@ describe("TreeRail", () => {
     expect(onDropNode).not.toHaveBeenCalled();
   });
 
+  it("drops beside a row under another parent and at the top of an expanded folder", async () => {
+    const onReorderNodeAt = vi.fn();
+    const folder = treeNode({
+      id: "folder-node",
+      title: "Folder",
+      node_kind: "folder",
+      can_have_children: true,
+      children_count: 2,
+      sort_key: "0001",
+    });
+    const first = treeNode({
+      id: "first-node",
+      title: "First",
+      parent_id: folder.id,
+      sort_key: "0001",
+      breadcrumb: [breadcrumb(folder)],
+    });
+    const second = treeNode({
+      id: "second-node",
+      title: "Second",
+      parent_id: folder.id,
+      sort_key: "0002",
+      breadcrumb: [breadcrumb(folder)],
+    });
+    const outside = treeNode({ id: "outside-node", title: "Outside", sort_key: "0002" });
+
+    render(
+      <TreeRail
+        title="Context"
+        activeTargetId={null}
+        expandedNodeIds={[folder.id]}
+        onDropNode={vi.fn()}
+        onReorderNodeAt={onReorderNodeAt}
+        nodes={[folder, first, second, outside]}
+      />,
+    );
+    const row = (name: string) => screen.getByRole("treeitem", { name });
+    for (const name of ["Folder", "First", "Second"]) {
+      vi.spyOn(row(name), "getBoundingClientRect").mockReturnValue(
+        rowBounds({ top: 100, height: 90 }),
+      );
+    }
+
+    let dataTransfer = createDataTransfer();
+    fireEvent.dragStart(row("Outside"), { dataTransfer });
+    fireTreeDragEvent(row("Second"), "dragover", { clientY: 110, dataTransfer });
+    expect(row("Second")).toHaveAttribute("data-drop-placement", "before");
+    fireTreeDragEvent(row("Second"), "drop", { clientY: 110, dataTransfer });
+    await waitFor(() =>
+      expect(onReorderNodeAt).toHaveBeenCalledWith(outside, second, "before"),
+    );
+
+    // The gap under an expanded folder is its children's top, not the slot
+    // after the folder's whole subtree.
+    dataTransfer = createDataTransfer();
+    fireEvent.dragStart(row("Outside"), { dataTransfer });
+    fireTreeDragEvent(row("Folder"), "dragover", { clientY: 180, dataTransfer });
+    expect(row("Folder")).toHaveAttribute("data-drop-placement", "first-child");
+    expect(row("Folder")).toHaveClass("tree-row-insert-first-child");
+    fireTreeDragEvent(row("Folder"), "drop", { clientY: 180, dataTransfer });
+    await waitFor(() =>
+      expect(onReorderNodeAt).toHaveBeenCalledWith(outside, first, "before"),
+    );
+
+    dataTransfer = createDataTransfer();
+    fireEvent.dragStart(row("Folder"), { dataTransfer });
+    fireTreeDragEvent(row("Second"), "dragover", { clientY: 110, dataTransfer });
+    expect(row("Second")).not.toHaveAttribute("data-drop-placement");
+  });
+
+  it("gives touch drags wide insertion bands, a drop hint, and closes the long-press menu", () => {
+    vi.useFakeTimers();
+    const folder = treeNode({
+      id: "folder-node",
+      title: "Folder",
+      node_kind: "folder",
+      can_have_children: true,
+    });
+    const page = treeNode({ id: "page-node", title: "Page", sort_key: "0002" });
+
+    render(
+      <TreeRail
+        title="Context"
+        activeTargetId={null}
+        onDropNode={vi.fn()}
+        onRenameNode={vi.fn()}
+        onReorderNodeAt={vi.fn()}
+        nodes={[folder, page]}
+      />,
+    );
+    const folderRow = screen.getByRole("treeitem", { name: "Folder" });
+    const pageRow = screen.getByRole("treeitem", { name: "Page" });
+    vi.spyOn(folderRow, "getBoundingClientRect").mockReturnValue(
+      rowBounds({ top: 100, height: 48 }),
+    );
+
+    fireEvent.pointerDown(pageRow, { button: 0, clientX: 48, clientY: 56, pointerType: "touch" });
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    const dataTransfer = createDataTransfer();
+    fireEvent.dragStart(pageRow, { dataTransfer });
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    // 17px down a 48px folder row: a mouse drag would nest here, a finger
+    // still inserts before it.
+    fireTreeDragEvent(folderRow, "dragover", { clientY: 117, dataTransfer });
+    expect(folderRow).toHaveAttribute("data-drop-placement", "before");
+    expect(document.querySelector(".tree-drop-hint")).toHaveTextContent("Before Folder");
+    fireTreeDragEvent(folderRow, "dragover", { clientY: 124, dataTransfer });
+    expect(document.querySelector(".tree-drop-hint")).toHaveTextContent("Into Folder");
+  });
+
   it("disables sibling insertion while the tree filter is active", async () => {
     const onReorderNodeAt = vi.fn();
     const moving = treeNode({

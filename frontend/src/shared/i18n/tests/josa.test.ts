@@ -58,14 +58,14 @@ describe("josa i18next Formatter wiring", () => {
   it("resolves a real t() call through the registered josaEulReul format", () => {
     // "3" is a digit, not a Hangul syllable, so this exercises the
     // bracketed-fallback branch end to end.
-    expect(i18n.t("agent:history.restoreConfirm", { version: "3", lng: "ko" })).toBe(
-      "Agent v3을(를) 새 초안으로 복원할까요? 활성 버전은 변경되지 않습니다.",
+    expect(i18n.t("agent:history.restored", { version: "2", draft: "3", lng: "ko" })).toBe(
+      "Agent v2 내용으로 새 초안 v3을(를) 만들었습니다.",
     );
     // A Hangul-ending value must resolve to the bare particle, proving the
     // Formatter is genuinely dispatching through attachJosa and not just
     // echoing the raw value.
-    expect(i18n.t("agent:history.restoreConfirm", { version: "하나", lng: "ko" })).toBe(
-      "Agent v하나를 새 초안으로 복원할까요? 활성 버전은 변경되지 않습니다.",
+    expect(i18n.t("agent:history.restored", { version: "2", draft: "하나", lng: "ko" })).toBe(
+      "Agent v2 내용으로 새 초안 v하나를 만들었습니다.",
     );
   });
 

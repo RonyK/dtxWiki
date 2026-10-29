@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createContext, useContext } from "react";
-import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
+import { Link, MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readAppStyles } from "../../../test-support/appStyles";
@@ -44,6 +44,54 @@ describe("AgentScreen", () => {
     window.localStorage.setItem("dtxwiki:workspace-layout:v2:agent:left", "true");
     agentWorkspace.current = { selectedWorkspace: { role: "owner" } };
     consoleErrorSpy = vi.spyOn(console, "error");
+  });
+
+  it("refreshes the overview and tree after leaving the reader and clicking its menu again", async () => {
+    let pages = [agentPage("agent-1", "persona", "Existing item")];
+    let listReads = 0;
+    let treeReads = 0;
+    mockFetch({
+      [`${BASE}/api/v1/workspaces`]: { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`]: () => {
+        listReads += 1;
+        return { data: pages, total: pages.length };
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`]: () => {
+        treeReads += 1;
+        return { data: treeResponse("agent", pages.map((page) =>
+          treeNode(`node-${page.id}`, page.id, page.title),
+        )) };
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=active`]: { data: agentDetail("agent-1", "persona", "Existing item", "Selected reader body") },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/categories`]: { data: [category("persona", "always")] },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-1`]: {
+        data: { versions: [], changesets: [], review_decisions: [], diffs: null },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1/bundles`]: { data: [] },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1/chats?limit=50`]: { data: { items: [], next_cursor: null } },
+    });
+    const view = render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent/pages/agent-1`]}>
+        <Link to={`/workspaces/${WORKSPACE_ID}/agent`}>Main menu agent</Link>
+        <AgentScreen />
+      </MemoryRouter>,
+    );
+    await screen.findByText("Selected reader body");
+    const main = within(view.container.querySelector(".feature-main") as HTMLElement);
+    expect([listReads, treeReads]).toEqual([1, 1]);
+
+    pages = [agentPage("fresh-1", "persona", "Fresh after reader"), ...pages];
+    await userEvent.click(screen.getByRole("link", { name: "Main menu agent" }));
+    await screen.findByRole("treeitem", { name: "Fresh after reader" });
+    expect(await main.findByRole("button", { name: /Fresh after reader/ })).toBeInTheDocument();
+    expect(screen.queryByText("Selected reader body")).not.toBeInTheDocument();
+    expect([listReads, treeReads]).toEqual([2, 2]);
+
+    pages = [agentPage("fresh-2", "persona", "Fresh while home"), ...pages];
+    await userEvent.click(screen.getByRole("link", { name: "Main menu agent" }));
+    await screen.findByRole("treeitem", { name: "Fresh while home" });
+    expect(await main.findByRole("button", { name: /Fresh while home/ })).toBeInTheDocument();
+    expect([listReads, treeReads]).toEqual([3, 3]);
   });
 
   it("provides a wide, long-form Agent editor and bounded reader measure", () => {
@@ -259,7 +307,7 @@ describe("AgentScreen", () => {
     expect(screen.queryByText("# Persona")).not.toBeInTheDocument();
     // An editor (owner) sees the restore affordance in History.
     expect(
-      screen.getByRole("button", { name: "Restore this version" }),
+      screen.getByRole("button", { name: "Start a new draft from this version" }),
     ).toBeInTheDocument();
 
     await userEvent.click(
@@ -703,7 +751,7 @@ describe("AgentScreen", () => {
     // and the History tab's restore (a write) is hidden for viewers (#2)
     await userEvent.click(screen.getByRole("tab", { name: /History/ }));
     expect(
-      screen.queryByRole("button", { name: "Restore this version" }),
+      screen.queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
   });
 
@@ -793,6 +841,7 @@ describe("AgentScreen", () => {
   it("marks manual tree refresh busy and announces completion", async () => {
     const treeRefresh = deferredResponse();
     let treeCallCount = 0;
+    let pageCallCount = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -802,6 +851,7 @@ describe("AgentScreen", () => {
         return jsonResponse({ data: [category("persona", "always")] });
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`) {
+        pageCallCount += 1;
         return jsonResponse({ data: [agentPage("agent-1", "persona", "Default Persona")] });
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`) {
@@ -821,11 +871,13 @@ describe("AgentScreen", () => {
 
     render(
       <MemoryRouter initialEntries={["/workspaces/workspace-1/agent"]}>
+        <AgentNavigationProbe />
         <AgentScreen />
       </MemoryRouter>,
     );
 
     await screen.findByRole("heading", { name: "Agent pages" });
+    const originalLocationKey = screen.getByTestId("agent-navigation-key").textContent;
     // Refresh is a direct rail-header button now (no "⋯" overflow menu).
     await userEvent.click(
       screen.getByRole("button", { name: "Refresh Agent tree" }),
@@ -849,6 +901,10 @@ describe("AgentScreen", () => {
         screen.getByRole("button", { name: "Refresh Agent tree" }),
       ).toBeEnabled();
     });
+
+    expect(pageCallCount).toBe(2);
+    expect(treeCallCount).toBe(2);
+    expect(screen.getByTestId("agent-navigation-key")).toHaveTextContent(originalLocationKey!);
 
     await userEvent.click(
       screen.getByRole("button", { name: "Refresh Agent tree" }),
@@ -1813,10 +1869,10 @@ describe("AgentScreen", () => {
     expect(within(dialog).getByText("Original")).toBeInTheDocument();
     expect(within(dialog).getAllByText("Current").length).toBeGreaterThan(0);
 
-    await userEvent.click(within(dialog).getByRole("button", { name: "Restore this version" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start a new draft from this version" }));
 
     expect(confirm).toHaveBeenCalledWith(
-      "Restore Agent v2 as a new draft? The active version stays unchanged.",
+      "Create a new draft from Agent v2? The active version stays unchanged.",
     );
     const restoreCalls = () =>
       fetchMock.mock.calls.filter(
@@ -1836,7 +1892,7 @@ describe("AgentScreen", () => {
     expect(within(dialog).getByRole("combobox", { name: "Earlier version" })).toBeDisabled();
     fireEvent.change(later, { target: { value: "version-3" } });
     expect(dialog).toHaveAccessibleName("Changes in v2 since the previous version, v1");
-    expect(within(dialog).getByRole("button", { name: "Restoring" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Creating draft" })).toBeDisabled();
     expect(within(dialog).getByRole("button", { name: "Close diff" })).toBeDisabled();
 
     restoreResponse.resolve(
@@ -2095,7 +2151,7 @@ describe("AgentScreen", () => {
     // Changes (against v2), but restoring it would only stack an identical
     // version, so that action is dropped there.
     const v3 = within(panel).getByText("v3").closest(".history-card") as HTMLElement;
-    expect(within(v3).queryByRole("button", { name: "Restore this version" })).toBeNull();
+    expect(within(v3).queryByRole("button", { name: "Start a new draft from this version" })).toBeNull();
 
     await userEvent.click(
       within(v3).getByRole("button", {
@@ -2146,7 +2202,8 @@ function mockFetch(responses: Record<string, unknown>) {
     if (!body) {
       throw new Error(`Unexpected request: ${url}`);
     }
-    return new Response(JSON.stringify(body), {
+    const value = typeof body === "function" ? await body() : body;
+    return new Response(JSON.stringify(value), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -2447,3 +2504,8 @@ test("relabels the seeded category folders with the shared category label", asyn
     await screen.findByRole("heading", { name: "System-managed Agent guide" }),
   ).toBeInTheDocument();
 });
+
+function AgentNavigationProbe() {
+  const location = useLocation();
+  return <span data-testid="agent-navigation-key">{location.key}</span>;
+}

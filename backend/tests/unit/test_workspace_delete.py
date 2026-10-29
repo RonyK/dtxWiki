@@ -191,7 +191,7 @@ def test_delete_workspace_drains_empty_media_control_rows(session_factory):
         )
 
 
-def test_delete_workspace_explicitly_clears_user_workspace_pointers(session_factory):
+def test_delete_workspace_explicitly_clears_user_default_pointer(session_factory):
     """Pointer cleanup must not depend on database FK cascade enforcement."""
 
     with session_factory.begin() as session:
@@ -201,7 +201,6 @@ def test_delete_workspace_explicitly_clears_user_workspace_pointers(session_fact
         )
         assert user is not None
         user.default_workspace_id = workspace_id
-        user.personal_workspace_id = workspace_id
         user_id = user.id
 
     with session_factory.begin() as session:
@@ -216,7 +215,6 @@ def test_delete_workspace_explicitly_clears_user_workspace_pointers(session_fact
         user = session.get(User, user_id)
         assert user is not None
         assert user.default_workspace_id is None
-        assert user.personal_workspace_id is None
         assert session.get(Workspace, workspace_id) is None
 
 

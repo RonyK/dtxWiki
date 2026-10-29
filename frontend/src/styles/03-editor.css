@@ -3086,46 +3086,6 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
   object-fit: contain;
 }
 
-.dialog-panel.image-viewer-panel {
-  width: min(1280px, 96vw);
-  max-width: none;
-  max-height: 92vh;
-  overflow: hidden;
-  padding: 0;
-}
-
-.image-viewer {
-  position: relative;
-  display: grid;
-  min-height: 120px;
-  max-height: 92vh;
-  place-items: center;
-  overflow: auto;
-  background: var(--surface-subtle);
-  padding: 48px 20px 20px;
-}
-
-.image-viewer-close {
-  position: absolute;
-  z-index: 1;
-  top: 10px;
-  right: 10px;
-  width: 34px;
-  height: 34px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  box-shadow: var(--shadow-1);
-}
-
-.image-viewer-content {
-  display: block;
-  width: auto;
-  max-width: 100%;
-  max-height: calc(92vh - 68px);
-  height: auto;
-}
-
 .markdown-body h1,
 .markdown-body h2,
 .markdown-body h3 {
@@ -3338,23 +3298,25 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
   background: var(--surface);
 }
 
-.dialog-panel.mermaid-zoom-panel {
+/* ZoomPanViewer, shared by the Mermaid diagram viewer and enlarged images. */
+/* 100% is the backdrop's content box, so the panel keeps the backdrop's 20px
+   gutter; 96vw overflowed it on phones and cut off the close button. */
+.dialog-panel.zoom-viewer-panel {
   display: flex;
-  width: min(1440px, 96vw);
+  width: min(1440px, 100%);
   height: min(88vh, 900px);
-  max-width: none;
   overflow: hidden;
   padding: 0;
 }
 
-.dialog-panel.mermaid-zoom-panel > .dialog-scroll-region {
+.dialog-panel.zoom-viewer-panel > .dialog-scroll-region {
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
 }
 
-.mermaid-zoom-root {
+.zoom-viewer {
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
@@ -3362,7 +3324,7 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
   flex-direction: column;
 }
 
-.mermaid-zoom-toolbar {
+.zoom-viewer-toolbar {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -3370,8 +3332,8 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
   padding: 8px 12px;
 }
 
-.mermaid-zoom-toolbar-button,
-.mermaid-zoom-readout {
+.zoom-viewer-toolbar-button,
+.zoom-viewer-readout {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3382,11 +3344,11 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
   color: var(--ink);
 }
 
-.mermaid-zoom-toolbar-button {
+.zoom-viewer-toolbar-button {
   width: 32px;
 }
 
-.mermaid-zoom-readout {
+.zoom-viewer-readout {
   min-width: 58px;
   padding: 0 8px;
   font-size: 13px;
@@ -3394,18 +3356,18 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
   font-weight: 700;
 }
 
-.mermaid-zoom-toolbar-button:hover,
-.mermaid-zoom-toolbar-button:focus-visible,
-.mermaid-zoom-readout:hover,
-.mermaid-zoom-readout:focus-visible {
+.zoom-viewer-toolbar-button:hover,
+.zoom-viewer-toolbar-button:focus-visible,
+.zoom-viewer-readout:hover,
+.zoom-viewer-readout:focus-visible {
   background: var(--surface-active);
 }
 
-.mermaid-zoom-close {
+.zoom-viewer-close {
   margin-left: auto;
 }
 
-.mermaid-zoom-viewport {
+.zoom-viewer-viewport {
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
@@ -3414,26 +3376,50 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
   touch-action: none;
 }
 
-.mermaid-zoom-viewport.is-dragging {
+.zoom-viewer-viewport.is-dragging {
   cursor: grabbing;
 }
 
-.mermaid-zoom-content {
+.zoom-viewer-content {
   display: flex;
   width: 100%;
   height: 100%;
   align-items: center;
   justify-content: center;
   transform-origin: center center;
+}
+
+/* A will-change layer keeps the raster scale it was promoted at, so a zoomed
+   image or diagram would stay blurry. Promote only while panning, which
+   translates without scaling. */
+.zoom-viewer-viewport.is-dragging .zoom-viewer-content {
   will-change: transform;
 }
 
-.mermaid-zoom-content svg {
+.mermaid-zoom-svg {
   flex: 0 0 auto;
+  width: 100%;
+}
+
+.mermaid-zoom-svg svg {
+  display: block;
   width: 100%;
   max-width: 100%;
   max-height: none;
   height: auto;
+}
+
+/* Fitted inside the viewport at 100%, never enlarged past its own pixels
+   there; the viewer's scale does the magnifying. */
+.zoom-viewer-image {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 100%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .markdown-code-toolbar {

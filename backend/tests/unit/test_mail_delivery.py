@@ -1,3 +1,4 @@
+import hashlib
 import re
 import ssl
 import threading
@@ -11,6 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 from backend.app.settings import Settings
 from backend.models.audit import AuditEvent
+from backend.models.auth_verification import EmailReauthenticationChallenge
 from backend.models.base import Base
 from backend.models.job import Job
 from backend.models.mail import EmailOutbox, PasswordRecoveryRateLimitSlot
@@ -277,10 +279,13 @@ def test_email_reset_uses_encrypted_outbox_and_no_worker_job(session_factory):
 
     assert len(provider.messages) == 1
     assert raw_token in provider.messages[0].text_body
-    assert _emailed_link_token(
-        provider.messages[0].text_body,
-        path="/reset-password",
-    ) == raw_token
+    assert (
+        _emailed_link_token(
+            provider.messages[0].text_body,
+            path="/reset-password",
+        )
+        == raw_token
+    )
     with session_factory() as session:
         outbox = session.get(EmailOutbox, result.outbox_id)
         assert outbox is not None and outbox.status == "sent"
@@ -527,9 +532,7 @@ def test_sweep_and_a_direct_delivery_cannot_double_send(tmp_path):
 
         def run_sweep() -> None:
             try:
-                sweep_delivered.append(
-                    delivery.sweep_due(session_factory=sessions)
-                )
+                sweep_delivered.append(delivery.sweep_due(session_factory=sessions))
             except BaseException as exc:  # asserted below
                 failures.append(exc)
 
@@ -795,6 +798,61 @@ def test_consuming_email_verification_terminalizes_own_envelope(
                 revoked_at=datetime.now(UTC),
             )
             == 1
+        )
+
+    # Obsolete confirmation is the same terminal policy, without pretending
+    # that expiry, consumption, revocation or replacement is an SMTP failure.
+    now = datetime.now(UTC)
+    for state in ("expired", "consumed", "revoked", "replaced"):
+        token = f"challenge-token-{state}"
+        with session_factory.begin() as session:
+            challenge = EmailReauthenticationChallenge(
+                user_id=user.id,
+                session_generation=session.get(User, user.id).session_generation,
+                session_digest="s" * 64,
+                binding_digest="b" * 64,
+                recipient_digest=hashlib.sha256(user.email.encode()).hexdigest(),
+                token_digest=hashlib.sha256(token.encode()).hexdigest(),
+                scope="account",
+                return_to="/account",
+                created_at=now,
+                expires_at=now + timedelta(minutes=5),
+            )
+            if state == "expired":
+                challenge.expires_at = now - timedelta(seconds=1)
+            elif state == "consumed":
+                challenge.consumed_at = now
+            elif state == "revoked":
+                challenge.revoked_at = now
+            else:
+                challenge.token_digest = "replaced-digest"
+            session.add(challenge)
+            session.flush()
+            delivery.queue_reauthentication_email(
+                session, user=user, challenge=challenge, token=token
+            )
+    assert delivery.sweep_due(session_factory=session_factory) == 0
+    assert delivery.sweep_due(session_factory=session_factory) == 0
+    assert delivery.provider.messages == []
+    with session_factory() as session:
+        confirmations = session.scalars(
+            select(EmailOutbox).where(
+                EmailOutbox.message_kind == "email_reauthentication"
+            )
+        ).all()
+        assert len(confirmations) == 4
+        assert all(
+            row.encrypted_token is None and row.next_attempt_at is None
+            for row in confirmations
+        )
+        assert delivery.status(session).failed == 0
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(AuditEvent)
+                .where(AuditEvent.action == "auth.email.delivery.failed")
+            )
+            == 0
         )
 
 
@@ -1626,13 +1684,11 @@ def test_sweep_due_leaves_a_freshly_claimed_sending_row_alone(session_factory):
         assert in_flight is not None and in_flight.status == "sending"
 
 
-def _expired_reset_outbox(session_factory, user: User) -> EmailOutbox:
-    """A password_reset row whose token has already expired.
+def _corrupted_reset_outbox(session_factory, user: User) -> EmailOutbox:
+    """A live token with an unreadable envelope exercises render failure.
 
-    ``_render`` raises ``MailDeliveryError`` for it before the provider is ever
-    reached, which is the render-failure branch F1 covers. An expired token is
-    the ordinary way to get there in production -- a reset issued just before a
-    worker outage, a revoked-but-unfenced token, an unset mail_from_address.
+    Expired tokens now terminate normally; corruption must still record a real
+    render failure durably and consume the bounded retry budget.
     """
     with session_factory.begin() as session:
         token = PasswordResetToken(
@@ -1641,7 +1697,7 @@ def _expired_reset_outbox(session_factory, user: User) -> EmailOutbox:
             purpose="password_reset",
             delivery="email",
             requested_via="public",
-            expires_at=datetime.now(UTC) - timedelta(hours=1),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
         )
         session.add(token)
         session.flush()
@@ -1673,7 +1729,7 @@ def test_render_failure_persists_its_attempt_and_backoff(session_factory):
     user = add_verified_user(session_factory, "render-failure@example.com")
     provider = RecordingProvider()
     delivery = EmailDeliveryService(settings=mail_settings(), provider=provider)
-    outbox_id = _expired_reset_outbox(session_factory, user).id
+    outbox_id = _corrupted_reset_outbox(session_factory, user).id
 
     assert delivery.sweep_due(session_factory=session_factory) == 0
 
@@ -1710,7 +1766,7 @@ def test_render_failure_is_not_reattempted_every_sweep(session_factory):
     delivery = EmailDeliveryService(
         settings=mail_settings(), provider=RecordingProvider()
     )
-    outbox_id = _expired_reset_outbox(session_factory, user).id
+    outbox_id = _corrupted_reset_outbox(session_factory, user).id
     frozen = datetime.now(UTC)
 
     for _ in range(5):
@@ -1733,7 +1789,7 @@ def test_render_failure_spends_a_bounded_budget_then_stops(session_factory):
     delivery = EmailDeliveryService(
         settings=mail_settings(), provider=RecordingProvider()
     )
-    outbox_id = _expired_reset_outbox(session_factory, user).id
+    outbox_id = _corrupted_reset_outbox(session_factory, user).id
     now = datetime.now(UTC)
 
     for _ in range(DEFAULT_JOB_MAX_ATTEMPTS):
@@ -1746,8 +1802,7 @@ def test_render_failure_spends_a_bounded_budget_then_stops(session_factory):
         assert outbox.status == "failed"
         assert outbox.next_attempt_at is None
         assert outbox.encrypted_token is None, (
-            "a terminal render failure must clear the recoverable reset "
-            "envelope"
+            "a terminal render failure must clear the recoverable reset envelope"
         )
 
     for _ in range(10):
@@ -1784,9 +1839,7 @@ def test_spent_budget_stops_contacting_the_provider(session_factory):
     provider = CountingFailingProvider()
     delivery = EmailDeliveryService(settings=mail_settings(), provider=provider)
     with session_factory.begin() as session:
-        outbox_id = _queued_notification(
-            session, user, created_at=datetime.now(UTC)
-        ).id
+        outbox_id = _queued_notification(session, user, created_at=datetime.now(UTC)).id
 
     now = datetime.now(UTC)
     for _ in range(10):
@@ -1968,9 +2021,7 @@ def test_lease_recovery_of_an_accepted_send_is_at_least_once(session_factory):
     provider = RecordingProvider()
     delivery = EmailDeliveryService(settings=mail_settings(), provider=provider)
     with session_factory.begin() as session:
-        outbox_id = _queued_notification(
-            session, user, created_at=datetime.now(UTC)
-        ).id
+        outbox_id = _queued_notification(session, user, created_at=datetime.now(UTC)).id
 
     def _crash(self, **_kwargs):
         raise SettleCrash("process died after the provider accepted the message")
@@ -1991,9 +2042,7 @@ def test_lease_recovery_of_an_accepted_send_is_at_least_once(session_factory):
             "tell apart from one whose send never left"
         )
 
-    later = datetime.now(UTC) + timedelta(
-        seconds=delivery.sending_lease_seconds + 30
-    )
+    later = datetime.now(UTC) + timedelta(seconds=delivery.sending_lease_seconds + 30)
     assert delivery.sweep_due(session_factory=session_factory, now=later) == 1
 
     assert len(provider.messages) == 2, (

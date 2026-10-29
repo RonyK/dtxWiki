@@ -42,22 +42,23 @@ describe("Mermaid sizing styles", () => {
   });
 
   it("fits the zoom SVG to the popup width before applying the transform", () => {
-    const panelRule = ruleBody(".dialog-panel.mermaid-zoom-panel");
-    expect(panelRule).toContain("width: min(1440px, 96vw);");
+    const panelRule = ruleBody(".dialog-panel.zoom-viewer-panel");
+    expect(panelRule).toContain("width: min(1440px, 100%);");
+    expect(panelRule).not.toContain("max-width: none;");
 
     const scrollRegionRule = ruleBody(
-      ".dialog-panel.mermaid-zoom-panel > .dialog-scroll-region",
+      ".dialog-panel.zoom-viewer-panel > .dialog-scroll-region",
     );
     expect(scrollRegionRule).toContain("display: flex;");
     expect(scrollRegionRule).toContain("flex: 1 1 auto;");
     expect(scrollRegionRule).toContain("min-width: 0;");
     expect(scrollRegionRule).toContain("min-height: 0;");
 
-    const viewportRule = ruleBody(".mermaid-zoom-viewport");
+    const viewportRule = ruleBody(".zoom-viewer-viewport");
     expect(viewportRule).toContain("overflow: hidden;");
     expect(viewportRule).toContain("cursor: grab;");
 
-    const svgRule = ruleBody(".mermaid-zoom-content svg");
+    const svgRule = ruleBody(".mermaid-zoom-svg svg");
     expect(svgRule).toContain("width: 100%;");
     expect(svgRule).toContain("max-width: 100%;");
     expect(svgRule).toContain("max-height: none;");

@@ -16,8 +16,8 @@ from backend.models import (
     PageLink,
     PageNameIndex,
     ReviewItem,
-    User,
     Workspace,
+    WorkspaceMembership,
     WorkspaceTreeNode,
 )
 from backend.policy.auth import ActorContext, get_rest_actor
@@ -2044,20 +2044,25 @@ def test_oauth_foreign_workspace_page_id_and_slug_match_missing(page_service):
         },
     ).json()["data"]
     owner_id = UUID(owner.get("/api/v1/auth/me").json()["data"]["user_id"])
+    seeded_workspace_id = UUID(default_workspace_id(page_service))
     with page_service.session_factory() as session:
-        personal_workspace_id = session.get(User, owner_id).personal_workspace_id
-    assert personal_workspace_id is not None
+        starter_workspace_id = session.scalars(
+            select(WorkspaceMembership.workspace_id).where(
+                WorkspaceMembership.user_id == owner_id,
+                WorkspaceMembership.workspace_id != seeded_workspace_id,
+            )
+        ).one()
 
     owner.app.dependency_overrides[get_rest_actor] = lambda: ActorContext(
         actor_kind="human",
         actor_id=str(owner_id),
         user_id=owner_id,
-        workspace_id=personal_workspace_id,
+        workspace_id=starter_workspace_id,
         workspace_role="owner",
         role="owner",
         scopes=("mcp:read",),
         token_kind="oauth_jwt",
-        token_workspace_ids=(personal_workspace_id,),
+        token_workspace_ids=(starter_workspace_id,),
         provenance="oauth_client",
     )
     try:

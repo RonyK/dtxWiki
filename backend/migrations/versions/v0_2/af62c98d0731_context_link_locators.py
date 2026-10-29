@@ -1,7 +1,7 @@
 """Index Context links by their authored locator, preserving existing pins.
 
 Revision ID: af62c98d0731
-Revises: ef53a0a7061c
+Revises: 175b9664724e
 
 Downgrade retains wikilink pins only. Other rebuildable link rows and their
 pins are discarded before restoring the old slug-based unique constraint;
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "af62c98d0731"
-down_revision = "ef53a0a7061c"
+down_revision = "175b9664724e"
 branch_labels = None
 depends_on = None
 

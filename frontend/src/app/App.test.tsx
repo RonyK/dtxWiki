@@ -447,8 +447,12 @@ describe("appRoutes role gating", () => {
     },
   );
 
-  it("does not register the /context-map alias (no map feature exists)", () => {
+  it("registers account and workspace Inbox routes without a context-map alias", () => {
     expect(findRoute(appRoutes, "/context-map")).toBeNull();
+    expect(findRoute(appRoutes, "/inbox")?.path).toBe("/inbox");
+    expect(findRoute(appRoutes, "/workspaces/:workspaceId/inbox")?.path).toBe(
+      "/workspaces/:workspaceId/inbox",
+    );
   });
 
   it.each(["/workspaces/ws-1/ask", "/workspaces/ws-1/ask?view=history", "/workspaces/ws-1/ask/"])(
@@ -579,7 +583,7 @@ describe("appRoutes role gating", () => {
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(["http://127.0.0.1:21080/api/v1/auth/me"]);
   });
 
-  it("mounts the canonical Context page permalink under RequireAuth", () => {
+  it("mounts the canonical Context and complete workspace Settings routes under RequireAuth", () => {
     const route = findRoute(
       appRoutes,
       "/workspaces/:workspaceId/context/pages/:pageId",
@@ -590,6 +594,21 @@ describe("appRoutes role gating", () => {
       throw new Error("canonical Context route has no element");
     }
     expect(element.type).toBe(RequireAuth);
+    // Both Settings addresses must expose all sections. A focused workspace
+    // panel on the canonical route would silently discard ?section=review,
+    // members, policies, and the existing links to those sections.
+    const settings = findRoute(appRoutes, "/workspaces/:workspaceId/settings")?.element;
+    const integrations = findRoute(appRoutes, "/workspaces/:workspaceId/settings/integrations")?.element;
+    if (!isValidElement<{ children: ReactNode }>(settings) || !isValidElement<{ children: ReactNode }>(integrations)) {
+      throw new Error("workspace Settings routes have no element");
+    }
+    expect(settings.type).toBe(RequireAuth);
+    const settingsScreen = settings.props.children;
+    const integrationsScreen = integrations.props.children;
+    if (!isValidElement(settingsScreen) || !isValidElement(integrationsScreen)) {
+      throw new Error("workspace Settings routes have no screen");
+    }
+    expect(settingsScreen.type).toBe(integrationsScreen.type);
   });
 
   it("mounts the canonical Context edit permalink under RequireAuth + RequireEditor", () => {

@@ -95,6 +95,15 @@ def test_per_ip_120_per_min():
         )
     assert "rate limit exceeded" in str(excinfo.value)
     assert "client IP" in str(excinfo.value)
+    # Independent failure mechanism: callback traffic from the same browser
+    # must retain its own quota when native password attempts exhaust theirs.
+    consume_auth_slot(
+        client_ip="203.0.113.7",
+        email="per-ip-overflow@example.com",
+        namespace="sso_callback",
+    )
+    with pytest.raises(AuthRateLimitError):
+        consume_auth_slot(client_ip="203.0.113.7", email="per-ip-overflow@example.com")
 
 
 # ---------------------------------------------------------------------------

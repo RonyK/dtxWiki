@@ -15,7 +15,7 @@ from backend.scripts.seed_dev import seed_default_workspace
 from backend.tests.integration.test_release_schema_migration import _config
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
-PARENT_REVISION = "ef53a0a7061c"
+PARENT_REVISION = "175b9664724e"
 LOCATOR_REVISION = "af62c98d0731"
 
 

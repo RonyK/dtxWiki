@@ -19,6 +19,7 @@ import type {
   ReactNode,
 } from "react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import type { TreeNodePayload } from "../api/workspace";
@@ -48,11 +49,24 @@ type TreeIndentGuideStyle = CSSProperties & {
   "--tree-guide-level": number;
 };
 
-type TreeDropPlacement = "before" | "inside" | "after";
+// "first-child" is the gap below an expanded row: the drop lands at the top of
+// that row's children instead of after its whole subtree.
+type TreeDropPlacement = "before" | "inside" | "after" | "first-child";
+
+type TreeDragState = {
+  draggedNodeId: string;
+  dropTargetNodeId: string | null;
+  placement: TreeDropPlacement | null;
+  // A finger covers the row it is over, so touch and pen drags get wider
+  // before/after bands and a text hint above the finger.
+  touch: boolean;
+};
 
 const LONG_PRESS_CONTEXT_MENU_MS = 550;
 const LONG_PRESS_MOVE_CANCEL_PX = 12;
 const TREE_NODE_DRAG_DATA = "application/x-dtxwiki-tree-node";
+const TOUCH_DROP_EDGE_RATIO = 0.375;
+const DROP_HINT_FINGER_GAP_PX = 48;
 
 type TreeRailProps = {
   title: string;
@@ -180,11 +194,10 @@ export function TreeRail({
   } | null>(null);
   const contextMenu = contextMenuState?.scopeKey === favoriteScopeKey ? contextMenuState : null;
   const contextMenuInvokerRef = useRef<HTMLElement | null>(null);
-  const [dragState, setDragState] = useState<{
-    draggedNodeId: string;
-    dropTargetNodeId: string | null;
-    placement: TreeDropPlacement | null;
-  } | null>(null);
+  const [dragState, setDragState] = useState<TreeDragState | null>(null);
+  const dragPointerTypeRef = useRef("mouse");
+  const dropHintRef = useRef<HTMLDivElement | null>(null);
+  const dropPointRef = useRef<{ x: number; y: number } | null>(null);
   const [refreshAnnouncement, setRefreshAnnouncement] = useState("");
   const [dragAnnouncement, setDragAnnouncement] = useState("");
   const [focusedNodeId, setFocusedNodeId] = useState("");
@@ -309,6 +322,10 @@ export function TreeRail({
       (favoriteScope && favoriteTargetKind(node)),
     );
   }
+  const dropHintText = dropHintLabel(dragState);
+  useLayoutEffect(() => {
+    positionDropHint(dropHintRef.current, dropPointRef.current);
+  }, [dropHintText]);
   const resolvedExpandWidthLabel =
     expandWidthLabel ??
     (expandWidthAtMax ? t("resetWidth", { title }) : t("widen", { title }));
@@ -397,6 +414,10 @@ export function TreeRail({
     targetNode: TreeNodePayload,
   ) {
     const draggedNode = nodeById.get(draggedNodeId);
+    // Any row can anchor the drop. Beside a row under another parent the node
+    // moves to that parent at that position, and the server holds that move to
+    // the Move dialog's rules; only a drop into the node's own subtree is
+    // refused here.
     return Boolean(
       anchoredReorderEnabled &&
       !filterQuery.trim() &&
@@ -405,8 +426,28 @@ export function TreeRail({
       !targetNode.is_system_node &&
       targetNode.visibility_status === "visible" &&
       targetNode.section === draggedNode.section &&
-      targetNode.parent_id === draggedNode.parent_id,
+      !isTreeDescendant(orderedNodes, targetNode.id, draggedNode.id),
     );
+  }
+
+  function firstVisibleChild(node: TreeNodePayload) {
+    const index = visibleNodes.findIndex((candidate) => candidate.id === node.id);
+    const next = index >= 0 ? visibleNodes[index + 1] : undefined;
+    return next?.parent_id === node.id ? next : undefined;
+  }
+
+  function afterPlacement(
+    draggedNodeId: string,
+    targetNode: TreeNodePayload,
+    canInsert: boolean,
+  ): TreeDropPlacement | null {
+    const firstChild = firstVisibleChild(targetNode);
+    if (!firstChild) {
+      return canInsert ? "after" : null;
+    }
+    return canInsertNodeAtTarget(draggedNodeId, firstChild)
+      ? "first-child"
+      : null;
   }
 
   function dropPlacementForRow(
@@ -421,11 +462,12 @@ export function TreeRail({
     const canInsert = canInsertNodeAtTarget(draggedNodeId, targetNode);
 
     if (targetNode.can_have_children) {
-      if (ratio < 1 / 3) {
+      const edge = dragState?.touch ? TOUCH_DROP_EDGE_RATIO : 1 / 3;
+      if (ratio < edge) {
         return canInsert ? "before" : null;
       }
-      if (ratio > 2 / 3) {
-        return canInsert ? "after" : null;
+      if (ratio > 1 - edge) {
+        return afterPlacement(draggedNodeId, targetNode, canInsert);
       }
       return canReparentNodeOnTarget(draggedNodeId, targetNode)
         ? "inside"
@@ -434,7 +476,28 @@ export function TreeRail({
     if (!canInsert) {
       return null;
     }
-    return ratio < 0.5 ? "before" : "after";
+    return ratio < 0.5 ? "before" : afterPlacement(draggedNodeId, targetNode, canInsert);
+  }
+
+  function dropHintLabel(state: TreeDragState | null) {
+    const target = state?.dropTargetNodeId
+      ? nodeById.get(state.dropTargetNodeId)
+      : undefined;
+    if (!state?.touch || !target) {
+      return "";
+    }
+    switch (state.placement) {
+      case "before":
+        return t("dropHint.before", { anchor: target.title });
+      case "after":
+        return t("dropHint.after", { anchor: target.title });
+      case "inside":
+        return t("dropHint.inside", { parent: target.title });
+      case "first-child":
+        return t("dropHint.firstChild", { parent: target.title });
+      default:
+        return "";
+    }
   }
 
   function draggedNodeIdFromEvent(event: ReactDragEvent<HTMLDivElement>) {
@@ -457,10 +520,15 @@ export function TreeRail({
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData(TREE_NODE_DRAG_DATA, node.id);
     event.dataTransfer.setData("text/plain", node.id);
+    // On touch the press that starts a drag can also open the long-press menu,
+    // which would then cover the rows the node can be dropped on.
+    contextMenuInvokerRef.current = null;
+    setContextMenu(null);
     setDragState({
       draggedNodeId: node.id,
       dropTargetNodeId: null,
       placement: null,
+      touch: dragPointerTypeRef.current !== "mouse",
     });
     setDragAnnouncement(t("moving", { title: node.title }));
   }
@@ -489,8 +557,15 @@ export function TreeRail({
       current.dropTargetNodeId === node.id &&
       current.placement === placement
         ? current
-        : { draggedNodeId, dropTargetNodeId: node.id, placement },
+        : {
+            draggedNodeId,
+            dropTargetNodeId: node.id,
+            placement,
+            touch: current?.touch ?? false,
+          },
     );
+    dropPointRef.current = { x: event.clientX, y: event.clientY };
+    positionDropHint(dropHintRef.current, dropPointRef.current);
   }
 
   function handleRowDragLeave(
@@ -570,10 +645,18 @@ export function TreeRail({
       void performReparent(draggedNode, node);
       return;
     }
+    if (placement === "first-child") {
+      const firstChild = firstVisibleChild(node);
+      if (firstChild) {
+        void performAnchoredReorder(draggedNode, firstChild, "before");
+      }
+      return;
+    }
     void performAnchoredReorder(draggedNode, node, placement);
   }
 
   function handleRowDragEnd() {
+    dropPointRef.current = null;
     setDragState(null);
     setDragAnnouncement("");
   }
@@ -583,7 +666,8 @@ export function TreeRail({
     position: { left: number; top: number },
     invoker: HTMLElement | null,
   ) {
-    if (!canOpenNodeContextMenu(node)) {
+    // Android fires contextmenu on the same long press that starts a drag.
+    if (dragState || !canOpenNodeContextMenu(node)) {
       return;
     }
     contextMenuInvokerRef.current = invoker;
@@ -890,6 +974,9 @@ export function TreeRail({
           <div
             className="tree-list"
             role="tree"
+            onPointerDownCapture={(event) => {
+              dragPointerTypeRef.current = event.pointerType || "mouse";
+            }}
             onBlur={(event) => {
               if (!event.currentTarget.contains(event.relatedTarget)) {
                 setFocusedNodeId("");
@@ -937,6 +1024,14 @@ export function TreeRail({
         )}
       </div>
       {tooltip.popup}
+      {dropHintText
+        ? createPortal(
+            <div aria-hidden="true" className="tree-drop-hint" ref={dropHintRef}>
+              {dropHintText}
+            </div>,
+            document.body,
+          )
+        : null}
       {contextMenu ? (
         <TreeNodeContextMenu
           canCreateFolder={Boolean(
@@ -1018,11 +1113,7 @@ function TreeRow({
   canOpenContextMenu: boolean;
   canToggleExpanded: boolean;
   draggable: boolean;
-  dragState: {
-    draggedNodeId: string;
-    dropTargetNodeId: string | null;
-    placement: TreeDropPlacement | null;
-  } | null;
+  dragState: TreeDragState | null;
   expanded: boolean;
   onToggleExpanded: (nodeId: string) => void;
   onCreateFolder?: (parentNodeId: string | null) => void;
@@ -1093,7 +1184,10 @@ function TreeRow({
     isDragging ? "tree-row-dragging" : "",
     dropPlacement === "inside" ? "tree-row-drop-target" : "",
     dropPlacement === "before" ? "tree-row-insert-before" : "",
-    dropPlacement === "after" ? "tree-row-insert-after" : "",
+    dropPlacement === "after" || dropPlacement === "first-child"
+      ? "tree-row-insert-after"
+      : "",
+    dropPlacement === "first-child" ? "tree-row-insert-first-child" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -1372,7 +1466,12 @@ function TreeRow({
       onDragEnd={onDragEnd}
       onDragLeave={(event) => onDragLeave(node, event)}
       onDragOver={(event) => onDragOver(node, event)}
-      onDragStart={(event) => onDragStart(node, event)}
+      onDragStart={(event) => {
+        // A drag replaces the long press that the same touch may have armed.
+        clearLongPressTimer();
+        longPressOpenedRef.current = false;
+        onDragStart(node, event);
+      }}
       onDrop={(event) => onDrop(node, event)}
       onKeyDown={(event) => {
         onKeyDown(node, event);
@@ -1389,6 +1488,24 @@ function TreeRow({
       {rowContent}
     </div>
   );
+}
+
+// Keep the hint above the finger and inside the viewport.
+function positionDropHint(
+  hint: HTMLDivElement | null,
+  point: { x: number; y: number } | null,
+) {
+  if (!hint || !point) {
+    return;
+  }
+  const margin = 8;
+  const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+  const left = Math.min(
+    point.x - hint.offsetWidth / 2,
+    viewportWidth - hint.offsetWidth - margin,
+  );
+  hint.style.left = `${Math.max(margin, left)}px`;
+  hint.style.top = `${Math.max(margin, point.y - DROP_HINT_FINGER_GAP_PX - hint.offsetHeight)}px`;
 }
 
 function isInteractiveTreeRowTarget(target: EventTarget) {

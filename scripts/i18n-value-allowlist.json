@@ -25,6 +25,7 @@
   "settings.json:access.shellWindows",
   "settings.json:access.shellZsh",
   "settings.json:appHub.oauth",
+  "settings.json:attachments.policy.daysHours",
   "settings.json:keyRow.uuid",
   "settings.json:setup.fields.oauth",
   "settings.json:setup.fields.tls",
@@ -34,10 +35,17 @@
   "settings.json:setup.update.methods.pipx",
   "settings.json:setup.update.methods.uv",
   "settings.json:setup.update.pypi",
-  "settings.json:workspaceMembers.add.emailPlaceholder",
+  "settings.json:userRecovery.accountCard.shortId",
+  "settings.json:userRecovery.accountCard.sso",
   "shell.json:topbar.language.en",
   "shell.json:topbar.language.ko",
   "tree.json:counts",
   "tree.json:folder.pageFolderCount",
-  "settings.json:attachments.policy.daysHours"
+  "settings.json:attachments.policy.daysHours",
+  "review.json:workflow.documentKinds.context",
+  "review.json:workflow.documentKinds.agent",
+  "review.json:workflow.documentKinds.library",
+  "review.json:document.kind.context",
+  "review.json:document.kind.agent",
+  "review.json:document.kind.library"
 ]

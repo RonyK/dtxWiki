@@ -1,16 +1,18 @@
-"""Workspace-scoped lookup for one supported workspace-plane model shape.
+"""Workspace-scoped reads and mutations for workspace-plane models.
 
-This helper is deliberately narrower than "any model with an ``id`` and a
+These helpers are deliberately narrower than "any model with an ``id`` and a
 ``workspace_id`` column". The table must be explicitly classified on the
 workspace plane, its workspace scope must be required, and its exact primary
-key must be the single ``id`` column. Workspace-plane composite identities and
-control- or mixed-plane tables need purpose-specific lookup APIs.
+key must be the single ``id`` column. Batch mutations also support composite
+primary keys because their required workspace predicate represents the scope
+independently of each row's identity. Control- or mixed-plane tables need
+purpose-specific APIs.
 """
 
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
 from uuid import UUID
 
-from sqlalchemy import Delete, Select, delete, inspect, select
+from sqlalchemy import Delete, Select, Update, delete, inspect, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -54,7 +56,36 @@ def select_in_workspace_by_ids[Model](
     )
 
 
+def select_in_workspace[Model](
+    model: type[Model],
+    *,
+    workspace_id: UUID,
+    criteria: Iterable[ColumnElement[bool]] = (),
+    conditions: Iterable[ColumnElement[bool]] = (),
+) -> Select[tuple[Model]]:
+    """Build a query whose workspace predicate cannot be omitted by its caller.
+
+    Both keyword forms narrow the required scope; even a contradictory
+    workspace criterion cannot widen it. Existing dev callers use conditions
+    and review callers use criteria on this one validated path.
+    """
+    _validate_workspace_model(model, operation="select_in_workspace")
+    return select(model).where(
+        model.workspace_id == workspace_id,  # type: ignore[attr-defined]
+        *criteria,
+        *conditions,
+    )
+
+
 def _validate_workspace_model(model: type, *, operation: str) -> None:
+    _validate_workspace_scope(model, operation=operation)
+    mapper = inspect(model)
+    primary_key_names = tuple(column.name for column in mapper.primary_key)
+    if primary_key_names != ("id",):
+        raise TypeError(f"{operation} requires the exact primary key (id)")
+
+
+def _validate_workspace_scope(model: type, *, operation: str) -> None:
     mapper = inspect(model)
     table = mapper.local_table
     if table.name not in WORKSPACE_PLANE_TABLES:
@@ -65,36 +96,6 @@ def _validate_workspace_model(model: type, *, operation: str) -> None:
 
     if "workspace_id" not in table.c or table.c.workspace_id.nullable:
         raise TypeError(f"{operation} requires a non-null workspace_id column")
-
-    primary_key_names = tuple(column.name for column in mapper.primary_key)
-    if primary_key_names != ("id",):
-        raise TypeError(f"{operation} requires the exact primary key (id)")
-
-
-def select_in_workspace[Model](
-    model: type[Model],
-    *,
-    workspace_id: UUID,
-    conditions: Iterable[ColumnElement[bool]] = (),
-) -> Select[tuple[Model]]:
-    """Build a model read whose workspace predicate callers cannot omit.
-
-    Extra selectors only narrow the scope. Plane/PK validation is the same as
-    the single-row lookup; global audit records need their own mixed-plane API.
-    """
-    _validate_workspace_model(model, operation="select_in_workspace")
-    return select(model).where(model.workspace_id == workspace_id, *conditions)
-
-
-def delete_in_workspace[Model](
-    model: type[Model],
-    *,
-    workspace_id: UUID,
-    conditions: Iterable[ColumnElement[bool]] = (),
-) -> Delete:
-    """Delete only supported model rows in an explicit Workspace."""
-    _validate_workspace_model(model, operation="delete_in_workspace")
-    return delete(model).where(model.workspace_id == workspace_id, *conditions)
 
 
 def list_in_workspace[Model](
@@ -171,3 +172,38 @@ def join_in_workspace(
         & (joined_model.workspace_id == root_model.workspace_id),
         isouter=isouter,
     )
+
+
+def update_in_workspace[Model](
+    model: type[Model],
+    *,
+    workspace_id: UUID,
+    values: Mapping[str, object],
+    conditions: Iterable[ColumnElement[bool]] = (),
+) -> Update:
+    """Build an update constrained to one explicit workspace.
+
+    Composite identities are supported, but moving rows between workspaces is
+    deliberately outside this API. Additional selectors can only narrow scope.
+    """
+
+    _validate_workspace_scope(model, operation="update_in_workspace")
+    if "workspace_id" in values:
+        raise ValueError("update_in_workspace cannot change workspace_id")
+    return (
+        update(model)
+        .where(model.workspace_id == workspace_id, *conditions)
+        .values(dict(values))
+    )
+
+
+def delete_in_workspace[Model](
+    model: type[Model],
+    *,
+    workspace_id: UUID,
+    conditions: Iterable[ColumnElement[bool]] = (),
+) -> Delete:
+    """Build a deletion constrained to one explicit workspace, for any PK."""
+
+    _validate_workspace_scope(model, operation="delete_in_workspace")
+    return delete(model).where(model.workspace_id == workspace_id, *conditions)

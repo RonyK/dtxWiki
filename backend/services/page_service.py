@@ -83,8 +83,12 @@ from backend.services.context_editing import (
     block_operation_provenance,
 )
 from backend.services.context_lifecycle import (
+    RejectedDraftRestart,
     apply_context_publication,
     project_context_version,
+    record_metadata_snapshot,
+    record_unarchive,
+    rejected_draft_restart,
 )
 from backend.services.context_link_targets import (
     context_link_targets,
@@ -1453,8 +1457,15 @@ class PageService:
             if page is None:
                 raise PageNotFoundError("page not found")
             target = self._require_page_version(session, page, version_id)
-            current = self._require_page_version(session, page, page.current_version_id)
-            if target.id == current.id:
+            # A page with no existing version can restore its initial
+            # snapshot as a new root draft. Otherwise, an already-current
+            # restore returns the same prepared, link-aware payload as reads.
+            current = (
+                self._require_page_version(session, page, page.current_version_id)
+                if page.current_version_id is not None
+                else None
+            )
+            if current is not None and target.id == current.id:
                 return self._payload_from_page(
                     session,
                     page,
@@ -1468,14 +1479,13 @@ class PageService:
                         actor_provenance=actor_provenance,
                     ),
                 )
-
             parsed = parse_page_frontmatter(target.body_md)
             title = title_from_markdown_heading(parsed.body) or page.title
             was_archived = page.lifecycle_status == "archived"
             version = self._insert_version_copy(
                 session,
                 page_id=page.id,
-                parent_version_id=current.id,
+                parent_version_id=current.id if current is not None else None,
                 source_version=target,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
@@ -1503,6 +1513,10 @@ class PageService:
                 page.lifecycle_status = (
                     "published" if page.current_published_version_id else "draft"
                 )
+                if was_archived:
+                    record_unarchive(
+                        session, page=page, actor_kind=actor_kind, actor_id=actor_id
+                    )
             session.add(page)
             session.flush()
             if was_archived and actor_provenance not in AI_PROVENANCES:
@@ -1525,10 +1539,10 @@ class PageService:
                 page_id=page.id,
                 version_id=version.id,
                 payload={
-                    "from_version_id": str(current.id),
+                    "from_version_id": str(current.id) if current else None,
                     "restored_from_version_id": str(target.id),
                     "draft_version_id": str(version.id),
-                    "before_content_hash": current.content_hash,
+                    "before_content_hash": current.content_hash if current else None,
                     "after_content_hash": version.content_hash,
                     "staged_metadata": stage_metadata and bool(metadata_patch),
                 },
@@ -1550,6 +1564,8 @@ class PageService:
                     actor_kind=actor_kind,
                     actor_id=actor_id,
                 )
+                if current is not None
+                else 0
             )
             if metadata_patch:
                 stage_page_metadata_patch(
@@ -1785,7 +1801,11 @@ class PageService:
                 action="page.create",
                 target_kind="context_page",
                 target_id=page.id,
-                payload={"version_id": str(version.id)},
+                payload={
+                    "version_id": str(version.id),
+                    "editing_revision": version.editing_revision,
+                    "was_private_edit": True,
+                },
             )
             return self._payload_from_page(
                 session,
@@ -1907,6 +1927,8 @@ class PageService:
                     target_id=page.id,
                     payload={
                         "version_id": str(version.id),
+                        "was_private_edit": True,
+                        "editing_revision": version.editing_revision,
                         "base_version_id": (str(base.id) if base is not None else None),
                     },
                 )
@@ -2090,6 +2112,13 @@ class PageService:
                 body=version.body_md,
                 needs_review=needs_review,
             )
+            if result.change_set_id is not None:
+                record_metadata_snapshot(
+                    session,
+                    change_set_id=result.change_set_id,
+                    page=page,
+                    version=version,
+                )
             self._refresh_page_links(session, page=page, version=version)
             return self._payload_from_page(
                 session,
@@ -2196,7 +2225,7 @@ class PageService:
                             )
                             if candidate.id != version.id
                             and candidate.graph_status == "linear"
-                            and self._draft_still_open(session, page, candidate)
+                            and self.draft_still_open(session, page, candidate)
                         ),
                         None,
                     )
@@ -2280,7 +2309,7 @@ class PageService:
                 retry_only=retry_only,
             )
 
-    def _draft_still_open(
+    def draft_still_open(
         self,
         session: Session,
         page: ContextPage,
@@ -2523,6 +2552,8 @@ class PageService:
                     target_id=page.id,
                     payload={
                         "version_id": str(version.id),
+                        "was_private_edit": True,
+                        "editing_revision": version.editing_revision,
                         "operation_count": len(operations),
                     },
                 )
@@ -3486,7 +3517,7 @@ class PageService:
                     actor_kind=actor_kind,
                     actor_id=actor_id,
                 )
-                current = self._autosave_resolve_target(
+                current, resume_parent = self._autosave_resolve_target(
                     session=session,
                     page=page,
                     session_version_id=session_version_id,
@@ -3571,7 +3602,11 @@ class PageService:
                 # Bytes, not content_hash: the hash ignores trailing spaces, so
                 # a save that only added or removed a hard break (two trailing
                 # spaces) was answered as succeeded and silently not stored.
-                if prepared.body == current.body_md and not metadata_patch:
+                if (
+                    prepared.body == current.body_md
+                    and not metadata_patch
+                    and resume_parent is None
+                ):
                     # P2.2/P2.6: `current` is the page-global pointer -- returning
                     # it unchanged is only safe when it is published (anyone with
                     # read access already sees it) or genuinely this actor's own
@@ -3610,6 +3645,7 @@ class PageService:
                         actor_provenance=actor_provenance,
                         session_version_id=session_version_id,
                         metadata_patch=metadata_patch,
+                        restart=resume_parent,
                     )
 
                 return self._autosave_persist_editing_row(
@@ -3625,6 +3661,7 @@ class PageService:
                     own_open_edit=own_open_edit,
                     baseline_patch=baseline_patch,
                     metadata_patch=metadata_patch,
+                    restart=resume_parent,
                 )
 
             return execute_idempotent_write(
@@ -3705,32 +3742,34 @@ class PageService:
         session_version_id: UUID | None,
         actor_kind: str,
         actor_id: str,
-    ) -> ContextPageVersion:
-        current = self._require_page_version(
-            session,
-            page,
-            self._editable_version_id_for_actor(session, page, actor_kind, actor_id),
+    ) -> tuple[ContextPageVersion, RejectedDraftRestart | None]:
+        editable_version_id = self._editable_version_id_for_actor(
+            session, page, actor_kind, actor_id
         )
+        # Rejection may leave no head. Resolve the submitting session's
+        # retired draft before deciding whether there is an editable version.
+        current = (
+            None
+            if editable_version_id is None and session_version_id is not None
+            else self._require_page_version(session, page, editable_version_id)
+        )
+        restart = None
         if session_version_id is not None:
             session_version = self._require_page_version(
                 session,
                 page,
                 session_version_id,
             )
-            if current.id != session_version.id:
-                session_reviews = self._context_reviews_for_version(
-                    session=session,
-                    page=page,
-                    version=session_version,
-                )
-                can_resume_rejected_session = (
-                    session_version.version_status == "draft"
-                    and session_version.graph_status == "linear"
-                    and session_version.created_by_actor_kind == actor_kind
+            if current is None or current.id != session_version.id:
+                restart = (
+                    rejected_draft_restart(session, page, session_version)
+                    if session_version.created_by_actor_kind == actor_kind
                     and session_version.created_by_actor_id == actor_id
-                    and any(review.status == "rejected" for review in session_reviews)
+                    else None
                 )
-                if not can_resume_rejected_session:
+                if restart is None and current is None:
+                    raise PageNotFoundError("page version not found")
+                if restart is None:
                     disclosed_version_id, disclosed_content_hash = (
                         self._disclosable_version_fields(current, actor_kind, actor_id)
                     )
@@ -3738,13 +3777,12 @@ class PageService:
                         server_version_id=disclosed_version_id,
                         server_content_hash=disclosed_content_hash,
                     )
-                # Rejection deliberately restores the visible page head to
-                # the published snapshot. The submitting session may still
-                # continue from its exact rejected bytes, but only by
-                # forking a successor below; the resolved review and its
-                # immutable version are never rewritten.
+                # Keep the rejected bytes as source evidence, but start the
+                # successor on the surviving head, never on retired history.
                 current = session_version
-        return current
+                for retired in restart.retired_versions:
+                    retired.graph_status = "discarded"
+        return current, restart
 
     def _autosave_check_base(
         self,
@@ -3844,6 +3882,7 @@ class PageService:
         own_open_edit: bool,
         baseline_patch: dict[str, object] | None,
         metadata_patch: dict[str, object],
+        restart: RejectedDraftRestart | None = None,
     ) -> PagePayload:
         body_md = prepared.body
         staged_patch = dict(baseline_patch or {})
@@ -3874,12 +3913,16 @@ class PageService:
             for review in targeting_reviews
             if review.status in {"pending", "changes_requested"}
         ]
-        created_session_draft = not same_actor_draft or bool(targeting_reviews)
+        created_session_draft = (
+            restart is not None or not same_actor_draft or bool(targeting_reviews)
+        )
         if created_session_draft:
             version = self._insert_version(
                 session,
                 page_id=page.id,
-                parent_version_id=current.id,
+                parent_version_id=(
+                    restart.parent_version_id if restart is not None else current.id
+                ),
                 body=prepared,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
@@ -3931,6 +3974,14 @@ class PageService:
                 target_kind="context_page",
                 target_id=page.id,
                 payload={
+                    "version_id": str(version.id),
+                    "base_version_id": (
+                        str(version.parent_version_id)
+                        if version.parent_version_id
+                        else None
+                    ),
+                    "was_private_edit": True,
+                    "editing_revision": version.editing_revision,
                     "before_content_hash": current.content_hash,
                     "after_content_hash": version.content_hash,
                     "parent_version_id": str(current.id),
@@ -4026,6 +4077,7 @@ class PageService:
         actor_provenance: str,
         session_version_id: UUID | None,
         metadata_patch: dict[str, object],
+        restart: RejectedDraftRestart | None = None,
     ) -> PagePayload:
         """Stage an AI autosave without mutating any published projection."""
         body_md = prepared.body
@@ -4041,7 +4093,8 @@ class PageService:
             if review.status in {"pending", "changes_requested"}
         ]
         same_actor_unreviewed_draft = (
-            current.version_status in ("editing", "draft")
+            restart is None
+            and current.version_status in ("editing", "draft")
             and current.graph_status == "linear"
             and current.created_by_actor_kind == actor_kind
             and current.created_by_actor_id == actor_id
@@ -4071,7 +4124,9 @@ class PageService:
             version = self._insert_version(
                 session,
                 page_id=page.id,
-                parent_version_id=current.id,
+                parent_version_id=(
+                    restart.parent_version_id if restart is not None else current.id
+                ),
                 body=prepared,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
@@ -4111,6 +4166,13 @@ class PageService:
             version=version,
             patch=metadata_patch,
         )
+        if result.change_set_id is not None:
+            record_metadata_snapshot(
+                session,
+                change_set_id=result.change_set_id,
+                page=page,
+                version=version,
+            )
         self._refresh_page_links(session, page=page, version=version)
         for unresolved_review in unresolved_reviews:
             supersede_review_with_lineage(

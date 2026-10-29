@@ -247,6 +247,87 @@ def test_what_changed_delta_flow(session_factory, page_service):
     assert not has_more
 
 
+def test_what_changed_follows_the_published_version(session_factory, page_service):
+    """Entries name the version published before them, and a restored
+    archived page re-enters the published set."""
+    from backend.models.tree import WorkspaceTreeNode
+    from backend.services.tree_service import TreeService
+
+    write = ContextWriteService()
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        page_id, v1 = _write_and_publish(
+            session, workspace_id, "Head Moves", "# H\n\nOne."
+        )
+    since = _now()
+    with session_factory.begin() as session:
+        drafts = [
+            write.write_draft(
+                session=session,
+                workspace_id=workspace_id,
+                request=WriteDraftRequest(
+                    title="Head Moves",
+                    page_type="concept",
+                    body_markdown=f"# H\n\n{body}.",
+                    reason=f"draft {body}",
+                ),
+                actor_kind="human",
+                actor_id="tester",
+                actor_role="owner",
+            )
+            for body in ("Two", "Three")
+        ]
+        # Approving the newer draft skips the never-published one below it.
+        ReviewService().apply_decision(
+            session=session,
+            workspace_id=workspace_id,
+            review_item_id=drafts[1].review_item_id,
+            request=ReviewDecisionRequest(decision_type="approve"),
+            actor_kind="human",
+            actor_id="tester",
+            actor_role="owner",
+            actor_provenance="browser_session",
+        )
+        v3 = drafts[1].draft_version_id
+        assert session.get(ContextPageVersion, v3).parent_version_id == (
+            drafts[0].draft_version_id
+        )
+        TreeService().archive_node(
+            session=session,
+            workspace_id=workspace_id,
+            node_id=session.scalar(
+                select(WorkspaceTreeNode.id).where(
+                    WorkspaceTreeNode.target_kind == "context_page",
+                    WorkspaceTreeNode.target_id == page_id,
+                )
+            ),
+            actor_kind="human",
+            actor_id="tester",
+        )
+    # Restoring an older version revives the page; its published version
+    # is live again while the restored copy waits as a draft.
+    page_service.restore_version(
+        page_id=page_id,
+        version_id=v1,
+        actor_kind="human",
+        actor_id="tester",
+        actor_provenance="browser_session",
+    )
+
+    with session_factory() as session:
+        entries, _ = what_changed(session, workspace_id, since=since, actor=None)
+        page = session.get(ContextPage, page_id)
+        assert resolve_version_as_of(session, page, _now()).id == v3
+    assert [
+        (e.change_kind, e.version_id, e.previous_version_id, e.reason)
+        for e in entries
+    ] == [
+        ("updated", v3, v1, "approved through Context review"),
+        ("archived", v3, v3, "delete tree node Head Moves"),
+        ("created", v3, None, "page restored from archive"),
+    ]
+
+
 def test_what_changed_first_publish_ignores_earlier_draft_create(session_factory):
     write = ContextWriteService()
     with session_factory.begin() as session:
