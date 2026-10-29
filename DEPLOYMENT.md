@@ -729,6 +729,11 @@ docker compose up -d app worker
 `rollback`, `migrate-data`는 "stop dtxWiki (server and worker) first"로 거부합니다(systemd tier의
 `update`는 서비스를 스스로 멈췄다 다시 시작합니다).
 
+Context 링크 locator 색인 migration `af62c98d0731`이 포함된 버전으로 업그레이드한 뒤에는
+서버와 같은 OS 계정·환경·DB로 `dtxwiki reindex`를 한 번 실행해 기존 live 버전의 링크
+색인을 갱신하세요. 본문과 content hash는 바뀌지 않습니다. 이전 스키마로 downgrade하면
+wikilink 외 링크 색인과 pin이 삭제되므로 다시 업그레이드한 뒤에도 재색인이 필요합니다.
+
 ### 관리자 화면에서 버전 확인
 
 서버 관리자는 **Settings → 배포**에서 현재 버전과 새 배포 여부를 확인할 수 있습니다.

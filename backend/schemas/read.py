@@ -399,6 +399,15 @@ class WikilinkTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ContextLinkTarget(BaseModel):
+    locator: str
+    href: str | None = None
+    target_page_id: UUID | None = None
+    state: Literal["ok", "unavailable"]
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ContextPageDetail(ContextPageSummary):
     body_markdown: str | None = None
     version_info: VersionInfo | None = None

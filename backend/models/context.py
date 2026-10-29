@@ -339,14 +339,21 @@ class ContextPageVersion(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         self.body_md = value
 
 
+def _legacy_page_link_locator_key(context) -> str:
+    target_slug = context.get_current_parameters().get("target_slug")
+    if not isinstance(target_slug, str) or not target_slug:
+        raise ValueError("PageLink requires locator_key or a nonempty target_slug")
+    return f"wikilink:{target_slug}"
+
+
 class PageLink(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "page_links"
     __table_args__ = (
         UniqueConstraint(
             "source_page_id",
             "source_version_id",
-            "target_slug",
-            name="uq_page_links_source_version_target",
+            "locator_key",
+            name="uq_page_links_source_version_locator",
         ),
         Index("idx_page_links_target_workspace", "workspace_id", "target_slug"),
         Index("idx_page_links_target_page", "workspace_id", "target_page_id"),
@@ -387,7 +394,12 @@ class PageLink(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         Uuid(as_uuid=True),
         nullable=False,
     )
-    target_slug: Mapped[str] = mapped_column(Text, nullable=False)
+    locator_key: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default=_legacy_page_link_locator_key,
+    )
+    target_slug: Mapped[str | None] = mapped_column(Text)
     target_page_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     occurrence_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     first_snippet: Mapped[str | None] = mapped_column(Text)

@@ -496,7 +496,21 @@ def test_page_service_rejects_base_version_id_belonging_to_another_page():
 
 
 def test_wikilink_pin_survives_rename_rescan_and_restore():
+    from backend.app.container import assemble
+    from backend.app.settings import Settings
+
     service = make_service()
+    self_origin = "https://pin-origin-fixture.invalid:54443"
+    configured = assemble(
+        Settings(
+            database_url="sqlite+pysqlite:///:memory:",
+            session_secret="test-session-secret",
+            public_base_url=self_origin,
+        ),
+        session_factory=service.session_factory,
+    )
+    service = configured.get_page_service()
+    reader = configured.get_services().domain_read
     target = service.write_page(
         workspace_slug="default",
         slug="한글-문서",
@@ -506,28 +520,66 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
         actor_id="dev-local-user",
         actor_provenance="browser_session",
     )
+    # One persisted-link lifecycle: several authored locators must bind the
+    # same page, coalesce UUID forms, and keep their pins after slug reuse.
+    # A pure parser test cannot verify persisted uniqueness or restore/reindex.
+    linked_body = (
+        "# Link Source\n\nSee [[한글 문서]]. "
+        "[Legacy](/context/한글-문서.md) "
+        f"[Configured]({self_origin}/context/한글-문서.md) "
+        f"[Short](/p/{target.id}) [Full](/p/{target.workspace_id}/{target.id}) "
+        f"[Navigation](/context?target={target.id}) "
+        "[Opaque](node:/leave/authored) [Custom](s://leave/authored)"
+    )
     linked = service.write_page(
         workspace_slug="default",
         slug="link-source",
         title="Link Source",
-        body_md="# Link Source\n\nSee [[한글 문서]].",
+        body_md=linked_body,
         actor_kind="human",
         actor_id="dev-local-user",
         actor_provenance="browser_session",
     )
     with service.session_factory.begin() as session:
         link = session.scalar(
-            select(PageLink).where(PageLink.source_version_id == linked.version_id)
+            select(PageLink).where(
+                PageLink.source_version_id == linked.version_id,
+                PageLink.locator_key == "wikilink:한글-문서",
+            )
         )
         assert link.target_slug == "한글-문서"
         assert link.target_page_id == target.id
+        keyed = {
+            row.locator_key: row
+            for row in session.scalars(
+                select(PageLink).where(PageLink.source_version_id == linked.version_id)
+            )
+        }
+        assert set(keyed) == {
+            "wikilink:한글-문서",
+            "concept_path:한글-문서",
+            f"page_id:{target.id}",
+        }
+        assert keyed[f"page_id:{target.id}"].target_slug is None
+        assert keyed[f"page_id:{target.id}"].occurrence_count == 3
+        assert keyed["concept_path:한글-문서"].occurrence_count == 2
         session.get(ContextPage, target.id).slug = "renamed-korean-page"
+    replacement = service.write_page(
+        workspace_slug="default",
+        slug="한글-문서",
+        title="Replacement",
+        body_md="# Replacement",
+        actor_kind="human",
+        actor_id="dev-local-user",
+        actor_provenance="browser_session",
+    )
+    assert replacement.id != target.id
 
     duplicate = service.write_page(
         workspace_slug="default",
         slug="link-source",
         title="Link Source",
-        body_md="# Link Source\n\nSee [[한글 문서]].",
+        body_md=linked_body,
         actor_kind="human",
         actor_id="dev-local-user",
         base_version_id=linked.version_id,
@@ -538,7 +590,7 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
         workspace_slug="default",
         slug="link-source",
         title="Link Source",
-        body_md="# Link Source\n\nChanged, still see [[한글 문서]].",
+        body_md=linked_body + "\n\nChanged.",
         actor_kind="human",
         actor_id="dev-local-user",
         base_version_id=duplicate.version_id,
@@ -566,7 +618,7 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
         assert restored.version_id in {pin.source_version_id for pin in pins}
         assert all(pin.target_page_id == target.id for pin in pins)
         workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
-        detail = DomainReadService().read_context_page(
+        detail = reader.read_context_page(
             session=session,
             workspace_id=workspace.id,
             page_id=linked.id,
@@ -583,6 +635,12 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
     assert detail.wikilink_targets[0].target_slug == "한글-문서"
     assert detail.wikilink_targets[0].target_page_id == target.id
     assert detail.wikilink_targets[0].current_slug == "renamed-korean-page"
+
+    assert not hasattr(detail, "link_targets")
+    assert restored.body_md == linked.body_md
+    backlinks = service.list_backlinks(page_id=target.id)
+    assert [entry.id for entry in backlinks] == [linked.id]
+    assert backlinks[0].occurrence_count == 6
 
 
 def test_context_read_includes_unresolved_wikilink_target():

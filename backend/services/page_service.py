@@ -5,8 +5,6 @@ import binascii
 import difflib
 import hashlib
 import json
-import re
-import unicodedata
 from collections import Counter, OrderedDict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -38,7 +36,12 @@ from backend.models.review import ReviewItem
 from backend.models.workspace import Workspace
 from backend.policy.trust_boundaries import actor_can_read_drafts
 from backend.repositories import context_page_repo, workspace_repo
-from backend.repositories.workspace_scoped import get_in_workspace
+from backend.repositories.workspace_scoped import (
+    delete_in_workspace,
+    get_in_workspace,
+    join_in_workspace,
+    select_in_workspace,
+)
 from backend.schemas.common import DraftReviewReason
 from backend.schemas.context_edit import EditOperation
 from backend.schemas.page import (
@@ -289,65 +292,6 @@ class PageVersionListResult:
 class PagePublishResult:
     page: PagePayload
     findings: list[DraftReviewReason]
-
-
-# Page links are page-level backlink edges. The regex captures the target text
-# and intentionally discards #anchor fragments and |aliases; storing those
-# would require a separate anchor-aware backlink contract. Title-style targets
-# are slugified before PageLink rows are written.
-WIKILINK_PATTERN = re.compile(
-    r"(?<!\\)\[\[\s*(?P<target>[^\]\n|#]*?)(?:#[^\]\n|]+)?(?:\|[^\]\n]+)?\s*\]\]"
-)
-
-# Fenced code block boundary: ``` or ~~~ at the line start, optional language
-# tag, captured by line so we can strip them before scanning for wikilinks.
-# Without this, documentation pages demonstrating wikilink syntax inside a
-# code block silently create phantom PageLink rows. Review §3.1 P-H1.
-_FENCE_LINE = re.compile(r"^(?P<fence>`{3,}|~{3,})\s*([^\s`~]*)\s*$")
-_INLINE_CODE = re.compile(r"`+")
-
-
-def _strip_code_regions(body: str) -> str:
-    """Replace fenced code blocks and inline code with whitespace of equal
-    length so character offsets used by snippet generation stay aligned.
-
-    The replacement preserves line count and column positions, which means the
-    snippet_around_match radius math still produces stable previews relative to
-    the original body.
-    """
-    lines = body.split("\n")
-    out: list[str] = []
-    fence: str | None = None
-    for line in lines:
-        if fence is None:
-            match = _FENCE_LINE.match(line.lstrip())
-            if match:
-                fence = match.group("fence")[0]  # ` or ~
-                out.append(" " * len(line))
-                continue
-        else:
-            match = _FENCE_LINE.match(line.lstrip())
-            if match and match.group("fence")[0] == fence:
-                fence = None
-            out.append(" " * len(line))
-            continue
-        # Outside any fence: blank out inline `code` spans. The matcher walks
-        # pairs of backtick runs so triple-backtick inline (rare) still pairs.
-        result = []
-        cursor = 0
-        backtick_match = _INLINE_CODE.search(line, cursor)
-        while backtick_match:
-            run = backtick_match.group(0)
-            close = line.find(run, backtick_match.end())
-            if close == -1:
-                break
-            result.append(line[cursor : backtick_match.start()])
-            result.append(" " * (close + len(run) - backtick_match.start()))
-            cursor = close + len(run)
-            backtick_match = _INLINE_CODE.search(line, cursor)
-        result.append(line[cursor:])
-        out.append("".join(result))
-    return "\n".join(out)
 
 
 ANCHOR_RESOLVE_CACHE_SIZE = 1024
@@ -838,27 +782,42 @@ class PageService:
             backlink_modified_at = func.coalesce(
                 backlink_published.created_at, ContextPage.updated_at
             )
+            from backend.services.context_link_targets import page_link_target_condition
+
+            source_statement = join_in_workspace(
+                select_in_workspace(
+                    PageLink,
+                    workspace_id=target_page.workspace_id,
+                    conditions=(
+                        page_link_target_condition(target_page),
+                        PageLink.source_page_id != target_page.id,
+                        ContextPage.lifecycle_status != "archived",
+                        PageLink.source_version_id
+                        == visible_context_version_expression(actor),
+                    ),
+                ),
+                PageLink,
+                ContextPage,
+                workspace_id=target_page.workspace_id,
+                on=ContextPage.id == PageLink.source_page_id,
+            )
             rows = session.execute(
-                select(PageLink, ContextPage, backlink_modified_at)
-                .join(ContextPage, ContextPage.id == PageLink.source_page_id)
-                .outerjoin(
+                join_in_workspace(
+                    source_statement,
+                    PageLink,
                     backlink_published,
-                    backlink_published.id == ContextPage.current_published_version_id,
+                    workspace_id=target_page.workspace_id,
+                    on=backlink_published.id
+                    == ContextPage.current_published_version_id,
+                    isouter=True,
                 )
-                .where(PageLink.workspace_id == target_page.workspace_id)
-                .where(
-                    (PageLink.target_page_id == target_page.id)
-                    | (
-                        PageLink.target_page_id.is_(None)
-                        & (PageLink.target_slug == target_page.slug)
-                    )
+                .with_only_columns(
+                    ContextPage,
+                    func.sum(PageLink.occurrence_count),
+                    func.min(PageLink.first_snippet),
+                    backlink_modified_at,
                 )
-                .where(PageLink.source_page_id != target_page.id)
-                .where(ContextPage.lifecycle_status != "archived")
-                .where(
-                    PageLink.source_version_id
-                    == visible_context_version_expression(actor)
-                )
+                .group_by(ContextPage.id, backlink_published.created_at)
                 .order_by(backlink_modified_at.desc(), ContextPage.slug.asc())
                 .limit(limit)
             ).all()
@@ -868,10 +827,10 @@ class PageService:
                     slug=page.slug,
                     title=page.title,
                     updated_at=modified_at or page.updated_at,
-                    occurrence_count=link.occurrence_count,
-                    snippet=link.first_snippet,
+                    occurrence_count=occurrence_count,
+                    snippet=snippet,
                 )
-                for link, page, modified_at in rows
+                for page, occurrence_count, snippet, modified_at in rows
             ]
             return backlinks
 
@@ -1581,7 +1540,7 @@ class PageService:
                     version=version,
                     patch=metadata_patch,
                 )
-            refresh_page_links(session, page=page, version=version)
+            self._refresh_page_links(session, page=page, version=version)
             return self._payload_from_page(
                 session,
                 page,
@@ -2083,7 +2042,7 @@ class PageService:
                         page=page,
                         version=version,
                     )
-                refresh_page_links(session, page=page, version=version)
+                self._refresh_page_links(session, page=page, version=version)
                 return self._payload_from_page(
                     session,
                     page,
@@ -2496,7 +2455,7 @@ class PageService:
                 )
                 page.updated_at = utc_now()
                 self._set_current_version(session, page, version)
-                refresh_page_links(session, page=page, version=version)
+                self._refresh_page_links(session, page=page, version=version)
                 AuditService().emit(
                     session=session,
                     workspace_id=page.workspace_id,
@@ -2683,7 +2642,7 @@ class PageService:
                     title,
                     publish=not create_as_draft,
                 )
-                refresh_page_links(session, page=page, version=version)
+                self._refresh_page_links(session, page=page, version=version)
                 page.placement_parent_node_id = placement_parent_node_id
                 self._ensure_context_tree_placement(
                     session=session,
@@ -2817,7 +2776,7 @@ class PageService:
                             version=current,
                             patch=metadata_patch,
                         )
-                    refresh_page_links(session, page=page, version=current)
+                    self._refresh_page_links(session, page=page, version=current)
                 return self._payload_from_page(session, page, current)
 
             version = self._insert_version(
@@ -2857,7 +2816,7 @@ class PageService:
                 title,
                 publish=not requires_human_review,
             )
-            refresh_page_links(session, page=page, version=version)
+            self._refresh_page_links(session, page=page, version=version)
             if not version_stages_metadata:
                 self._ensure_context_tree_placement(
                     session=session,
@@ -3135,7 +3094,7 @@ class PageService:
                             patch=metadata_patch,
                         )
                     if title_changed or metadata_changed:
-                        refresh_page_links(session, page=page, version=current)
+                        self._refresh_page_links(session, page=page, version=current)
                 return self._payload_from_page(session, page, current)
 
             was_archived = page.lifecycle_status == "archived"
@@ -3197,7 +3156,7 @@ class PageService:
                     actor_id=actor_id,
                     move_existing=placement_changed,
                 )
-            refresh_page_links(session, page=page, version=version)
+            self._refresh_page_links(session, page=page, version=version)
             result = self.change_audit_recorder.record_context_page_write(
                 session=session,
                 workspace_id=page.workspace_id,
@@ -3243,6 +3202,17 @@ class PageService:
                 version,
                 superseded_review_count=superseded_review_count,
             )
+
+    def _refresh_page_links(
+        self, session: Session, *, page: ContextPage, version: ContextPageVersion
+    ) -> None:
+        self_origins = getattr(self.body_preparer, "self_origins", None)
+        refresh_page_links(
+            session,
+            page=page,
+            version=version,
+            self_origins=self_origins,
+        )
 
     def _prepare_body(
         self,
@@ -3986,7 +3956,7 @@ class PageService:
             actor_kind=actor_kind,
             actor_id=actor_id,
         )
-        refresh_page_links(session, page=page, version=version)
+        self._refresh_page_links(session, page=page, version=version)
         return self._payload_from_page(
             session,
             page,
@@ -4128,7 +4098,7 @@ class PageService:
                 page=page,
                 version=version,
             )
-        refresh_page_links(session, page=page, version=version)
+        self._refresh_page_links(session, page=page, version=version)
         for unresolved_review in unresolved_reviews:
             supersede_review_with_lineage(
                 session=session,
@@ -5635,6 +5605,7 @@ def sync_page_projections(
     *,
     page: ContextPage,
     version: ContextPageVersion | None = None,
+    self_origins: frozenset[str] | None = None,
 ) -> None:
     """Synchronize write-through projections for a Context page.
 
@@ -5648,7 +5619,9 @@ def sync_page_projections(
         # Re-derive so ``dtxwiki reindex`` doubles as the NULL backfill path
         # for legacy rows (nav_description is rebuildable by contract).
         version.nav_description = derive_nav_description(version.body_md)
-        _sync_page_links_for_version(session, page=page, version=version)
+        _sync_page_links_for_version(
+            session, page=page, version=version, self_origins=self_origins
+        )
     _sync_page_doc_source(session, page=page)
     _delete_stale_page_link_versions(session, page=page)
 
@@ -5667,10 +5640,13 @@ def refresh_page_links(
     *,
     page: ContextPage,
     version: ContextPageVersion,
+    self_origins: frozenset[str] | None = None,
 ) -> None:
     """Compatibility wrapper for older call sites."""
 
-    sync_page_projections(session, page=page, version=version)
+    sync_page_projections(
+        session, page=page, version=version, self_origins=self_origins
+    )
 
 
 def _sync_page_links_for_version(
@@ -5678,63 +5654,160 @@ def _sync_page_links_for_version(
     *,
     page: ContextPage,
     version: ContextPageVersion,
+    self_origins: frozenset[str] | None = None,
 ) -> None:
-    # The table is pruned to the page's live pointers after every sync, so all
-    # rows present here belonged to a live version immediately before this
-    # write. Prefer the newest surviving pin for each target slug.
+    from backend.services.context_links import (
+        classify,
+        configured_self_origins,
+        extract_links,
+    )
+
+    origins = configured_self_origins() if self_origins is None else self_origins
     preserved_pins: dict[str, UUID] = {}
     pin_rows = session.execute(
-        select(PageLink.target_slug, PageLink.target_page_id)
-        .join(
+        join_in_workspace(
+            select_in_workspace(
+                PageLink,
+                workspace_id=page.workspace_id,
+                conditions=(
+                    PageLink.source_page_id == page.id,
+                    PageLink.target_page_id.is_not(None),
+                ),
+            ),
+            PageLink,
             ContextPageVersion,
-            ContextPageVersion.id == PageLink.source_version_id,
+            workspace_id=page.workspace_id,
+            on=ContextPageVersion.id == PageLink.source_version_id,
         )
-        .where(
-            PageLink.source_page_id == page.id,
-            PageLink.target_page_id.is_not(None),
+        .with_only_columns(
+            PageLink.locator_key,
+            PageLink.target_page_id,
+            ContextPageVersion.version_no,
         )
         .order_by(ContextPageVersion.version_no.desc())
     ).all()
-    for target_slug, target_page_id in pin_rows:
-        preserved_pins.setdefault(target_slug, target_page_id)
+    for locator_key, target_page_id, _version_no in pin_rows:
+        preserved_pins.setdefault(locator_key, target_page_id)
     session.execute(
-        delete(PageLink).where(
-            PageLink.source_page_id == page.id,
-            PageLink.source_version_id == version.id,
+        delete_in_workspace(
+            PageLink,
+            workspace_id=page.workspace_id,
+            conditions=(
+                PageLink.source_page_id == page.id,
+                PageLink.source_version_id == version.id,
+            ),
         )
     )
-    body = parse_page_frontmatter(version.body_md).body
-    # Strip fenced code blocks and inline `code` so a documentation page that
-    # demonstrates wikilink syntax (`[[other]]`, or a ```md fence) does not
-    # create phantom backlink rows. Offsets are preserved (whitespace-filled)
-    # so snippet_around_match still produces accurate previews. P-H1.
-    scannable = _strip_code_regions(body)
-    matches_by_target: dict[str, list[re.Match[str]]] = {}
-    for match in WIKILINK_PATTERN.finditer(scannable):
-        target_slug = slugify_wikilink_target(match.group("target"))
-        if not target_slug:
-            continue
-        matches_by_target.setdefault(target_slug, []).append(match)
+    occurrences = extract_links(version.body_md)
+    locators = [classify(item.href, origins) for item in occurrences]
+    eligible = [
+        (occurrence, locator)
+        for occurrence, locator in zip(occurrences, locators, strict=True)
+        if locator.kind
+        not in {"external", "public_reader", "local", "media", "unknown"}
+        and locator.workspace_id in {None, page.workspace_id}
+    ]
+    # This writer projection records same-workspace identity without requiring
+    # a reader-visible version. Read paths reauthorize each pinned target.
+    locator_slugs = {locator.slug for _, locator in eligible if locator.slug}
+    node_ids = {
+        locator.node_id
+        for _, locator in eligible
+        if locator.node_id is not None
+    }
+    locator_page_ids = {
+        locator.page_id
+        for _, locator in eligible
+        if locator.page_id is not None
+    } | node_ids
 
-    target_page_ids = _target_page_ids_by_slug(
-        session,
-        workspace_id=page.workspace_id,
-        target_slugs=matches_by_target.keys(),
-    )
-    for target_slug, matches in matches_by_target.items():
-        session.add(
-            PageLink(
-                workspace_id=page.workspace_id,
-                source_page_id=page.id,
-                source_version_id=version.id,
-                target_slug=target_slug,
-                target_page_id=preserved_pins.get(
-                    target_slug, target_page_ids.get(target_slug)
-                ),
-                occurrence_count=len(matches),
-                first_snippet=snippet_around_match(body, matches[0]),
+    def chunks(values: list, size: int = 400):
+        for start in range(0, len(values), size):
+            yield values[start : start + size]
+
+    existing_by_slug: dict[str, UUID] = {}
+    for slug_chunk in chunks(list(locator_slugs)):
+        existing_by_slug.update(
+            session.execute(
+                select_in_workspace(
+                    ContextPage,
+                    workspace_id=page.workspace_id,
+                    conditions=(ContextPage.slug.in_(slug_chunk),),
+                ).with_only_columns(ContextPage.slug, ContextPage.id)
+            ).all()
+        )
+    node_to_page_id: dict[UUID, UUID] = {}
+    if node_ids:
+        from backend.models.tree import WorkspaceTreeNode
+
+        for node_chunk in chunks(list(node_ids)):
+            node_to_page_id.update(
+                session.execute(
+                    select_in_workspace(
+                        WorkspaceTreeNode,
+                        workspace_id=page.workspace_id,
+                        conditions=(
+                            WorkspaceTreeNode.id.in_(node_chunk),
+                            WorkspaceTreeNode.target_kind == "context_page",
+                        ),
+                    ).with_only_columns(
+                        WorkspaceTreeNode.id, WorkspaceTreeNode.target_id
+                    )
+                ).all()
+            )
+    candidate_page_ids = locator_page_ids | {
+        page_id for page_id in node_to_page_id.values() if page_id is not None
+    }
+    existing_page_ids: set[UUID] = set()
+    for page_id_chunk in chunks(list(candidate_page_ids)):
+        existing_page_ids.update(
+            session.scalars(
+                select_in_workspace(
+                    ContextPage,
+                    workspace_id=page.workspace_id,
+                    conditions=(ContextPage.id.in_(page_id_chunk),),
+                ).with_only_columns(ContextPage.id)
             )
         )
+
+    grouped: dict[str, dict] = {}
+    for occurrence, locator in eligible:
+        key = locator.key
+        if locator.node_id is not None:
+            page_key = f"page_id:{locator.node_id}"
+            if page_key in preserved_pins or locator.node_id in existing_page_ids:
+                key = page_key
+        pin = preserved_pins.get(key)
+        if pin is None and locator.page_id in existing_page_ids:
+            pin = locator.page_id
+        if pin is None and locator.node_id is not None:
+            candidate_id = (
+                locator.node_id
+                if locator.node_id in existing_page_ids
+                else node_to_page_id.get(locator.node_id)
+            )
+            if candidate_id in existing_page_ids:
+                pin = candidate_id
+        if pin is None and locator.slug is not None:
+            pin = existing_by_slug.get(locator.slug)
+        if key not in grouped:
+            grouped[key] = {
+                "target_slug": locator.slug,
+                "target_page_id": pin,
+                "occurrence_count": 0,
+                "first_snippet": occurrence.snippet,
+            }
+        grouped[key]["occurrence_count"] += 1
+    session.add_all(
+        PageLink(
+            workspace_id=page.workspace_id,
+            source_page_id=page.id,
+            source_version_id=version.id,
+            locator_key=key,
+            **values,
+        )
+        for key, values in grouped.items()
+    )
 
 
 def _delete_stale_page_link_versions(session: Session, *, page: ContextPage) -> None:
@@ -5747,7 +5820,23 @@ def _delete_stale_page_link_versions(session: Session, *, page: ContextPage) -> 
         )
         if version_id is not None
     }
-    statement = delete(PageLink).where(PageLink.source_page_id == page.id)
+    live_version_ids.update(
+        session.scalars(
+            select_in_workspace(
+                ContextPageVersion,
+                workspace_id=page.workspace_id,
+                conditions=(
+                    ContextPageVersion.page_id == page.id,
+                    ContextPageVersion.version_status == "editing",
+                ),
+            ).with_only_columns(ContextPageVersion.id)
+        )
+    )
+    statement = delete_in_workspace(
+        PageLink,
+        workspace_id=page.workspace_id,
+        conditions=(PageLink.source_page_id == page.id,),
+    )
     if live_version_ids:
         statement = statement.where(PageLink.source_version_id.notin_(live_version_ids))
     session.execute(statement)
@@ -6048,29 +6137,10 @@ def should_stage_page_metadata(
     return version.version_status in ("editing", "draft")
 
 
-def _target_page_ids_by_slug(
-    session: Session,
-    *,
-    workspace_id: UUID,
-    target_slugs: Iterable[str],
-) -> dict[str, UUID]:
-    slugs = tuple(target_slugs)
-    if not slugs:
-        return {}
-    rows = session.execute(
-        select(ContextPage.slug, ContextPage.id)
-        .where(ContextPage.workspace_id == workspace_id)
-        .where(ContextPage.slug.in_(slugs))
-    )
-    return {slug: page_id for slug, page_id in rows}
-
-
 def slugify_wikilink_target(value: str | None) -> str:
-    if not value:
-        return ""
-    normalized = unicodedata.normalize("NFKC", value.strip()).lower()
-    slug = re.sub(r"[\W_]+", "-", normalized).strip("-")
-    return slug[:80]
+    from backend.services.context_links import normalize_wikilink_target
+
+    return normalize_wikilink_target(value)
 
 
 def apply_page_metadata(
@@ -6095,17 +6165,6 @@ def apply_page_metadata(
             page.aliases = next_aliases
             changed = True
     return changed
-
-
-def snippet_around_match(body_md: str, match: re.Match[str], radius: int = 90) -> str:
-    start = max(0, match.start() - radius)
-    end = min(len(body_md), match.end() + radius)
-    snippet = re.sub(r"\s+", " ", body_md[start:end]).strip()
-    if start > 0:
-        snippet = f"...{snippet}"
-    if end < len(body_md):
-        snippet = f"{snippet}..."
-    return snippet
 
 
 def select_inline_comment_rows(page_id: UUID, *, limit: int):

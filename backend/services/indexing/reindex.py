@@ -11,6 +11,8 @@ from backend.app.container import DatabaseProvider
 from backend.models.chunk import ContentChunk
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.library import LibraryItem
+from backend.repositories.workspace_scoped import get_in_workspace, select_in_workspace
+from backend.services.context_links import configured_self_origins
 from backend.services.delegated_tasks import produce_folder_summary_tasks
 from backend.services.indexing.edge_registry import rebuild_edge_projection
 from backend.services.page_service import sync_page_projections
@@ -38,9 +40,19 @@ def reindex_workspace(
         for page in pages:
             live_versions = _live_context_versions(session, page)
             if not live_versions:
-                sync_page_projections(session, page=page, version=None)
+                sync_page_projections(
+                    session,
+                    page=page,
+                    version=None,
+                    self_origins=configured_self_origins(database_provider.settings),
+                )
             for version in live_versions:
-                sync_page_projections(session, page=page, version=version)
+                sync_page_projections(
+                    session,
+                    page=page,
+                    version=version,
+                    self_origins=configured_self_origins(database_provider.settings),
+                )
                 synced_versions += 1
         edge_counts = rebuild_edge_projection(session, workspace_id)
         delegated = produce_folder_summary_tasks(session, workspace_id)
@@ -73,9 +85,28 @@ def _live_context_versions(
     ):
         if version_id is not None and version_id not in version_ids:
             version_ids.append(version_id)
+    version_ids.extend(
+        version_id
+        for version_id in session.scalars(
+            select_in_workspace(
+                ContextPageVersion,
+                workspace_id=page.workspace_id,
+                conditions=(
+                    ContextPageVersion.page_id == page.id,
+                    ContextPageVersion.version_status == "editing",
+                ),
+            ).with_only_columns(ContextPageVersion.id)
+        )
+        if version_id not in version_ids
+    )
     versions = []
     for version_id in version_ids:
-        version = session.get(ContextPageVersion, version_id)
+        version = get_in_workspace(
+            session,
+            ContextPageVersion,
+            workspace_id=page.workspace_id,
+            resource_id=version_id,
+        )
         if version is not None:
             versions.append(version)
     return versions

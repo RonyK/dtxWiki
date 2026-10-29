@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from sqlalchemy import select
-
 from backend.models.context import ContextPage, PageLink
+from backend.repositories.workspace_scoped import join_in_workspace, select_in_workspace
 from backend.services.lint.base import (
     LintContext,
     LintFindingDraft,
@@ -25,11 +24,16 @@ class _UnresolvedLinkRule:
         session, workspace_id = ctx.session, ctx.workspace_id
         version_id = ctx.version.id
         rows = session.scalars(
-            select(PageLink).where(
-                PageLink.workspace_id == workspace_id,
-                PageLink.source_page_id == target.id,
-                PageLink.source_version_id == version_id,
-                PageLink.target_page_id.is_(None),
+            select_in_workspace(
+                PageLink,
+                workspace_id=workspace_id,
+                conditions=(
+                    PageLink.source_page_id == target.id,
+                    PageLink.source_version_id == version_id,
+                    PageLink.target_page_id.is_(None),
+                    PageLink.locator_key.startswith("wikilink:"),
+                    PageLink.target_slug.is_not(None),
+                ),
             )
         ).all()
         return [_unresolved_finding(target.id, link) for link in rows]
@@ -72,14 +76,24 @@ class _BrokenSlugLinkRule:
         session, workspace_id = ctx.session, ctx.workspace_id
         version_id = ctx.version.id
         rows = session.execute(
-            select(PageLink, ContextPage.slug)
-            .join(ContextPage, ContextPage.id == PageLink.target_page_id)
-            .where(
-                PageLink.workspace_id == workspace_id,
-                PageLink.source_page_id == target.id,
-                PageLink.source_version_id == version_id,
-                PageLink.target_slug != ContextPage.slug,
+            join_in_workspace(
+                select_in_workspace(
+                    PageLink,
+                    workspace_id=workspace_id,
+                    conditions=(
+                        PageLink.source_page_id == target.id,
+                        PageLink.source_version_id == version_id,
+                        PageLink.locator_key.startswith("wikilink:"),
+                        PageLink.target_slug.is_not(None),
+                        PageLink.target_slug != ContextPage.slug,
+                    ),
+                ),
+                PageLink,
+                ContextPage,
+                workspace_id=workspace_id,
+                on=ContextPage.id == PageLink.target_page_id,
             )
+            .with_only_columns(PageLink, ContextPage.slug)
         ).all()
         return [_broken_slug_finding(target.id, link, slug) for link, slug in rows]
 
