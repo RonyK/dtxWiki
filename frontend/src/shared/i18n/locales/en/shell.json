@@ -457,5 +457,12 @@
     "versionDisabledEarlier": "v{{version}} — unavailable: already selected as the earlier version",
     "versionDisabledLater": "v{{version}} — unavailable: already selected as the later version",
     "selectorHelp": "A version cannot be compared with itself. The pair is ordered oldest-first automatically."
+  },
+  "zoomViewer": {
+    "controls": "Zoom controls",
+    "out": "Zoom out",
+    "current": "Current zoom {{percent}}%",
+    "in": "Zoom in",
+    "reset": "Reset zoom"
   }
 }

@@ -3446,8 +3446,8 @@ button.history-card {
   /* These compact controls do not use the shared icon-button primitive, so
      their fixed 23/32px desktop dimensions need an explicit mobile target. */
   .markdown-code-copy,
-  .mermaid-zoom-toolbar-button,
-  .mermaid-zoom-readout,
+  .zoom-viewer-toolbar-button,
+  .zoom-viewer-readout,
   .editor-link-header button,
   .editor-link-actions button,
   .editor-comment-header button,
@@ -4204,8 +4204,8 @@ button.history-card {
    narrow-layout breakpoint. Preserve the contract's 44px hit area there too. */
 @media (any-pointer: coarse) {
   .markdown-code-copy,
-  .mermaid-zoom-toolbar-button,
-  .mermaid-zoom-readout,
+  .zoom-viewer-toolbar-button,
+  .zoom-viewer-readout,
   .editor-link-header button,
   .editor-link-actions button,
   .editor-comment-header button,

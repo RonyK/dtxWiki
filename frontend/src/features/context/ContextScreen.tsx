@@ -17,6 +17,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ComponentProps,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -52,6 +53,14 @@ import {
   listContextPages,
   readContextPage,
 } from "../../shared/api/context";
+import {
+  favoriteTargetKind,
+  getTreeFavoriteSnapshot,
+  subscribeTreeFavorites,
+  toggleTreeFavorite,
+  treeFavoriteKey,
+  type TreeFavoriteScope,
+} from "../../shared/api/treeFavorites";
 import {
   decideReview,
   getReview,
@@ -1164,6 +1173,10 @@ export function ContextScreen() {
   const selectedNode = state.selectedNodeId
     ? (state.tree.find((node) => node.id === state.selectedNodeId) ?? null)
     : null;
+  const favoriteScope =
+    auth?.user && state.workspaceId
+      ? { actorId: auth.user.user_id, workspaceId: state.workspaceId }
+      : undefined;
   const contextRoot =
     state.tree.find((node) =>
       isSemanticSectionRoot(node, t("rail.title", { defaultValue: "Context" })),
@@ -1217,7 +1230,7 @@ export function ContextScreen() {
           onExpandWidth,
         }) => (
           <TreeRail
-            favoriteScope={auth?.user && state.workspaceId ? { actorId: auth.user.user_id, workspaceId: state.workspaceId } : undefined}
+            favoriteScope={favoriteScope}
             title={t("rail.title", { defaultValue: "Context" })}
             accent="context"
             nodes={state.tree}
@@ -1344,6 +1357,7 @@ export function ContextScreen() {
               <ContextReader
                 canEdit={canEdit}
                 detail={state.detail}
+                favoriteScope={favoriteScope}
                 history={state.history}
                 neighbors={state.neighbors}
                 neighborsFailed={state.neighborsFailed}
@@ -2095,6 +2109,7 @@ function pendingReviewCompareCandidate(
 function ContextReader({
   canEdit,
   detail,
+  favoriteScope,
   history,
   neighbors,
   neighborsFailed,
@@ -2112,6 +2127,7 @@ function ContextReader({
 }: {
   canEdit: boolean;
   detail: ContextPageDetail;
+  favoriteScope?: TreeFavoriteScope;
   history: ContextChangeHistory | null;
   neighbors: GraphNeighborsPayload | null;
   neighborsFailed: boolean;
@@ -2679,6 +2695,7 @@ function ContextReader({
           {node ? (
             <ContextReaderNodeMenu
               canEdit={canEdit}
+              favoriteScope={favoriteScope}
               node={node}
               onCopyNodeLink={onCopyNodeLink}
               onDeleteNode={onDeleteNode}
@@ -3163,6 +3180,7 @@ function ContextShareDialog({
 
 function ContextReaderNodeMenu({
   canEdit,
+  favoriteScope,
   node,
   onCopyNodeLink,
   onDeleteNode,
@@ -3170,6 +3188,7 @@ function ContextReaderNodeMenu({
   onRenameNode,
 }: {
   canEdit: boolean;
+  favoriteScope?: TreeFavoriteScope;
   node: TreeNodePayload;
   onCopyNodeLink: (node: TreeNodePayload) => Promise<CopyTextDetailedResult>;
   onDeleteNode: (node: TreeNodePayload) => void;
@@ -3177,24 +3196,39 @@ function ContextReaderNodeMenu({
   onRenameNode: (node: TreeNodePayload) => void;
 }) {
   const { t } = useTranslation("context");
+  const { t: tTree } = useTranslation("tree");
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [menuPosition, setMenuPosition] = useState<{
     left: number;
     top: number;
   } | null>(null);
-  const [copyStatus, setCopyStatus] =
-    useState<CopyTextDetailedResult | null>(null);
+  const [actionStatus, setActionStatus] = useState<{
+    message: string;
+    timeoutMs: number;
+  } | null>(null);
+  // The rail and this menu share one favorite store, so a toggle here also
+  // updates the rail star and vice versa.
+  const favoriteSnapshot = useSyncExternalStore(
+    subscribeTreeFavorites,
+    getTreeFavoriteSnapshot,
+  );
+  const canFavorite = Boolean(favoriteScope && favoriteTargetKind(node));
+  const favorite =
+    favoriteScope && canFavorite
+      ? favoriteSnapshot.get(treeFavoriteKey(favoriteScope, node))
+      : undefined;
+  const menuNode = favorite ? { ...node, is_favorite: favorite.isFavorite } : node;
 
   useEffect(() => {
-    if (!copyStatus) {
+    if (!actionStatus) {
       return undefined;
     }
     const timeout = window.setTimeout(
-      () => setCopyStatus(null),
-      copyStatus.status === "copied" ? 1800 : 5000,
+      () => setActionStatus(null),
+      actionStatus.timeoutMs,
     );
     return () => window.clearTimeout(timeout);
-  }, [copyStatus]);
+  }, [actionStatus]);
 
   function openMenu() {
     const rect = triggerRef.current?.getBoundingClientRect();
@@ -3223,8 +3257,30 @@ function ContextReaderNodeMenu({
       onDeleteNode(action.node);
       return;
     }
+    if (action.type === "favorite") {
+      if (favoriteScope) {
+        setActionStatus(null);
+        void toggleTreeFavorite(favoriteScope, action.node).catch(() =>
+          setActionStatus({
+            message: tTree("favorite.failed", { title: action.node.title }),
+            timeoutMs: 5000,
+          }),
+        );
+      }
+      return;
+    }
     if (action.type === "copy-link") {
-      void onCopyNodeLink(action.node).then(setCopyStatus);
+      void onCopyNodeLink(action.node).then((result) =>
+        setActionStatus({
+          message:
+            result.status === "copied"
+              ? t("actions.linkCopied")
+              : result.status === "selected"
+                ? t("actions.linkSelected")
+                : t(`actions.linkCopyReasons.${result.reason ?? "selection"}`),
+          timeoutMs: result.status === "copied" ? 1800 : 5000,
+        }),
+      );
     }
   }
 
@@ -3243,15 +3299,9 @@ function ContextReaderNodeMenu({
       >
         <MoreHorizontal size={16} aria-hidden="true" />
       </button>
-      {copyStatus ? (
+      {actionStatus ? (
         <span className="reader-action-status" role="status">
-          {copyStatus.status === "copied"
-            ? t("actions.linkCopied")
-            : copyStatus.status === "selected"
-              ? t("actions.linkSelected")
-              : t(
-                  `actions.linkCopyReasons.${copyStatus.reason ?? "selection"}`,
-                )}
+          {actionStatus.message}
         </span>
       ) : null}
       {menuPosition ? (
@@ -3260,9 +3310,11 @@ function ContextReaderNodeMenu({
           canCreateFolder={false}
           canCreatePage={false}
           canDelete={canEdit && !node.is_system_node}
+          canFavorite={canFavorite}
           canMove={canEdit && !node.is_system_node}
           canRename={canEdit}
-          node={node}
+          favoritePending={Boolean(favorite?.pending)}
+          node={menuNode}
           position={menuPosition}
           onAction={handleAction}
           onClose={() => setMenuPosition(null)}

@@ -1,8 +1,8 @@
-import { X } from "lucide-react";
 import { createPortal } from "react-dom";
 import type { HTMLAttributeReferrerPolicy } from "react";
 
 import { Dialog } from "./Dialog";
+import { ZoomPanViewer } from "./ZoomPanViewer";
 
 type ImageViewerDialogProps = {
   alt: string;
@@ -17,15 +17,13 @@ type ImageViewerDialogProps = {
 };
 
 /**
- * One image, enlarged to fit the viewport.
+ * One image, fitted to the viewer and zoomable.
  *
- * Extracted from MarkdownImage, which had the only enlargement in the app, so
- * Settings > Attachments could reuse it instead of growing a second one that
- * would drift. Deliberately not a zoom/pan surface: MermaidZoomViewer exists
- * because a diagram is dense enough to need magnifying, while both callers here
- * answer "what is this file?", which fitting it to the viewport answers
- * completely. `Dialog` already supplies Escape, backdrop dismissal, the focus
- * trap, focus restoration and the portal root, so none of that is rebuilt.
+ * Shared by MarkdownImage and Settings > Attachments. It opens fitted to the
+ * viewport and uses the same zoom and pan surface as the Mermaid viewer, since
+ * a large screenshot fitted to the window is too small to read. `Dialog`
+ * already supplies Escape, backdrop dismissal, the focus trap, focus
+ * restoration and the portal root, so none of that is rebuilt.
  */
 export function ImageViewerDialog({
   alt,
@@ -38,29 +36,23 @@ export function ImageViewerDialog({
   onError,
 }: ImageViewerDialogProps) {
   return createPortal(
-    <Dialog className="image-viewer-panel" labelledBy={titleId} onClose={onClose}>
-      <div className="image-viewer">
-        <h2 className="visually-hidden" id={titleId}>
-          {title}
-        </h2>
-        <button
-          aria-label={closeLabel}
-          className="image-viewer-close icon-button"
-          type="button"
-          onClick={onClose}
-        >
-          <X aria-hidden="true" size={18} />
-        </button>
+    <Dialog className="zoom-viewer-panel" labelledBy={titleId} onClose={onClose}>
+      <h2 className="visually-hidden" id={titleId}>
+        {title}
+      </h2>
+      <ZoomPanViewer closeLabel={closeLabel} onClose={onClose}>
         <img
           alt={alt}
-          className="image-viewer-content"
+          className="zoom-viewer-image"
           decoding="async"
+          // A native image drag would steal the pointer from panning.
+          draggable={false}
           loading="lazy"
           referrerPolicy={referrerPolicy}
           src={src}
           onError={onError}
         />
-      </div>
+      </ZoomPanViewer>
     </Dialog>,
     document.body,
   );

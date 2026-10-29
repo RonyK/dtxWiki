@@ -1350,6 +1350,74 @@ def test_read_api_reorders_tree_siblings_by_anchor(page_service):
     assert relative_order() == [alpha["id"], bravo["id"], charlie["id"]]
 
 
+def test_read_api_anchor_under_another_parent_moves_to_that_position(page_service):
+    client = make_client(page_service)
+    workspace_id = client.get("/api/v1/workspaces").json()["data"][
+        "current_workspace_id"
+    ]
+
+    def create(title: str, slug: str, **extra) -> str:
+        response = client.post(
+            f"/api/v1/workspaces/{workspace_id}/tree/nodes",
+            json={"section": "context", "title": title, "slug": slug, **extra},
+        )
+        assert response.status_code == 201, response.text
+        return response.json()["data"]["id"]
+
+    folder = create("Cross Folder", "cross-folder")
+    first = create("Cross First", "cross-first", parent_id=folder)
+    second = create("Cross Second", "cross-second", parent_id=folder)
+    outside = create("Cross Outside", "cross-outside")
+
+    def place(node_id: str, anchor_id: str, placement: str):
+        return client.post(
+            f"/api/v1/workspaces/{workspace_id}/tree/reorder",
+            json={
+                "node_id": node_id,
+                "anchor_node_id": anchor_id,
+                "placement": placement,
+            },
+        )
+
+    def children(parent_id: str) -> list[str]:
+        nodes = client.get(
+            f"/api/v1/workspaces/{workspace_id}/tree?section=context"
+        ).json()["data"]["nodes"]
+        ordered = sorted(
+            (node for node in nodes if node["parent_id"] == parent_id),
+            key=lambda node: (node["sort_key"], node["title"], node["id"]),
+        )
+        return [node["id"] for node in ordered]
+
+    root_id = client.get(
+        f"/api/v1/workspaces/{workspace_id}/tree/nodes/{folder}"
+    ).json()["data"]["parent_id"]
+
+    into = place(outside, second, "before")
+    assert into.status_code == 200, into.text
+    assert children(folder) == [first, outside, second]
+    with page_service.session_factory() as session:
+        audits = session.scalars(
+            select(AuditEvent).where(
+                AuditEvent.target_id == UUID(outside),
+                AuditEvent.action.in_(("tree.node.move", "tree.node.reorder")),
+            )
+        ).all()
+    # Recorded as the same move the Move dialog writes, not a sibling reorder.
+    assert [(audit.action, audit.payload["new_parent_id"]) for audit in audits] == [
+        ("tree.node.move", folder)
+    ]
+
+    out = place(first, folder, "after")
+    assert out.status_code == 200, out.text
+    top_level = children(root_id)
+    assert top_level[top_level.index(folder) + 1] == first
+
+    cycle = place(folder, outside, "after")
+    assert cycle.status_code in {403, 404}, cycle.text
+    assert children(folder) == [outside, second]
+
+
 def test_read_api_anchor_reorder_cannot_cross_system_node(page_service):
     # LEAK-04: the direction form refuses to move a node past a system folder
     # (test_read_api_rejects_reordering_system_tree_node and the "Alpha is
@@ -1473,11 +1541,6 @@ def test_read_api_reorder_rejects_ambiguous_or_ineligible_anchor(page_service):
 
     moving = create("Eligibility Moving", "eligibility-moving")
     sibling = create("Eligibility Sibling", "eligibility-sibling")
-    nested = create(
-        "Eligibility Nested",
-        "eligibility-nested",
-        parent_id=sibling["id"],
-    )
     other_section = create(
         "Eligibility Agent",
         "eligibility-agent",
@@ -1503,7 +1566,7 @@ def test_read_api_reorder_rejects_ambiguous_or_ineligible_anchor(page_service):
     )
     assert ambiguous.status_code == 422
 
-    for anchor_id in (nested["id"], other_section["id"], system_sibling["id"]):
+    for anchor_id in (other_section["id"], system_sibling["id"]):
         refused = client.post(
             f"/api/v1/workspaces/{workspace_id}/tree/reorder",
             json={

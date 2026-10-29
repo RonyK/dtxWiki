@@ -58,4 +58,5 @@ export * from "./UserDeletionImpact";
 export * from "./useTreeRowTooltip";
 export * from "./WorkspaceLayout";
 export * from "./WorkspacePanelChrome";
+export * from "./ZoomPanViewer";
 export * from "./WorkspaceScopePicker";

@@ -150,6 +150,17 @@
   and slug changes refuse it; a slug generated from a title that would start
   with it gets a `ws-` prefix instead. All workspace slugs fold accented Latin
   letters to ASCII.
+- The Context reader's `…` menu adds or removes the page from the reader's own
+  favorites, kept in sync with the tree's star.
+- Dragging a tree item before or after a row in another folder moves it to that
+  exact position, including back to the top level; the gap under an expanded
+  folder places it first inside that folder. `POST /tree/reorder` accepts an
+  anchor under another parent as such a move and applies the Move dialog's
+  rules. Touch drags get wider before/after bands with a label above the
+  finger, and starting a drag closes the long-press menu.
+- Enlarged images in Context and Settings > Attachments open in the same zoom
+  and pan viewer as Mermaid diagrams: toolbar, wheel, `+`/`-`/`0`, drag and
+  pinch. The viewer, Mermaid's included, now stays inside the screen on phones.
 
 ## 0.1.4 — 2026-10-23
 

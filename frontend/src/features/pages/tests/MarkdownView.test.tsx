@@ -121,10 +121,15 @@ describe("MarkdownView", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Architecture viewer" });
     expect(dialog).toBeInTheDocument();
-    expect(screen.getAllByRole("img", { name: "Architecture" })[1]).toHaveAttribute(
-      "src",
-      source,
-    );
+    const enlarged = screen.getAllByRole("img", { name: "Architecture" })[1];
+    expect(enlarged).toHaveAttribute("src", source);
+    // A large screenshot fitted to the window is too small to read, so the
+    // viewer zooms; a native image drag would steal the pan gesture.
+    expect(enlarged).toHaveAttribute("draggable", "false");
+    await user.click(within(dialog).getByRole("button", { name: "Zoom in" }));
+    expect(
+      within(dialog).getByRole("button", { name: "Current zoom 120%" }),
+    ).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
 

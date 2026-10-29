@@ -457,5 +457,12 @@
     "versionDisabledEarlier": "v{{version}} — 선택 불가: 이미 이전 버전으로 선택됨",
     "versionDisabledLater": "v{{version}} — 선택 불가: 이미 이후 버전으로 선택됨",
     "selectorHelp": "같은 버전끼리는 비교할 수 없습니다. 쌍은 자동으로 오래된 버전부터 정렬됩니다."
+  },
+  "zoomViewer": {
+    "controls": "확대/축소 도구",
+    "out": "축소",
+    "current": "현재 배율 {{percent}}%",
+    "in": "확대",
+    "reset": "배율 초기화"
   }
 }
