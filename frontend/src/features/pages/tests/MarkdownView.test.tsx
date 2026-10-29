@@ -1108,6 +1108,7 @@ describe("MarkdownView", () => {
     expect(mermaidMock.render).toHaveBeenCalledWith(
       expect.stringMatching(/^dtxwiki-mermaid-/),
       expect.stringContaining("graph TD"),
+      expect.any(HTMLElement),
     );
     const diagram = document.querySelector(".mermaid-diagram");
     expect(diagram).toHaveAttribute("data-source-line", "1");
@@ -1187,103 +1188,24 @@ describe("MarkdownView", () => {
       .toHaveTextContent("stateDiagram-v2");
   });
 
-  it("applies visible fallback styles when Mermaid emits class-only flowchart nodes", async () => {
+  it("resolves Mermaid's stylesheet onto the SVG before stripping it", async () => {
     mermaidMock.render.mockResolvedValueOnce({
       svg: [
-        // aria-roledescription is how the sanitizer tells the families apart,
-        // and real Mermaid stamps it on every one of them. Centring node
-        // labels is correct for flowcharts and wrong for ER/class/state, so a
-        // fixture that omits it is not a flowchart as far as the sanitizer is
-        // concerned and would not be centred.
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80"' +
-          ' aria-roledescription="flowchart-v2">',
-        '<path class="flowchart-link" d="M 0 0 L 20 20"></path>',
-        '<path class="arrowMarkerPath" d="M 0 0 L 10 5 L 0 10 z"></path>',
-        '<g class="node default">',
-        '<rect class="background" style="stroke: none"></rect>',
-        '<rect class="basic label-container" x="0" y="0" width="100" height="40"></rect>',
-        '<text x="50" y="20">Flow label</text>',
-        "</g>",
-        '<text x="10" y="80">Edge label</text>',
-        "</svg>",
-      ].join(""),
-    });
-
-    render(
-      <MemoryRouter>
-        <MarkdownView body={"```mermaid\nflowchart TD\n  A[Flow label]\n```"} />
-      </MemoryRouter>,
-    );
-
-    expect(await screen.findByText("Flow label")).toBeInTheDocument();
-    const nodeRect = document.querySelector("rect.label-container");
-    expect(nodeRect).toHaveAttribute("fill", "#f8fafc");
-    expect(nodeRect).toHaveAttribute("stroke", "#334155");
-    expect(document.querySelector("path.flowchart-link"))
-      .toHaveAttribute("stroke", "#64748b");
-    expect(document.querySelector("rect.background"))
-      .toHaveAttribute("fill", "transparent");
-    expect(document.querySelector(".node text"))
-      .toHaveAttribute("text-anchor", "middle");
-    expect(document.querySelector("svg > text"))
-      .not.toHaveAttribute("text-anchor");
-  });
-
-  it("repaints non-rect Mermaid node shapes when gradient styles are stripped", async () => {
-    mermaidMock.render.mockResolvedValueOnce({
-      svg: [
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80">',
-        "<style>.label-container{fill:url(#gradient-1);}</style>",
-        '<polygon class="label-container" points="0,20 20,0 40,20 20,40"></polygon>',
-        '<circle class="basic label-container" r="20"></circle>',
-        '<ellipse class="label-container" rx="30" ry="15"></ellipse>',
-        '<path class="basic label-container" d="M 0 0 L 20 0"></path>',
-        "<text>Decision label</text>",
-        "</svg>",
-      ].join(""),
-    });
-
-    render(
-      <MemoryRouter>
-        <MarkdownView body={"```mermaid\ngraph TD\n  B{Check}\n```"} />
-      </MemoryRouter>,
-    );
-
-    expect(await screen.findByText("Decision label")).toBeInTheDocument();
-    const diagram = document.querySelector(".mermaid-diagram");
-    expect(diagram?.querySelector("style")).not.toBeInTheDocument();
-    for (const selector of [
-      "polygon.label-container",
-      "circle.label-container",
-      "ellipse.label-container",
-      "path.label-container",
-    ]) {
-      const shape = diagram?.querySelector(selector);
-      expect(shape).toHaveAttribute("fill", "#f8fafc");
-      expect(shape).toHaveAttribute("stroke", "#334155");
-    }
-  });
-
-  it("strips Mermaid style blocks and supplies safe connector attributes", async () => {
-    mermaidMock.render.mockResolvedValueOnce({
-      svg: [
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80"' +
-          ' aria-roledescription="sequence">',
-        "<style>.messageLine0{stroke:#334155;fill:none;}</style>",
-        // Mermaid 11.16.1 stamps stroke="none" and leaves colour to the
-        // stylesheet stripped above; without a fallback only arrowheads show.
-        '<line class="messageLine0" x1="0" y1="0" x2="20" y2="20"',
-        ' stroke-width="2" stroke="none" style="fill: none;" />',
-        '<path class="messageLine1" d="M 0 40 C 20 40 20 60 0 60"',
-        ' stroke-width="2" stroke="none" style="stroke-dasharray: 3, 3; fill: none;" />',
-        '<line id="authored-message" class="messageLine0" stroke="#ef4444"',
-        ' style="stroke: #16a34a;" x1="0" y1="60" x2="20" y2="60" />',
-        '<line id="hidden-line" stroke="none" stroke-width="0"',
-        ' x1="0" y1="70" x2="20" y2="70" />',
-        '<text font-size="16px" font-family="serif"',
-        ' style="font:italic 700 16px serif;text-anchor:start">',
-        '<tspan font-size="18px" style="font-size:18px">Sequence label</tspan>',
-        "</text>",
+        '<svg xmlns="http://www.w3.org/2000/svg" id="m" viewBox="0 0 120 80">',
+        "<style>#m .messageLine0{stroke:#334155;fill:none;}</style>",
+        // Mermaid stamps stroke="none" and leaves colour to the stylesheet.
+        '<line class="messageLine0" x1="0" y1="0" x2="20" y2="20" stroke="none" />',
+        '<line id="authored-message" class="messageLine0" style="stroke: #16a34a;"',
+        ' x1="0" y1="60" x2="20" y2="60" />',
+        // CSS decodes the escape: this is url(https://...) in disguise.
+        '<rect id="escaped" fill="u\\72l(https://evil.example/p.svg#g)" />',
+        '<switch><foreignObject width="40" height="20">',
+        // `--saved` resolves on the outer div, before the inner `--ink` exists.
+        '<div xmlns="http://www.w3.org/1999/xhtml"',
+        ' style="--ink: #123456; --saved: var(--ink); --leak: url(https://evil.example/p.svg#g)">',
+        '<div style="--ink: #ffffff; color: var(--saved)">Work</div></div>',
+        '</foreignObject><text class="section-type-0" style="fill: #eee">Work</text></switch>',
+        '<text style="font-size: 18px">Sequence label</text>',
         "</svg>",
       ].join(""),
     });
@@ -1295,42 +1217,26 @@ describe("MarkdownView", () => {
     );
 
     expect(await screen.findByText("Sequence label")).toBeInTheDocument();
-    const diagram = document.querySelector(".mermaid-diagram");
-    expect(diagram?.querySelector("style")).not.toBeInTheDocument();
-    for (const selector of ["line.messageLine0", "path.messageLine1"]) {
-      const line = diagram?.querySelector(selector);
-      expect(line).toHaveAttribute("stroke", "#64748b");
-      expect(line).toHaveAttribute("stroke-width", "1.5");
-      expect(line).toHaveAttribute("fill", "none");
-    }
-    expect(
-      (diagram?.querySelector("path.messageLine1") as SVGElement).style
-        .getPropertyValue("stroke-dasharray"),
-    ).toBe("3, 3");
-    const authoredMessage = diagram?.querySelector("#authored-message");
-    expect(authoredMessage).toHaveAttribute("stroke", "#ef4444");
-    expect((authoredMessage as SVGElement).style.getPropertyValue("stroke"))
-      .toBe("#16a34a");
-    expect(diagram?.querySelector("#hidden-line"))
-      .toHaveAttribute("stroke", "none");
-    expect(diagram?.querySelector("#hidden-line"))
-      .toHaveAttribute("stroke-width", "0");
-    const svg = diagram?.querySelector(".mermaid-diagram-svg > svg");
-    const text = diagram?.querySelector("text");
-    const tspan = diagram?.querySelector("tspan");
-    for (const element of [svg, text, tspan]) {
-      expect(element).toHaveAttribute("font-size", "13px");
-      expect(element).toHaveAttribute(
-        "font-family",
-        'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-      );
-      expect((element as SVGElement).style.fontSize).toBe("13px");
-      expect((element as SVGElement).style.fontFamily).toContain("Inter");
-    }
-    expect((text as SVGTextElement).style.fontWeight).toBe("700");
-    expect((text as SVGTextElement).style.fontStyle).toBe("italic");
-    expect((text as SVGTextElement).style.getPropertyValue("text-anchor"))
-      .toBe("start");
+    const diagram = document.querySelector(".mermaid-diagram") as Element;
+    const inline = (selector: string, property: string) =>
+      (diagram.querySelector(selector) as SVGElement).style.getPropertyValue(property);
+    expect(diagram.querySelector("style")).not.toBeInTheDocument();
+    expect(inline("line.messageLine0", "stroke")).toBe("#334155");
+    expect(inline("#authored-message", "stroke")).toBe("#16a34a");
+    expect(diagram.querySelector("#escaped")).not.toHaveAttribute("fill");
+    // The <switch> fallback stands in for the removed HTML label, in its colour.
+    expect(diagram.querySelector("foreignObject")).not.toBeInTheDocument();
+    const fallback = diagram.querySelector("switch text") as SVGElement;
+    expect(fallback.style.getPropertyValue("fill")).toBe("var(--saved)");
+    const [outerLevel, innerLevel] = Array.from(
+      diagram.querySelectorAll("switch g[style]"),
+    ) as SVGElement[];
+    expect(outerLevel.style.getPropertyValue("--saved")).toBe("var(--ink)");
+    expect(innerLevel.style.getPropertyValue("--ink")).toBe("#ffffff");
+    expect(innerLevel.contains(fallback)).toBe(true);
+    expect(outerLevel.style.getPropertyValue("--leak")).toBe("");
+    // Sizes stay as Mermaid measured them.
+    expect(inline("svg > text", "font-size")).toBe("18px");
   });
 
   it("opens Mermaid diagrams in a zoom dialog without re-rendering", async () => {
