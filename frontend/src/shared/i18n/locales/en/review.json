@@ -105,7 +105,7 @@
   "policy": {
     "title": "Review risk policy",
     "settingsLink": "Open Settings",
-    "enabledDescription": "Auto-approval uses separate Low and Medium delay rules. High-risk items always require manual review.",
+    "enabledDescription": "Auto-approval uses a separate delay rule for each allowed risk level.",
     "disabledDescription": "Auto-approval is off. Review items stay in the queue until an editor decides.",
     "preset": "Preset",
     "threshold": "Auto-approve up to",
@@ -114,7 +114,6 @@
     "autoApproveLabel": "Auto-approve",
     "manualLabel": "Manual",
     "openSettingsAria": "Open {{risk}} risk auto-approval settings",
-    "highManualReason": "High risk is locked to manual review",
     "delayDays_one": "{{count}} day",
     "delayDays_other": "{{count}} days",
     "delayNotApplied": "No auto-approval delay",

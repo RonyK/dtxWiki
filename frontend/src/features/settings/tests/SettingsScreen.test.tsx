@@ -4477,12 +4477,16 @@ describe("SettingsScreen", () => {
     ) as HTMLElement;
     expect(delayRow).toHaveTextContent("Low");
 
-    fireEvent.change(delay, { target: { value: "14" } });
-
     const reviewCard = delay.closest(".policy-card") as HTMLElement;
-    await user.click(
-      within(reviewCard).getByRole("button", { name: "Save changes" }),
-    );
+    const save = within(reviewCard).getByRole("button", { name: "Save changes" });
+    // Erasing must leave the field empty, not "0" ("no wait"): typing after a
+    // forced 0 read "014", and an empty delay must not be savable.
+    await user.clear(delay);
+    expect(delay).toHaveDisplayValue("");
+    expect(save).toBeDisabled();
+    await user.type(delay, "14");
+    expect(delay).toHaveDisplayValue("14");
+    await user.click(save);
 
     await waitFor(() => {
       expect(
@@ -4568,7 +4572,14 @@ describe("SettingsScreen", () => {
   });
 
   it("gates High Review auto-approval behind a danger acknowledgement", async () => {
-    mockFetch({
+    const byRisk = (highAllowed: boolean) => ({
+      auto_approve_by_risk: {
+        low: { allowed: false, delay_days: 1 },
+        medium: { allowed: false, delay_days: 3 },
+        high: { allowed: highAllowed, delay_days: 7 },
+      },
+    });
+    const fetchMock = mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
         data: {
           current_workspace_id: WORKSPACE_ID,
@@ -4578,21 +4589,10 @@ describe("SettingsScreen", () => {
         },
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {
-        data: {
-          workspace: policy("workspace", "Workspace policy"),
-          library: policy("library", "Library policy"),
-          citation: policy("citation", "Citation policy"),
-          context_write: policy("context_write", "Context write policy"),
-          agent_injection: policy("agent_injection", "Agent injection policy"),
-          review: reviewPolicy({
-            auto_approve_by_risk: {
-              low: { enabled: false, delay_days: 1 },
-              medium: { enabled: false, delay_days: 3 },
-              high: { enabled: false, delay_days: 7 },
-            },
-          }),
-          mcp_clients: [],
-        },
+        data: { ...basicSettingsPolicies(), review: reviewPolicy(byRisk(false)) },
+      },
+      [`PATCH ${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies/batch`]: {
+        data: { ...basicSettingsPolicies(), review: reviewPolicy(byRisk(true)) },
       },
       [`${BASE}/api/v1/auth/tokens`]: { data: [] },
       [`${BASE}/oauth/consents`]: { data: [] },
@@ -4617,6 +4617,31 @@ describe("SettingsScreen", () => {
     const ack = within(card).getByRole("checkbox", { name: /Danger noted/i });
     await userEvent.click(ack);
     expect(highAllowed).not.toBeDisabled();
+
+    await userEvent.click(highAllowed);
+    const save = within(card).getByRole("button", { name: "Save changes" });
+    await userEvent.click(save);
+    expect(
+      lastJsonBody(
+        fetchMock,
+        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies/batch`,
+        "PATCH",
+      )?.changes,
+    ).toEqual({ "automation.auto_approve_by_risk.high.allowed": true });
+    // The saved opt-in must become the new baseline: reading high back as
+    // false left the card dirty and showed it unchecked after a reload.
+    await waitFor(() => expect(save).toBeDisabled());
+    expect(highAllowed).toBeChecked();
+    expect(ack).toBeChecked();
+
+    // Discard restores the ack with the drafts; otherwise the saved High came
+    // back checked but locked behind an unchecked acknowledgement.
+    await userEvent.click(ack);
+    expect(highAllowed).not.toBeChecked();
+    await userEvent.click(within(card).getByRole("button", { name: "Discard" }));
+    expect(highAllowed).toBeChecked();
+    expect(highAllowed).toBeEnabled();
+    expect(ack).toBeChecked();
   });
 
   it("locks Medium auto-approval above the Manual-review-from level", async () => {

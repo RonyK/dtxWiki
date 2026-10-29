@@ -105,7 +105,7 @@
   "policy": {
     "title": "리뷰 위험도 정책",
     "settingsLink": "설정 열기",
-    "enabledDescription": "자동 승인은 낮음과 중간 위험도에 각각 별도 대기 규칙을 사용합니다. 높음 위험도는 항상 수동 리뷰가 필요합니다.",
+    "enabledDescription": "자동 승인은 허용된 위험도마다 별도 대기 규칙을 사용합니다.",
     "disabledDescription": "자동 승인이 꺼져 있습니다. 리뷰 항목은 편집자가 결정할 때까지 큐에 남습니다.",
     "preset": "프리셋",
     "threshold": "자동 승인 최대 위험도",
@@ -114,7 +114,6 @@
     "autoApproveLabel": "자동 승인",
     "manualLabel": "수동",
     "openSettingsAria": "{{risk}} 위험도 자동 승인 설정 열기",
-    "highManualReason": "높음 위험도는 수동 리뷰로 고정됩니다",
     "delayDays_one": "{{count}}일",
     "delayDays_other": "{{count}}일",
     "delayNotApplied": "자동 승인 대기 없음",

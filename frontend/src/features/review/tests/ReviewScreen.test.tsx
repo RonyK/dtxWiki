@@ -181,7 +181,7 @@ describe("ReviewScreen", () => {
                   auto_approve_by_risk: {
                     low: { enabled: true, delay_days: 7 },
                     medium: { enabled: true, delay_days: 7 },
-                    high: { enabled: false, delay_days: 7 },
+                    high: { allowed: true, delay_days: 28 },
                   },
                 },
               },
@@ -217,6 +217,10 @@ describe("ReviewScreen", () => {
     expect(await screen.findByText("Context page publish")).toBeInTheDocument();
     expect(screen.getByText("Review risk policy")).toBeInTheDocument();
     expect(screen.getByText("Eligible now")).toBeInTheDocument();
+    // A saved High opt-in is what the sweep acts on, so the summary shows it.
+    expect(
+      screen.getByRole("button", { name: "Open High risk auto-approval settings" }),
+    ).toHaveTextContent(/Auto-approve.*28 days/);
     // The lifecycle tabs render in the rail without opening "Filters".
     expect(screen.getByRole("tab", { name: /Pending.*1/ })).toBeInTheDocument();
     const reviewDateLabel = formatVersionTimestamp(reviewItem().created_at);

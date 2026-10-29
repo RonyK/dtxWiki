@@ -2256,7 +2256,7 @@ function ReviewOverview({
           {reviewPolicy.autoApproveByRisk.some((row) => row.allowed)
             ? t("policy.enabledDescription", {
                 defaultValue:
-                  "Auto-approval uses separate Low and Medium delay rules. High-risk items always require manual review.",
+                  "Auto-approval uses a separate delay rule for each allowed risk level.",
               })
             : t("policy.disabledDescription", {
                 defaultValue:
@@ -2313,23 +2313,15 @@ function ReviewOverview({
                       })
                     : t("policy.manualLabel", { defaultValue: "Manual" })}
                 </span>
-                <span className={row.allowed || row.risk === "high" ? undefined : "muted"}>
-                  {row.risk === "high"
-                    ? t("policy.highManualReason", {
-                        defaultValue: "High risk is locked to manual review",
+                <span className={row.allowed ? undefined : "muted"}>
+                  {row.allowed && row.delayDays !== 0
+                    ? t("policy.delayDays", {
+                        count: row.delayDays,
+                        defaultValue: "{{count}} days",
                       })
-                    : row.allowed
-                      ? row.delayDays === 0
-                        ? t("policy.delayNotApplied", {
-                            defaultValue: "No auto-approval delay",
-                          })
-                        : t("policy.delayDays", {
-                            count: row.delayDays,
-                            defaultValue: "{{count}} days",
-                          })
-                      : t("policy.delayNotApplied", {
-                          defaultValue: "No auto-approval delay",
-                        })}
+                    : t("policy.delayNotApplied", {
+                        defaultValue: "No auto-approval delay",
+                      })}
                 </span>
                 {/* L-10 (260908 UI audit): the column header directly above
                     this cell already reads "Eligible" -- repeating the word
@@ -3665,7 +3657,7 @@ function reviewPolicySummary(
       const rawAllowed = row.allowed !== undefined ? row.allowed : row.enabled;
       return {
         risk,
-        allowed: risk !== "high" && rawAllowed === true,
+        allowed: rawAllowed === true,
         delayDays:
           typeof row.delay_days === "number" && Number.isFinite(row.delay_days)
              ? Math.min(30, Math.max(0, Math.floor(row.delay_days)))

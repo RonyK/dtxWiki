@@ -4,6 +4,10 @@ config:
   default: true
   # Long lines: prose and tables are not hard-wrapped, so a width limit is noise.
   MD013: false
+  # Duplicate headings: each CHANGELOG release repeats the same subsections
+  # ("Fixes", "Tests"), so only siblings under one parent must differ.
+  MD024:
+    siblings_only: true
   # Ordered lists: the docs number lists explicitly, across code blocks.
   MD029: false
   # Allow collapsible setup details and explicit section anchors.

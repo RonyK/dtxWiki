@@ -352,7 +352,7 @@ const REVIEW_RISK_RANK: Record<ReviewRiskLevel, number> = {
 // RO-3: risk-aware factory defaults shown for a workspace that has not yet set
 // these explicitly. They mirror the backend factory defaults (Codex #16): a
 // workspace never auto-approves until an admin opts in, so every level falls
-// back to allowed=false. High stays manual-only.
+// back to allowed=false. High stays manual until an admin acknowledges the risk.
 const REVIEW_AUTO_APPROVE_DEFAULTS: Record<
   ReviewRiskLevel,
   { allowed: boolean; delayDays: number }
@@ -8315,19 +8315,18 @@ export function ReviewAutoApproveByRiskSettings({
 }) {
   const { t } = useTranslation("settings");
   const rows = reviewAutoApproveRows(policy);
+  const savedHighAllowed =
+    rows.find((row) => row.risk === "high")?.allowed ?? false;
   const [drafts, setDrafts] = useState(rows);
   // F-9: high auto-approval is gated by an explicit "danger noted" ack. If high
   // is already allowed (saved), the ack is considered given.
-  const [highDangerAck, setHighDangerAck] = useState(
-    () => rows.find((row) => row.risk === "high")?.allowed ?? false,
-  );
+  const [highDangerAck, setHighDangerAck] = useState(savedHighAllowed);
   const baselineKey = useMemo(() => JSON.stringify(rows), [rows]);
   // Re-baseline while rendering rather than from an effect: see PolicyGroupView.
   const [draftsBaselineKey, setDraftsBaselineKey] = useState(baselineKey);
   if (draftsBaselineKey !== baselineKey) {
     setDraftsBaselineKey(baselineKey);
-    setDrafts(rows);
-    setHighDangerAck(rows.find((row) => row.risk === "high")?.allowed ?? false);
+    resetDrafts();
   }
   const savedLabel = savedLabelFor(saveNotice, (key) =>
     key.includes("auto_approve_by_risk"),
@@ -8352,7 +8351,11 @@ export function ReviewAutoApproveByRiskSettings({
       REVIEW_RISK_RANK[draft.risk] > REVIEW_RISK_RANK[fromRisk],
   );
   const saveDisabled =
-    readOnly || busy || dirtyRows.length === 0 || Boolean(conflictingDraft);
+    readOnly ||
+    busy ||
+    dirtyRows.length === 0 ||
+    Boolean(conflictingDraft) ||
+    drafts.some((draft) => Number.isNaN(draft.delayDays));
   useRegisterSettingsDirty("policy:reviewAutoApprove", dirtyRows.length > 0);
 
   // RO-4: when the overview deep-links to /settings?section=review#auto-approve-<risk>,
@@ -8381,6 +8384,13 @@ export function ReviewAutoApproveByRiskSettings({
       window.clearTimeout(timeout);
     };
   }, [location.hash]);
+
+  // The ack is restored with the drafts: resetting the drafts alone brought a
+  // saved High back allowed but locked behind an unchecked ack.
+  function resetDrafts() {
+    setDrafts(rows);
+    setHighDangerAck(savedHighAllowed);
+  }
 
   function updateDraft(
     risk: ReviewRiskLevel,
@@ -8555,14 +8565,20 @@ export function ReviewAutoApproveByRiskSettings({
                   min={0}
                   onChange={(event) =>
                     updateDraft(row.risk, {
-                      delayDays: Math.min(
-                        REVIEW_AUTO_APPROVE_MAX_DAYS,
-                        Math.max(0, Number(event.target.value) || 0),
-                      ),
+                      // An emptied field stays empty until a number is typed.
+                      // Coercing it to 0 put "0" under the caret, so typing 5
+                      // read "05", and saving it meant "no wait" unasked.
+                      delayDays:
+                        event.target.value === ""
+                          ? Number.NaN
+                          : Math.min(
+                              REVIEW_AUTO_APPROVE_MAX_DAYS,
+                              Math.max(0, Math.trunc(Number(event.target.value))),
+                            ),
                     })
                   }
                   type="number"
-                  value={row.delayDays}
+                  value={Number.isNaN(row.delayDays) ? "" : row.delayDays}
                 />
               </label>
             </div>
@@ -8589,7 +8605,7 @@ export function ReviewAutoApproveByRiskSettings({
           <button
             className="icon-button"
             disabled={busy || dirtyRows.length === 0}
-            onClick={() => setDrafts(rows)}
+            onClick={resetDrafts}
             type="button"
           >
             {t("actions.discard")}
@@ -9469,15 +9485,13 @@ function reviewAutoApproveRows(policy: Record<string, unknown>) {
         : def.delayDays;
     // RO-3: read the new "allowed" key, falling back to the legacy "enabled"
     // key for one release, then to the risk-aware factory default. High is
-    // always manual.
+    // read like the others (F-9): forcing it to false hid a saved opt-in,
+    // so the form never re-baselined and a reload showed it unchecked while
+    // the server kept auto-approving.
     const rawAllowed =
       row.allowed !== undefined ? row.allowed : row.enabled;
     const allowed =
-      risk === "high"
-        ? false
-        : rawAllowed === undefined
-          ? def.allowed
-          : rawAllowed === true;
+      rawAllowed === undefined ? def.allowed : rawAllowed === true;
     return {
       risk,
       allowed,
