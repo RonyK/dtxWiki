@@ -24,5 +24,8 @@ MCP_SERVER_INSTRUCTIONS = (
     "conversation_token "
     "optionally. Content tools (writes, citations, feedback, bundles, and "
     "maintenance) require it: echo envelope.conversation_token from an earlier "
-    'call or pass the literal "new" to start a conversation.'
+    'call or pass the literal "new" to start a conversation. A result field '
+    "that is left out has its default (false, 0, empty, or null); a field "
+    "whose null means unknown is always sent. envelope.request_id names the "
+    "call when you report a problem."
 )

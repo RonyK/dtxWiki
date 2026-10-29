@@ -4,13 +4,14 @@ from uuid import uuid4
 
 import pytest
 
-from backend.mcp.envelope import error_envelope
+from backend.mcp.envelope import MCPErrorResponse, error_envelope
 from backend.mcp.protocol import output_validation
 from backend.mcp.protocol import runner as runner_module
 from backend.mcp.protocol.output_validation import (
     MCPOutputContractViolation,
     validate_tool_output,
 )
+from backend.mcp.protocol.wire_defaults import omit_declared_defaults
 from backend.policy.auth import ActorContext
 from backend.scripts.export_mcp_schemas import build_mcp_schemas
 from backend.tests.conftest import captured_log_messages
@@ -132,7 +133,11 @@ def test_tool_error_payload_satisfies_every_tool_contract_in_both_phases(tool_na
 
     validate_tool_output(tool_name, payload)
     validate_tool_output(
-        tool_name, runner_module._slim_envelope_for_wire(payload), phase="wire"
+        tool_name,
+        omit_declared_defaults(
+            MCPErrorResponse, runner_module._slim_envelope_for_wire(payload)
+        ),
+        phase="wire",
     )
 
 
@@ -232,15 +237,15 @@ def test_the_model_facing_envelope_field_set_is_pinned():
     so it is asserted here rather than described in a comment.
 
     These are the 9 fields a model actually acts on -- a status/error to branch
-    on, warnings and error_details to self-correct from, and the two handles a
-    follow-up call needs. The other 13 are audit/telemetry, and folding them
-    into envelope.meta is most of the wire saving the 260901 design bought.
+    on, warnings and error_details to self-correct from, the two handles a
+    follow-up call needs, and request_id to name the call in a report. The
+    other 14 are audit/telemetry and stay in the trace only.
     """
 
     assert output_validation.WIRE_ENVELOPE_FIELDS == frozenset(
         {
             "result_status",
-            "result_summary",
+            "request_id",
             "error_code",
             "error_message",
             "error_details",
@@ -253,18 +258,14 @@ def test_the_model_facing_envelope_field_set_is_pinned():
 
 
 def test_the_folded_field_count_matches_the_envelope():
-    """The comments say 14; make that a measurement, not a claim.
+    """The comments say 14 fields stay off the wire; make that a measurement.
 
-    They said 13 for the whole of Epic-1, at nine sites across production code
-    and tests. The real count is 14, and the fourteenth is `meta` ITSELF: the
-    slimmer folds every non-model-facing field into a fresh `meta` dict, and
-    `meta` is not in the model-facing set, so a fresh envelope produces
-    `envelope.meta.meta = null` on the wire. That artifact is recorded but not
-    yet fixed -- `_slim_envelope_for_wire` lives in runner.py, which another
-    change owns at the time of writing.
+    The envelope's own `meta` field is one of them. The slimmer used to fold
+    the others into a fresh `meta` dict on the wire (so a fresh envelope
+    carried `envelope.meta.meta = null`); it now leaves all 14 to the trace.
 
     Pinning the count here means the next person to touch the envelope has to
-    update the number rather than discovering later that nine comments drifted.
+    update the number rather than discovering later that the comments drifted.
     """
 
     from backend.schemas.common import MCPResultEnvelope
@@ -278,7 +279,4 @@ def test_the_folded_field_count_matches_the_envelope():
         "schemas/common.py and output_validation.py must match this set: "
         f"{sorted(folded)}"
     )
-    assert "meta" in folded, (
-        "`meta` folding into itself is what makes the count 14 rather than 13, "
-        "and is why a fresh envelope carries `envelope.meta.meta = null`"
-    )
+    assert "meta" in folded, "the envelope's own `meta` field stays off the wire"

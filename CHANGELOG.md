@@ -110,6 +110,18 @@
   `list_agent_categories` for AgentPages. The guide offers the
   whole-workspace bundle only when its estimated size is within 64 KiB;
   above that it routes to search and `get_index`.
+- MCP tool contract revision 21 trims what every tool result carries. The
+  envelope is `result_status`, `request_id`, `conversation_token`, and when
+  present `warnings` and `review_item_id`; a call that did not succeed adds
+  `error_code`, `error_message`, `error_details` and `retryable`.
+  `envelope.meta` (447 bytes of audit fields on every call) and
+  `result_summary` are gone; the audit fields stay in the server's trace.
+  `request_id` is also in the result's protocol `_meta` as
+  `com.dtxwiki/requestId`. A field equal to an empty declared default (null,
+  false, 0, empty string, list or object) is now left out, so clients treat
+  an absent field as that default; `edit_receipt.changes`,
+  `edit_receipt.body_adjusted` and `envelope.retryable` are always sent
+  because their null means unknown.
 - Approving a Context review publishes the changes up to that draft; rejecting
   one also rejects the later drafts written on it and returns the edit head to
   the draft below them. Earlier drafts and branched alternatives are untouched.

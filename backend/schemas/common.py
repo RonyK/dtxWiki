@@ -184,7 +184,22 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        returns a node and its visible children with node_id. The bundle is
 #        offered for whole reading only when its estimated size is within
 #        64 KiB (workspace_routing), not by page count.
-MCP_TOOL_CONTRACT_REVISION = 20
+#  21 -- The envelope on the wire is result_status, request_id,
+#        conversation_token, and when present warnings and review_item_id;
+#        a call that did not succeed adds error_code, error_message,
+#        error_details and retryable. envelope.meta and result_summary are
+#        gone (audit fields stay in the trace). request_id is also in the
+#        result's protocol _meta as com.dtxwiki/requestId. Every tool leaves a
+#        field off the wire when it equals an empty declared default (null,
+#        false, 0, "", [], {}); fields marked x-wire-explicit
+#        (edit_receipt.changes, edit_receipt.body_adjusted, envelope.retryable)
+#        are always sent because their null means unknown.
+MCP_TOOL_CONTRACT_REVISION = 21
+# Marks a field whose null means "unknown" on the MCP wire. Fields at their
+# declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
+# a field carrying this marker is always sent, so an absent value can never be
+# confused with an unknown one.
+WIRE_EXPLICIT_FIELD = {"x-wire-explicit": True}
 ERROR_CODES = (
     "not_found",
     "stale_base_version",
@@ -516,7 +531,7 @@ class MCPResultEnvelope(BaseModel):
     # (an agent that cannot tell will loop).
     error_message: str | None = None
     error_details: list[MCPErrorDetail] = Field(default_factory=list)
-    retryable: bool | None = None
+    retryable: bool | None = Field(default=None, json_schema_extra=WIRE_EXPLICIT_FIELD)
     review_item_id: UUID | None = None
     warnings: list[EnvelopeWarning] = Field(default_factory=list)
     conversation_token: str | None = Field(

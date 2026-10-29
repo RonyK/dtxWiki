@@ -10,6 +10,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
+from backend.schemas.common import WIRE_EXPLICIT_FIELD
+
 EditMode = Literal["patch", "whole_body", "create"]
 
 
@@ -106,6 +108,7 @@ class EditReceipt(BaseModel):
             "changes_omitted_count counts the rest. null on create and when "
             "unknown (a replay of a receipt stored before this field)."
         ),
+        json_schema_extra=WIRE_EXPLICIT_FIELD,
     )
     changes_omitted_count: int = 0
     body_adjusted: bool | None = Field(
@@ -115,6 +118,7 @@ class EditReceipt(BaseModel):
             "produced: managed frontmatter was added or synced, or a format "
             "fix ran. null when unknown."
         ),
+        json_schema_extra=WIRE_EXPLICIT_FIELD,
     )
     server_fixes: list[str] = Field(
         default_factory=list,

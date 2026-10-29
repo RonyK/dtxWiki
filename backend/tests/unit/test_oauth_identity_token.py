@@ -443,7 +443,8 @@ def test_list_my_workspaces_oauth_hides_default_workspace_id_outside_roster(
     assert response.status_code == 200
     data = response.json()["result"]["structuredContent"]["data"]
     assert {item["id"] for item in data["workspaces"]} == {str(workspace_a)}
-    assert data["default_workspace_id"] is None
+    # An empty default is left off the wire: absent means null.
+    assert data.get("default_workspace_id") is None
 
 
 def test_revoke_consent_invalidates_the_access_token_immediately(page_service):

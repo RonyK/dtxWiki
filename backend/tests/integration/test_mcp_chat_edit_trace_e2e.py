@@ -120,6 +120,13 @@ def test_traced_edit_calls_carry_previews_receipts_and_the_session_diff(
     )
     assert patched["envelope"]["result_status"] == "succeeded", patched
     after_patch = patched["data"]
+    # On the wire a field at its declared default is left off (an empty
+    # server_fixes, a zero omitted count), but a field whose null means
+    # "unknown" is always sent.
+    wire_receipt = after_patch["edit_receipt"]
+    assert "server_fixes" not in wire_receipt
+    assert "changes_omitted_count" not in wire_receipt
+    assert {"changes", "body_adjusted"} <= set(wire_receipt)
 
     failed = _call(
         page_service,

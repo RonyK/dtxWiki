@@ -402,7 +402,8 @@
               }
             ],
             "default": null,
-            "title": "Retryable"
+            "title": "Retryable",
+            "x-wire-explicit": true
           },
           "review_item_id": {
             "anyOf": [

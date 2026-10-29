@@ -180,7 +180,7 @@ def test_discovery_calls_need_no_token(page_service, conversation_actor):
     payload = json.loads(result.content[0].text)
     assert result.isError is False
     assert payload["envelope"]["result_status"] == "succeeded", payload
-    assert [warning["code"] for warning in payload["envelope"]["warnings"]] == [
+    assert [warning["code"] for warning in payload["envelope"].get("warnings", [])] == [
         "conversation_token_not_supplied"
     ]
 
@@ -213,7 +213,7 @@ def test_discovery_call_with_a_token_stays_in_one_chat_without_warning(
         assert result.isError is False
         assert payload["envelope"]["conversation_token"] == token
         assert "conversation_token_not_supplied" not in {
-            warning["code"] for warning in payload["envelope"]["warnings"]
+            warning["code"] for warning in payload["envelope"].get("warnings", [])
         }
     assert _chat_count(page_service, workspace_id) == before + 1
 

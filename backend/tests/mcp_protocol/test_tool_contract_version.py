@@ -82,6 +82,7 @@ TOOL_CONTRACT_DIGESTS = {
     18: "a31838390269",
     19: "8d1f8f54fc8b",
     20: "a9b2db9d822c",
+    21: "b3f00168ca4d",
 }
 
 
@@ -238,7 +239,7 @@ def test_the_digest_moves_when_the_model_facing_envelope_allowlist_widens(monkey
     """
 
     baseline = tool_contract_digest()
-    widened = frozenset(tool_descriptors.WIRE_ENVELOPE_FIELDS | {"request_id"})
+    widened = frozenset(tool_descriptors.WIRE_ENVELOPE_FIELDS | {"workspace_id"})
     assert _digest_with(monkeypatch, WIRE_ENVELOPE_FIELDS=widened) != baseline
 
 

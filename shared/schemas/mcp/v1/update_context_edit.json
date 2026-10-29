@@ -333,7 +333,8 @@
             ],
             "default": null,
             "description": "Whether the stored body differs from the body your request produced: managed frontmatter was added or synced, or a format fix ran. null when unknown.",
-            "title": "Body Adjusted"
+            "title": "Body Adjusted",
+            "x-wire-explicit": true
           },
           "changed_blocks": {
             "description": "Blocks whose id or hash is new after a patch, so a follow-up block-addressed patch needs no read_structure_map round trip. Unchanged blocks keep the id and hash you already hold. Listed up to 50; changed_blocks_omitted_count counts the rest.",
@@ -373,7 +374,8 @@
             ],
             "default": null,
             "description": "The regions this patch or whole-body update replaced, in document order: exactly what the stored body now says, including any server fix. Listed until 20 regions or 4 KB; changes_omitted_count counts the rest. null on create and when unknown (a replay of a receipt stored before this field).",
-            "title": "Changes"
+            "title": "Changes",
+            "x-wire-explicit": true
           },
           "changes_omitted_count": {
             "default": 0,
@@ -999,7 +1001,8 @@
               }
             ],
             "default": null,
-            "title": "Retryable"
+            "title": "Retryable",
+            "x-wire-explicit": true
           },
           "review_item_id": {
             "anyOf": [
