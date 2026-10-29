@@ -4650,7 +4650,7 @@ class PageService:
             requested = str(parent_id) if parent_id is not None else "default Inbox"
             raise PageValidationError(
                 f"placement parent {requested} is invalid: {exc}. "
-                "Call guide and choose a node_id from placement_parent_candidates; "
+                "Walk get_index(format='nodes') and choose a node_id there; "
                 "the page write was rolled back.",
                 cause_error_code=exc.error_code,
             ) from exc

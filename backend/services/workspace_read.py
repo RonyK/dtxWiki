@@ -1,21 +1,23 @@
+from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from backend.models.agent import AgentPage
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
 from backend.policy.auth import ActorContext
 from backend.policy.rbac import list_user_workspaces
 from backend.policy.trust_boundaries import actor_workspace_filter
+from backend.repositories.context_page_repo import visible_page_body_totals
 from backend.schemas.read import (
     GuidePayload,
     WorkspaceDetail,
     WorkspaceListData,
+    WorkspaceRouting,
     WorkspaceSummary,
 )
-from backend.services.actor_visible_read import agent_page_requires_sensitive_access
 from backend.services.read_errors import ReadNotFoundError
 from backend.services.review_risk_policy import ai_writes_require_human_review
 from backend.services.settings_service import normalized_library_policy
@@ -83,10 +85,36 @@ AVAILABLE_RESOURCES = [
     "dtxwiki://workspaces/{workspace_id}/context/pages/{slug}",
 ]
 REQUIRED_WORKFLOW = [
-    "guide",
-    "search or get_index",
-    "fetch a search result, or use read_concept/read for direct navigation",
-    "cite before a sourced write",
+    (
+        "guide: this brief view is enough to read, edit and explore. Call "
+        "guide(detail_level='normal') for taxonomies, prompts/resources, "
+        "AgentPage policy, hot concepts and your full tool list, or "
+        "guide(detail_level='detailed') for field explanations, only when a "
+        "task needs them."
+    ),
+    (
+        "find: search (ranked), then fetch a hit by its id and type; grep_wiki "
+        "for exact text; get_index to browse; what_changed to re-sync instead "
+        "of re-reading."
+    ),
+    (
+        "read: read_context_outline to choose a section (with select it "
+        "returns that section), read for a whole page, read_structure_map for "
+        "block ids before block-addressed edits."
+    ),
+    "cite before a sourced write.",
+    (
+        "write: create_context_page (new page) or begin_context_edit "
+        "(existing page); then patch_context_edit (local changes) or "
+        "update_context_edit (whole body), taking the next editing_revision "
+        "and block ids from each response's edit_receipt instead of "
+        "re-reading; then submit_context_edit_for_review."
+    ),
+    (
+        "place a new page: walk get_index(format='nodes') from /context and "
+        "pass the chosen node_id as placement_parent_node_id (omit it for "
+        "Inbox)."
+    ),
     (
         "for an image: upload_image first; store data.markdown or "
         "data.logical_ref, never data.content_url or an /api/v1 transport URL; "
@@ -94,15 +122,56 @@ REQUIRED_WORKFLOW = [
         "editing_version_id, so create the page first for a new page, then "
         "upload and call update_context_edit; never fall back to data:"
     ),
-    (
-        "to write: create_context_page (new page) or begin_context_edit "
-        "(existing page); then patch_context_edit (local changes) or "
-        "update_context_edit (whole body), taking the next editing_revision "
-        "and block ids from each response's edit_receipt instead of "
-        "re-reading; then submit_context_edit_for_review"
-    ),
 ]
-CAG_BUNDLE_PAGE_LIMIT = 200
+# Above this, the guide sends agents to search and get_index instead of
+# offering the whole-workspace bundle: a page count says nothing about size
+# (109 pages here weighed 7.3 MiB).
+WHOLE_READ_BUDGET_BYTES = 64 * 1024
+GUIDE_DETAIL_LEVELS = {
+    "brief": (
+        "Default: workspace, your permissions, how to find pages, and the "
+        "read/write workflow. Enough to read, edit and explore."
+    ),
+    "normal": (
+        "Adds page and AgentPage taxonomies, prompt and resource entry points, "
+        "the AgentPage injection policy, hot concepts and your full tool list."
+    ),
+    "detailed": (
+        "Adds the full workspace summary and actor context, and explains what "
+        "each permission and routing field means."
+    ),
+}
+GUIDE_LEVEL_ORDER = ("brief", "normal", "detailed")
+# "full" was the old name of the richest level; it never meant every list.
+GUIDE_LEVEL_ALIASES = {"full": "detailed"}
+GUIDE_FIELD_EXPLANATIONS = {
+    "actor_context.may_write_drafts": (
+        "True when your credential can call create_context_page or "
+        "begin_context_edit."
+    ),
+    "actor_context.my_writes_wait_for_human_review": (
+        "True when what you write as an AI client waits for a human review "
+        "decision in this workspace; false for browser writes, or when the "
+        "workspace turned the requirement off."
+    ),
+    "actor_context.my_writes_stage_as_drafts": (
+        "True for AI-authenticated writes: they never move the published "
+        "version themselves; a review decision publishes them."
+    ),
+    "workspace_routing.whole_read": (
+        "within_budget: the whole-workspace bundle is estimated at or under "
+        "whole_read_budget_bytes, so reading it whole is an option for tasks "
+        "that need the whole workspace. over_budget: find pages with search "
+        "or get_index instead. The size is estimated from stored bodies."
+    ),
+}
+_BRIEF_SUMMARY_FIELDS = ("id", "slug", "title", "goal", "default_language")
+_BRIEF_ACTOR_FIELDS = (
+    "workspace_role",
+    "may_write_drafts",
+    "my_writes_wait_for_human_review",
+    "my_writes_stage_as_drafts",
+)
 
 RECOMMENDED_AGENT_GUIDANCE_FLOW = [
     "Call guide first to understand workspace policy and available MCP surfaces.",
@@ -127,9 +196,9 @@ RECOMMENDED_AGENT_GUIDANCE_FLOW = [
     ),
     (
         "A new Context draft with no placement goes to Inbox. To choose a "
-        "location, read placement_parent_candidates and pass that entry's "
-        "node_id as placement_parent_node_id; paths are discovery hints, not "
-        "write inputs."
+        "location, walk get_index(format='nodes') and pass a node_id as "
+        "placement_parent_node_id; paths are discovery hints, not write "
+        "inputs."
     ),
     (
         "For images, call upload_image first and store data.markdown or "
@@ -142,15 +211,25 @@ RECOMMENDED_AGENT_GUIDANCE_FLOW = [
     ),
 ]
 
-_SMALL_WORKSPACE_ROUTING = (
-    "This workspace is small ({count} visible pages): read the whole bundle "
-    "resource {bundle_uri} once and re-sync with what_changed (CAG routing)."
+_WITHIN_BUDGET_ROUTING = (
+    "The whole workspace is about {size} ({pages} pages), within the {budget} "
+    "budget: read the bundle resource only for tasks that need the whole "
+    "workspace; otherwise find pages with search or get_index, and re-sync "
+    "with what_changed."
 )
-_LARGE_WORKSPACE_ROUTING = (
-    "This workspace is large ({count} visible pages): descend get_index "
-    "nodes and read_concept selected paths; use search/grep_wiki for "
-    "lookups and what_changed for deltas."
+_OVER_BUDGET_ROUTING = (
+    "This workspace is too large to read whole (about {size}, {pages} pages, "
+    "over the {budget} budget). Find pages with search or get_index, read only "
+    "the sections you need, and re-sync with what_changed."
 )
+
+
+@dataclass(frozen=True)
+class _GuideInputs:
+    session: Session
+    workspace: Workspace
+    actor: ActorContext | None
+    available_tools: list[str] | None
 
 
 class WorkspaceReadService:
@@ -272,158 +351,148 @@ class WorkspaceReadService:
         self,
         session: Session,
         workspace_id: UUID,
-        detail_level: str = "normal",
+        detail_level: str = "brief",
         available_tools: list[str] | None = None,
         actor: ActorContext | None = None,
     ) -> GuidePayload:
+        """The guide at ``detail_level``: each level adds the views registered
+        for it on top of the levels below (``_GUIDE_VIEWS``)."""
+
         workspace = session.get(Workspace, workspace_id)
         if workspace is None:
             raise ReadNotFoundError("workspace not found")
+        level = GUIDE_LEVEL_ALIASES.get(detail_level, detail_level)
+        rank = GUIDE_LEVEL_ORDER.index(level)
+        inputs = _GuideInputs(
+            session=session,
+            workspace=workspace,
+            actor=actor,
+            available_tools=available_tools,
+        )
+        fields: dict[str, Any] = {
+            "detail_level": level,
+            "detail_levels": GUIDE_DETAIL_LEVELS,
+        }
+        for view_level, view in self._GUIDE_VIEWS:
+            if GUIDE_LEVEL_ORDER.index(view_level) <= rank:
+                fields.update(view(self, inputs))
+        return GuidePayload(**fields)
+
+    def _brief_view(self, inputs: _GuideInputs) -> dict[str, Any]:
+        """What reading, editing and exploring need, and nothing else."""
+
+        summary = self._workspace_summary(inputs)
+        actor_context = self._actor_context(inputs)
+        return {
+            "workspace_summary": {key: summary[key] for key in _BRIEF_SUMMARY_FIELDS},
+            "actor_context": {key: actor_context[key] for key in _BRIEF_ACTOR_FIELDS},
+            "citation_policy": inputs.workspace.citation_policy,
+            "workspace_routing": self._workspace_routing(inputs),
+            "required_workflow": REQUIRED_WORKFLOW,
+        }
+
+    def _normal_view(self, inputs: _GuideInputs) -> dict[str, Any]:
         from backend.services.trail_analysis import list_hot_concepts
 
-        return GuidePayload(
-            workspace_summary=self._summary(
-                workspace, role=getattr(actor, "workspace_role", None)
-            ).model_dump(mode="json"),
-            actor_context={
-                "actor_kind": getattr(actor, "actor_kind", "anonymous"),
-                "actor_id": getattr(actor, "actor_id", None),
-                "workspace_id": str(workspace.id),
-                "workspace_slug": workspace.slug,
-                "workspace_role": getattr(actor, "workspace_role", "none"),
-                "may_write_drafts": any(
-                    name in set(available_tools or [])
-                    for name in ("create_context_page", "begin_context_edit")
-                ),
-                # Both of these used to be read out of `write_policy`, a blob
-                # nothing enforced and no surface could edit, under names that
-                # promised more than they delivered. They now report what is
-                # actually true of this caller's writes.
-                #
-                # `my_writes_wait_for_human_review` is the question an agent is
-                # really asking: will what I write sit in a queue, or land? It
-                # is false for a person writing in the browser, and for an agent
-                # in a workspace that has turned the requirement off.
-                "my_writes_wait_for_human_review": (
-                    getattr(actor, "provenance", "internal") in AI_PROVENANCES
-                    and ai_writes_require_human_review(workspace)
-                ),
-                # An invariant, not a preference: an AI-authenticated write never
-                # moves the published pointer itself. It either waits for a
-                # decision or is published by one.
-                "my_writes_stage_as_drafts": (
-                    getattr(actor, "provenance", "internal") in AI_PROVENANCES
-                ),
-            },
-            library_policy_summary=self._library_policy_summary(workspace),
-            context_write_policy={},
-            agent_injection_policy=workspace.agent_injection_policy,
-            citation_policy=workspace.citation_policy,
-            context_page_taxonomy=self._taxonomy(CONTEXT_PAGE_TAXONOMY),
-            agent_page_taxonomy=self._taxonomy(AGENT_PAGE_TAXONOMY),
-            available_tools=self._available_tools(detail_level, available_tools),
-            available_prompts=AVAILABLE_PROMPTS,
-            available_resources=AVAILABLE_RESOURCES,
-            active_agent_pages=self._active_agent_pages(
-                session,
-                workspace_id,
-                include_sensitive=_actor_is_owner(session, actor, workspace_id),
+        return {
+            "library_policy_summary": self._library_policy_summary(inputs.workspace),
+            "agent_injection_policy": inputs.workspace.agent_injection_policy,
+            "context_page_taxonomy": self._taxonomy(CONTEXT_PAGE_TAXONOMY),
+            "agent_page_taxonomy": self._taxonomy(AGENT_PAGE_TAXONOMY),
+            "available_tools": self._available_tools(inputs.available_tools),
+            "available_prompts": AVAILABLE_PROMPTS,
+            "available_resources": AVAILABLE_RESOURCES,
+            "hot_concepts": list_hot_concepts(
+                inputs.session,
+                inputs.workspace.id,
+                actor=inputs.actor,
             ),
-            hot_concepts=list_hot_concepts(
-                session,
-                workspace_id,
-                actor=actor,
-            ),
-            placement_parent_candidates=self._placement_parent_candidates(
-                session, workspace_id
-            ),
-            recommended_agent_guidance_flow=self._guidance_flow(
-                session, workspace_id, actor
-            ),
-            required_workflow=REQUIRED_WORKFLOW,
-        )
+            "recommended_agent_guidance_flow": RECOMMENDED_AGENT_GUIDANCE_FLOW,
+        }
+
+    def _detailed_view(self, inputs: _GuideInputs) -> dict[str, Any]:
+        return {
+            "workspace_summary": self._workspace_summary(inputs),
+            "actor_context": self._actor_context(inputs),
+            "field_explanations": GUIDE_FIELD_EXPLANATIONS,
+        }
+
+    # Lowest level that includes each view; a later view may replace a field
+    # an earlier one set (detailed's full summary over brief's subset). A new
+    # guide field is a new view here, not a branch in guide().
+    _GUIDE_VIEWS = (
+        ("brief", _brief_view),
+        ("normal", _normal_view),
+        ("detailed", _detailed_view),
+    )
+
+    def _workspace_summary(self, inputs: _GuideInputs) -> dict[str, Any]:
+        return self._summary(
+            inputs.workspace, role=getattr(inputs.actor, "workspace_role", None)
+        ).model_dump(mode="json")
 
     @staticmethod
-    def _placement_parent_candidates(
-        session: Session, workspace_id: UUID
-    ) -> list[dict[str, str | int | None]]:
-        from backend.models.tree import WorkspaceTreeNode
-
-        nodes = session.scalars(
-            select(WorkspaceTreeNode)
-            .where(
-                WorkspaceTreeNode.workspace_id == workspace_id,
-                WorkspaceTreeNode.section == "context",
-                WorkspaceTreeNode.visibility_status == "visible",
-            )
-        ).all()
-        nodes_by_id = {node.id: node for node in nodes}
-
-        def hierarchy(node: WorkspaceTreeNode) -> tuple[int, str]:
-            lineage: list[WorkspaceTreeNode] = []
-            seen: set[UUID] = set()
-            current: WorkspaceTreeNode | None = node
-            while current is not None and current.id not in seen:
-                seen.add(current.id)
-                lineage.append(current)
-                current = (
-                    nodes_by_id.get(current.parent_id)
-                    if current.parent_id is not None
-                    else None
-                )
-            lineage.reverse()
-            path_parts = [
-                candidate.slug or candidate.title.strip().replace(" ", "-").lower()
-                for candidate in lineage
-            ]
-            return max(len(lineage) - 1, 0), "/" + "/".join(path_parts)
-
-        candidates = []
-        for node in sorted(nodes, key=lambda item: (item.title, item.id)):
-            if not node.can_have_children:
-                continue
-            depth, path = hierarchy(node)
-            # No slug or parent_node_id: the path already ends in the slug and
-            # spells out the parents, and this list is most of every guide
-            # response (78 entries were 23.6k of a 32k-character payload).
-            candidates.append(
-                {
-                    "node_id": str(node.id),
-                    "title": node.title,
-                    "depth": depth,
-                    "path": path,
-                }
-            )
-        return candidates
+    def _actor_context(inputs: _GuideInputs) -> dict[str, Any]:
+        actor = inputs.actor
+        workspace = inputs.workspace
+        available_tools = inputs.available_tools
+        return {
+            "actor_kind": getattr(actor, "actor_kind", "anonymous"),
+            "actor_id": getattr(actor, "actor_id", None),
+            "workspace_id": str(workspace.id),
+            "workspace_slug": workspace.slug,
+            "workspace_role": getattr(actor, "workspace_role", "none"),
+            "may_write_drafts": any(
+                name in set(available_tools or [])
+                for name in ("create_context_page", "begin_context_edit")
+            ),
+            # Both of these used to be read out of `write_policy`, a blob
+            # nothing enforced and no surface could edit, under names that
+            # promised more than they delivered. They now report what is
+            # actually true of this caller's writes.
+            #
+            # `my_writes_wait_for_human_review` is the question an agent is
+            # really asking: will what I write sit in a queue, or land? It
+            # is false for a person writing in the browser, and for an agent
+            # in a workspace that has turned the requirement off.
+            "my_writes_wait_for_human_review": (
+                getattr(actor, "provenance", "internal") in AI_PROVENANCES
+                and ai_writes_require_human_review(workspace)
+            ),
+            # An invariant, not a preference: an AI-authenticated write never
+            # moves the published pointer itself. It either waits for a
+            # decision or is published by one.
+            "my_writes_stage_as_drafts": (
+                getattr(actor, "provenance", "internal") in AI_PROVENANCES
+            ),
+        }
 
     @staticmethod
-    def _guidance_flow(
-        session: Session,
-        workspace_id: UUID,
-        actor: ActorContext | None,
-    ) -> list[str]:
-        """E-3 scale-aware routing: small workspaces read the CAG bundle
-        whole; large ones descend the index — the guide must say which."""
-        from backend.models.context import ContextPage
+    def _workspace_routing(inputs: _GuideInputs) -> WorkspaceRouting:
+        """Offer the whole-workspace bundle only when it is small enough to
+        read whole; otherwise route to search and get_index."""
 
-        count = (
-            session.scalar(
-                select(func.count())
-                .select_from(ContextPage)
-                .where(ContextPage.workspace_id == workspace_id)
-                .where(ContextPage.lifecycle_status != "archived")
-                .where(ContextPage.current_published_version_id.is_not(None))
-            )
-            or 0
+        pages, body_bytes = visible_page_body_totals(
+            inputs.session, inputs.workspace.id, inputs.actor
         )
-        bundle_uri = f"dtxwiki://workspaces/{workspace_id}/bundle"
-        if count <= CAG_BUNDLE_PAGE_LIMIT:
-            routing = _SMALL_WORKSPACE_ROUTING.format(
-                count=count, bundle_uri=bundle_uri
-            )
-        else:
-            routing = _LARGE_WORKSPACE_ROUTING.format(count=count)
-        return [*RECOMMENDED_AGENT_GUIDANCE_FLOW, routing]
+        within = body_bytes <= WHOLE_READ_BUDGET_BYTES
+        template = _WITHIN_BUDGET_ROUTING if within else _OVER_BUDGET_ROUTING
+        return WorkspaceRouting(
+            visible_pages=pages,
+            bundle_estimated_bytes=body_bytes,
+            whole_read_budget_bytes=WHOLE_READ_BUDGET_BYTES,
+            whole_read="within_budget" if within else "over_budget",
+            bundle_resource=(
+                f"dtxwiki://workspaces/{inputs.workspace.id}/bundle"
+                if within
+                else None
+            ),
+            guidance=template.format(
+                size=_human_bytes(body_bytes),
+                pages=pages,
+                budget=_human_bytes(WHOLE_READ_BUDGET_BYTES),
+            ),
+        )
 
     @staticmethod
     def _workspace_rows(
@@ -492,37 +561,9 @@ class WorkspaceReadService:
         )
 
     @staticmethod
-    def _active_agent_pages(
-        session: Session,
-        workspace_id: UUID,
-        include_sensitive: bool,
-    ) -> list[dict[str, str]]:
-        rows = session.scalars(
-            select(AgentPage)
-            .where(AgentPage.workspace_id == workspace_id)
-            .where(AgentPage.lifecycle_status == "active")
-            .order_by(AgentPage.category, AgentPage.priority, AgentPage.slug)
-        ).all()
-        return [
-            {
-                "id": str(page.id),
-                "slug": page.slug,
-                "title": page.title,
-                "category": page.category,
-                "injection_policy": page.injection_policy,
-            }
-            for page in rows
-            if include_sensitive or not agent_page_requires_sensitive_access(page)
-        ]
-
-    @staticmethod
     def _taxonomy(entries: list[tuple[str, str]]) -> list[dict[str, str]]:
         return [
-            {
-                "type": entry_type,
-                "description": description,
-                "example_use": description,
-            }
+            {"type": entry_type, "description": description}
             for entry_type, description in entries
         ]
 
@@ -534,37 +575,15 @@ class WorkspaceReadService:
         }
 
     @staticmethod
-    def _available_tools(
-        detail_level: str,
-        available_tools: list[str] | None = None,
-    ) -> list[str]:
-        if detail_level == "brief":
-            tools = [
-                "guide",
-                "search",
-                "fetch",
-                "grep_wiki",
-                "read",
-                "list_agent_categories",
-            ]
-        else:
-            tools = AVAILABLE_READ_TOOLS
+    def _available_tools(available_tools: list[str] | None = None) -> list[str]:
         if available_tools is None:
-            return tools
+            return AVAILABLE_READ_TOOLS
         allowed = set(available_tools)
-        return [tool for tool in tools if tool in allowed]
+        return [tool for tool in AVAILABLE_READ_TOOLS if tool in allowed]
 
 
-def _actor_is_owner(
-    session: Session,
-    actor: ActorContext | None,
-    workspace_id: UUID,
-) -> bool:
-    if actor is None:
-        return True
-    if actor.user_id is None:
-        return False
-    return any(
-        workspace.id == workspace_id and role == "owner"
-        for workspace, role in WorkspaceReadService._workspace_rows(session, actor)
-    )
+def _human_bytes(size: int) -> str:
+    if size >= 1024 * 1024:
+        return f"{size / (1024 * 1024):.1f} MiB"
+    kib = size / 1024
+    return f"{kib:.0f} KiB" if size % 1024 == 0 else f"{kib:.1f} KiB"

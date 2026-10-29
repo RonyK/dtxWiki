@@ -119,10 +119,12 @@ TOOL_META = {
     ),
     "guide": (
         "Get workspace guide",
-        "Call this first for a workspace. Return the caller actor context, resolved "
-        "workspace, write/review behavior, policy summaries, "
-        "Agent/Context taxonomy, active AgentPage inventory, available tools, "
-        "MCP prompts/resources, and the required read/write workflow.",
+        "Call this first for a workspace. detail_level='brief' (default) "
+        "returns what you need to read, edit and explore: the workspace, your "
+        "permissions, how to find pages and the read/write workflow. 'normal' "
+        "adds taxonomies, prompts/resources, AgentPage policy, hot concepts "
+        "and your full tool list; 'detailed' adds the full workspace summary "
+        "and field explanations. Every level lists all three.",
         True,
     ),
     "search": (
@@ -399,7 +401,10 @@ TOOL_META = {
         "Get knowledge index",
         "Tier-1 navigational catalog (OKF index.md) of the workspace: a list of "
         "Context concepts and Library sources the agent can survey before "
-        "reading. Filtered to what the actor may see. Pair with read_concept.",
+        "reading. Filtered to what the actor may see. Pair with read_concept. "
+        "format='nodes' returns one tree node and its visible children with "
+        "node_id instead: walk from /context to choose a "
+        "placement_parent_node_id for create_context_page.",
         True,
     ),
     "read_concept": (

@@ -17,6 +17,38 @@
         "description": "Opaque MCP conversation token. Omit or pass 'new' to start a new dtxWiki MCP chat; echo the returned envelope value to append.",
         "title": "Conversation Token"
       },
+      "cursor": {
+        "anyOf": [
+          {
+            "maxLength": 512,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "format='nodes' only: next_cursor from the previous page.",
+        "title": "Cursor"
+      },
+      "format": {
+        "default": "markdown",
+        "description": "'nodes' returns one tree node and its visible children with node_id, so you can walk from /context to a placement_parent_node_id.",
+        "enum": [
+          "markdown",
+          "nodes"
+        ],
+        "title": "Format",
+        "type": "string"
+      },
+      "limit": {
+        "default": 20,
+        "description": "format='nodes' only.",
+        "maximum": 200,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+      },
       "node": {
         "anyOf": [
           {
@@ -108,6 +140,108 @@
           "message"
         ],
         "title": "EnvelopeWarning",
+        "type": "object"
+      },
+      "IndexNodeChild": {
+        "additionalProperties": false,
+        "properties": {
+          "can_have_children": {
+            "title": "Can Have Children",
+            "type": "boolean"
+          },
+          "has_children": {
+            "title": "Has Children",
+            "type": "boolean"
+          },
+          "node_id": {
+            "format": "uuid",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "node_kind": {
+            "title": "Node Kind",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "title",
+          "path",
+          "node_kind",
+          "can_have_children",
+          "has_children"
+        ],
+        "title": "IndexNodeChild",
+        "type": "object"
+      },
+      "IndexNodeRef": {
+        "additionalProperties": false,
+        "properties": {
+          "node_id": {
+            "format": "uuid",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "title",
+          "path"
+        ],
+        "title": "IndexNodeRef",
+        "type": "object"
+      },
+      "IndexNodesPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "children": {
+            "items": {
+              "$ref": "#/$defs/IndexNodeChild"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "children_total": {
+            "default": 0,
+            "title": "Children Total",
+            "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Next Cursor"
+          },
+          "node": {
+            "$ref": "#/$defs/IndexNodeRef"
+          }
+        },
+        "required": [
+          "node"
+        ],
+        "title": "IndexNodesPayload",
         "type": "object"
       },
       "MCPActor": {
@@ -522,6 +656,17 @@
         ],
         "default": null,
         "title": "Index"
+      },
+      "nodes": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/IndexNodesPayload"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
       }
     },
     "required": [

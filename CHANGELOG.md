@@ -98,6 +98,18 @@
   `body_adjusted`, `server_fixes` and `changed_blocks_omitted_count`. The text
   copy of every tool result is compact JSON. `begin_context_edit` still
   returns the body.
+- MCP tool contract revision 20 makes `guide` answer at
+  `detail_level="brief"` by default: the workspace, your permissions,
+  `workspace_routing` and the read/write workflow, about 3 KB instead of
+  58 KB on a 109-page workspace. `normal` adds taxonomies, prompts,
+  resources, `available_tools`, the AgentPage policy and hot concepts;
+  `detailed` adds the full summary and field explanations (`full` is
+  accepted as `detailed`). `placement_parent_candidates` and
+  `active_agent_pages` are gone: walk `get_index(format="nodes")` from
+  `/context` to choose a `placement_parent_node_id`, and use
+  `list_agent_categories` for AgentPages. The guide offers the
+  whole-workspace bundle only when its estimated size is within 64 KiB;
+  above that it routes to search and `get_index`.
 - Approving a Context review publishes the changes up to that draft; rejecting
   one also rejects the later drafts written on it and returns the edit head to
   the draft below them. Earlier drafts and branched alternatives are untouched.

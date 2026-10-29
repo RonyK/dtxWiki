@@ -145,23 +145,55 @@ class HotConceptEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+GuideDetailLevel = Literal["brief", "normal", "detailed"]
+
+
+class WorkspaceRouting(BaseModel):
+    """How to find and read pages here, sized by what the whole workspace
+    weighs rather than by how many pages it has."""
+
+    visible_pages: int
+    bundle_estimated_bytes: int = Field(
+        description=(
+            "Estimated size of the whole-workspace bundle resource: the stored "
+            "bodies of the pages you can see."
+        )
+    )
+    whole_read_budget_bytes: int
+    whole_read: Literal["within_budget", "over_budget"]
+    bundle_resource: str | None = Field(
+        default=None,
+        description="The bundle resource URI, given only within the budget.",
+    )
+    guidance: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class GuidePayload(BaseModel):
+    """The workspace guide at one detail level.
+
+    brief (the default) carries what reading, editing and exploring need;
+    normal and detailed add fields, never unbounded lists.
+    """
+
+    detail_level: GuideDetailLevel
+    detail_levels: dict[str, str]
     workspace_summary: dict[str, Any]
     actor_context: dict[str, Any]
-    library_policy_summary: dict[str, Any]
-    context_write_policy: dict[str, Any]
-    agent_injection_policy: dict[str, Any]
     citation_policy: dict[str, Any]
-    context_page_taxonomy: list[dict[str, str]]
-    agent_page_taxonomy: list[dict[str, str]]
-    available_tools: list[str]
+    workspace_routing: WorkspaceRouting
+    required_workflow: list[str]
+    library_policy_summary: dict[str, Any] | None = None
+    agent_injection_policy: dict[str, Any] | None = None
+    context_page_taxonomy: list[dict[str, str]] = Field(default_factory=list)
+    agent_page_taxonomy: list[dict[str, str]] = Field(default_factory=list)
+    available_tools: list[str] = Field(default_factory=list)
     available_prompts: list[str] = Field(default_factory=list)
     available_resources: list[str] = Field(default_factory=list)
-    active_agent_pages: list[dict[str, Any]] = Field(default_factory=list)
     hot_concepts: list[HotConceptEntry] = Field(default_factory=list)
-    placement_parent_candidates: list[dict[str, Any]] = Field(default_factory=list)
     recommended_agent_guidance_flow: list[str] = Field(default_factory=list)
-    required_workflow: list[str]
+    field_explanations: dict[str, str] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
 

@@ -35,6 +35,7 @@ from backend.schemas.mcp.read_tools import (
     GrepWikiOutput,
     GuideInput,
     GuideOutput,
+    IndexNodesPayload,
     ListAgentCategoriesInput,
     ListAgentCategoriesOutput,
     ListChangesInput,
@@ -89,7 +90,11 @@ from backend.services.okf import (
     resolve_library_concept,
     resolve_workspace_slug,
 )
-from backend.services.okf_index import IndexNodeNotFoundError
+from backend.services.okf_index import (
+    IndexCursorError,
+    IndexNodeNotFoundError,
+    build_index_nodes,
+)
 from backend.services.read_errors import (
     ReadServiceError,
     UnsupportedRetrievalModeError,
@@ -750,6 +755,19 @@ def get_index(payload: dict, ctx: ToolCallContext) -> GetIndexOutput:
         if workspace_slug is None:
             return GetIndexOutput(envelope=error_envelope(actor, "not_found"))
         try:
+            if request.format == "nodes":
+                nodes = build_index_nodes(
+                    session,
+                    ctx.workspace_id,
+                    actor=actor,
+                    node=request.node,
+                    limit=request.limit,
+                    cursor=request.cursor,
+                )
+                return GetIndexOutput(
+                    envelope=ok_envelope(actor),
+                    nodes=IndexNodesPayload.model_validate(nodes),
+                )
             index = build_workspace_index(
                 session,
                 ctx.workspace_id,
@@ -760,6 +778,8 @@ def get_index(payload: dict, ctx: ToolCallContext) -> GetIndexOutput:
             )
         except IndexNodeNotFoundError:
             return GetIndexOutput(envelope=error_envelope(actor, "not_found"))
+        except IndexCursorError:
+            return GetIndexOutput(envelope=error_envelope(actor, "validation_failed"))
     return GetIndexOutput(envelope=ok_envelope(actor), index=index)
 
 

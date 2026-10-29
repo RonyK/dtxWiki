@@ -173,7 +173,18 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        regions or 4 KB, then changes_omitted_count), and gains body_adjusted,
 #        server_fixes and changed_blocks_omitted_count. Every result's text
 #        copy is compact JSON. begin_context_edit is unchanged.
-MCP_TOOL_CONTRACT_REVISION = 19
+#  20 -- guide answers at detail_level brief (new default), normal or
+#        detailed ("full" is accepted as detailed). Every level carries
+#        detail_level, detail_levels, a trimmed workspace_summary/actor_context,
+#        citation_policy, workspace_routing and required_workflow; normal adds
+#        taxonomies, prompts/resources, available_tools, AgentPage policy and
+#        hot concepts; detailed adds the full summary and field_explanations.
+#        placement_parent_candidates, active_agent_pages and context_write_policy
+#        are gone; find a placement with get_index(format="nodes"), which
+#        returns a node and its visible children with node_id. The bundle is
+#        offered for whole reading only when its estimated size is within
+#        64 KiB (workspace_routing), not by page count.
+MCP_TOOL_CONTRACT_REVISION = 20
 ERROR_CODES = (
     "not_found",
     "stale_base_version",

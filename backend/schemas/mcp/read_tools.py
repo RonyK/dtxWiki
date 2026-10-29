@@ -41,7 +41,16 @@ class ListMyWorkspacesOutput(BaseModel):
 
 class GuideInput(MCPConversationInput):
     workspace_id: UUID
-    detail_level: Literal["brief", "normal", "full"] = "normal"
+    detail_level: Literal["brief", "normal", "detailed", "full"] = Field(
+        default="brief",
+        description=(
+            "'brief' (default): what reading, editing and exploring need. "
+            "'normal' adds taxonomies, prompt/resource entry points, AgentPage "
+            "policy, hot concepts and your full tool list. 'detailed' adds the "
+            "full workspace summary and field explanations. 'full' is the old "
+            "name of 'detailed'."
+        ),
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -155,6 +164,44 @@ class GetIndexInput(MCPConversationInput):
         default_factory=lambda: ["context", "library"]
     )
     node: str | None = Field(default=None, max_length=512)
+    format: Literal["markdown", "nodes"] = Field(
+        default="markdown",
+        description=(
+            "'nodes' returns one tree node and its visible children with "
+            "node_id, so you can walk from /context to a placement_parent_node_id."
+        ),
+    )
+    limit: int = Field(default=20, ge=1, le=200, description="format='nodes' only.")
+    cursor: str | None = Field(
+        default=None,
+        max_length=512,
+        description="format='nodes' only: next_cursor from the previous page.",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class IndexNodeRef(BaseModel):
+    node_id: UUID
+    title: str
+    path: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class IndexNodeChild(IndexNodeRef):
+    node_kind: str
+    can_have_children: bool
+    has_children: bool
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class IndexNodesPayload(BaseModel):
+    node: IndexNodeRef
+    children: list[IndexNodeChild] = Field(default_factory=list)
+    children_total: int = 0
+    next_cursor: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -162,6 +209,7 @@ class GetIndexInput(MCPConversationInput):
 class GetIndexOutput(BaseModel):
     envelope: MCPResultEnvelope
     index: str | None = None
+    nodes: IndexNodesPayload | None = None
 
     model_config = ConfigDict(extra="forbid")
 

@@ -105,9 +105,9 @@ class WriteDraftRequest(InputRequest):
         default=None,
         description=(
             "Context tree parent node UUID. If omitted, a new page goes to "
-            "Inbox. To choose a location, read guide placement_parent_candidates "
-            "and pass its node_id; candidate paths are discovery hints, not "
-            "write inputs. A failed placement rejects and rolls back the entire "
+            "Inbox. To choose a location, walk get_index(format='nodes') from "
+            "/context and pass a node_id; paths are discovery hints, not write "
+            "inputs. A failed placement rejects and rolls back the entire "
             "write."
         ),
     )

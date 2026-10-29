@@ -28,6 +28,7 @@ from backend.scripts.seed_dev import (
 from backend.services.domain_read import DomainReadService
 from backend.services.extraction_service import ExtractionService
 from backend.services.library_service import LibraryService
+from backend.services.okf_index import IndexCursorError, build_index_nodes
 from backend.services.page_service import PageService
 from backend.services.read_errors import (
     ReadNotFoundError,
@@ -436,62 +437,66 @@ def test_workspace_read_service_lists_details_and_guide_payload():
             session=session,
             workspace_id=workspace.id,
         )
-        guide = workspace_service.guide(
-            session=session,
-            workspace_id=workspace.id,
-            detail_level="brief",
+        brief = workspace_service.guide(session=session, workspace_id=workspace.id)
+        normal = workspace_service.guide(
+            session=session, workspace_id=workspace.id, detail_level="normal"
+        )
+        detailed = workspace_service.guide(
+            session=session, workspace_id=workspace.id, detail_level="full"
         )
 
     assert listed.current_workspace_id == workspace.id
     assert [item.slug for item in listed.workspaces] == ["default"]
     assert detail.library_policy["manual_approval_required"] is True
     assert detail.agent_injection_policy["bundle_ttl_default_seconds"] == 3600
-    assert guide.workspace_summary["slug"] == "default"
-    assert guide.library_policy_summary["manual_approval_required"] is True
-    assert guide.available_tools == [
-        "guide",
-        "search",
-        "fetch",
-        "grep_wiki",
-        "read",
-        "list_agent_categories",
-    ]
-    assert guide.required_workflow == [
-        "guide",
-        "search or get_index",
-        "fetch a search result, or use read_concept/read for direct navigation",
-        "cite before a sourced write",
-        (
-            "for an image: upload_image first; store data.markdown or "
-            "data.logical_ref, never data.content_url or an /api/v1 transport URL; "
-            "upload_image always requires an existing page_id and your own open "
-            "editing_version_id, so create the page first for a new page, then "
-            "upload and call update_context_edit; never fall back to data:"
-        ),
-        (
-            "to write: create_context_page (new page) or begin_context_edit "
-            "(existing page); then patch_context_edit (local changes) or "
-            "update_context_edit (whole body), taking the next editing_revision "
-            "and block ids from each response's edit_receipt instead of "
-            "re-reading; then submit_context_edit_for_review"
-        ),
-    ]
-    assert guide.actor_context["workspace_id"] == str(workspace.id)
+
+    # brief is the default and carries only what reading, editing and
+    # exploring need; every level says what the other two add.
+    assert brief.detail_level == "brief"
+    assert set(brief.detail_levels) == {"brief", "normal", "detailed"}
+    assert brief.workspace_summary == {
+        "id": str(workspace.id),
+        "slug": "default",
+        "title": workspace.title,
+        "goal": workspace.goal,
+        "default_language": workspace.default_language,
+    }
     # No actor was passed, so this reads as an internal call: not an AI channel,
     # so neither staging nor a review queue applies to it.
-    assert guide.actor_context["my_writes_wait_for_human_review"] is False
-    assert guide.actor_context["my_writes_stage_as_drafts"] is False
-    assert guide.placement_parent_candidates
+    assert brief.actor_context == {
+        "workspace_role": "none",
+        "may_write_drafts": False,
+        "my_writes_wait_for_human_review": False,
+        "my_writes_stage_as_drafts": False,
+    }
+    assert brief.required_workflow[0].startswith("guide: this brief view")
+    assert any("get_index(format='nodes')" in step for step in brief.required_workflow)
+    assert brief.workspace_routing.whole_read == "within_budget"
+    assert brief.workspace_routing.bundle_resource is not None
+    assert brief.library_policy_summary is None
+    assert brief.available_tools == []
+    assert brief.context_page_taxonomy == []
+    assert brief.hot_concepts == []
+
+    assert normal.detail_level == "normal"
+    assert normal.library_policy_summary["manual_approval_required"] is True
+    assert "get_index" in normal.available_tools
     assert all(
-        {"node_id", "title", "depth", "path"} == set(candidate)
-        for candidate in guide.placement_parent_candidates
+        set(entry) == {"type", "description"} for entry in normal.context_page_taxonomy
     )
-    assert "dtxwiki.agent_page.{slug}" in guide.available_prompts
-    assert guide.recommended_agent_guidance_flow[0].startswith("Call guide first")
+    assert "dtxwiki.agent_page.{slug}" in normal.available_prompts
+    assert normal.recommended_agent_guidance_flow[0].startswith("Call guide first")
     assert any(
-        "no placement goes to Inbox" in step
-        for step in guide.recommended_agent_guidance_flow
+        "no placement goes to Inbox" in step and "get_index(format='nodes')" in step
+        for step in normal.recommended_agent_guidance_flow
     )
+    assert normal.field_explanations == {}
+
+    # "full" is the old name of detailed: the whole summary and explanations.
+    assert detailed.detail_level == "detailed"
+    assert detailed.workspace_summary["visibility"] == workspace.visibility
+    assert detailed.actor_context["workspace_id"] == str(workspace.id)
+    assert "workspace_routing.whole_read" in detailed.field_explanations
 
 
 def test_workspace_provisioning_creates_one_canonical_context_inbox():
@@ -548,9 +553,8 @@ def test_workspace_provisioning_creates_one_canonical_context_inbox():
     assert inbox_nodes[0].can_have_children is True
 
 
-def test_guide_placement_candidates_include_real_parent_depth_and_path():
+def test_index_nodes_walk_from_context_to_a_placement_parent():
     session_factory = make_session_factory()
-    workspace_service = WorkspaceReadService()
     tree_service = TreeService()
 
     with session_factory.begin() as session:
@@ -588,29 +592,84 @@ def test_guide_placement_candidates_include_real_parent_depth_and_path():
             actor_kind="human",
             actor_id="00000000-0000-0000-0000-000000000010",
         )
-        guide = workspace_service.guide(
+        drafts = tree_service.create_folder(
             session=session,
             workspace_id=workspace.id,
-            detail_level="full",
+            request=TreeFolderCreateRequest(
+                parent_id=research.id,
+                section="context",
+                title="Drafts",
+                slug="drafts",
+            ),
+            actor_kind="human",
+            actor_id="00000000-0000-0000-0000-000000000010",
         )
-        candidates = {
-            candidate["node_id"]: candidate
-            for candidate in guide.placement_parent_candidates
-        }
-        context_root = next(
-            candidate
-            for candidate in guide.placement_parent_candidates
-            if candidate["path"] == "/context"
+        root = build_index_nodes(
+            session, workspace.id, actor=None, node=None, limit=20, cursor=None
         )
+        inbox_page = build_index_nodes(
+            session,
+            workspace.id,
+            actor=None,
+            node=str(inbox.id),
+            limit=20,
+            cursor=None,
+        )
+        research_page = build_index_nodes(
+            session,
+            workspace.id,
+            actor=None,
+            node=str(research.id),
+            limit=20,
+            cursor=None,
+        )
+        # Paging: a cursor resumes the same node and cannot be replayed on another.
+        first = build_index_nodes(
+            session,
+            workspace.id,
+            actor=None,
+            node=str(research.id),
+            limit=1,
+            cursor=None,
+        )
+        second = build_index_nodes(
+            session,
+            workspace.id,
+            actor=None,
+            node=str(research.id),
+            limit=1,
+            cursor=first["next_cursor"],
+        )
+        with pytest.raises(IndexCursorError):
+            build_index_nodes(
+                session,
+                workspace.id,
+                actor=None,
+                node=str(inbox.id),
+                limit=1,
+                cursor=first["next_cursor"],
+            )
 
-    assert context_root["depth"] == 0
-    assert context_root["path"] == "/context"
-    assert candidates[str(inbox.id)]["depth"] == 1
-    assert candidates[str(inbox.id)]["path"] == "/context/inbox"
-    assert candidates[str(research.id)]["depth"] == 2
-    assert candidates[str(research.id)]["path"] == "/context/inbox/research"
-    assert candidates[str(notes.id)]["depth"] == 3
-    assert candidates[str(notes.id)]["path"] == ("/context/inbox/research/notes")
+    assert root["node"]["path"] == "/context"
+    inbox_entry = next(c for c in root["children"] if c["node_id"] == inbox.id)
+    assert inbox_entry["path"] == "/context/inbox"
+    assert inbox_entry["can_have_children"] is True
+    assert inbox_entry["has_children"] is True
+    research_entry = next(
+        c for c in inbox_page["children"] if c["node_id"] == research.id
+    )
+    assert research_entry["path"] == "/context/inbox/research"
+    paths = {c["node_id"]: c["path"] for c in research_page["children"]}
+    assert paths == {
+        notes.id: "/context/inbox/research/notes",
+        drafts.id: "/context/inbox/research/drafts",
+    }
+    assert all(c["has_children"] is False for c in research_page["children"])
+    assert first["children_total"] == 2 and first["next_cursor"] is not None
+    assert second["next_cursor"] is None
+    assert [first["children"][0]["node_id"], second["children"][0]["node_id"]] == [
+        c["node_id"] for c in research_page["children"]
+    ]
 
 
 def test_tree_read_service_lists_tree_and_target_path():

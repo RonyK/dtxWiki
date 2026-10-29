@@ -236,8 +236,8 @@ def get_dtxwiki_prompt(
                             "fall back to a data: "
                             "URI. A new "
                             "page with no placement goes to Inbox; to choose a "
-                            "location, read guide.placement_parent_candidates and "
-                            "pass its node_id as placement_parent_node_id. "
+                            "location, walk get_index(format='nodes') and pass a "
+                            "node_id as placement_parent_node_id. "
                             "Read and discovery tools accept conversation_token "
                             "optionally. Content tools (writes, citations, feedback, "
                             "bundles, and maintenance) require it: echo "
@@ -595,7 +595,7 @@ def read_dtxwiki_resource(
             payload = WorkspaceReadService().guide(
                 session,
                 workspace_id,
-                detail_level="full",
+                detail_level="detailed",
                 actor=scoped_actor,
             )
             return [

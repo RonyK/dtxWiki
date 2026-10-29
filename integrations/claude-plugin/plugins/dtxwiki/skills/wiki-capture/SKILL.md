@@ -7,7 +7,7 @@ description: Orchestrate capture of conversation knowledge into dtxWiki by compo
 
 This skill is orchestration only. Apply `dtxwiki-conventions`, `dtxwiki-retrieval`, and `dtxwiki-authoring-review` as the sources of truth instead of restating or weakening their rules.
 
-1. Call `guide` to resolve the workspace, effective capabilities, live policies, and placement choices.
+1. Call `guide` to resolve the workspace, effective capabilities, and live policies; choose a placement with `get_index(format='nodes')`.
 2. Identify the durable claims, decisions, sources, uncertainties, and requested destination in the conversation. Ask for a missing material choice; do not invent it.
 3. Retrieve existing knowledge to avoid an uninformed duplicate and to obtain the current base for any update.
 4. Read complete evidence, obtain write-ready citations where factual claims need them, and upload any new image before referring to it.

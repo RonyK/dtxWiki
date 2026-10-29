@@ -5,7 +5,7 @@ description: Create or update grounded dtxWiki Context pages, upload images safe
 
 # dtxWiki Authoring and Review
 
-Read `dtxwiki-conventions` before writing. Call `guide` for the current write policy, citation policy, placement candidates, and effective capabilities; do not hardcode values it reports.
+Read `dtxwiki-conventions` before writing. Call `guide` for the current write policy, citation policy, and effective capabilities; do not hardcode values it reports.
 
 ## Protect the base
 
@@ -13,7 +13,7 @@ Never write against a base you did not read. `update_context_edit` and `patch_co
 
 ## Choose the write shape
 
-1. For a new Context page, call `create_context_page`. Title/body/tags/aliases are all optional; an omitted title defaults to a placeholder. If `placement_parent_node_id` is omitted, the page goes to Inbox -- to choose a location, read `guide.placement_parent_candidates` and pass its node id as `placement_parent_node_id`.
+1. For a new Context page, call `create_context_page`. Title/body/tags/aliases are all optional; an omitted title defaults to a placeholder. If `placement_parent_node_id` is omitted, the page goes to Inbox -- to choose a location, walk `get_index(format='nodes')` from `/context` (pass a child's `node_id` as `node` to descend) and pass the chosen `node_id` as `placement_parent_node_id`.
 2. For an existing page, call `begin_context_edit` to idempotently open or resume your own private "editing" session. Passing `base_version_id`/`base_content_hash` asserts the base explicitly and returns a conflict instead of silently building on a head that moved.
 3. Prefer a partial edit over a full rewrite:
    - Call `read_structure_map` for the target page to obtain block ids, row ids, and content hashes. Call `read_context_outline` when you need heading text or one section's body.

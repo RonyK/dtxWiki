@@ -5,7 +5,7 @@ description: Apply dtxWiki MCP conversation continuity, result-envelope, scope, 
 
 # dtxWiki Conventions
 
-Call `guide` when starting work in a workspace and whenever current capabilities or policy are unclear. Treat its resolved workspace, available tools, taxonomies, placement candidates, and policy summaries as authoritative. Do not cache or hardcode values that `guide` reports.
+Call `guide` when starting work in a workspace and whenever current capabilities or policy are unclear. It has three detail levels: `brief` (the default: the workspace, your permissions, how to find pages and the read/write workflow, enough to read, edit and explore), `normal` (adds taxonomies, prompt and resource entry points, the AgentPage injection policy, hot concepts and your full tool list) and `detailed` (adds the full workspace summary and field explanations). Start with `brief` and ask for more only when a task needs it. Treat what `guide` reports as authoritative; do not cache or hardcode it.
 
 ## Carry the conversation token
 
@@ -42,7 +42,7 @@ Set `needs_review` true only for a genuine exception that requires human attenti
 
 ## Respect effective visibility
 
-Workspace membership and role checks still apply in addition to OAuth scopes. Use `guide.actor_context` and `guide.available_tools` for the effective live result.
+Workspace membership and role checks still apply in addition to OAuth scopes. Use `guide.actor_context` for your write permission and `tools/list` (or `available_tools` in `guide` at `normal`) for the tools you can call.
 
 - `mcp:read` grants workspace discovery and actor-visible Context, Library, and Agent-page retrieval. It does not expose audit history, the review queue, or writes.
 - `mcp:write` adds audit and review reads plus Context draft, citation, feedback, review-resubmission, and maintenance capabilities.

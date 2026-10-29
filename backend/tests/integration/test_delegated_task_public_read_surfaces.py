@@ -270,24 +270,46 @@ def test_bundle_hash_changes_on_publish(page_service, session_factory):
 # --- guide routing (E-3) ---------------------------------------------------------
 
 
-def test_guide_emits_scale_aware_routing_line(session_factory, monkeypatch):
+def test_guide_emits_scale_aware_routing_line(
+    page_service, session_factory, monkeypatch
+):
+    """Whole-workspace reading is offered by size, not by page count."""
+
     service = WorkspaceReadService()
     with session_factory() as session:
         workspace_id = _workspace_id(session)
-        payload = service.guide(session, workspace_id)
-        flow = payload.recommended_agent_guidance_flow
-        assert any("bundle" in line and "what_changed" in line for line in flow)
-        bundle_uri = f"dtxwiki://workspaces/{workspace_id}/bundle"
-        assert any(bundle_uri in line for line in flow)
+        before = service.guide(session, workspace_id).workspace_routing
+    body = "# Sized\n\n한국어 본문은 글자당 3바이트다."
+    page_service.write_page(
+        workspace_slug="default",
+        slug="routing-sized",
+        title="Routing Sized",
+        body_md=body,
+        actor_kind="human",
+        actor_id="tester",
+        actor_provenance="browser_session",
+    )
+    with session_factory() as session:
+        routing = service.guide(session, workspace_id).workspace_routing
+        assert routing.visible_pages == before.visible_pages + 1
+        # UTF-8 bytes of the stored body, not characters.
+        assert routing.bundle_estimated_bytes - before.bundle_estimated_bytes >= len(
+            body.encode("utf-8")
+        )
+        assert routing.whole_read == "within_budget"
+        assert routing.bundle_resource == f"dtxwiki://workspaces/{workspace_id}/bundle"
+        assert "what_changed" in routing.guidance
 
     import backend.services.workspace_read as wr
 
-    monkeypatch.setattr(wr, "CAG_BUNDLE_PAGE_LIMIT", -1)
+    monkeypatch.setattr(wr, "WHOLE_READ_BUDGET_BYTES", len(body))
     with session_factory() as session:
         workspace_id = _workspace_id(session)
-        payload = service.guide(session, workspace_id)
-        flow = payload.recommended_agent_guidance_flow
-        assert any("descend get_index" in line for line in flow)
+        payload = service.guide(session, workspace_id, detail_level="normal")
+        routing = payload.workspace_routing
+        assert routing.whole_read == "over_budget"
+        assert routing.bundle_resource is None
+        assert "search or get_index" in routing.guidance
     assert "get_index" in payload.available_tools
     assert "get_index" in wr.AVAILABLE_READ_TOOLS
     assert "read_concept" in wr.AVAILABLE_READ_TOOLS
