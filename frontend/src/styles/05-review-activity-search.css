@@ -1509,7 +1509,6 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
   height: 16px;
 }
 
-.index-preview__toggle:hover,
 .index-preview__refresh:hover:not([aria-disabled="true"]) {
   background: var(--surface-hover);
 }
@@ -1612,6 +1611,30 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
 .index-preview__entry-title a:focus-visible {
   color: var(--info);
   text-decoration: underline;
+}
+
+/* Kind icon: the section color as the outline, a light tint of it as the fill. */
+.index-preview__entry-icon {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: -2px;
+  fill: color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.index-preview__entry-icon--folder {
+  color: var(--warning);
+}
+
+.index-preview__entry-icon--context {
+  color: var(--context);
+}
+
+.index-preview__entry-icon--library {
+  color: var(--library);
+}
+
+.index-preview__entry-icon--agent {
+  color: var(--agent);
 }
 
 .index-preview__entry-summary {

@@ -1,6 +1,16 @@
 import { Children, isValidElement, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronDown, ChevronRight, LoaderCircle, RefreshCw } from "lucide-react";
+import {
+  Bot,
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  Folder,
+  Library,
+  LoaderCircle,
+  RefreshCw,
+  type LucideIcon,
+} from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -31,6 +41,16 @@ const INDEX_REF_PATTERN = new RegExp(`^dtxwiki://index/(folder|context|library|a
 const CANONICAL_ENTRY_HREF_PATTERN = new RegExp(
   `^/workspaces/(${UUID_PATTERN})/(context|library|agent)/(folders|pages|items)/(${UUID_PATTERN})$`,
 );
+
+type EntryKind = Exclude<TreeIndexPreviewEntry["kind"], "other">;
+
+/** The tree and navigation icon for each entry kind; colors live in the CSS. */
+const ENTRY_ICONS: Record<EntryKind, LucideIcon> = {
+  folder: Folder,
+  context: FileText,
+  library: Library,
+  agent: Bot,
+};
 
 const INDEX_ROW_LINK_PATTERN = new RegExp(
   `^- \\[((?:\\\\.|[^\\]])*)\\]\\((dtxwiki://index/(?:folder|context|library|agent)/${UUID_PATTERN})\\)(.*)$`,
@@ -189,7 +209,8 @@ function FormattedIndex({
       const entry = leadingIndexRef(children);
       const target = entry ? links.get(entry.ref) : undefined;
       if (!entry || !target) return <li>{children}</li>;
-      const kind = INDEX_REF_PATTERN.exec(entry.ref)?.[1] ?? "";
+      const kind = INDEX_REF_PATTERN.exec(entry.ref)?.[1] as EntryKind;
+      const EntryIcon = ENTRY_ICONS[kind];
       const [head, ...tail] = entry.rest;
       const display = typeof head === "string"
         ? splitKnownEntrySuffix(head, kind)
@@ -198,6 +219,11 @@ function FormattedIndex({
       return (
         <li className="index-preview__entry">
           <div className="index-preview__entry-title">
+            <EntryIcon
+              aria-hidden="true"
+              className={`index-preview__entry-icon index-preview__entry-icon--${kind}`}
+              size={15}
+            />
             <Link to={target}><strong>{entry.label}</strong></Link>{display.titleSuffix}
           </div>
           {hasVisibleText(summary) ? (
