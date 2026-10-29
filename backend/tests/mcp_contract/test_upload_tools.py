@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 
 from backend.app.container import DatabaseProvider, ToolCallContext, WorkspaceDirectory
 from backend.context_media.domain.policy import MAX_CONTEXT_IMAGE_UPLOAD_BYTES
+from backend.mcp.envelope import ERROR_CODE_GUIDANCE
 from backend.mcp.protocol.runner import call_tool_async
 from backend.mcp.router import dispatch, resolve_target_actor
 from backend.mcp.upload_tools import upload_image
@@ -421,7 +422,9 @@ def test_upload_image_rejects_missing_page_as_not_found(
     )
 
     assert response.envelope.error_code == "not_found"
-    assert response.envelope.error_message == "page not found"
+    assert response.envelope.error_message == (
+        "page not found " + ERROR_CODE_GUIDANCE["not_found"]
+    )
 
 
 def test_upload_image_rejects_archived_page_as_not_found(
@@ -452,7 +455,9 @@ def test_upload_image_rejects_archived_page_as_not_found(
     )
 
     assert response.envelope.error_code == "not_found"
-    assert response.envelope.error_message == "page not found"
+    assert response.envelope.error_message == (
+        "page not found " + ERROR_CODE_GUIDANCE["not_found"]
+    )
 
 
 def test_upload_image_rejects_visible_page_from_a_different_workspace(

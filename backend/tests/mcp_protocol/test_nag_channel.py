@@ -72,19 +72,19 @@ def _structure_map_args(workspace_id, page_id, conversation_token):
 def _warning(payload):
     return next(
         warning
-        for warning in payload["envelope"]["warnings"]
+        for warning in payload["envelope"].get("warnings", [])
         if warning["code"] == "unresolved_diverged_branch"
     )
 
 
 def _warning_codes(payload):
-    return {warning["code"] for warning in payload["envelope"]["warnings"]}
+    return {warning["code"] for warning in payload["envelope"].get("warnings", [])}
 
 
 def _warning_with_code(payload, code):
     return next(
         warning
-        for warning in payload["envelope"]["warnings"]
+        for warning in payload["envelope"].get("warnings", [])
         if warning["code"] == code
     )
 

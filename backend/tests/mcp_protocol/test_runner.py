@@ -8,6 +8,7 @@ import anyio
 import pytest
 from sqlalchemy import func, select
 
+from backend.mcp.envelope import ERROR_CODE_GUIDANCE
 from backend.mcp.protocol import runner as runner_module
 from backend.mcp.protocol.output_validation import (
     MCPOutputContractViolation,
@@ -171,7 +172,7 @@ def test_conflicting_conversation_token_carriers_are_validation_failed(
     assert envelope["error_code"] == "validation_failed"
     assert envelope["error_message"] == (
         "Conversation token carriers have conflicting values: "
-        f"{', '.join(expected_carriers)}."
+        f"{', '.join(expected_carriers)}. " + ERROR_CODE_GUIDANCE["validation_failed"]
     )
     assert "plain-token" not in result.content[0].text
     assert "namespaced-token" not in result.content[0].text
@@ -575,8 +576,18 @@ def test_missing_workspace_target_never_reads_page_directory(
         )
 
     assert results == [
-        (True, "validation_failed", "workspace_id: Field required", False),
-        (True, "validation_failed", "workspace_id: Field required", False),
+        (
+            True,
+            "validation_failed",
+            "workspace_id: Field required " + ERROR_CODE_GUIDANCE["validation_failed"],
+            False,
+        ),
+        (
+            True,
+            "validation_failed",
+            "workspace_id: Field required " + ERROR_CODE_GUIDANCE["validation_failed"],
+            False,
+        ),
     ]
     assert directory_lookups == []
 
@@ -717,6 +728,10 @@ def test_call_tool_async_unexpected_dispatch_error_is_sanitized_and_traced(
     assert result.isError is True
     assert payload["envelope"]["error_code"] == "internal_error"
     assert payload["envelope"]["result_status"] == "failed"
+    assert payload["envelope"]["error_message"] == (
+        "Tool call failed due to an unexpected server error. "
+        "Details were logged on the server."
+    )
     assert payload["envelope"]["conversation_token"].startswith("conv_")
     assert "do-not-leak" not in result.content[0].text
 
@@ -965,7 +980,7 @@ def test_call_tool_async_preflight_db_error_is_sanitized(
     assert "do-not-leak" not in result.content[0].text
 
 
-def test_slim_envelope_for_wire_keeps_model_facing_fields_and_folds_the_rest():
+def test_slim_envelope_for_wire_keeps_model_facing_fields_and_drops_the_rest():
     payload = {
         "envelope": {
             "schema_version": "llmwiki.mcp.v1",
@@ -996,14 +1011,17 @@ def test_slim_envelope_for_wire_keeps_model_facing_fields_and_folds_the_rest():
 
     wire = runner_module._slim_envelope_for_wire(payload)
 
-    assert set(wire["envelope"]) == runner_module._WIRE_ENVELOPE_FIELDS | {"meta"}
-    assert wire["envelope"]["result_status"] == "succeeded"
+    # A success carries no error fields, and the audit fields stay in the
+    # trace: no `meta` on the wire. request_id stays (owner decision).
+    assert set(wire["envelope"]) == {
+        "result_status",
+        "request_id",
+        "review_item_id",
+        "warnings",
+        "conversation_token",
+    }
+    assert wire["envelope"]["request_id"] == "11111111-1111-1111-1111-111111111111"
     assert wire["envelope"]["conversation_token"] == "conv-1"
-    assert wire["envelope"]["meta"]["schema_version"] == "llmwiki.mcp.v1"
-    assert wire["envelope"]["meta"]["workspace_id"] == (
-        "22222222-2222-2222-2222-222222222222"
-    )
-    assert wire["envelope"]["meta"]["actor_kind"] == "human"
     # Non-envelope keys (the tool's own result data) are untouched.
     assert wire["data"] == {"stuff": 1}
 
@@ -1081,11 +1099,9 @@ def test_capture_trace_and_wire_payload_keeps_full_envelope_for_trace():
     )
     assert trace_payload["envelope"]["provider"] == "unknown"
     assert trace_payload["envelope"]["schema_version"] == "llmwiki.mcp.v1"
-    # The wire copy is slimmed.
-    assert "workspace_id" not in wire_payload["envelope"]
-    assert wire_payload["envelope"]["meta"]["workspace_id"] == (
-        "33333333-3333-3333-3333-333333333333"
-    )
+    # The wire copy is slimmed, and an empty warnings list (its declared
+    # default) is left off.
+    assert set(wire_payload["envelope"]) == {"result_status"}
     assert trace_arguments == {}
 
 
@@ -1098,8 +1114,7 @@ def test_call_tool_async_fails_closed_on_a_violation_the_wire_phase_cannot_see(
     survives slimming and so is caught a second time by the wire phase --
     deleting the handler-phase call leaves them green. Here the violation is
     in ``params_summary``, one of the 14 envelope fields
-    ``_slim_envelope_for_wire`` folds into ``envelope.meta``, typed
-    ``dict[str, Any] | None`` where any JSON is legal. The wire phase is
+    ``_slim_envelope_for_wire`` leaves off the wire. The wire phase is
     provably blind to it (asserted below), so the handler phase is the only
     gate that can catch a handler emitting a malformed audit envelope.
     """
@@ -1119,9 +1134,9 @@ def test_call_tool_async_fails_closed_on_a_violation_the_wire_phase_cannot_see(
         }
     }
 
-    # The wire phase genuinely cannot see this: both fields land in
-    # envelope.meta, which accepts arbitrary JSON. If this ever starts
-    # raising, this test has stopped pinning what it claims to pin.
+    # The wire phase genuinely cannot see this: both fields are left off the
+    # wire. If this ever starts raising, this test has stopped pinning what it
+    # claims to pin.
     validate_tool_output(
         "search",
         runner_module._slim_envelope_for_wire(copy.deepcopy(violating)),
@@ -1152,7 +1167,7 @@ def test_call_tool_async_fails_closed_on_a_violation_the_wire_phase_cannot_see(
     assert result.isError is True
     assert payload["envelope"]["error_code"] == "internal_error"
     assert payload["envelope"]["result_status"] == "failed"
-    assert payload["envelope"]["meta"].get("params_summary") != "not-a-dict"
+    assert "params_summary" not in payload["envelope"]
     assert any(
         "phase=handler" in message and "$.envelope.params_summary" in message
         for message in messages
@@ -1201,9 +1216,13 @@ def test_runtime_denial_result_is_slimmed_and_wire_contract_clean(
 
     assert result.isError is True
     assert payload["envelope"]["error_code"] == "mcp_client_disabled"
-    assert set(payload["envelope"]) == runner_module._WIRE_ENVELOPE_FIELDS | {"meta"}
-    # The audit fields are folded, not dropped -- and not repeated at the top.
-    assert payload["envelope"]["meta"]["schema_version"] == "llmwiki.mcp.v1"
+    assert set(payload["envelope"]) <= runner_module._WIRE_ENVELOPE_FIELDS
+    # The audit fields stay in the trace; request_id is in the envelope and in
+    # the result's protocol _meta (owner decision: the model always has it).
+    assert payload["envelope"]["request_id"]
+    assert result.meta == {
+        runner_module.REQUEST_ID_META_KEY: payload["envelope"]["request_id"]
+    }
     # The served shape satisfies the contract the wire phase enforces.
     validate_tool_output("guide", payload, phase="wire")
     # structuredContent and the text body must be the same slimmed object.
@@ -1213,6 +1232,6 @@ def test_runtime_denial_result_is_slimmed_and_wire_contract_clean(
     with pytest.raises(MCPOutputContractViolation):
         validate_tool_output(
             "guide",
-            {"envelope": {**payload["envelope"], **payload["envelope"]["meta"]}},
+            {"envelope": {**payload["envelope"], "schema_version": "llmwiki.mcp.v1"}},
             phase="wire",
         )

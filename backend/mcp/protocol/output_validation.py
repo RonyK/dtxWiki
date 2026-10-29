@@ -42,15 +42,16 @@ from backend.scripts.export_mcp_schemas import build_mcp_schemas
 
 logger = logging.getLogger("dtxwiki.mcp")
 
-# The 9 MCPResultEnvelope fields a model actually acts on: a status/error to
-# branch on, warnings and error_details to self-correct from, and the two
-# handles (conversation_token, review_item_id) a follow-up call needs. The
-# other 14 fields (schema_version, request_id, workspace_id, actor*,
-# audit_event_id, activity_ref, provider, model_id, model_version,
-# params_summary, client_self_reported) are audit/telemetry nobody has ever
-# branched a tool call on -- folding them into envelope.meta instead of
-# repeating them in every tool's outputSchema is most of this envelope's
-# 47% share of the wire tools/list payload. It lives here rather than in
+# The 9 MCPResultEnvelope fields a model acts on: a status/error to branch
+# on, warnings and error_details to self-correct from, the two handles
+# (conversation_token, review_item_id) a follow-up call needs, and request_id
+# so an agent can name the call when it reports a problem (owner decision; it
+# is also in the result's protocol _meta). The other 14 fields
+# (schema_version, workspace_id, actor*, audit_event_id, activity_ref,
+# provider, model_id, model_version, params_summary, client_self_reported,
+# result_summary) are audit/telemetry nobody has ever branched a tool call on.
+# They used to ride along folded into envelope.meta, 447 bytes on every call;
+# they now stay in the trace only. It lives here rather than in
 # runner.py because ``_wire_schemas()`` below derives its pruned schema from
 # it: the runner already imports this module (and aliases this name as
 # ``_WIRE_ENVELOPE_FIELDS``), so defining it in runner.py would force this
@@ -59,7 +60,7 @@ logger = logging.getLogger("dtxwiki.mcp")
 WIRE_ENVELOPE_FIELDS = frozenset(
     {
         "result_status",
-        "result_summary",
+        "request_id",
         "error_code",
         "error_message",
         "error_details",
@@ -68,6 +69,10 @@ WIRE_ENVELOPE_FIELDS = frozenset(
         "conversation_token",
         "review_item_id",
     }
+)
+# Sent only when a call did not succeed: on success they are always empty.
+FAILURE_ENVELOPE_FIELDS = frozenset(
+    {"error_code", "error_message", "error_details", "retryable"}
 )
 
 _SCHEMAS: dict[str, dict] | None = None
@@ -123,7 +128,7 @@ def _wire_schemas() -> dict[str, dict]:
     """Per-tool schema for the SLIMMED wire shape.
 
     Derived by pruning ``MCPResultEnvelope``'s properties to
-    ``WIRE_ENVELOPE_FIELDS`` + ``meta``. The envelope model declares
+    ``WIRE_ENVELOPE_FIELDS``. The envelope model declares
     ``additionalProperties: false``, so an audit-only field surviving onto the
     wire is a hard validation failure rather than a silent leak.
 
@@ -143,7 +148,7 @@ def _wire_schemas() -> dict[str, dict]:
 
     global _WIRE_SCHEMAS
     if _WIRE_SCHEMAS is None:
-        allowed = WIRE_ENVELOPE_FIELDS | {"meta"}
+        allowed = WIRE_ENVELOPE_FIELDS
         built: dict[str, dict] = {}
         for tool_name, schema in _schemas().items():
             output = copy.deepcopy(schema["output"])

@@ -97,6 +97,50 @@
   (for example `review decision undone` or `page restored from archive`).
   Draft visibility still applies, so readers without draft access receive no
   unpublished-page metadata.
+- MCP tool contract revision 19 stops repeating the whole page in the
+  responses of `create_context_page`, `update_context_edit`,
+  `patch_context_edit` and `submit_context_edit_for_review`: a one-word patch
+  to a 28 KB page now returns about 2 KB instead of 32 KB. `data` keeps the
+  ids, `editing_revision`, `content_hash`, status, review ids,
+  `publish_blocked_reasons` and `edit_receipt`; clients that read
+  `data.body_md` from these responses read that version by `data.version_id`
+  instead (`version="my_edit"` names only an edit that is still open). `edit_receipt.first_change` is replaced by
+  `changes`, the replaced regions as exact text with same-line context (up to
+  20 regions or 4 KB, then `changes_omitted_count`). The receipt also reports
+  `body_adjusted`, `server_fixes` and `changed_blocks_omitted_count`. The text
+  copy of every tool result is compact JSON. `begin_context_edit` still
+  returns the body.
+- MCP tool contract revision 20 makes `guide` answer at
+  `detail_level="brief"` by default: the workspace, your permissions,
+  `workspace_routing` and the read/write workflow, about 3 KB instead of
+  58 KB on a 109-page workspace. `normal` adds taxonomies, prompts,
+  resources, `available_tools`, the AgentPage policy and hot concepts;
+  `detailed` adds the full summary and field explanations (`full` is
+  accepted as `detailed`). `placement_parent_candidates` and
+  `active_agent_pages` are gone: walk `get_index(format="nodes")` from
+  `/context` to choose a `placement_parent_node_id`, and use
+  `list_agent_categories` for AgentPages. The guide offers the
+  whole-workspace bundle only when its estimated size is within 64 KiB;
+  above that it routes to search and `get_index`.
+- MCP tool contract revision 21 trims what every tool result carries. The
+  envelope is `result_status`, `request_id`, `conversation_token`, and when
+  present `warnings` and `review_item_id`; a call that did not succeed adds
+  `error_code`, `error_message`, `error_details` and `retryable`.
+  `envelope.meta` (447 bytes of audit fields on every call) and
+  `result_summary` are gone; the audit fields stay in the server's trace.
+  Failure recovery instructions are included in `error_message` alongside
+  the cause, including conversation-token recovery and sanitized server errors.
+  `request_id` is also in the result's protocol `_meta` as
+  `com.dtxwiki/requestId`. A field equal to an empty declared default (null,
+  false, 0, empty string, list or object) is now left out, so clients treat
+  an absent field as that default; `edit_receipt.changes`,
+  `edit_receipt.body_adjusted` and `envelope.retryable` are always sent
+  because their null means unknown.
+- MCP tool contract revision 22 includes `can_have_children` on the current
+  node returned by `get_index(format="nodes")`, so clients can check whether
+  its `node_id` accepts placement without reading its parent. The `normal`
+  and `detailed` guide views, including the guide resource, now list every
+  tool available to the caller instead of filtering through a partial list.
 - Approving a Context review publishes the changes up to that draft; rejecting
   one also rejects the later drafts written on it and returns the edit head to
   the draft below them. Earlier drafts and branched alternatives are untouched.

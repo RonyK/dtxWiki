@@ -164,7 +164,46 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        set on updated, unpublished and archived entries. reason says why
 #        the version moved. Restoring an archived page is reported as created.
 #        Existing visibility rules still apply, including draft visibility.
-MCP_TOOL_CONTRACT_REVISION = 18
+#  19 -- create/update/patch/submit_context_edit_for_review data no longer
+#        repeat the page: it carries id, version_id, editing_revision,
+#        content_hash, version_status, title, slug, review_item_id,
+#        change_set_id, publish_blocked_reasons and edit_receipt. Read the
+#        body by data.version_id when needed. The receipt's first_change
+#        is replaced by changes (the replaced regions as exact text, up to 20
+#        regions or 4 KB, then changes_omitted_count), and gains body_adjusted,
+#        server_fixes and changed_blocks_omitted_count. Every result's text
+#        copy is compact JSON. begin_context_edit is unchanged.
+#  20 -- guide answers at detail_level brief (new default), normal or
+#        detailed ("full" is accepted as detailed). Every level carries
+#        detail_level, detail_levels, a trimmed workspace_summary/actor_context,
+#        citation_policy, workspace_routing and required_workflow; normal adds
+#        taxonomies, prompts/resources, available_tools, AgentPage policy and
+#        hot concepts; detailed adds the full summary and field_explanations.
+#        placement_parent_candidates, active_agent_pages and context_write_policy
+#        are gone; find a placement with get_index(format="nodes"), which
+#        returns a node and its visible children with node_id. The bundle is
+#        offered for whole reading only when its estimated size is within
+#        64 KiB (workspace_routing), not by page count.
+#  21 -- The envelope on the wire is result_status, request_id,
+#        conversation_token, and when present warnings and review_item_id;
+#        a call that did not succeed adds error_code, error_message,
+#        error_details and retryable. envelope.meta and result_summary are
+#        gone (audit fields stay in the trace). request_id is also in the
+#        result's protocol _meta as com.dtxwiki/requestId. Every tool leaves a
+#        field off the wire when it equals an empty declared default (null,
+#        false, 0, "", [], {}); fields marked x-wire-explicit
+#        (edit_receipt.changes, edit_receipt.body_adjusted, envelope.retryable)
+#        are always sent because their null means unknown.
+#  22 -- get_index(format="nodes") includes can_have_children on the current
+#        node as well as its children, so its node_id can be used for placement
+#        without first reading its parent. guide's normal/detailed tool lists
+#        include the full actor-filtered catalog, including the guide resource.
+MCP_TOOL_CONTRACT_REVISION = 22
+# Marks a field whose null means "unknown" on the MCP wire. Fields at their
+# declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
+# a field carrying this marker is always sent, so an absent value can never be
+# confused with an unknown one.
+WIRE_EXPLICIT_FIELD = {"x-wire-explicit": True}
 ERROR_CODES = (
     "not_found",
     "stale_base_version",
@@ -496,7 +535,7 @@ class MCPResultEnvelope(BaseModel):
     # (an agent that cannot tell will loop).
     error_message: str | None = None
     error_details: list[MCPErrorDetail] = Field(default_factory=list)
-    retryable: bool | None = None
+    retryable: bool | None = Field(default=None, json_schema_extra=WIRE_EXPLICIT_FIELD)
     review_item_id: UUID | None = None
     warnings: list[EnvelopeWarning] = Field(default_factory=list)
     conversation_token: str | None = Field(

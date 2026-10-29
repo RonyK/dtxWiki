@@ -5,7 +5,7 @@ description: Create or update grounded dtxWiki Context pages, upload images safe
 
 # dtxWiki Authoring and Review
 
-Read `dtxwiki-conventions` before writing. Call `guide` for the current write policy, citation policy, placement candidates, and effective capabilities; do not hardcode values it reports.
+Read `dtxwiki-conventions` before writing. Call `guide` for the current write policy, citation policy, and effective capabilities; do not hardcode values it reports.
 
 ## Protect the base
 
@@ -13,12 +13,13 @@ Never write against a base you did not read. `update_context_edit` and `patch_co
 
 ## Choose the write shape
 
-1. For a new Context page, call `create_context_page`. Title/body/tags/aliases are all optional; an omitted title defaults to a placeholder. If `placement_parent_node_id` is omitted, the page goes to Inbox -- to choose a location, read `guide.placement_parent_candidates` and pass its node id as `placement_parent_node_id`.
+1. For a new Context page, call `create_context_page`. Title/body/tags/aliases are all optional; an omitted title defaults to a placeholder. If `placement_parent_node_id` is omitted, the page goes to Inbox -- to choose a location, walk `get_index(format='nodes')` from `/context` (pass a child's `node_id` as `node` to descend) and pass the chosen `node_id` as `placement_parent_node_id`.
 2. For an existing page, call `begin_context_edit` to idempotently open or resume your own private "editing" session. Passing `base_version_id`/`base_content_hash` asserts the base explicitly and returns a conflict instead of silently building on a head that moved.
 3. Prefer a partial edit over a full rewrite:
    - Call `read_structure_map` for the target page to obtain block ids, row ids, and content hashes. Call `read_context_outline` when you need heading text or one section's body.
    - Call `patch_context_edit` with typed operations addressed by block or row id and hash -- this tool always applies against your own open row, never a shared reconciled head, so there is no conflict-resolution operation to send.
    - Requires the `expected_editing_revision` you last saw as a CAS input; a stale value returns a conflict rather than silently overwriting a newer save.
+   - The response does not repeat the body. Take the next `editing_revision` and the new block ids and hashes (`edit_receipt.changed_blocks`) from it, and check the result in `edit_receipt.changes`, which quotes each replaced region as stored. Do not re-read the page after a successful patch; read it with `version='my_edit'` only when `changes` is null or `changes_omitted_count` or `changed_blocks_omitted_count` is above 0.
 4. Use `update_context_edit` for a full-document autosave -- title/body/tags/aliases/placement together, always sending the complete `body_md`. There is no metadata-only or citation-only write mode: changing tags, aliases, or placement without also resending the full body currently requires `update_context_edit` with the unchanged body included.
 5. Call `submit_context_edit_for_review` when the edit is ready for human review ("Save draft"). Once submitted, that version is never mutated again -- further changes need a new `begin_context_edit`. A submission never publishes on its own; read `data.publish_blocked_reasons` to learn why human review was required.
 6. Call `discard_context_edit` to abandon your own open editing session (terminal, not a hard-delete: audit/History is preserved). A page with no prior published/submitted history is archived when its only version is discarded; a previously published/shared page keeps its existing head.

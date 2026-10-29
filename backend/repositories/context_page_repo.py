@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import LargeBinary, cast, func, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, aliased
@@ -67,6 +67,38 @@ def current_page_versions_statement(
             ContextPage.slug.asc(),
         )
     )
+
+
+def visible_page_body_totals(
+    session: Session,
+    workspace_id: UUID,
+    actor: ActorContext | None = None,
+) -> tuple[int, int]:
+    """(pages, UTF-8 body bytes) of the live pages ``actor`` can see.
+
+    The same visible-version rule the whole-workspace bundle uses, summed in
+    one query rather than rendered, so the guide can say whether the bundle is
+    worth reading whole. Stored bodies only: the rendered bundle drops stored
+    frontmatter and adds an index, so this is an estimate.
+    """
+
+    body = ContextPageVersion.body_md
+    body_bytes = (
+        func.length(cast(body, LargeBinary))
+        if session.get_bind().dialect.name == "sqlite"
+        else func.octet_length(body)
+    )
+    pages, total = session.execute(
+        select(func.count(), func.coalesce(func.sum(body_bytes), 0))
+        .select_from(ContextPage)
+        .join(
+            ContextPageVersion,
+            ContextPageVersion.id == visible_context_version_expression(actor),
+        )
+        .where(ContextPage.workspace_id == workspace_id)
+        .where(ContextPage.lifecycle_status != "archived")
+    ).one()
+    return int(pages), int(total)
 
 
 def list_pages(

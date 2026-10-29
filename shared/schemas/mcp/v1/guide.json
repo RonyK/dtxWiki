@@ -18,10 +18,12 @@
         "title": "Conversation Token"
       },
       "detail_level": {
-        "default": "normal",
+        "default": "brief",
+        "description": "'brief' (default): what reading, editing and exploring need. 'normal' adds taxonomies, prompt/resource entry points, AgentPage policy, hot concepts and your full tool list. 'detailed' adds the full workspace summary and field explanations. 'full' is the old name of 'detailed'.",
         "enum": [
           "brief",
           "normal",
+          "detailed",
           "full"
         ],
         "title": "Detail Level",
@@ -98,24 +100,25 @@
       },
       "GuidePayload": {
         "additionalProperties": false,
+        "description": "The workspace guide at one detail level.\n\nbrief (the default) carries what reading, editing and exploring need;\nnormal and detailed add fields, never unbounded lists.",
         "properties": {
-          "active_agent_pages": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Active Agent Pages",
-            "type": "array"
-          },
           "actor_context": {
             "additionalProperties": true,
             "title": "Actor Context",
             "type": "object"
           },
           "agent_injection_policy": {
-            "additionalProperties": true,
-            "title": "Agent Injection Policy",
-            "type": "object"
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Agent Injection Policy"
           },
           "agent_page_taxonomy": {
             "items": {
@@ -163,9 +166,27 @@
             "title": "Context Page Taxonomy",
             "type": "array"
           },
-          "context_write_policy": {
-            "additionalProperties": true,
-            "title": "Context Write Policy",
+          "detail_level": {
+            "enum": [
+              "brief",
+              "normal",
+              "detailed"
+            ],
+            "title": "Detail Level",
+            "type": "string"
+          },
+          "detail_levels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Detail Levels",
+            "type": "object"
+          },
+          "field_explanations": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Field Explanations",
             "type": "object"
           },
           "hot_concepts": {
@@ -176,17 +197,17 @@
             "type": "array"
           },
           "library_policy_summary": {
-            "additionalProperties": true,
-            "title": "Library Policy Summary",
-            "type": "object"
-          },
-          "placement_parent_candidates": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Placement Parent Candidates",
-            "type": "array"
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Library Policy Summary"
           },
           "recommended_agent_guidance_flow": {
             "items": {
@@ -202,6 +223,9 @@
             "title": "Required Workflow",
             "type": "array"
           },
+          "workspace_routing": {
+            "$ref": "#/$defs/WorkspaceRouting"
+          },
           "workspace_summary": {
             "additionalProperties": true,
             "title": "Workspace Summary",
@@ -209,15 +233,12 @@
           }
         },
         "required": [
+          "detail_level",
+          "detail_levels",
           "workspace_summary",
           "actor_context",
-          "library_policy_summary",
-          "context_write_policy",
-          "agent_injection_policy",
           "citation_policy",
-          "context_page_taxonomy",
-          "agent_page_taxonomy",
-          "available_tools",
+          "workspace_routing",
           "required_workflow"
         ],
         "title": "GuidePayload",
@@ -554,7 +575,8 @@
               }
             ],
             "default": null,
-            "title": "Retryable"
+            "title": "Retryable",
+            "x-wire-explicit": true
           },
           "review_item_id": {
             "anyOf": [
@@ -651,6 +673,59 @@
           "match_kind"
         ],
         "title": "TextMatchCandidate",
+        "type": "object"
+      },
+      "WorkspaceRouting": {
+        "additionalProperties": false,
+        "description": "How to find and read pages here, sized by what the whole workspace\nweighs rather than by how many pages it has.",
+        "properties": {
+          "bundle_estimated_bytes": {
+            "description": "Estimated size of the whole-workspace bundle resource: the stored bodies of the pages you can see.",
+            "title": "Bundle Estimated Bytes",
+            "type": "integer"
+          },
+          "bundle_resource": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The bundle resource URI, given only within the budget.",
+            "title": "Bundle Resource"
+          },
+          "guidance": {
+            "title": "Guidance",
+            "type": "string"
+          },
+          "visible_pages": {
+            "title": "Visible Pages",
+            "type": "integer"
+          },
+          "whole_read": {
+            "enum": [
+              "within_budget",
+              "over_budget"
+            ],
+            "title": "Whole Read",
+            "type": "string"
+          },
+          "whole_read_budget_bytes": {
+            "title": "Whole Read Budget Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "visible_pages",
+          "bundle_estimated_bytes",
+          "whole_read_budget_bytes",
+          "whole_read",
+          "guidance"
+        ],
+        "title": "WorkspaceRouting",
         "type": "object"
       }
     },

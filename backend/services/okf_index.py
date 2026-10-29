@@ -16,6 +16,7 @@ module (see ``render_export_manifest`` in okf.py).
 
 from __future__ import annotations
 
+import base64
 import math
 from uuid import UUID
 
@@ -37,6 +38,13 @@ GET_INDEX_NODE_TOKEN_BUDGET = 7_000
 _ENTRY_SUMMARY_MAX = 160
 _HEURISTIC_TITLE_ROLLUP = 3
 _TOKEN_BUDGET_TAIL_RESERVE = 32
+
+
+_NODES_CURSOR_PREFIX = "nodes:"
+
+
+class IndexCursorError(ValueError):
+    """A format='nodes' cursor that this node did not issue."""
 
 
 class IndexNodeNotFoundError(LookupError):
@@ -104,6 +112,75 @@ def build_routing_index(
         lines.extend(entries or ["_(none)_"])
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def build_index_nodes(
+    session: Session,
+    workspace_id: UUID,
+    *,
+    actor: ActorContext | None,
+    node: str | None,
+    limit: int,
+    cursor: str | None,
+) -> dict:
+    """One tree node and a page of its visible children, by id.
+
+    The way an agent picks a ``placement_parent_node_id``: start at
+    ``/context`` and pass a child's ``node_id`` back as ``node`` to descend.
+    Raises IndexNodeNotFoundError for an unknown or invisible ``node`` and
+    IndexCursorError for a cursor issued for another node.
+    """
+
+    projection = TreeProjectionService().load(session, workspace_id, actor)
+    target = _resolve_node_ref(session, workspace_id, projection, node or "/context")
+    offset = _decode_nodes_cursor(cursor, target.id)
+    children = projection.visible_children(target.id, folders_first=True)
+    page = children[offset : offset + limit]
+    end = offset + len(page)
+    return {
+        "node": {
+            "node_id": target.id,
+            "title": target.title,
+            "path": _node_path(projection, target),
+            "can_have_children": target.can_have_children,
+        },
+        "children": [
+            {
+                "node_id": child.id,
+                "title": child.title,
+                "path": _node_path(projection, child),
+                "node_kind": child.node_kind,
+                "can_have_children": child.can_have_children,
+                "has_children": projection.has_children(child.id),
+            }
+            for child in page
+        ],
+        "children_total": len(children),
+        "next_cursor": (
+            _encode_nodes_cursor(target.id, end) if end < len(children) else None
+        ),
+    }
+
+
+def _encode_nodes_cursor(node_id: UUID, offset: int) -> str:
+    raw = f"{_NODES_CURSOR_PREFIX}{node_id}:{offset}"
+    return base64.urlsafe_b64encode(raw.encode()).decode()
+
+
+def _decode_nodes_cursor(cursor: str | None, node_id: UUID) -> int:
+    if cursor is None:
+        return 0
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode()).decode()
+        prefix, cursor_node, offset = raw.rsplit(":", 2)
+        position = int(offset)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise IndexCursorError("invalid nodes cursor") from exc
+    if f"{prefix}:" != _NODES_CURSOR_PREFIX or cursor_node != str(node_id):
+        raise IndexCursorError("cursor was issued for another node")
+    if position < 0:
+        raise IndexCursorError("invalid nodes cursor")
+    return position
 
 
 def _resolve_node_ref(

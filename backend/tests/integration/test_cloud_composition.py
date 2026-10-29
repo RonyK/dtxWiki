@@ -1581,22 +1581,13 @@ def test_mcp_error_traces_use_requested_workspace_not_actor_default(
     handler_failure = anyio.run(invoke)
     unauthorized = anyio.run(invoke, 123, unauthorized_workspace_id)
 
-    # workspace_id is audit/telemetry, not a field a model acts on -- the
-    # wire envelope folds it into envelope.meta (see runner.py
-    # _slim_envelope_for_wire); it is asserted here via that nested path
-    # rather than a top-level envelope key.
-    assert malformed.isError is True
-    assert malformed.structuredContent["envelope"]["meta"]["workspace_id"] == str(
-        target_workspace_id
-    )
-    assert handler_failure.isError is True
-    assert handler_failure.structuredContent["envelope"]["meta"]["workspace_id"] == str(
-        target_workspace_id
-    )
-    assert unauthorized.isError is True
-    assert unauthorized.structuredContent["envelope"]["meta"]["workspace_id"] == str(
-        unauthorized_workspace_id
-    )
+    # workspace_id is audit/telemetry, not a field a model acts on: it stays
+    # off the wire (see runner.py _slim_envelope_for_wire) and is asserted on
+    # the trace rows below.
+    for result in (malformed, handler_failure, unauthorized):
+        assert result.isError is True
+        assert "workspace_id" not in result.structuredContent["envelope"]
+        assert "meta" not in result.structuredContent["envelope"]
     with control_factory() as session:
         assert session.scalar(select(MCPToolCall)) is None
     with data_factory() as session:

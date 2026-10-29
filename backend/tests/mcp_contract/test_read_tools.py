@@ -84,7 +84,7 @@ def test_mcp_guide_and_agent_read_tools(page_service, actor, mcp_default_actor):
 
     guide = dispatch(
         "guide",
-        {"workspace_id": str(workspace_id), "detail_level": "brief"},
+        {"workspace_id": str(workspace_id)},
         actor=actor,
         page_service=page_service,
     )
@@ -103,15 +103,10 @@ def test_mcp_guide_and_agent_read_tools(page_service, actor, mcp_default_actor):
     )
 
     assert guide.envelope.result_status == "succeeded"
+    # No detail_level: brief, which leaves the tool list to tools/list.
+    assert guide.data.detail_level == "brief"
     assert guide.data.workspace_summary["slug"] == "default"
-    assert guide.data.available_tools == [
-        "guide",
-        "search",
-        "fetch",
-        "grep_wiki",
-        "read",
-        "list_agent_categories",
-    ]
+    assert guide.data.available_tools == []
     assert categories.data[0].category == "agent_guide"
     assert agent_page.data.body_markdown.startswith("# Default System Prompt")
     assert agent_page.data.tree_path[-1].title == "Default System Prompt"

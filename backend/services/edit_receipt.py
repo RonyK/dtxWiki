@@ -4,9 +4,10 @@ A successful patch used to answer with the whole page and nothing else: the
 agent could not tell which blocks got new ids or hashes without calling
 read_structure_map again, and the Chats timeline could show no more than "the
 call succeeded". The receipt is computed once from the before/after bodies
-the write already has in hand. It names positions, sections and sizes; its
-only content is two short previews around the first change, which is text the
-caller itself just wrote or replaced.
+the write already has in hand. It names positions, sections and sizes, and
+quotes only the replaced regions with a little same-line context -- the edit
+response carries no body, so these regions are how the caller sees what the
+stored body now says without reading the page again.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from backend.schemas.edit_receipt import (
     EditMode,
     EditReceipt,
     EditReceiptBlock,
-    EditReceiptFirstChange,
+    EditReceiptChange,
     EditReceiptOperation,
 )
 from backend.services.text_matching import MATCH_POLICY
@@ -34,6 +35,9 @@ MAX_CHANGED_SECTIONS = 20
 MAX_CHANGED_BLOCKS = 50
 # before-lines x after-lines of the region that differs; ~40 ms of diffing.
 MAX_DIFF_WORK = 250_000
+MAX_CHANGES = 20
+MAX_CHANGES_BYTES = 4096
+CHANGE_CONTEXT_CHARS = 40
 
 
 def _line_starts(text: str) -> list[int]:
@@ -74,6 +78,17 @@ def _section_for(outline: Outline, offset: int) -> tuple[str, ...]:
             if section.level > best_level:
                 best, best_level = section.heading_path, section.level
     return best
+
+
+def _line_start(text: str, offset: int) -> int:
+    return max(text.rfind("\n", 0, offset), text.rfind("\r", 0, offset)) + 1
+
+
+def _line_end(text: str, offset: int) -> int:
+    ends = [
+        end for end in (text.find("\n", offset), text.find("\r", offset)) if end >= 0
+    ]
+    return min(ends) if ends else len(text)
 
 
 def _first_ink(text: str, start: int, end: int) -> int:
@@ -130,6 +145,63 @@ def _changed_spans(before: str, after: str) -> list[tuple[int, int, int, int]]:
     return spans
 
 
+def _change_regions(
+    before: str, spans: Sequence[tuple[int, int, int, int]], after: str
+) -> list[tuple[int, int, int, int]]:
+    """``spans`` narrowed to the characters that differ at each end.
+
+    A span is whole lines; trimming its common prefix and suffix leaves the
+    exact replacement, so a one-word fix quotes the word, not the paragraph.
+    """
+
+    regions: list[tuple[int, int, int, int]] = []
+    for b1, b2, a1, a2 in spans:
+        old, new = before[b1:b2], after[a1:a2]
+        prefix = len(os.path.commonprefix([old, new]))
+        suffix = len(os.path.commonprefix([old[prefix:][::-1], new[prefix:][::-1]]))
+        regions.append((b1 + prefix, b2 - suffix, a1 + prefix, a2 - suffix))
+    return regions
+
+
+def _changes(
+    before: str,
+    after: str,
+    regions: Sequence[tuple[int, int, int, int]],
+    after_starts: Sequence[int],
+) -> tuple[list[EditReceiptChange], int]:
+    """The regions as listed on the receipt, and how many did not fit.
+
+    Always a prefix in document order, so the first listed region is the first
+    change; a region past either cap is left out whole, never cut, because a
+    cut region would invite copying a partial text as the next old_text.
+    """
+
+    changes: list[EditReceiptChange] = []
+    used = 0
+    for index, (b1, b2, a1, a2) in enumerate(regions):
+        texts = (
+            after[max(a1 - CHANGE_CONTEXT_CHARS, _line_start(after, a1)) : a1],
+            before[b1:b2],
+            after[a1:a2],
+            after[a2 : min(a2 + CHANGE_CONTEXT_CHARS, _line_end(after, a2))],
+        )
+        size = sum(len(text.encode("utf-8")) for text in texts)
+        if len(changes) == MAX_CHANGES or used + size > MAX_CHANGES_BYTES:
+            return changes, len(regions) - index
+        used += size
+        context_before, removed, added, context_after = texts
+        changes.append(
+            EditReceiptChange(
+                line=_line_of(after_starts, a1),
+                context_before=context_before,
+                removed=removed,
+                added=added,
+                context_after=context_after,
+            )
+        )
+    return changes, 0
+
+
 def build_edit_receipt(
     *,
     edit_mode: EditMode,
@@ -140,7 +212,12 @@ def build_edit_receipt(
     operations: list[EditReceiptOperation] | None = None,
     before_block_map: Sequence[dict] | None = None,
     after_block_map: Sequence[dict] | None = None,
+    requested_body: str | None = None,
+    server_fixes: Sequence[str] = (),
 ) -> EditReceipt:
+    """``requested_body`` is the body the request itself produced, before the
+    server's own preparation (managed frontmatter, format fixes) ran."""
+
     before = before_body or ""
     spans = _changed_spans(before, after_body)
     after_outline = parse_outline(after_body)
@@ -168,39 +245,25 @@ def build_edit_receipt(
         if len(sections) >= MAX_CHANGED_SECTIONS:
             break
 
-    first_change = None
-    if spans and edit_mode != "create":
-        b1, b2, a1, a2 = spans[0]
-        # Start at the first changed character that is not a blank line: an
-        # inserted section begins with the blank line that separates it, and
-        # pointing at that line would name the section above it.
-        after_start = _first_ink(after_body, a1, a2)
-        before_start = _first_ink(before, b1, b2)
-        first_change = EditReceiptFirstChange(
-            line=_line_of(after_starts, after_start),
-            before_preview=before[before_start : before_start + PREVIEW_CHARS],
-            after_preview=after_body[after_start : after_start + PREVIEW_CHARS],
+    changes: list[EditReceiptChange] | None = None
+    changes_omitted = 0
+    if before_body is not None:
+        changes, changes_omitted = _changes(
+            before, after_body, _change_regions(before, spans, after_body), after_starts
         )
 
-    changed_blocks: list[EditReceiptBlock] = []
+    changed_entries: list[dict] = []
     if after_block_map is not None:
         previous = {
             (entry.get("id"), entry.get("hash")) for entry in before_block_map or ()
         }
-        for entry in after_block_map:
-            if (entry.get("id"), entry.get("hash")) in previous:
-                continue
-            changed_blocks.append(
-                EditReceiptBlock(
-                    id=str(entry.get("id")),
-                    kind=str(entry.get("kind")),
-                    hash=str(entry.get("hash")),
-                )
-            )
-            if len(changed_blocks) >= MAX_CHANGED_BLOCKS:
-                break
+        changed_entries = [
+            entry
+            for entry in after_block_map
+            if (entry.get("id"), entry.get("hash")) not in previous
+        ]
 
-    return EditReceipt(
+    receipt = EditReceipt(
         edit_mode=edit_mode,
         editing_revision_before=editing_revision_before,
         editing_revision_after=editing_revision_after,
@@ -209,10 +272,36 @@ def build_edit_receipt(
         lines_added=lines_added,
         lines_removed=lines_removed,
         changed_sections=sections,
-        first_change=first_change,
+        changes=changes,
+        changes_omitted_count=changes_omitted,
+        body_adjusted=(
+            None if requested_body is None else after_body != requested_body
+        ),
+        server_fixes=list(server_fixes),
         operations=list(operations or []),
-        changed_blocks=changed_blocks,
+        changed_blocks=[
+            EditReceiptBlock(
+                id=str(entry.get("id")),
+                kind=str(entry.get("kind")),
+                hash=str(entry.get("hash")),
+            )
+            for entry in changed_entries[:MAX_CHANGED_BLOCKS]
+        ],
+        changed_blocks_omitted_count=max(0, len(changed_entries) - MAX_CHANGED_BLOCKS),
     )
+    if spans and before_body is not None:
+        b1, b2, a1, a2 = spans[0]
+        # Start at the first changed character that is not a blank line: an
+        # inserted section begins with the blank line that separates it, and
+        # pointing at that line would name the section above it.
+        after_start = _first_ink(after_body, a1, a2)
+        before_start = _first_ink(before, b1, b2)
+        receipt._trace_first_change = {
+            "line": _line_of(after_starts, after_start),
+            "before_preview": before[before_start : before_start + PREVIEW_CHARS],
+            "after_preview": after_body[after_start : after_start + PREVIEW_CHARS],
+        }
+    return receipt
 
 
 def patch_operation_receipts(

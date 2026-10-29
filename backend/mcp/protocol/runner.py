@@ -24,9 +24,11 @@ from backend.mcp.envelope import (
 )
 from backend.mcp.protocol.lifecycle import evaluate_actor_mcp_surface_lifecycle
 from backend.mcp.protocol.output_validation import (
+    FAILURE_ENVELOPE_FIELDS,
     WIRE_ENVELOPE_FIELDS,
     validate_tool_output,
 )
+from backend.mcp.protocol.wire_defaults import omit_declared_defaults
 from backend.mcp.router import dispatch
 from backend.mcp.scopes import (
     CONTENT_TOOLS,
@@ -73,6 +75,9 @@ CONVERSATION_TOKEN_NOT_SUPPLIED_MESSAGE = (
 UNRESOLVED_DIVERGED_BRANCH_CODE = "unresolved_diverged_branch"
 CONVERSATION_READ_STALE_CODE = "conversation_read_stale"
 CONVERSATION_TOKEN_META_KEY = "com.dtxwiki/conversationToken"
+# The call's request_id in the result's protocol _meta, for hosts and support
+# tooling; the envelope carries the same value for the model.
+REQUEST_ID_META_KEY = "com.dtxwiki/requestId"
 # These successful reads issue the exact version identity later write semantics
 # rely on. Returning success while their durable read-ledger transaction failed
 # would turn a correctness record into best-effort telemetry.
@@ -359,6 +364,7 @@ async def call_tool_async(
                     'request, or pass "new" to start a new conversation.'
                 )
             )
+            envelope.error_message = envelope.result_summary
             if requested_workspace_id is not None:
                 envelope.workspace_id = requested_workspace_id
             envelope.conversation_token = conversation.token
@@ -390,16 +396,7 @@ async def call_tool_async(
                 ),
             )
             # metric_status stays "error"; the finally emits it.
-            return CallToolResult(
-                content=[
-                    TextContent(
-                        type="text",
-                        text=json.dumps(payload, ensure_ascii=False, indent=2),
-                    )
-                ],
-                structuredContent=payload,
-                isError=True,
-            )
+            return _tool_result(payload, is_error=True)
         response = await asyncio.to_thread(
             dispatch,
             name,
@@ -489,6 +486,7 @@ async def call_tool_async(
             name,
             arguments,
             payload,
+            output_model=type(response),
         )
         _persist_trace(
             session_factory=fallback_session_factory,
@@ -498,6 +496,7 @@ async def call_tool_async(
             arguments=trace_arguments,
             payload=trace_payload,
             read_projection=getattr(response, "_served_read_projection", None),
+            edit_first_change=_edit_trace_preview(response),
             mcp_session_id=conversation.token
             or mcp_session_id
             or str(envelope.get("request_id") or ""),
@@ -515,16 +514,7 @@ async def call_tool_async(
             int((time.perf_counter() - started) * 1000),
             status,
         )
-        return CallToolResult(
-            content=[
-                TextContent(
-                    type="text",
-                    text=json.dumps(payload, ensure_ascii=False, indent=2),
-                )
-            ],
-            structuredContent=payload,
-            isError=status in ERROR_RESULT_STATUSES,
-        )
+        return _tool_result(payload, is_error=status in ERROR_RESULT_STATUSES)
     except (WorkspacePlaneUnavailableError, GrantReplicaMissingError) as exc:
         # Credential-replica and workspace-plane availability are pre-dispatch
         # failures. They must remain retryable and, unlike ordinary rejected
@@ -545,16 +535,7 @@ async def call_tool_async(
             payload,
             validate_contract=False,
         )
-        return CallToolResult(
-            content=[
-                TextContent(
-                    type="text",
-                    text=json.dumps(payload, ensure_ascii=False, indent=2),
-                )
-            ],
-            structuredContent=payload,
-            isError=True,
-        )
+        return _tool_result(payload, is_error=True)
     except (MCPClientRuntimeDenied, _ToolScopeDenied, _LiveGrantDenied) as exc:
         metric_status = "denied"
         envelope = error_envelope(
@@ -592,16 +573,7 @@ async def call_tool_async(
             payload,
             validate_contract=False,
         )
-        return CallToolResult(
-            content=[
-                TextContent(
-                    type="text",
-                    text=json.dumps(payload, ensure_ascii=False, indent=2),
-                )
-            ],
-            structuredContent=payload,
-            isError=True,
-        )
+        return _tool_result(payload, is_error=True)
     except (
         _ConversationTokenCarrierConflict,
         _WorkspaceTargetValidationError,
@@ -656,16 +628,7 @@ async def call_tool_async(
             trace_workspace_id=trace_workspace_id,
             create_chat_session=False,
         )
-        return CallToolResult(
-            content=[
-                TextContent(
-                    type="text",
-                    text=json.dumps(payload, ensure_ascii=False, indent=2),
-                )
-            ],
-            structuredContent=payload,
-            isError=True,
-        )
+        return _tool_result(payload, is_error=True)
     except Exception:
         # Set before anything else: the success path assigns metric_status
         # "ok" immediately before the capture call, so a contract violation
@@ -688,6 +651,7 @@ async def call_tool_async(
             "Tool call failed due to an unexpected server error. "
             "Details were logged on the server."
         )
+        envelope.error_message = envelope.result_summary
         if conversation_token is not None:
             envelope.conversation_token = conversation_token
         payload = _tool_error_payload(envelope)
@@ -713,16 +677,7 @@ async def call_tool_async(
             latency_ms=int((time.perf_counter() - started) * 1000),
             trace_workspace_id=trace_workspace_id,
         )
-        return CallToolResult(
-            content=[
-                TextContent(
-                    type="text",
-                    text=json.dumps(payload, ensure_ascii=False, indent=2),
-                )
-            ],
-            structuredContent=payload,
-            isError=True,
-        )
+        return _tool_result(payload, is_error=True)
     finally:
         inc_mcp_tool_call(tool=name, status=metric_status)
 
@@ -823,19 +778,58 @@ def _requested_conversation_token(arguments: dict[str, Any]) -> Any:
 _WIRE_ENVELOPE_FIELDS = WIRE_ENVELOPE_FIELDS
 
 
+def _edit_trace_preview(response: Any) -> dict[str, Any] | None:
+    """An edit receipt's Chats preview, cut from whole lines for masking.
+
+    Like ``_served_read_projection`` it bypasses the wire schema; the runner
+    passes it to trace persistence separately.
+    """
+
+    receipt = getattr(getattr(response, "data", None), "edit_receipt", None)
+    return getattr(receipt, "_trace_first_change", None)
+
+
+def _wire_text(payload: dict[str, Any]) -> str:
+    """The TextContent copy of a result: the same JSON as structuredContent.
+
+    Compact, because a client that hands this copy to the model pays for
+    every byte of it; indentation alone made results about 30% larger.
+    """
+
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
 def _slim_envelope_for_wire(payload: dict[str, Any]) -> dict[str, Any]:
-    """Trim ``payload["envelope"]`` to the wire-facing fields, folding the
-    rest into ``envelope.meta``. Applied to the WIRE copy only -- the caller
-    passes the untrimmed ``payload`` to ``_persist_trace`` separately, so
-    mcp_trace_capture.py keeps reading the full envelope unchanged."""
+    """Trim ``payload["envelope"]`` to the wire-facing fields; the error
+    fields only when the call did not succeed. Applied to the WIRE copy only
+    -- the caller passes the untrimmed ``payload`` to ``_persist_trace``
+    separately, so mcp_trace_capture.py keeps reading the full envelope."""
 
     envelope = payload.get("envelope")
     if not isinstance(envelope, dict):
         return payload
-    kept = {k: v for k, v in envelope.items() if k in _WIRE_ENVELOPE_FIELDS}
-    meta = {k: v for k, v in envelope.items() if k not in _WIRE_ENVELOPE_FIELDS}
-    kept["meta"] = meta
+    succeeded = envelope.get("result_status") == "succeeded"
+    kept = {
+        key: value
+        for key, value in envelope.items()
+        if key in _WIRE_ENVELOPE_FIELDS
+        and not (succeeded and key in FAILURE_ENVELOPE_FIELDS)
+    }
     return {**payload, "envelope": kept}
+
+
+def _tool_result(payload: dict[str, Any], *, is_error: bool) -> CallToolResult:
+    """The served result: text copy, structured copy, and request_id in the
+    protocol ``_meta``."""
+
+    envelope = payload.get("envelope")
+    request_id = envelope.get("request_id") if isinstance(envelope, dict) else None
+    return CallToolResult(
+        content=[TextContent(type="text", text=_wire_text(payload))],
+        structuredContent=payload,
+        isError=is_error,
+        _meta={REQUEST_ID_META_KEY: request_id} if request_id else None,
+    )
 
 
 def _capture_trace_and_wire_payload(
@@ -844,8 +838,13 @@ def _capture_trace_and_wire_payload(
     payload: dict[str, Any],
     *,
     validate_contract: bool = True,
+    output_model: type[BaseModel] = MCPErrorResponse,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Redact a tool result for durable capture and slim it for the wire.
+
+    ``output_model`` is the model ``payload`` was dumped from; fields at its
+    declared defaults are left off the wire copy (wire_defaults.py). The
+    error paths default to ``MCPErrorResponse``, the shape they all serve.
 
     Two DISTINCT contracts are checked, not one. ``payload`` is the full,
     untrimmed result the handler returned; ``wire_payload`` is what the client
@@ -867,14 +866,15 @@ def _capture_trace_and_wire_payload(
     """
 
     if validate_contract:
-        # Not redundant with the wire check below. The wire copy folds the 13
-        # audit/telemetry envelope fields into `envelope.meta`, typed
-        # `dict[str, Any] | None`, where any JSON is legal -- so for those
-        # fields THIS is the only gate. Pinned by
+        # Not redundant with the wire check below. The wire copy drops the
+        # audit/telemetry envelope fields, so for those fields THIS is the
+        # only gate. Pinned by
         # test_call_tool_async_fails_closed_on_a_violation_the_wire_phase_cannot_see.
         validate_tool_output(name, payload)
     trace_arguments, trace_payload = redact_tool_capture(name, arguments, payload)
-    wire_payload = _slim_envelope_for_wire(trace_payload)
+    wire_payload = omit_declared_defaults(
+        output_model, _slim_envelope_for_wire(trace_payload)
+    )
     if validate_contract:
         validate_tool_output(name, wire_payload, phase="wire")
     return trace_arguments, trace_payload, wire_payload
@@ -895,6 +895,7 @@ def _persist_trace(
     create_chat_session: bool = True,
     fail_closed: bool = False,
     read_projection: dict[str, Any] | None = None,
+    edit_first_change: dict[str, Any] | None = None,
 ) -> None:
     if not mcp_session_id or trace_workspace_id is None:
         return
@@ -926,6 +927,7 @@ def _persist_trace(
                 latency_ms=latency_ms,
                 create_chat_session=create_chat_session,
                 read_projection=read_projection,
+                edit_first_change=edit_first_change,
             )
     except Exception:
         # Counted BEFORE the fail_closed branch: a correctness-critical trace

@@ -1706,6 +1706,7 @@ class PageService:
         tags: list[str] | None = None,
         aliases: list[str] | None = None,
         placement_parent_node_id: UUID | None = None,
+        with_edit_receipt: bool = False,
     ) -> PagePayload:
         """Atomically create a page and its first, private "editing" version.
 
@@ -1804,12 +1805,23 @@ class PageService:
                     "was_private_edit": True,
                 },
             )
-            return self._payload_from_page(
+            payload = self._payload_from_page(
                 session,
                 page,
                 version,
                 current_version_id_override=version.id,
             )
+            if with_edit_receipt:
+                payload._edit_receipt = build_edit_receipt(
+                    edit_mode="create",
+                    before_body=None,
+                    after_body=payload.body_md,
+                    editing_revision_before=None,
+                    editing_revision_after=payload.editing_revision,
+                    requested_body=body_md,
+                    server_fixes=prepared.fixes,
+                )
+            return payload
 
     def begin_context_edit(
         self,
@@ -2520,6 +2532,8 @@ class PageService:
                     ),
                     before_block_map=block_map,
                     after_block_map=version.block_map,
+                    requested_body=applied.body,
+                    server_fixes=prepared.fixes,
                 )
                 return payload
 
@@ -3456,8 +3470,18 @@ class PageService:
                     and current.created_by_actor_kind == actor_kind
                     and current.created_by_actor_id == actor_id
                 )
-                receipt_base["body"] = current.body_md
-                receipt_base["revision"] = current.editing_revision
+                # The receipt quotes its base, so it follows the same rule as
+                # a conflict response: another author's private editing row
+                # is never disclosed, and the receipt then has no base.
+                disclosed_id, _ = self._disclosable_version_fields(
+                    current, actor_kind, actor_id
+                )
+                receipt_base["body"] = (
+                    current.body_md if disclosed_id is not None else None
+                )
+                receipt_base["revision"] = (
+                    current.editing_revision if disclosed_id is not None else None
+                )
                 alternative_base = self._autosave_check_base(
                     session=session,
                     page=page,
@@ -3483,6 +3507,8 @@ class PageService:
                     aliases=aliases,
                     actor_provenance=actor_provenance,
                 )
+                receipt_base["requested"] = body_md
+                receipt_base["fixes"] = prepared.fixes
                 if alternative_base is not None:
                     return self._preserve_alternative(
                         session=session,
@@ -3979,12 +4005,18 @@ class PageService:
         with_edit_receipt: bool,
     ) -> PagePayload:
         if with_edit_receipt and receipt_base:
+            before_body = receipt_base["body"]
+            revision_before = receipt_base["revision"]
             result._edit_receipt = build_edit_receipt(
                 edit_mode="whole_body",
-                before_body=str(receipt_base["body"]),
+                before_body=before_body if isinstance(before_body, str) else None,
                 after_body=result.body_md,
-                editing_revision_before=int(receipt_base["revision"]),
+                editing_revision_before=(
+                    revision_before if isinstance(revision_before, int) else None
+                ),
                 editing_revision_after=result.editing_revision,
+                requested_body=str(receipt_base["requested"]),
+                server_fixes=tuple(receipt_base["fixes"]),
             )
         return result
 
@@ -4634,7 +4666,7 @@ class PageService:
             requested = str(parent_id) if parent_id is not None else "default Inbox"
             raise PageValidationError(
                 f"placement parent {requested} is invalid: {exc}. "
-                "Call guide and choose a node_id from placement_parent_candidates; "
+                "Walk get_index(format='nodes') and choose a node_id there; "
                 "the page write was rolled back.",
                 cause_error_code=exc.error_code,
             ) from exc

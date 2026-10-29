@@ -3,6 +3,7 @@
 from sqlalchemy import select
 
 from backend.models.context import ContextPageVersion
+from backend.models.mcp_trace import MCPWriteIdempotency
 from backend.models.workspace import Workspace
 from backend.schemas.context_edit import ReplaceBlockOperation
 from backend.utils.content_hash import content_hash
@@ -93,8 +94,16 @@ def test_context_edit_patch_fixes_final_body_and_replays_matching_receipt(
     receipt = patched._edit_receipt
     assert receipt is not None
     assert receipt.editing_revision_after == final_revision
-    assert receipt.first_change is not None
-    assert receipt.first_change.after_preview.startswith("- revised\n\n| a   | b")
+    # The regions quote the stored body, so the caller sees the fixer's
+    # padding it never sent, and is told the server adjusted its request.
+    assert (
+        receipt.changes[0].context_before,
+        receipt.changes[0].removed,
+        receipt.changes[0].added,
+    ) == ("- ", "original", "revised")
+    assert "| -------- |" in receipt.changes[1].added
+    assert receipt.body_adjusted is True
+    assert receipt.server_fixes == ["format"]
     assert receipt.chars_added - receipt.chars_removed == len(final_body) - len(
         before_body
     )
@@ -106,7 +115,33 @@ def test_context_edit_patch_fixes_final_body_and_replays_matching_receipt(
 
     replayed = page_service.patch_context_edit(**command)
     assert replayed.model_dump() == patched.model_dump()
-    assert replayed._edit_receipt == receipt
+    assert replayed._edit_receipt.model_dump() == receipt.model_dump()
+    # A receipt stored before `changes` replaced `first_change` still replays;
+    # its regions are unknown rather than empty.
+    with session_factory.begin() as session:
+        row = session.scalar(
+            select(MCPWriteIdempotency).where(
+                MCPWriteIdempotency.idempotency_key == command["idempotency_key"]
+            )
+        )
+        legacy = {
+            key: value
+            for key, value in row.result_payload["_edit_receipt"].items()
+            if key
+            not in {
+                "changes",
+                "changes_omitted_count",
+                "body_adjusted",
+                "server_fixes",
+                "changed_blocks_omitted_count",
+            }
+        }
+        legacy["first_change"] = {"line": 3, "before_preview": "", "after_preview": ""}
+        row.result_payload = {**row.result_payload, "_edit_receipt": legacy}
+    legacy_replay = page_service.patch_context_edit(**command)._edit_receipt
+    assert legacy_replay.changes is None
+    assert legacy_replay.body_adjusted is None
+    assert legacy_replay.changed_blocks == receipt.changed_blocks
     with session_factory() as session:
         stored = session.get(ContextPageVersion, patched.version_id)
         assert stored.body_md == final_body

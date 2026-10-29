@@ -13,6 +13,7 @@ from backend.schemas.context_write import (
 )
 from backend.schemas.edit_receipt import EditReceipt
 from backend.schemas.page import (
+    CONTENT_HASH_PATTERN,
     CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD,
     PAGE_LIST_CURSOR_MAX_LENGTH,
     PAGE_LIST_CURSOR_PATTERN,
@@ -21,6 +22,7 @@ from backend.schemas.page import (
     ContextPageCreateRequest,
     DiscardContextEditRequest,
     DiscardContextEditResult,
+    DraftReviewReason,
     ListMyContextEditsResult,
     PagePayload,
     SubmitContextEditRequest,
@@ -97,25 +99,43 @@ class CreateContextPageInput(ContextPageCreateRequest):
     model_config = ConfigDict(extra="forbid")
 
 
-class ContextEditPayload(PagePayload):
-    """The page after an edit command, plus what that command changed."""
+class ContextEditResult(BaseModel):
+    """What an edit command saved: the version to address next and what changed.
 
+    The body is not repeated. edit_receipt.changes quotes the replaced
+    regions; when you need text the receipt does not show, read this version
+    by version_id (target.version_id), which still names it after a submit.
+    """
+
+    id: UUID
+    version_id: UUID
+    editing_revision: int
+    content_hash: str = Field(pattern=CONTENT_HASH_PATTERN)
+    version_status: str | None = None
+    title: str
+    slug: str
+    review_item_id: UUID | None = None
+    change_set_id: UUID | None = None
+    publish_blocked_reasons: list[DraftReviewReason] = Field(default_factory=list)
     edit_receipt: EditReceipt | None = Field(
         default=None,
         description=(
-            "What this write changed: sections, line/char counts, per-operation "
-            "positions, and (for a patch) the id and hash of every block whose "
-            "id or hash changed. replace_block keeps the block's id; a block "
-            "other edits changed keeps its id while its text stays close to the "
-            "old text, otherwise it gets a new one. null on an idempotent "
-            "replay."
+            "What this write changed: sections, line/char counts, the replaced "
+            "regions, per-operation positions, and (for a patch) the id and "
+            "hash of every block whose id or hash changed. replace_block keeps "
+            "the block's id; a block other edits changed keeps its id while "
+            "its text stays close to the old text, otherwise it gets a new "
+            "one. An idempotent replay returns the receipt of the call it "
+            "replays, which may describe an earlier revision. null on submit."
         ),
     )
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class CreateContextPageToolOutput(BaseModel):
     envelope: MCPResultEnvelope
-    data: ContextEditPayload | None = None
+    data: ContextEditResult | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -145,7 +165,7 @@ class UpdateContextEditInput(UpdateContextEditRequest):
 
 class UpdateContextEditToolOutput(BaseModel):
     envelope: MCPResultEnvelope
-    data: ContextEditPayload | None = None
+    data: ContextEditResult | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -160,7 +180,7 @@ class SubmitContextEditForReviewInput(SubmitContextEditRequest):
 
 class SubmitContextEditForReviewToolOutput(BaseModel):
     envelope: MCPResultEnvelope
-    data: PagePayload | None = None
+    data: ContextEditResult | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -265,6 +285,6 @@ class PatchContextEditInput(BaseModel):
 
 class PatchContextEditToolOutput(BaseModel):
     envelope: MCPResultEnvelope
-    data: ContextEditPayload | None = None
+    data: ContextEditResult | None = None
 
     model_config = ConfigDict(extra="forbid")

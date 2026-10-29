@@ -186,9 +186,19 @@ def test_repeated_updates_stay_on_one_editing_row_until_submit(page_service, act
     assert patched.envelope.result_status == "succeeded", patched.envelope
     # An open edit is the page's draft head while it is being edited; that is
     # the normal state, not an inconsistency to report on every save.
-    for response in (first, second, patched):
-        assert response.data.history_status == "current_editing"
-        assert response.data.inconsistency_reasons == []
+    resumed = dispatch(
+        "begin_context_edit",
+        {
+            "workspace_id": str(workspace_id),
+            "page_id": str(created.id),
+            "idempotency_key": "b-1",
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+    assert resumed.data.version_id == created.version_id
+    assert resumed.data.history_status == "current_editing"
+    assert resumed.data.inconsistency_reasons == []
 
     submitted = dispatch(
         "submit_context_edit_for_review",
@@ -286,7 +296,7 @@ def test_two_unscoped_replace_texts_apply_together(page_service, actor):
     )
     assert response.envelope.result_status == "succeeded", response.envelope
     assert response.data.editing_revision == created.editing_revision + 1
-    body = response.data.body_md
+    body = _stored(page_service, created.version_id).body_md
     assert "The ALPHA word lives here." in body
     assert "The OMEGA word lives there." in body
     # Both edits in one splice: the document is not duplicated.
@@ -422,7 +432,7 @@ def test_a_drifted_map_on_an_open_edit_heals_instead_of_failing(page_service, ac
         "p-1",
     )
     assert response.envelope.result_status == "succeeded", response.envelope
-    assert "One, patched." in response.data.body_md
+    assert "One, patched." in _stored(page_service, created.version_id).body_md
 
 
 def test_a_patch_receipt_is_enough_to_chain_the_next_block_patch(page_service, actor):
@@ -459,8 +469,11 @@ def test_a_patch_receipt_is_enough_to_chain_the_next_block_patch(page_service, a
     assert receipt.operations[0].op == "replace_block"
     assert receipt.operations[0].affected_block_ids == [one.id]
     assert [block.id for block in receipt.changed_blocks] == [one.id]
-    assert receipt.first_change is not None
-    assert receipt.first_change.after_preview.startswith("One, edited.")
+    # The receipt quotes the replaced region itself, not the page around it.
+    assert [
+        (change.line, change.context_before, change.removed, change.added)
+        for change in receipt.changes
+    ] == [(3, "One", "", ", edited")]
 
     # `two` was untouched, so the id/hash read before the first patch still
     # addresses it.
@@ -498,7 +511,7 @@ def test_a_patch_receipt_is_enough_to_chain_the_next_block_patch(page_service, a
         "p-3",
     )
     assert third.envelope.result_status == "succeeded", third.envelope
-    assert "One, edited twice." in third.data.body_md
+    assert "One, edited twice." in _stored(page_service, created.version_id).body_md
 
 
 def test_update_receipt_and_update_without_base_fields(page_service, actor):
@@ -524,7 +537,7 @@ def test_update_receipt_and_update_without_base_fields(page_service, actor):
     assert receipt.editing_revision_before == created.editing_revision
     assert receipt.lines_added >= 3
     assert ["Hello", "Part B"] in receipt.changed_sections
-    assert "New text." in receipt.first_change.after_preview
+    assert "New text." in receipt.changes[0].added
 
     stale = dispatch(
         "update_context_edit",
@@ -858,8 +871,9 @@ def test_a_copy_slip_is_forgiven_in_a_block_and_refused_without_one(
         "p-block",
     )
     assert forgiven.envelope.result_status == "succeeded", forgiven.envelope
-    assert "Install the package, then restart the service." in forgiven.data.body_md
-    assert sentence not in forgiven.data.body_md
+    body = _stored(page_service, created.version_id).body_md
+    assert "Install the package, then restart the service." in body
+    assert sentence not in body
     receipt_op = forgiven.data.edit_receipt.operations[0]
     assert receipt_op.match_kind == "fuzzy"
     assert 0.9 < receipt_op.match_similarity < 1
@@ -1292,4 +1306,7 @@ def test_a_stale_block_id_after_reordered_groups_is_not_found(page_service, acto
     )
     assert stale.envelope.result_status == "failed", stale.envelope
     assert stale.envelope.error_code == "block_not_found"
-    assert _stored(page_service, created.version_id).body_md == swapped.data.body_md
+    assert (
+        _stored(page_service, created.version_id).content_hash
+        == swapped.data.content_hash
+    )

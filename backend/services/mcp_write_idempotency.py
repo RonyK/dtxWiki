@@ -144,6 +144,16 @@ def execute_idempotent_write[ResultT: BaseModel](
     return result
 
 
+def _stored_edit_receipt(receipt: dict) -> EditReceipt:
+    """A stored receipt, including one written before ``changes`` replaced
+    ``first_change`` (rows live for IDEMPOTENCY_WINDOW). Such a receipt's
+    regions are unknown, so ``changes`` stays null rather than empty."""
+
+    stored = dict(receipt)
+    stored.pop("first_change", None)
+    return EditReceipt.model_validate(stored)
+
+
 def _replay_result[ResultT: BaseModel](
     row: MCPWriteIdempotency,
     *,
@@ -166,7 +176,7 @@ def _replay_result[ResultT: BaseModel](
     receipt = payload.pop("_edit_receipt", None)
     result = result_model.model_validate(payload)
     if isinstance(result, PagePayload) and receipt is not None:
-        result._edit_receipt = EditReceipt.model_validate(receipt)
+        result._edit_receipt = _stored_edit_receipt(receipt)
     if replay_transform is not None:
         return replay_transform(result)
     return result

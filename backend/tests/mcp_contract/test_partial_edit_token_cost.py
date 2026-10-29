@@ -1,17 +1,15 @@
-"""Phase 5 measurement against the REAL engine, not payload sketches.
+"""Phase 5 measurement against the REAL tools, not payload sketches.
 
 The epic's premise is that a one-sentence edit to a large page should not cost a
-whole-body round trip. An estimate cannot settle that, so this drives the actual
-patch engine and weighs the bytes the transport would carry.
+whole-body round trip. An estimate cannot settle that, so the cost test drives
+the live patch_context_edit tool and weighs the bytes the transport would carry.
+It used to drive the deregistered patch_draft engine, which is why the live
+tool could answer with the whole page without this test noticing.
 
-P8.6: write_draft/update_draft/patch_draft are no longer callable MCP tools
-(deregistered), but ContextWriteService's methods backing them remain fully
-live internal callers for PageService.reconcile_branch and
-ReviewService.submit_revision_for_review. These tests call the engine
-directly instead of going through MCP dispatch -- see
-test_patch_draft_push_semantics.py's module docstring for the same pattern.
-`read`/`read_structure_map` stay on the live MCP client since those tools are
-unaffected by the deregistration.
+The recovery tests below still call the patch_draft engine directly:
+ContextWriteService's methods remain live internal callers for
+PageService.reconcile_branch and ReviewService.submit_revision_for_review (see
+test_patch_draft_push_semantics.py's module docstring for the same pattern).
 """
 
 import json
@@ -22,7 +20,7 @@ from sqlalchemy import select
 from backend.mcp.router import dispatch
 from backend.models.workspace import Workspace
 from backend.schemas.context_edit import PatchDraftRequest
-from backend.schemas.context_write import UpdateDraftRequest, WriteDraftRequest
+from backend.schemas.context_write import WriteDraftRequest
 from backend.services.context_write_service import ContextWriteService
 from backend.services.read_errors import ReadValidationError
 
@@ -81,18 +79,6 @@ def _patch_draft(page_service, actor, workspace_id, **payload):
         )
 
 
-def _update_draft(page_service, actor, workspace_id, **payload):
-    """Engine-level equivalent of ``dispatch("update_draft", {...})``."""
-    with page_service.session_factory.begin() as session:
-        return ContextWriteService().update_draft(
-            session=session,
-            workspace_id=workspace_id,
-            request=UpdateDraftRequest(**payload),
-            actor_kind=actor.actor_kind,
-            actor_id=actor.actor_id,
-        )
-
-
 def test_partial_edit_costs_a_fraction_of_a_whole_body_round_trip(
     page_service, actor
 ):
@@ -102,37 +88,43 @@ def test_partial_edit_costs_a_fraction_of_a_whole_body_round_trip(
         ).id
 
     body = _korean_document()
-    created = _write_draft(
-        page_service,
-        actor,
-        workspace_id,
-        title="Phase5 Measurement",
-        page_type="overview",
-        body_markdown=body,
-        reason="measurement fixture",
+    created = dispatch(
+        "create_context_page",
+        {
+            "workspace_id": str(workspace_id),
+            "title": "Phase5 Measurement",
+            "body_md": body,
+        },
+        actor=actor,
+        page_service=page_service,
     )
-    page_id = str(created.page_id)
+    assert created.envelope.result_status == "succeeded", created.envelope
+    page_id = str(created.data.id)
+    version_id = str(created.data.version_id)
 
     old_text = "마무리 문단 40. 추가 설명 문장입니다. "
     new_text = "마무리 문단 40. 수정된 설명 문장입니다. "
     assert body.count(old_text) == 1, "measurement target must be unique"
 
-    # --- NEW: patch_draft, using the write receipt as base (no pre-read) ---
+    # --- NEW: patch_context_edit, chained from the create response (no read) ---
     patch_params = {
+        "workspace_id": str(workspace_id),
         "page_id": page_id,
-        "base": str(created.draft_version_id),
+        "version_id": version_id,
+        "expected_editing_revision": created.data.editing_revision,
         "operations": [
             {"op": "replace_text", "old_text": old_text, "new_text": new_text}
         ],
-        "reason": "one sentence fix",
+        "idempotency_key": "cost-patch",
     }
-    patched = _patch_draft(page_service, actor, workspace_id, **patch_params)
-    receipt = _payload(patched)
-    patch_cost = _bytes({"workspace_id": str(workspace_id), **patch_params}) + _bytes(
-        receipt
+    patched = dispatch(
+        "patch_context_edit", patch_params, actor=actor, page_service=page_service
     )
+    assert patched.envelope.result_status == "succeeded", patched.envelope
+    receipt = _payload(patched.data)
+    patch_cost = _bytes(patch_params) + _bytes(receipt)
 
-    # --- OLD: read the whole body to obtain the CAS hash, then rewrite it ---
+    # --- OLD: read the whole body, then rewrite it ---
     read_params = {
         "workspace_id": str(workspace_id),
         "target_type": "context_page",
@@ -140,21 +132,23 @@ def test_partial_edit_costs_a_fraction_of_a_whole_body_round_trip(
     }
     read_back = dispatch("read", read_params, actor=actor, page_service=page_service)
     assert read_back.data is not None, read_back.envelope.result_status
-    read_payload = _payload(read_back.data)
     update_params = {
+        "workspace_id": str(workspace_id),
         "page_id": page_id,
-        "base_version_id": str(patched.draft_version_id),
-        "base_content_hash": receipt["persisted_content_hash"],
-        "update_mode": "full_rewrite",
-        "body_markdown": body.replace(old_text, new_text, 1),
-        "reason": "one sentence fix",
+        "version_id": version_id,
+        "expected_editing_revision": patched.data.editing_revision,
+        "body_md": body.replace(old_text, new_text, 1),
+        "idempotency_key": "cost-update",
     }
-    updated = _update_draft(page_service, actor, workspace_id, **update_params)
+    updated = dispatch(
+        "update_context_edit", update_params, actor=actor, page_service=page_service
+    )
+    assert updated.envelope.result_status == "succeeded", updated.envelope
     baseline_cost = (
         _bytes(read_params)
-        + _bytes(read_payload)
-        + _bytes({"workspace_id": str(workspace_id), **update_params})
-        + _bytes(_payload(updated))
+        + _bytes(_payload(read_back.data))
+        + _bytes(update_params)
+        + _bytes(_payload(updated.data))
     )
 
     ratio = baseline_cost / patch_cost
@@ -164,15 +158,15 @@ def test_partial_edit_costs_a_fraction_of_a_whole_body_round_trip(
     print(f"  document               : {len(body):,} chars")
     print(f"  document bytes         : {len(body_bytes):,}")
     print(f"  baseline (read+rewrite): {baseline_cost:,} bytes")
-    print(f"  patch_draft            : {patch_cost:,} bytes")
+    print(f"  patch_context_edit     : {patch_cost:,} bytes")
     print(f"  reduction              : {ratio:.1f}x")
 
-    assert body_bytes not in json.dumps(patch_params, ensure_ascii=False).encode(
-        "utf-8"
-    ), "full body leaked into the patch request"
-    assert body_bytes not in json.dumps(receipt, ensure_ascii=False).encode(
-        "utf-8"
-    ), "full body leaked into the patch receipt"
+    # A write response never repeats the page, whichever command wrote it.
+    for response in (created, patched, updated):
+        assert "body_md" not in _payload(response.data)
+    assert body_bytes[:2_000] not in json.dumps(
+        receipt, ensure_ascii=False
+    ).encode("utf-8"), "the page leaked into the patch response"
     assert ratio >= 20, f"reduction {ratio:.1f}x is below the 20x acceptance bar"
 
 
