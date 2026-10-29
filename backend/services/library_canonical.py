@@ -7,20 +7,25 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import case, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from backend.library_media.ports import LibraryBlobRepositoryFactory
 from backend.media.domain import BlobEpoch, BlobReference
 from backend.models.library import (
     LibraryArtifact,
     LibraryArtifactConversionDetail,
+    LibraryArtifactPreviewDetail,
     LibraryAttempt,
+    LibraryAttemptPreviewDetail,
     LibraryItem,
     LibraryItemVersion,
 )
 from backend.models.library_semantic_overlay import LibrarySemanticOverlay
 from backend.models.media import SecurityBlockedBlobRow
-from backend.repositories.workspace_scoped import get_in_workspace
+from backend.repositories.workspace_scoped import (
+    get_in_workspace,
+    select_in_workspace_by_ids,
+)
 from backend.services.preview_contracts import renderer_accepts_media_type
 
 _LEGACY_READY_STATUSES = frozenset({"completed", "ready", "ready_partial"})
@@ -316,6 +321,28 @@ def preview_generation_dependency_matches(
     detail = attempt.preview_detail
     if detail is None:
         return False
+    artifact = (
+        get_in_workspace(
+            session,
+            LibraryArtifact,
+            workspace_id=version.workspace_id,
+            resource_id=detail.input_artifact_id,
+        )
+        if detail.input_artifact_id is not None
+        else None
+    )
+    return _preview_generation_dependency_matches_data(
+        version, attempt, detail, artifact
+    )
+
+
+def _preview_generation_dependency_matches_data(
+    version: LibraryItemVersion,
+    attempt: LibraryAttempt,
+    detail: LibraryAttemptPreviewDetail,
+    input_artifact: LibraryArtifact | None,
+) -> bool:
+    """Pure dependency gate shared by scalar and batched canonical lookup."""
     if detail.input_kind == "source":
         return (
             detail.input_attempt_id is None
@@ -328,13 +355,52 @@ def preview_generation_dependency_matches(
         or detail.input_artifact_id is None
     ):
         return False
-    artifact = session.get(LibraryArtifact, detail.input_artifact_id)
     return (
-        artifact is not None
-        and artifact.library_item_version_id == version.id
-        and artifact.attempt_id == detail.input_attempt_id
-        and artifact.content_sha256 is not None
-        and artifact.content_sha256.lower() == attempt.input_sha256
+        input_artifact is not None
+        and input_artifact.library_item_version_id == version.id
+        and input_artifact.attempt_id == detail.input_attempt_id
+        and input_artifact.content_sha256 is not None
+        and input_artifact.content_sha256.lower() == attempt.input_sha256
+    )
+
+
+def _canonical_artifact_is_valid(
+    item: LibraryItem,
+    version: LibraryItemVersion,
+    artifact: LibraryArtifact,
+    *,
+    canonical_version: LibraryItemVersion | None,
+    attempt: LibraryAttempt | None = None,
+    attempt_preview_detail: LibraryAttemptPreviewDetail | None = None,
+    input_artifact: LibraryArtifact | None = None,
+    artifact_preview_detail: LibraryArtifactPreviewDetail | None = None,
+) -> bool:
+    """Shared stage and selection policy for scalar and batched lookups."""
+    if artifact.stage == "conversion":
+        return (
+            canonical_version is not None
+            and canonical_version.id == version.id
+            and artifact.attempt_id == version.selected_conversion_attempt_id
+        )
+    if artifact.stage != "preview_generation":
+        return False
+    if (
+        item.current_preview_version_id != version.id
+        or version.selected_preview_attempt_id is None
+        or version.preview_status not in {"ready", "ready_partial"}
+        or version.selected_preview_attempt_id != artifact.attempt_id
+        or attempt is None
+        or attempt_preview_detail is None
+        or artifact_preview_detail is None
+    ):
+        return False
+    return (
+        _preview_generation_dependency_matches_data(
+            version, attempt, attempt_preview_detail, input_artifact
+        )
+        and renderer_accepts_media_type(
+            artifact_preview_detail.renderer_contract, artifact.media_type
+        )
     )
 
 
@@ -382,41 +448,192 @@ def canonical_library_artifact_lookup(
     if item is None:
         return None
 
-    if artifact.stage == "conversion":
-        canonical_version = get_canonical_library_version(session, item)
-        if canonical_version is None or canonical_version.id != version.id:
-            return None
-        if artifact.attempt_id != version.selected_conversion_attempt_id:
-            return None
-        return item, version, artifact
-
+    canonical_version = (
+        get_canonical_library_version(session, item)
+        if artifact.stage == "conversion"
+        else None
+    )
+    attempt = None
+    attempt_preview_detail = None
+    input_artifact = None
+    artifact_preview_detail = None
     if artifact.stage == "preview_generation":
-        if item.current_preview_version_id != version.id:
-            return None
-        if (
-            version.selected_preview_attempt_id is None
-            or version.preview_status not in {"ready", "ready_partial"}
-            or version.selected_preview_attempt_id != artifact.attempt_id
-        ):
-            return None
-        attempt = session.get(LibraryAttempt, artifact.attempt_id)
-        if attempt is None or not preview_generation_dependency_matches(
-            session, version, attempt
-        ):
-            return None
-        if artifact.preview_detail is None or not renderer_accepts_media_type(
-            artifact.preview_detail.renderer_contract, artifact.media_type
-        ):
-            return None
+        attempt = get_in_workspace(
+            session,
+            LibraryAttempt,
+            workspace_id=workspace_id,
+            resource_id=artifact.attempt_id,
+        )
+        if attempt is not None:
+            attempt_preview_detail = attempt.preview_detail
+            if (
+                attempt_preview_detail is not None
+                and attempt_preview_detail.input_artifact_id is not None
+            ):
+                input_artifact = get_in_workspace(
+                    session,
+                    LibraryArtifact,
+                    workspace_id=workspace_id,
+                    resource_id=attempt_preview_detail.input_artifact_id,
+                )
+        artifact_preview_detail = artifact.preview_detail
+    if _canonical_artifact_is_valid(
+        item,
+        version,
+        artifact,
+        canonical_version=canonical_version,
+        attempt=attempt,
+        attempt_preview_detail=attempt_preview_detail,
+        input_artifact=input_artifact,
+        artifact_preview_detail=artifact_preview_detail,
+    ):
         return item, version, artifact
-
     return None
+
+
+def canonical_library_artifact_lookup_many(
+    session: Session,
+    *,
+    workspace_id: UUID,
+    artifact_ids: set[UUID] | list[UUID] | tuple[UUID, ...],
+    chunk_size: int = 400,
+) -> dict[UUID, tuple[LibraryItem, LibraryItemVersion, LibraryArtifact] | None]:
+    """Resolve canonical artifact lineages with bounded workspace-scoped reads.
+
+    This is for read projections that may contain many artifact links. It
+    applies the same stage, selected-version/attempt, preview dependency and
+    renderer-contract gates as :func:`canonical_library_artifact_lookup`.
+    Missing, foreign-workspace, stale, and unsupported artifacts map to None.
+    """
+    ids = list(dict.fromkeys(artifact_ids))
+    result: dict[
+        UUID, tuple[LibraryItem, LibraryItemVersion, LibraryArtifact] | None
+    ] = {artifact_id: None for artifact_id in ids}
+    if not ids:
+        return result
+
+    def load(model, resource_ids: set[UUID], *, options=()):
+        rows = {}
+        if not resource_ids:
+            return rows
+        ordered_ids = list(resource_ids)
+        for offset in range(0, len(ordered_ids), chunk_size):
+            rows.update(
+                (
+                    row.id,
+                    row,
+                )
+                for row in session.scalars(
+                    select_in_workspace_by_ids(
+                        model,
+                        workspace_id=workspace_id,
+                        resource_ids=ordered_ids[offset : offset + chunk_size],
+                    )
+                    .options(*options)
+                )
+            )
+        return rows
+
+    artifacts = load(
+        LibraryArtifact,
+        set(ids),
+        options=(selectinload(LibraryArtifact.preview_detail),),
+    )
+    version_ids = {
+        artifact.library_item_version_id for artifact in artifacts.values()
+    }
+    versions = load(LibraryItemVersion, version_ids)
+    item_ids = {version.library_item_id for version in versions.values()}
+    items = load(LibraryItem, item_ids)
+
+    # Include both the artifact's version and the version pointer used by the
+    # scalar canonical-version helper, including its legacy ready fallback.
+    pointer_version_ids = {
+        selected_id
+        for item in items.values()
+        for selected_id in (
+            item.current_ready_version_id or item.current_version_id,
+        )
+        if selected_id is not None
+    }
+    missing_pointer_ids = pointer_version_ids - versions.keys()
+    versions.update(load(LibraryItemVersion, missing_pointer_ids))
+
+    preview_attempt_ids = {
+        artifact.attempt_id
+        for artifact in artifacts.values()
+        if artifact.stage == "preview_generation"
+    }
+    attempts = load(
+        LibraryAttempt,
+        preview_attempt_ids,
+        options=(selectinload(LibraryAttempt.preview_detail),),
+    )
+    preview_details = {
+        attempt_id: attempt.preview_detail
+        for attempt_id, attempt in attempts.items()
+        if attempt.preview_detail is not None
+    }
+    artifact_preview_details = {
+        artifact_id: artifact.preview_detail
+        for artifact_id, artifact in artifacts.items()
+        if artifact.preview_detail is not None
+    }
+    input_artifact_ids = {
+        detail.input_artifact_id
+        for detail in preview_details.values()
+        if detail.input_artifact_id is not None
+    }
+    input_artifacts = load(LibraryArtifact, input_artifact_ids)
+
+    for artifact_id, artifact in artifacts.items():
+        version = versions.get(artifact.library_item_version_id)
+        if version is None:
+            continue
+        item = items.get(version.library_item_id)
+        if item is None:
+            continue
+        canonical_version = None
+        canonical_pointer = item.current_ready_version_id
+        if canonical_pointer is None and item.current_version_id is not None:
+            legacy_version = versions.get(item.current_version_id)
+            if (
+                legacy_version is not None
+                and legacy_version.library_item_id == item.id
+                and legacy_version.processing_status in _LEGACY_READY_STATUSES
+            ):
+                canonical_pointer = legacy_version.id
+        if canonical_pointer == version.id:
+            canonical_version = version
+        elif canonical_pointer is not None:
+            canonical_version = versions.get(canonical_pointer)
+        attempt = attempts.get(artifact.attempt_id)
+        detail = preview_details.get(artifact.attempt_id)
+        input_artifact = (
+            input_artifacts.get(detail.input_artifact_id)
+            if detail is not None and detail.input_artifact_id is not None
+            else None
+        )
+        artifact_detail = artifact_preview_details.get(artifact_id)
+        if _canonical_artifact_is_valid(
+            item,
+            version,
+            artifact,
+            canonical_version=canonical_version,
+            attempt=attempt,
+            attempt_preview_detail=detail,
+            input_artifact=input_artifact,
+            artifact_preview_detail=artifact_detail,
+        ):
+            result[artifact_id] = (item, version, artifact)
+    return result
 
 
 __all__ = [
     "EffectiveLibraryMarkdown",
     "canonical_library_artifact_belongs_to_item",
     "canonical_library_artifact_lookup",
+    "canonical_library_artifact_lookup_many",
     "get_canonical_editable_markdown_artifact",
     "get_canonical_library_version",
     "get_canonical_markdown_artifact",

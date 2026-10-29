@@ -22,7 +22,10 @@ from backend.models.workspace import Workspace, default_actor_id
 from backend.policy.auth import ActorContext
 from backend.policy.rbac import role_allows
 from backend.policy.trust_boundaries import actor_can_read_drafts
-from backend.repositories.workspace_scoped import get_in_workspace
+from backend.repositories.workspace_scoped import (
+    get_in_workspace,
+    select_in_workspace,
+)
 from backend.schemas.context_write import (
     PublishContextPageRequest,
     ReviewCountsPayload,
@@ -829,18 +832,59 @@ class ReviewService:
         from_me) — the same audience predicate list_reviews clamps viewers to."""
         if principal is None:
             return False
-        for scope in ("to_me", "from_me"):
-            statement = self._apply_scope_predicate(
-                session=session,
-                statement=select(ReviewItem.id).where(ReviewItem.id == review.id),
-                workspace_id=review.workspace_id,
-                principal=principal,
-                scope=scope,
-                principal_role=principal_role,
+        return review.id in self.visible_review_ids(
+            session,
+            review.workspace_id,
+            [review.id],
+            actor_user_id=principal,
+            actor_role=principal_role,
+        )
+
+    def visible_review_ids(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        review_item_ids: list[UUID],
+        *,
+        actor_user_id: UUID | None = None,
+        actor_role: str | None = None,
+    ) -> set[UUID]:
+        """Return review IDs visible in the same list scope for this actor.
+
+        Explicit IDs are filtered in bounded chunks before any review-specific
+        visibility join. Editors receive workspace-scoped rows; other roles
+        reuse the list's to_me/from_me audience predicates.
+        """
+        resolved_role = actor_role or "viewer"
+        ids = list(dict.fromkeys(review_item_ids))
+        if not ids:
+            return set()
+        visible: set[UUID] = set()
+        for offset in range(0, len(ids), 400):
+            chunk = ids[offset : offset + 400]
+            statement = select_in_workspace(
+                ReviewItem,
+                workspace_id=workspace_id,
+                conditions=(ReviewItem.id.in_(chunk),),
+            ).with_only_columns(
+                ReviewItem.id
             )
-            if session.scalar(statement) is not None:
-                return True
-        return False
+            if role_allows(resolved_role, "editor"):
+                visible.update(session.scalars(statement).all())
+                continue
+            if actor_user_id is None:
+                continue
+            for scope in ("to_me", "from_me"):
+                scoped = self._apply_scope_predicate(
+                    session=session,
+                    statement=statement,
+                    workspace_id=workspace_id,
+                    principal=actor_user_id,
+                    scope=scope,
+                    principal_role=resolved_role,
+                )
+                visible.update(session.scalars(scoped).all())
+        return visible
 
     def can_decide_review(
         self,

@@ -15,6 +15,7 @@ from backend.services.context_links import (
     Resolution,
     classify,
     decide,
+    decide_link,
     extract_links,
     format_stable_url,
     link_markdown,
@@ -171,6 +172,101 @@ def test_context_link_contract_and_source_decisions(monkeypatch):
         )
         assert rewritten == foreign_body
         assert fixes == ()
+
+    # Budget exception: overview, domain-detail and artifact routes use
+    # separate parser branches, and foreign routes must never query a target.
+    # These pure checks cover the lint boundary without new database cases.
+    # Recognized explicit-workspace destinations outside the three typed
+    # resource routes are navigation references, not resource-existence
+    # claims. Context lint has no destination-reader authority for these
+    # routes, so preserve both local and foreign links without probing.
+    navigation_workspace = str(workspace_id)
+    navigation_target = str(page_id)
+    navigation_hrefs = (
+        f"/workspaces/{navigation_workspace}",
+        f"/workspaces/{navigation_workspace}/review/{navigation_target}",
+        f"/workspaces/{navigation_workspace}/ask/{navigation_target}",
+        f"/workspaces/{navigation_workspace}/chats/{navigation_target}",
+        f"/workspaces/{navigation_workspace}/lint/findings/{navigation_target}",
+        f"/workspaces/{navigation_workspace}/library/artifacts/{navigation_target}",
+        f"/workspaces/{foreign_workspace_id}/review/{navigation_target}",
+        f"/workspaces/{foreign_workspace_id}/lint/findings/{navigation_target}",
+    )
+    navigation_body = "\n".join(f"[Destination]({item})" for item in navigation_hrefs)
+    navigation_context = LinkContext(NoDatabaseReads(), workspace_id)
+    for navigation_href in navigation_hrefs:
+        locator, resolution, decision = decide_link(
+            navigation_href, navigation_context
+        )
+        assert locator.kind == "unknown"
+        assert resolution is None
+        assert decision.action == "keep"
+        assert decision.finding is None
+    rewritten_navigation, navigation_fixes, _ = rewrite_links_with_report(
+        navigation_body, navigation_context
+    )
+    assert rewritten_navigation == navigation_body
+    assert navigation_fixes == ()
+
+    # Recognition is grammar-bound: a malformed product path remains an
+    # unresolved authored link instead of being granted navigation treatment.
+    malformed_navigation = (
+        f"/workspaces/{navigation_workspace}/lint/findings/not-a-uuid"
+    )
+    malformed_locator, malformed_resolution, malformed_decision = decide_link(
+        malformed_navigation, navigation_context
+    )
+    assert malformed_locator.kind == "unknown"
+    assert malformed_resolution is not None
+    assert malformed_decision.finding == "link.unresolved"
+
+    # Budget exception: canonical/stable paths, foreign workspace authority and
+    # identity overrides take separate query-classification branches. A plain
+    # navigation URL cannot expose loss of a pinned version during lint fixes.
+    # Safe Context view queries are accepted by the Context reader but are
+    # not target-existence claims for lint. Preserve their exact query bytes;
+    # identity overrides still fail closed and remain unresolved.
+    version_id = "44444444-4444-4444-8444-444444444444"
+    safe_context_hrefs = (
+        f"/workspaces/{navigation_workspace}/context/pages/{navigation_target}"
+        f"?version={version_id}",
+        f"/p/{navigation_workspace}/{navigation_target}?version={version_id}",
+        f"/workspaces/{foreign_workspace_id}/context/pages/{navigation_target}"
+        f"?version={version_id}",
+    )
+    safe_context_body = "\n".join(
+        f"[Version]({item})" for item in safe_context_hrefs
+    )
+    for safe_context_href in safe_context_hrefs:
+        safe_locator, safe_resolution, safe_decision = decide_link(
+            safe_context_href, navigation_context
+        )
+        assert safe_locator.kind in {"canonical_route", "stable_full"}
+        assert safe_resolution is None
+        assert safe_decision.action == "keep"
+        assert safe_decision.finding is None
+    rewritten_context, context_fixes, _ = rewrite_links_with_report(
+        safe_context_body, navigation_context
+    )
+    assert rewritten_context == safe_context_body
+    assert context_fixes == ()
+
+    identity_override = (
+        f"/workspaces/{navigation_workspace}/context/pages/{navigation_target}"
+        f"?workspaceId={foreign_workspace_id}"
+    )
+    override_locator, override_resolution, override_decision = decide_link(
+        identity_override, navigation_context
+    )
+    assert override_locator.kind == "unknown"
+    assert override_resolution is not None
+    assert override_decision.finding == "link.unresolved"
+    override_body = f"[Wrong workspace]({identity_override})"
+    rewritten_override, override_fixes, _ = rewrite_links_with_report(
+        override_body, navigation_context
+    )
+    assert rewritten_override == override_body
+    assert override_fixes == ()
 
     # Budget exception: populated and empty query delimiters are independent
     # parser cases recorded in the cross-language fixture; neither has a
@@ -355,6 +451,10 @@ def test_workspace_navigation_projection_respects_source_scope_and_route_identit
     monkeypatch.setattr(
         "backend.services.context_link_targets.resolve", resolve_missing
     )
+    monkeypatch.setattr(
+        "backend.services.context_link_targets._resolution_batch",
+        lambda *_args: None,
+    )
     mixed_links = context_link_targets(
         object(),
         page=SimpleNamespace(
@@ -446,6 +546,10 @@ def test_ask_recognizes_configured_absolute_context_route(monkeypatch):
                 page_id=target,
             )
         ),
+    )
+    monkeypatch.setattr(
+        "backend.services.context_link_targets._resolution_batch",
+        lambda *_args: None,
     )
 
     (result,) = ask_context_link_targets(
@@ -609,6 +713,17 @@ def test_context_navigation_batches_tree_visibility_projection(monkeypatch):
     monkeypatch.setattr(
         "backend.services.context_link_targets.library_item_visible",
         lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        "backend.services.context_link_targets._navigation_batch",
+        lambda _session, _hrefs, **kwargs: SimpleNamespace(
+            library_items={library_item_id: SimpleNamespace(id=library_item_id)},
+            library_artifacts={},
+            agent_pages={},
+            ask_sessions=set(),
+            chat_sessions=set(),
+            tree=kwargs["tree"],
+        ),
     )
     monkeypatch.setattr(
         "backend.services.context_link_targets.canonical_library_artifact_lookup",

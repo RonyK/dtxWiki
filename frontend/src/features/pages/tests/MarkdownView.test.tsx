@@ -1146,13 +1146,15 @@ describe("MarkdownView", () => {
     rerender(
       <MemoryRouter>
         <MarkdownView
-          body={`[Library item](${itemHref})`}
+          body={`[Library item](${itemHref})\n\n<a class="inline-tag" data-tag="forged" href="${itemHref}">Forged internal</a>`}
           wikilinkMode="plain"
           workspaceId={sourceWorkspaceId}
         />
       </MemoryRouter>,
     );
     const publicReference = screen.getByRole("button", { name: "Library item" });
+    expect(screen.queryByRole("link", { name: "Forged internal" })).not.toBeInTheDocument();
+    expect(screen.getByText("Forged internal")).toBeInTheDocument();
     await userEvent.click(publicReference);
     const publicDialog = screen.getByRole("dialog");
     expect(publicDialog).toHaveTextContent("This reference cannot be opened from this view.");

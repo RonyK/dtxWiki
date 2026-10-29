@@ -496,6 +496,9 @@ def test_page_service_rejects_base_version_id_belonging_to_another_page():
 
 
 def test_wikilink_pin_survives_rename_rescan_and_restore():
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
     from backend.app.container import assemble
     from backend.app.settings import Settings
     from backend.models.lint import LintFinding
@@ -644,6 +647,174 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
     assert len(detail.link_targets) == 6
     assert all(entry.state == "ok" for entry in detail.link_targets)
     assert all(entry.target_page_id == target.id for entry in detail.link_targets)
+    # Budget exception: the six mixed locators above do not distinguish one
+    # query per target from a request-scoped batch. Fifty distinct published
+    # page IDs rule out per-target memoization, while a real SQLite session and
+    # persisted PageLink rows are needed to count SELECTs rather than only
+    # asserting a mocked helper call count.
+    from backend.services.context_link_targets import context_link_targets
+    from backend.services.context_links import (
+        LinkContext,
+        LinkResolutionBatch,
+        classify,
+        resolve,
+    )
+
+    bulk_target_pages = [target]
+    for index in range(49):
+        bulk_target_pages.append(
+            service.write_page(
+                workspace_slug="default",
+                slug=f"link-query-target-{index}",
+                title=f"Link Query Target {index}",
+                body_md=f"# Link Query Target {index}",
+                actor_kind="human",
+                actor_id="dev-local-user",
+                actor_provenance="browser_session",
+            )
+        )
+    bulk_body = "\n".join(
+        f"[Section {index}](/p/{page.workspace_id}/{page.id}#section-{index})"
+        for index, page in enumerate(bulk_target_pages)
+    )
+    bulk_source = service.write_page(
+        workspace_slug="default",
+        slug="link-query-batch",
+        title="Link Query Batch",
+        body_md=bulk_body,
+        actor_kind="human",
+        actor_id="dev-local-user",
+        actor_provenance="browser_session",
+    )
+    engine = service.session_factory.kw["bind"]
+    query_count = 0
+    measuring = False
+
+    def count_projection_selects(_conn, _cursor, statement, _parameters, _ctx, _many):
+        nonlocal query_count
+        if measuring and statement.lstrip().upper().startswith(("SELECT", "WITH")):
+            query_count += 1
+
+    event.listen(engine, "before_cursor_execute", count_projection_selects)
+    try:
+        with service.session_factory.begin() as session:
+            bulk_page = session.get(ContextPage, bulk_source.id)
+            bulk_version = session.get(ContextPageVersion, bulk_source.version_id)
+            workspace = session.get(Workspace, target.workspace_id)
+            measuring = True
+            bulk_targets = context_link_targets(
+                session,
+                page=bulk_page,
+                version=bulk_version,
+                actor=ActorContext(
+                    actor_kind="human",
+                    actor_id="viewer",
+                    workspace_role="viewer",
+                    role="viewer",
+                    workspace_id=workspace.id,
+                ),
+                self_origins=frozenset(),
+            )
+            measuring = False
+    finally:
+        measuring = False
+        event.remove(engine, "before_cursor_execute", count_projection_selects)
+    assert len(bulk_targets) == 50
+    assert all(entry.state == "ok" for entry in bulk_targets)
+    assert query_count <= 8
+
+    # Budget exception: this legacy dual-key fallback is a separate failure
+    # mode from per-link SQL growth. A copied page version has no exact pins;
+    # its old nav_target and page_id aliases must choose the newest historical
+    # pin, while a normal wikilink must still inherit its prior source pin.
+    fallback_source_v1 = service.write_page(
+        workspace_slug="default",
+        slug="legacy-pin-source",
+        title="Legacy Pin Source",
+        body_md="# Legacy Pin Source",
+        actor_kind="human",
+        actor_id="dev-local-user",
+        actor_provenance="browser_session",
+    )
+    fallback_source_v2 = service.write_page(
+        workspace_slug="default",
+        slug="legacy-pin-source",
+        title="Legacy Pin Source",
+        body_md="# Legacy Pin Source Updated",
+        base_version_id=fallback_source_v1.version_id,
+        base_content_hash=fallback_source_v1.content_hash,
+        actor_kind="human",
+        actor_id="dev-local-user",
+        actor_provenance="browser_session",
+    )
+    nav_target_id = uuid4()
+    nav_locator = classify(f"/context?target={nav_target_id}")
+    wiki_locator = classify("[[한글 문서]]")
+    with service.session_factory.begin() as session:
+        now = datetime.now(UTC)
+        session.add_all(
+            [
+                PageLink(
+                    workspace_id=target.workspace_id,
+                    source_page_id=fallback_source_v1.id,
+                    source_version_id=fallback_source_v1.version_id,
+                    locator_key=nav_locator.key,
+                    target_slug="한글-문서",
+                    target_page_id=target.id,
+                    occurrence_count=1,
+                    created_at=now - timedelta(days=1),
+                ),
+                PageLink(
+                    workspace_id=target.workspace_id,
+                    source_page_id=fallback_source_v1.id,
+                    source_version_id=fallback_source_v1.version_id,
+                    locator_key=f"page_id:{nav_target_id}",
+                    target_slug="link-query-target-48",
+                    target_page_id=bulk_target_pages[-1].id,
+                    occurrence_count=1,
+                    created_at=now,
+                ),
+                PageLink(
+                    workspace_id=target.workspace_id,
+                    source_page_id=fallback_source_v1.id,
+                    source_version_id=fallback_source_v1.version_id,
+                    locator_key=wiki_locator.key,
+                    target_slug="한글-문서",
+                    target_page_id=target.id,
+                    occurrence_count=1,
+                    created_at=now,
+                ),
+            ]
+        )
+        session.flush()
+        source_page = session.get(ContextPage, fallback_source_v2.id)
+        source_version = session.get(ContextPageVersion, fallback_source_v2.version_id)
+        workspace = session.get(Workspace, target.workspace_id)
+        actor = ActorContext(
+            actor_kind="human",
+            actor_id="editor",
+            workspace_role="editor",
+            role="editor",
+            workspace_id=workspace.id,
+        )
+        context = LinkContext(
+            session=session,
+            workspace_id=workspace.id,
+            actor=actor,
+            source_page_id=source_page.id,
+            source_version_id=source_version.id,
+        )
+        locators = [nav_locator, wiki_locator]
+        batch = LinkResolutionBatch(locators, context)
+        scalar_results = [resolve(locator, context) for locator in locators]
+        batch_results = [resolve(locator, context, batch=batch) for locator in locators]
+    assert [result.page_id for result in scalar_results] == [
+        bulk_target_pages[-1].id,
+        target.id,
+    ]
+    assert [result.page_id for result in batch_results] == [
+        result.page_id for result in scalar_results
+    ]
     # Injected Settings must govern SAVE, projection, READ and RUN alike;
     # ambient get_settings() does not contain this unusual trusted origin.
     # This distinct DI failure path reuses the same target and registry fixture.

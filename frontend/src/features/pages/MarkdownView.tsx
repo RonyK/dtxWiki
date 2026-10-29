@@ -177,6 +177,7 @@ const SVG_NUMBER_PATTERN = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
 // links pointing at the prefixed ids.
 const CLOBBER_PREFIX = "user-content-";
 const TRUSTED_REFERENCE_NODE = "dtxTrustedReference";
+const TRUSTED_INLINE_TAG_NODE = "dtxTrustedInlineTag";
 // remark-rehype would otherwise prefix GFM footnote ids itself; emit them raw
 // so rehype-sanitize's clobberPrefix stays the single place ids gain the
 // prefix (a second prefix here would orphan footnote links).
@@ -318,7 +319,7 @@ export function MarkdownView({
         renderPolicy === "page"
           ? [
               rehypeWrapRegisteredReferences,
-              [rehypeRaw, { passThrough: [TRUSTED_REFERENCE_NODE] }],
+              [rehypeRaw, { passThrough: [TRUSTED_REFERENCE_NODE, TRUSTED_INLINE_TAG_NODE] }],
               [rehypeResolveContextLinks, contextLinkPluginOptions],
               [rehypeResolveContextMedia, contextMediaPluginOptions],
               rehypeConstrainPageImageSources,
@@ -494,6 +495,21 @@ function rehypeWrapRegisteredReferences() {
     const visit = (parent: HastParent) => {
       parent.children = parent.children.flatMap((child): HastNode[] => {
         if (!isHastElement(child)) return [child];
+        // Inline tag links are generated from the app's `#tag` syntax. Preserve
+        // their provenance through rehypeRaw without treating an authored raw
+        // HTML `data-tag` attribute as proof of provenance.
+        const className = child.properties.className;
+        if (
+          child.tagName === "a" &&
+          Array.isArray(className) &&
+          className.includes("inline-tag") &&
+          typeof (child.properties.dataTag ?? child.properties["data-tag"]) === "string"
+        ) {
+          return [{
+            type: TRUSTED_INLINE_TAG_NODE,
+            children: [child],
+          } as unknown as HastNode];
+        }
         const rawLocator = child.properties.dataDtxReferenceLocator ??
           child.properties["data-dtx-reference-locator"];
         if (child.tagName === "a" && typeof rawLocator === "string") {
@@ -555,7 +571,6 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
       delete props["data-dtx-unavailable-reference"];
       delete props.ariaDisabled;
       delete props["aria-disabled"];
-      if (props.dataTag || props["data-tag"]) return [child];
       const href = typeof props.href === "string" ? props.href : "";
       const locator = reference?.locator ?? href;
       const target = targets.get(locator);
@@ -620,6 +635,14 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
   }
   function resolve(parent: HastParent) {
     parent.children = parent.children.flatMap((child): HastNode[] => {
+      if ((child as { type: string }).type === TRUSTED_INLINE_TAG_NODE) {
+        const trustedNode = child as unknown as { children?: HastNode[] };
+        const anchor = trustedNode.children?.[0];
+        if (!anchor || !isHastElement(anchor) || anchor.tagName !== "a") {
+          return trustedNode.children ?? [];
+        }
+        return [anchor];
+      }
       if ((child as { type: string }).type === TRUSTED_REFERENCE_NODE) {
         const trustedNode = child as unknown as {
           data?: { reference?: unknown };

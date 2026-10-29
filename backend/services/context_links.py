@@ -11,6 +11,7 @@ import re
 import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from types import SimpleNamespace
 from urllib.parse import parse_qs, unquote, urlsplit
 from uuid import UUID
@@ -277,11 +278,289 @@ class Resolution:
     published: bool = False
 
 
+_LINK_LOOKUP_CHUNK_SIZE = 400
+
+
+def _chunks(values: list, size: int = _LINK_LOOKUP_CHUNK_SIZE):
+    for start in range(0, len(values), size):
+        yield values[start : start + size]
+
+
+class LinkResolutionBatch:
+    """Request-local, workspace-scoped reads shared by authored-link resolvers.
+
+    This is only a read snapshot for one response. Callers that need write-time
+    freshness continue to use ``resolve`` without a batch.
+    """
+
+    def __init__(self, locators: list[Locator], ctx: LinkContext) -> None:
+        self.workspace_id = ctx.workspace_id
+        self.source_version_id = ctx.source_version_id
+        self.pins: dict[str, UUID] = {}
+        self.latest_pins: dict[str, tuple[datetime, UUID]] = {}
+        self.node_page_ids: dict[UUID, UUID] = {}
+        self.pages_by_id: dict[UUID, ContextPage] = {}
+        self.pages_by_slug: dict[str, list[ContextPage]] = {}
+        self.alias_pages: dict[str, list[ContextPage]] = {}
+        self.visible_version_ids: dict[UUID, UUID | None] = {}
+        self.versions: dict[UUID, ContextPageVersion] = {}
+
+        eligible = [
+            locator
+            for locator in locators
+            if locator.kind
+            not in {"external", "public_reader", "local", "media", "unknown"}
+            and locator.workspace_id in {None, ctx.workspace_id}
+        ]
+        if not eligible:
+            return
+
+        keys = {locator.key for locator in eligible}
+        node_ids = {locator.node_id for locator in eligible if locator.node_id}
+        if node_ids:
+            keys.update(f"page_id:{node_id}" for node_id in node_ids)
+        if ctx.source_page_id is not None:
+            key_list = list(keys)
+            for key_chunk in _chunks(key_list):
+                conditions = [
+                    PageLink.source_page_id == ctx.source_page_id,
+                    PageLink.target_page_id.is_not(None),
+                    PageLink.locator_key.in_(key_chunk),
+                ]
+                if ctx.source_version_id is not None:
+                    conditions.append(
+                        PageLink.source_version_id == ctx.source_version_id
+                    )
+                rows = ctx.session.execute(
+                    select_in_workspace(
+                        PageLink, workspace_id=ctx.workspace_id, conditions=conditions
+                    )
+                    .with_only_columns(
+                        PageLink.locator_key,
+                        PageLink.target_page_id,
+                        PageLink.created_at,
+                    )
+                    .order_by(PageLink.created_at.desc())
+                )
+                for key, target_id, _created_at in rows:
+                    self.pins.setdefault(key, target_id)
+            if ctx.source_version_id is not None:
+                # The scalar fallback chooses the newest pin across the
+                # locator's legacy aliases, not a fixed key priority. Keep
+                # that ordering for nav_target/page_id dual-key migrations.
+                fallback_keys: set[str] = set()
+                for locator in eligible:
+                    if locator.key in self.pins:
+                        continue
+                    fallback_keys.add(locator.key)
+                    if locator.node_id is not None:
+                        fallback_keys.add(f"page_id:{locator.node_id}")
+                for key_chunk in _chunks(list(fallback_keys)):
+                    rows = ctx.session.execute(
+                        select_in_workspace(
+                            PageLink,
+                            workspace_id=ctx.workspace_id,
+                            conditions=(
+                                PageLink.source_page_id == ctx.source_page_id,
+                                PageLink.locator_key.in_(key_chunk),
+                                PageLink.target_page_id.is_not(None),
+                            ),
+                        )
+                        .with_only_columns(
+                            PageLink.locator_key,
+                            PageLink.target_page_id,
+                            PageLink.created_at,
+                        )
+                        .order_by(PageLink.created_at.desc())
+                    )
+                    for key, target_id, created_at in rows:
+                        self.latest_pins.setdefault(key, (created_at, target_id))
+
+        if node_ids:
+            from backend.models.tree import WorkspaceTreeNode
+
+            for node_chunk in _chunks(list(node_ids)):
+                nodes = ctx.session.scalars(
+                    select_in_workspace(
+                        WorkspaceTreeNode,
+                        workspace_id=ctx.workspace_id,
+                        conditions=(
+                            WorkspaceTreeNode.id.in_(node_chunk),
+                            WorkspaceTreeNode.target_kind == "context_page",
+                            WorkspaceTreeNode.target_id.is_not(None),
+                        ),
+                    )
+                )
+                self.node_page_ids.update(
+                    (node.id, node.target_id) for node in nodes
+                )
+
+        page_ids = {
+            locator.page_id for locator in eligible if locator.page_id is not None
+        }
+        page_ids.update(node_ids)
+        page_ids.update(self.pins.values())
+        page_ids.update(
+            target_id for _created_at, target_id in self.latest_pins.values()
+        )
+        page_ids.update(self.node_page_ids.values())
+        direct_slugs = {
+            locator.slug for locator in eligible if locator.slug is not None
+        }
+        from backend.services.entity_ref import normalize_entity_name
+
+        for page_id_chunk in _chunks(list(page_ids)):
+            pages = ctx.session.scalars(
+                select_in_workspace(
+                    ContextPage,
+                    workspace_id=ctx.workspace_id,
+                    conditions=(ContextPage.id.in_(page_id_chunk),),
+                )
+            )
+            for page in pages:
+                self._add_page(page)
+        for slug_chunk in _chunks(list(direct_slugs)):
+            pages = ctx.session.scalars(
+                select_in_workspace(
+                    ContextPage,
+                    workspace_id=ctx.workspace_id,
+                    conditions=(ContextPage.slug.in_(slug_chunk),),
+                )
+            )
+            for page in pages:
+                self._add_page(page)
+
+        missing_aliases = {
+            slug
+            for slug in direct_slugs
+            if not self.pages_by_slug.get(slug)
+        }
+        alias_names: dict[str, set[str]] = {}
+        for slug in missing_aliases:
+            alias_names.setdefault(normalize_entity_name(slug), set()).add(slug)
+        alias_name_list = list(alias_names)
+        if alias_name_list:
+            for name_chunk in _chunks(alias_name_list):
+                rows = ctx.session.execute(
+                    join_in_workspace(
+                        select_in_workspace(
+                            ContextPage, workspace_id=ctx.workspace_id
+                        ),
+                        ContextPage,
+                        PageNameIndex,
+                        workspace_id=ctx.workspace_id,
+                        on=(PageNameIndex.page_id == ContextPage.id)
+                        & (PageNameIndex.name_norm.in_(name_chunk)),
+                    ).add_columns(PageNameIndex.name_norm)
+                ).unique()
+                for page, name in rows:
+                    self._add_page(page)
+                    for original_slug in alias_names.get(name, ()):
+                        values = self.alias_pages.setdefault(original_slug, [])
+                        if all(existing.id != page.id for existing in values):
+                            values.append(page)
+
+        all_page_ids = list(self.pages_by_id)
+        if not all_page_ids:
+            return
+        from backend.repositories.context_visibility import (
+            visible_context_version_expression,
+        )
+
+        for id_chunk in _chunks(all_page_ids):
+            rows = ctx.session.execute(
+                select_in_workspace(
+                    ContextPage,
+                    workspace_id=ctx.workspace_id,
+                    conditions=(ContextPage.id.in_(id_chunk),),
+                ).with_only_columns(
+                    ContextPage.id,
+                    visible_context_version_expression(ctx.actor),
+                )
+            )
+            for page_id, version_id in rows:
+                self.visible_version_ids[page_id] = version_id
+        version_ids = {
+            version_id
+            for version_id in self.visible_version_ids.values()
+            if version_id is not None
+        }
+        version_ids.update(
+            page.current_published_version_id
+            for page in self.pages_by_id.values()
+            if page.current_published_version_id is not None
+        )
+        for id_chunk in _chunks(list(version_ids)):
+            versions = ctx.session.scalars(
+                select_in_workspace(
+                    ContextPageVersion,
+                    workspace_id=ctx.workspace_id,
+                    conditions=(ContextPageVersion.id.in_(id_chunk),),
+                )
+            )
+            self.versions.update((version.id, version) for version in versions)
+
+    def _add_page(self, page: ContextPage) -> None:
+        self.pages_by_id[page.id] = page
+        values = self.pages_by_slug.setdefault(page.slug, [])
+        if all(existing.id != page.id for existing in values):
+            values.append(page)
+
+    def page(self, page_id: UUID) -> ContextPage | None:
+        return self.pages_by_id.get(page_id)
+
+    def pin_for(self, locator: Locator) -> tuple[bool, UUID | None]:
+        if locator.key in self.pins:
+            return True, self.pins[locator.key]
+        if self.source_version_id is None:
+            return False, None
+        candidate_keys = [locator.key]
+        if locator.node_id is not None:
+            candidate_keys.append(f"page_id:{locator.node_id}")
+        candidates = [
+            self.latest_pins[candidate]
+            for candidate in candidate_keys
+            if candidate in self.latest_pins
+        ]
+        if candidates:
+            return True, max(candidates, key=lambda pin: pin[0])[1]
+        return False, None
+
+    def visible(self, page: ContextPage, actor: object | None) -> bool:
+        if page.lifecycle_status == "archived":
+            return False
+        version_id = self.visible_version_ids.get(page.id)
+        if version_id is None:
+            return False
+        from backend.services.actor_visible_read import context_version_is_visible
+
+        version = self.versions.get(version_id)
+        return (
+            version is not None
+            and version.workspace_id == self.workspace_id
+            and version.page_id == page.id
+            and context_version_is_visible(version, actor)
+        )
+
+    def published(self, page: ContextPage) -> bool:
+        if page.current_published_version_id is None:
+            return False
+        version = self.versions.get(page.current_published_version_id)
+        return (
+            version is not None
+            and version.workspace_id == self.workspace_id
+            and version.page_id == page.id
+            and version.version_status
+            in {"published_snapshot", "superseded_snapshot"}
+        )
+
+
 def resolve(
     locator: Locator,
     ctx: LinkContext,
     *,
     preserved_pins: Mapping[str, UUID] | None = None,
+    batch: LinkResolutionBatch | None = None,
 ) -> Resolution:
     if locator.workspace_id is not None and locator.workspace_id != ctx.workspace_id:
         return Resolution("foreign")
@@ -291,7 +570,15 @@ def resolve(
     pinned = (preserved_pins or {}).get(locator.key)
     if pinned is None and locator.node_id is not None:
         pinned = (preserved_pins or {}).get(f"page_id:{locator.node_id}")
-    if pinned is None and ctx.source_page_id is not None:
+    batch_pin_known = False
+    if pinned is None and batch is not None:
+        batch_pin_known, pinned = batch.pin_for(locator)
+    if (
+        pinned is None
+        and not batch_pin_known
+        and batch is None
+        and ctx.source_page_id is not None
+    ):
         conditions = [
             PageLink.source_page_id == ctx.source_page_id,
             PageLink.target_page_id.is_not(None),
@@ -326,14 +613,22 @@ def resolve(
             )
     page_id = pinned or locator.page_id
     if page_id is None and locator.node_id is not None:
-        page_id = session.scalar(
-            select_in_workspace(
-                ContextPage,
-                workspace_id=ctx.workspace_id,
-                conditions=(ContextPage.id == locator.node_id,),
-            ).with_only_columns(ContextPage.id)
+        page_id = (
+            locator.node_id
+            if batch is not None and batch.page(locator.node_id) is not None
+            else (
+                batch.node_page_ids.get(locator.node_id)
+                if batch is not None
+                else session.scalar(
+                    select_in_workspace(
+                        ContextPage,
+                        workspace_id=ctx.workspace_id,
+                        conditions=(ContextPage.id == locator.node_id,),
+                    ).with_only_columns(ContextPage.id)
+                )
+            )
         )
-        if page_id is None:
+        if page_id is None and batch is None:
             from backend.models.tree import WorkspaceTreeNode
 
             page_id = session.scalar(
@@ -352,17 +647,43 @@ def resolve(
         condition = ContextPage.slug == locator.slug
     else:
         return Resolution("unavailable")
-    pages = list(
-        session.scalars(
-            select_in_workspace(
-                ContextPage, workspace_id=ctx.workspace_id, conditions=(condition,)
+    if batch is not None:
+        page = batch.page(page_id) if page_id is not None else None
+        pages = [page] if page is not None else []
+        if page_id is None and locator.slug is not None:
+            pages = batch.pages_by_slug.get(locator.slug, [])
+            if not pages:
+                visible_aliases = [
+                    candidate
+                    for candidate in batch.alias_pages.get(locator.slug, [])
+                    if batch.visible(candidate, ctx.actor)
+                ]
+                if len(visible_aliases) == 1:
+                    return Resolution("needs_review", page_id=visible_aliases[0].id)
+                if len(visible_aliases) > 1:
+                    return Resolution("ambiguous")
+    else:
+        pages = list(
+            session.scalars(
+                select_in_workspace(
+                    ContextPage, workspace_id=ctx.workspace_id, conditions=(condition,)
+                )
             )
         )
-    )
     if len(pages) != 1:
         if len(pages) > 1:
             return Resolution("ambiguous")
-        if locator.slug:
+        if locator.slug and batch is not None:
+            visible = [
+                candidate
+                for candidate in batch.alias_pages.get(locator.slug, [])
+                if batch.visible(candidate, ctx.actor)
+            ]
+            if len(visible) == 1:
+                return Resolution("needs_review", page_id=visible[0].id)
+            if len(visible) > 1:
+                return Resolution("ambiguous")
+        elif locator.slug:
             from backend.services.entity_ref import normalize_entity_name
 
             candidates = (
@@ -389,14 +710,18 @@ def resolve(
                 return Resolution("ambiguous")
         return Resolution("unavailable")
     page = pages[0]
-    if not _visible_page(page, ctx):
+    if not (
+        batch.visible(page, ctx.actor)
+        if batch is not None
+        else _visible_page(page, ctx)
+    ):
         return Resolution("unavailable")
     return Resolution(
         "ok",
         page.id,
         format_stable_url(ctx.workspace_id, page.id, locator.fragment),
         page.slug,
-        _published_page(page, ctx),
+        batch.published(page) if batch is not None else _published_page(page, ctx),
     )
 
 
@@ -917,6 +1242,16 @@ def _workspace_route(href: str, ctx: LinkContext) -> tuple[bool, str | None]:
         ("agent", "folder"): "folder",
     }.get((section, kind))
     if route_kind is None or workspace_id is None or target_id is None:
+        # These are syntactically valid workspace UI destinations, but this
+        # resolver is a Context-link lint/write boundary, not the readers for
+        # reviews, chats, Ask, Lint, or Library artifacts. Keep their authored
+        # bytes and let each route's reader decide availability and access.
+        if workspace_id is not None and (
+            kind == "overview"
+            or section in {"review", "ask", "chats", "lint"}
+            or (section == "library" and kind == "artifact")
+        ):
+            return True, href
         return False, None
     if workspace_id != ctx.workspace_id:
         return True, href
@@ -944,6 +1279,28 @@ def decide_link(
         return locator, None, LinkDecision("fix", target, "link.internal-noncanonical")
     else:
         locator = classify(href, ctx.self_origins)
+        try:
+            has_query = bool(urlsplit(href).query)
+        except ValueError:
+            has_query = False
+        if has_query:
+            # Context readers accept a small set of presentation-state query
+            # parameters (for example a pinned version). Keep such authored
+            # routes opaque after the Context navigation classifier proves
+            # their path and query grammar; lint must not strip view state or
+            # treat it as a target-existence lookup. Identity overrides fail
+            # that classifier and continue through the unresolved path.
+            from backend.services.context_link_targets import (
+                _classify_context_navigation,
+            )
+
+            view_locator = _classify_context_navigation(href, ctx.self_origins)
+            if view_locator.kind in {
+                "canonical_route",
+                "stable_full",
+                "stable_short",
+            }:
+                return view_locator, None, LinkDecision("keep")
         if locator.kind == "unknown":
             handled, target = _workspace_route(href, ctx)
             if handled:

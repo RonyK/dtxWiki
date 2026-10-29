@@ -777,6 +777,45 @@ def test_selected_canonical_markdown_is_exposed_as_semantic_preview(
     assert own_foreign_content.status_code == 200, own_foreign_content.text
     assert b"Foreign Preview" in own_foreign_content.content
 
+    # Budget exception: these two independently selected item artifacts
+    # exercise the batch lookup against the same canonical lineage rule used
+    # by scalar content delivery. The HTTP checks above do not exercise the
+    # new multi-ID projection path used by authored Library links.
+    from urllib.parse import urlsplit
+
+    from backend.services.library_canonical import (
+        canonical_library_artifact_lookup,
+        canonical_library_artifact_lookup_many,
+    )
+
+    artifact_ids = {
+        UUID(urlsplit(url).path.rstrip("/").split("/")[-2])
+        for url in (markdown["content_url"], foreign_artifact["content_url"])
+    }
+    with preview_api.session_factory() as session:
+        batch_results = canonical_library_artifact_lookup_many(
+            session,
+            workspace_id=preview_api.workspace_id,
+            artifact_ids=artifact_ids,
+        )
+        scalar_results = {
+            artifact_id: canonical_library_artifact_lookup(
+                session,
+                workspace_id=preview_api.workspace_id,
+                artifact_id=artifact_id,
+            )
+            for artifact_id in artifact_ids
+        }
+    assert batch_results.keys() == scalar_results.keys()
+    assert all(batch_results[artifact_id] is not None for artifact_id in artifact_ids)
+    assert {
+        artifact_id: tuple(row.id for row in result) if result else None
+        for artifact_id, result in batch_results.items()
+    } == {
+        artifact_id: tuple(row.id for row in result) if result else None
+        for artifact_id, result in scalar_results.items()
+    }
+
     with preview_api.session_factory.begin() as session:
         stale_version = session.get(LibraryItemVersion, UUID(version["id"]))
         assert stale_version is not None
