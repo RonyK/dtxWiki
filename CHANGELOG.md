@@ -116,12 +116,19 @@
   `error_code`, `error_message`, `error_details` and `retryable`.
   `envelope.meta` (447 bytes of audit fields on every call) and
   `result_summary` are gone; the audit fields stay in the server's trace.
+  Failure recovery instructions are included in `error_message` alongside
+  the cause, including conversation-token recovery and sanitized server errors.
   `request_id` is also in the result's protocol `_meta` as
   `com.dtxwiki/requestId`. A field equal to an empty declared default (null,
   false, 0, empty string, list or object) is now left out, so clients treat
   an absent field as that default; `edit_receipt.changes`,
   `edit_receipt.body_adjusted` and `envelope.retryable` are always sent
   because their null means unknown.
+- MCP tool contract revision 22 includes `can_have_children` on the current
+  node returned by `get_index(format="nodes")`, so clients can check whether
+  its `node_id` accepts placement without reading its parent. The `normal`
+  and `detailed` guide views, including the guide resource, now list every
+  tool available to the caller instead of filtering through a partial list.
 - Approving a Context review publishes the changes up to that draft; rejecting
   one also rejects the later drafts written on it and returns the edit head to
   the draft below them. Earlier drafts and branched alternatives are untouched.

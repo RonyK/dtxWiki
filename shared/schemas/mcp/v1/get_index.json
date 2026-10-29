@@ -175,8 +175,8 @@
           "node_id",
           "title",
           "path",
-          "node_kind",
           "can_have_children",
+          "node_kind",
           "has_children"
         ],
         "title": "IndexNodeChild",
@@ -185,6 +185,10 @@
       "IndexNodeRef": {
         "additionalProperties": false,
         "properties": {
+          "can_have_children": {
+            "title": "Can Have Children",
+            "type": "boolean"
+          },
           "node_id": {
             "format": "uuid",
             "title": "Node Id",
@@ -202,7 +206,8 @@
         "required": [
           "node_id",
           "title",
-          "path"
+          "path",
+          "can_have_children"
         ],
         "title": "IndexNodeRef",
         "type": "object"

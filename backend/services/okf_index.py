@@ -142,6 +142,7 @@ def build_index_nodes(
             "node_id": target.id,
             "title": target.title,
             "path": _node_path(projection, target),
+            "can_have_children": target.can_have_children,
         },
         "children": [
             {

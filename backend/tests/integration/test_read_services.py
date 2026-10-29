@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 
+from backend.mcp.scopes import TOOL_REQUIRED_SCOPES
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.base import Base
 from backend.models.change import ChangeOperation, ChangeSet
@@ -480,9 +481,12 @@ def test_workspace_read_service_lists_details_and_guide_payload():
 
     assert normal.detail_level == "normal"
     assert normal.library_policy_summary["manual_approval_required"] is True
-    assert "get_index" in normal.available_tools
+    assert set(normal.available_tools) == set(TOOL_REQUIRED_SCOPES)
+    assert normal.context_page_taxonomy
+    assert normal.agent_page_taxonomy
     assert all(
-        set(entry) == {"type", "description"} for entry in normal.context_page_taxonomy
+        set(entry) == {"type", "description"} and entry["description"]
+        for entry in normal.context_page_taxonomy + normal.agent_page_taxonomy
     )
     assert "dtxwiki.agent_page.{slug}" in normal.available_prompts
     assert normal.recommended_agent_guidance_flow[0].startswith("Call guide first")
@@ -651,6 +655,8 @@ def test_index_nodes_walk_from_context_to_a_placement_parent():
             )
 
     assert root["node"]["path"] == "/context"
+    assert root["node"]["can_have_children"] is True
+    assert research_page["node"]["can_have_children"] is True
     inbox_entry = next(c for c in root["children"] if c["node_id"] == inbox.id)
     assert inbox_entry["path"] == "/context/inbox"
     assert inbox_entry["can_have_children"] is True

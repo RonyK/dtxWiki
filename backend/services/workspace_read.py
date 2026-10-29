@@ -45,6 +45,7 @@ AGENT_PAGE_TAXONOMY = [
     ("memory", "Reviewed memory, user profile, and reference material"),
 ]
 AVAILABLE_READ_TOOLS = [
+    "list_my_workspaces",
     "guide",
     "get_index",
     "read_concept",
@@ -53,6 +54,8 @@ AVAILABLE_READ_TOOLS = [
     "grep_wiki",
     "what_changed",
     "read",
+    "read_context_outline",
+    "read_structure_map",
     "cite",
     # P8.6: the Context-editing-state-machine surface.
     "create_context_page",
@@ -69,6 +72,9 @@ AVAILABLE_READ_TOOLS = [
     "read_agent_page",
     "write_agent_page_draft",
     "build_agent_input_bundle",
+    "list_requested_changes",
+    "submit_revision_for_review",
+    "wiki_maintenance",
 ]
 AVAILABLE_PROMPTS = [
     "dtxwiki.context_workflow",
@@ -576,10 +582,11 @@ class WorkspaceReadService:
 
     @staticmethod
     def _available_tools(available_tools: list[str] | None = None) -> list[str]:
-        if available_tools is None:
-            return AVAILABLE_READ_TOOLS
-        allowed = set(available_tools)
-        return [tool for tool in AVAILABLE_READ_TOOLS if tool in allowed]
+        # MCP entry points supply the actor-filtered live catalog. Only direct
+        # internal callers without a catalog use the fallback list.
+        return list(
+            AVAILABLE_READ_TOOLS if available_tools is None else available_tools
+        )
 
 
 def _human_bytes(size: int) -> str:

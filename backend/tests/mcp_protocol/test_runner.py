@@ -8,6 +8,7 @@ import anyio
 import pytest
 from sqlalchemy import func, select
 
+from backend.mcp.envelope import ERROR_CODE_GUIDANCE
 from backend.mcp.protocol import runner as runner_module
 from backend.mcp.protocol.output_validation import (
     MCPOutputContractViolation,
@@ -171,7 +172,7 @@ def test_conflicting_conversation_token_carriers_are_validation_failed(
     assert envelope["error_code"] == "validation_failed"
     assert envelope["error_message"] == (
         "Conversation token carriers have conflicting values: "
-        f"{', '.join(expected_carriers)}."
+        f"{', '.join(expected_carriers)}. " + ERROR_CODE_GUIDANCE["validation_failed"]
     )
     assert "plain-token" not in result.content[0].text
     assert "namespaced-token" not in result.content[0].text
@@ -575,8 +576,18 @@ def test_missing_workspace_target_never_reads_page_directory(
         )
 
     assert results == [
-        (True, "validation_failed", "workspace_id: Field required", False),
-        (True, "validation_failed", "workspace_id: Field required", False),
+        (
+            True,
+            "validation_failed",
+            "workspace_id: Field required " + ERROR_CODE_GUIDANCE["validation_failed"],
+            False,
+        ),
+        (
+            True,
+            "validation_failed",
+            "workspace_id: Field required " + ERROR_CODE_GUIDANCE["validation_failed"],
+            False,
+        ),
     ]
     assert directory_lookups == []
 
@@ -717,6 +728,10 @@ def test_call_tool_async_unexpected_dispatch_error_is_sanitized_and_traced(
     assert result.isError is True
     assert payload["envelope"]["error_code"] == "internal_error"
     assert payload["envelope"]["result_status"] == "failed"
+    assert payload["envelope"]["error_message"] == (
+        "Tool call failed due to an unexpected server error. "
+        "Details were logged on the server."
+    )
     assert payload["envelope"]["conversation_token"].startswith("conv_")
     assert "do-not-leak" not in result.content[0].text
 

@@ -26,10 +26,9 @@ MAX_ERROR_MESSAGE_CHARS = 600
 # What to do next, per failure code. Mirrors ADVISORY_WARNING_MESSAGES: stable
 # English written for the agent that has to recover, not for a log reader.
 #
-# None of these name an envelope field. Guidance is folded in unconditionally,
-# but most call sites pass no message and legacy sites build no details, so a
-# pointer like "see envelope.error_message" spent most of its life aiming at
-# null. The message itself already precedes the guidance in `result_summary`.
+# None of these name an envelope field. Guidance is included in error_message
+# even when a call site supplies no message or details. result_summary keeps
+# the same cause and recovery text for the trace.
 ERROR_CODE_GUIDANCE = {
     "validation_failed": (
         "Fix the fields named in this failure, then call the tool again."
@@ -408,6 +407,16 @@ def error_envelope(
         summary = f"{summary} {message}"
     if guidance:
         summary = f"{summary} {guidance}"
+    error_message = message
+    if guidance:
+        # Validation errors have a message budget; reserve room for the full
+        # repair instruction. Other failures keep their complete cause, which
+        # can include the version, hash and revision needed to recover.
+        if root == "validation_failed" and message:
+            error_message = _clamp(
+                message, MAX_ERROR_MESSAGE_CHARS - len(guidance) - 1
+            )
+        error_message = f"{error_message} {guidance}" if error_message else guidance
     return MCPResultEnvelope(
         result_status=result_status or result_status_for_error(error_code),
         workspace_id=actor.workspace_id,
@@ -415,7 +424,7 @@ def error_envelope(
         actor_id=actor.actor_id,
         result_summary=summary,
         error_code=error_code,
-        error_message=message,
+        error_message=error_message,
         error_details=list(details or []),
         retryable=retryable,
         review_item_id=review_item_id,

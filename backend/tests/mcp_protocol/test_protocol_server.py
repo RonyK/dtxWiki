@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from backend.app.settings import Settings
 from backend.mcp.protocol.server import create_mcp_server
+from backend.mcp.scopes import visible_tool_names
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.oauth import OAuthClient, OAuthConsent
@@ -271,6 +272,8 @@ def test_unknown_conversation_token_self_corrects_on_next_echo(
                 first_payload["envelope"]["error_code"] == "conversation_token_unknown"
             )
             assert first_payload["envelope"]["result_status"] == "failed"
+            assert "for a new request" in first_payload["envelope"]["error_message"]
+            assert 'pass "new"' in first_payload["envelope"]["error_message"]
             assert next_token != "conv_missing"
 
             second = await client.call_tool(
@@ -278,6 +281,7 @@ def test_unknown_conversation_token_self_corrects_on_next_echo(
                 {
                     "conversation_token": next_token,
                     "workspace_id": str(workspace_id),
+                    "detail_level": "normal",
                 },
             )
             second_payload = json.loads(second.content[0].text)
@@ -285,6 +289,9 @@ def test_unknown_conversation_token_self_corrects_on_next_echo(
             assert second.isError is False
             assert second_payload["envelope"]["result_status"] == "succeeded"
             assert second_payload["envelope"]["conversation_token"] == next_token
+            assert set(second_payload["data"]["available_tools"]) == set(
+                visible_tool_names(actor)
+            )
 
             malformed = await client.call_tool(
                 "guide",
@@ -294,6 +301,10 @@ def test_unknown_conversation_token_self_corrects_on_next_echo(
                 },
             )
             malformed_payload = json.loads(malformed.content[0].text)
+            assert (
+                malformed_payload["envelope"]["error_message"]
+                == first_payload["envelope"]["error_message"]
+            )
             assert malformed.isError is True
             assert (
                 malformed_payload["envelope"]["error_code"]

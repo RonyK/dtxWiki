@@ -83,6 +83,10 @@ def test_content_call_without_a_token_is_refused_and_opens_no_chat(
 
     assert result.isError is True
     assert payload["envelope"]["error_code"] == "conversation_token_required"
+    message = payload["envelope"]["error_message"]
+    assert 'pass "new" to start' in message
+    assert '_meta["com.dtxwiki/conversationToken"]' in message
+    assert result.structuredContent == payload
     # The call never ran, so it must not leave a chat behind -- creating one per
     # rejected call would just relocate the churn.
     assert _chat_count(page_service, workspace_id) == before

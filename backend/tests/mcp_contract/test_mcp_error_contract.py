@@ -19,6 +19,7 @@ from backend.mcp.envelope import (
     error_envelope,
     validation_error_envelope,
 )
+from backend.mcp.protocol.runner import _capture_trace_and_wire_payload
 from backend.mcp.router import dispatch
 from backend.policy.auth import ActorContext
 from backend.schemas.common import ERROR_CODES
@@ -132,7 +133,10 @@ def test_service_message_and_recovery_guidance_reach_the_caller():
         message="core claim missing citation under strict policy",
     )
 
-    assert envelope.error_message == ("core claim missing citation under strict policy")
+    assert envelope.error_message == (
+        "core claim missing citation under strict policy "
+        + ERROR_CODE_GUIDANCE["rejected_by_policy"]
+    )
     # A client that only reads result_summary still learns the cause and the fix.
     assert "core claim missing citation" in (envelope.result_summary or "")
     assert ERROR_CODE_GUIDANCE["rejected_by_policy"] in (envelope.result_summary or "")
@@ -177,6 +181,15 @@ def test_media_editing_not_open_is_a_nonretryable_conflict():
     assert envelope.retryable is False
     assert ERROR_CODE_GUIDANCE["media_editing_not_open"] in (
         envelope.result_summary or ""
+    )
+    # Recovery must survive the wire projection that omits result_summary.
+    _, _, wire = _capture_trace_and_wire_payload(
+        "upload_image", {}, MCPErrorResponse(envelope=envelope).model_dump(mode="json")
+    )
+    assert "result_summary" not in wire["envelope"]
+    assert (
+        wire["envelope"]["error_message"]
+        == ERROR_CODE_GUIDANCE["media_editing_not_open"]
     )
 
 
@@ -240,7 +253,7 @@ def test_existing_call_sites_keep_working_without_the_new_arguments():
     envelope = error_envelope(_actor(), "not_found")
 
     assert envelope.error_code == "not_found"
-    assert envelope.error_message is None
+    assert envelope.error_message == ERROR_CODE_GUIDANCE["not_found"]
     assert envelope.error_details == []
 
 
@@ -292,6 +305,7 @@ def test_an_invented_field_name_cannot_flood_the_response_or_the_trace():
     )
 
     assert len(envelope.error_message or "") <= MAX_ERROR_MESSAGE_CHARS + 1
+    assert envelope.error_message.endswith(ERROR_CODE_GUIDANCE["validation_failed"])
     assert len(envelope.result_summary or "") < 2000
     for detail in envelope.error_details:
         assert len(detail.field or "") <= MAX_FIELD_CHARS + 1

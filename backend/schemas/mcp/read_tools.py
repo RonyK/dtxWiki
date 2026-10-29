@@ -185,13 +185,13 @@ class IndexNodeRef(BaseModel):
     node_id: UUID
     title: str
     path: str
+    can_have_children: bool
 
     model_config = ConfigDict(extra="forbid")
 
 
 class IndexNodeChild(IndexNodeRef):
     node_kind: str
-    can_have_children: bool
     has_children: bool
 
     model_config = ConfigDict(extra="forbid")

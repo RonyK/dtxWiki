@@ -20,6 +20,7 @@ from backend.mcp.scopes import (
     AGENT_PAGE_BODY_SCOPES,
     CONTEXT_PAGE_BODY_SCOPES,
     has_required_scope,
+    visible_tool_names,
 )
 from backend.policy.auth import ActorContext
 from backend.policy.rbac import (
@@ -596,6 +597,7 @@ def read_dtxwiki_resource(
                 session,
                 workspace_id,
                 detail_level="detailed",
+                available_tools=visible_tool_names(scoped_actor),
                 actor=scoped_actor,
             )
             return [

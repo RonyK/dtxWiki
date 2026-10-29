@@ -194,7 +194,11 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        false, 0, "", [], {}); fields marked x-wire-explicit
 #        (edit_receipt.changes, edit_receipt.body_adjusted, envelope.retryable)
 #        are always sent because their null means unknown.
-MCP_TOOL_CONTRACT_REVISION = 21
+#  22 -- get_index(format="nodes") includes can_have_children on the current
+#        node as well as its children, so its node_id can be used for placement
+#        without first reading its parent. guide's normal/detailed tool lists
+#        include the full actor-filtered catalog, including the guide resource.
+MCP_TOOL_CONTRACT_REVISION = 22
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their
 # declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
 # a field carrying this marker is always sent, so an absent value can never be

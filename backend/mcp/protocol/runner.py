@@ -364,6 +364,7 @@ async def call_tool_async(
                     'request, or pass "new" to start a new conversation.'
                 )
             )
+            envelope.error_message = envelope.result_summary
             if requested_workspace_id is not None:
                 envelope.workspace_id = requested_workspace_id
             envelope.conversation_token = conversation.token
@@ -650,6 +651,7 @@ async def call_tool_async(
             "Tool call failed due to an unexpected server error. "
             "Details were logged on the server."
         )
+        envelope.error_message = envelope.result_summary
         if conversation_token is not None:
             envelope.conversation_token = conversation_token
         payload = _tool_error_payload(envelope)
