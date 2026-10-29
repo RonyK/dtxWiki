@@ -220,7 +220,10 @@ TOOL_META = {
         "Begin context edit",
         "Idempotently open or resume your own private 'editing' session on an "
         "existing page. Returns your already-open editing row unchanged if "
-        "one exists; otherwise opens a new one parented on the current "
+        "one exists. If this chat submitted the page's latest draft and its "
+        "review is still pending, reopens that same version for editing "
+        "instead (same version_id, its pending review withdrawn; submit again "
+        "when done). Otherwise opens a new one parented on the current "
         "published head (or the page's own head if never published). Pass "
         "base_version_id/base_content_hash together to assert the base "
         "explicitly and get a conflict instead of silently building on a "
@@ -245,7 +248,8 @@ TOOL_META = {
         "does that once. With no open edit (after a submit or discard) a call "
         "with base_version_id/base_content_hash instead stages a new draft "
         "version with its own ReviewItem; call begin_context_edit to keep "
-        "editing privately. The response does not repeat the body: "
+        "editing privately (it reopens this chat's still-pending submission). "
+        "The response does not repeat the body: "
         "data.edit_receipt.changes quotes each region the save replaced, as "
         "stored, with the changed sections and line/char counts. Prefer "
         "patch_context_edit for local changes: it sends less and cannot "
@@ -257,10 +261,13 @@ TOOL_META = {
     "submit_context_edit_for_review": (
         "Submit context edit for review",
         "Lock your own open editing content and submit it for human review "
-        "('Save draft'). Requires the editing_revision you last saw. Once "
-        "submitted, that version is never mutated again -- further changes "
-        "need a new begin_context_edit. The response returns the version's "
-        "ids and review status, not the body; read it by version_id. "
+        "('Save draft'). Requires the editing_revision you last saw. Submit "
+        "once, when the whole task is done -- not after each change. To change "
+        "it again from the same chat before it is reviewed, call "
+        "begin_context_edit: it reopens this same version, and the next submit "
+        "replaces its review. An edit you never submit stays private and is "
+        "never reviewed. The response returns the version's ids and review "
+        "status, not the body; read it by version_id. "
         "Requires conversation_token: echo one from an earlier envelope or "
         "pass the literal 'new'.",
         False,

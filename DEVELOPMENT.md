@@ -839,6 +839,9 @@ MCP revision does not add that metadata to read responses.
 For partial edits, read the structure with `read_structure_map`, open an edit
 with `begin_context_edit`, and apply `patch_context_edit`. Use
 `update_context_edit` for a full body replacement or page metadata changes.
+Keep one edit per task and submit it once. In the same MCP chat,
+`begin_context_edit` after a submit reopens that submission while its review is
+pending, instead of creating a new version.
 Editing commands use `editing_version_id`, `expected_editing_revision`, and an
 operation key to detect conflicting updates. The Context editing tools do not
 currently support attaching citation arrays or metadata-only updates without

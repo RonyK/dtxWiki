@@ -93,6 +93,7 @@ class ChangeReviewAuditRecorder:
         body: str | None = None,
         needs_review: bool = False,
         risk_signals: dict[str, bool] | None = None,
+        origin_chat_session_id: UUID | None = None,
     ) -> ChangeReviewAuditResult:
         ai_authored = actor_provenance in AI_PROVENANCES
         operation_kind = "create" if action == "page.create" else "update"
@@ -129,6 +130,7 @@ class ChangeReviewAuditRecorder:
             actor_id=parse_uuid_or_none(actor_id),
             status="pending_review" if review_required else "applied",
             risk_level=risk_resolution.risk_level,
+            origin_chat_session_id=origin_chat_session_id,
         )
         session.add(change_set)
         session.flush()

@@ -214,7 +214,14 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        through read_concept.path. Other page inputs return repair guidance.
 #        Folder index results add stable_url/link_markdown for browser answers.
 #        Refresh cached tool catalogs and result schemas.
-MCP_TOOL_CONTRACT_REVISION = 25
+#  26 -- begin_context_edit reopens the calling chat's own still-pending
+#        submission of the page as its open edit (same version_id, that review
+#        superseded) instead of opening a new version from the published head;
+#        the next submit records a new review on that version. Descriptions of
+#        begin/update/submit say so; no input or output schema changed. A
+#        client that compared version_id across a submit and the next begin
+#        must expect them to match.
+MCP_TOOL_CONTRACT_REVISION = 26
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their
 # declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
 # a field carrying this marker is always sent, so an absent value can never be

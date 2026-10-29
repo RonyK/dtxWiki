@@ -112,10 +112,12 @@ REQUIRED_WORKFLOW = [
     "cite before a sourced write.",
     (
         "write: create_context_page (new page) or begin_context_edit "
-        "(existing page); then patch_context_edit (local changes) or "
-        "update_context_edit (whole body), taking the next editing_revision "
-        "and block ids from each response's edit_receipt instead of "
-        "re-reading; then submit_context_edit_for_review."
+        "(existing page) once per task; patch_context_edit (local changes) or "
+        "update_context_edit (whole body) as often as needed, taking the next "
+        "editing_revision and block ids from each response's edit_receipt "
+        "instead of re-reading; submit_context_edit_for_review once when done. "
+        "To change your pending submission in the same chat, call "
+        "begin_context_edit: it reopens that same version."
     ),
     (
         "place a new page: walk get_index(format='nodes') from /context and "

@@ -238,6 +238,13 @@
   its `node_id` accepts placement without reading its parent. The `normal`
   and `detailed` guide views, including the guide resource, now list every
   tool available to the caller instead of filtering through a partial list.
+- An MCP chat that keeps editing the same Context page no longer leaves a new
+  version and a pending review per submit. MCP tool contract revision 26:
+  `begin_context_edit` reopens that chat's own still-pending submission (same
+  `version_id`, its review withdrawn) instead of starting again from the
+  published version, and the next submit replaces the review. Other chats,
+  other people, and reviewed submissions still start a new branch. Guidance now
+  says to keep one edit per task and submit it once.
 - Approving a Context review publishes the changes up to that draft; rejecting
   one also rejects the later drafts written on it and returns the edit head to
   the draft below them. Earlier drafts and branched alternatives are untouched.

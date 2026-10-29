@@ -45,6 +45,8 @@ from backend.services.client_round_state import (
     ClientRoundStateError,
 )
 from backend.services.maintenance_rounds import UNTRUSTED_CONTEXT_NOTICE
+from backend.services.mcp_chat_service import ensure_chat_session
+from backend.services.mcp_client_service import resolve_trace_mcp_client
 from backend.services.page_service import (
     PageConflictError,
     PageNotFoundError,
@@ -275,6 +277,29 @@ def _context_edit_page_service(ctx: ToolCallContext) -> PageService:
     )
 
 
+def _chat_session_id(ctx: ToolCallContext) -> UUID | None:
+    """The chat this call belongs to, for begin and submit to share.
+
+    A submission stamped with its chat is what lets the same chat reopen it
+    instead of branching a new version. Find-or-create, as the other write
+    tools stamp theirs (review_tools); trace capture converges on the same row.
+    """
+
+    if not ctx.conversation_token:
+        return None
+    with ctx.session_factory.begin() as session:
+        client = resolve_trace_mcp_client(
+            session, workspace_id=ctx.workspace_id, actor=ctx.actor
+        )
+        return ensure_chat_session(
+            session,
+            workspace_id=ctx.workspace_id,
+            client_id=client.id,
+            mcp_session_id=ctx.conversation_token,
+            owner_user_id=ctx.actor.user_id,
+        )
+
+
 def _stale_base_message(exc: PageConflictError) -> str:
     if exc.no_open_edit:
         return "you have no open edit on this page any more"
@@ -437,6 +462,7 @@ def begin_context_edit(
             base_version_id=request.base_version_id,
             base_content_hash=request.base_content_hash,
             retry_only=request.retry_only,
+            chat_session_id=_chat_session_id(ctx),
         )
     except ValidationError as exc:
         return BeginContextEditToolOutput(
@@ -522,6 +548,7 @@ def submit_context_edit_for_review(
             idempotency_key=request.idempotency_key,
             reason=request.reason,
             retry_only=request.retry_only,
+            chat_session_id=_chat_session_id(ctx),
         )
         data = _edit_result(data)
     except ValidationError as exc:

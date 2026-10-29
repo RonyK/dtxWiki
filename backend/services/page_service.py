@@ -131,6 +131,7 @@ from backend.services.public_page_exposure import (
 from backend.services.read_errors import ReadServiceError, ReadValidationError
 from backend.services.review_risk_policy import ai_writes_require_human_review
 from backend.services.review_supersession import supersede_review_with_lineage
+from backend.services.temporal_read import publish_timeline
 from backend.services.tree_service import ensure_primary_tree_placement
 from backend.spi.types import AI_PROVENANCES
 from backend.utils.actor_display import (
@@ -163,6 +164,9 @@ if TYPE_CHECKING:
 
 
 MAX_ACTIVE_ALTERNATIVE_DRAFTS = 20
+
+# ChangeSet.reason of a submission made by submit_context_edit_for_review.
+SUBMIT_CONTEXT_EDIT_ACTION = "page.submit_context_edit_for_review"
 
 _UNSET = object()
 
@@ -1838,16 +1842,20 @@ class PageService:
         base_version_id: UUID | None = None,
         base_content_hash: str | None = None,
         retry_only: bool = False,
+        chat_session_id: UUID | None = None,
     ) -> PagePayload:
         """Start or resume this actor's own editing session on ``page_id`` (P8.3).
 
         Idempotent: an existing open "editing" row for this (page, author) is
         returned unchanged, never overwritten by a second call -- enforced by
-        the ``uq_cpv_current_editing_per_author`` partial unique index. A
-        fresh row is parented on the current published head (or the page's
-        own current head for a page that has never published), matching the
-        "base version/hash the caller means to build from" contract. Shared
-        by Browser REST and MCP -- there is exactly one implementation.
+        the ``uq_cpv_current_editing_per_author`` partial unique index. When
+        ``chat_session_id`` (the MCP chat) submitted the page's latest draft
+        and its review is still pending, that same version is reopened
+        instead (``_reopen_own_pending_submission``). Otherwise a fresh row is
+        parented on the current published head (or the page's own current
+        head for a page that has never published), matching the "base
+        version/hash the caller means to build from" contract. Shared by
+        Browser REST and MCP -- there is exactly one implementation.
 
         P8.5: ``idempotency_key`` is required and replayed through the shared
         Context-command ledger (``execute_idempotent_write``), and
@@ -1881,6 +1889,45 @@ class PageService:
                             session,
                             page,
                             existing,
+                            actor_kind=actor_kind,
+                            actor_id=actor_id,
+                            actor_provenance=actor_provenance,
+                        ),
+                    )
+                reopened = self._reopen_own_pending_submission(
+                    session,
+                    page,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    chat_session_id=chat_session_id,
+                    base_version_id=base_version_id,
+                    base_content_hash=base_content_hash,
+                )
+                if reopened is not None:
+                    AuditService().emit(
+                        session=session,
+                        workspace_id=page.workspace_id,
+                        actor_kind=actor_kind,
+                        actor_id=actor_id,
+                        action="page.begin_context_edit",
+                        target_kind="context_page",
+                        target_id=page.id,
+                        payload={
+                            "version_id": str(reopened.id),
+                            "reopened_submission": True,
+                            "was_private_edit": True,
+                            "editing_revision": reopened.editing_revision,
+                        },
+                    )
+                    return self._payload_from_page(
+                        session,
+                        page,
+                        reopened,
+                        current_version_id_override=reopened.id,
+                        prepared=self._inspect_saved_body(
+                            session,
+                            page,
+                            reopened,
                             actor_kind=actor_kind,
                             actor_id=actor_id,
                             actor_provenance=actor_provenance,
@@ -1959,6 +2006,28 @@ class PageService:
                     ),
                 )
 
+            fingerprint_payload = {
+                "page_id": str(page_id),
+                "base_version_id": (
+                    str(base_version_id) if base_version_id is not None else None
+                ),
+                "base_content_hash": base_content_hash,
+            }
+            # The chat decides whether a submission is reopened, so a key reused
+            # from another chat must not replay this chat's result. A receipt
+            # stored before begin knew its chat carries no chat at all and
+            # still replays (the legacy fingerprint); one stored by another
+            # chat does not.
+            fingerprint = request_fingerprint(
+                fingerprint_payload
+                if chat_session_id is None
+                else {**fingerprint_payload, "chat_session_id": str(chat_session_id)}
+            )
+            legacy_fingerprints = (
+                (request_fingerprint(fingerprint_payload),)
+                if chat_session_id is not None
+                else ()
+            )
             return execute_idempotent_write(
                 session,
                 workspace_id=workspace_id,
@@ -1966,21 +2035,127 @@ class PageService:
                 actor_id=actor_id,
                 tool_name="begin_context_edit",
                 idempotency_key=idempotency_key,
-                fingerprint=request_fingerprint(
-                    {
-                        "page_id": str(page_id),
-                        "base_version_id": (
-                            str(base_version_id)
-                            if base_version_id is not None
-                            else None
-                        ),
-                        "base_content_hash": base_content_hash,
-                    }
-                ),
+                fingerprint=fingerprint,
+                compatible_fingerprints=legacy_fingerprints,
                 result_model=PagePayload,
                 execute=_execute,
                 retry_only=retry_only,
             )
+
+    def _reopen_own_pending_submission(
+        self,
+        session: Session,
+        page: ContextPage,
+        *,
+        actor_kind: str,
+        actor_id: str,
+        chat_session_id: UUID | None,
+        base_version_id: UUID | None,
+        base_content_hash: str | None,
+    ) -> ContextPageVersion | None:
+        """Reopen the submission this chat is still waiting on, as its open edit.
+
+        One chat editing one page keeps one version. An edit begun after a
+        submit used to start again from the published head, so an agent that
+        kept refining its work left a sibling draft and a pending review per
+        round, and only the newest could ever be approved.
+
+        Only this actor's own submission qualifies: stamped with this chat,
+        still the page's latest draft, its review still pending and the only
+        open review on that version. Anything else returns None and the
+        caller opens a new branch as before. The review is superseded before
+        the row turns editable, so no pending review ever names bytes that
+        change; the next submit opens a new one on the same version.
+        """
+
+        if chat_session_id is None or page.latest_draft_version_id is None:
+            return None
+        draft = context_page_repo.get_version(session, page.latest_draft_version_id)
+        if (
+            draft is None
+            or draft.page_id != page.id
+            or draft.version_status != "draft"
+            or draft.graph_status != "linear"
+            or draft.created_by_actor_kind != actor_kind
+            or draft.created_by_actor_id != actor_id
+        ):
+            return None
+        open_reviews = [
+            review
+            for review in self._context_reviews_for_version(
+                session=session, page=page, version=draft
+            )
+            if review.status in {"pending", "changes_requested"}
+        ]
+        if len(open_reviews) != 1:
+            return None
+        # An approval undone after the fact returns its draft to pending, but
+        # as_of reads still serve those bytes for the time it was live
+        # (resolve_version_as_of): editing it in place would rewrite history.
+        if any(
+            event.version_id == draft.id for event in publish_timeline(session, page.id)
+        ):
+            return None
+        # Page then review, the order review decisions lock in. The status is
+        # read again under the lock, so a decision that just landed wins.
+        review = session.scalar(
+            select_in_workspace(
+                ReviewItem,
+                workspace_id=page.workspace_id,
+                conditions=(ReviewItem.id == open_reviews[0].id,),
+            )
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        )
+        change_set = (
+            get_in_workspace(
+                session,
+                ChangeSet,
+                workspace_id=page.workspace_id,
+                resource_id=review.change_set_id,
+            )
+            if review is not None
+            else None
+        )
+        if (
+            review is None
+            or review.status != "pending"
+            or change_set is None
+            or change_set.reason != SUBMIT_CONTEXT_EDIT_ACTION
+            or change_set.origin_chat_session_id != chat_session_id
+        ):
+            return None
+        # For this chat the head it builds on is its own submission now.
+        if (base_version_id is not None or base_content_hash is not None) and (
+            base_version_id != draft.id or base_content_hash != draft.content_hash
+        ):
+            raise PageConflictError(
+                server_version_id=draft.id,
+                server_content_hash=draft.content_hash,
+            )
+        review.status = "superseded"
+        review.claimed_by = None
+        review.claimed_at = None
+        change_set.status = "superseded"
+        draft.version_status = "editing"
+        # A revision read before the submit must not reach the reopened row.
+        previous_revision = self._highest_editing_revision(
+            session, page, actor_kind, actor_id, excluding=draft.id
+        )
+        draft.editing_revision = max(draft.editing_revision, previous_revision or 0) + 1
+        session.add_all([review, change_set, draft])
+        session.flush()
+        self.change_audit_recorder.audit_service.emit(
+            session=session,
+            workspace_id=page.workspace_id,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            action="review.withdrawn_for_reopen",
+            target_kind="review_item",
+            target_id=review.id,
+            payload={"version_id": str(draft.id)},
+        )
+        return draft
 
     def submit_context_edit_for_review(
         self,
@@ -1994,6 +2169,7 @@ class PageService:
         idempotency_key: str,
         reason: str = "author submitted for review",
         retry_only: bool = False,
+        chat_session_id: UUID | None = None,
     ) -> PagePayload:
         """ "Save draft": lock the caller's own editing content and submit it (P8.1).
 
@@ -2002,9 +2178,10 @@ class PageService:
         aliases, staged metadata -- not just ``content_hash``) so a stale
         client cannot silently overwrite a newer autosave with an older one
         just because the body happens to still match. Once locked to
-        ``draft``, further edits must open a new editing version via
-        ``begin_context_edit`` -- this method never mutates the version it
-        just submitted.
+        ``draft``, further edits go through ``begin_context_edit`` -- this
+        method never mutates the version it just submitted. ``chat_session_id``
+        (the MCP chat) is stamped on the submission's change set; it is what
+        lets that chat reopen this version while the review is pending.
 
         P8.5: ``idempotency_key`` is required -- a retried "Save draft" must
         never create a second ``ReviewItem`` for the same submission.
@@ -2020,6 +2197,7 @@ class PageService:
                 expected_editing_revision=expected_editing_revision,
                 idempotency_key=idempotency_key, reason=reason,
                 retry_only=retry_only, needs_review=True,
+                chat_session_id=chat_session_id,
             )
 
     def _submit_context_edit_in_session(
@@ -2038,6 +2216,7 @@ class PageService:
         needs_review: bool,
         retry_only: bool = False,
         risk_signals: dict[str, bool] | None = None,
+        chat_session_id: UUID | None = None,
     ) -> PagePayload:
         """Submit in the caller's transaction with its explicit review intent."""
         if reason is not None:
@@ -2117,7 +2296,7 @@ class PageService:
                 workspace_id=page.workspace_id,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
-                action="page.submit_context_edit_for_review",
+                action=SUBMIT_CONTEXT_EDIT_ACTION,
                 page_id=page.id,
                 version_id=version.id,
                 payload={"reason": reason},
@@ -2125,6 +2304,7 @@ class PageService:
                 body=version.body_md,
                 needs_review=needs_review,
                 risk_signals=risk_signals,
+                origin_chat_session_id=chat_session_id,
             )
             if result.change_set_id is not None:
                 record_metadata_snapshot(
@@ -4579,6 +4759,11 @@ class PageService:
         and left a phantom entry in the review queue. They are settled here,
         audited; the real review is the one submit_context_edit_for_review
         records.
+
+        A submission's own review, already withdrawn because this chat
+        reopened the row (``_reopen_own_pending_submission``), is dropped as
+        well: it no longer speaks for the row's bytes, so it must not fork the
+        save either. An open edit carries such a review no other way.
         """
 
         remaining: list[ReviewItem] = []
@@ -4590,6 +4775,12 @@ class PageService:
                 workspace_id=page.workspace_id,
                 resource_id=review.change_set_id,
             )
+            if (
+                review.status == "superseded"
+                and change_set is not None
+                and change_set.reason == SUBMIT_CONTEXT_EDIT_ACTION
+            ):
+                continue
             from_autosave = change_set is not None and (
                 change_set.reason or ""
             ).startswith("page.autosave")
