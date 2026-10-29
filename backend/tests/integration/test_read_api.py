@@ -1407,6 +1407,11 @@ def test_read_api_anchor_under_another_parent_moves_to_that_position(page_servic
     assert [(audit.action, audit.payload["new_parent_id"]) for audit in audits] == [
         ("tree.node.move", folder)
     ]
+    assert audits[0].payload["previous_parent_path"][-1]["id"] == root_id
+    assert audits[0].payload["new_parent_path"][-1] == {
+        "id": folder,
+        "title": "Cross Folder",
+    }
 
     out = place(first, folder, "after")
     assert out.status_code == 200, out.text

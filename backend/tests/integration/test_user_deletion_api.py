@@ -9,6 +9,7 @@ from backend.app.container import BlobStoreProvider
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models import (
+    AccountInboxEntry,
     ApiToken,
     AppMetadata,
     ChangeSet,
@@ -21,9 +22,11 @@ from backend.models import (
     UserFavorite,
     Workspace,
     WorkspaceCredentialGrant,
+    WorkspaceInboxEntry,
     WorkspaceMembership,
     WorkspaceTreeNode,
 )
+from backend.models.base import utc_now
 from backend.schemas.context_write import ReviewDecisionRequest, WriteDraftRequest
 from backend.services.context_write_service import ContextWriteService
 from backend.services.credential_hashing import CredentialHasher
@@ -59,6 +62,45 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         personal_id = _starter_workspace_id(session, target.user_id)
         admin_personal_id = _starter_workspace_id(session, admin.user_id)
         teamlead_personal_id = _starter_workspace_id(session, teamlead.user_id)
+        inbox_workspace_id = _starter_workspace_id(session, outsider.user_id)
+        # An Inbox-only footprint must be cleaned even without membership or
+        # authored content there; other recipients keep their personal state.
+        session.add_all(
+            [
+                WorkspaceInboxEntry(
+                    workspace_id=inbox_workspace_id,
+                    user_id=target.user_id,
+                    kind="test.workspace",
+                    item_key="notice",
+                    mode="mark",
+                    read_revision="v1",
+                ),
+                WorkspaceInboxEntry(
+                    workspace_id=inbox_workspace_id,
+                    user_id=outsider.user_id,
+                    kind="test.workspace",
+                    item_key="notice",
+                    mode="mark",
+                    read_revision="v1",
+                ),
+                AccountInboxEntry(
+                    user_id=target.user_id,
+                    kind="test.account",
+                    item_key="notice",
+                    mode="stored",
+                    revision="v1",
+                    event_at=utc_now(),
+                ),
+                AccountInboxEntry(
+                    user_id=outsider.user_id,
+                    kind="test.account",
+                    item_key="notice",
+                    mode="stored",
+                    revision="v1",
+                    event_at=utc_now(),
+                ),
+            ]
+        )
         personal_title = session.get(Workspace, personal_id).title
         shared = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         shared_id = shared.id
@@ -586,6 +628,19 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         assert session.get(Workspace, team_id).account_deletion_user_id is None
         assert session.get(User, target.user_id) is not None
         assert session.get(Workspace, personal_id) is not None
+        assert (
+            session.get(
+                WorkspaceInboxEntry,
+                (inbox_workspace_id, target.user_id, "test.workspace", "notice"),
+            ).read_revision
+            == "v1"
+        )
+        assert (
+            session.get(
+                AccountInboxEntry, (target.user_id, "test.account", "notice")
+            ).revision
+            == "v1"
+        )
     assert store.path_for_key(stored.storage_key).exists()
 
     original_purge = store.purge_workspace
@@ -613,6 +668,30 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
     with factory() as session:
         assert session.get(User, target.user_id) is None
         assert session.get(User, admin.user_id) is not None
+        assert (
+            session.get(
+                WorkspaceInboxEntry,
+                (inbox_workspace_id, target.user_id, "test.workspace", "notice"),
+            )
+            is None
+        )
+        assert (
+            session.get(AccountInboxEntry, (target.user_id, "test.account", "notice"))
+            is None
+        )
+        assert (
+            session.get(
+                WorkspaceInboxEntry,
+                (inbox_workspace_id, outsider.user_id, "test.workspace", "notice"),
+            ).read_revision
+            == "v1"
+        )
+        assert (
+            session.get(
+                AccountInboxEntry, (outsider.user_id, "test.account", "notice")
+            ).revision
+            == "v1"
+        )
         assert session.get(ContextPage, page_id) is not None
         retained_version = session.get(ContextPageVersion, version_id)
         assert retained_version.body_md == "Retained team documentation"

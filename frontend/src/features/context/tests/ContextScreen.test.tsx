@@ -1037,9 +1037,14 @@ describe("ContextScreen", () => {
     const readerTabs = within(
       screen.getByRole("tablist", { name: "Context reader views" }),
     );
+    // Activity loads when its tab opens, so a plain page view neither requests
+    // it nor shows its count.
     expect(
       readerTabs.getAllByRole("tab").map((tab) => tab.textContent),
-    ).toEqual(["View", "History1", "GraphPreview", "Activity1"]);
+    ).toEqual(["View", "History1", "GraphPreview", "Activity"]);
+    expect(
+      fetchMock.mock.calls.some((call) => String(call[0]).includes("/activity")),
+    ).toBe(false);
     expect(readerTabs.queryByRole("tab", { name: "Bundle" })).toBeNull();
   });
 

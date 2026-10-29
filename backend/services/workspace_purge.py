@@ -66,6 +66,7 @@ from backend.models.base import Base
 # its per-(user, client, workspace) row and IS purged.
 GLOBAL_TABLES = frozenset(
     {
+        "account_inbox_entry",
         "api_tokens",
         "app_metadata",
         "auth_email_conflict_requests",

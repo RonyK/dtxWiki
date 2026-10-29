@@ -152,7 +152,7 @@ import {
   copyTextWithReason,
   type CopyTextDetailedResult,
 } from "../../shared/lib/copyText";
-import { presentActivityItem } from "../../shared/lib/activityLabels";
+import { ActivityEventCard } from "../../shared/components/ActivityEventCard";
 import {
   contextHistoryNodes,
   contextHistoryPillTone,
@@ -183,13 +183,6 @@ type PublishedVersionInfo = {
 
 type ContextDetailWithPublishedVersion = ContextPageDetail & {
   published_version_info?: PublishedVersionInfo | null;
-};
-
-type ActivityActorPresentation = {
-  actor_kind: string;
-  actor_id?: string | null;
-  display_name?: string;
-  is_current_user?: boolean;
 };
 
 type ContextState = {
@@ -2571,6 +2564,18 @@ function ContextReader({
     loadedHistory,
     tab,
   ]);
+  // Activity is read the first time its tab opens for a page, not on every
+  // page view; the tab shows its count once that load has finished.
+  const activityPageKey = `${workspaceId ?? ""}:${detail.id}`;
+  const [activityRequestedKey, setActivityRequestedKey] = useState<
+    string | null
+  >(null);
+  useEffect(() => {
+    if (tab === "activity") {
+      setActivityRequestedKey(activityPageKey);
+    }
+  }, [activityPageKey, tab]);
+  const activityRequested = activityRequestedKey === activityPageKey;
   useEffect(() => {
     let active = true;
     const generation = ++activityLoadGenerationRef.current;
@@ -2578,6 +2583,11 @@ function ContextReader({
     setActivityNextCursor(null);
     setActivityLoadingMore(false);
     setActivityError(null);
+    if (!activityRequested) {
+      return () => {
+        active = false;
+      };
+    }
     if (!workspaceId) {
       setActivityItems([]);
       return () => {
@@ -2607,7 +2617,7 @@ function ContextReader({
     return () => {
       active = false;
     };
-  }, [detail.id, workspaceId, t]);
+  }, [activityRequested, detail.id, workspaceId, t]);
 
   const loadMoreActivity = useCallback(async () => {
     if (!workspaceId || !activityNextCursor || activityLoadingMore) {
@@ -2973,7 +2983,7 @@ function ContextReader({
           tabIndex={0}
         >
           <ContextActivity
-            currentPageTitle={detail.title}
+            workspaceId={workspaceId}
             error={activityError}
             items={activityItems}
             loadingMore={activityLoadingMore}
@@ -3350,14 +3360,14 @@ function readerVersionNumber(
 }
 
 function ContextActivity({
-  currentPageTitle,
+  workspaceId,
   error,
   items,
   loadingMore,
   nextCursor,
   onLoadMore,
 }: {
-  currentPageTitle: string;
+  workspaceId: string | null;
   error: string | null;
   items: ActivityItem[] | null;
   loadingMore: boolean;
@@ -3415,35 +3425,11 @@ function ContextActivity({
                 })}
                 className="context-activity-card-list"
               >
-                {dayItems.map((item) => {
-                  const presented = presentActivityItem(item);
-                  const actor = item.actor as ActivityActorPresentation | null;
-                  const actorName = actor?.is_current_user
-                    ? t("reader.activityYou", { defaultValue: "You" })
-                    : (actor?.display_name ??
-                      t("reader.activityUnknownActor", {
-                        defaultValue: "Unknown actor",
-                      }));
-                  const body =
-                    presented.body && presented.body !== currentPageTitle
-                      ? presented.body
-                      : "";
-                  return (
-                    <li key={item.id}>
-                      <article className="context-activity-card">
-                        <div className="context-activity-card-copy">
-                          <strong>{presented.title}</strong>
-                          {body ? <p>{body}</p> : null}
-                        </div>
-                        <AvatarWithTimestamp
-                          actorType={actor?.actor_kind ?? "system"}
-                          name={actorName}
-                          timestamp={item.created_at}
-                        />
-                      </article>
-                    </li>
-                  );
-                })}
+                {dayItems.map((item) => (
+                  <li key={item.id}>
+                    <ActivityEventCard item={item} workspaceId={workspaceId} />
+                  </li>
+                ))}
               </ul>
             </section>
           ))}

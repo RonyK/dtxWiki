@@ -18,6 +18,7 @@ from typing import NamedTuple
 
 CONTROL_PLANE_TABLES: frozenset[str] = frozenset(
     {
+        "account_inbox_entry",
         "api_token_workspaces",
         "api_tokens",
         "app_metadata",
@@ -135,6 +136,7 @@ WORKSPACE_PLANE_TABLES: frozenset[str] = frozenset(
         "upload_asset",
         "upload_asset_binding",
         "workspace_credential_grant",
+        "workspace_inbox_entry",
         "workspace_media_quota_usage",
         "workspace_media_write_intent",
         "workspace_purge_grant",

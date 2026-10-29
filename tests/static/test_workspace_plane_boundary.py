@@ -437,6 +437,11 @@ SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
         "identity-plane by construction; nothing in this file resolves a "
         "workspace_id to read a domain table."
     ),
+    "backend/api/inbox.py": (
+        "Identity-plane only: the account inbox reads and marks "
+        "account_inbox_entry, a control-plane table keyed by the authenticated "
+        "user. The workspace inbox routes use WorkspaceSessionFactoryDep."
+    ),
     "backend/api/oauth.py": (
         "MIXED. Every route delegates through oauth_service.py, which reads "
         "OAuthClient/OAuthGrant/User (identity-plane) on this session. The "

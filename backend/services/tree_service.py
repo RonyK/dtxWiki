@@ -310,6 +310,32 @@ class TreeService:
         activity and search treat both as one kind of move.
         """
 
+        previous_parent = (
+            get_in_workspace(
+                session,
+                WorkspaceTreeNode,
+                workspace_id=workspace_id,
+                resource_id=previous_parent_id,
+            )
+            if previous_parent_id
+            else None
+        )
+        previous_parent_path = (
+            [
+                {"id": str(entry.id), "title": entry.title}
+                for entry in self.tree_read_service.path_for_node(
+                    session, previous_parent
+                )
+            ]
+            if previous_parent
+            else []
+        )
+        assert node.parent_id is not None
+        parent = require_tree_node(session, workspace_id, node.parent_id)
+        new_parent_path = [
+            {"id": str(entry.id), "title": entry.title}
+            for entry in self.tree_read_service.path_for_node(session, parent)
+        ]
         change_set = create_tree_change_set(
             session=session,
             workspace_id=workspace_id,
@@ -345,6 +371,8 @@ class TreeService:
                     str(previous_parent_id) if previous_parent_id else None
                 ),
                 "new_parent_id": str(node.parent_id),
+                "previous_parent_path": previous_parent_path,
+                "new_parent_path": new_parent_path,
                 "reason": reason,
                 **(audit_extra or {}),
             },
@@ -403,23 +431,52 @@ class TreeService:
                     "reorder anchor must be a visible non-system node",
                     error_code="invalid_tree_reorder_anchor",
                 )
-            if anchor.parent_id != node.parent_id:
-                # Placing a node beside a row under another parent is a move
-                # to that exact position, held to the Move dialog's rules.
+        parent_id = anchor.parent_id if anchor is not None else node.parent_id
+        assert parent_id is not None
+        locked_parent_ids = (node.parent_id, parent_id)
+        siblings = _lock_ordered_children(
+            session, workspace_id, locked_parent_ids, parent_id
+        )
+        # A competing move can commit while we wait for the parent locks. Use
+        # the current placement and visibility before deciding whether this is
+        # still a move or has become a sibling reorder.
+        session.refresh(node)
+        node = require_visible_tree_node(
+            session, workspace_id, reorder.node_id, actor, self.tree_read_service
+        )
+        if node.is_system_node or node.parent_id is None:
+            raise RejectedByPolicyError(
+                "system tree node cannot be reordered",
+                error_code="system_tree_node_protected",
+            )
+        if node.parent_id not in locked_parent_ids:
+            # We do not hold this new parent's lock. Refuse rather than modify
+            # an unprotected sibling set or acquire locks out of order.
+            raise ReadNotFoundError(
+                "tree node moved to another parent; reload the tree"
+            )
+        if anchor is not None:
+            session.refresh(anchor)
+            anchor = require_visible_tree_node(
+                session, workspace_id, anchor.id, actor, self.tree_read_service
+            )
+            if anchor.parent_id != parent_id or anchor.is_system_node:
+                raise RejectedByPolicyError(
+                    "reorder anchor must be a visible non-system node",
+                    error_code="invalid_tree_reorder_anchor",
+                )
+            if node.parent_id != parent_id:
                 return self._move_node_beside_anchor(
                     session,
                     workspace_id,
                     node,
                     anchor,
                     reorder.placement,
+                    siblings,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
                     actor=actor,
                 )
-
-        siblings = _lock_ordered_children(
-            session, workspace_id, (node.parent_id,), node.parent_id
-        )
         index = next(
             (
                 position
@@ -557,6 +614,7 @@ class TreeService:
         node: WorkspaceTreeNode,
         anchor: WorkspaceTreeNode,
         placement: str,
+        destination: list[WorkspaceTreeNode],
         *,
         actor_kind: str,
         actor_id: str,
@@ -567,11 +625,11 @@ class TreeService:
             session, workspace_id, anchor.parent_id, actor, self.tree_read_service
         )
         require_move_target(session, workspace_id, node, parent)
-        # Both sibling sets change, so lock both parents (in one global order)
-        # against a concurrent reorder or move of either.
-        destination = _lock_ordered_children(
-            session, workspace_id, (node.parent_id, parent.id), parent.id
-        )
+        # The caller holds both parent locks and has refreshed the node. Keep
+        # one occurrence even if a supplied destination already includes it.
+        destination = [
+            candidate for candidate in destination if candidate.id != node.id
+        ]
         anchor_index = next(
             (
                 position
@@ -1066,7 +1124,9 @@ def _lock_ordered_children(
                 WorkspaceTreeNode,
                 workspace_id=workspace_id,
                 conditions=(WorkspaceTreeNode.id == locked_id,),
-            ).with_for_update()
+            )
+            .execution_options(populate_existing=True)
+            .with_for_update()
         )
     children = list(
         session.scalars(

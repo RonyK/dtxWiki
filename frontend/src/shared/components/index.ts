@@ -6,6 +6,7 @@ export * from "./ActionMenu";
 export * from "./ActivityActionBadge";
 export * from "./ActivityActorBadge";
 export * from "./ActivityEntryRow";
+export * from "./ActivityEventCard";
 export * from "./ActivityGroupingControl";
 export * from "./ActivityReadGroup";
 export * from "./AdvancedSection";

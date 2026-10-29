@@ -533,6 +533,12 @@ REST_SESSION_ONLY_ROUTES: set[tuple[str, str]] = {
         "/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decisions/"
         "{decision_id}/undo",
     ),
+    # The Inbox is the signed-in person's own message box. Whether agents may
+    # read or mark it is a later MCP decision, so bearer tokens stay out.
+    ("GET", "/api/v1/users/me/inbox"),
+    ("POST", "/api/v1/users/me/inbox/marks"),
+    ("GET", "/api/v1/workspaces/{workspace_id}/inbox"),
+    ("POST", "/api/v1/workspaces/{workspace_id}/inbox/marks"),
 }
 
 # These browser-session routes intentionally operate before membership exists.
