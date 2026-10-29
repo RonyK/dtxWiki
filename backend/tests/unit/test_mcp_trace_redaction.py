@@ -663,11 +663,25 @@ def _edit_receipt() -> dict:
         "lines_added": 1,
         "lines_removed": 0,
         "changed_sections": [["Guide", "Setup"]],
-        "first_change": {
-            "line": 7,
-            "before_preview": "token=RECEIPT-SECRET old line",
-            "after_preview": "x" * 500,
-        },
+        "changes": [
+            {
+                "line": 7,
+                "context_before": "",
+                "removed": "token=RECEIPT-SECRET old",
+                "added": "x" * 500,
+                "context_after": " line",
+            },
+            {
+                "line": 9,
+                "context_before": "",
+                "removed": "SECOND-REGION",
+                "added": "y",
+                "context_after": "",
+            },
+        ],
+        "changes_omitted_count": 0,
+        "body_adjusted": True,
+        "server_fixes": ["format"],
         "operations": [
             {
                 "index": 0,
@@ -691,6 +705,9 @@ def test_edit_receipt_is_allowlisted_and_its_previews_are_masked() -> None:
 
     assert receipt is not None
     assert "UNLISTED-RECEIPT-FIELD" not in json.dumps(receipt)
+    # Only the first region is kept, as the Chats preview, and it is masked.
+    assert "SECOND-REGION" not in json.dumps(receipt)
+    assert receipt["first_change"]["line"] == 7
     assert "RECEIPT-SECRET" not in receipt["first_change"]["before_preview"]
     assert receipt["first_change"]["after_preview"].endswith("…")
     assert len(receipt["first_change"]["after_preview"]) <= 301
@@ -708,6 +725,11 @@ def test_edit_receipt_is_allowlisted_and_its_previews_are_masked() -> None:
     assert receipt["changed_sections"] == [["Guide", "Setup"]]
     assert receipt["editing_revision_after"] == 4
     assert redact_edit_receipt(receipt) == receipt
+    # With the first region left out, no later region poses as the first.
+    omitted = redact_edit_receipt(
+        {**_edit_receipt(), "changes": [], "changes_omitted_count": 1}
+    )
+    assert omitted["first_change"] is None
     assert redact_edit_receipt("not a receipt") is None
     assert redact_edit_receipt({"edit_mode": "bogus"}) is None
 
@@ -728,7 +750,7 @@ def test_edit_receipt_accepts_the_in_process_shape() -> None:
             "lines_added": 1,
             "lines_removed": 0,
             "changed_sections": [("Intro",)],
-            "first_change": None,
+            "changes": None,
             "operations": [
                 {
                     "index": 0,

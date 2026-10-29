@@ -411,8 +411,9 @@ def _result_detail(
         return {"error_details": error_details} if error_details else None
     data = _data(payload)
     detail: dict[str, Any] = {}
-    # Every context-edit response is a PagePayload (id/version_id) except
-    # discard's small result, which carries only version_id.
+    # Every context-edit response carries id/version_id (begin's PagePayload,
+    # the other commands' ContextEditResult) except discard's small result,
+    # which carries only version_id.
     page_id = _uuid_or_none(data.get("id"))
     if page_id is not None:
         detail["page_id"] = str(page_id)

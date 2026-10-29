@@ -394,7 +394,7 @@ async def call_tool_async(
                 content=[
                     TextContent(
                         type="text",
-                        text=json.dumps(payload, ensure_ascii=False, indent=2),
+                        text=_wire_text(payload),
                     )
                 ],
                 structuredContent=payload,
@@ -519,7 +519,7 @@ async def call_tool_async(
             content=[
                 TextContent(
                     type="text",
-                    text=json.dumps(payload, ensure_ascii=False, indent=2),
+                    text=_wire_text(payload),
                 )
             ],
             structuredContent=payload,
@@ -549,7 +549,7 @@ async def call_tool_async(
             content=[
                 TextContent(
                     type="text",
-                    text=json.dumps(payload, ensure_ascii=False, indent=2),
+                    text=_wire_text(payload),
                 )
             ],
             structuredContent=payload,
@@ -596,7 +596,7 @@ async def call_tool_async(
             content=[
                 TextContent(
                     type="text",
-                    text=json.dumps(payload, ensure_ascii=False, indent=2),
+                    text=_wire_text(payload),
                 )
             ],
             structuredContent=payload,
@@ -660,7 +660,7 @@ async def call_tool_async(
             content=[
                 TextContent(
                     type="text",
-                    text=json.dumps(payload, ensure_ascii=False, indent=2),
+                    text=_wire_text(payload),
                 )
             ],
             structuredContent=payload,
@@ -717,7 +717,7 @@ async def call_tool_async(
             content=[
                 TextContent(
                     type="text",
-                    text=json.dumps(payload, ensure_ascii=False, indent=2),
+                    text=_wire_text(payload),
                 )
             ],
             structuredContent=payload,
@@ -821,6 +821,16 @@ def _requested_conversation_token(arguments: dict[str, Any]) -> Any:
 # it and cannot import this module back) and aliased here under the name the
 # slimming function and its tests already use.
 _WIRE_ENVELOPE_FIELDS = WIRE_ENVELOPE_FIELDS
+
+
+def _wire_text(payload: dict[str, Any]) -> str:
+    """The TextContent copy of a result: the same JSON as structuredContent.
+
+    Compact, because a client that hands this copy to the model pays for
+    every byte of it; indentation alone made results about 30% larger.
+    """
+
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 def _slim_envelope_for_wire(payload: dict[str, Any]) -> dict[str, Any]:

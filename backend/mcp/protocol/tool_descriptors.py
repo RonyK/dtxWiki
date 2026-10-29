@@ -203,7 +203,9 @@ TOOL_META = {
         "for human review. This tool, and the rest of the P8.6 editing-state-"
         "machine tools below (begin/update/submit/discard_context_edit, "
         "list_my_context_edits), are the current target surface -- prefer "
-        "them over submit_revision_for_review for new integrations."
+        "them over submit_revision_for_review for new integrations. The "
+        "response returns the new page's ids and editing_revision, not the "
+        "body. "
         "Requires conversation_token: echo one from an earlier envelope or "
         "pass the literal 'new'.",
         False,
@@ -237,9 +239,11 @@ TOOL_META = {
         "does that once. With no open edit (after a submit or discard) a call "
         "with base_version_id/base_content_hash instead stages a new draft "
         "version with its own ReviewItem; call begin_context_edit to keep "
-        "editing privately. data.edit_receipt reports the changed sections and "
-        "line/char counts. Prefer patch_context_edit for local changes: it "
-        "sends less and cannot overwrite text you did not mean to change. "
+        "editing privately. The response does not repeat the body: "
+        "data.edit_receipt.changes quotes each region the save replaced, as "
+        "stored, with the changed sections and line/char counts. Prefer "
+        "patch_context_edit for local changes: it sends less and cannot "
+        "overwrite text you did not mean to change. "
         "Requires conversation_token: echo one from an earlier envelope or "
         "pass the literal 'new'.",
         False,
@@ -249,7 +253,8 @@ TOOL_META = {
         "Lock your own open editing content and submit it for human review "
         "('Save draft'). Requires the editing_revision you last saw. Once "
         "submitted, that version is never mutated again -- further changes "
-        "need a new begin_context_edit."
+        "need a new begin_context_edit. The response returns the version's "
+        "ids and review status, not the body. "
         "Requires conversation_token: echo one from an earlier envelope or "
         "pass the literal 'new'.",
         False,
@@ -292,7 +297,12 @@ TOOL_META = {
         "changed (replace_block keeps the block's id; a block other "
         "operations changed keeps it while its text stays close to the old "
         "text), so a follow-up block-addressed patch needs no "
-        "read_structure_map call. "
+        "read_structure_map call. The response does not repeat the body: "
+        "data.edit_receipt.changes quotes each region the patch replaced as "
+        "stored, including a forgiven copy slip or a server format fix, so "
+        "do not re-read to check the result. Re-read with version='my_edit' "
+        "only when changes is null or changes_omitted_count or "
+        "changed_blocks_omitted_count is above 0. "
         "Never creates a new version or a ReviewItem; use "
         "submit_context_edit_for_review for that. "
         "Requires conversation_token: echo one from an earlier envelope or "

@@ -22,7 +22,7 @@ from backend.schemas.mcp.context_tools import (
     BeginContextEditToolOutput,
     CiteInput,
     CiteToolOutput,
-    ContextEditPayload,
+    ContextEditResult,
     CreateContextPageInput,
     CreateContextPageToolOutput,
     DiscardContextEditInput,
@@ -44,7 +44,6 @@ from backend.services.client_round_state import (
     ClientRoundStateCodec,
     ClientRoundStateError,
 )
-from backend.services.edit_receipt import build_edit_receipt
 from backend.services.maintenance_rounds import UNTRUSTED_CONTEXT_NOTICE
 from backend.services.page_service import (
     PageConflictError,
@@ -351,13 +350,13 @@ def _stale_base_envelope(actor, exc: PageConflictError):
     )
 
 
-def _with_receipt(data: PagePayload, receipt=None) -> ContextEditPayload:
-    """The page payload plus what the write changed (see edit_receipt.py)."""
+def _edit_result(data: PagePayload) -> ContextEditResult:
+    """What an edit command saved, without repeating the body."""
 
-    receipt = receipt if receipt is not None else data._edit_receipt
-    return ContextEditPayload.model_validate(
+    receipt = data._edit_receipt
+    return ContextEditResult.model_validate(
         {
-            **data.model_dump(),
+            **data.model_dump(include=set(ContextEditResult.model_fields)),
             "edit_receipt": receipt.model_dump() if receipt is not None else None,
         }
     )
@@ -401,17 +400,9 @@ def create_context_page(
             actor_id=actor.actor_id,
             actor_provenance=actor.provenance,
             placement_parent_node_id=request.placement_parent_node_id,
+            with_edit_receipt=True,
         )
-        data = _with_receipt(
-            data,
-            build_edit_receipt(
-                edit_mode="create",
-                before_body=None,
-                after_body=data.body_md,
-                editing_revision_before=None,
-                editing_revision_after=data.editing_revision,
-            ),
-        )
+        data = _edit_result(data)
     except ValidationError as exc:
         return CreateContextPageToolOutput(
             envelope=validation_error_envelope(
@@ -489,7 +480,7 @@ def update_context_edit(
             with_edit_receipt=True,
             editing_version_id=request.version_id,
         )
-        data = _with_receipt(data)
+        data = _edit_result(data)
     except ValidationError as exc:
         return UpdateContextEditToolOutput(
             envelope=validation_error_envelope(
@@ -528,6 +519,7 @@ def submit_context_edit_for_review(
             reason=request.reason,
             retry_only=request.retry_only,
         )
+        data = _edit_result(data)
     except ValidationError as exc:
         return SubmitContextEditForReviewToolOutput(
             envelope=validation_error_envelope(
@@ -632,7 +624,7 @@ def patch_context_edit(
             idempotency_key=request.idempotency_key,
             retry_only=request.retry_only,
         )
-        data = _with_receipt(data)
+        data = _edit_result(data)
     except ValidationError as exc:
         return PatchContextEditToolOutput(
             envelope=validation_error_envelope(

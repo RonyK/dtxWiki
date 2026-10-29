@@ -1706,6 +1706,7 @@ class PageService:
         tags: list[str] | None = None,
         aliases: list[str] | None = None,
         placement_parent_node_id: UUID | None = None,
+        with_edit_receipt: bool = False,
     ) -> PagePayload:
         """Atomically create a page and its first, private "editing" version.
 
@@ -1800,12 +1801,23 @@ class PageService:
                 target_id=page.id,
                 payload={"version_id": str(version.id)},
             )
-            return self._payload_from_page(
+            payload = self._payload_from_page(
                 session,
                 page,
                 version,
                 current_version_id_override=version.id,
             )
+            if with_edit_receipt:
+                payload._edit_receipt = build_edit_receipt(
+                    edit_mode="create",
+                    before_body=None,
+                    after_body=payload.body_md,
+                    editing_revision_before=None,
+                    editing_revision_after=payload.editing_revision,
+                    requested_body=body_md,
+                    server_fixes=prepared.fixes,
+                )
+            return payload
 
     def begin_context_edit(
         self,
@@ -2512,6 +2524,8 @@ class PageService:
                     ),
                     before_block_map=block_map,
                     after_block_map=version.block_map,
+                    requested_body=applied.body,
+                    server_fixes=prepared.fixes,
                 )
                 return payload
 
@@ -3475,6 +3489,8 @@ class PageService:
                     aliases=aliases,
                     actor_provenance=actor_provenance,
                 )
+                receipt_base["requested"] = body_md
+                receipt_base["fixes"] = prepared.fixes
                 if alternative_base is not None:
                     return self._preserve_alternative(
                         session=session,
@@ -3969,6 +3985,8 @@ class PageService:
                 after_body=result.body_md,
                 editing_revision_before=int(receipt_base["revision"]),
                 editing_revision_after=result.editing_revision,
+                requested_body=str(receipt_base["requested"]),
+                server_fixes=tuple(receipt_base["fixes"]),
             )
         return result
 

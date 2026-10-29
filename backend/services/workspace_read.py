@@ -97,7 +97,9 @@ REQUIRED_WORKFLOW = [
     (
         "to write: create_context_page (new page) or begin_context_edit "
         "(existing page); then patch_context_edit (local changes) or "
-        "update_context_edit (whole body); then submit_context_edit_for_review"
+        "update_context_edit (whole body), taking the next editing_revision "
+        "and block ids from each response's edit_receipt instead of "
+        "re-reading; then submit_context_edit_for_review"
     ),
 ]
 CAG_BUNDLE_PAGE_LIMIT = 200

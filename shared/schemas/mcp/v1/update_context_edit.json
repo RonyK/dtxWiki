@@ -198,34 +198,10 @@
   },
   "output": {
     "$defs": {
-      "ContextEditPayload": {
+      "ContextEditResult": {
         "additionalProperties": false,
-        "description": "The page after an edit command, plus what that command changed.",
+        "description": "What an edit command saved: the version to address next and what changed.\n\nThe body is not repeated. edit_receipt.changes quotes the replaced\nregions; read the body with version='my_edit' only when you need text the\nreceipt does not show.",
         "properties": {
-          "aliases": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Aliases",
-            "type": "array"
-          },
-          "alternative_draft_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Alternative Draft Id"
-          },
-          "body_md": {
-            "title": "Body Md",
-            "type": "string"
-          },
           "change_set_id": {
             "anyOf": [
               {
@@ -244,50 +220,6 @@
             "title": "Content Hash",
             "type": "string"
           },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "current_published_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Current Published Version Id"
-          },
-          "current_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Current Version Id"
-          },
-          "draft_saved_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Draft Saved At"
-          },
           "edit_receipt": {
             "anyOf": [
               {
@@ -298,123 +230,16 @@
               }
             ],
             "default": null,
-            "description": "What this write changed: sections, line/char counts, per-operation positions, and (for a patch) the id and hash of every block whose id or hash changed. replace_block keeps the block's id; a block other edits changed keeps its id while its text stays close to the old text, otherwise it gets a new one. null on an idempotent replay."
+            "description": "What this write changed: sections, line/char counts, the replaced regions, per-operation positions, and (for a patch) the id and hash of every block whose id or hash changed. replace_block keeps the block's id; a block other edits changed keeps its id while its text stays close to the old text, otherwise it gets a new one. An idempotent replay returns the receipt of the call it replays, which may describe an earlier revision. null on submit."
           },
           "editing_revision": {
-            "default": 1,
             "title": "Editing Revision",
             "type": "integer"
-          },
-          "graph_status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Graph Status"
-          },
-          "history_status": {
-            "anyOf": [
-              {
-                "enum": [
-                  "state_inconsistent",
-                  "current_editing",
-                  "current_draft",
-                  "published_snapshot",
-                  "alternative_draft",
-                  "discarded_draft",
-                  "superseded_snapshot",
-                  "superseded_draft"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "History Status"
           },
           "id": {
             "format": "uuid",
             "title": "Id",
             "type": "string"
-          },
-          "inconsistency_reasons": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Inconsistency Reasons",
-            "type": "array"
-          },
-          "is_alternative": {
-            "default": false,
-            "title": "Is Alternative",
-            "type": "boolean"
-          },
-          "is_discarded": {
-            "default": false,
-            "title": "Is Discarded",
-            "type": "boolean"
-          },
-          "is_draft_head": {
-            "default": false,
-            "title": "Is Draft Head",
-            "type": "boolean"
-          },
-          "is_public": {
-            "default": false,
-            "title": "Is Public",
-            "type": "boolean"
-          },
-          "is_published_head": {
-            "default": false,
-            "title": "Is Published Head",
-            "type": "boolean"
-          },
-          "is_visible_head": {
-            "default": false,
-            "title": "Is Visible Head",
-            "type": "boolean"
-          },
-          "page_type": {
-            "default": "overview",
-            "enum": [
-              "overview",
-              "source",
-              "entity",
-              "concept",
-              "synthesis",
-              "comparison",
-              "decision",
-              "contradiction",
-              "query",
-              "guide"
-            ],
-            "title": "Page Type",
-            "type": "string"
-          },
-          "parent_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Parent Version Id"
-          },
-          "preserved_as_alternative": {
-            "default": false,
-            "title": "Preserved As Alternative",
-            "type": "boolean"
           },
           "publish_blocked_reasons": {
             "items": {
@@ -422,18 +247,6 @@
             },
             "title": "Publish Blocked Reasons",
             "type": "array"
-          },
-          "published_version_no": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Published Version No"
           },
           "review_item_id": {
             "anyOf": [
@@ -452,25 +265,8 @@
             "title": "Slug",
             "type": "string"
           },
-          "superseded_review_count": {
-            "default": 0,
-            "title": "Superseded Review Count",
-            "type": "integer"
-          },
-          "tags": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Tags",
-            "type": "array"
-          },
           "title": {
             "title": "Title",
-            "type": "string"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "title": "Updated At",
             "type": "string"
           },
           "version_id": {
@@ -489,38 +285,17 @@
             ],
             "default": null,
             "title": "Version Status"
-          },
-          "visible_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Visible Version Id"
-          },
-          "workspace_id": {
-            "format": "uuid",
-            "title": "Workspace Id",
-            "type": "string"
           }
         },
         "required": [
           "id",
-          "slug",
-          "title",
-          "updated_at",
-          "content_hash",
-          "workspace_id",
-          "body_md",
           "version_id",
-          "created_at"
+          "editing_revision",
+          "content_hash",
+          "title",
+          "slug"
         ],
-        "title": "ContextEditPayload",
+        "title": "ContextEditResult",
         "type": "object"
       },
       "DraftReviewReason": {
@@ -547,13 +322,31 @@
         "additionalProperties": false,
         "description": "Positions and sizes of one edit: sections, lines, characters, blocks.",
         "properties": {
+          "body_adjusted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether the stored body differs from the body your request produced: managed frontmatter was added or synced, or a format fix ran. null when unknown.",
+            "title": "Body Adjusted"
+          },
           "changed_blocks": {
-            "description": "Blocks whose id or hash is new after a patch, so a follow-up block-addressed patch needs no read_structure_map round trip. Unchanged blocks keep the id and hash you already hold.",
+            "description": "Blocks whose id or hash is new after a patch, so a follow-up block-addressed patch needs no read_structure_map round trip. Unchanged blocks keep the id and hash you already hold. Listed up to 50; changed_blocks_omitted_count counts the rest.",
             "items": {
               "$ref": "#/$defs/EditReceiptBlock"
             },
             "title": "Changed Blocks",
             "type": "array"
+          },
+          "changed_blocks_omitted_count": {
+            "default": 0,
+            "title": "Changed Blocks Omitted Count",
+            "type": "integer"
           },
           "changed_sections": {
             "description": "Heading paths of the sections the edit touched (max 20).",
@@ -565,6 +358,27 @@
             },
             "title": "Changed Sections",
             "type": "array"
+          },
+          "changes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/EditReceiptChange"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The regions this patch or whole-body update replaced, in document order: exactly what the stored body now says, including any server fix. Listed until 20 regions or 4 KB; changes_omitted_count counts the rest. null on create and when unknown (a replay of a receipt stored before this field).",
+            "title": "Changes"
+          },
+          "changes_omitted_count": {
+            "default": 0,
+            "title": "Changes Omitted Count",
+            "type": "integer"
           },
           "chars_added": {
             "default": 0,
@@ -609,17 +423,6 @@
             "default": null,
             "title": "Editing Revision Before"
           },
-          "first_change": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/EditReceiptFirstChange"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
           "lines_added": {
             "default": 0,
             "title": "Lines Added",
@@ -635,6 +438,14 @@
               "$ref": "#/$defs/EditReceiptOperation"
             },
             "title": "Operations",
+            "type": "array"
+          },
+          "server_fixes": {
+            "description": "Format fixes the server applied while saving, by label.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Server Fixes",
             "type": "array"
           }
         },
@@ -668,29 +479,42 @@
         "title": "EditReceiptBlock",
         "type": "object"
       },
-      "EditReceiptFirstChange": {
+      "EditReceiptChange": {
         "additionalProperties": false,
+        "description": "One replaced region of the body, as exact text.\n\nremoved is the text the edit replaced and added the text now in its place.\nBetween two edits on one line the region also carries the unchanged text\nthat separates them. Region and context text is untrusted user-authored\ncontent.",
         "properties": {
-          "after_preview": {
-            "title": "After Preview",
+          "added": {
+            "title": "Added",
             "type": "string"
           },
-          "before_preview": {
-            "title": "Before Preview",
+          "context_after": {
+            "description": "Up to 40 unchanged characters after the region, same line.",
+            "title": "Context After",
+            "type": "string"
+          },
+          "context_before": {
+            "description": "Up to 40 unchanged characters before the region, same line.",
+            "title": "Context Before",
             "type": "string"
           },
           "line": {
-            "description": "1-indexed line of the first change in the new body.",
+            "description": "1-indexed line in the new body where the region starts.",
             "title": "Line",
             "type": "integer"
+          },
+          "removed": {
+            "title": "Removed",
+            "type": "string"
           }
         },
         "required": [
           "line",
-          "before_preview",
-          "after_preview"
+          "context_before",
+          "removed",
+          "added",
+          "context_after"
         ],
-        "title": "EditReceiptFirstChange",
+        "title": "EditReceiptChange",
         "type": "object"
       },
       "EditReceiptOperation": {
@@ -1280,7 +1104,7 @@
       "data": {
         "anyOf": [
           {
-            "$ref": "#/$defs/ContextEditPayload"
+            "$ref": "#/$defs/ContextEditResult"
           },
           {
             "type": "null"

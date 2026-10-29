@@ -85,6 +85,19 @@
   (for example `review decision undone` or `page restored from archive`).
   Draft visibility still applies, so readers without draft access receive no
   unpublished-page metadata.
+- MCP tool contract revision 19 stops repeating the whole page in the
+  responses of `create_context_page`, `update_context_edit`,
+  `patch_context_edit` and `submit_context_edit_for_review`: a one-word patch
+  to a 28 KB page now returns about 2 KB instead of 32 KB. `data` keeps the
+  ids, `editing_revision`, `content_hash`, status, review ids,
+  `publish_blocked_reasons` and `edit_receipt`; clients that read
+  `data.body_md` from these responses read the body with
+  `version="my_edit"` instead. `edit_receipt.first_change` is replaced by
+  `changes`, the replaced regions as exact text with same-line context (up to
+  20 regions or 4 KB, then `changes_omitted_count`). The receipt also reports
+  `body_adjusted`, `server_fixes` and `changed_blocks_omitted_count`. The text
+  copy of every tool result is compact JSON. `begin_context_edit` still
+  returns the body.
 - Approving a Context review publishes the changes up to that draft; rejecting
   one also rejects the later drafts written on it and returns the edit head to
   the draft below them. Earlier drafts and branched alternatives are untouched.

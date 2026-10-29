@@ -632,11 +632,12 @@ def _canonical_value_digest(value: Any) -> dict[str, Any]:
 def redact_edit_receipt(receipt: Any) -> dict[str, Any] | None:
     """Allowlisted, masked copy of a context-edit response's ``edit_receipt``.
 
-    The receipt is server-produced, but it quotes document text (the first
-    change's before/after excerpts and heading paths), so it crosses the same
-    boundary as caller input before it is stored: known keys only, typed
-    values only, excerpts re-cut and masked like any other preview. Returns
-    ``None`` for anything that is not a receipt. Idempotent.
+    The receipt is server-produced, but it quotes document text (the replaced
+    regions and heading paths), so it crosses the same boundary as caller
+    input before it is stored: known keys only, typed values only, excerpts
+    re-cut and masked like any other preview. Of the regions only the first is
+    kept, as the Chats ``first_change`` preview. Returns ``None`` for anything
+    that is not a receipt. Idempotent.
     """
 
     if not isinstance(receipt, dict):
@@ -660,7 +661,11 @@ def redact_edit_receipt(receipt: Any) -> dict[str, Any] | None:
         )
         if path
     ]
-    redacted["first_change"] = _receipt_first_change(receipt.get("first_change"))
+    redacted["first_change"] = _receipt_first_change(
+        receipt["first_change"]
+        if "first_change" in receipt
+        else _first_region(receipt.get("changes"))
+    )
     operations = receipt.get("operations")
     redacted["operations"] = [
         operation
@@ -705,6 +710,31 @@ def _receipt_heading_path(value: Any) -> list[str]:
         if text:
             path.append(text)
     return path
+
+
+def _first_region(changes: Any) -> dict[str, Any] | None:
+    """The first replaced region as a before/after preview pair.
+
+    Regions are listed as a prefix in document order, so the first one listed
+    is the edit's first change; with none listed there is no preview.
+    """
+
+    regions = _sequence(changes)
+    if not regions or not isinstance(regions[0], dict):
+        return None
+    region = regions[0]
+    parts = [
+        region.get(key)
+        for key in ("context_before", "removed", "added", "context_after")
+    ]
+    if not all(isinstance(part, str) for part in parts):
+        return None
+    before, removed, added, after = parts
+    return {
+        "line": region.get("line"),
+        "before_preview": before + removed + after,
+        "after_preview": before + added + after,
+    }
 
 
 def _receipt_first_change(value: Any) -> dict[str, Any] | None:

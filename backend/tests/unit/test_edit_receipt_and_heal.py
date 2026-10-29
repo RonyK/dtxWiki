@@ -9,7 +9,9 @@ exist to catch a return to quadratic behaviour, not to benchmark.
 from time import perf_counter
 
 from backend.services.edit_receipt import (
+    MAX_CHANGES,
     MAX_DIFF_WORK,
+    _change_regions,
     _changed_spans,
     build_edit_receipt,
 )
@@ -98,6 +100,20 @@ def test_receipt_of_a_large_rewrite_is_bounded_and_keeps_exact_sizes():
     assert before[:b1] + after[a1:a2] + before[b2:] == after
     assert receipt.chars_removed == b2 - b1
     assert receipt.chars_added == a2 - a1
+    # The one merged region is far past the byte cap: left out whole, counted.
+    assert receipt.changes == []
+    assert receipt.changes_omitted_count == 1
+
+    edits = [f"line {index}" for index in range(MAX_CHANGES + 5)]
+    many = build_edit_receipt(
+        edit_mode="whole_body",
+        before_body="\n\n".join(edits),
+        after_body="\n\n".join(f"{edit} edited" for edit in edits),
+        editing_revision_before=4,
+        editing_revision_after=5,
+    )
+    assert [change.added for change in many.changes] == [" edited"] * MAX_CHANGES
+    assert many.changes_omitted_count == 5
 
 
 def test_changed_spans_always_reconstruct_the_new_body():
@@ -106,17 +122,43 @@ def test_changed_spans_always_reconstruct_the_new_body():
     generator = random.Random(7)
     for _ in range(1000):
         before = "".join(
-            generator.choice("ab\n") for _ in range(generator.randint(0, 30))
+            generator.choice("ab\r\n") for _ in range(generator.randint(0, 30))
         )
         after = "".join(
-            generator.choice("ab\n") for _ in range(generator.randint(0, 30))
+            generator.choice("ab\r\n") for _ in range(generator.randint(0, 30))
         )
+        spans = _changed_spans(before, after)
         rebuilt: list[str] = []
         cursor = 0
-        for b1, b2, a1, a2 in _changed_spans(before, after):
+        for b1, b2, a1, a2 in spans:
             assert b1 >= cursor
             rebuilt.append(before[cursor:b1])
             rebuilt.append(after[a1:a2])
+            cursor = b2
+        rebuilt.append(before[cursor:])
+        assert "".join(rebuilt) == after
+
+        # The receipt's regions alone rebuild it too, quoting exact text with
+        # same-line context on both sides.
+        receipt = build_edit_receipt(
+            edit_mode="whole_body",
+            before_body=before,
+            after_body=after,
+            editing_revision_before=1,
+            editing_revision_after=2,
+        )
+        assert receipt.changes_omitted_count == 0
+        regions = _change_regions(before, spans, after)
+        rebuilt = []
+        cursor = 0
+        for (b1, b2, a1, a2), change in zip(regions, receipt.changes, strict=True):
+            assert change.removed == before[b1:b2]
+            assert change.added == after[a1:a2]
+            assert after[:a1].endswith(change.context_before)
+            assert after[a2:].startswith(change.context_after)
+            assert not {"\r", "\n"} & set(change.context_before + change.context_after)
+            rebuilt.append(before[cursor:b1])
+            rebuilt.append(change.added)
             cursor = b2
         rebuilt.append(before[cursor:])
         assert "".join(rebuilt) == after
@@ -132,5 +174,4 @@ def test_an_inserted_section_is_attributed_to_itself_not_the_one_above():
     )
 
     assert receipt.changed_sections == [["Doc", "B"]]
-    assert receipt.first_change is not None
-    assert receipt.first_change.after_preview.startswith("## B")
+    assert receipt.changes[0].added.lstrip("\n").startswith("## B")

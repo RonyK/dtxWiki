@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import select
 
 from backend.mcp.router import dispatch
+from backend.models.context import ContextPageVersion
 from backend.models.workspace import Workspace
 
 
@@ -45,6 +46,14 @@ def _workspace(page_service):
         return session.scalar(select(Workspace).where(Workspace.slug == "default")).id
 
 
+def _stored(page_service, version_id) -> ContextPageVersion:
+    with page_service.session_factory() as session:
+        version = session.get(ContextPageVersion, version_id)
+        assert version is not None
+        session.expunge(version)
+        return version
+
+
 def _create_page(page_service, actor, workspace_id, **overrides):
     payload = {
         "workspace_id": str(workspace_id),
@@ -64,7 +73,6 @@ def test_create_context_page_creates_private_editing_version(page_service, actor
     data = _create_page(page_service, actor, workspace_id)
     assert data.version_status == "editing"
     assert data.editing_revision == 1
-    assert data.workspace_id == workspace_id
 
 
 def test_read_only_actor_cannot_create_context_page(
@@ -308,9 +316,10 @@ def test_update_context_edit_on_another_actors_editing_row_forks_a_draft(
     assert response.envelope.result_status == "succeeded", response.envelope
     # A NEW version was created (not a 404, and not a mutation of A's row).
     assert response.data.version_id != created.version_id
-    assert response.data.parent_version_id == created.version_id
     assert response.data.version_status == "draft"
-    assert response.data.body_md == "# Hello\n\nActor B's own words, not A's."
+    forked = _stored(page_service, response.data.version_id)
+    assert forked.parent_version_id == created.version_id
+    assert forked.body_md == "# Hello\n\nActor B's own words, not A's."
 
     # And critically: A's own editing row is untouched by B's call.
     a_view = dispatch(
@@ -325,7 +334,7 @@ def test_update_context_edit_on_another_actors_editing_row_forks_a_draft(
     )
     assert a_view.envelope.result_status == "succeeded", a_view.envelope
     assert a_view.data.version_id == created.version_id
-    assert a_view.data.body_md == created.body_md
+    assert a_view.data.content_hash == created.content_hash
     assert a_view.data.editing_revision == created.editing_revision
 
 
@@ -460,8 +469,9 @@ def test_patch_context_edit_happy_path_single_block_replace(page_service, actor)
     assert response.data.version_id == created.version_id
     assert response.data.version_status == "editing"
     assert response.data.editing_revision == created.editing_revision + 1
-    assert "Patched via block address." in response.data.body_md
-    assert "Initial body." not in response.data.body_md
+    body = _stored(page_service, created.version_id).body_md
+    assert "Patched via block address." in body
+    assert "Initial body." not in body
 
 
 def test_patch_context_edit_multi_operation_patch(page_service, actor):
@@ -510,10 +520,11 @@ def test_patch_context_edit_multi_operation_patch(page_service, actor):
     assert response.envelope.result_status == "succeeded", response.envelope
     assert response.data.version_id == created.version_id
     assert response.data.editing_revision == created.editing_revision + 1
-    assert "First, edited." in response.data.body_md
-    assert "Second, edited." in response.data.body_md
-    assert "First paragraph." not in response.data.body_md
-    assert "Second paragraph." not in response.data.body_md
+    body = _stored(page_service, created.version_id).body_md
+    assert "First, edited." in body
+    assert "Second, edited." in body
+    assert "First paragraph." not in body
+    assert "Second paragraph." not in body
 
 
 def test_patch_context_edit_rejects_stale_revision_as_masked_conflict(
@@ -611,4 +622,4 @@ def test_patch_context_edit_replay_is_idempotent(page_service, actor):
     assert replay.data.version_id == first.data.version_id
     assert replay.data.editing_revision == first.data.editing_revision
     assert replay.data.content_hash == first.data.content_hash
-    assert replay.data.body_md == first.data.body_md
+    assert replay.data.edit_receipt == first.data.edit_receipt
