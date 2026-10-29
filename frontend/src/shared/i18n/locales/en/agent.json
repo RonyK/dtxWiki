@@ -52,7 +52,8 @@
     "moveTreeNode": "Failed to move Agent tree node",
     "refreshTree": "Failed to refresh Agent tree",
     "reorderTreeNode": "Failed to reorder Agent tree node",
-    "itemUnavailable": "That Agent page is no longer available. It was removed from the list."
+    "itemUnavailable": "That Agent page is no longer available. It was removed from the list.",
+    "folderParentUnavailable": "The parent folder is unavailable in this workspace."
   },
   "labels": {
     "unset": "unset",

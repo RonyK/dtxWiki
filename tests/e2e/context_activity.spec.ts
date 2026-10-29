@@ -1,4 +1,5 @@
 import { test, expect } from "./fixtures";
+import { workspaceUrl } from "./auth";
 import { mkdirSync, writeFileSync } from "node:fs";
 
 test("Context activity shows changes, decisions and exact links @cross-browser", async ({ page, browser, browserName }, testInfo) => {
@@ -79,7 +80,7 @@ test("Context activity shows changes, decisions and exact links @cross-browser",
     oldParentTitle:oldParent?.title,folder,actualFeed,history,reviewDecisions,
   },null,2));
 
-  await page.goto(`/context?target=${pid}&tab=activity`);
+  await page.goto(`${workspaceUrl(wid, `context/pages/${pid}`)}?tab=activity`);
   const panel=page.locator('#context-reader-panel-activity');
   await expect(panel.locator('.context-event-card')).toHaveCount(11);
   await expect(panel.locator('.context-event-chip')).toHaveCount(11);
@@ -96,7 +97,7 @@ test("Context activity shows changes, decisions and exact links @cross-browser",
   expect(actualFeed.items.find((i: any)=>i.body==='page.autosave.draft').details.editing_revision).toBe(secondSaved.editing_revision);
   await expect(panel.locator('[data-action="page.autosave.draft"] a')).toHaveCount(0);
   const submitRows=panel.locator('[data-action="page.submit_context_edit_for_review"]');
-  await expect(submitRows.first().getByRole('link',{name:'해당 리뷰 보기'})).toHaveAttribute('href',`/review?review=${secondSubmitted.review_item_id}`);
+  await expect(submitRows.first().getByRole('link',{name:'해당 리뷰 보기'})).toHaveAttribute('href',workspaceUrl(wid, `review/${secondSubmitted.review_item_id}`));
   await page.setViewportSize({width:1440,height:1900});
   await page.locator('.context-reader').screenshot({path:`${out}/implemented-desktop.png`});
   for(const width of [390,320]){
@@ -122,7 +123,7 @@ test("Context activity shows changes, decisions and exact links @cross-browser",
       hasTouch:true,isMobile:true,baseURL:testInfo.project.use.baseURL,
     });
     const touch=await touchContext.newPage();
-    await touch.goto(`/context?target=${pid}&tab=activity`);
+    await touch.goto(`${workspaceUrl(wid, `context/pages/${pid}`)}?tab=activity`);
     const touchMove=touch.locator('[data-action="tree.node.move"]');
     await touchMove.getByRole('button',{name:/전체 이름/}).tap();
     await expect(touch.getByRole('dialog',{name:'활동 기록'})).toContainText('sangron (검증용)');
@@ -136,9 +137,9 @@ test("Context activity shows changes, decisions and exact links @cross-browser",
   await comparison.click();
   await expect(page).toHaveURL(new RegExp(`compareFrom=${firstPublished.version_id}&compareTo=${secondPublished.version_id}`));
   await expect(page.locator('.diff-viewer').first()).toBeVisible();
-  await page.goto(`/context?target=${pid}&tab=activity`);
+  await page.goto(`${workspaceUrl(wid, `context/pages/${pid}`)}?tab=activity`);
   await page.locator('[data-action="page.submit_context_edit_for_review"]').first().getByRole('link',{name:'해당 리뷰 보기'}).click();
-  await expect(page).toHaveURL(new RegExp(`/review\\?review=${secondSubmitted.review_item_id}`));
+  await expect(page).toHaveURL(workspaceUrl(wid, `review/${secondSubmitted.review_item_id}`));
   await expect(page.getByRole('heading',{name:'운영 절차 가이드',exact:true}).first()).toBeVisible();
   expect(errors).toEqual([]);
   expect(failed).toEqual([]);

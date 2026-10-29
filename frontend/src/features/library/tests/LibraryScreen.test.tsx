@@ -1,7 +1,7 @@
 import { EditorView } from "@codemirror/view";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Link, MemoryRouter } from "react-router-dom";
+import { Link, MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TreeNodePayload } from "../../../shared/api/workspace";
@@ -40,16 +40,18 @@ vi.mock("../PdfLibraryPreview", () => ({
 import { LibraryScreen } from "../LibraryScreen";
 
 const BASE = "http://127.0.0.1:21080";
-const WORKSPACE_ID = "workspace-1";
-const LIBRARY_ITEM_ID = "item-1";
-const SECOND_LIBRARY_ITEM_ID = "item-2";
+const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
+const LIBRARY_ITEM_ID = "11111111-1111-4111-8111-111111111112";
+const SECOND_LIBRARY_ITEM_ID = "11111111-1111-4111-8111-111111111113";
+const LIBRARY_FOLDER_ID = "11111111-1111-4111-8111-111111111114";
+const THIRD_LIBRARY_ITEM_ID = "11111111-1111-4111-8111-111111111115";
 
 describe("LibraryScreen", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     window.localStorage.clear();
     window.localStorage.setItem("dtxwiki:workspace-layout:v2:library:left", "true");
-    libWorkspace.current = { selectedWorkspace: { role: "owner" } };
+    libWorkspace.current = { selectedWorkspace: { id: WORKSPACE_ID, role: "owner" } };
   });
 
   afterEach(() => {
@@ -59,6 +61,59 @@ describe("LibraryScreen", () => {
       configurable: true,
       value: 1024,
     });
+  });
+
+  it("does not navigate back after an upload resolves on another workspace route", async () => {
+    const otherWorkspaceId = "22222222-2222-4222-8222-222222222222";
+    let resolveUpload!: (response: Response) => void;
+    const pendingUpload = new Promise<Response>((resolve) => {
+      resolveUpload = resolve;
+    });
+    const uploaded = libraryItemDetail(
+      LIBRARY_ITEM_ID,
+      "Late upload",
+      `upload://${WORKSPACE_ID}/late.md`,
+    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input.toString();
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
+      }
+      if (url.endsWith("/library/capabilities")) {
+        return jsonResponse({ data: defaultLibraryCapabilities() });
+      }
+      const itemsMatch = url.match(new RegExp(`${BASE}/api/v1/workspaces/(${WORKSPACE_ID}|${otherWorkspaceId})/library/items`));
+      if (itemsMatch && (init?.method ?? "GET") === "GET") return jsonResponse({ data: [] });
+      if (itemsMatch && init?.method === "POST") return pendingUpload;
+      if (url.endsWith("/tree?section=library")) {
+        return jsonResponse({ data: treeResponse("library", []) });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("crypto", { getRandomValues: (bytes: Uint8Array) => bytes.fill(1) });
+
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library`]}>
+        <LibraryScreen />
+        <LibraryWorkspaceRouteControls otherWorkspaceId={otherWorkspaceId} />
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole("heading", { name: "No Library items yet" });
+    await userEvent.upload(
+      screen.getByLabelText("Upload Library file"),
+      new File(["# Late"], "late.md", { type: "text/markdown" }),
+    );
+    await waitFor(() => expect(fetchSpy.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true));
+    await userEvent.click(screen.getByRole("button", { name: "Switch test workspace" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("library-location")).toHaveTextContent(`/workspaces/${otherWorkspaceId}/library`),
+    );
+
+    await act(async () => resolveUpload(jsonResponse({ data: uploaded })));
+
+    expect(screen.getByTestId("library-location")).toHaveTextContent(`/workspaces/${otherWorkspaceId}/library`);
+    expect(screen.queryByText(/Late upload/)).toBeNull();
   });
 
   it.each([
@@ -82,7 +137,7 @@ describe("LibraryScreen", () => {
       },
     });
     const { unmount } = render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -93,7 +148,7 @@ describe("LibraryScreen", () => {
   });
 
   it("refreshes the overview and tree after leaving the reader and clicking its menu again", async () => {
-    let pages = [libraryItemSummary("item-1", "Existing item", "https://example.com/existing")];
+    let pages = [libraryItemSummary(LIBRARY_ITEM_ID, "Existing item", "https://example.com/existing")];
     let listReads = 0;
     let treeReads = 0;
     mockFetch({
@@ -108,11 +163,11 @@ describe("LibraryScreen", () => {
           treeNode(`node-${page.id}`, page.id, page.title),
         )) };
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/item-1`]: { data: libraryItemDetail("item-1", "Existing item", "https://example.com/existing", "sha256:existing", "Selected reader body") },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]: { data: libraryItemDetail(LIBRARY_ITEM_ID, "Existing item", "https://example.com/existing", "sha256:existing", "Selected reader body") },
     });
     const view = render(
-      <MemoryRouter initialEntries={["/library?target=item-1"]}>
-        <Link to="/library">Main menu library</Link>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
+        <Link to={`/workspaces/${WORKSPACE_ID}/library`}>Main menu library</Link>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -120,14 +175,14 @@ describe("LibraryScreen", () => {
     const main = within(view.container.querySelector(".feature-main") as HTMLElement);
     expect([listReads, treeReads]).toEqual([1, 1]);
 
-    pages = [libraryItemSummary("fresh-1", "Fresh after reader", "https://example.com/fresh-1"), ...pages];
+    pages = [libraryItemSummary("11111111-1111-4111-8111-111111111116", "Fresh after reader", "https://example.com/fresh-1"), ...pages];
     await userEvent.click(screen.getByRole("link", { name: "Main menu library" }));
     await screen.findByRole("treeitem", { name: "Fresh after reader" });
     expect(await main.findByRole("button", { name: /Fresh after reader/ })).toBeInTheDocument();
     expect(screen.queryByText("Selected reader body")).not.toBeInTheDocument();
     expect([listReads, treeReads]).toEqual([2, 2]);
 
-    pages = [libraryItemSummary("fresh-2", "Fresh while home", "https://example.com/fresh-2"), ...pages];
+    pages = [libraryItemSummary("11111111-1111-4111-8111-111111111117", "Fresh while home", "https://example.com/fresh-2"), ...pages];
     await userEvent.click(screen.getByRole("link", { name: "Main menu library" }));
     await screen.findByRole("treeitem", { name: "Fresh while home" });
     expect(await main.findByRole("button", { name: /Fresh while home/ })).toBeInTheDocument();
@@ -159,7 +214,7 @@ describe("LibraryScreen", () => {
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=library`]: {
         data: treeResponse("library", [
           treeNode("node-1", LIBRARY_ITEM_ID, "API Item"),
-          folderNode("ancestor-0", "References"),
+          folderNode(LIBRARY_FOLDER_ID, "References"),
           treeNode("node-2", SECOND_LIBRARY_ITEM_ID, "Design Item", ["References"]),
         ]),
       },
@@ -180,7 +235,7 @@ describe("LibraryScreen", () => {
     // C2: no ?target no longer auto-opens items[0]; deep-link the item so its
     // detail is selected.
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -220,9 +275,9 @@ describe("LibraryScreen", () => {
     ).toHaveAttribute("aria-selected", "true");
     const breadcrumb = within(screen.getByLabelText("Breadcrumb"));
     expect(breadcrumb.getByRole("link", { name: "Library" }))
-      .toHaveAttribute("href", "/library");
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/library`);
     expect(breadcrumb.getByRole("link", { name: "References" }))
-      .toHaveAttribute("href", "/library?target=ancestor-0");
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/library/folders/${LIBRARY_FOLDER_ID}`);
 
     await userEvent.click(breadcrumb.getByRole("link", { name: "References" }));
 
@@ -268,7 +323,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library` ]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -309,7 +364,7 @@ describe("LibraryScreen", () => {
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items?limit=10&cursor=cursor-2`]: {
         data: [
-          libraryItemSummary("item-3", "Runbook", "https://example.com/runbook"),
+          libraryItemSummary(THIRD_LIBRARY_ITEM_ID, "Runbook", "https://example.com/runbook"),
         ],
         next_cursor: null,
         total: 9,
@@ -317,7 +372,7 @@ describe("LibraryScreen", () => {
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=library`]: {
         data: treeResponse("library", [
-          folderNode("references", "References"),
+          folderNode(LIBRARY_FOLDER_ID, "References"),
         ]),
       },
     });
@@ -325,7 +380,7 @@ describe("LibraryScreen", () => {
     // Land on a folder node so no item is selected and the overview renders
     // (entry without a target still auto-selects items[0] until C2).
     render(
-      <MemoryRouter initialEntries={["/library?target=references"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/folders/${LIBRARY_FOLDER_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -350,11 +405,12 @@ describe("LibraryScreen", () => {
   it("removes a deleted item from the Load-more recency cache", async () => {
     const user = userEvent.setup();
     const appendedId = SECOND_LIBRARY_ITEM_ID;
+    let deleted = false;
     mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items?limit=10`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items?limit=10`]: () => ({
         data: [
           libraryItemSummary(
             LIBRARY_ITEM_ID,
@@ -362,10 +418,10 @@ describe("LibraryScreen", () => {
             "https://example.com/base",
           ),
         ],
-        next_cursor: "cursor-2",
-        total: 2,
-        has_more: true,
-      },
+        next_cursor: deleted ? null : "cursor-2",
+        total: deleted ? 1 : 2,
+        has_more: !deleted,
+      }),
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items?limit=10&cursor=cursor-2`]: {
         data: [
           libraryItemSummary(
@@ -380,15 +436,18 @@ describe("LibraryScreen", () => {
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=library`]: {
         data: treeResponse("library", [
-          folderNode("references", "References"),
+          folderNode(LIBRARY_FOLDER_ID, "References"),
         ]),
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/${LIBRARY_FOLDER_ID}`]: {
+        data: folderNode(LIBRARY_FOLDER_ID, "References"),
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${appendedId}`]: (
         _input: RequestInfo | URL,
         init?: RequestInit,
       ) =>
         init?.method === "DELETE"
-          ? { data: { id: appendedId, deleted: true } }
+          ? (deleted = true, { data: { id: appendedId, deleted: true } })
           : {
               data: libraryItemDetail(
                 appendedId,
@@ -402,7 +461,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/library?target=references"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/folders/${LIBRARY_FOLDER_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -457,9 +516,12 @@ describe("LibraryScreen", () => {
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=library`]: {
         data: treeResponse("library", [
-          folderNode("references", "References"),
+          folderNode(LIBRARY_FOLDER_ID, "References"),
           treeNode("node-1", LIBRARY_ITEM_ID, "Deleted elsewhere"),
         ]),
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/${LIBRARY_FOLDER_ID}`]: {
+        data: folderNode(LIBRARY_FOLDER_ID, "References"),
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]: jsonResponse(
         {
@@ -473,7 +535,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/library?target=references"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/folders/${LIBRARY_FOLDER_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -493,7 +555,9 @@ describe("LibraryScreen", () => {
         "That Library item is no longer available. It was removed from the list.",
       ),
     ).toBeInTheDocument();
-    expect(screen.queryByText("Deleted elsewhere")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryAllByText("Deleted elsewhere")).toHaveLength(0);
+    });
   });
 
   it("resets the reader to the View tab when switching items", async () => {
@@ -533,7 +597,7 @@ describe("LibraryScreen", () => {
 
     // C2: deep-link the first item so its detail is selected (no auto-open).
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -567,17 +631,17 @@ describe("LibraryScreen", () => {
   it("preserves a manual collapse of the selected path across tree refresh", async () => {
     const nestedTree: TreeNodePayload[] = [
       {
-        ...folderNode("folder-references", "References"),
+        ...folderNode(LIBRARY_FOLDER_ID, "References"),
         children_count: 1,
       },
       {
         ...treeNode("node-2", SECOND_LIBRARY_ITEM_ID, "Design Item", [
           "References",
         ]),
-        parent_id: "folder-references",
+        parent_id: LIBRARY_FOLDER_ID,
         breadcrumb: [
           {
-            id: "folder-references",
+            id: LIBRARY_FOLDER_ID,
             section: "library",
             title: "References",
             slug: "references",
@@ -615,7 +679,7 @@ describe("LibraryScreen", () => {
 
     render(
       <MemoryRouter
-        initialEntries={[`/library?target=${SECOND_LIBRARY_ITEM_ID}`]}
+        initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${SECOND_LIBRARY_ITEM_ID}`]}
       >
         <LibraryScreen />
       </MemoryRouter>,
@@ -687,7 +751,7 @@ describe("LibraryScreen", () => {
 
     // C2: deep-link the item so its detail is selected (no auto-open).
     const view = render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -718,7 +782,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library` ]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -756,6 +820,7 @@ describe("LibraryScreen", () => {
       "sha256:uploaded",
       "# Uploaded Notes\n\nUploaded artifact",
     );
+    const otherWorkspaceId = "22222222-2222-4222-8222-222222222222";
     mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
@@ -776,6 +841,7 @@ describe("LibraryScreen", () => {
         ) ?? "";
         return { data: uploaded };
       },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]: { data: uploaded },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=library`]: () => ({
         data: treeResponse(
           "library",
@@ -787,8 +853,9 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library` ]}>
         <LibraryScreen />
+        <LibraryWorkspaceRouteControls otherWorkspaceId={otherWorkspaceId} />
       </MemoryRouter>,
     );
 
@@ -810,6 +877,12 @@ describe("LibraryScreen", () => {
       new File(["# Uploaded Notes"], "notes.md", { type: "text/markdown" }),
     );
 
+    expect(await screen.findByRole("region", { name: "Upload queue" }))
+      .toHaveTextContent("notes.md Succeeded");
+    await waitFor(() =>
+      expect(screen.getByTestId("library-location"))
+        .toHaveTextContent(`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`),
+    );
     expect(await screen.findByText(/Uploaded artifact/)).toBeInTheDocument();
     expect(screen.getByRole("treeitem", { name: "Uploaded Notes" }))
       .toHaveAttribute("aria-selected", "true");
@@ -833,7 +906,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library` ]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -889,10 +962,11 @@ describe("LibraryScreen", () => {
             : [treeNode("node-1", LIBRARY_ITEM_ID, "Dropped Notes")],
         ),
       }),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]: { data: uploaded },
     });
 
     const view = render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library` ]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -959,7 +1033,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library` ]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1047,6 +1121,12 @@ describe("LibraryScreen", () => {
           ),
         });
       }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`) {
+        return jsonResponse({ data: firstUploaded });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${SECOND_LIBRARY_ITEM_ID}`) {
+        return jsonResponse({ data: secondUploaded });
+      }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items`) {
         const file = (init?.body as FormData).get("file") as File;
         uploadedFileNames.push(file.name);
@@ -1058,7 +1138,7 @@ describe("LibraryScreen", () => {
               request_id: "request-2",
               warnings: [],
               limit_bytes: 1000000,
-              settings_link: "/settings?section=library",
+              settings_link: `/workspaces/${WORKSPACE_ID}/settings?section=library`,
             },
             422,
           );
@@ -1085,7 +1165,7 @@ describe("LibraryScreen", () => {
     });
 
     const view = render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library` ]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1114,7 +1194,7 @@ describe("LibraryScreen", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Open Library policy settings" }),
-    ).toHaveAttribute("href", "/settings?section=library");
+    ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/settings?section=library`);
     expect(screen.getByRole("treeitem", { name: "Second Notes" }))
       .toHaveAttribute("aria-selected", "true");
   });
@@ -1176,10 +1256,11 @@ describe("LibraryScreen", () => {
             : [treeNode("node-1", LIBRARY_ITEM_ID, "Retried Notes")],
         ),
       }),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]: { data: uploaded },
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library` ]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1255,7 +1336,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1338,7 +1419,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1397,7 +1478,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1458,10 +1539,11 @@ describe("LibraryScreen", () => {
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=library`]: {
         data: treeResponse("library", []),
       },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]: { data: uploaded },
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library` ]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1547,6 +1629,9 @@ describe("LibraryScreen", () => {
         }
         return jsonResponse({ data: uploaded });
       }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`) {
+        return jsonResponse({ data: uploaded });
+      }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/capabilities`) {
         return jsonResponse({ data: defaultLibraryCapabilities() });
       }
@@ -1565,7 +1650,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library` ]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1623,7 +1708,7 @@ describe("LibraryScreen", () => {
             request_id: "request-1",
             warnings: [],
             limit_bytes: 1000000,
-            settings_link: "/settings?section=library",
+            settings_link: `/workspaces/${WORKSPACE_ID}/settings?section=library`,
           },
           422,
         );
@@ -1635,7 +1720,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library` ]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1655,7 +1740,7 @@ describe("LibraryScreen", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Open Library policy settings" }),
-    ).toHaveAttribute("href", "/settings?section=library");
+    ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/settings?section=library`);
     expect(
       screen.queryByRole("button", { name: "Retry upload for large.md" }),
     ).toBeNull();
@@ -1703,7 +1788,7 @@ describe("LibraryScreen", () => {
 
     // C2: deep-link the JSON item so its detail is selected (no auto-open).
     const view = render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1758,7 +1843,7 @@ describe("LibraryScreen", () => {
 
     // C2: deep-link the PDF item so its detail is selected (no auto-open).
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1841,7 +1926,7 @@ describe("LibraryScreen", () => {
     });
 
     const view = render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1942,7 +2027,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2032,7 +2117,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2167,7 +2252,7 @@ describe("LibraryScreen", () => {
       });
 
       render(
-        <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+        <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
           <LibraryScreen />
         </MemoryRouter>,
       );
@@ -2345,7 +2430,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2378,6 +2463,10 @@ describe("LibraryScreen", () => {
 
   it("polls converting details until they are ready", async () => {
     let detailCalls = 0;
+    let resolveReady!: (response: unknown) => void;
+    const readyResponse = new Promise<unknown>((resolve) => {
+      resolveReady = resolve;
+    });
     const queued = libraryItemDetail(
       LIBRARY_ITEM_ID,
       "Converting Notes",
@@ -2417,19 +2506,20 @@ describe("LibraryScreen", () => {
           treeNode("node-1", LIBRARY_ITEM_ID, "Converting Notes"),
         ]),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]: () => ({
-        data: detailCalls++ === 0 ? queued : ready,
-      }),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]: () =>
+        detailCalls++ === 0 ? { data: queued } : readyResponse,
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
 
     expect(await screen.findByText("Converting", { selector: ".status-pill" }))
       .toBeInTheDocument();
+    await waitFor(() => expect(detailCalls).toBe(2), { timeout: 2_500 });
+    resolveReady({ data: ready });
     expect(await screen.findByText("Polling finished", {}, { timeout: 2_500 }))
       .toBeInTheDocument();
     expect(detailCalls).toBeGreaterThanOrEqual(2);
@@ -2525,7 +2615,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2650,7 +2740,7 @@ describe("LibraryScreen", () => {
         has_more: false,
       }),
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=library`]: {
-        data: treeResponse("library", [folderNode("references", "References")]),
+        data: treeResponse("library", [folderNode(LIBRARY_FOLDER_ID, "References")]),
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${SECOND_LIBRARY_ITEM_ID}`]: () => {
         detailReads += 1;
@@ -2663,7 +2753,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/library?target=references"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/folders/${LIBRARY_FOLDER_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2761,7 +2851,7 @@ describe("LibraryScreen", () => {
 
     // C2: deep-link the PDF item so its detail is selected (no auto-open).
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2806,7 +2896,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/library"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2862,7 +2952,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2926,12 +3016,12 @@ describe("LibraryScreen", () => {
         ),
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}/references`]: {
-        data: [{ id: "page-1", title: "Runbook", slug: "runbook" }],
+        data: [{ id: "22222222-2222-4222-8222-222222222222", title: "Runbook", slug: "runbook" }],
       },
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2943,7 +3033,7 @@ describe("LibraryScreen", () => {
     const dialog = await screen.findByRole("dialog", { name: "Delete API Item" });
     expect(within(dialog).getByRole("link", { name: "Runbook" })).toHaveAttribute(
       "href",
-      `/workspaces/${WORKSPACE_ID}/context/pages/page-1`,
+      `/workspaces/${WORKSPACE_ID}/context/pages/22222222-2222-4222-8222-222222222222`,
     );
   });
 
@@ -2971,7 +3061,7 @@ describe("LibraryScreen", () => {
     // C2: deep-link the item so its detail is selected (no auto-open), then
     // assert the viewer sees no write affordances on the reader.
     const view = render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3018,7 +3108,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library` ]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3066,7 +3156,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3101,7 +3191,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3149,7 +3239,7 @@ describe("LibraryScreen", () => {
       .mockImplementation(() => undefined);
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3229,7 +3319,7 @@ describe("LibraryScreen", () => {
       const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
 
       render(
-        <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+        <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
           <LibraryScreen />
         </MemoryRouter>,
       );
@@ -3274,7 +3364,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3315,14 +3405,14 @@ describe("LibraryScreen", () => {
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=library`]: {
         data: treeResponse("library", [
-          folderNode("references", "References"),
+          folderNode(LIBRARY_FOLDER_ID, "References"),
         ]),
       },
     });
 
     // Land on a folder so the overview header (not an item detail) renders.
     render(
-      <MemoryRouter initialEntries={["/library?target=references"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/folders/${LIBRARY_FOLDER_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3361,7 +3451,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3440,7 +3530,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3506,7 +3596,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3549,12 +3639,12 @@ describe("LibraryScreen", () => {
         init?: RequestInit,
       ) => {
         created.push(JSON.parse(String(init?.body)));
-        return { data: folderNode("folder-new", "Research") };
+        return { data: folderNode("11111111-1111-4111-8111-111111111118", "Research") };
       },
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library` ]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3591,12 +3681,12 @@ describe("LibraryScreen", () => {
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items`]: { data: [] },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=library`]: {
-        data: treeResponse("library", [folderNode("folder-1", "References")]),
+        data: treeResponse("library", [folderNode(LIBRARY_FOLDER_ID, "References")]),
       },
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library` ]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3948,13 +4038,26 @@ function treeNode(
     visibility_status: "visible",
     children_count: 0,
     breadcrumb: breadcrumb.map((ancestor, index) => ({
-      id: `ancestor-${index}`,
+      id: libraryFolderFixtureId(ancestor, index),
       section: "library",
       title: ancestor,
       slug: ancestor.toLowerCase(),
       node_kind: "folder",
     })),
   };
+}
+
+function LibraryWorkspaceRouteControls({ otherWorkspaceId }: { otherWorkspaceId: string }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <>
+      <output data-testid="library-location">{location.pathname}</output>
+      <button type="button" onClick={() => navigate(`/workspaces/${otherWorkspaceId}/library`)}>
+        Switch test workspace
+      </button>
+    </>
+  );
 }
 
 function folderNode(id: string, title: string): TreeNodePayload {
@@ -3975,6 +4078,11 @@ function folderNode(id: string, title: string): TreeNodePayload {
     children_count: 0,
     breadcrumb: [],
   };
+}
+
+function libraryFolderFixtureId(title: string, index: number): string {
+  if (title === "References") return LIBRARY_FOLDER_ID;
+  return `cccccccc-cccc-4ccc-8ccc-${String(index + 1).padStart(12, "0")}`;
 }
 
 function libraryArtifactTreeNode(

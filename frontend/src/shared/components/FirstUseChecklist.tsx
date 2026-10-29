@@ -7,6 +7,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
+import { useRouteWorkspaceId, workspacePath } from "../lib/workspaceRoutes";
 import { useFirstUseProgress } from "../hooks/useFirstUseProgress";
 
 export type FirstUseStepKey = "library" | "context" | "review";
@@ -25,7 +26,7 @@ export const FIRST_USE_STEPS: Array<{
     key: "library",
     label: "Add source material",
     description: "Collect source material that answers can cite.",
-    href: "/setup",
+    href: "library/items/new",
     actionLabel: "Add first source",
     icon: Library,
   },
@@ -33,7 +34,7 @@ export const FIRST_USE_STEPS: Array<{
     key: "context",
     label: "Write Context page",
     description: "Turn important knowledge into durable workspace pages.",
-    href: "/context/new?from=context",
+    href: "context/pages/new",
     actionLabel: "Write first Context page",
     icon: FileText,
   },
@@ -41,7 +42,7 @@ export const FIRST_USE_STEPS: Array<{
     key: "review",
     label: "Save or review",
     description: "Review proposed changes before they update the workspace.",
-    href: "/review",
+    href: "review",
     actionLabel: "Open Review queue",
     icon: ListChecks,
   },
@@ -73,6 +74,7 @@ export function FirstUseChecklist({
   // The checklist ships its strings through the dashboard namespace (its home
   // surface); the FIRST_USE_STEPS literals double as the en defaults.
   const { t } = useTranslation("dashboard");
+  const workspaceId = useRouteWorkspaceId();
   const resolvedTitle =
     title ?? t("firstUse.title", { defaultValue: "Workspace setup sequence" });
   const resolvedNextStep = nextStep ?? firstIncompleteStep(completed);
@@ -86,7 +88,7 @@ export function FirstUseChecklist({
       <div className="first-use-checklist-header">
         <span>{resolvedTitle}</span>
         {showPrimaryAction && actionStep ? (
-          <Link className="icon-button primary" to={actionStep.href}>
+          <Link className="icon-button primary" to={workspacePath(workspaceId, actionStep.href)}>
             {t(`firstUse.steps.${actionStep.key}.action`, {
               defaultValue: actionStep.actionLabel,
             })}

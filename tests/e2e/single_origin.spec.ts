@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { expect, test, type Page } from "./fixtures";
 
-import { authenticatePage, backendBaseUrl, viteDevServerOrigin } from "./auth";
+import { authenticatePage, backendBaseUrl, currentWorkspace, viteDevServerOrigin, workspaceUrl } from "./auth";
 
 /**
  * Topology gate for the E2E runner itself.
@@ -177,7 +177,8 @@ test("lazily imported route chunks and authenticated API traffic stay on the one
   const watch = watchOrigins(page);
 
   await authenticatePage(page, testInfo, "single-origin-authenticated");
-  await page.goto("/settings");
+  const workspace = await currentWorkspace(page.request);
+  await page.goto(workspaceUrl(workspace.id, "settings"));
   await expect(
     page.getByRole("heading", { name: "Workspace", exact: true }),
   ).toBeVisible();

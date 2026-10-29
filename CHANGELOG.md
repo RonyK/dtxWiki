@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Explicit workspace URLs
+
+- Route workspace screens, data requests, navigation, and Context permalinks
+  through an explicit workspace UUID. Context pages use
+  `/workspaces/<workspace_id>/context/pages/<page_id>`; shared permalinks use
+  `/p/<workspace_id>/<page_id>`. Refresh old bookmarks with the new addresses.
+- Preserve upload progress when navigating within a workspace, isolate state
+  when switching workspaces, and keep creation dialogs tied to their routes.
+- Remove the workspace-less page-location API and single-ID permalink lookup.
+  Only target-free legacy entry points use the last-used workspace preference.
+
 ### Context link projections
 
 - Track authored link locators separately from document slugs so pinned

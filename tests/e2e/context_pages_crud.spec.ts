@@ -5,6 +5,7 @@ import {
   backendBaseUrl,
   currentWorkspace,
   signUp,
+  workspaceUrl,
 } from "./auth";
 
 test("requires login at the root route", async ({ page }) => {
@@ -21,6 +22,7 @@ test("shows the dashboard at the authenticated root route", async ({
   page,
 }, testInfo) => {
   await authenticatePage(page, testInfo, "landing");
+  const workspace = await currentWorkspace(page.request);
   await page.goto("/");
 
   await expect(page).toHaveURL(/\/dashboard$/);
@@ -30,7 +32,7 @@ test("shows the dashboard at the authenticated root route", async ({
   await page.getByRole("banner").getByRole("button", { name: /Create/ }).click();
   await expect(
     page.getByRole("menuitem", { name: "New Context page" }),
-  ).toHaveAttribute("href", "/context/new?from=context");
+  ).toHaveAttribute("href", workspaceUrl(workspace.id, "context/pages/new"));
 });
 
 test("creates, reads, edits, and shows stale conflict in the browser @cross-browser", async ({
@@ -41,8 +43,8 @@ test("creates, reads, edits, and shows stale conflict in the browser @cross-brow
     request,
     `pages-${testInfo.workerIndex}-${testInfo.retry}-${Date.now()}@example.com`,
   );
-  await page.goto("/context/new?from=context");
   const workspace = await currentWorkspace(request);
+  await page.goto(workspaceUrl(workspace.id, "context/pages/new"));
 
   await page.getByLabel("Title").fill("Hello PoC");
   await expect(page.getByLabel("Title")).toHaveValue("Hello PoC");
@@ -62,7 +64,7 @@ test("creates, reads, edits, and shows stale conflict in the browser @cross-brow
   const createdPage = (await created.json()).data as { id: string; slug: string };
 
   await expect(page).toHaveURL(
-    new RegExp(`/context/${createdPage.slug}/edit$`),
+    new RegExp(`/workspaces/${workspace.id}/context/pages/${createdPage.id}/edit$`),
   );
   await expect(page.getByRole("button", { name: "Publish" })).toBeEnabled();
   const publishResponse = page.waitForResponse(
@@ -75,7 +77,7 @@ test("creates, reads, edits, and shows stale conflict in the browser @cross-brow
   await page.getByRole("button", { name: "Publish" }).click();
   expect((await publishResponse).ok()).toBeTruthy();
   await expect(page).toHaveURL(
-    new RegExp(`/context\\?target=${createdPage.id}$`),
+    new RegExp(`/workspaces/${workspace.id}/context/pages/${createdPage.id}$`),
   );
   await expect(page.getByRole("main").getByRole("heading", { name: "Hello PoC" }))
     .toBeVisible();
@@ -106,7 +108,7 @@ test("creates, reads, edits, and shows stale conflict in the browser @cross-brow
   await expect(article.getByText("rendered")).toBeVisible();
   await expect(page).toHaveTitle("Hello PoC - dtxWiki");
 
-  await page.goto(`/context/${createdPage.slug}/edit`);
+  await page.goto(workspaceUrl(workspace.id, `context/pages/${createdPage.id}/edit`));
   await expect(page.getByLabel("Title")).toHaveValue("Hello PoC");
   await expect(page).toHaveTitle("dtxWiki");
 
@@ -143,7 +145,7 @@ test("publishes a new Context page directly to its reader", async ({ page }, tes
     `direct-publish-${testInfo.workerIndex}-${testInfo.retry}-${Date.now()}@example.com`,
   );
   const workspace = await currentWorkspace(request);
-  await page.goto("/context/new?from=context");
+  await page.goto(workspaceUrl(workspace.id, "context/pages/new"));
 
   await page.getByLabel("Title").fill("Direct publish PoC");
   await page.locator(".cm-content").click();
@@ -170,7 +172,7 @@ test("publishes a new Context page directly to its reader", async ({ page }, tes
   const createdPage = (await created.json()).data as { id: string };
   expect((await publishResponse).ok()).toBeTruthy();
   await expect(page).toHaveURL(
-    new RegExp(`/context\\?target=${createdPage.id}$`),
+    new RegExp(`/workspaces/${workspace.id}/context/pages/${createdPage.id}$`),
   );
   await expect(
     page.getByRole("main").getByRole("heading", { name: "Direct publish PoC" }),
@@ -201,9 +203,9 @@ test("uploads an image through the slash image command in the browser @cross-bro
     },
   );
   expect(createResponse.ok()).toBeTruthy();
-  const created = (await createResponse.json()).data as { slug: string };
+  const created = (await createResponse.json()).data as { id: string; slug: string };
 
-  await page.goto(`/context/${created.slug}/edit`);
+  await page.goto(workspaceUrl(workspace.id, `context/pages/${created.id}/edit`));
   await page.getByLabel("Markdown body").waitFor();
   await page.locator(".cm-content").click();
   await page.keyboard.press("ControlOrMeta+/");

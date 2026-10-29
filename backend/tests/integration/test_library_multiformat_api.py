@@ -862,7 +862,9 @@ def test_upload_enforces_workspace_exact_format_and_family_caps(
     body = response.json()
     assert body["error_code"] == "library_upload_too_large"
     assert body["limit_bytes"] == 1_000
-    assert body["settings_link"] == "/settings?section=library"
+    assert body["settings_link"] == (
+        f"/workspaces/{library_api.workspace_id}/settings?section=library"
+    )
 
 
 def test_original_download_supports_full_range_etag_and_invalid_range(

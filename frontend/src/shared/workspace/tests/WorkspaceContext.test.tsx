@@ -9,6 +9,7 @@ import {
 } from "../WorkspaceContext";
 import {
   deleteWorkspace,
+  getCurrentWorkspaceId,
   setDefaultWorkspace,
   type WorkspaceSummary,
 } from "../../api/workspace";
@@ -66,6 +67,37 @@ describe("WorkspaceProvider", () => {
     expect(resolved).not.toBeNull();
     expect(resolved?.id).toBe("workspace-2");
     expect(result.current.selectedId).toBe("workspace-2");
+  });
+
+  it("keeps provider and persisted selection aligned after leaving a verified workspace route", async () => {
+    let routeWorkspaceId: string | null = null;
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <WorkspaceProvider routeWorkspaceId={routeWorkspaceId}>
+        {children}
+      </WorkspaceProvider>
+    );
+    const { result, rerender } = renderHook(() => useWorkspaceContext(), {
+      wrapper,
+    });
+
+    act(() => {
+      result.current.addWorkspace(workspace("workspace-a", "Alpha"));
+      result.current.addWorkspace(workspace("workspace-b", "Beta"));
+      result.current.selectWorkspaceId("workspace-a");
+    });
+    expect(result.current.selectedId).toBe("workspace-a");
+
+    routeWorkspaceId = "workspace-b";
+    rerender();
+    expect(result.current.selectedId).toBe("workspace-b");
+    expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe(
+      "workspace-b",
+    );
+
+    routeWorkspaceId = null;
+    rerender();
+    expect(result.current.selectedId).toBe("workspace-b");
+    await expect(getCurrentWorkspaceId()).resolves.toBe("workspace-b");
   });
 
   // RequireEditor gates on `error && !selectedWorkspace` (App.tsx); these tests

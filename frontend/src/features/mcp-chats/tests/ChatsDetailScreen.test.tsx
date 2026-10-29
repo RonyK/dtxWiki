@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { useEffect, type ReactNode } from "react";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -8,10 +9,12 @@ import type {
   McpChatTimelineItem,
 } from "../../../shared/api/operations";
 import { i18n } from "../../../shared/i18n";
+import { WorkspaceProvider, useWorkspaceContext } from "../../../shared/workspace/WorkspaceContext";
+import { parseWorkspaceRoute } from "../../../shared/lib/workspaceRoutes";
 import { ChatsDetailScreen } from "../ChatsDetailScreen";
 
 const BASE = "http://127.0.0.1:21080";
-const WORKSPACE_ID = "workspace-1";
+const WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
 
 describe("ChatsDetailScreen", () => {
   beforeEach(() => {
@@ -82,7 +85,7 @@ describe("ChatsDetailScreen", () => {
       ...detail.timeline[0], action: "edit", tool_name: "update_context_edit",
       input_summary: { page_id: pageId, version_id: versionId, body_md: "Raw content ".repeat(30) },
       input_display_items: [
-        { key: "requested_artifact", kind: "artifact", text: "Requested guide", resource_kind: "context_page", resource_id: pageId, navigation_path: `/context?target=${pageId}` },
+        { key: "requested_artifact", kind: "artifact", text: "Requested guide", resource_kind: "context_page", resource_id: pageId, navigation_path: `/workspaces/00000000-0000-4000-8000-000000000001/context/pages/${pageId}` },
         { key: "input_version", kind: "text", text: "v12", resource_id: versionId },
       ],
     };
@@ -390,7 +393,7 @@ describe("ChatsDetailScreen", () => {
         id: `artifact-link-other-${index}`,
         resource_id: `page-other-${index}`,
         artifact_title: `Other policy ${index + 1}`,
-        navigation_path: `/context?target=page-other-${index}`,
+        navigation_path: `/workspaces/00000000-0000-4000-8000-000000000001/context/pages/page-other-${index}`,
         occurrence_count: 1,
       })),
       referenced,
@@ -458,7 +461,7 @@ describe("ChatsDetailScreen", () => {
                   text: "Authentication policy",
                   resource_kind: "context_page",
                   resource_id: "page-1",
-                  navigation_path: "/context?target=page-1",
+                  navigation_path: "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/page-1",
                 },
               ],
             },
@@ -824,7 +827,7 @@ describe("ChatsDetailScreen", () => {
     const artifactLink = within(callPanel(call)).getByRole("link", {
       name: /Authentication policy/,
     });
-    expect(artifactLink).toHaveAttribute("href", "/context?target=page-1");
+    expect(artifactLink).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/page-1");
 
     await user.click(within(call).getByRole("tab", { name: "Metadata" }));
     expect(within(callPanel(call)).getByText("Schema")).toBeInTheDocument();
@@ -965,7 +968,7 @@ describe("ChatsDetailScreen", () => {
                   text: "Deploy procedure",
                   resource_kind: "context_page",
                   resource_id: "page-9",
-                  navigation_path: "/context?target=page-9",
+                  navigation_path: "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/page-9",
                 },
               ],
             },
@@ -1075,6 +1078,35 @@ describe("ChatsDetailScreen", () => {
         body: JSON.stringify({ title: "Renamed MCP Session" }),
       }),
     );
+  });
+
+  it("hides the previous chat and ignores its late title response after route navigation", async () => {
+    const user = userEvent.setup();
+    let resolvePatch!: (response: Response) => void;
+    const patchResult = new Promise<Response>((resolve) => { resolvePatch = resolve; });
+    let resolveChatTwo!: (response: unknown) => void;
+    const chatTwoResult = new Promise<unknown>((resolve) => { resolveChatTwo = resolve; });
+    mockFetch({
+      [`${BASE}/api/v1/workspaces`]: workspaceResponse(),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/chat-1`]: chatResponse(chatDetail()),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/chat-1#PATCH`]: () => patchResult,
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/chat-2`]: () => chatTwoResult,
+    });
+
+    renderDetailRoute();
+    await user.click(await screen.findByRole("button", { name: "Edit title" }));
+    await user.clear(screen.getByLabelText("Chat title"));
+    await user.type(screen.getByLabelText("Chat title"), "Late chat one title");
+    await user.click(screen.getByRole("button", { name: "Save title" }));
+    await user.click(screen.getByRole("button", { name: "Navigate to chat-2" }));
+
+    expect(screen.queryByText("Codex Research Session")).toBeNull();
+    resolveChatTwo(chatResponse({ ...chatDetail(), id: "chat-2", title: "Chat Two Marker", subject: "Chat Two Marker" }));
+    expect(await screen.findByRole("heading", { name: "Chat Two Marker" })).toBeInTheDocument();
+    resolvePatch(jsonResponse({ data: { ...chatDetail(), title: "Late chat one title", subject: "Late chat one title" } }));
+
+    expect(await screen.findByRole("heading", { name: "Chat Two Marker" })).toBeInTheDocument();
+    expect(screen.queryByText("Title saved. Focus moved to the updated heading.")).toBeNull();
   });
 
   it("fences a pending title save and restores retry focus after failure", async () => {
@@ -1324,7 +1356,7 @@ describe("ChatsDetailScreen", () => {
     ).toBeNull();
     expect(screen.getByRole("link", { name: /Back to Chats/ })).toHaveAttribute(
       "href",
-      "/chats",
+      "/workspaces/00000000-0000-4000-8000-000000000001/chats",
     );
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
@@ -1590,7 +1622,7 @@ describe("ChatsDetailScreen", () => {
                   text: "Rollback criteria and procedure",
                   resource_kind: "context_page",
                   resource_id: "page-2",
-                  navigation_path: "/context?target=page-2",
+                  navigation_path: "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/page-2",
                 },
               ],
             },
@@ -1632,7 +1664,7 @@ describe("ChatsDetailScreen", () => {
                   text: "Rollback criteria and procedure",
                   resource_kind: "context_page",
                   resource_id: "page-2",
-                  navigation_path: "/context?target=page-2",
+                  navigation_path: "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/page-2",
                 },
               ],
             },
@@ -2239,13 +2271,37 @@ function renderWithDetail(
 
 function renderDetailRoute() {
   return render(
-    <MemoryRouter initialEntries={["/chats/chat-1"]}>
-      <Routes>
-        <Route path="/chats" element={<div>Chats landing</div>} />
-        <Route path="/chats/:chatId" element={<ChatsDetailScreen />} />
-      </Routes>
+    <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/chats/chat-1"]}>
+      <RouteWorkspaceProvider>
+        <Routes>
+          <Route path="/workspaces/00000000-0000-4000-8000-000000000001/chats" element={<div>Chats landing</div>} />
+          <Route path="/workspaces/00000000-0000-4000-8000-000000000001/chats/:chatId" element={<ChatsDetailScreen />} />
+        </Routes>
+        <ChatRouteSwitch />
+      </RouteWorkspaceProvider>
     </MemoryRouter>,
   );
+}
+
+function ChatRouteSwitch() {
+  const navigate = useNavigate();
+  return <button type="button" onClick={() => navigate("/workspaces/00000000-0000-4000-8000-000000000001/chats/chat-2")}>Navigate to chat-2</button>;
+}
+
+function RouteWorkspaceProvider({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const workspaceId = parseWorkspaceRoute(location.pathname)?.workspaceId ?? null;
+  return (
+    <WorkspaceProvider routeWorkspaceId={workspaceId}>
+      <RouteWorkspaceInitializer workspaceId={workspaceId}>{children}</RouteWorkspaceInitializer>
+    </WorkspaceProvider>
+  );
+}
+
+function RouteWorkspaceInitializer({ children, workspaceId }: { children: ReactNode; workspaceId: string | null }) {
+  const { refreshWorkspaces } = useWorkspaceContext();
+  useEffect(() => { void refreshWorkspaces(workspaceId); }, [refreshWorkspaces, workspaceId]);
+  return <>{children}</>;
 }
 
 function mockFetch(
@@ -2257,7 +2313,7 @@ function mockFetch(
   Object.assign(fetchResponses, responses);
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = input.toString();
-    const key = init?.method === "DELETE" ? `${url}#DELETE` : url;
+    const key = init?.method === "DELETE" || init?.method === "PATCH" ? `${url}#${init.method}` : url;
     const body = fetchResponses[key];
     if (!body) {
       throw new Error(`Unexpected request: ${url}`);
@@ -2350,7 +2406,7 @@ function chatDetail(): McpChatDetail {
         resource_kind: "context_page",
         resource_id: "page-1",
         artifact_title: "Authentication policy",
-        navigation_path: "/context?target=page-1",
+        navigation_path: "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/page-1",
         verb: "referenced",
         first_occurred_at: "2026-05-27T09:01:00Z",
         last_occurred_at: "2026-05-27T09:02:00Z",
@@ -2384,7 +2440,7 @@ function chatDetail(): McpChatDetail {
             resource_kind: "context_page",
             resource_id: "page-1",
             artifact_title: "Authentication policy",
-            navigation_path: "/context?target=page-1",
+            navigation_path: "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/page-1",
             verb: "referenced",
           },
         ],

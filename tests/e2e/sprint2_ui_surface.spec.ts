@@ -6,7 +6,7 @@ import {
   type Page,
 } from "./fixtures";
 
-import { authenticatePage, backendBaseUrl, login, signUp } from "./auth";
+import { authenticatePage, backendBaseUrl, currentWorkspace, login, signUp, workspaceUrl } from "./auth";
 
 type Surface =
   | { path: string; heading: string; reviewRail?: never; textbox?: never }
@@ -34,17 +34,25 @@ const SURFACES: Surface[] = [
 async function expectLabsMenus(
   navigation: Locator,
   enabled: { ask: boolean; agent: boolean },
+  workspaceId: string,
 ) {
-  await expect(navigation.locator('a[href="/chats"]')).toBeVisible();
-  await expect(navigation.locator('a[href="/chats"] .nav-preview-badge')).toHaveCount(0);
+  const chatsHref = workspaceUrl(workspaceId, "chats");
+  await expect(navigation.locator(`a[href="${chatsHref}"]`)).toBeVisible();
+  await expect(navigation.locator(`a[href="${chatsHref}"] .nav-preview-badge`)).toHaveCount(0);
   for (const [menu, visible] of Object.entries(enabled)) {
-    const link = navigation.locator(`a[href="/${menu}"]`);
+    const link = navigation.locator(`a[href="${workspaceUrl(workspaceId, menu)}"]`);
     if (visible) {
       await expect(link).toBeVisible();
     } else {
       await expect(link).toHaveCount(0);
     }
   }
+}
+
+async function gotoWorkspaceDashboard(page: Page) {
+  const workspace = await currentWorkspace(page.request);
+  await page.goto(workspaceUrl(workspace.id, "dashboard"));
+  return workspace;
 }
 
 async function expectLabsCommands(
@@ -72,7 +80,12 @@ test.describe("Sprint 2 UI surface", () => {
       });
 
       await authenticatePage(page, testInfo, surface.path);
-      await page.goto(surface.path);
+      const workspace = await currentWorkspace(page.request);
+      const suffix = surface.path === "/context/new"
+        ? "context/pages/new"
+        : surface.path.slice(1);
+      const scoped = surface.path === "/context/new" || ["agent", "chats", "context", "library", "activity", "review", "search", "lint", "setup"].includes(suffix);
+      await page.goto(scoped ? workspaceUrl(workspace.id, suffix) : surface.path);
 
       if (surface.heading !== undefined) {
         await expect(
@@ -95,6 +108,7 @@ test.describe("Sprint 2 UI surface", () => {
     page,
   }, testInfo) => {
     await authenticatePage(page, testInfo, "ask-hidden");
+    const workspace = await currentWorkspace(page.request);
     const askRequests: string[] = [];
     page.on("request", (request) => {
       if (/\/api\/v1\/workspaces\/[^/]+\/ask\//.test(request.url())) {
@@ -107,27 +121,29 @@ test.describe("Sprint 2 UI surface", () => {
       { path: "/setup", heading: "Setup" },
       { path: "/chats", heading: "Chats" },
     ]) {
-      await page.goto(surface.path);
+      await page.goto(surface.path === "/chats" ? workspaceUrl(workspace.id, "chats") : workspaceUrl(workspace.id, surface.path.slice(1)));
       await expect(page.getByRole("heading", { name: surface.heading, exact: true }))
         .toBeVisible();
-      await expect(page.locator('a[href^="/ask"]')).toHaveCount(0);
+      await expect(page.locator('a[href^="/workspaces/"][href$="/ask"]')).toHaveCount(0);
       await expect(page.getByRole("button", { name: "New Ask", exact: true }))
         .toHaveCount(0);
     }
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/dashboard");
+    await gotoWorkspaceDashboard(page);
     await expect(page.getByRole("heading", { name: "Workspace Operations", exact: true }))
       .toBeVisible();
     await page.getByRole("button", { name: "Open navigation" }).click();
     await expect(page.getByRole("navigation", { name: "Mobile" })).toBeVisible();
-    await expect(page.locator('a[href^="/ask"]')).toHaveCount(0);
+    await expect(page.locator('a[href^="/workspaces/"][href$="/ask"]')).toHaveCount(0);
 
-    for (const path of ["/ask", "/ask?new=1", "/ask?target=legacy-session"]) {
+    for (const path of [workspaceUrl(workspace.id, "ask"), `${workspaceUrl(workspace.id, "ask")}?new=1`, `${workspaceUrl(workspace.id, "ask")}?target=legacy-session`]) {
       await page.goto(path);
       await expect(page).toHaveURL(new URL(path, backendBaseUrl).href);
       await expect(
-        page.getByRole("heading", { name: "We couldn't find that page" }),
+        page.getByRole("heading", {
+          name: "We couldn't find that page",
+        }),
       ).toBeVisible();
       await expect(page.locator(".ask-composer")).toHaveCount(0);
     }
@@ -139,27 +155,28 @@ test.describe("Sprint 2 UI surface", () => {
   }, testInfo) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await authenticatePage(page, testInfo, "labs-menus");
-    await page.goto("/dashboard");
+    const workspace = await currentWorkspace(page.request);
+    await gotoWorkspaceDashboard(page);
     await expect(page.getByRole("heading", { name: "Workspace Operations", exact: true }))
       .toBeVisible();
 
     const sidebar = page.getByRole("navigation", { name: "Sidebar" });
-    await expectLabsMenus(sidebar, { ask: false, agent: false });
-    await expect(page.locator('a[href="/agent"]')).toHaveCount(0);
+    await expectLabsMenus(sidebar, { ask: false, agent: false }, workspace.id);
+    await expect(page.locator(`a[href="${workspaceUrl(workspace.id, "agent")}"]`)).toHaveCount(0);
     await expectLabsCommands(page, { ask: false, agent: false });
 
-    await page.goto("/setup");
+    await page.goto(workspaceUrl(workspace.id, "setup"));
     await expect(page.getByRole("heading", { name: "Setup", exact: true })).toBeVisible();
     await expect(page.getByText(/^\d+ of 2 · /)).toBeVisible();
-    await expect(page.locator('a[href="/agent"]')).toHaveCount(0);
-    await page.goto("/activity?kind=mcp");
+    await expect(page.locator(`a[href="${workspaceUrl(workspace.id, "agent")}"]`)).toHaveCount(0);
+    await page.goto(`${workspaceUrl(workspace.id, "activity")}?kind=mcp`);
     await expect(page.getByRole("link", { name: "Open MCP setup" }).first()).toBeVisible();
     await expect(page.getByRole("link", { name: "Open Chats", exact: true }).first()).toBeVisible();
 
     await page.locator(".topbar-actions").getByRole("link", { name: "Settings", exact: true })
       .click();
     await page.getByRole("button", { name: "Labs", exact: true }).click();
-    await expect(page).toHaveURL(/\/settings\?section=labs$/);
+    await expect(page).toHaveURL(`/account/integrations?section=labs`);
     await expect(page.getByRole("heading", { name: "Labs", exact: true }))
       .toBeVisible();
     const ask = page.getByRole("checkbox", { name: "Show Ask menu", exact: true });
@@ -169,62 +186,62 @@ test.describe("Sprint 2 UI surface", () => {
     await expect(page.getByRole("checkbox", { name: "Show Chats menu", exact: true })).toHaveCount(0);
 
     await ask.check();
-    await expectLabsMenus(sidebar, { ask: true, agent: false });
+    await expectLabsMenus(sidebar, { ask: true, agent: false }, workspace.id);
     await expectLabsCommands(page, { ask: true, agent: false });
 
-    await sidebar.locator('a[href="/ask"]').click();
-    await expect(page).toHaveURL(/\/ask$/);
+    await sidebar.locator(`a[href="${workspaceUrl(workspace.id, "ask")}"]`).click();
+    await expect(page).toHaveURL(new RegExp(`/workspaces/${workspace.id}/ask$`));
     await expect(page.locator(".ask-main")).toBeVisible();
     await expect(page.getByRole("heading", { name: "We couldn't find that page" })).toHaveCount(0);
-    await page.goto("/settings?section=labs");
+    await page.goto(`/account/integrations?section=labs`);
 
     await agent.check();
-    await expectLabsMenus(sidebar, { ask: true, agent: true });
+    await expectLabsMenus(sidebar, { ask: true, agent: true }, workspace.id);
     await expectLabsCommands(page, { ask: true, agent: true });
 
-    await page.goto("/setup");
+    await page.goto(workspaceUrl(workspace.id, "setup"));
     await expect(page.getByText(/^\d+ of 3 · /)).toBeVisible();
-    await expect(page.locator(".main-surface").locator('a[href="/agent"]')).toBeVisible();
-    await page.goto("/settings?section=labs");
+    await expect(page.locator(".main-surface").locator(`a[href="${workspaceUrl(workspace.id, "agent")}"]`)).toBeVisible();
+    await page.goto(`/account/integrations?section=labs`);
 
     await ask.uncheck();
-    await expectLabsMenus(sidebar, { ask: false, agent: true });
+    await expectLabsMenus(sidebar, { ask: false, agent: true }, workspace.id);
     await page.reload();
     await expect(page.getByRole("heading", { name: "Labs", exact: true }))
       .toBeVisible();
     await expect(ask).not.toBeChecked();
     await expect(agent).toBeChecked();
-    await expectLabsMenus(sidebar, { ask: false, agent: true });
+    await expectLabsMenus(sidebar, { ask: false, agent: true }, workspace.id);
     await expectLabsCommands(page, { ask: false, agent: true });
 
-    await page.goto("/dashboard");
-    await expect(page.locator(".main-surface").locator('a[href="/agent"]'))
+    await gotoWorkspaceDashboard(page);
+    await expect(page.locator(".main-surface").locator(`a[href="${workspaceUrl(workspace.id, "agent")}"]`))
       .toBeVisible();
-    await page.goto("/settings?section=labs");
+    await page.goto(`/account/integrations?section=labs`);
     await ask.check();
     await page.setViewportSize({ width: 390, height: 844 });
     const mobile = page.getByRole("navigation", { name: "Mobile" });
     const openNavigation = page.getByRole("button", { name: "Open navigation" });
     await openNavigation.click();
-    await expectLabsMenus(mobile, { ask: true, agent: true });
+    await expectLabsMenus(mobile, { ask: true, agent: true }, workspace.id);
     await page.keyboard.press("Escape");
     await expect(mobile).toBeHidden();
 
     await agent.uncheck();
     await openNavigation.click();
-    await expectLabsMenus(mobile, { ask: true, agent: false });
+    await expectLabsMenus(mobile, { ask: true, agent: false }, workspace.id);
     await page.keyboard.press("Escape");
     await expect(mobile).toBeHidden();
 
     await ask.uncheck();
     await openNavigation.click();
-    await expectLabsMenus(mobile, { ask: false, agent: false });
+    await expectLabsMenus(mobile, { ask: false, agent: false }, workspace.id);
     await page.keyboard.press("Escape");
     await page.reload();
     await expect(ask).not.toBeChecked();
     await expect(agent).not.toBeChecked();
     await openNavigation.click();
-    await expectLabsMenus(mobile, { ask: false, agent: false });
+    await expectLabsMenus(mobile, { ask: false, agent: false }, workspace.id);
   });
 
   test("Labs choices stay with their account in the same browser", async ({
@@ -235,30 +252,32 @@ test.describe("Sprint 2 UI surface", () => {
     const firstEmail = `e2e-labs-first-${suffix}@example.com`;
     const secondEmail = `e2e-labs-second-${suffix}@example.com`;
     await signUp(page.request, firstEmail);
-    await page.goto("/settings?section=labs");
+    const firstWorkspace = await currentWorkspace(page.request);
+    await page.goto(`${workspaceUrl(firstWorkspace.id, "settings")}?section=labs`);
     const ask = page.getByRole("checkbox", { name: "Show Ask menu", exact: true });
     const agent = page.getByRole("checkbox", { name: "Show Agent menu", exact: true });
     const sidebar = page.getByRole("navigation", { name: "Sidebar" });
     await ask.check();
-    await expectLabsMenus(sidebar, { ask: true, agent: false });
+    await expectLabsMenus(sidebar, { ask: true, agent: false }, firstWorkspace.id);
 
     const firstLogout = await page.request.post(`${backendBaseUrl}/api/v1/auth/logout`);
     expect(firstLogout.ok()).toBeTruthy();
     await signUp(page.request, secondEmail);
-    await page.goto("/settings?section=labs");
+    const secondWorkspace = await currentWorkspace(page.request);
+    await page.goto(`${workspaceUrl(secondWorkspace.id, "settings")}?section=labs`);
     await expect(ask).not.toBeChecked();
     await expect(agent).not.toBeChecked();
-    await expectLabsMenus(sidebar, { ask: false, agent: false });
+    await expectLabsMenus(sidebar, { ask: false, agent: false }, secondWorkspace.id);
     await agent.check();
-    await expectLabsMenus(sidebar, { ask: false, agent: true });
+    await expectLabsMenus(sidebar, { ask: false, agent: true }, secondWorkspace.id);
 
     const secondLogout = await page.request.post(`${backendBaseUrl}/api/v1/auth/logout`);
     expect(secondLogout.ok()).toBeTruthy();
     await login(page.request, firstEmail);
-    await page.goto("/settings?section=labs");
+    await page.goto(`${workspaceUrl(firstWorkspace.id, "settings")}?section=labs`);
     await expect(ask).toBeChecked();
     await expect(agent).not.toBeChecked();
-    await expectLabsMenus(sidebar, { ask: true, agent: false });
+    await expectLabsMenus(sidebar, { ask: true, agent: false }, firstWorkspace.id);
   });
 
   test("supports tree rail expand and collapse in the browser", async ({
@@ -301,7 +320,7 @@ test.describe("Sprint 2 UI surface", () => {
     );
     expect(childResponse.ok()).toBeTruthy();
 
-    await page.goto("/context");
+    await page.goto(workspaceUrl(workspaceId, "context"));
 
     const root = page.getByRole("treeitem", {
       name: parentTitle,
@@ -331,12 +350,13 @@ test.describe("Sprint 2 UI surface", () => {
     page,
   }, testInfo) => {
     await authenticatePage(page, testInfo, "topbar-search");
-    await page.goto("/dashboard");
+    const workspace = await currentWorkspace(page.request);
+    await gotoWorkspaceDashboard(page);
 
     await page.getByRole("combobox", { name: "Search workspace" }).fill("default");
     await page.keyboard.press("Enter");
 
-    await expect(page).toHaveURL(/\/search\?q=default$/);
+    await expect(page).toHaveURL(new RegExp(`/workspaces/${workspace.id}/search\\?q=default$`));
     await expect(
       page.getByRole("heading", { name: "Search", exact: true }),
     ).toBeVisible();
@@ -352,7 +372,7 @@ test.describe("Sprint 2 UI surface", () => {
 
     for (const width of [768, 1024]) {
       await page.setViewportSize({ width, height: 900 });
-      await page.goto("/dashboard");
+      await gotoWorkspaceDashboard(page);
 
       const openNavigation = page.getByRole("button", { name: "Open navigation" });
       await expect(openNavigation).toBeVisible();
@@ -374,7 +394,7 @@ test.describe("Sprint 2 UI surface", () => {
   }, testInfo) => {
     await authenticatePage(page, testInfo, "context-map-hidden");
 
-    await page.goto("/dashboard");
+    await gotoWorkspaceDashboard(page);
     await expect(page.getByRole("link", { name: "Context Map" })).toHaveCount(0);
 
     await page.setViewportSize({ width: 390, height: 844 });
@@ -398,8 +418,9 @@ test.describe("Sprint 2 UI surface", () => {
     page,
   }, testInfo) => {
     await authenticatePage(page, testInfo, "mobile-search");
+    const workspace = await currentWorkspace(page.request);
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/dashboard");
+    await gotoWorkspaceDashboard(page);
 
     const searchLink = page.getByRole("link", { name: "Open Search" });
     await expect(searchLink).toBeVisible();
@@ -407,7 +428,7 @@ test.describe("Sprint 2 UI surface", () => {
 
     await searchLink.click();
 
-    await expect(page).toHaveURL(/\/search$/);
+    await expect(page).toHaveURL(new RegExp(`/workspaces/${workspace.id}/search$`));
     await expect(
       page.getByRole("heading", { name: "Search", exact: true }),
     ).toBeVisible();
@@ -418,7 +439,7 @@ test.describe("Sprint 2 UI surface", () => {
   }, testInfo) => {
     await page.setViewportSize({ width: 1025, height: 900 });
     await authenticatePage(page, testInfo, "desktop-navigation");
-    await page.goto("/dashboard");
+    await gotoWorkspaceDashboard(page);
 
     await expect(
       page.getByRole("button", { name: "Open navigation" }),
@@ -433,7 +454,7 @@ test.describe("Sprint 2 UI surface", () => {
     await authenticatePage(page, testInfo, "topbar-responsive-space");
 
     await page.setViewportSize({ width: 1050, height: 900 });
-    await page.goto("/dashboard");
+    await gotoWorkspaceDashboard(page);
 
     const search = page.getByRole("combobox", { name: "Search workspace" });
     const actions = page.locator(".topbar-actions");
@@ -450,7 +471,7 @@ test.describe("Sprint 2 UI surface", () => {
     expect(searchBox!.x + searchBox!.width).toBeLessThanOrEqual(actionsBox!.x - 8);
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/dashboard");
+    await gotoWorkspaceDashboard(page);
 
     const switcher = page.getByRole("button", { name: /Switch workspace/ });
     await expect(switcher).toBeVisible();
@@ -471,7 +492,8 @@ test.describe("Sprint 2 UI surface", () => {
     page,
   }, testInfo) => {
     await authenticatePage(page, testInfo, "settings-helper-copy");
-    await page.goto("/settings");
+    const workspace = await currentWorkspace(page.request);
+    await page.goto(workspaceUrl(workspace.id, "settings"));
 
     const languageHint = page.getByText("Used when a question does not specify a language.");
     await expect(languageHint).toBeVisible();
@@ -484,7 +506,8 @@ test.describe("Sprint 2 UI surface", () => {
   }, testInfo) => {
     await page.setViewportSize({ width: 1600, height: 900 });
     await authenticatePage(page, testInfo, "settings-control-width");
-    await page.goto("/settings");
+    const workspace = await currentWorkspace(page.request);
+    await page.goto(workspaceUrl(workspace.id, "settings"));
 
     const language = page.getByRole("combobox", { name: "Default language" });
     await expect(language).toBeVisible();
@@ -496,7 +519,7 @@ test.describe("Sprint 2 UI surface", () => {
     expect(desktopControlBox!.width).toBeLessThanOrEqual(desktopCardBox!.width);
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/settings");
+    await page.goto(workspaceUrl(workspace.id, "settings"));
     const mobileControlBox = await language.boundingBox();
     const mobileCardBox = await page.locator(".policy-card").first().boundingBox();
     expect(mobileControlBox).not.toBeNull();
@@ -504,7 +527,7 @@ test.describe("Sprint 2 UI surface", () => {
     expect(mobileControlBox!.width).toBeLessThanOrEqual(mobileCardBox!.width);
     expect(mobileControlBox!.width).toBeGreaterThan(220);
 
-    await page.goto("/settings?section=library");
+    await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=library`);
     await expect(
       page
         .locator(".library-policy-card")
@@ -520,6 +543,7 @@ test.describe("Sprint 2 UI surface", () => {
     page,
   }, testInfo) => {
     await authenticatePage(page, testInfo, "settings-deep-links");
+    const workspace = await currentWorkspace(page.request);
 
     // The five policy screens folded into one "Content policies" destination
     // with a tab each, so a policy deep link has to land on that destination
@@ -528,9 +552,9 @@ test.describe("Sprint 2 UI surface", () => {
     // in the list is checked, not just the first: they share one code path and
     // fixing Library alone would have failed again on the next one.
     const policyTabs = [
-      ["/settings?section=library", "Library policy"],
-      ["/settings?section=citation-write", "Citation & write policy"],
-      ["/settings?section=agent-injection", "Agent injection"],
+      [`${workspaceUrl(workspace.id, "settings")}?section=library`, "Library policy"],
+      [`${workspaceUrl(workspace.id, "settings")}?section=citation-write`, "Citation & write policy"],
+      [`${workspaceUrl(workspace.id, "settings")}?section=agent-injection`, "Agent injection"],
     ] as const;
     for (const [path, tabName] of policyTabs) {
       await page.goto(path);
@@ -545,7 +569,7 @@ test.describe("Sprint 2 UI surface", () => {
     }
 
     // MCP access stayed its own destination through that regrouping.
-    await page.goto("/settings?section=mcp");
+    await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=mcp`);
     await expect(page.getByRole("button", { name: /^MCP access/i }))
       .toHaveAttribute("aria-current", "page");
 
@@ -562,7 +586,7 @@ test.describe("Sprint 2 UI surface", () => {
     );
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/settings?section=mcp");
+    await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=mcp`);
     await expect(page.locator("#mcp-scope-mcp-read-hint")).toHaveCSS(
       "display",
       "block",

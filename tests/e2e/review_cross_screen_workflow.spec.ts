@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
 import { expect, test, type APIRequestContext, type APIResponse, type Locator, type Page } from "./fixtures";
-import { authenticatePage, backendBaseUrl, currentWorkspace } from "./auth";
+import { authenticatePage, backendBaseUrl, currentWorkspace, workspaceUrl } from "./auth";
 
 type PendingPage = { id: string; title: string; version_id: string; review_item_id: string };
 
@@ -18,7 +18,7 @@ test("reads review evidence, approves a document group and a single review, and 
   execFileSync(".venv/bin/python", [
     "-m", "tests.e2e.seed_review_siblings", workspace.id, first.review_item_id,
   ]);
-  await page.goto(`/review?review=${first.review_item_id}`);
+  await page.goto(workspaceUrl(workspace.id, `review/${first.review_item_id}`));
   const detail = page.locator(".review-detail-card");
   await expect(detail.locator("#review-detail-title")).toHaveText(first.title);
   await expect(detail.getByRole("button", { name: "Approve", exact: true })).toBeEnabled();
@@ -47,7 +47,7 @@ test("reads review evidence, approves a document group and a single review, and 
   await expect(page.getByText(/outside the current queue filters/)).toHaveCount(0);
   const secondGroup = rail.getByRole("region", { name: second.title, exact: true });
   await expect(secondGroup).toBeVisible();
-  await page.goto(`/review?review=${second.review_item_id}`);
+  await page.goto(workspaceUrl(workspace.id, `review/${second.review_item_id}`));
   await expect(detail.locator("#review-detail-title")).toHaveText(second.title);
   await detail.getByText("Add a decision reason (optional)", { exact: true }).click();
   await detail.getByLabel("Decision reason").fill("Cross-screen workflow reviewed");
@@ -59,7 +59,7 @@ test("reads review evidence, approves a document group and a single review, and 
   await expect(secondGroup).toHaveCount(0);
   const feedResponsePromise = page.waitForResponse((response) => response.request().method() === "GET"
     && new URL(response.url()).pathname === `/api/v1/workspaces/${workspace.id}/activity/feed`);
-  await page.goto("/activity");
+  await page.goto(workspaceUrl(workspace.id, "activity"));
   const feed = await responseData<{ entries: unknown[] }>(await feedResponsePromise);
   expect(feed.entries).toEqual(expect.arrayContaining([
     expect.objectContaining({ event: expect.objectContaining({
@@ -80,14 +80,14 @@ test("reads review evidence, approves a document group and a single review, and 
   await expect(decisionRow).toBeVisible();
   await expect(decisionRow.getByText("Reviewed", { exact: true })).toBeVisible();
   await expect(decisionRow.getByRole("link", { name: second.title, exact: true }))
-    .toHaveAttribute("href", `/review?review=${decided.id}`);
+    .toHaveAttribute("href", workspaceUrl(workspace.id, `review/${decided.id}`));
   await page.getByRole("link", { name: "View all history activity", exact: true }).click();
-  await expect(page).toHaveURL((url) => url.pathname === "/activity/history"
+  await expect(page).toHaveURL((url) => url.pathname === workspaceUrl(workspace.id, "activity/history")
     && url.searchParams.get("period") === "all" && url.searchParams.get("kind") === "all"
     && url.searchParams.get("subtype") === "all" && url.searchParams.get("group_reads") === "1");
   await expect(decisionRow).toBeVisible();
   await decisionRow.getByRole("link", { name: second.title, exact: true }).click();
-  await expect(page).toHaveURL(`/review?review=${decided.id}`);
+  await expect(page).toHaveURL(workspaceUrl(workspace.id, `review/${decided.id}`));
   await expect(page.locator("#review-detail-title")).toHaveText(second.title);
 });
 
@@ -99,7 +99,7 @@ test("keeps focused review content and mobile review targets usable @cross-brows
   await pendingPage(page.request, workspace.id, "Second layout review");
   const candidate = await pendingPage(page.request, workspace.id, "Layout review");
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`/review?review=${candidate.review_item_id}`);
+  await page.goto(workspaceUrl(workspace.id, `review/${candidate.review_item_id}`));
   const detail = page.locator(".review-detail-card");
   await expect(detail.getByRole("button", { name: "Approve", exact: true })).toBeEnabled();
   await expectNoDocumentOverflow(page);

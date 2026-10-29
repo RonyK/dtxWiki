@@ -25,7 +25,7 @@ vi.mock(
 );
 
 const BASE = "http://127.0.0.1:21080";
-const WORKSPACE_ID = "workspace-1";
+const WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
 
 describe("LintScreen", () => {
   beforeEach(() => {
@@ -70,7 +70,7 @@ describe("LintScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -186,7 +186,7 @@ describe("LintScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
         <LintScreen />
         <LintHistoryProbe />
       </MemoryRouter>,
@@ -268,7 +268,7 @@ describe("LintScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -304,7 +304,7 @@ describe("LintScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -341,7 +341,7 @@ describe("LintScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -387,7 +387,7 @@ describe("LintScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -443,7 +443,7 @@ describe("LintScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -482,7 +482,7 @@ describe("LintScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -550,7 +550,7 @@ describe("LintScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -564,7 +564,7 @@ describe("LintScreen", () => {
     const link = await screen.findByRole("link", {
       name: "Open linked finding",
     });
-    expect(link).toHaveAttribute("href", "/lint?finding=finding-1");
+    expect(link).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/lint/findings/finding-1");
     expect(screen.getByText("1+")).toBeInTheDocument();
   });
 
@@ -599,7 +599,7 @@ describe("LintScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -648,7 +648,7 @@ describe("LintScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -709,7 +709,7 @@ describe("LintScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/lint?finding=finding-1"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint/findings/finding-1"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -725,7 +725,7 @@ describe("LintScreen", () => {
     expect(screen.queryByText("internal-actor")).toBeNull();
     expect(
       screen.getByRole("link", { name: "Open target Context page" }),
-    ).toHaveAttribute("href", `/context?target=${targetId}`);
+    ).toHaveAttribute("href", `/workspaces/00000000-0000-4000-8000-000000000001/context/pages/${targetId}`);
     // The view switch is a tab bar now; the rest stay filter groups.
     expect(screen.getByRole("tab", { name: "Findings" })).toBeInTheDocument();
     expect(
@@ -735,6 +735,47 @@ describe("LintScreen", () => {
     for (const label of ["Status", "Layer", "Severity"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
+  });
+
+  it("hides a previously loaded finding while a different typed target loads", async () => {
+    let resolveSecond!: (response: Response) => void;
+    let secondRequestStarted = false;
+    const secondFinding = new Promise<Response>((resolve) => { resolveSecond = resolve; });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/lint/findings?status=open&page=1&page_size=20`) {
+        return jsonResponse({ data: { findings: [
+          finding({ id: "finding-1", suggested_action: "First route action" }),
+          finding({ id: "finding-2", suggested_action: "Second route action" }),
+        ], next_cursor: null } });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/lint/findings?finding_id=finding-2&page=1&page_size=20`) {
+        secondRequestStarted = true;
+        return secondFinding;
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
+        <LintScreen />
+        <LintRouteSwitch />
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole("heading", { name: "Lint queue" });
+    expect(screen.getAllByRole("button", { name: /More actions for missing citation/i }).length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole("button", { name: "Navigate to finding-2" }));
+    await waitFor(() => expect(secondRequestStarted).toBe(true));
+    expect(screen.queryByRole("button", { name: /More actions/ })).toBeNull();
+    expect(screen.queryByText("Second route action")).toBeNull();
+    await act(async () => {
+      resolveSecond(jsonResponse({ data: { findings: [finding({ id: "finding-2", suggested_action: "Second route action" })], next_cursor: null } }));
+    });
+    expect(await screen.findByText("Second route action")).toBeInTheDocument();
   });
 
   it("reloads the latest filters when a queued run completes", async () => {
@@ -789,7 +830,7 @@ describe("LintScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -847,7 +888,7 @@ describe("LintScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -903,7 +944,7 @@ describe("LintScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -924,7 +965,8 @@ describe("LintScreen", () => {
   it("links page and tree targets while keeping null targets as text", async () => {
     const contextId = "11111111-1111-4111-8111-111111111111";
     const treeId = "22222222-2222-4222-8222-222222222222";
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const secondTreeId = "33333333-3333-4333-8333-333333333333";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({
@@ -950,6 +992,12 @@ describe("LintScreen", () => {
                 target_id: treeId,
               }),
               finding({
+                id: "second-tree-finding",
+                rule_id: "tree_target",
+                target_type: "workspace_tree_node",
+                target_id: secondTreeId,
+              }),
+              finding({
                 id: "null-finding",
                 rule_id: "null_target",
                 target_id: null,
@@ -959,11 +1007,29 @@ describe("LintScreen", () => {
           },
         });
       }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?include_archived=true`) {
+        return jsonResponse({
+          data: [treeId, secondTreeId].map((id) => ({
+            id,
+            section: "context",
+            title: id === treeId ? "Workspace folder" : "Second workspace folder",
+            node_kind: "folder",
+            parent_id: null,
+            sort_key: "0001",
+            target_kind: null,
+            target_id: null,
+            is_system_node: false,
+            can_have_children: true,
+            primary_placement: true,
+            visibility_status: id === secondTreeId ? "archived" : "visible",
+          })),
+        });
+      }
       throw new Error(`Unexpected request: ${url}`);
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -971,9 +1037,9 @@ describe("LintScreen", () => {
     const contextRow = (await screen.findByText("context target")).closest(
       ".lint-finding-card",
     ) as HTMLElement;
-    const treeRow = screen
-      .getByText("tree target")
-      .closest(".lint-finding-card") as HTMLElement;
+    const treeRows = screen
+      .getAllByText("tree target")
+      .map((text) => text.closest(".lint-finding-card") as HTMLElement);
     const nullRow = screen
       .getByText("null target")
       .closest(".lint-finding-card") as HTMLElement;
@@ -981,12 +1047,19 @@ describe("LintScreen", () => {
       within(contextRow).getByRole("link", {
         name: "Open target Context page",
       }),
-    ).toHaveAttribute("href", `/context?target=${contextId}`);
+    ).toHaveAttribute("href", `/workspaces/00000000-0000-4000-8000-000000000001/context/pages/${contextId}`);
     expect(
-      within(treeRow).getByRole("link", {
+      within(treeRows[0]).getByRole("link", {
         name: "Open target Workspace folder",
       }),
-    ).toHaveAttribute("href", `/context?target=${treeId}`);
+    ).toHaveAttribute("href", `/workspaces/00000000-0000-4000-8000-000000000001/context/folders/${treeId}`);
+    expect(
+      within(treeRows[1]).getByRole("link", {
+        name: "Open target Workspace folder",
+      }),
+    ).toHaveAttribute("href", `/workspaces/00000000-0000-4000-8000-000000000001/context/folders/${secondTreeId}`);
+    expect(fetchSpy.mock.calls.filter(([input]) => String(input).endsWith("/tree?include_archived=true"))).toHaveLength(1);
+    expect(fetchSpy.mock.calls.some(([input]) => String(input).includes("/tree/nodes/"))).toBe(false);
     expect(within(nullRow).queryByRole("link")).toBeNull();
     expect(within(nullRow).getByText("Context page")).toBeInTheDocument();
   });
@@ -1038,7 +1111,7 @@ describe("LintScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -1144,7 +1217,7 @@ describe("LintScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/lint?page_size=100"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint?page_size=100"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -1172,7 +1245,7 @@ describe("LintScreen", () => {
   });
 
   it("clears selection and disables old-workspace mutations during a switch", async () => {
-    const nextWorkspaceId = "workspace-2";
+    const nextWorkspaceId = "00000000-0000-4000-8000-000000000002";
     ctxWorkspace.current = {
       selectedWorkspace: { id: WORKSPACE_ID, role: "owner" },
     };
@@ -1200,7 +1273,7 @@ describe("LintScreen", () => {
     });
 
     const view = render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/lint"]}>
         <LintScreen />
       </MemoryRouter>,
     );
@@ -1213,20 +1286,13 @@ describe("LintScreen", () => {
       selectedWorkspace: { id: nextWorkspaceId, role: "owner" },
     };
     view.rerender(
-      <MemoryRouter>
+      <MemoryRouter key={nextWorkspaceId} initialEntries={[`/workspaces/${nextWorkspaceId}/lint`]}>
         <LintScreen />
       </MemoryRouter>,
     );
 
     expect(screen.queryAllByText("1 selected")).toHaveLength(0);
-    expect(
-      screen.getByRole("button", {
-        name: /More actions for missing citation/i,
-      }),
-    ).toBeDisabled();
-    expect(
-      screen.getByRole("checkbox", { name: "Select all 1 on this page" }),
-    ).toBeDisabled();
+    expect(await screen.findByText("Loading Lint")).toBeInTheDocument();
 
     await act(async () => {
       resolveNextWorkspace(
@@ -1346,4 +1412,9 @@ function LintHistoryProbe() {
       </button>
     </>
   );
+}
+
+function LintRouteSwitch() {
+  const navigate = useNavigate();
+  return <button onClick={() => navigate("/workspaces/00000000-0000-4000-8000-000000000001/lint/findings/finding-2")} type="button">Navigate to finding-2</button>;
 }

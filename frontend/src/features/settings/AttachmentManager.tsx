@@ -16,11 +16,17 @@ export function AttachmentManager({
   canViewEveryUpload: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const [scope, setScope] = useState<AttachmentsScope>("workspace");
-  const effectiveScope = isServerAdmin ? scope : "workspace";
+  const [scope, setScope] = useState<AttachmentsScope>(() =>
+    isServerAdmin && !workspaceId ? "server" : "workspace",
+  );
+  const effectiveScope = !workspaceId && isServerAdmin
+    ? "server"
+    : isServerAdmin
+      ? scope
+      : "workspace";
   return (
     <>
-      {isServerAdmin ? (
+      {isServerAdmin && workspaceId ? (
         <fieldset className="attachments-scope">
           <SegmentedControl
             label={t("attachments.scope.label")}

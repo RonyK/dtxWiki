@@ -9,16 +9,11 @@ vi.mock("../../../shared/api/operations", () => ({
   getSettingsPolicies: vi.fn(),
   updateSettingsPolicy: vi.fn(),
 }));
-vi.mock("../../../shared/api/workspace", () => ({
-  getCurrentWorkspaceId: vi.fn(),
-}));
-
 import {
   getLintRules,
   getSettingsPolicies,
   updateSettingsPolicy,
 } from "../../../shared/api/operations";
-import { getCurrentWorkspaceId } from "../../../shared/api/workspace";
 import { LintRulesSection } from "../LintRulesSection";
 
 // The card links out to the lint queue, so it needs a router context.
@@ -51,11 +46,11 @@ const RULES = {
     },
   ],
 };
+const WORKSPACE_ID = "00000000-0000-4000-8000-000000000110";
 
 describe("LintRulesSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getCurrentWorkspaceId).mockResolvedValue("ws-1");
     vi.mocked(getLintRules).mockResolvedValue(RULES as never);
     vi.mocked(getSettingsPolicies).mockResolvedValue({
       lint: { policy: { auto_fix: false } },
@@ -65,7 +60,7 @@ describe("LintRulesSection", () => {
 
   it("groups rules by layer and toggles via the lint policy", async () => {
     const user = userEvent.setup();
-    renderRouted(<LintRulesSection readOnly={false} />);
+    renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
 
     expect(await screen.findByText("Format")).toBeInTheDocument();
     expect(screen.getByText("Knowledge")).toBeInTheDocument();
@@ -80,7 +75,7 @@ describe("LintRulesSection", () => {
     await user.click(checkbox);
 
     await waitFor(() =>
-      expect(updateSettingsPolicy).toHaveBeenCalledWith("ws-1", {
+      expect(updateSettingsPolicy).toHaveBeenCalledWith(WORKSPACE_ID, {
         group: "lint",
         key: "kb.orphan_page",
         value: true,
@@ -90,12 +85,12 @@ describe("LintRulesSection", () => {
 
   it("toggles auto-fix mode via the lint policy (F2b)", async () => {
     const user = userEvent.setup();
-    renderRouted(<LintRulesSection readOnly={false} />);
+    renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
     const autofix = await screen.findByRole("checkbox", { name: /auto-fix/i });
     expect(autofix).not.toBeChecked();
     await user.click(autofix);
     await waitFor(() =>
-      expect(updateSettingsPolicy).toHaveBeenCalledWith("ws-1", {
+      expect(updateSettingsPolicy).toHaveBeenCalledWith(WORKSPACE_ID, {
         group: "lint",
         key: "auto_fix",
         value: true,
@@ -105,7 +100,7 @@ describe("LintRulesSection", () => {
 
   it("still renders the rules list when the policies fetch fails (I10)", async () => {
     vi.mocked(getSettingsPolicies).mockRejectedValue(new Error("boom"));
-    renderRouted(<LintRulesSection readOnly={false} />);
+    renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
     // the rule list must still appear despite the auto-fix policies failure
     expect(await screen.findByText("Code fence balance")).toBeInTheDocument();
     // auto-fix degrades to off rather than breaking the whole section
@@ -114,7 +109,7 @@ describe("LintRulesSection", () => {
   });
 
   it("disables toggles when read-only", async () => {
-    renderRouted(<LintRulesSection readOnly={true} />);
+    renderRouted(<LintRulesSection readOnly={true} workspaceId={WORKSPACE_ID} />);
     const checkboxes = await screen.findAllByRole("checkbox");
     expect(checkboxes.length).toBeGreaterThan(0);
     for (const checkbox of checkboxes) {

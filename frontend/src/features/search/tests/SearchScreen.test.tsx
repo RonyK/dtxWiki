@@ -13,7 +13,7 @@ import {
 import { SearchScreen } from "../SearchScreen";
 
 const BASE = "http://127.0.0.1:21080";
-const WORKSPACE_ID = "workspace-1";
+const WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
 
 describe("SearchScreen", () => {
   beforeEach(async () => {
@@ -33,7 +33,7 @@ describe("SearchScreen", () => {
         return jsonResponse({
           data: {
             ranked_results: [
-              result("context-1", "context_page", "Decision Log", "", 1, {
+              result("00000000-0000-4000-8000-000000000107", "context_page", "Decision Log", "", 1, {
                 match_reason: "trigram",
                 matched_name: "Decision Log",
                 location: ["Team", "Decisions"],
@@ -42,7 +42,7 @@ describe("SearchScreen", () => {
                 concept_path: "/library/source-1.md",
                 match_reason: "keyword",
               }),
-              result("context-2", "context_page", "Decision Log", "Another document with the same title", 0.6, {
+              result("00000000-0000-4000-8000-000000000108", "context_page", "Decision Log", "Another document with the same title", 0.6, {
                 match_reason: "exact_title",
                 location: ["Team", "Decisions"],
               }),
@@ -60,7 +60,7 @@ describe("SearchScreen", () => {
     });
 
     const { container } = render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -77,10 +77,10 @@ describe("SearchScreen", () => {
     await screen.findByRole("link", { name: "Open Library Source" });
     const rows = Array.from(container.querySelectorAll(".operations-list > .search-result-row"));
     expect(rows.map((row) => row.getAttribute("href"))).toEqual([
-      "/context?target=context-1",
-      "/library?target=source-1",
-      "/context?target=context-2",
-      "/review?review=review-1",
+      "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000107",
+      "/workspaces/00000000-0000-4000-8000-000000000001/library/items/source-1",
+      "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000108",
+      "/workspaces/00000000-0000-4000-8000-000000000001/review/review-1",
     ]);
     for (const row of screen.getAllByRole("link", { name: "Open Decision Log" })) {
       expect(row.querySelector(".search-result-location")).toHaveTextContent(/Team.*Decisions/);
@@ -140,7 +140,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -185,7 +185,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search"]}>
         <SearchScreen />
         <LocationProbe />
       </MemoryRouter>,
@@ -233,7 +233,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -261,7 +261,7 @@ describe("SearchScreen", () => {
           data: {
             ranked_results: [
               result("claim-1", "context_claim", "Claim Hit", "Claim hit", 1, {
-                source_ref: { kind: "context_page", id: "page-1" },
+                source_ref: { kind: "context_page", id: "00000000-0000-4000-8000-000000000105" },
               }),
               result("feedback-1", "feedback", "Feedback Hit", "Feedback hit", 0.9, {
                 source_ref: { kind: "library_item", id: "item-1" },
@@ -270,7 +270,7 @@ describe("SearchScreen", () => {
                 source_ref: { kind: "review_item", id: "review-1" },
               }),
               result("artifact-1", "library_artifact", "Artifact Hit", "Artifact hit", 0.7, {
-                concept_path: "/library/item-1.md",
+                concept_path: "/workspaces/00000000-0000-4000-8000-000000000001/library/item-1.md",
                 source_ref: { kind: "library_artifact", id: "artifact-1" },
               }),
             ],
@@ -283,7 +283,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -292,13 +292,13 @@ describe("SearchScreen", () => {
     await user.click(screen.getByRole("button", { name: "Search" }));
 
     expect(await screen.findByRole("link", { name: "Open Claim Hit" }))
-      .toHaveAttribute("href", "/context?target=page-1");
+      .toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000105");
     expect(screen.getByRole("link", { name: "Open Feedback Hit" }))
-      .toHaveAttribute("href", "/library?target=item-1");
+      .toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/library/items/item-1");
     expect(screen.getByRole("link", { name: "Open Change Hit" }))
-      .toHaveAttribute("href", "/review?review=review-1");
+      .toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/review/review-1");
     expect(screen.getByRole("link", { name: "Open Artifact Hit" }))
-      .toHaveAttribute("href", "/library?target=item-1");
+      .toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/library/artifacts/artifact-1");
     for (const [title, destination] of [
       ["Claim Hit", "context"],
       ["Feedback Hit", "library"],
@@ -333,13 +333,13 @@ describe("SearchScreen", () => {
           ranked_results: [
             result(pageId, "context_page", "Embedding policy", "", 1, {
               source_ref: { kind: "context_page", id: pageId },
-              concept_path: `/context/p-${pageId}.md`,
+              concept_path: `/workspaces/00000000-0000-4000-8000-000000000001/context/p-${pageId}.md`,
               matched_name: "Embedding policy", match_reason: "exact_title",
               summary: "**Embedding** policy explains [retrieval](https://example.com).",
               location: ["Product", "Research", "Very long document title kept in the accessible description", "Search", "Policies"],
               stale: true, citation_available: false,
             }),
-            result("human-path", "context_page", "Search handbook", "A **clean** `snippet`. model_name and model_version. Keep x < 10 and y > 2. `a*b*c` and _emphasis_. vector<T>.", 0.8, {
+            result("00000000-0000-4000-8000-000000000109", "context_page", "Search handbook", "A **clean** `snippet`. model_name and model_version. Keep x < 10 and y > 2. `a*b*c` and _emphasis_. vector<T>.", 0.8, {
               concept_path: "/context/search-handbook.md", match_reason: "keyword",
               heading_path: ["Search handbook", "Storage"],
             }),
@@ -355,7 +355,7 @@ describe("SearchScreen", () => {
     });
 
     const { container } = render(
-      <MemoryRouter initialEntries={["/search?q=Embedding%20policy"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search?q=Embedding%20policy"]}>
         <WorkspaceProvider>
           <WorkspaceSearchHarness />
         </WorkspaceProvider>
@@ -383,7 +383,7 @@ describe("SearchScreen", () => {
       "Product › Research › Very long document title kept in the accessible description › Search › Policies. Title match",
     );
     expect(row.querySelector("nav, a, button")).toBeNull();
-    expect(container.textContent).not.toContain(`/context/p-${pageId}`);
+    expect(container.textContent).not.toContain(`/workspaces/00000000-0000-4000-8000-000000000001/context/p-${pageId}`);
     const handbook = screen.getByRole("link", { name: "Open Search handbook" });
     expect(handbook).toHaveTextContent("/context/search-handbook");
     expect(handbook).toHaveTextContent("A clean snippet.");
@@ -391,12 +391,12 @@ describe("SearchScreen", () => {
     expect(handbook.querySelector(".search-result-snippet strong")).toHaveTextContent("Storage");
     expect(within(handbook).queryByText("Keyword", { exact: true })).not.toBeInTheDocument();
     const unavailable = container.querySelectorAll(".search-result-row.is-disabled");
-    expect(unavailable).toHaveLength(2);
+    expect(unavailable).toHaveLength(1);
     expect(unavailable[0].tagName).toBe("DIV");
     expect(unavailable[0]).toHaveTextContent(/Cannot open directly from search.*review/i);
-    expect(unavailable[1]).toHaveTextContent(/Cannot open directly from search.*link/i);
     expect(unavailable[0].querySelector(".search-result-chevron")).toBeNull();
     expect(screen.queryByRole("link", { name: "Open Unmapped change" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Unmapped artifact" })).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/library/artifacts/unmapped-artifact`);
     expect(container.querySelector(".search-source-chip")).toBeNull();
     expect(screen.queryByText("No citation")).not.toBeInTheDocument();
     expect(screen.queryByText("stale", { exact: true })).not.toBeInTheDocument();
@@ -427,7 +427,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -472,7 +472,7 @@ describe("SearchScreen", () => {
     });
 
     const view = render(
-      <MemoryRouter initialEntries={["/search?q=review&scope=change"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search?q=review&scope=change"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -482,12 +482,12 @@ describe("SearchScreen", () => {
     );
     expect(screen.getByLabelText("Scope")).toHaveValue("all");
     expect(screen.queryByRole("option", { name: "Changes" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Activity" })).toHaveAttribute("href", "/activity");
-    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute("href", "/review");
+    expect(screen.getByRole("link", { name: "Activity" })).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/activity");
+    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/review");
     view.unmount();
     searchBody = null;
     render(
-      <MemoryRouter initialEntries={["/search?scope=change"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search?scope=change"]}>
         <SearchScreen />
         <LocationProbe />
       </MemoryRouter>,
@@ -525,7 +525,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -561,7 +561,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -601,7 +601,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/search?q=needle&scope=agent_page"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search?q=needle&scope=agent_page"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -630,7 +630,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/search?q=needle&scope=library_item"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search?q=needle&scope=library_item"]}>
         <SearchScreen />
         <LocationProbe />
       </MemoryRouter>,
@@ -665,7 +665,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/search?q=needle"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search?q=needle"]}>
         <SearchScreen />
         <LocationProbe />
       </MemoryRouter>,
@@ -700,7 +700,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search"]}>
         <SearchScreen />
         <LocationProbe />
       </MemoryRouter>,
@@ -728,7 +728,7 @@ describe("SearchScreen", () => {
         return jsonResponse({
           data: {
             ranked_results: [
-              result("context-2", "context_page", "Delayed Result", "Hit", 1),
+              result("00000000-0000-4000-8000-000000000108", "context_page", "Delayed Result", "Hit", 1),
             ],
             supported_retrieval_modes: ["keyword"],
             permission_note: null,
@@ -740,7 +740,7 @@ describe("SearchScreen", () => {
 
     try {
       render(
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search"]}>
           <SearchScreen />
         </MemoryRouter>,
       );
@@ -779,7 +779,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -833,7 +833,7 @@ describe("SearchScreen", () => {
 
     const user = userEvent.setup();
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -916,7 +916,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -974,7 +974,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -1043,7 +1043,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/search?q=needle"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search?q=needle"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -1120,7 +1120,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );

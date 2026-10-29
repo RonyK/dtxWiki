@@ -687,11 +687,11 @@ describe("MarkdownView", () => {
     );
 
     expect(screen.getByRole("link", { name: "Old Name" }))
-      .toHaveAttribute("href", "/context?target=target-page-id");
+      .toHaveAttribute("href", "#");
     expect(screen.getByRole("link", { name: "changes" }))
       .toHaveAttribute(
         "href",
-        "/context?target=target-page-id#user-content-breaking-changes",
+        "#",
       );
     expect(screen.getByText("link to nothing").closest("a"))
       .toHaveAttribute("href", "#");
@@ -747,26 +747,30 @@ describe("MarkdownView", () => {
     render(
       <MemoryRouter>
         <MarkdownView
-          body="See [[Old Name]] and [[Old Name#Breaking Changes|changes]]."
+          body="See [[Old Name]], [[Old Name#Breaking Changes|changes]], and [stored](/p/22222222-2222-4222-8222-222222222222#details)."
           wikilinkTargets={[
             {
               target_slug: "old-name",
-              target_page_id: "target-page-id",
+              target_page_id: "22222222-2222-4222-8222-222222222222",
               current_slug: "new-name",
             },
           ]}
-          workspaceId="workspace-1"
+          workspaceId="11111111-1111-4111-8111-111111111111"
         />
       </MemoryRouter>,
     );
 
     expect(screen.getByRole("link", { name: "Old Name" })).toHaveAttribute(
       "href",
-      "/workspaces/workspace-1/context/pages/target-page-id",
+      "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222",
     );
     expect(screen.getByRole("link", { name: "changes" })).toHaveAttribute(
       "href",
-      "/workspaces/workspace-1/context/pages/target-page-id#user-content-breaking-changes",
+      "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222#user-content-breaking-changes",
+    );
+    expect(screen.getByRole("link", { name: "stored" })).toHaveAttribute(
+      "href",
+      "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222#details",
     );
   });
 
@@ -774,6 +778,7 @@ describe("MarkdownView", () => {
     render(
       <MemoryRouter>
         <MarkdownView
+          workspaceId="11111111-1111-4111-8111-111111111111"
           body={[
             "Mark ==important claim== and tag #release-note.",
             "",
@@ -788,7 +793,7 @@ describe("MarkdownView", () => {
     expect(highlight).toHaveClass("markdown-highlight");
 
     const tag = screen.getByRole("link", { name: "#release-note" });
-    expect(tag).toHaveAttribute("href", "/search?q=%23release-note");
+    expect(tag).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/search?q=%23release-note");
     expect(tag).toHaveAttribute("data-tag", "release-note");
     expect(tag).toHaveClass("inline-tag");
 

@@ -8,7 +8,7 @@ import { i18n } from "../../../shared/i18n";
 import { ArtifactChatsSection } from "../ArtifactChatsSection";
 
 const BASE = "http://127.0.0.1:21080";
-const WORKSPACE_ID = "workspace-1";
+const WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
 const PROVENANCE_URL = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/resource-provenance?kind=context_page&id=page-1`;
 
 describe("ArtifactChatsSection", () => {
@@ -28,7 +28,7 @@ describe("ArtifactChatsSection", () => {
     const link = await screen.findByRole("link", {
       name: /Codex Research Session/,
     });
-    expect(link).toHaveAttribute("href", "/chats/chat-1");
+    expect(link).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/chats/chat-1");
     expect(
       screen.queryByText("Not yet referenced in any external chat."),
     ).toBeNull();
@@ -188,7 +188,7 @@ describe("ArtifactChatsSection", () => {
 
 function renderSection() {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/chats"]}>
       <ArtifactChatsSection resourceKind="context_page" resourceId="page-1" />
     </MemoryRouter>,
   );

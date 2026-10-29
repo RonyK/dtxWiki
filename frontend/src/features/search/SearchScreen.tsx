@@ -14,7 +14,6 @@ import type {
   SearchScope,
 } from "../../shared/api/operations";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
-import { getCurrentWorkspaceId } from "../../shared/api/workspace";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { ListPanelHeader } from "../../shared/components/ListPanelHeader";
 import { SearchField } from "../../shared/components/SearchField";
@@ -27,7 +26,7 @@ import { displayConceptPath } from "../../shared/lib/conceptPath";
 import { domainLabel } from "../../shared/lib/domainLabel";
 import { SEARCH_QUERY_MAX_LENGTH } from "../../shared/lib/searchLimits";
 import { searchResultLink } from "../../shared/lib/searchResultHref";
-import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
+import { useRouteWorkspaceId, workspacePath } from "../../shared/lib/workspaceRoutes";
 
 const SCOPES: SearchScope[] = [
   "all",
@@ -52,8 +51,7 @@ export function SearchScreen() {
   const { t } = useTranslation("search");
   const { preferences: labsPreferences } = useLabsPreferences();
   const includeAgents = labsPreferences.agent;
-  // Ambient workspace id for canonical Context result links.
-  const workspaceId = useOptionalWorkspaceContext()?.selectedId ?? null;
+  const workspaceId = useRouteWorkspaceId();
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState("");
   const [selectedScope, setScope] = useState<SearchScope>("all");
@@ -62,24 +60,20 @@ export function SearchScreen() {
     parseMode(searchParams.get("mode")),
   );
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const searchBaseKey = `${debouncedQuery}:${scope}:${retrievalMode}:${includeAgents}`;
+  const searchBaseKey = `${workspaceId}:${debouncedQuery}:${scope}:${retrievalMode}:${includeAgents}`;
   const indexUnavailableMessage = t("errors.indexUnavailable", {
     defaultValue:
       "Search index is not available in this build. Use the navigation to browse documents.",
   });
   const { data: capabilities } = useAsyncLoad(
     async () => {
-      const workspaceId = await getCurrentWorkspaceId();
-      if (!workspaceId) {
-        return { supported_retrieval_modes: ["keyword"] };
-      }
       try {
         return await getSearchCapabilities(workspaceId);
       } catch {
         return { supported_retrieval_modes: ["keyword"] };
       }
     },
-    [],
+    [workspaceId],
     {
       errorMessage: t("errors.capabilities", {
         defaultValue: "Failed to load search capabilities",
@@ -108,15 +102,11 @@ export function SearchScreen() {
       if (!debouncedQuery || capabilities === null) {
         return null;
       }
-      const workspaceId = await getCurrentWorkspaceId();
       // Bail out the moment a newer scope/query starts a fresh request or
       // the AbortController fires - either path means our result is stale
       // and must not be allowed to overwrite the in-flight response.
       if (signal?.aborted || requestId !== requestIdRef.current) {
         throw new DOMException("Aborted", "AbortError");
-      }
-      if (!workspaceId) {
-        throw new Error("Workspace not found");
       }
       try {
         const result = await searchWorkspace(
@@ -146,6 +136,7 @@ export function SearchScreen() {
     },
     [
       debouncedQuery,
+      workspaceId,
       scope,
       retrievalMode,
       includeAgents,
@@ -219,10 +210,6 @@ export function SearchScreen() {
     setLoadingMore(true);
     setLoadMoreError(null);
     try {
-      const workspaceId = await getCurrentWorkspaceId();
-      if (!workspaceId) {
-        return;
-      }
       const next = await searchWorkspace(workspaceId, {
         query: debouncedQuery,
         scope,
@@ -395,8 +382,8 @@ export function SearchScreen() {
             {t("results.changeScopeMoved", {
               defaultValue: "Showing all documents. For changes, use document History, Activity, or Review.",
             })}
-            {" "}<Link to="/activity">{t("results.activity", { defaultValue: "Activity" })}</Link>
-            {" · "}<Link to="/review">{t("results.review", { defaultValue: "Review" })}</Link>
+            {" "}<Link to={workspacePath(workspaceId, "activity")}>{t("results.activity", { defaultValue: "Activity" })}</Link>
+            {" · "}<Link to={workspacePath(workspaceId, "review")}>{t("results.review", { defaultValue: "Review" })}</Link>
           </StatusBanner>
         ) : null}
         <form className="search-panel" onSubmit={submit}>
@@ -494,7 +481,7 @@ function SearchResults({
   payload: SearchPayload | null;
   unavailable: boolean;
   onSelectSuggestion: (query: string) => void;
-  workspaceId: string | null;
+  workspaceId: string;
   query: string;
 }) {
   const { t } = useTranslation("search");
@@ -535,7 +522,7 @@ function SearchResults({
           })}
         </p>
         <div className="empty-state-actions">
-          <Link className="icon-button" to="/library">
+          <Link className="icon-button" to={workspacePath(workspaceId, "library")}>
             {t("empty.openLibrary", { defaultValue: "Open Library" })}
           </Link>
         </div>
@@ -574,11 +561,11 @@ function SearchResults({
           <div className="empty-state-actions">
             <Link
               className="icon-button primary"
-              to={newPageFromSearchHref(payload.raw_query)}
+              to={newPageFromSearchHref(workspaceId, payload.raw_query)}
             >
               {t("empty.coverageGap", { defaultValue: "Create coverage" })}
             </Link>
-            <Link className="icon-button" to="/library?from=search-zero">
+            <Link className="icon-button" to={`${workspacePath(workspaceId, "library")}?from=search-zero`}>
               {t("empty.addLibrarySource", {
                 defaultValue: "Add Library source",
               })}
@@ -651,7 +638,7 @@ function SearchResultRow({
   query,
 }: {
   result: RankedSearchResult;
-  workspaceId: string | null;
+  workspaceId: string;
   query: string;
 }) {
   const { t } = useTranslation("search");
@@ -871,11 +858,11 @@ function searchParamsForQuery(
   return params;
 }
 
-function newPageFromSearchHref(query: string | undefined) {
+function newPageFromSearchHref(workspaceId: string, query: string | undefined) {
   const params = new URLSearchParams({ from: "search-zero" });
   const title = (query ?? "").trim().slice(0, 160);
   if (title) params.set("title", title);
-  return `/context/new?${params.toString()}`;
+  return `${workspacePath(workspaceId, "context/pages/new")}?${params.toString()}`;
 }
 
 function defaultMatchReasonLabel(reason: string) {

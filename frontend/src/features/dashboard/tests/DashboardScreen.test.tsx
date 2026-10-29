@@ -12,7 +12,7 @@ import {
 import { DashboardScreen } from "../DashboardScreen";
 
 const BASE = "http://127.0.0.1:21080";
-const WORKSPACE_ID = "workspace-1";
+const WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
 
 // DashboardScreen reads role via useOptionalWorkspaceContext to gate the setup
 // write CTAs; the tests render it without a provider, so mock the role here.
@@ -64,7 +64,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -77,17 +77,17 @@ describe("DashboardScreen", () => {
     expect(screen.queryByRole("link", { name: /Ask Ask questions/ })).toBeNull();
     expect(screen.getByRole("link", { name: /Pending 1/ })).toHaveAttribute(
       "href",
-      "/review",
+      "/workspaces/00000000-0000-4000-8000-000000000001/review",
     );
     // The lane titles carry no period suffix: the period control states the
     // scope once, and Pending (all waiting reviews) is not period-scoped.
     expect(screen.getByRole("link", { name: /Advisory 1/ })).toHaveAttribute(
       "href",
-      "/activity/advisory?period=today&kind=workspace&subtype=all&group_reads=1",
+      "/workspaces/00000000-0000-4000-8000-000000000001/activity/advisory?period=today&kind=workspace&subtype=all&group_reads=1",
     );
     expect(screen.getByRole("link", { name: /History 2/ })).toHaveAttribute(
       "href",
-      "/activity/history?period=today&kind=workspace&subtype=all&group_reads=1",
+      "/workspaces/00000000-0000-4000-8000-000000000001/activity/history?period=today&kind=workspace&subtype=all&group_reads=1",
     );
     expect(screen.getByText("Context page edited")).toBeInTheDocument();
     expect(screen.getByText("Edited")).toBeInTheDocument();
@@ -139,7 +139,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -193,7 +193,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -246,7 +246,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -296,7 +296,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -329,7 +329,7 @@ describe("DashboardScreen", () => {
 
     render(
       <MemoryRouter
-        initialEntries={[{ pathname: "/dashboard", state: { editorRequired: true } }]}
+        initialEntries={[{ pathname: "/workspaces/00000000-0000-4000-8000-000000000001/dashboard", state: { editorRequired: true } }]}
       >
         <DashboardScreen />
       </MemoryRouter>,
@@ -359,7 +359,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/dashboard"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -399,7 +399,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -409,7 +409,7 @@ describe("DashboardScreen", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Pending 3/ })).toHaveAttribute(
       "href",
-      "/review",
+      "/workspaces/00000000-0000-4000-8000-000000000001/review",
     );
   });
 
@@ -434,7 +434,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/dashboard?period=week"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard?period=week"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -447,7 +447,7 @@ describe("DashboardScreen", () => {
     );
     expect(screen.getByRole("link", { name: /History 1/ })).toHaveAttribute(
       "href",
-      "/activity/history?period=week&kind=workspace&subtype=all&group_reads=1",
+      "/workspaces/00000000-0000-4000-8000-000000000001/activity/history?period=week&kind=workspace&subtype=all&group_reads=1",
     );
   });
 
@@ -486,7 +486,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -495,7 +495,7 @@ describe("DashboardScreen", () => {
       await screen.findByText("No workspace activity for today"),
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View system events in Activity" }))
-      .toHaveAttribute("href", "/activity?period=today&kind=system&subtype=all&group_reads=1");
+      .toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/activity?period=today&kind=system&subtype=all&group_reads=1");
     expect(screen.queryByText("Signed in")).not.toBeInTheDocument();
     expect(screen.queryByText("auth.session.created")).not.toBeInTheDocument();
   });
@@ -535,7 +535,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/dashboard?period=week"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard?period=week"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -543,7 +543,7 @@ describe("DashboardScreen", () => {
     expect(await screen.findByText("No workspace activity for week"))
       .toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View system events in Activity" }))
-      .toHaveAttribute("href", "/activity?period=week&kind=system&subtype=all&group_reads=1");
+      .toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/activity?period=week&kind=system&subtype=all&group_reads=1");
   });
 
   it("keeps the welcome guide visible when opened from signup", async () => {
@@ -567,7 +567,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/dashboard?welcome=1"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard?welcome=1"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -580,7 +580,7 @@ describe("DashboardScreen", () => {
     );
     expect(screen.getByRole("link", { name: "Rename workspace" })).toHaveAttribute(
       "href",
-      "/settings?section=workspace",
+      "/workspaces/00000000-0000-4000-8000-000000000001/settings?section=workspace",
     );
     expect(
       screen.getByText(/create a separate collaborative workspace/i),
@@ -620,7 +620,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -632,7 +632,7 @@ describe("DashboardScreen", () => {
     ).toHaveAttribute("aria-valuenow", "33");
     expect(screen.queryByLabelText("Workspace setup sequence")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Write first Context page" }))
-      .toHaveAttribute("href", "/context/new?from=context");
+      .toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/new");
     expect(
       screen.queryByRole("link", { name: "Find workspaces" }),
     ).not.toBeInTheDocument();
@@ -661,7 +661,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -695,7 +695,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -744,7 +744,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -762,7 +762,7 @@ describe("DashboardScreen", () => {
     // The feed stays a short preview even though the count window grew.
     expect(screen.getAllByText(/Filler item/)).toHaveLength(8);
     expect(screen.queryByText(/50\+|25\+/)).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View all activity" })).toHaveAttribute("href", "/activity?period=today&kind=workspace&subtype=all&group_reads=1");
+    expect(screen.getByRole("link", { name: "View all activity" })).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/activity?period=today&kind=workspace&subtype=all&group_reads=1");
   });
 
   it("classifies activity actions from audit codes when titles are localized", async () => {
@@ -797,7 +797,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -832,7 +832,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -858,7 +858,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/dashboard?welcome=1"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard?welcome=1"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -891,7 +891,7 @@ describe("DashboardScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}>
         <DashboardScreen />
       </MemoryRouter>,
     );
@@ -910,7 +910,7 @@ describe("DashboardScreen", () => {
       if (url === dashboardFeedUrl) return pending;
       return jsonResponse(dashboardResponse(url));
     });
-    render(<MemoryRouter><DashboardScreen /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}><DashboardScreen /></MemoryRouter>);
     expect(screen.getByRole("status")).toHaveTextContent("Loading");
     expect(screen.queryByText("No workspace activity for today")).not.toBeInTheDocument();
     expect(screen.queryByText("Start your first workspace")).not.toBeInTheDocument();
@@ -925,7 +925,7 @@ describe("DashboardScreen", () => {
       if (url === dashboardFeedUrl && feedAttempts++ === 0) return jsonResponse({ error_code: "forbidden", message: "Denied", request_id: "test", warnings: [] }, 403);
       return jsonResponse(url === dashboardFeedUrl ? dashboardFeed([dashboardEntry("recovered", "Recovered activity")]) : dashboardResponse(url));
     });
-    render(<MemoryRouter><DashboardScreen /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}><DashboardScreen /></MemoryRouter>);
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.queryByText("No workspace activity for today")).not.toBeInTheDocument();
     expect(screen.queryByText("Start your first workspace")).not.toBeInTheDocument();
@@ -936,24 +936,24 @@ describe("DashboardScreen", () => {
   it.each([0, 1])("reconciles a permission-shrunken read group to %s visible events without reloading", async visibleCount => {
     let feedAttempts = 0;
     const grouped = dashboardReadGroup();
-    const survivor = { ...grouped.event, id: "visible-member", navigation: { target_kind: "context_page", target_id: "visible-page", title: "Visible survivor", href: "/context?target=visible-page" } };
+    const survivor = { ...grouped.event, id: "visible-member", navigation: { target_kind: "context_page", target_id: "visible-page", title: "Visible survivor", href: "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/visible-page" } };
     vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
       const url = input.toString();
       if (url === dashboardFeedUrl) {
         if (feedAttempts++ > 0) return jsonResponse({ error_code: "service_unavailable", message: "Unavailable", request_id: "test", warnings: [] }, 503);
         return jsonResponse(dashboardFeed([grouped, dashboardEntry("other", "Other visible activity")]));
       }
-      if (url.endsWith("/activity/read-group?token=opaque-group")) return jsonResponse({ data: { events: visibleCount ? [survivor] : [], event_count: visibleCount, group_id: grouped.id } });
+      if (url.endsWith("/workspaces/00000000-0000-4000-8000-000000000001/activity/read-group?token=opaque-group")) return jsonResponse({ data: { events: visibleCount ? [survivor] : [], event_count: visibleCount, group_id: grouped.id } });
       return jsonResponse(dashboardResponse(url));
     });
-    render(<MemoryRouter><DashboardScreen /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}><DashboardScreen /></MemoryRouter>);
     await screen.findByRole("link", { name: "Read Old private title 4 times" });
     await userEvent.click(screen.getByRole("button", { name: "Expand 4 original events" }));
     await vi.waitFor(() => expect(screen.queryByText(/Old private title/)).not.toBeInTheDocument());
     expect(screen.getByText("Other visible activity")).toBeInTheDocument();
     expect(screen.queryByText(/5 original events/)).not.toBeInTheDocument();
     if (visibleCount) {
-      expect(screen.getByRole("link", { name: "Read Visible survivor" })).toHaveAttribute("href", "/context?target=visible-page");
+      expect(screen.getByRole("link", { name: "Read Visible survivor" })).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/visible-page");
       expect(screen.getAllByText("2 entries · 2 original events")).toHaveLength(2);
     } else expect(screen.getAllByText("1 entry · 1 original event")).toHaveLength(2);
     // The reconciled entry replaces the group in place; nothing re-fetches.
@@ -968,10 +968,10 @@ describe("DashboardScreen", () => {
       const url = input.toString();
       return jsonResponse(url === dashboardFeedUrl ? feed : dashboardResponse(url));
     });
-    render(<MemoryRouter><DashboardScreen /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}><DashboardScreen /></MemoryRouter>);
     await screen.findByText("History event");
-    expect(document.querySelector('.metric-card[href^="/activity/history"] strong')).toHaveTextContent(/^1\+$/);
-    expect(document.querySelector('.metric-card[href^="/activity/advisory"] strong')).toHaveTextContent(/^0$/);
+    expect(document.querySelector('.metric-card[href^="/workspaces/00000000-0000-4000-8000-000000000001/activity/history"] strong')).toHaveTextContent(/^1\+$/);
+    expect(document.querySelector('.metric-card[href^="/workspaces/00000000-0000-4000-8000-000000000001/activity/advisory"] strong')).toHaveTextContent(/^0$/);
   });
 
   it("keeps loaded group counts and detail retry when an invalid token refresh also fails", async () => {
@@ -984,13 +984,13 @@ describe("DashboardScreen", () => {
         if (feedAttempts++ > 0) return jsonResponse({ error_code: "service_unavailable", message: "Unavailable", request_id: "test", warnings: [] }, 503);
         return jsonResponse(dashboardFeed([grouped, dashboardEntry("other", "Other activity")]));
       }
-      if (url.endsWith("/activity/read-group?token=opaque-group")) {
+      if (url.endsWith("/workspaces/00000000-0000-4000-8000-000000000001/activity/read-group?token=opaque-group")) {
         detailAttempts++;
         return jsonResponse({ error_code: "invalid_activity_token", message: "Expired token", request_id: "test", warnings: [] }, 400);
       }
       return jsonResponse(dashboardResponse(url));
     });
-    render(<MemoryRouter><DashboardScreen /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}><DashboardScreen /></MemoryRouter>);
     await screen.findByRole("link", { name: "Read Old private title 4 times" });
     await userEvent.click(screen.getByRole("button", { name: "Expand 4 original events" }));
     expect(await screen.findByText("Original events could not be loaded. Try again.")).toBeVisible();
@@ -1018,9 +1018,9 @@ describe("DashboardScreen", () => {
       const url = input.toString();
       return jsonResponse(url === scopedFeedUrl ? dashboardFeed(Array.from({ length: returned }, (_, n) => dashboardEntry(`boundary-${n}`, `Boundary event ${n}`))) : dashboardResponse(url));
     });
-    render(<MemoryRouter initialEntries={["/dashboard?period=week&group_reads=0"]}><DashboardScreen /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard?period=week&group_reads=0"]}><DashboardScreen /></MemoryRouter>);
     const link = await screen.findByRole("link", { name: "View all activity" });
-    expect(link).toHaveAttribute("href", "/activity?period=week&kind=workspace&subtype=all&group_reads=0");
+    expect(link).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/activity?period=week&kind=workspace&subtype=all&group_reads=0");
     const panel = link.closest("section")!;
     expect(panel.querySelectorAll(".activity-feed-entry")).toHaveLength(visible);
     expect(within(panel).getByText(label)).toBeInTheDocument();
@@ -1153,7 +1153,7 @@ function policies() {
 }
 
 function typedFeedResponse(url: string, body: unknown) {
-  if (!body || !url.includes("/activity/feed?")) return body;
+  if (!body || !url.includes("/workspaces/00000000-0000-4000-8000-000000000001/activity/feed?")) return body;
   const data = (body as { data?: { items?: Array<Record<string, unknown>>; next_cursor?: string | null; unread_count?: number } }).data;
   if (!data?.items) return body;
   const entries = data.items.map(item => ({
@@ -1178,7 +1178,7 @@ function dashboardEntry(id: string, title: string): ActivityFeedEntry {
 }
 function dashboardReadGroup(): ActivityFeedEntry {
   const single = dashboardEntry("group-entry", "MCP read succeeded");
-  return { ...single, entry_type: "read_group", event_count: 4, group_token: "opaque-group", event: { ...single.event, target: { target_kind: "mcp_tool_call", target_id: "call-1" }, operation: "read", result_status: "succeeded", navigation: { target_kind: "context_page", target_id: "old-page", title: "Old private title", href: "/context?target=old-page" } } };
+  return { ...single, entry_type: "read_group", event_count: 4, group_token: "opaque-group", event: { ...single.event, target: { target_kind: "mcp_tool_call", target_id: "call-1" }, operation: "read", result_status: "succeeded", navigation: { target_kind: "context_page", target_id: "old-page", title: "Old private title", href: "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/old-page" } } };
 }
 function dashboardFeed(entries: ActivityFeedEntry[]) {
   const lane = (name: string) => { const shown = entries.filter(item => item.event.lane === name); return { returned_entry_count: shown.length, represented_event_count: shown.reduce((sum, item) => sum + item.event_count, 0), has_more: false }; };

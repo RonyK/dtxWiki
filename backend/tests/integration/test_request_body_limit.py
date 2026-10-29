@@ -241,7 +241,7 @@ def test_library_upload_beyond_its_cap_is_refused_before_authentication(
             "library_upload_too_large",
         )
         assert body["limit_bytes"] == cap
-        assert body["settings_link"] == "/settings?section=library"
+        assert "settings_link" not in body
 
 
 def test_context_media_upload_keeps_its_policy_bound(apps):

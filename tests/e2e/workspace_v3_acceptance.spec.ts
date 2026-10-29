@@ -21,6 +21,7 @@ import {
   seededPasswordResetStateToken,
   seededRecoveryEmail,
   signUp,
+  workspaceUrl,
 } from "./auth";
 import {
   requestIdentity,
@@ -193,7 +194,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           onlyWorkspace!.id,
         ]);
 
-        await page.goto("/settings?section=workspace");
+        await page.goto(`${workspaceUrl(onlyWorkspace!.id, "settings")}?section=workspace`);
         await expect(
           page.getByText("Danger Zone", { exact: true }),
         ).toBeVisible();
@@ -373,9 +374,9 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           );
 
           await test.step("self-demotion on a trailing-slash settings route refreshes and fails closed", async () => {
-            await memberPage.goto("/settings/?section=members");
+            await memberPage.goto(`${workspaceUrl(collaborative.id, "settings")}/?section=members`);
             await expect(memberPage).toHaveURL(
-              /\/settings\/\?section=members$/,
+              new RegExp(`/workspaces/${collaborative.id}/settings/\\?section=members$`),
             );
             // Exactly one heading carries this name, and it is the page h1.
             // A visually-hidden h2 used to repeat it verbatim so the region
@@ -501,7 +502,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             expect(removalData.fallback_workspace_id).toBe(persistedDefault.id);
 
             await test.step("navigate to the persisted fallback after self-removal", async () => {
-              await expect(memberPage).toHaveURL(`${frontendBaseUrl}/dashboard`);
+              await expect(memberPage).toHaveURL(`${frontendBaseUrl}${workspaceUrl(persistedDefault.id, "dashboard")}`);
             });
             const persistedSelection = await memberPage.evaluate(() => ({
               id: window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
@@ -516,7 +517,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             expect(persistedSelection.slug).toBe(persistedDefault.slug);
             expect(
               persistedSelection.replacements.some(
-                (value) => new URL(value, frontendBaseUrl).pathname === "/",
+                (value) => new URL(value, frontendBaseUrl).pathname === workspaceUrl(persistedDefault.id, "dashboard"),
               ),
             ).toBeTruthy();
 
@@ -532,7 +533,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             await test.step("reload the fallback dashboard after self-removal", async () => {
               await memberPage.reload();
             });
-            await expect(memberPage).toHaveURL(`${frontendBaseUrl}/dashboard`);
+            await expect(memberPage).toHaveURL(`${frontendBaseUrl}${workspaceUrl(persistedDefault.id, "dashboard")}`);
             expect(
               await memberPage.evaluate(() => ({
                 id: window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
@@ -682,7 +683,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
 
           await test.step("System Admin sees redacted Identity & Recovery state", async () => {
             await login(page.request, adminEmail);
-            await page.goto("/settings?section=deployment");
+            await page.goto("/settings/server?section=deployment");
 
             await expect(
               page.getByRole("heading", { name: "Deployment", exact: true }),
@@ -736,7 +737,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               ).ok(),
             ).toBeTruthy();
 
-            await page.goto("/settings?section=users");
+            await page.goto("/settings/server?section=users");
             // The destination is the server's whole account directory, and the
             // h1 says so: it was renamed off "Users" precisely because that sat
             // beside "Members & access" and read as a second way to manage this
@@ -958,7 +959,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           });
 
           await test.step("durable recovery mail and worker requirement are reflected in Deployment", async () => {
-            await page.goto("/settings?section=deployment");
+            await page.goto("/settings/server?section=deployment");
             const outboxRow = page
               .locator(".deployment-status-row")
               .filter({ hasText: "Delivery outbox" });
@@ -1058,6 +1059,27 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             expect(collaborative).toBeTruthy();
             expect(ownerAfterCreate.default_workspace_id).toBe(ownerStarterId);
 
+            await ownerPage.goto(workspaceUrl(collaborative!.id, "context"));
+            await expect(
+              ownerPage.getByRole("heading", { name: "Context", exact: true }),
+            ).toBeVisible();
+            await ownerPage
+              .getByRole("button", { name: /Switch workspace, current:/ })
+              .click();
+            picker = ownerPage.getByRole("dialog", {
+              name: "Workspace switcher",
+            });
+            const switchToStarter = picker
+              .locator(".workspace-menu-row")
+              .filter({ hasText: ownerStarterTitle });
+            await switchToStarter.locator("button.workspace-menu-item").click();
+            await expect(ownerPage).toHaveURL(
+              `${frontendBaseUrl}${workspaceUrl(ownerStarterId, "context")}`,
+            );
+            await expect(
+              ownerPage.getByRole("heading", { name: "Context", exact: true }),
+            ).toBeVisible();
+
             await ownerPage.goto("/account");
             const collaborativeRow = ownerPage
               .locator(".workspace-access-row")
@@ -1090,7 +1112,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
                 name: `Switch workspace, current: ${ownerStarterTitle}`,
               }),
             ).toBeVisible();
-            await ownerPage.goto("/settings?section=members");
+            await ownerPage.goto(`${workspaceUrl(ownerStarterId, "settings")}?section=members`);
             await expect(
               ownerPage.getByRole("heading", { name: "Members & access" }),
             ).toBeVisible();
@@ -1208,7 +1230,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
         );
 
         await test.step("Context exposes only View, History, Graph, and Activity body tabs", async () => {
-          await page.goto(`/context?target=${encodeURIComponent(decision.id)}`);
+          await page.goto(workspaceUrl(workspace.id, `context/pages/${decision.id}`));
           await expect(
             page.getByRole("heading", { name: decisionTitle, exact: true }),
           ).toBeVisible();
@@ -1266,19 +1288,19 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
         });
 
         const surfaces = [
-          { path: `/context?target=${encodeURIComponent(decision.id)}`, name: decisionTitle },
-          { path: "/library", name: "Library" },
-          { path: "/agent", name: "Agent pages" },
-          { path: "/ask", name: "We couldn't find that page" },
+          { path: workspaceUrl(workspace.id, `context/pages/${decision.id}`), name: decisionTitle },
+          { path: workspaceUrl(workspace.id, "library"), name: "Library" },
+          { path: workspaceUrl(workspace.id, "agent"), name: "Agent pages" },
+          { path: workspaceUrl(workspace.id, "ask"), name: "We couldn't find that page" },
           // The Review queue rail becomes a drawer on narrow screens and
           // intentionally loses its desktop complementary landmark. The main
           // operations heading is the route-level readiness signal in both
           // responsive layouts.
-          { path: "/review", name: "Review operations" },
-          { path: "/search", name: "Search" },
-          { path: "/lint", name: "Lint queue" },
-          { path: "/activity", name: "Activity" },
-          { path: "/chats", name: "Chats" },
+          { path: workspaceUrl(workspace.id, "review"), name: "Review operations" },
+          { path: workspaceUrl(workspace.id, "search"), name: "Search" },
+          { path: workspaceUrl(workspace.id, "lint"), name: "Lint queue" },
+          { path: workspaceUrl(workspace.id, "activity"), name: "Activity" },
+          { path: workspaceUrl(workspace.id, "chats"), name: "Chats" },
         ] as const;
 
         await test.step("all contract Web routes render against the live stack", async () => {
@@ -1300,10 +1322,10 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             if (retried) {
               networkChangeRecoveries.push({ path: surface.path, recovered });
             }
-            if (surface.path === "/ask") {
-              await expect(page).toHaveURL(/\/ask$/);
+            if (surface.path === workspaceUrl(workspace.id, "ask")) {
+              await expect(page).toHaveURL(new RegExp(`/workspaces/${workspace.id}/ask$`));
               await expect(page.locator(".ask-composer")).toHaveCount(0);
-              await expect(page.locator('a[href^="/ask"]')).toHaveCount(0);
+              await expect(page.locator('a[href^="/workspaces/"][href$="/ask"]')).toHaveCount(0);
             }
             await expect(
               page.getByRole("heading", { name: surface.name, exact: true }),

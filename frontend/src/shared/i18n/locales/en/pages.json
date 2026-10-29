@@ -411,7 +411,9 @@
       "taskList": "Task list",
       "linkEmptyCursor": "Link (empty cursor)",
       "aiPlaceholder": "AI placeholder (selected text)"
-    }
+    },
+    "publishedReviewCompletedReloadFailed": "Review approved, but the published page could not be reloaded.",
+    "reloadLatestFailed": "Could not reload the latest server version."
   },
   "blocks": {
     "groups": {

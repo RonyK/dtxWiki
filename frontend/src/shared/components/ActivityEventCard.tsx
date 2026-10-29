@@ -7,6 +7,7 @@ import { Link } from "react-router-dom";
 import type { ActivityItem } from "../api/operations";
 import { contextActivityPresentation } from "../lib/contextActivity";
 import { presentActivityItem } from "../lib/activityLabels";
+import { contextPageHref, workspacePath } from "../lib/workspaceRoutes";
 import { RelativeTime } from "./RelativeTime";
 
 export function ActivityEventCard({ item, workspaceId }: {
@@ -63,7 +64,7 @@ export function ActivityEventCard({ item, workspaceId }: {
     };
   }, [open]);
   const details = item.details;
-  const pageHref = details && workspaceId ? `/workspaces/${encodeURIComponent(workspaceId)}/context/pages/${details.page_id}?tab=history` : null;
+  const pageHref = details && workspaceId ? `${contextPageHref(workspaceId, details.page_id)}?tab=history` : null;
   let href: string | null = null;
   let linkLabel = "";
   if (workspaceId && item.review_item_id && details && (
@@ -72,7 +73,7 @@ export function ActivityEventCard({ item, workspaceId }: {
     || model?.action === "page.restore_version"
     || model?.action.startsWith("context_page.draft.") && model.action !== "context_page.draft.publish"
   )) {
-    href = `/review?review=${encodeURIComponent(item.review_item_id)}`;
+    href = workspacePath(workspaceId, `review/${encodeURIComponent(item.review_item_id)}`);
     linkLabel = t("contextActivity.openReview");
   } else if (pageHref && details?.version?.immutable && (
     model?.action === "context_page.draft.publish" || model?.action === "page.restore_version"

@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createContext, useContext } from "react";
-import { Link, MemoryRouter, useLocation } from "react-router-dom";
+import { Link, MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AskTurnDetail } from "../../../shared/api/operations";
@@ -10,7 +10,7 @@ import { readAppStyles } from "../../../test-support/appStyles";
 import { AskScreen } from "../AskScreen";
 
 const BASE = "http://127.0.0.1:21080";
-const WORKSPACE_ID = "workspace-1";
+const WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
 const SESSION_ID = "session-1";
 const TURN_ID = "turn-1";
 const PARENT_ID = "context-parent-1";
@@ -82,8 +82,8 @@ describe("AskScreen", () => {
       throw new Error(`Unexpected request: ${url}`);
     });
     render(
-      <MemoryRouter initialEntries={[`/ask?target=${SESSION_ID}`]}>
-        <Link to="/ask">Main menu Ask</Link>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
+        <Link to={`/workspaces/${WORKSPACE_ID}/ask`}>Main menu Ask</Link>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -106,7 +106,7 @@ describe("AskScreen", () => {
     const title = `Needle ${"x".repeat(51)}\u{1F600}`;
     mockFetch((url, init) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
         return { data: { items: [sessionRef()], date_buckets: [], next_cursor: null } };
@@ -134,7 +134,7 @@ describe("AskScreen", () => {
           data: {
             proposal_id: "proposal-1",
             change_set_id: "change-1",
-            context_page_id: "context-1",
+            context_page_id: "00000000-0000-4000-8000-000000000107",
             context_page_version_id: "version-1",
             tree_node_id: "tree-1",
             feedback_item_id: null,
@@ -148,7 +148,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -201,7 +201,7 @@ describe("AskScreen", () => {
   it("hides the Details rail when no Ask session is selected", async () => {
     mockFetch((url) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
         return { data: { items: [], date_buckets: [], next_cursor: null } };
@@ -216,7 +216,7 @@ describe("AskScreen", () => {
     });
 
     const view = render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -234,7 +234,7 @@ describe("AskScreen", () => {
   it("renders actor-visible graph context as linked inspector documents", async () => {
     mockFetch((url) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
         return { data: { items: [sessionRef()], date_buckets: [], next_cursor: null } };
@@ -252,7 +252,7 @@ describe("AskScreen", () => {
               graph_context: [
                 {
                   kind: "context_page",
-                  id: "linked-context-1",
+                  id: "00000000-0000-4000-8000-000000000102",
                   title: "Linked Context",
                   path: "/context/linked-context.md",
                   edge_kind: "wikilink",
@@ -267,7 +267,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -276,13 +276,13 @@ describe("AskScreen", () => {
     await userEvent.click(screen.getByRole("button", { name: "Show Details" }));
     expect(screen.getByText("Linked documents")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Linked Context/ }))
-      .toHaveAttribute("href", "/context?target=linked-context-1");
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/context/pages/00000000-0000-4000-8000-000000000102`);
   });
 
   it("renders the assistant answer as markdown instead of raw syntax (M-9)", async () => {
     mockFetch((url) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
         return { data: { items: [sessionRef()], date_buckets: [], next_cursor: null } };
@@ -307,7 +307,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -329,7 +329,7 @@ describe("AskScreen", () => {
     let rejectedBody: unknown = null;
     mockFetch((url, init) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
         return { data: { items: [sessionRef()], date_buckets: [], next_cursor: null } };
@@ -341,7 +341,7 @@ describe("AskScreen", () => {
         return {
           data: [
             treeNode(PARENT_ID, "context", "Ask Captures", "ask_captures"),
-            contextPageNode("context-node-1", "context-page-1", "Existing Page"),
+            contextPageNode("context-node-1", "00000000-0000-4000-8000-000000000103", "Existing Page"),
           ],
         };
       }
@@ -365,7 +365,7 @@ describe("AskScreen", () => {
           data: {
             proposal_id: "proposal-1",
             change_set_id: "change-1",
-            context_page_id: "context-page-1",
+            context_page_id: "00000000-0000-4000-8000-000000000103",
             context_page_version_id: "version-1",
             tree_node_id: null,
             feedback_item_id: null,
@@ -383,7 +383,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -393,7 +393,7 @@ describe("AskScreen", () => {
     ).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Save answer" }));
     await userEvent.selectOptions(screen.getByLabelText("Save mode"), "append_section");
-    await userEvent.selectOptions(screen.getByLabelText("Target page"), "context-page-1");
+    await userEvent.selectOptions(screen.getByLabelText("Target page"), "00000000-0000-4000-8000-000000000103");
     await userEvent.click(screen.getByRole("button", { name: "Propose placement" }));
     expect(await screen.findByText("confidence low")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Accept placement" }));
@@ -409,7 +409,7 @@ describe("AskScreen", () => {
       final_parent_node_id: PARENT_ID,
       final_page_type: "guide",
       final_title: "Needle",
-      target_page_id: "context-page-1",
+      target_page_id: "00000000-0000-4000-8000-000000000103",
       review_required: true,
     });
     expect(await screen.findByText("Saved for review")).toBeInTheDocument();
@@ -427,7 +427,7 @@ describe("AskScreen", () => {
     let turns = [askTurn()];
     mockFetch((url, init) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
         return { data: { items: [sessionRef()], date_buckets: [], next_cursor: null } };
@@ -459,7 +459,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -485,7 +485,7 @@ describe("AskScreen", () => {
   it("appends an older keyset page when Load more is pressed", async () => {
     mockFetch((url) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
         return {
@@ -522,7 +522,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -587,7 +587,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -670,7 +670,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -727,7 +727,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -797,7 +797,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -879,7 +879,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -921,6 +921,151 @@ describe("AskScreen", () => {
     });
   });
 
+  it("keeps a newer route when a deferred turn completes", async () => {
+    let resolveTurn!: (response: Response) => void;
+    let resolveSecondDetail!: (response: Response) => void;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input.toString();
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
+        return jsonResponse({
+          data: { items: [sessionRef(), olderSessionRef()], date_buckets: [], next_cursor: null },
+        });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`) {
+        return jsonResponse({ data: [treeNode(PARENT_ID, "context", "Ask Captures", "ask_captures")] });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}`) {
+        return jsonResponse({ data: sessionDetail() });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/session-2`) {
+        return new Promise<Response>((resolve) => {
+          resolveSecondDetail = resolve;
+        });
+      }
+      if (
+        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}/turns` &&
+        init?.method === "POST"
+      ) {
+        return new Promise<Response>((resolve) => {
+          resolveTurn = resolve;
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    let pathname = "";
+    function RouteControls() {
+      const navigate = useNavigate();
+      pathname = useLocation().pathname;
+      return (
+        <button
+          type="button"
+          onClick={() => navigate(`/workspaces/${WORKSPACE_ID}/ask/session-2`)}
+        >
+          Navigate to second Ask
+        </button>
+      );
+    }
+
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
+        <AskScreen />
+        <RouteControls />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText(/Context-first retrieval summary/);
+    await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "Hello");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(screen.getByRole("button", { name: "Navigate to second Ask" }));
+    await waitFor(() => {
+      expect(pathname).toBe(`/workspaces/${WORKSPACE_ID}/ask/session-2`);
+    });
+    expect(screen.getByRole("status", { name: "Loading Ask" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save answer" })).toBeNull();
+
+    resolveSecondDetail(jsonResponse({
+      data: { ...sessionDetail(), id: "session-2", title: "Second Ask", turns: [] },
+    }));
+    await screen.findByRole("heading", { name: "Second Ask" });
+
+    resolveTurn(jsonResponse({ data: askTurn({ id: "turn-2", turn_no: 2 }) }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Second Ask" })).toBeInTheDocument();
+    });
+    expect(pathname).toBe(`/workspaces/${WORKSPACE_ID}/ask/session-2`);
+  });
+
+  it("starts a fresh session when sending during an overview reload", async () => {
+    let sessionListCalls = 0;
+    let resolveOverviewSessions!: (response: Response) => void;
+    const newSession = { ...sessionDetail([]), id: "session-new", title: "New Ask" };
+    let createTurnPath = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input.toString();
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
+        if (init?.method === "POST") return jsonResponse({ data: newSession });
+        sessionListCalls += 1;
+        if (sessionListCalls === 2) {
+          return new Promise<Response>((resolve) => { resolveOverviewSessions = resolve; });
+        }
+        return jsonResponse({ data: { items: [sessionRef()], date_buckets: [], next_cursor: null } });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`) {
+        return jsonResponse({ data: [] });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}`) {
+        return jsonResponse({ data: sessionDetail() });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/session-new`) {
+        return jsonResponse({ data: newSession });
+      }
+      if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/`) &&
+          url.endsWith("/turns") && init?.method === "POST") {
+        createTurnPath = url;
+        return jsonResponse({ data: askTurn({ id: "turn-new", ask_session_id: "session-new" }) });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    let pathname = "";
+    function RouteControls() {
+      const navigate = useNavigate();
+      pathname = useLocation().pathname;
+      return (
+        <button type="button" onClick={() => navigate(`/workspaces/${WORKSPACE_ID}/ask`)}>
+          Open Ask overview
+        </button>
+      );
+    }
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
+        <AskScreen />
+        <RouteControls />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText(/Context-first retrieval summary/);
+    await userEvent.click(screen.getByRole("button", { name: "Open Ask overview" }));
+    await waitFor(() => expect(pathname).toBe(`/workspaces/${WORKSPACE_ID}/ask`));
+    const message = screen.getByRole("textbox", { name: "Message" });
+    await userEvent.type(message, "Fresh route target");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(createTurnPath).toContain("/sessions/session-new/turns"));
+    expect(createTurnPath).not.toContain(`/sessions/${SESSION_ID}/turns`);
+    expect(await screen.findByRole("heading", { name: "New Ask" })).toBeInTheDocument();
+    resolveOverviewSessions(jsonResponse({
+      data: { items: [sessionRef()], date_buckets: [], next_cursor: null },
+    }));
+  });
+
   it("disables the composer while another session is loading", async () => {
     let resolveDetail!: (response: Response) => void;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -954,7 +1099,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -962,7 +1107,8 @@ describe("AskScreen", () => {
     await screen.findByText(/Context-first retrieval summary/);
     await userEvent.click(screen.getByRole("button", { name: /Second Ask/ }));
 
-    expect(screen.getByRole("textbox", { name: "Message" })).toBeDisabled();
+    expect(screen.getByRole("status", { name: "Loading Ask" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save answer" })).toBeNull();
 
     resolveDetail(
       jsonResponse({
@@ -980,7 +1126,7 @@ describe("AskScreen", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return new Response(
           JSON.stringify({
-            data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
+            data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] },
           }),
           {
             status: 200,
@@ -1034,7 +1180,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -1052,7 +1198,7 @@ describe("AskScreen", () => {
     expect(screen.queryByText("raw req-secret")).toBeNull();
   });
 
-  it("creates a new session from the new-ask route request", async () => {
+  it("creates a new session when the user starts a new ask", async () => {
     let created = false;
     let createCount = 0;
     const createdSession = {
@@ -1065,7 +1211,7 @@ describe("AskScreen", () => {
     };
     mockFetch((url, init) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (
         url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions` &&
@@ -1111,11 +1257,13 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/ask?new=1"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask`]}>
         <AskScreen />
       </MemoryRouter>,
     );
 
+    await screen.findByRole("button", { name: "New" });
+    await userEvent.click(screen.getByRole("button", { name: "New" }));
     expect(await screen.findAllByText("Created Ask")).not.toHaveLength(0);
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "New" })).toHaveAttribute(
@@ -1141,7 +1289,7 @@ describe("AskScreen", () => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({
-          data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
+          data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] },
         });
       }
       if (
@@ -1185,7 +1333,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -1212,7 +1360,7 @@ describe("AskScreen", () => {
     askWorkspace.current = { selectedWorkspace: { role: "viewer" } };
     mockFetch((url) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
         return { data: { items: [sessionRef()], date_buckets: [], next_cursor: null } };
@@ -1231,7 +1379,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -1243,7 +1391,6 @@ describe("AskScreen", () => {
     expect(screen.getByLabelText("Ask history")).toHaveTextContent("Research Ask");
     // every write affordance is hidden for viewers
     expect(screen.queryByRole("button", { name: "New" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "New Ask" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Save answer" })).toBeNull();
     expect(screen.queryByRole("textbox", { name: "Message" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
@@ -1254,7 +1401,7 @@ describe("AskScreen", () => {
     let createCount = 0;
     mockFetch((url, init) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (
         url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions` &&
@@ -1273,7 +1420,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/ask?new=1"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -1282,16 +1429,15 @@ describe("AskScreen", () => {
       .toBeInTheDocument();
     // empty state keeps read-only workflow links but no create button
     expect(screen.getAllByRole("link", { name: "Open Library" })[0])
-      .toHaveAttribute("href", "/library");
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/library`);
     expect(screen.queryByRole("button", { name: "New" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "New Ask" })).toBeNull();
     expect(createCount).toBe(0);
   });
 
   it("shows workflow actions when no ask sessions exist", async () => {
     mockFetch((url) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
         return { data: { items: [], date_buckets: [], next_cursor: null } };
@@ -1306,7 +1452,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -1323,21 +1469,21 @@ describe("AskScreen", () => {
     expect(setup).toHaveTextContent("Write Context page");
     expect(setup).toHaveTextContent("Save or review");
     expect(setup).not.toHaveTextContent("Ask a question");
-    expect(screen.getByRole("button", { name: "New Ask" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "New" })).toHaveLength(1);
     expect(
       screen.getByRole("button", { name: "Start first Ask session" }),
     ).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "New" })).toHaveLength(1);
     expect(screen.getAllByRole("link", { name: "Open Library" })[0])
-      .toHaveAttribute("href", "/library");
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/library`);
     expect(screen.getAllByRole("link", { name: "Write Context page" })[0])
-      .toHaveAttribute("href", "/context/new?from=context");
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/context/pages/new`);
   });
 
   it("shows next-step actions when a session has no turns", async () => {
     mockFetch((url) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
         return {
@@ -1361,7 +1507,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -1372,15 +1518,15 @@ describe("AskScreen", () => {
     // still lists "Ask a question" as a pending step) has no place here.
     expect(screen.queryByLabelText("Workspace setup sequence")).toBeNull();
     expect(screen.getByRole("link", { name: "Open Library" }))
-      .toHaveAttribute("href", "/library");
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/library`);
     expect(screen.getByRole("link", { name: "Write Context page" }))
-      .toHaveAttribute("href", "/context/new?from=context");
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/context/pages/new`);
   });
 
   it("links no-evidence answers to source, context, and search recovery", async () => {
     mockFetch((url) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
         return { data: { items: [sessionRef()], date_buckets: [], next_cursor: null } };
@@ -1407,7 +1553,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -1418,20 +1564,20 @@ describe("AskScreen", () => {
     expect(screen.getByRole("button", { name: "Save answer" })).toBeDisabled();
     expect(screen.getByText(/saving is disabled/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Add source material" }))
-      .toHaveAttribute("href", "/library");
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/library`);
     expect(screen.getByRole("link", { name: "Write Context page" }))
-      .toHaveAttribute("href", "/context/new?from=context");
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/context/pages/new`);
     expect(screen.getByRole("link", { name: "Search workspace" }))
-      .toHaveAttribute("href", "/search?q=Needle");
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/search?q=Needle`);
   });
 
   it("renders persisted evidence identity, search path, and library fallback", async () => {
     const evidenceTurn = askTurn({
       assistant_message: "No matching Context or Library evidence was found.",
-      cited_context_page_ids: ["context-page-1"],
+      cited_context_page_ids: ["00000000-0000-4000-8000-000000000103"],
       retrieval_trace: [
         {
-          id: "context-page-1",
+          id: "00000000-0000-4000-8000-000000000103",
           type: "context_page",
           title: "Deployment Guide",
           score: "1.00",
@@ -1444,7 +1590,7 @@ describe("AskScreen", () => {
     });
     mockFetch((url) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
         return { data: { items: [sessionRef()], date_buckets: [], next_cursor: null } };
@@ -1462,7 +1608,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -1470,7 +1616,7 @@ describe("AskScreen", () => {
     expect(await screen.findByRole("heading", { name: "Cited evidence" }))
       .toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Deployment Guide" }))
-      .toHaveAttribute("href", "/context?target=context-page-1");
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/context/pages/00000000-0000-4000-8000-000000000103`);
     expect(screen.getAllByText("Exact title")).toHaveLength(2);
     // M-11 (260908 UI audit): the ".md" suffix is a backend identifier
     // (concept_path), not a real file the user can open -- it must not leak.
@@ -1545,7 +1691,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -1587,7 +1733,7 @@ describe("AskScreen", () => {
     const frozenServerTitle = "New Ask 1999-12-31 23:59";
     mockFetch((url) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
         return {
@@ -1619,7 +1765,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -1639,7 +1785,7 @@ describe("AskScreen", () => {
   it("keeps user-edited titles and pluralizes multi-turn counts", async () => {
     mockFetch((url) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
         return {
@@ -1662,7 +1808,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -1677,7 +1823,7 @@ describe("AskScreen", () => {
   it("surfaces accept-placement API failures", async () => {
     mockFetch((url) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
         return { data: { items: [sessionRef()], date_buckets: [], next_cursor: null } };
@@ -1716,7 +1862,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -1742,7 +1888,7 @@ describe("AskScreen", () => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({
-          data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
+          data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] },
         });
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
@@ -1780,7 +1926,7 @@ describe("AskScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -1807,9 +1953,10 @@ describe("AskScreen", () => {
 
   it("surfaces a failed post-accept refresh on the screen banner", async () => {
     let accepted = false;
+    let secondSessionAttempts = 0;
     mockFetch((url) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
         return { data: { items: [sessionRef()], date_buckets: [], next_cursor: null } };
@@ -1839,6 +1986,24 @@ describe("AskScreen", () => {
         }
         return { data: sessionDetail() };
       }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/session-2`) {
+        secondSessionAttempts += 1;
+        if (secondSessionAttempts === 1) {
+          return new Response(
+            JSON.stringify({
+              error_code: "service_unavailable",
+              message: "Second session unavailable",
+              request_id: "req-second-test",
+              warnings: [],
+            }),
+            {
+              status: 500,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+        return { data: { ...sessionDetail(), id: "session-2", title: "Second Ask" } };
+      }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/turns/${TURN_ID}/promote`) {
         return { data: proposal() };
       }
@@ -1852,9 +2017,24 @@ describe("AskScreen", () => {
       throw new Error(`Unexpected request: ${url}`);
     });
 
+    let pathname = "";
+    function RetryTarget() {
+      const navigate = useNavigate();
+      pathname = useLocation().pathname;
+      return (
+        <button
+          type="button"
+          onClick={() => navigate(`/workspaces/${WORKSPACE_ID}/ask/session-2`)}
+        >
+          Open second Ask
+        </button>
+      );
+    }
+
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
+        <RetryTarget />
       </MemoryRouter>,
     );
 
@@ -1873,6 +2053,18 @@ describe("AskScreen", () => {
     ).toBeInTheDocument();
     expect(await screen.findByText("Saved to Context")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Accept placement" })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "Open second Ask" }));
+    expect(
+      await screen.findByText("The service is temporarily unavailable. Try again shortly."),
+    ).toBeInTheDocument();
+    expect(pathname).toBe(`/workspaces/${WORKSPACE_ID}/ask/session-2`);
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Second Ask" }),
+    ).toBeInTheDocument();
+    expect(secondSessionAttempts).toBe(2);
+    expect(pathname).toBe(`/workspaces/${WORKSPACE_ID}/ask/session-2`);
   });
 
   it("settles on the session you clicked last instead of ping-ponging", async () => {
@@ -1883,7 +2075,7 @@ describe("AskScreen", () => {
     const detailRequests: string[] = [];
     mockFetch((url) => {
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
         return {
@@ -1911,14 +2103,14 @@ describe("AskScreen", () => {
       throw new Error(`Unexpected request: ${url}`);
     });
 
-    let search = "";
+    let pathname = "";
     function LocationProbe() {
-      search = useLocation().search;
+      pathname = useLocation().pathname;
       return null;
     }
 
     render(
-      <MemoryRouter initialEntries={["/ask"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
         <LocationProbe />
       </MemoryRouter>,
@@ -1926,19 +2118,19 @@ describe("AskScreen", () => {
 
     await screen.findByRole("button", { name: /Second Ask/ }, { timeout: 5000 });
     // The session the initial load resolved gets a URL of its own.
-    await waitFor(() => expect(search).toBe(`?target=${SESSION_ID}`));
+    await waitFor(() => expect(pathname).toBe(`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`));
 
     await userEvent.click(screen.getByRole("button", { name: /Second Ask/ }));
-    await waitFor(() => expect(search).toBe("?target=session-2"));
+    await waitFor(() => expect(pathname).toBe(`/workspaces/${WORKSPACE_ID}/ask/session-2`));
 
     await userEvent.click(screen.getByRole("button", { name: /Research Ask/ }));
-    await waitFor(() => expect(search).toBe(`?target=${SESSION_ID}`));
+    await waitFor(() => expect(pathname).toBe(`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`));
 
     // Nothing may move after the click settles: the loop showed up as the URL
     // and the active row alternating on their own, so hold still and watch.
     const settled = detailRequests.length;
     await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(search).toBe(`?target=${SESSION_ID}`);
+    expect(pathname).toBe(`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`);
     expect(detailRequests.length).toBe(settled);
     expect(detailRequests).toEqual([SESSION_ID, "session-2", SESSION_ID]);
     // Longer than the default: this test deliberately sits still for 150ms to
@@ -1964,7 +2156,7 @@ describe("AskScreen", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const { unmount } = render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
         <AskScreen />
       </MemoryRouter>,
     );
@@ -2052,7 +2244,7 @@ function askTurn(overrides: Partial<AskTurnDetail> = {}): AskTurnDetail {
     turn_no: 1,
     user_message: "Needle",
     assistant_message: "Context-first retrieval summary:\n- Evidence",
-    cited_context_page_ids: ["context-page-1"],
+    cited_context_page_ids: ["00000000-0000-4000-8000-000000000103"],
     cited_library_artifact_ids: [],
     topic_tags: [],
     promoted_context_page_id: null,
@@ -2098,7 +2290,7 @@ function acceptResult() {
   return {
     proposal_id: "proposal-1",
     change_set_id: "change-1",
-    context_page_id: "context-1",
+    context_page_id: "00000000-0000-4000-8000-000000000107",
     context_page_version_id: "version-1",
     tree_node_id: "tree-1",
     feedback_item_id: null,

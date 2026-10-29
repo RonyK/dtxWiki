@@ -1,4 +1,3 @@
-import { getSelectedWorkspaceId } from "../api/workspace";
 import type { TreeNodePayload } from "../api/workspace";
 
 export const TREE_TARGET_PARAM = "target";
@@ -28,6 +27,7 @@ export function resolveExpandedNodeIds(
   options: {
     defaultMode?: ExpandedDefaultMode;
     storageKey?: TreeExpansionStorageKey;
+    workspaceId?: string;
   } = {},
 ): string[] {
   const nodeIds = new Set(nodes.map((node) => node.id));
@@ -42,10 +42,11 @@ export function resolveExpandedNodeIds(
       ),
     );
   }
-  if (baseline === null && options.storageKey) {
+  if (baseline === null && options.storageKey && options.workspaceId) {
     const storedNodeIds = readExpandedNodeIdsFromStorage(
       options.storageKey,
       nodeIds,
+      options.workspaceId,
     );
     if (storedNodeIds !== null) {
       baseline = storedNodeIds;
@@ -100,13 +101,14 @@ function defaultExpandedNodeIds(
 export function writeExpandedNodeIdsToStorage(
   storageKey: TreeExpansionStorageKey,
   nodeIds: string[],
+  workspaceId: string,
 ) {
-  if (typeof window === "undefined") {
+  if (typeof window === "undefined" || !workspaceId) {
     return;
   }
   try {
     window.localStorage.setItem(
-      treeExpansionStorageKey(storageKey),
+      treeExpansionStorageKey(storageKey, workspaceId),
       JSON.stringify(Array.from(new Set(nodeIds))),
     );
   } catch {
@@ -117,20 +119,13 @@ export function writeExpandedNodeIdsToStorage(
 export function updateTreeSearchParams(
   current: URLSearchParams,
   next: {
-    targetId?: string | null;
     expandedNodeIds?: string[];
     versionId?: string | null;
   },
 ): URLSearchParams {
   const params = new URLSearchParams(current);
-  if (next.targetId !== undefined) {
-    if (next.targetId) {
-      params.set(TREE_TARGET_PARAM, next.targetId);
-    } else {
-      params.delete(TREE_TARGET_PARAM);
-    }
-    params.delete(TREE_VERSION_PARAM);
-  }
+  // Object identity belongs to the typed pathname, never this UI-state query.
+  params.delete(TREE_TARGET_PARAM);
   if (next.expandedNodeIds !== undefined) {
     params.set(TREE_EXPANDED_PARAM, next.expandedNodeIds.join(","));
   }
@@ -167,16 +162,15 @@ function ancestorIdsForTarget(
 function readExpandedNodeIdsFromStorage(
   storageKey: TreeExpansionStorageKey,
   validNodeIds: Set<string>,
+  workspaceId: string,
 ) {
   if (typeof window === "undefined") {
     return null;
   }
   try {
-    // Pre-workspace-scoping entries live under the legacy key; fall back so an
-    // existing expansion survives the key migration.
+    // Unscoped legacy entries cannot prove which workspace owns their IDs.
     const raw =
-      window.localStorage.getItem(treeExpansionStorageKey(storageKey)) ??
-      window.localStorage.getItem(legacyTreeExpansionStorageKey(storageKey));
+      window.localStorage.getItem(treeExpansionStorageKey(storageKey, workspaceId));
     if (raw === null) {
       return null;
     }
@@ -203,14 +197,6 @@ function readExpandedNodeIdsFromStorage(
   }
 }
 
-function treeExpansionStorageKey(storageKey: TreeExpansionStorageKey) {
-  const workspaceId = getSelectedWorkspaceId();
-  if (!workspaceId) {
-    return legacyTreeExpansionStorageKey(storageKey);
-  }
+function treeExpansionStorageKey(storageKey: TreeExpansionStorageKey, workspaceId: string) {
   return `${TREE_EXPANSION_STORAGE_PREFIX}${workspaceId}:${storageKey}`;
-}
-
-function legacyTreeExpansionStorageKey(storageKey: TreeExpansionStorageKey) {
-  return `${TREE_EXPANSION_STORAGE_PREFIX}${storageKey}`;
 }

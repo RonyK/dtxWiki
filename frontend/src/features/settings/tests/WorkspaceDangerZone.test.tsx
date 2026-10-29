@@ -59,6 +59,7 @@ function EditDuringCommit({
 
 const noEdit = () => {};
 
+const WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
 const TYPED_SLUG = "research-space-v2";
 
 function dangerZone(
@@ -66,7 +67,7 @@ function dangerZone(
   edit: (host: HTMLElement) => void = noEdit,
 ) {
   return (
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=workspace`]}>
       <EditDuringCommit edit={edit}>
         <WorkspaceDangerZone
           currentSlug={currentSlug}
@@ -145,7 +146,7 @@ describe("WorkspaceDangerZone slug draft with a workspace context", () => {
   function contextAt(slug: string) {
     return {
       selectedWorkspace: {
-        id: "workspace-1",
+        id: "00000000-0000-4000-8000-000000000001",
         slug,
         title: "Research Space",
         role: "owner",

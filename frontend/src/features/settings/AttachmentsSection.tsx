@@ -15,7 +15,7 @@ import {
   type ContextMediaAttachment,
   type AttachmentRetentionPolicy,
 } from "../../shared/api/contextMediaAttachments";
-import { getCurrentWorkspaceId } from "../../shared/api/workspace";
+import { contextPageHref } from "../../shared/lib/workspaceRoutes";
 import { ListPanelHeader } from "../../shared/components/ListPanelHeader";
 import { SearchField } from "../../shared/components/SearchField";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
@@ -144,8 +144,8 @@ export function AttachmentsSection({
         // The prop is authoritative when the host knows the selection; the
         // global stays the fallback for hosts that render this with no
         // workspace context at all, where there is no selection to go stale.
-        const resolved = workspaceId ?? (await getCurrentWorkspaceId());
-        if (!resolved) {
+        const resolved = workspaceId;
+        if (!resolved && !serverScope) {
           throw new Error("no current workspace");
         }
         const query = {
@@ -165,7 +165,7 @@ export function AttachmentsSection({
         } as const;
         const page = serverScope
           ? await listAdminContextMediaAttachments(query)
-          : await listWorkspaceContextMediaAttachments(resolved, query);
+          : await listWorkspaceContextMediaAttachments(resolved!, query);
         if (generation !== loadGenerationRef.current) return;
         setItems((current) =>
           cursor ? [...current, ...page.items] : page.items,
@@ -245,8 +245,8 @@ export function AttachmentsSection({
     setDeleteBusy(true);
     setDeleteError(null);
     try {
-      const resolved = workspaceId ?? (await getCurrentWorkspaceId());
-      if (!resolved) throw new Error("No current workspace");
+      const resolved = workspaceId;
+      if (!resolved && !serverScope) throw new Error("No current workspace");
       if (
         workspaceRef.current !== originWorkspace ||
         loadGenerationRef.current !== originGeneration
@@ -259,7 +259,7 @@ export function AttachmentsSection({
       await (
         serverScope ? deleteAdminContextMediaAttachment : deletePageContextMedia
       )(
-        serverScope ? item.workspace_id : resolved,
+        serverScope ? item.workspace_id : resolved!,
         item.asset_id,
         item.usage_token,
       );
@@ -325,8 +325,8 @@ export function AttachmentsSection({
     let succeeded = 0;
     const failures: Record<string, number> = {};
     try {
-      const resolved = workspaceId ?? (await getCurrentWorkspaceId());
-      if (!resolved || !current()) return;
+      const resolved = workspaceId;
+      if ((!resolved && !serverScope) || !current()) return;
       for (const item of snapshot) {
         if (!current()) return;
         try {
@@ -335,7 +335,7 @@ export function AttachmentsSection({
               ? deleteAdminContextMediaAttachment
               : deletePageContextMedia
           )(
-            serverScope ? item.workspace_id : resolved,
+            serverScope ? item.workspace_id : resolved!,
             item.asset_id,
             item.usage_token,
           );
@@ -801,7 +801,7 @@ export function AttachmentsSection({
                           ) : (
                             <a
                               className="attachments-page-link"
-                              href={`/context?target=${encodeURIComponent(item.page_id)}`}
+                              href={contextPageHref(item.workspace_id, item.page_id)}
                               title={item.page_id}
                             >
                               {item.page_title ?? item.page_id}

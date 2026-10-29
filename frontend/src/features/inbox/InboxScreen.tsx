@@ -1,12 +1,14 @@
 import { Archive, ArchiveRestore, Circle, CircleDot } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { apiErrorMessage } from "../../shared/api/client";
 import {
+  ACCOUNT_INBOX_SCOPE,
   listInbox,
   markInboxItem,
+  workspaceInboxScope,
   type InboxItem,
   type InboxPage,
   type InboxState,
@@ -16,6 +18,7 @@ import { RouteLoading } from "../../shared/components/RouteLoading";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
+import { parseWorkspaceRoute, workspacePath } from "../../shared/lib/workspaceRoutes";
 import { presentInboxItem } from "./inboxRenderers";
 import { inboxScopeOptions } from "./inboxScopes";
 
@@ -95,9 +98,26 @@ export function InboxItemRow({
 export function InboxScreen() {
   const { t } = useTranslation("inbox");
   const workspaceContext = useOptionalWorkspaceContext();
-  const scopes = inboxScopeOptions({ workspace: workspaceContext?.selectedWorkspace ?? null, t });
-  const [chosenKey, setChosenKey] = useState<string | null>(null);
-  const scope = (scopes.find((option) => option.scope.key === chosenKey) ?? scopes[0]).scope;
+  const location = useLocation();
+  const navigate = useNavigate();
+  const route = parseWorkspaceRoute(location.pathname);
+  const routeWorkspaceId = route?.section === "inbox" ? route.workspaceId : null;
+  const routeWorkspace = routeWorkspaceId
+    ? workspaceContext?.workspaces.find((workspace) => workspace.id === routeWorkspaceId) ?? null
+    : null;
+  // On the account route, an existing membership is offered only as a
+  // navigation choice. List/mark requests use the account endpoint until the
+  // URL commits to the explicit workspace inbox route.
+  const workspaceChoice = routeWorkspaceId
+    ? routeWorkspace
+    : workspaceContext?.selectedWorkspace ?? null;
+  const scopes = inboxScopeOptions({ workspace: workspaceChoice, t });
+  // Keep the request scope derived from the URL even while membership data is
+  // unavailable. The shell boundary controls access; this screen never
+  // silently substitutes the account inbox for an explicit workspace URL.
+  const activeScope = routeWorkspaceId
+    ? workspaceInboxScope(routeWorkspaceId)
+    : ACCOUNT_INBOX_SCOPE;
   const [state, setState] = useState<InboxState>("all");
   const [page, setPage] = useState<InboxPage | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -109,14 +129,14 @@ export function InboxScreen() {
     const request = ++requestRef.current;
     setError(null);
     try {
-      const next = await listInbox(scope, { state });
+      const next = await listInbox(activeScope, { state });
       if (request === requestRef.current) setPage(next);
     } catch (caught) {
       if (request === requestRef.current) setError(apiErrorMessage(caught));
     }
     // scope.key identifies the scope; the object itself is rebuilt each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope.key, state]);
+  }, [activeScope.key, state]);
 
   useEffect(() => {
     setPage(null);
@@ -128,7 +148,7 @@ export function InboxScreen() {
     const request = requestRef.current;
     setLoadingMore(true);
     try {
-      const next = await listInbox(scope, { state, cursor: page.next_cursor });
+      const next = await listInbox(activeScope, { state, cursor: page.next_cursor });
       if (request !== requestRef.current) return;
       setPage({ ...page, items: [...page.items, ...next.items], next_cursor: next.next_cursor });
     } catch (caught) {
@@ -144,7 +164,7 @@ export function InboxScreen() {
     try {
       // The response carries the item's current state, including a newer
       // revision when the mark was not applied, so loaded pages stay in place.
-      const result = await markInboxItem(scope, item, marks);
+      const result = await markInboxItem(activeScope, item, marks);
       if (request === requestRef.current) {
         setPage((current) => current && withItem(current, result.item, state));
       }
@@ -182,9 +202,15 @@ export function InboxScreen() {
         <div className="inbox-controls">
           <SegmentedControl
             label={t("scope.label")}
-            onChange={setChosenKey}
+            onChange={(key) => {
+              if (key === "account") {
+                navigate("/inbox");
+              } else if (workspaceChoice) {
+                navigate(workspacePath(workspaceChoice.id, "inbox"));
+              }
+            }}
             options={scopes.map((option) => ({ key: option.scope.key, label: option.label }))}
-            value={scope.key}
+            value={activeScope.key}
           />
           <SegmentedControl
             compact

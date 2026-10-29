@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SearchScreen } from "./SearchScreen";
 
 const BASE = "http://127.0.0.1:21080";
-const WORKSPACE_ID = "workspace-1";
+const WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
 
 describe("SearchScreen race handling", () => {
   afterEach(() => {
@@ -34,7 +34,7 @@ describe("SearchScreen race handling", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );

@@ -99,6 +99,20 @@ export type LibraryArtifactPayload = {
   created_at: string;
 };
 
+export async function readLibraryArtifact(workspaceId: string, artifactId: string): Promise<LibraryArtifactPayload> {
+  const response = await apiRequest<{ data: LibraryArtifactPayload }>(
+    `/api/v1/workspaces/${workspaceId}/library/artifacts/${artifactId}`,
+  );
+  return response.data;
+}
+
+export async function readLibraryVersion(workspaceId: string, versionId: string): Promise<LibraryItemVersionPayload> {
+  const response = await apiRequest<{ data: LibraryItemVersionPayload }>(
+    `/api/v1/workspaces/${workspaceId}/library/versions/${versionId}`,
+  );
+  return response.data;
+}
+
 export type LibraryItemDetail = LibraryItemSummary & {
   metadata: Record<string, unknown>;
   current_version: LibraryItemVersionPayload | null;

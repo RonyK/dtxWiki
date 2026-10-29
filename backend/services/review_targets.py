@@ -32,6 +32,11 @@ from backend.services.actor_visible_read import (
     library_item_visible,
 )
 from backend.services.context_lifecycle import is_publishable_draft
+from backend.services.workspace_urls import (
+    agent_page_url,
+    library_artifact_url,
+    library_item_url,
+)
 from backend.utils.page_frontmatter import parse_page_frontmatter
 from backend.utils.uuid import parse_uuid_or_none
 
@@ -398,7 +403,7 @@ def _agent_target(
         document_id=page.id,
         title=page.title,
         slug=page.slug,
-        reader_href=f"/agent?target={page.id}" if ordinary else None,
+        reader_href=agent_page_url(workspace_id, page.id) if ordinary else None,
         can_open=ordinary,
         unavailable_reason=None if ordinary else "reader_unavailable",
     ), ReviewContentTarget(
@@ -419,6 +424,7 @@ def _library_target(
     actor: ActorContext | None,
 ) -> tuple[ReviewDocumentTarget, ReviewContentTarget]:
     version = None
+    artifact_id = None
     item_id = operation.target_id if operation.target_type == "library_item" else None
     if operation.target_type == "library_artifact":
         artifact = get_in_workspace(
@@ -427,6 +433,7 @@ def _library_target(
             workspace_id=workspace_id,
             resource_id=operation.target_id,
         )
+        artifact_id = artifact.id if artifact is not None else None
         version_id = artifact.library_item_version_id if artifact is not None else None
     else:
         version_id = (
@@ -467,7 +474,11 @@ def _library_target(
         document_kind="library",
         document_id=item.id,
         title=item.title,
-        reader_href=f"/library?target={item.id}",
+        reader_href=(
+            library_artifact_url(workspace_id, artifact_id)
+            if artifact_id is not None
+            else library_item_url(workspace_id, item.id)
+        ),
         can_open=True,
     ), ReviewContentTarget(
         mode="unsupported",

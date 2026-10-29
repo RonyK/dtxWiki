@@ -7,7 +7,7 @@ import {
   type Response,
 } from "./fixtures";
 
-import { authenticatePage, backendBaseUrl, currentWorkspace } from "./auth";
+import { authenticatePage, backendBaseUrl, currentWorkspace, workspaceUrl } from "./auth";
 
 type LibraryVersion = {
   id: string;
@@ -77,7 +77,7 @@ test("converts multi-uploaded JSON and CSV into durable Library previews", async
       name: `e2e-library-${suffix}.csv`,
     },
   ] as const;
-  await page.goto("/library");
+  await page.goto(workspaceUrl(workspace.id, "library"));
   await expect(
     page.getByRole("heading", { name: "Library", exact: true }),
   ).toBeVisible({ timeout: 15_000 });
@@ -167,7 +167,7 @@ test("converts multi-uploaded JSON and CSV into durable Library previews", async
   );
 
   for (const fixture of uploaded) {
-    await assertPreviewAndOriginalSurviveReload(page, fixture);
+    await assertPreviewAndOriginalSurviveReload(page, fixture, workspace.id);
     await expect(page).toHaveTitle(`${fixture.name} - dtxWiki`);
   }
 
@@ -245,7 +245,7 @@ test("renders protected image, PDF, WAV, and MP4 previews from exact-version sou
         `/library/versions/${image.current_version?.id}/preview/source`,
       ),
   );
-  await page.goto(`/library?target=${encodeURIComponent(image.id)}`);
+  await page.goto(workspaceUrl(workspace.id, `library/items/${image.id}`));
   await expect(
     page.getByRole("heading", { level: 2, name: imageName, exact: true }),
   ).toBeVisible({ timeout: 10_000 });
@@ -273,7 +273,7 @@ test("renders protected image, PDF, WAV, and MP4 previews from exact-version sou
         `/library/versions/${pdfItem.current_version?.id}/preview/source`,
       ),
   );
-  await page.goto(`/library?target=${encodeURIComponent(pdfItem.id)}`);
+  await page.goto(workspaceUrl(workspace.id, `library/items/${pdfItem.id}`));
   await expect(page.getByLabel(`PDF preview for ${pdfName}`)).toBeVisible();
   await expect(page.locator(".react-pdf__Page__canvas")).toBeVisible();
   await expect(page.getByText("Protected Preview PDF", { exact: false })).toBeVisible();
@@ -396,7 +396,7 @@ test("renders protected image, PDF, WAV, and MP4 previews from exact-version sou
   );
   expect((await rangedAudioSource.body()).equals(wav)).toBeTruthy();
 
-  await page.goto(`/library?target=${encodeURIComponent(audio.id)}`);
+  await page.goto(workspaceUrl(workspace.id, `library/items/${audio.id}`));
   const audioElement = page.getByLabel(`Audio preview for ${audioName}`);
   const explicitAudioFallback = page.getByText(
     /^(This browser cannot play this media format|The media preview could not be played)\. The original file is safely stored\.$/,
@@ -447,7 +447,7 @@ test("renders protected image, PDF, WAV, and MP4 previews from exact-version sou
   );
   expect((await rangedVideoSource.body()).equals(mp4)).toBeTruthy();
 
-  await page.goto(`/library?target=${encodeURIComponent(video.id)}`);
+  await page.goto(workspaceUrl(workspace.id, `library/items/${video.id}`));
   const videoElement = page.getByLabel(`Video preview for ${videoName}`);
   const explicitPlaybackFallback = page.getByText(
     /^(This browser cannot play this media format|The media preview could not be played)\. The original file is safely stored\.$/,
@@ -491,6 +491,7 @@ async function waitForReady(
 async function assertPreviewAndOriginalSurviveReload(
   page: Page,
   fixture: UploadedFixture,
+  workspaceId: string,
 ) {
   const originalUrl = fixture.detail.current_version?.original_url;
   expect(
@@ -498,7 +499,7 @@ async function assertPreviewAndOriginalSurviveReload(
     `${fixture.name} must expose its protected original URL`,
   ).toBeTruthy();
 
-  await page.goto(`/library?target=${encodeURIComponent(fixture.detail.id)}`);
+  await page.goto(workspaceUrl(workspaceId, `library/items/${fixture.detail.id}`));
   await assertReadyPreview(page, fixture);
 
   await page.reload();
@@ -572,7 +573,7 @@ async function assertSemanticMarkdownEdit(
   const versionId = fixture.detail.current_ready_version_id;
   expect(versionId, "editable fixture must have a current-ready version").toBeTruthy();
 
-  await page.goto(`/library?target=${encodeURIComponent(fixture.detail.id)}`);
+  await page.goto(workspaceUrl(workspaceId, `library/items/${fixture.detail.id}`));
   const editAction = page.getByRole("button", { name: "Edit Markdown" });
   await expect(editAction).toBeVisible();
   await editAction.click();

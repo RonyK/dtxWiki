@@ -52,19 +52,6 @@ CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD = Field(
 )
 
 
-class ContextPageLocation(BaseModel):
-    workspace_id: UUID
-    page_id: UUID
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class ContextPageLocationResponse(RESTResponseBase):
-    data: ContextPageLocation
-
-    model_config = ConfigDict(extra="forbid")
-
-
 class PageSummary(BaseModel):
     id: UUID
     slug: str
@@ -105,7 +92,7 @@ class PageSummary(BaseModel):
 
 
 class PagePayload(PageSummary):
-    # Authenticated stable permalinks (`/p/{page_id}`) can be opened while a
+    # Explicit permalinks (`/p/{workspace_id}/{page_id}`) can open while a
     # different Workspace is selected. The authorized read response therefore
     # carries the owning Workspace identity so the client can switch before
     # resolving the page in that Workspace's Context tree. Public payloads do

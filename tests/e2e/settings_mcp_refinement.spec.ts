@@ -1,6 +1,6 @@
 import { expect, test, type Page, type TestInfo } from "./fixtures";
 import { mkdir, writeFile } from "node:fs/promises";
-import { authenticatePage } from "./auth";
+import { authenticatePage, workspaceUrl } from "./auth";
 import { evidenceScreenshot } from "./evidence";
 
 async function checkBoxes(page: Page, testInfo: TestInfo, surface: string) {
@@ -91,7 +91,7 @@ for (const language of ["en", "ko"] as const) {
         await (await page.request.get("/api/v1/workspaces")).json()
       ).data;
       const expectedIds = new Set<string>([roster.default_workspace_id]);
-      await page.goto("/settings/integrations");
+      await page.goto(workspaceUrl(roster.default_workspace_id, "settings/integrations"));
       const en = language === "en";
       const create = page.locator("#integrations");
       const summary = create.locator(".workspace-scope-summary");
@@ -336,7 +336,7 @@ for (const language of ["en", "ko"] as const) {
     test(`${language} ${width}px Settings checkbox inventory and portal geometry`, async ({
       page,
     }, testInfo) => {
-      const { login, seededAdminEmail } = await import("./auth");
+      const { login, seededAdminEmail, currentWorkspace } = await import("./auth");
       await login(
         page.request,
         seededAdminEmail("1440x900", testInfo.project.name),
@@ -346,6 +346,7 @@ for (const language of ["en", "ko"] as const) {
         (locale) => localStorage.setItem("dtxwiki.uiLanguage", locale),
         language,
       );
+      const workspace = await currentWorkspace(page.request);
       let total = 0;
       for (const section of [
         "workspace",
@@ -361,7 +362,11 @@ for (const language of ["en", "ko"] as const) {
         "deployment",
         "mcp",
       ]) {
-        await page.goto(`/settings?section=${section}`);
+        await page.goto(["users", "deployment"].includes(section)
+          ? `/settings/server?section=${section}`
+          : section === "mcp"
+            ? `/account/integrations?section=${section}`
+            : `${workspaceUrl(workspace.id, "settings")}?section=${section}`);
         await expect(page.locator("#settings-destination-title")).toBeVisible();
         if (["library", "review", "lint", "jobs", "mcp"].includes(section)) {
           await expect(
@@ -467,7 +472,7 @@ for (const language of ["en", "ko"] as const) {
         localStorage.clear();
         localStorage.setItem("dtxwiki.uiLanguage", locale);
       }, language);
-      await page.goto("/settings?section=workspace");
+      await page.goto(`${workspaceUrl(targetWorkspace.id, "settings")}?section=workspace`);
       await page.locator(".workspace-danger-item button.danger-action").click();
       await page.locator(".modal-panel input").fill(slug);
       const rejected = page.waitForResponse(
@@ -552,7 +557,7 @@ for (const language of ["en", "ko"] as const) {
       );
       expect(submittedResponse.ok()).toBeTruthy();
       const submitted = (await submittedResponse.json()).data;
-      await page.goto("/review");
+      await page.goto(workspaceUrl(workspace.id, "review"));
       if (width === 390)
         await page.locator(".workspace-mobile-drawer-toggle").click();
       await expect(
@@ -586,7 +591,7 @@ for (const language of ["en", "ko"] as const) {
           )
         ).ok(),
       ).toBeTruthy();
-      await page.goto(`/context?target=${created.id}`);
+      await page.goto(workspaceUrl(workspace.id, `context/pages/${created.id}`));
       await expect(page.locator(".markdown-task-state")).toHaveCount(2);
       await checkBoxes(page, testInfo, "markdown-tasks");
       expect(
@@ -670,7 +675,7 @@ for (const language of ["en", "ko"] as const) {
           }),
       );
       await page.goto(
-        `/context?target=${created.id}&tab=history&reconcile=${branch}`,
+        `${workspaceUrl(workspace.id, `context/pages/${created.id}`)}?tab=history&reconcile=${branch}`,
       );
       const reconciliation = page.locator(".context-reconciliation-dialog");
       await expect(
@@ -708,7 +713,7 @@ for (const language of ["en", "ko"] as const) {
           },
         }),
       );
-      await page.goto("/lint");
+      await page.goto(workspaceUrl(workspace.id, "lint"));
       await expect(page.locator(".lint-row-checkbox")).toHaveCount(2);
       await checkBoxes(page, testInfo, "lint-findings");
       for (const size of await page
@@ -730,8 +735,10 @@ for (const language of ["en", "ko"] as const) {
         testInfo,
         `common-checkbox-${language}-${width}`,
       );
+      const sessionId = crypto.randomUUID();
+      const turnId = crypto.randomUUID();
       const session = {
-        id: "ui-fixture-session",
+        id: sessionId,
         title: "Selection geometry",
         started_at: "2026-10-18T00:00:00Z",
         updated_at: "2026-10-18T00:00:00Z",
@@ -741,7 +748,7 @@ for (const language of ["en", "ko"] as const) {
         turn_count: 1,
       };
       const turn = {
-        id: "ui-fixture-turn",
+        id: turnId,
         ask_session_id: session.id,
         turn_no: 1,
         user_message: "Checkbox fixture",
@@ -780,7 +787,7 @@ for (const language of ["en", "ko"] as const) {
       );
       // Ask is opt-in per account/browser. Enable it through the mounted Labs
       // UI so this inventory exercises the save form rather than Not Found.
-      await page.goto("/settings?section=labs");
+      await page.goto(`/account/integrations?section=labs`);
       const askMenu = page.getByRole("checkbox", {
         name: language === "en" ? "Show Ask menu" : "Ask 메뉴 표시",
         exact: true,
@@ -788,7 +795,7 @@ for (const language of ["en", "ko"] as const) {
       await expect(askMenu).not.toBeChecked();
       await askMenu.check();
       await expect(askMenu).toBeChecked();
-      await page.goto("/ask");
+      await page.goto(workspaceUrl(workspace.id, `ask/${session.id}`));
       await expect(page.locator(".ask-main")).toBeVisible();
       await page
         .getByRole("button", {

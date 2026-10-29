@@ -6,6 +6,7 @@ import {
   seededAdminEmail,
   currentWorkspace,
   backendBaseUrl,
+  workspaceUrl,
 } from "./auth";
 import type { APIRequestContext } from "./fixtures";
 import { evidenceScreenshot } from "./evidence";
@@ -122,7 +123,7 @@ for (const locale of ["en", "ko"]) {
       (language) => localStorage.setItem("dtxwiki.uiLanguage", language),
       locale,
     );
-    await page.goto("/settings?section=attachments");
+    await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=attachments`);
     const section = page.locator(".attachments");
     await expect(section.getByText(names[0], { exact: true })).toBeVisible();
     const policyCard = section.locator(".attachments-policy");
@@ -345,7 +346,7 @@ for (const locale of ["en", "ko"]) {
       (language) => localStorage.setItem("dtxwiki.uiLanguage", language),
       locale,
     );
-    await page.goto("/settings?section=attachments");
+    await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=attachments`);
     const section = page.locator(".attachments");
     for (const item of items)
       await expect(
@@ -428,7 +429,7 @@ for (const locale of ["en", "ko"]) {
       `${prefix}-other.png`,
     );
     const otherPage = await other.newPage();
-    await otherPage.goto("/settings?section=attachments");
+    await otherPage.goto(`${workspaceUrl(otherWorkspace.id, "settings")}?section=attachments`);
     await expect(
       otherPage.getByRole("radio", {
         name: /All workspaces|전체 워크스페이스/,
@@ -438,12 +439,12 @@ for (const locale of ["en", "ko"]) {
       page.request,
       seededAdminEmail("1280x720", testInfo.project.name),
     );
-    await uploadOrphan(page.request, `${prefix}-current.png`);
+    const adminWorkspace = await uploadOrphan(page.request, `${prefix}-current.png`);
     await page.addInitScript(
       (language) => localStorage.setItem("dtxwiki.uiLanguage", language),
       locale,
     );
-    await page.goto("/settings?section=attachments");
+    await page.goto(`${workspaceUrl(adminWorkspace.id, "settings")}?section=attachments`);
     const current = page.getByRole("radio", {
       name: locale === "en" ? "Current workspace" : "현재 워크스페이스",
       exact: true,

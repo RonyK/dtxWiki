@@ -1794,7 +1794,9 @@
     },
     "setupCommandPlaceholder": "The setup command appears here once a key exists.",
     "oauthCapabilityUnknown": "This server's connection settings could not be read, so whether OAuth can be offered is unknown. Reload to try again.",
-    "oauthCapabilityRetry": "Try again"
+    "oauthCapabilityRetry": "Try again",
+    "chooseSetupWorkspace": "Choose a workspace to set up a connection",
+    "chooseWorkspace": "Choose a workspace"
   },
   "clipboard": {
     "copied": "{{label}} copied",

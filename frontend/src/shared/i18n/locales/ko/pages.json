@@ -411,7 +411,9 @@
       "taskList": "할 일 목록",
       "linkEmptyCursor": "링크(커서 위치)",
       "aiPlaceholder": "AI 대체 텍스트(선택 영역)"
-    }
+    },
+    "publishedReviewCompletedReloadFailed": "검토를 승인했지만 게시된 페이지를 다시 불러오지 못했습니다.",
+    "reloadLatestFailed": "최신 서버 버전을 다시 불러오지 못했습니다."
   },
   "blocks": {
     "groups": {

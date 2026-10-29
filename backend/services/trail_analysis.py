@@ -36,6 +36,7 @@ from backend.services.entity_ref import (
     library_concept_path,
 )
 from backend.services.indexing.edge_registry import refresh_co_access_edge_projection
+from backend.services.workspace_urls import agent_page_url
 
 TRAIL_WINDOW_DAYS = 30
 HOT_CONCEPT_LIMIT = 10
@@ -547,6 +548,6 @@ def _hot_concept_identities(
                 continue
             hydrated[(EntityKind.AGENT_PAGE.value, page.id)] = (
                 page.title,
-                f"/agent?target={page.id}",
+                agent_page_url(workspace_id, page.id),
             )
     return hydrated

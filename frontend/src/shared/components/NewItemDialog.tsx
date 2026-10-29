@@ -31,7 +31,7 @@ type NewItemDialogProps = {
   /** Label for the section root in the location picker (e.g. "Context"). */
   rootLabel?: string;
   typeOrder?: readonly NewItemType[];
-  onClose: () => void;
+  onClose: (reason?: "cancel" | "success") => void;
   onSubmit: (input: {
     itemType: NewItemType;
     parentNodeId: string | null;
@@ -139,7 +139,7 @@ export function NewItemDialog({
 
   function requestClose() {
     if (!submitting) {
-      onClose();
+      onClose("cancel");
     }
   }
 
@@ -163,7 +163,7 @@ export function NewItemDialog({
             : undefined,
         title: trimShortText(title),
       });
-      onClose();
+      onClose("success");
     } catch (exc) {
       setError(
         newItemErrorMessage(
@@ -191,7 +191,7 @@ export function NewItemDialog({
     setError(null);
     try {
       await onPickFiles?.(files, parentId || null);
-      onClose();
+      onClose("success");
     } catch (exc) {
       setError(
         apiErrorMessage(

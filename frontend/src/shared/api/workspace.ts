@@ -103,6 +103,13 @@ export type TreeSectionPolicy = {
   allow_page_as_parent: boolean;
 };
 
+export async function readTreeNode(workspaceId: string, nodeId: string): Promise<TreeNodePayload> {
+  const response = await apiRequest<{ data: TreeNodePayload }>(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/tree/nodes/${encodeURIComponent(nodeId)}`,
+  );
+  return response.data;
+}
+
 export type TreeListData = {
   nodes: TreeNodePayload[];
   policies: Record<string, TreeSectionPolicy>;
@@ -172,6 +179,7 @@ export async function listWorkspaces() {
   return workspaceListRequest.promise;
 }
 
+/** Landing preference only; resource requests use the workspace in the URL. */
 export async function getCurrentWorkspaceId() {
   const cached = currentWorkspaceSelection();
   if (cached.workspaceId) {
@@ -289,7 +297,9 @@ export function setSelectedWorkspaceId(workspaceId: string | null) {
     return;
   }
   if (workspaceId) {
-    window.localStorage.setItem(SELECTED_WORKSPACE_ID_KEY, workspaceId);
+    if (window.localStorage.getItem(SELECTED_WORKSPACE_ID_KEY) !== workspaceId) {
+      window.localStorage.setItem(SELECTED_WORKSPACE_ID_KEY, workspaceId);
+    }
     window.localStorage.removeItem(SELECTED_WORKSPACE_SLUG_KEY);
     updateSnapshotSelection(workspaceId);
     return;
@@ -307,8 +317,12 @@ export function setSelectedWorkspace(workspace: WorkspaceSummary | null) {
     setSelectedWorkspaceId(null);
     return;
   }
-  window.localStorage.setItem(SELECTED_WORKSPACE_ID_KEY, workspace.id);
-  window.localStorage.setItem(SELECTED_WORKSPACE_SLUG_KEY, workspace.slug);
+  if (window.localStorage.getItem(SELECTED_WORKSPACE_ID_KEY) !== workspace.id) {
+    window.localStorage.setItem(SELECTED_WORKSPACE_ID_KEY, workspace.id);
+  }
+  if (window.localStorage.getItem(SELECTED_WORKSPACE_SLUG_KEY) !== workspace.slug) {
+    window.localStorage.setItem(SELECTED_WORKSPACE_SLUG_KEY, workspace.slug);
+  }
   updateSnapshotSelection(workspace.id, workspace);
 }
 
@@ -439,11 +453,14 @@ export async function listTree(workspaceId: string, section?: string) {
 export async function listTreeData(
   workspaceId: string,
   section?: string,
+  options: { includeArchived?: boolean } = {},
 ): Promise<TreeListData> {
   const favoriteRead = beginTreeFavoriteRead();
-  const query = section
-    ? `?${new URLSearchParams({ section }).toString()}`
-    : "";
+  const params = new URLSearchParams();
+  if (section) params.set("section", section);
+  if (options.includeArchived) params.set("include_archived", "true");
+  const serializedParams = params.toString();
+  const query = serializedParams ? `?${serializedParams}` : "";
   const response = await apiRequest<{ data: TreeNodePayload[] | TreeListData }>(
     `/api/v1/workspaces/${workspaceId}/tree${query}`,
   );
