@@ -14,6 +14,10 @@ from backend.repositories.context_visibility import (
     visible_context_version_expression,
     visible_context_version_id,
 )
+from backend.repositories.workspace_scoped import (
+    select_in_workspace,
+    where_in_workspace,
+)
 from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.lint import (
     LintFindingBatchDecisionFailure,
@@ -101,92 +105,62 @@ class LintService:
         # no historical finding silently vanishes. This is a workspace policy gate,
         # not a list filter: a finding_id deep link bypasses the caller's
         # severity/layer/status filters but stays subject to it.
-        workspace = session.get(Workspace, workspace_id)
-        policy = LintPolicy(workspace)
-        enabled_ids = {rule.rule_id for rule in self.lint_registry.enabled(policy)}
-        disabled_ids = [
-            rule.rule_id
-            for rule in self.lint_registry.rules()
-            if getattr(rule, "runtime_checkable", True)
-            if rule.rule_id not in enabled_ids
-        ]
-        base = select(LintFinding).where(LintFinding.workspace_id == workspace_id)
-        if disabled_ids:
-            base = base.where(LintFinding.rule_id.not_in(disabled_ids))
+        base = self._base_findings_query(session, workspace_id)
         # M-02: a finding on a target the actor cannot read — a draft-only
         # Context page, a sensitive/draft tree node, or a deleted target — must
         # not surface its title, UUID, slug, or suggested action. Exclude those
         # findings BEFORE the count/pagination so totals and cursors stay
         # consistent, and fail CLOSED on a dangling (deleted) target.
-        if actor is not None:
-            # Context-page findings: keep only pages the actor can see. A draft
-            # and a deleted page both fall out (a deleted page is not in the set).
-            visible_page_ids = (
-                select(ContextPage.id)
-                .where(ContextPage.workspace_id == workspace_id)
-                .where(visible_context_version_expression(actor).is_not(None))
-            )
-            base = base.where(
-                (LintFinding.target_type != "context_page")
-                | LintFinding.target_id.in_(visible_page_ids)
-            )
         if finding_id is not None:
-            base = base.where(LintFinding.id == finding_id)
+            base = where_in_workspace(
+                base,
+                LintFinding,
+                workspace_id=workspace_id,
+                conditions=(LintFinding.id == finding_id,),
+            )
         else:
             if severity is not None:
-                base = base.where(LintFinding.severity == severity)
+                base = where_in_workspace(
+                    base,
+                    LintFinding,
+                    workspace_id=workspace_id,
+                    conditions=(LintFinding.severity == severity,),
+                )
             if rule is not None:
-                base = base.where(LintFinding.rule_id == rule)
+                base = where_in_workspace(
+                    base,
+                    LintFinding,
+                    workspace_id=workspace_id,
+                    conditions=(LintFinding.rule_id == rule,),
+                )
             if status is not None:
                 if status == "resolved":
-                    base = base.where(LintFinding.status.in_(("dismissed", "fixed")))
+                    status_condition = LintFinding.status.in_(("dismissed", "fixed"))
                 elif status == "open":
-                    base = base.where(LintFinding.status.in_(("open", "acknowledged")))
+                    status_condition = LintFinding.status.in_(("open", "acknowledged"))
                 else:
-                    base = base.where(LintFinding.status == status)
+                    status_condition = LintFinding.status == status
+                base = where_in_workspace(
+                    base,
+                    LintFinding,
+                    workspace_id=workspace_id,
+                    conditions=(status_condition,),
+                )
             if layer is not None:
                 # Layer is a property of the producing rule, not the finding, so
                 # map it to the rule_ids registered under that layer.
                 layer_rule_ids = [
                     r.rule_id for r in self.lint_registry.rules() if r.layer == layer
                 ]
-                base = base.where(LintFinding.rule_id.in_(layer_rule_ids))
-        if actor is not None:
-            # Tree-node findings: node visibility is projection-based, so check
-            # each target node against the SAME projection the tree GET uses
-            # (covers sensitive-agent and draft-context nodes; a missing node
-            # fails closed). Scope this to the ALREADY-filtered set — so a
-            # finding_id deep-link projects one node, not the whole workspace —
-            # and load ONE projection for the batch rather than per node.
-            filtered = base.subquery()
-            tree_node_ids = session.scalars(
-                select(filtered.c.target_id)
-                .where(filtered.c.target_type == "workspace_tree_node")
-                .where(filtered.c.target_id.is_not(None))
-                .distinct()
-            ).all()
-            if tree_node_ids:
-                from backend.services.tree_read import TreeReadService
-
-                nodes = session.scalars(
-                    select(WorkspaceTreeNode).where(
-                        WorkspaceTreeNode.workspace_id == workspace_id,
-                        WorkspaceTreeNode.id.in_(tree_node_ids),
-                    )
-                ).all()
-                visible_ids = TreeReadService.visible_node_ids(session, nodes, actor)
-                hidden_node_ids = [
-                    node_id for node_id in tree_node_ids if node_id not in visible_ids
-                ]
-                if hidden_node_ids:
-                    base = base.where(
-                        ~(
-                            (LintFinding.target_type == "workspace_tree_node")
-                            & LintFinding.target_id.in_(hidden_node_ids)
-                        )
-                    )
-        if actor is not None and not actor_can_read_drafts(actor):
-            base = self._exclude_draft_only_findings(session, base)
+                base = where_in_workspace(
+                    base,
+                    LintFinding,
+                    workspace_id=workspace_id,
+                    conditions=(LintFinding.rule_id.in_(layer_rule_ids),),
+                )
+        base = self._apply_finding_visibility_filters(
+            session, workspace_id, base, actor
+        )
         numeric_pagination = page is not None or page_size is not None
         if numeric_pagination and (limit is not None or cursor is not None):
             raise ValueError("page/page_size cannot be combined with limit/cursor")
@@ -253,6 +227,111 @@ class LintService:
             has_previous=has_previous,
             has_next=has_next,
         )
+
+    def visible_finding_ids(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        finding_ids: list[UUID],
+        *,
+        actor: ActorContext | None = None,
+    ) -> set[UUID]:
+        """Return IDs visible through the same gates as ``list_findings``."""
+        ids = list(dict.fromkeys(finding_ids))
+        if not ids:
+            return set()
+        visible: set[UUID] = set()
+        for offset in range(0, len(ids), 400):
+            base = where_in_workspace(
+                self._base_findings_query(session, workspace_id),
+                LintFinding,
+                workspace_id=workspace_id,
+                conditions=(LintFinding.id.in_(ids[offset : offset + 400]),),
+            )
+            base = self._apply_finding_visibility_filters(
+                session, workspace_id, base, actor
+            )
+            visible.update(session.scalars(select(base.subquery().c.id)).all())
+        return visible
+
+    def _base_findings_query(self, session: Session, workspace_id: UUID):
+        """Build the workspace and disabled-rule gates shared by ID and list reads."""
+        workspace = session.get(Workspace, workspace_id)
+        policy = LintPolicy(workspace)
+        enabled_ids = {rule.rule_id for rule in self.lint_registry.enabled(policy)}
+        disabled_ids = [
+            rule.rule_id
+            for rule in self.lint_registry.rules()
+            if getattr(rule, "runtime_checkable", True)
+            if rule.rule_id not in enabled_ids
+        ]
+        conditions = (
+            (LintFinding.rule_id.not_in(disabled_ids),) if disabled_ids else ()
+        )
+        return select_in_workspace(
+            LintFinding, workspace_id=workspace_id, conditions=conditions
+        )
+
+    @classmethod
+    def _apply_finding_visibility_filters(
+        cls,
+        session: Session,
+        workspace_id: UUID,
+        base,
+        actor: ActorContext | None,
+    ):
+        """Apply list-equivalent Context, tree, and draft visibility gates."""
+        if actor is not None:
+            visible_page_ids = select_in_workspace(
+                ContextPage,
+                workspace_id=workspace_id,
+                conditions=(visible_context_version_expression(actor).is_not(None),),
+            ).with_only_columns(ContextPage.id)
+            base = where_in_workspace(
+                base,
+                LintFinding,
+                workspace_id=workspace_id,
+                conditions=(
+                    (LintFinding.target_type != "context_page")
+                    | LintFinding.target_id.in_(visible_page_ids),
+                ),
+            )
+            filtered = base.subquery()
+            tree_node_ids = session.scalars(
+                select(filtered.c.target_id)
+                .where(filtered.c.target_type == "workspace_tree_node")
+                .where(filtered.c.target_id.is_not(None))
+                .distinct()
+            ).all()
+            if tree_node_ids:
+                from backend.services.tree_read import TreeReadService
+
+                nodes = session.scalars(
+                    select_in_workspace(
+                        WorkspaceTreeNode,
+                        workspace_id=workspace_id,
+                        conditions=(WorkspaceTreeNode.id.in_(tree_node_ids),),
+                    )
+                ).all()
+                visible_ids = TreeReadService.visible_node_ids(session, nodes, actor)
+                hidden_node_ids = [
+                    node_id for node_id in tree_node_ids if node_id not in visible_ids
+                ]
+                if hidden_node_ids:
+                    base = where_in_workspace(
+                        base,
+                        LintFinding,
+                        workspace_id=workspace_id,
+                        conditions=(
+                            ~(
+                                (LintFinding.target_type == "workspace_tree_node")
+                                & LintFinding.target_id.in_(hidden_node_ids)
+                            ),
+                        ),
+                    )
+        if actor is not None and not actor_can_read_drafts(actor):
+            base = cls._exclude_draft_only_findings(session, base)
+        return base
 
     def run_lint(
         self,

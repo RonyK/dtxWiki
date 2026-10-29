@@ -987,8 +987,12 @@ class ServiceRegistry:
     @cached_property
     def body_preparer(self):
         from backend.services.body_preparer import BodyPreparer
+        from backend.services.context_links import configured_self_origins
 
-        return BodyPreparer(registry=self.lint_registry)
+        return BodyPreparer(
+            registry=self.lint_registry,
+            self_origins=configured_self_origins(self.settings),
+        )
 
     @cached_property
     def lint_registry(self):
@@ -1087,6 +1091,11 @@ class AppContainer:
     search_service: object | None = None
     ask_service: object | None = None
     services: ServiceRegistry = field(default_factory=ServiceRegistry)
+
+    def __post_init__(self) -> None:
+        # Resolve link origins from this container even before get_services()
+        # initializes another cached service.
+        self.services.settings = self.settings
 
     def get_page_service(self):
         if self.page_service is None:

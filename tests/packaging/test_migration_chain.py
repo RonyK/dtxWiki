@@ -36,7 +36,7 @@ EXTERNAL_LOGIN_REVISION = "da94025713de"
 REVIEW_HISTORY_INDEX_REVISION = "333a67e22cd7"
 USER_DELETION_REVISION = "eb86fdacb1bb"
 INBOX_REVISION = "175b9664724e"
-CURRENT_HEAD = INBOX_REVISION
+CURRENT_HEAD = "af62c98d0731"
 ALEMBIC_REVISION_METADATA = {
     "revision",
     "down_revision",
@@ -98,7 +98,8 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
         EXTERNAL_LOGIN_REVISION: PERSONAL_POINTER_REVISION,
         REVIEW_HISTORY_INDEX_REVISION: EXTERNAL_LOGIN_REVISION,
         USER_DELETION_REVISION: REVIEW_HISTORY_INDEX_REVISION,
-        CURRENT_HEAD: USER_DELETION_REVISION,
+        INBOX_REVISION: USER_DELETION_REVISION,
+        CURRENT_HEAD: INBOX_REVISION,
     }
     assert Path(script.get_revision(INBOX_REVISION).path).parent.name == "v0_2"
 
@@ -107,6 +108,7 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
     assert manifest["schema_releases"]["0.1.2"]["head"] == CORE_REVISION
     assert manifest["schema_releases"]["0.1.3"]["head"] == RELEASE_013_REVISION
     assert manifest["schema_releases"]["0.1.4"]["head"] == RELEASE_014_REVISION
+    assert manifest["schema_releases"]["0.2.0"]["head"] == CURRENT_HEAD
     for release, entry in manifest["schema_releases"].items():
         major, minor = release.split(".")[:2]
         assert entry["group"] == f"v{major}_{minor}"

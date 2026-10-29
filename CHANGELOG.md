@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Context link projections
+
+- Track authored link locators separately from document slugs so pinned
+  references survive renames, rescans, restores, and slug reuse. Group backlinks
+  by source page when several locator forms point to the same document.
+- Add batched workspace-scoped link visibility helpers and preserve other
+  authors' live editing-version pins during projection cleanup and reindexing.
+- Migration `af62c98d0731` follows Inbox revision `175b9664724e` and backfills
+  existing wikilink pins. Reindex live versions after upgrading; a downgrade
+  discards rebuildable non-wikilink projections, requiring reindex on re-upgrade.
+
 ### Inbox (planned for 0.2.0)
 
 - Add the Inbox foundation. The top bar opens `/inbox`, which lists messages
