@@ -21153,6 +21153,7 @@
       },
       "TreeReorderByAnchorRequest": {
         "additionalProperties": false,
+        "description": "Place the node immediately before or after the anchor node.\n\nAn anchor under another parent moves the node to that parent at that\nposition, under the same rules as ``POST /tree/move``.",
         "properties": {
           "anchor_node_id": {
             "format": "uuid",

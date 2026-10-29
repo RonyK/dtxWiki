@@ -1346,7 +1346,7 @@ function MermaidDiagram({
         </figure>
         {zoomOpen ? (
           <Dialog
-            className="mermaid-zoom-panel"
+            className="zoom-viewer-panel"
             labelledBy={titleId}
             onClose={() => setZoomOpen(false)}
           >

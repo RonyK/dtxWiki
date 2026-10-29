@@ -18,6 +18,7 @@ import {
 } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { setTreeFavoriteActor } from "../../../shared/api/treeFavorites";
 import type { TreeNodePayload } from "../../../shared/api/workspace";
 import { i18n } from "../../../shared/i18n";
 import type { ContextHistoryStatus } from "../../../shared/lib/contextHistory";
@@ -33,6 +34,9 @@ const { ctxWorkspace } = vi.hoisted(() => ({
       unknown
     >,
   },
+}));
+const { ctxAuth } = vi.hoisted(() => ({
+  ctxAuth: { current: null as { user: { user_id: string } } | null },
 }));
 const { contextMermaid } = vi.hoisted(() => ({
   contextMermaid: {
@@ -50,6 +54,10 @@ vi.mock(
     useOptionalWorkspaceContext: () => ctxWorkspace.current,
   }),
 );
+vi.mock("../../../shared/auth/AuthContext", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useOptionalAuth: () => ctxAuth.current,
+}));
 vi.mock("mermaid", () => ({ default: contextMermaid }));
 
 const BASE = "http://127.0.0.1:21080";
@@ -69,6 +77,8 @@ describe("ContextScreen", () => {
       selectedWorkspace: { role: "owner", visibility: "public" },
       workspaceSlug: "demo",
     };
+    ctxAuth.current = null;
+    setTreeFavoriteActor(null);
   });
 
   afterEach(() => {
@@ -957,9 +967,23 @@ describe("ContextScreen", () => {
     ).toBe(false);
   });
 
-  it("renders selected markdown with page actions and copy link", async () => {
+  it("renders selected markdown with page actions, favorite, and copy link", async () => {
     const writeText = installClipboardStub();
+    ctxAuth.current = { user: { user_id: "viewer-1" } };
+    setTreeFavoriteActor("viewer-1");
     const fetchMock = await renderDecisionLog();
+    const routeFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) =>
+      init?.method === "PUT"
+        ? jsonResponse({
+            data: {
+              target_kind: "context_page",
+              target_id: PAGE_ID,
+              is_favorite: true,
+            },
+          })
+        : routeFetch(input, init),
+    );
 
     await userEvent.click(
       screen.getByRole("treeitem", { name: "Decision Log" }),
@@ -988,6 +1012,21 @@ describe("ContextScreen", () => {
     expect(
       screen.getByRole("menuitem", { name: "Delete" }),
     ).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("menuitem", { name: "Add to my favorites" }),
+    );
+    expect(
+      fetchMock.mock.calls.find(([, init]) => init?.method === "PUT"),
+    ).toEqual([
+      `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/favorites/context_page/${PAGE_ID}`,
+      expect.objectContaining({ body: JSON.stringify({ is_favorite: true }) }),
+    ]);
+    // The reader menu and the rail share one favorite store.
+    expect(document.querySelectorAll(".tree-row-favorite")).toHaveLength(1);
+    await userEvent.click(moreAction);
+    expect(
+      await screen.findByRole("menuitem", { name: "Remove from my favorites" }),
+    ).toBeEnabled();
     await userEvent.click(screen.getByRole("menuitem", { name: "Copy link" }));
     expect(writeText).toHaveBeenCalledWith(
       expect.stringMatching(

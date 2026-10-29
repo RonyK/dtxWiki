@@ -80,6 +80,12 @@ class TreeReorderByDirectionRequest(BaseModel):
 
 
 class TreeReorderByAnchorRequest(BaseModel):
+    """Place the node immediately before or after the anchor node.
+
+    An anchor under another parent moves the node to that parent at that
+    position, under the same rules as ``POST /tree/move``.
+    """
+
     node_id: UUID
     anchor_node_id: UUID
     placement: Literal["before", "after"]

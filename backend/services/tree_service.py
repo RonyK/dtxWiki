@@ -17,7 +17,7 @@ from backend.models.base import utc_now
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.tree import TreePolicy, WorkspaceTreeNode
 from backend.models.workspace import Workspace, default_actor_id
-from backend.repositories.workspace_scoped import get_in_workspace
+from backend.repositories.workspace_scoped import get_in_workspace, select_in_workspace
 from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.read import TreeNodePayload
 from backend.schemas.tree import (
@@ -268,36 +268,48 @@ class TreeService:
             actor,
             self.tree_read_service,
         )
-        if node.is_system_node and node.parent_id is None:
-            raise RejectedByPolicyError("tree root cannot be moved")
-        if parent.section != node.section:
-            raise RejectedByPolicyError("tree node cannot move across sections")
-        if parent.visibility_status != "visible":
-            raise RejectedByPolicyError("target parent is not visible")
-        if not parent.can_have_children:
-            raise RejectedByPolicyError("target parent cannot have children")
-        if node.id == parent.id or is_descendant(session, parent, node.id):
-            raise RejectedByPolicyError("tree cycle detected")
-        if (
-            node.node_kind == "folder"
-            and node.slug is not None
-            and node.parent_id != parent.id
-            and sibling_slug_exists(
-                session,
-                workspace_id=workspace_id,
-                parent_id=parent.id,
-                slug=node.slug,
-            )
-        ):
-            # surface the same 409 the create path raises instead of letting
-            # the visible-folder partial unique 500 at flush
-            raise DuplicateSlugError(
-                f"folder slug already exists under target parent: {node.slug}"
-            )
+        require_move_target(session, workspace_id, node, parent)
 
         reason = (request.reason or "").strip() or DEFAULT_TREE_MOVE_REASON
         previous_parent_id = node.parent_id
         previous_sort_key = node.sort_key
+        node.parent_id = parent.id
+        node.sort_key = request.sort_key or next_child_sort_key(
+            session=session,
+            workspace_id=workspace_id,
+            parent_id=parent.id,
+        )
+        return self._record_tree_move(
+            session,
+            workspace_id,
+            node,
+            previous_parent_id=previous_parent_id,
+            previous_sort_key=previous_sort_key,
+            reason=reason,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+        )
+
+    def _record_tree_move(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        node: WorkspaceTreeNode,
+        *,
+        previous_parent_id: UUID | None,
+        previous_sort_key: str,
+        reason: str,
+        actor_kind: str,
+        actor_id: str,
+        audit_extra: dict[str, str] | None = None,
+    ) -> TreeNodePayload:
+        """Record a parent change already applied to ``node``.
+
+        Every reparent -- the Move dialog and a drop beside a row under another
+        parent -- writes the same change operation and audit event, so history,
+        activity and search treat both as one kind of move.
+        """
+
         previous_parent = (
             get_in_workspace(
                 session,
@@ -318,16 +330,12 @@ class TreeService:
             if previous_parent
             else []
         )
+        assert node.parent_id is not None
+        parent = require_tree_node(session, workspace_id, node.parent_id)
         new_parent_path = [
             {"id": str(entry.id), "title": entry.title}
             for entry in self.tree_read_service.path_for_node(session, parent)
         ]
-        node.parent_id = parent.id
-        node.sort_key = request.sort_key or next_child_sort_key(
-            session=session,
-            workspace_id=workspace_id,
-            parent_id=parent.id,
-        )
         change_set = create_tree_change_set(
             session=session,
             workspace_id=workspace_id,
@@ -345,7 +353,7 @@ class TreeService:
                 diff_summary=reason,
                 diff_ref=(
                     f"from:{previous_parent_id}:{previous_sort_key};"
-                    f"to:{parent.id}:{node.sort_key}"
+                    f"to:{node.parent_id}:{node.sort_key}"
                 ),
             )
         )
@@ -362,10 +370,11 @@ class TreeService:
                 "previous_parent_id": (
                     str(previous_parent_id) if previous_parent_id else None
                 ),
-                "new_parent_id": str(parent.id),
+                "new_parent_id": str(node.parent_id),
                 "previous_parent_path": previous_parent_path,
                 "new_parent_path": new_parent_path,
                 "reason": reason,
+                **(audit_extra or {}),
             },
         )
         session.flush()
@@ -402,45 +411,7 @@ class TreeService:
                 error_code="system_tree_node_protected",
             )
 
-        # Serialize every reorder under this parent. PostgreSQL holds this row
-        # lock until the endpoint transaction commits, so sibling reads and the
-        # gap-free renumber cannot interleave with another reorder of the same
-        # parent. The sibling locks also protect against direct row mutations.
-        session.scalar(
-            select(WorkspaceTreeNode.id)
-            .where(WorkspaceTreeNode.id == node.parent_id)
-            .with_for_update()
-        )
-        siblings = list(
-            session.scalars(
-                select(WorkspaceTreeNode)
-                .where(
-                    WorkspaceTreeNode.workspace_id == workspace_id,
-                    WorkspaceTreeNode.parent_id == node.parent_id,
-                    WorkspaceTreeNode.visibility_status == "visible",
-                )
-                .execution_options(populate_existing=True)
-                .with_for_update()
-            ).all()
-        )
-        siblings.sort(
-            key=lambda candidate: (
-                candidate.sort_key,
-                candidate.title,
-                str(candidate.id),
-            )
-        )
-        index = next(
-            (
-                position
-                for position, candidate in enumerate(siblings)
-                if candidate.id == node.id
-            ),
-            -1,
-        )
-        if index < 0:
-            raise ReadNotFoundError("tree node not found")
-
+        anchor: WorkspaceTreeNode | None = None
         if isinstance(reorder, TreeReorderByAnchorRequest):
             anchor = require_visible_tree_node(
                 session,
@@ -453,13 +424,72 @@ class TreeService:
                 anchor.id == node.id
                 or anchor.visibility_status != "visible"
                 or anchor.is_system_node
+                or anchor.parent_id is None
                 or anchor.section != node.section
-                or anchor.parent_id != node.parent_id
             ):
                 raise RejectedByPolicyError(
-                    "reorder anchor must be a visible non-system sibling",
+                    "reorder anchor must be a visible non-system node",
                     error_code="invalid_tree_reorder_anchor",
                 )
+        parent_id = anchor.parent_id if anchor is not None else node.parent_id
+        assert parent_id is not None
+        locked_parent_ids = (node.parent_id, parent_id)
+        siblings = _lock_ordered_children(
+            session, workspace_id, locked_parent_ids, parent_id
+        )
+        # A competing move can commit while we wait for the parent locks. Use
+        # the current placement and visibility before deciding whether this is
+        # still a move or has become a sibling reorder.
+        session.refresh(node)
+        node = require_visible_tree_node(
+            session, workspace_id, reorder.node_id, actor, self.tree_read_service
+        )
+        if node.is_system_node or node.parent_id is None:
+            raise RejectedByPolicyError(
+                "system tree node cannot be reordered",
+                error_code="system_tree_node_protected",
+            )
+        if node.parent_id not in locked_parent_ids:
+            # We do not hold this new parent's lock. Refuse rather than modify
+            # an unprotected sibling set or acquire locks out of order.
+            raise ReadNotFoundError(
+                "tree node moved to another parent; reload the tree"
+            )
+        if anchor is not None:
+            session.refresh(anchor)
+            anchor = require_visible_tree_node(
+                session, workspace_id, anchor.id, actor, self.tree_read_service
+            )
+            if anchor.parent_id != parent_id or anchor.is_system_node:
+                raise RejectedByPolicyError(
+                    "reorder anchor must be a visible non-system node",
+                    error_code="invalid_tree_reorder_anchor",
+                )
+            if node.parent_id != parent_id:
+                return self._move_node_beside_anchor(
+                    session,
+                    workspace_id,
+                    node,
+                    anchor,
+                    reorder.placement,
+                    siblings,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    actor=actor,
+                )
+        index = next(
+            (
+                position
+                for position, candidate in enumerate(siblings)
+                if candidate.id == node.id
+            ),
+            -1,
+        )
+        if index < 0:
+            raise ReadNotFoundError("tree node not found")
+
+        if isinstance(reorder, TreeReorderByAnchorRequest):
+            assert anchor is not None
             without_node = [
                 candidate for candidate in siblings if candidate.id != node.id
             ]
@@ -473,7 +503,7 @@ class TreeService:
             )
             if anchor_index < 0:
                 raise RejectedByPolicyError(
-                    "reorder anchor must be a visible non-system sibling",
+                    "reorder anchor must be a visible non-system node",
                     error_code="invalid_tree_reorder_anchor",
                 )
             insertion_index = anchor_index + (1 if reorder.placement == "after" else 0)
@@ -576,6 +606,66 @@ class TreeService:
         )
         session.flush()
         return self.tree_read_service.get_node(session, workspace_id, node.id)
+
+    def _move_node_beside_anchor(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        node: WorkspaceTreeNode,
+        anchor: WorkspaceTreeNode,
+        placement: str,
+        destination: list[WorkspaceTreeNode],
+        *,
+        actor_kind: str,
+        actor_id: str,
+        actor: ActorContext | None,
+    ) -> TreeNodePayload:
+        assert anchor.parent_id is not None and node.parent_id is not None
+        parent = require_visible_tree_node(
+            session, workspace_id, anchor.parent_id, actor, self.tree_read_service
+        )
+        require_move_target(session, workspace_id, node, parent)
+        # The caller holds both parent locks and has refreshed the node. Keep
+        # one occurrence even if a supplied destination already includes it.
+        destination = [
+            candidate for candidate in destination if candidate.id != node.id
+        ]
+        anchor_index = next(
+            (
+                position
+                for position, candidate in enumerate(destination)
+                if candidate.id == anchor.id
+            ),
+            -1,
+        )
+        if anchor_index < 0:
+            raise RejectedByPolicyError(
+                "reorder anchor must be a visible non-system node",
+                error_code="invalid_tree_reorder_anchor",
+            )
+        # The node is inserted next to a non-system anchor, so it lands on the
+        # anchor's side of every system sibling; no system folder is crossed.
+        insertion_index = anchor_index + (1 if placement == "after" else 0)
+        reordered = list(destination)
+        reordered.insert(insertion_index, node)
+        previous_parent_id = node.parent_id
+        previous_sort_key = node.sort_key
+        node.parent_id = parent.id
+        for position, sibling in enumerate(reordered, start=1):
+            next_key = f"{position:04d}"
+            if sibling.sort_key != next_key:
+                sibling.sort_key = next_key
+        return self._record_tree_move(
+            session,
+            workspace_id,
+            node,
+            previous_parent_id=previous_parent_id,
+            previous_sort_key=previous_sort_key,
+            reason=f"move tree node {node.title} {placement} {anchor.title}",
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            audit_extra={"anchor_node_id": str(anchor.id), "placement": placement},
+        )
 
     def archive_node(
         self,
@@ -974,6 +1064,92 @@ def require_tree_node(
     if node is None:
         raise ReadNotFoundError("tree node not found")
     return node
+
+
+def require_move_target(
+    session: Session,
+    workspace_id: UUID,
+    node: WorkspaceTreeNode,
+    parent: WorkspaceTreeNode,
+) -> None:
+    """Refuse a reparent of ``node`` under ``parent`` that any move path forbids."""
+
+    if node.is_system_node and node.parent_id is None:
+        raise RejectedByPolicyError("tree root cannot be moved")
+    if parent.section != node.section:
+        raise RejectedByPolicyError("tree node cannot move across sections")
+    if parent.visibility_status != "visible":
+        raise RejectedByPolicyError("target parent is not visible")
+    if not parent.can_have_children:
+        raise RejectedByPolicyError("target parent cannot have children")
+    if node.id == parent.id or is_descendant(session, parent, node.id):
+        raise RejectedByPolicyError("tree cycle detected")
+    if (
+        node.node_kind == "folder"
+        and node.slug is not None
+        and node.parent_id != parent.id
+        and sibling_slug_exists(
+            session,
+            workspace_id=workspace_id,
+            parent_id=parent.id,
+            slug=node.slug,
+        )
+    ):
+        # surface the same 409 the create path raises instead of letting
+        # the visible-folder partial unique 500 at flush
+        raise DuplicateSlugError(
+            f"folder slug already exists under target parent: {node.slug}"
+        )
+
+
+def _lock_ordered_children(
+    session: Session,
+    workspace_id: UUID,
+    locked_parent_ids: tuple[UUID, ...],
+    parent_id: UUID,
+) -> list[WorkspaceTreeNode]:
+    """Lock ``locked_parent_ids`` and return ``parent_id``'s visible children in order.
+
+    Serialize every reorder or positional move under a parent. PostgreSQL holds
+    these row locks until the endpoint transaction commits, so sibling reads and
+    the gap-free renumber cannot interleave with another change of the same
+    sibling set. Parents are locked in id order so two moves in opposite
+    directions cannot deadlock. The child locks also protect against direct row
+    mutations.
+    """
+
+    for locked_id in sorted(set(locked_parent_ids), key=str):
+        session.scalar(
+            select_in_workspace(
+                WorkspaceTreeNode,
+                workspace_id=workspace_id,
+                conditions=(WorkspaceTreeNode.id == locked_id,),
+            )
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        )
+    children = list(
+        session.scalars(
+            select_in_workspace(
+                WorkspaceTreeNode,
+                workspace_id=workspace_id,
+                conditions=(
+                    WorkspaceTreeNode.parent_id == parent_id,
+                    WorkspaceTreeNode.visibility_status == "visible",
+                ),
+            )
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        ).all()
+    )
+    children.sort(
+        key=lambda candidate: (
+            candidate.sort_key,
+            candidate.title,
+            str(candidate.id),
+        )
+    )
+    return children
 
 
 def require_visible_tree_node(

@@ -137,8 +137,8 @@ describe("mobile layout regression styles", () => {
   it("raises compact Markdown and editor popover controls for narrow and coarse pointers", () => {
     for (const selector of [
       ".markdown-code-copy",
-      ".mermaid-zoom-toolbar-button",
-      ".mermaid-zoom-readout",
+      ".zoom-viewer-toolbar-button",
+      ".zoom-viewer-readout",
       ".editor-link-header button",
       ".editor-link-actions button",
       ".editor-comment-header button",

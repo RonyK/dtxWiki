@@ -7,6 +7,12 @@
   "landedAfter": "{{title}} 항목을 {{anchor}} 뒤에 배치했습니다.",
   "landedInside": "{{title}} 항목을 {{parent}} 안으로 이동했습니다.",
   "moveFailed": "{{title}} 항목을 이동하지 못했습니다.",
+  "dropHint": {
+    "before": "{{anchor}} 앞으로",
+    "after": "{{anchor}} 뒤로",
+    "inside": "{{parent}} 안으로",
+    "firstChild": "{{parent}} 맨 위로"
+  },
   "counts": "{{visible}}/{{total}}",
   "createItem": "{{title}} 항목 만들기",
   "createFolder": "{{title}} 폴더 만들기",

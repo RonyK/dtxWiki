@@ -546,10 +546,6 @@
     "diagram": "Mermaid 다이어그램",
     "zoom": {
       "controls": "Mermaid 확대/축소 도구",
-      "out": "축소",
-      "current": "현재 배율 {{percent}}%",
-      "in": "확대",
-      "reset": "배율 초기화",
       "close": "Mermaid 확대 보기 닫기"
     }
   }

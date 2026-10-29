@@ -10954,7 +10954,13 @@ export interface components {
             /** Title */
             title: string;
         };
-        /** TreeReorderByAnchorRequest */
+        /**
+         * TreeReorderByAnchorRequest
+         * @description Place the node immediately before or after the anchor node.
+         *
+         *     An anchor under another parent moves the node to that parent at that
+         *     position, under the same rules as ``POST /tree/move``.
+         */
         TreeReorderByAnchorRequest: {
             /**
              * Anchor Node Id
