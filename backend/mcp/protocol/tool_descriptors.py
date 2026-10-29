@@ -254,7 +254,7 @@ TOOL_META = {
         "('Save draft'). Requires the editing_revision you last saw. Once "
         "submitted, that version is never mutated again -- further changes "
         "need a new begin_context_edit. The response returns the version's "
-        "ids and review status, not the body. "
+        "ids and review status, not the body; read it by version_id. "
         "Requires conversation_token: echo one from an earlier envelope or "
         "pass the literal 'new'.",
         False,

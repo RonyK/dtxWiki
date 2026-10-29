@@ -695,7 +695,7 @@
     "$defs": {
       "ContextEditResult": {
         "additionalProperties": false,
-        "description": "What an edit command saved: the version to address next and what changed.\n\nThe body is not repeated. edit_receipt.changes quotes the replaced\nregions; read the body with version='my_edit' only when you need text the\nreceipt does not show.",
+        "description": "What an edit command saved: the version to address next and what changed.\n\nThe body is not repeated. edit_receipt.changes quotes the replaced\nregions; when you need text the receipt does not show, read this version\nby version_id (target.version_id), which still names it after a submit.",
         "properties": {
           "change_set_id": {
             "anyOf": [

@@ -320,6 +320,12 @@ def test_update_context_edit_on_another_actors_editing_row_forks_a_draft(
     forked = _stored(page_service, response.data.version_id)
     assert forked.parent_version_id == created.version_id
     assert forked.body_md == "# Hello\n\nActor B's own words, not A's."
+    # The receipt has no base to quote: A's private text, its size and its
+    # revision stay A's.
+    assert "Initial body" not in response.model_dump_json()
+    assert response.data.edit_receipt.changes is None
+    assert response.data.edit_receipt.chars_removed == 0
+    assert response.data.edit_receipt.editing_revision_before is None
 
     # And critically: A's own editing row is untouched by B's call.
     a_view = dispatch(
@@ -622,4 +628,4 @@ def test_patch_context_edit_replay_is_idempotent(page_service, actor):
     assert replay.data.version_id == first.data.version_id
     assert replay.data.editing_revision == first.data.editing_revision
     assert replay.data.content_hash == first.data.content_hash
-    assert replay.data.edit_receipt == first.data.edit_receipt
+    assert replay.data.edit_receipt.model_dump() == first.data.edit_receipt.model_dump()

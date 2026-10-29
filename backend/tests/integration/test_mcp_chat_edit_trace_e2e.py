@@ -198,6 +198,10 @@ def test_traced_edit_calls_carry_previews_receipts_and_the_session_diff(
     ] == [("old_text", "first line"), ("new_text", "second line")]
     assert patch_row.edit_summary.source == "receipt"
     assert patch_row.result_detail.edit_receipt.edit_mode == "patch"
+    # The whole-line preview reaches the trace although the response omits it.
+    assert patch_row.result_detail.edit_receipt.first_change.after_preview == (
+        "second line"
+    )
     # A brand-new page: its open session diffs against an empty document,
     # offered once, on the session's latest successful edit.
     assert create_row.session_diff is None

@@ -175,3 +175,4 @@ def test_an_inserted_section_is_attributed_to_itself_not_the_one_above():
 
     assert receipt.changed_sections == [["Doc", "B"]]
     assert receipt.changes[0].added.lstrip("\n").startswith("## B")
+    assert receipt._trace_first_change["after_preview"].startswith("## B")

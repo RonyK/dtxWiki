@@ -3462,8 +3462,18 @@ class PageService:
                     and current.created_by_actor_kind == actor_kind
                     and current.created_by_actor_id == actor_id
                 )
-                receipt_base["body"] = current.body_md
-                receipt_base["revision"] = current.editing_revision
+                # The receipt quotes its base, so it follows the same rule as
+                # a conflict response: another author's private editing row
+                # is never disclosed, and the receipt then has no base.
+                disclosed_id, _ = self._disclosable_version_fields(
+                    current, actor_kind, actor_id
+                )
+                receipt_base["body"] = (
+                    current.body_md if disclosed_id is not None else None
+                )
+                receipt_base["revision"] = (
+                    current.editing_revision if disclosed_id is not None else None
+                )
                 alternative_base = self._autosave_check_base(
                     session=session,
                     page=page,
@@ -3979,11 +3989,15 @@ class PageService:
         with_edit_receipt: bool,
     ) -> PagePayload:
         if with_edit_receipt and receipt_base:
+            before_body = receipt_base["body"]
+            revision_before = receipt_base["revision"]
             result._edit_receipt = build_edit_receipt(
                 edit_mode="whole_body",
-                before_body=str(receipt_base["body"]),
+                before_body=before_body if isinstance(before_body, str) else None,
                 after_body=result.body_md,
-                editing_revision_before=int(receipt_base["revision"]),
+                editing_revision_before=(
+                    revision_before if isinstance(revision_before, int) else None
+                ),
                 editing_revision_after=result.editing_revision,
                 requested_body=str(receipt_base["requested"]),
                 server_fixes=tuple(receipt_base["fixes"]),

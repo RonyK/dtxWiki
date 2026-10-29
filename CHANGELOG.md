@@ -91,8 +91,8 @@
   to a 28 KB page now returns about 2 KB instead of 32 KB. `data` keeps the
   ids, `editing_revision`, `content_hash`, status, review ids,
   `publish_blocked_reasons` and `edit_receipt`; clients that read
-  `data.body_md` from these responses read the body with
-  `version="my_edit"` instead. `edit_receipt.first_change` is replaced by
+  `data.body_md` from these responses read that version by `data.version_id`
+  instead (`version="my_edit"` names only an edit that is still open). `edit_receipt.first_change` is replaced by
   `changes`, the replaced regions as exact text with same-line context (up to
   20 regions or 4 KB, then `changes_omitted_count`). The receipt also reports
   `body_adjusted`, `server_fixes` and `changed_blocks_omitted_count`. The text

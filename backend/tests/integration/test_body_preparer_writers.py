@@ -216,7 +216,9 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
             if provenance == "mcp_client":
                 replay = page_service.autosave_page(**autosave_args)
                 assert saved._edit_receipt is not None
-                assert replay._edit_receipt == saved._edit_receipt
+                assert replay._edit_receipt.model_dump() == (
+                    saved._edit_receipt.model_dump()
+                )
                 assert replay.version_id == saved.version_id
                 assert replay.body_md == saved.body_md
                 assert replay.editing_revision == saved.editing_revision

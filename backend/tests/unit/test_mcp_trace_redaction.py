@@ -667,14 +667,7 @@ def _edit_receipt() -> dict:
             {
                 "line": 7,
                 "context_before": "",
-                "removed": "token=RECEIPT-SECRET old",
-                "added": "x" * 500,
-                "context_after": " line",
-            },
-            {
-                "line": 9,
-                "context_before": "",
-                "removed": "SECOND-REGION",
+                "removed": "REGION-TEXT",
                 "added": "y",
                 "context_after": "",
             },
@@ -699,14 +692,23 @@ def _edit_receipt() -> dict:
 
 
 def test_edit_receipt_is_allowlisted_and_its_previews_are_masked() -> None:
+    from backend.services.edit_receipt import build_edit_receipt
     from backend.services.mcp_trace_redaction import redact_edit_receipt
 
-    receipt = redact_edit_receipt(_edit_receipt())
+    receipt = redact_edit_receipt(
+        _edit_receipt(),
+        first_change={
+            "line": 7,
+            "before_preview": "token=RECEIPT-SECRET old line",
+            "after_preview": "x" * 500,
+        },
+    )
 
     assert receipt is not None
     assert "UNLISTED-RECEIPT-FIELD" not in json.dumps(receipt)
-    # Only the first region is kept, as the Chats preview, and it is masked.
-    assert "SECOND-REGION" not in json.dumps(receipt)
+    # Regions are never stored; the Chats preview is the server's whole-line cut.
+    assert "REGION-TEXT" not in json.dumps(receipt)
+    assert redact_edit_receipt(_edit_receipt())["first_change"] is None
     assert receipt["first_change"]["line"] == 7
     assert "RECEIPT-SECRET" not in receipt["first_change"]["before_preview"]
     assert receipt["first_change"]["after_preview"].endswith("…")
@@ -725,11 +727,20 @@ def test_edit_receipt_is_allowlisted_and_its_previews_are_masked() -> None:
     assert receipt["changed_sections"] == [["Guide", "Setup"]]
     assert receipt["editing_revision_after"] == 4
     assert redact_edit_receipt(receipt) == receipt
-    # With the first region left out, no later region poses as the first.
-    omitted = redact_edit_receipt(
-        {**_edit_receipt(), "changes": [], "changes_omitted_count": 1}
+    # A credential whose value alone changed is still masked: its region starts
+    # past the label, but the preview is cut from the start of the line.
+    built = build_edit_receipt(
+        edit_mode="patch",
+        before_body="# T\n\npassword=" + " " * 40 + "hunter2\n",
+        after_body="# T\n\npassword=" + " " * 40 + "hunter3\n",
+        editing_revision_before=1,
+        editing_revision_after=2,
     )
-    assert omitted["first_change"] is None
+    stored = redact_edit_receipt(
+        built.model_dump(mode="json"), first_change=built._trace_first_change
+    )
+    assert stored["first_change"] is not None
+    assert "hunter" not in json.dumps(stored)
     assert redact_edit_receipt("not a receipt") is None
     assert redact_edit_receipt({"edit_mode": "bogus"}) is None
 

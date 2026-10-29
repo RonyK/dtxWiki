@@ -168,7 +168,7 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        repeat the page: it carries id, version_id, editing_revision,
 #        content_hash, version_status, title, slug, review_item_id,
 #        change_set_id, publish_blocked_reasons and edit_receipt. Read the
-#        body with version="my_edit" when needed. The receipt's first_change
+#        body by data.version_id when needed. The receipt's first_change
 #        is replaced by changes (the replaced regions as exact text, up to 20
 #        regions or 4 KB, then changes_omitted_count), and gains body_adjusted,
 #        server_fixes and changed_blocks_omitted_count. Every result's text

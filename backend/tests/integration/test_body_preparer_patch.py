@@ -115,7 +115,7 @@ def test_context_edit_patch_fixes_final_body_and_replays_matching_receipt(
 
     replayed = page_service.patch_context_edit(**command)
     assert replayed.model_dump() == patched.model_dump()
-    assert replayed._edit_receipt == receipt
+    assert replayed._edit_receipt.model_dump() == receipt.model_dump()
     # A receipt stored before `changes` replaced `first_change` still replays;
     # its regions are unknown rather than empty.
     with session_factory.begin() as session:

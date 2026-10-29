@@ -62,6 +62,7 @@ def persist_mcp_tool_trace(
     chat_service: McpChatService | None = None,
     create_chat_session: bool = True,
     read_projection: dict[str, Any] | None = None,
+    edit_first_change: dict[str, Any] | None = None,
 ) -> MCPToolCall | None:
     arguments, payload = redact_tool_capture(tool_name, arguments, payload)
     envelope = payload.get("envelope", {})
@@ -86,7 +87,10 @@ def persist_mcp_tool_trace(
         result_status=str(envelope.get("result_status") or "failed"),
         result_summary=envelope.get("result_summary"),
         result_detail=_result_detail(
-            tool_name, payload, read_projection=read_projection
+            tool_name,
+            payload,
+            read_projection=read_projection,
+            edit_first_change=edit_first_change,
         ),
         warnings=_jsonable(envelope.get("warnings") or []),
         error_code=envelope.get("error_code"),
@@ -385,6 +389,7 @@ def _result_detail(
     payload: dict[str, Any],
     *,
     read_projection: dict[str, Any] | None = None,
+    edit_first_change: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Allowlisted edit receipts and separate internal served-read facts.
 
@@ -420,7 +425,9 @@ def _result_detail(
     version_id = _uuid_or_none(data.get("version_id"))
     if version_id is not None:
         detail["version_id"] = str(version_id)
-    receipt = redact_edit_receipt(data.get("edit_receipt"))
+    receipt = redact_edit_receipt(
+        data.get("edit_receipt"), first_change=edit_first_change
+    )
     if receipt is not None:
         detail["edit_receipt"] = receipt
     return detail or None

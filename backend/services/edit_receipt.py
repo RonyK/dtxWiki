@@ -30,6 +30,7 @@ from backend.utils.markdown_outline import Outline, parse_outline
 
 _ANY_NEWLINE = re.compile(r"\r\n|\r|\n")
 
+PREVIEW_CHARS = 300
 MAX_CHANGED_SECTIONS = 20
 MAX_CHANGED_BLOCKS = 50
 # before-lines x after-lines of the region that differs; ~40 ms of diffing.
@@ -262,7 +263,7 @@ def build_edit_receipt(
             if (entry.get("id"), entry.get("hash")) not in previous
         ]
 
-    return EditReceipt(
+    receipt = EditReceipt(
         edit_mode=edit_mode,
         editing_revision_before=editing_revision_before,
         editing_revision_after=editing_revision_after,
@@ -288,6 +289,19 @@ def build_edit_receipt(
         ],
         changed_blocks_omitted_count=max(0, len(changed_entries) - MAX_CHANGED_BLOCKS),
     )
+    if spans and before_body is not None:
+        b1, b2, a1, a2 = spans[0]
+        # Start at the first changed character that is not a blank line: an
+        # inserted section begins with the blank line that separates it, and
+        # pointing at that line would name the section above it.
+        after_start = _first_ink(after_body, a1, a2)
+        before_start = _first_ink(before, b1, b2)
+        receipt._trace_first_change = {
+            "line": _line_of(after_starts, after_start),
+            "before_preview": before[before_start : before_start + PREVIEW_CHARS],
+            "after_preview": after_body[after_start : after_start + PREVIEW_CHARS],
+        }
+    return receipt
 
 
 def patch_operation_receipts(

@@ -103,8 +103,8 @@ class ContextEditResult(BaseModel):
     """What an edit command saved: the version to address next and what changed.
 
     The body is not repeated. edit_receipt.changes quotes the replaced
-    regions; read the body with version='my_edit' only when you need text the
-    receipt does not show.
+    regions; when you need text the receipt does not show, read this version
+    by version_id (target.version_id), which still names it after a submit.
     """
 
     id: UUID

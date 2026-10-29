@@ -429,7 +429,7 @@ def _edit_trace_payload(workspace_id, *, data, result_status="succeeded"):
     }
 
 
-def _persist(page_service, actor, tool_name, arguments, payload):
+def _persist(page_service, actor, tool_name, arguments, payload, **trace_inputs):
     from datetime import UTC, datetime
 
     from backend.services.mcp_trace_capture import persist_mcp_tool_trace
@@ -446,6 +446,7 @@ def _persist(page_service, actor, tool_name, arguments, payload):
             started_at=now,
             completed_at=now,
             latency_ms=1,
+            **trace_inputs,
         )
         assert call is not None
         return call.id
@@ -470,11 +471,15 @@ def test_persist_trace_stores_the_masked_edit_receipt(page_service, mcp_default_
         "lines_added": 1,
         "lines_removed": 1,
         "changed_sections": [["Guide"]],
-        "first_change": {
-            "line": 3,
-            "before_preview": "old access_token=CAPTURE-SECRET",
-            "after_preview": "new line",
-        },
+        "changes": [
+            {
+                "line": 3,
+                "context_before": "",
+                "removed": "old",
+                "added": "new line",
+                "context_after": " REGION-CONTEXT",
+            }
+        ],
         "operations": [
             {
                 "index": 0,
@@ -510,6 +515,11 @@ def test_persist_trace_stores_the_masked_edit_receipt(page_service, mcp_default_
                 "edit_receipt": receipt,
             },
         ),
+        edit_first_change={
+            "line": 3,
+            "before_preview": "old access_token=CAPTURE-SECRET",
+            "after_preview": "new line",
+        },
     )
 
     with page_service.session_factory() as session:
@@ -521,7 +531,9 @@ def test_persist_trace_stores_the_masked_edit_receipt(page_service, mcp_default_
     assert detail["version_id"] == str(version_id)
     assert detail["edit_receipt"]["chars_added"] == 9
     assert detail["edit_receipt"]["operations"][0]["affected_block_ids"] == ["b_1"]
+    assert detail["edit_receipt"]["first_change"]["after_preview"] == "new line"
     assert "CAPTURE-SECRET" not in json.dumps(detail)
+    assert "REGION-CONTEXT" not in json.dumps(detail)
     assert "FULL-BODY-MUST-NOT-BE-STORED" not in json.dumps(detail)
     assert input_summary["operations"][0]["new_text_preview"] == {
         "text": "new line",

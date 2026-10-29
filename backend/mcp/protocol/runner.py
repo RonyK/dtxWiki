@@ -498,6 +498,7 @@ async def call_tool_async(
             arguments=trace_arguments,
             payload=trace_payload,
             read_projection=getattr(response, "_served_read_projection", None),
+            edit_first_change=_edit_trace_preview(response),
             mcp_session_id=conversation.token
             or mcp_session_id
             or str(envelope.get("request_id") or ""),
@@ -823,6 +824,17 @@ def _requested_conversation_token(arguments: dict[str, Any]) -> Any:
 _WIRE_ENVELOPE_FIELDS = WIRE_ENVELOPE_FIELDS
 
 
+def _edit_trace_preview(response: Any) -> dict[str, Any] | None:
+    """An edit receipt's Chats preview, cut from whole lines for masking.
+
+    Like ``_served_read_projection`` it bypasses the wire schema; the runner
+    passes it to trace persistence separately.
+    """
+
+    receipt = getattr(getattr(response, "data", None), "edit_receipt", None)
+    return getattr(receipt, "_trace_first_change", None)
+
+
 def _wire_text(payload: dict[str, Any]) -> str:
     """The TextContent copy of a result: the same JSON as structuredContent.
 
@@ -905,6 +917,7 @@ def _persist_trace(
     create_chat_session: bool = True,
     fail_closed: bool = False,
     read_projection: dict[str, Any] | None = None,
+    edit_first_change: dict[str, Any] | None = None,
 ) -> None:
     if not mcp_session_id or trace_workspace_id is None:
         return
@@ -936,6 +949,7 @@ def _persist_trace(
                 latency_ms=latency_ms,
                 create_chat_session=create_chat_session,
                 read_projection=read_projection,
+                edit_first_change=edit_first_change,
             )
     except Exception:
         # Counted BEFORE the fail_closed branch: a correctness-critical trace

@@ -351,13 +351,16 @@ def _stale_base_envelope(actor, exc: PageConflictError):
 
 
 def _edit_result(data: PagePayload) -> ContextEditResult:
-    """What an edit command saved, without repeating the body."""
+    """What an edit command saved, without repeating the body.
 
-    receipt = data._edit_receipt
+    The receipt instance is kept, not re-dumped, so its private Chats preview
+    reaches the runner's trace capture.
+    """
+
     return ContextEditResult.model_validate(
         {
             **data.model_dump(include=set(ContextEditResult.model_fields)),
-            "edit_receipt": receipt.model_dump() if receipt is not None else None,
+            "edit_receipt": data._edit_receipt,
         }
     )
 

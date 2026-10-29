@@ -6,9 +6,9 @@ responses and stored for the Chats timeline.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 EditMode = Literal["patch", "whole_body", "create"]
 
@@ -131,5 +131,10 @@ class EditReceipt(BaseModel):
         ),
     )
     changed_blocks_omitted_count: int = 0
+    # The Chats preview of the first change, cut from the start of its line so
+    # trace masking sees a credential's label even when only its value
+    # changed. Never on the wire, never in the replay ledger: the runner hands
+    # it to trace capture separately.
+    _trace_first_change: dict[str, Any] | None = PrivateAttr(default=None)
 
     model_config = ConfigDict(extra="forbid")
