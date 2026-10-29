@@ -1479,6 +1479,11 @@ async function renderMermaidDiagram(source: string, diagramId: string) {
     themeVariables: {
       fontFamily: MERMAID_FONT_FAMILY,
       fontSize: MERMAID_FONT_SIZE,
+      // Notes stay the yellow they have always been here, in every diagram
+      // type; the neutral theme would draw them dark grey with white text.
+      noteBkgColor: "#EDF2AE",
+      noteBorderColor: "#666",
+      noteTextColor: "#333",
     },
   });
   // Validate syntax WITHOUT touching the DOM before rendering. mermaid.render()
@@ -1675,8 +1680,14 @@ function sanitizeMermaidElement(root: Element) {
       element.remove();
       continue;
     }
+    // A raster image embedded in the SVG itself (C4's person icon) loads
+    // nothing and runs nothing. An image with any other source goes.
+    if (tagName === "image" && !hasOnlyEmbeddedMermaidRaster(element)) {
+      element.remove();
+      continue;
+    }
     for (const attribute of Array.from(element.attributes)) {
-      if (isUnsafeMermaidSvgAttribute(attribute.name, attribute.value, root.ownerDocument)) {
+      if (isUnsafeMermaidSvgAttribute(attribute.name, attribute.value, root.ownerDocument, tagName)) {
         element.removeAttribute(attribute.name);
       }
     }
@@ -1748,7 +1759,6 @@ function isForbiddenMermaidSvgElement(tagName: string) {
     "filter",
     "foreignobject",
     "iframe",
-    "image",
     "object",
     "script",
     "set",
@@ -1757,7 +1767,12 @@ function isForbiddenMermaidSvgElement(tagName: string) {
   ].includes(tagName);
 }
 
-function isUnsafeMermaidSvgAttribute(name: string, value: string, owner: Document) {
+function isUnsafeMermaidSvgAttribute(
+  name: string,
+  value: string,
+  owner: Document,
+  tagName: string,
+) {
   const normalizedName = name.toLowerCase();
   const normalizedValue = value.trim().toLowerCase();
   if (normalizedName.startsWith("on")) {
@@ -1772,7 +1787,8 @@ function isUnsafeMermaidSvgAttribute(name: string, value: string, owner: Documen
   }
   if (
     ["href", "xlink:href", "src"].includes(normalizedName) &&
-    !isSafeMermaidSvgReference(normalizedValue)
+    !isSafeMermaidSvgReference(normalizedValue) &&
+    !(tagName === "image" && isEmbeddedMermaidRaster(value))
   ) {
     return true;
   }
@@ -1781,6 +1797,24 @@ function isUnsafeMermaidSvgAttribute(name: string, value: string, owner: Documen
 
 function isSafeMermaidSvgReference(value: string) {
   return value.startsWith("#");
+}
+
+// PNG, JPEG, GIF or WebP data only: SVG data could carry its own references.
+const MERMAID_EMBEDDED_RASTER = /^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/]+={0,2}$/i;
+// Far above C4's 3 KB icon; bounds what one diagram can make the browser decode.
+const MERMAID_EMBEDDED_RASTER_MAX_LENGTH = 200_000;
+
+function isEmbeddedMermaidRaster(value: string) {
+  const source = value.trim();
+  return source.length <= MERMAID_EMBEDDED_RASTER_MAX_LENGTH &&
+    MERMAID_EMBEDDED_RASTER.test(source);
+}
+
+function hasOnlyEmbeddedMermaidRaster(image: Element) {
+  const sources = ["href", "xlink:href", "src"]
+    .map((name) => image.getAttribute(name))
+    .filter((source): source is string => source !== null);
+  return sources.length > 0 && sources.every(isEmbeddedMermaidRaster);
 }
 
 type AnchorHighlight = {

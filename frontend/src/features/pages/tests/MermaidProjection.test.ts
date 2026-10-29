@@ -338,6 +338,10 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
       'C4Context\n  Person(customer, "Customer")\n  System(sys, "System")\n  Rel(customer, sys, "Uses")',
     );
     expect(c4.textContent).toContain("Customer");
+    // The person icon is a PNG embedded in the SVG; it loads nothing.
+    const icon = c4.querySelector("image");
+    expect(icon?.getAttribute("xlink:href") ?? icon?.getAttribute("href"))
+      .toMatch(/^data:image\/png;base64,/);
     cleanup();
 
     const info = await renderRealMermaid("info");

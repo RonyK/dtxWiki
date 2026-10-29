@@ -1102,6 +1102,9 @@ describe("MarkdownView", () => {
           fontFamily:
             'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
           fontSize: "13px",
+          noteBkgColor: "#EDF2AE",
+          noteBorderColor: "#666",
+          noteTextColor: "#333",
         },
       }),
     );

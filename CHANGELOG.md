@@ -178,8 +178,9 @@
   timeline, journey and radar shapes no longer render as solid black or
   unreadable; gantt keeps its task status colours; architecture services stay
   visible; dotted and thick flowchart links and dashed class and state links
-  are no longer drawn as plain lines. C4 and `info` diagrams render instead of
-  failing (C4 still omits its person icon: images stay blocked).
+  are no longer drawn as plain lines. C4 diagrams render with their person
+  icon, and `info` diagrams render instead of failing. Notes stay yellow in
+  every diagram type.
 
 ## 0.1.4 — 2026-10-23
 
