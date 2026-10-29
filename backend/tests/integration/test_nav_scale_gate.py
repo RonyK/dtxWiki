@@ -15,7 +15,7 @@ from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.schemas.tree import TreeFolderCreateRequest
-from backend.services.index_refs import format_index_ref, plain_text
+from backend.services.index_refs import format_index_ref, title_text
 from backend.services.okf import build_workspace_index
 from backend.services.okf_index import (
     GET_INDEX_NODE_TOKEN_BUDGET,
@@ -229,7 +229,7 @@ def test_golden_pages_reachable_within_three_hops(
             # the page itself appears in the leaf render
             leaf_render = render(hops[-1])
             page_ref = format_index_ref("context", page_id)
-            assert f"- [{plain_text(title)}]({page_ref}) — " in leaf_render
+            assert f"- [{title_text(title)}]({page_ref}) — " in leaf_render
 
 
 def test_fanout_truncation_is_honest(session_factory_module, scale_workspace):

@@ -146,19 +146,34 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        Optional filters.include_agents defaults true; false excludes Agent
 #        pages before result counts and pagination. Refresh tools/list.
 #        Explicit read_concept and write-target ambiguity policies are retained.
-#  16 -- MCP Context results use workspace-qualified stable_url/link_markdown
+#  16 -- list_my_workspaces no longer returns personal_workspace_id: the
+#        workspace an account starts with is an ordinary workspace. Use
+#        default_workspace_id or current_workspace_id. Refresh tools/list.
+#  17 -- list_requested_changes evidence adds independently authorized document
+#        destinations and exact candidate/baseline content descriptors,
+#        including the earlier draft a candidate was written on. Clients may
+#        ignore these additive fields and keep using the existing target and
+#        diff_ref fields; no tool or input schema changed.
+#  18 -- what_changed reports each move of a page's published version
+#        (before -> after). It adds unpublished when an undone first
+#        publication leaves no published version: invalidate the page's cached
+#        publication by page_id; version_id is null. created now also covers
+#        a page published again after it was unpublished or archived, so
+#        treat created as an upsert. previous_version_id is the version
+#        published right before the entry, not the version's parent, and is
+#        set on updated, unpublished and archived entries. reason says why
+#        the version moved. Restoring an archived page is reported as created.
+#        Existing visibility rules still apply, including draft visibility.
+#  19 -- MCP Context results use workspace-qualified stable_url/link_markdown
 #        and drop concept_path/resource_uri. Page inputs share one locator
 #        grammar; Library lookup paths remain separate. Archived what_changed
-#        links are required-nullable. Refresh tool and result-schema caches.
-#  17 -- get_index lines start with an internal dtxwiki://index/<kind>/<id>
-#        ref instead of Markdown links; get_index node and read_concept path
-#        accept those refs unchanged, other page inputs reject them. get_index
-#        with node and Library read_concept results add stable_url and
-#        link_markdown. Refresh tool and result-schema caches.
-#  18 -- get_index and ref-mode bundle entries use a Markdown link to the
-#        exact internal dtxwiki://index/<kind>/<id> ref, followed by summary.
-#        Ref grammar and tool inputs are unchanged. Refresh tool/schema caches.
-MCP_TOOL_CONTRACT_REVISION = 18
+#        links are required-nullable. get_index entry lines start with a
+#        Markdown link to the internal dtxwiki://index/<kind>/<id> ref,
+#        followed by the summary; get_index node and read_concept path accept
+#        that ref unchanged, other page inputs reject it. get_index with node
+#        and Library read_concept results add stable_url and link_markdown.
+#        Refresh tool and result-schema caches.
+MCP_TOOL_CONTRACT_REVISION = 19
 ERROR_CODES = (
     "not_found",
     "stale_base_version",

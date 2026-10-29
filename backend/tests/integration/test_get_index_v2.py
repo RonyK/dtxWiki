@@ -242,7 +242,7 @@ def test_large_workspace_routes_and_descends(large_workspace):
         assert node_index.count("](dtxwiki://index/context/") == 50
         assert "…and 10 more" in node_index
         # entries carry write-time nav descriptions
-        assert "body paragraph\\." in node_index
+        assert "body paragraph." in node_index
         page = session.scalar(
             select(ContextPage).where(
                 ContextPage.workspace_id == workspace_id,

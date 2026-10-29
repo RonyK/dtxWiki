@@ -93,11 +93,13 @@ def _add_library_item(session, workspace_id, *, uri, title, trust_level="unknown
 
 def test_derive_nav_description_skips_headings_and_truncates():
     assert derive_nav_description("# Title\n\nFirst para.\n\nSecond.") == "First para."
-    assert derive_nav_description("") is None
-    assert derive_nav_description("# only heading") is None
+    # "" (not None) when there is no prose: a stored NULL means a legacy row.
+    assert derive_nav_description("") == ""
+    assert derive_nav_description("# only heading") == ""
+    assert derive_nav_description("  \n ") == ""
     long = "word " * 100
     out = derive_nav_description(long, max_length=20)
-    assert out is not None and len(out) <= 20 and out.endswith("…")
+    assert len(out) <= 20 and out.endswith("…")
     assert (
         derive_nav_description(
             "# Title\n\n- 상태: draft\n  wrapped metadata\n- 담당자: owner\n\n"
@@ -107,7 +109,25 @@ def test_derive_nav_description_skips_headings_and_truncates():
         )
         == "Actual subject paragraph."
     )
-    assert derive_nav_description("# Title\n\n- list only\n- no prose") is None
+    assert derive_nav_description("# Title\n\n- list only\n- no prose") == ""
+    # Index readers get text only: an image-only paragraph is not prose,
+    # while an image inside prose stays as written.
+    image = "![구조도](/api/media/1)"
+    assert derive_nav_description(f"{image}\n\n본문 설명.") == "본문 설명."
+    assert derive_nav_description(f"# T\n\n{image}") == ""
+    assert derive_nav_description(f"흐름은 {image} 참고.") == f"흐름은 {image} 참고."
+    # A definition after a reference image is not prose either, an image-only
+    # paragraph must not join prose across a fence, and code and raw HTML are
+    # content. Definitions elsewhere in the body resolve reference images and
+    # reference links around images.
+    assert derive_nav_description("![구조도][d]\n\n[d]: https://x/d.png") == ""
+    linked = "[![a](b)][d]\n\n[d]: /target\n\n본문."
+    assert derive_nav_description(linked) == "본문."
+    assert derive_nav_description("    ![a](b)\n\n본문.") == "![a](b)"
+    assert derive_nav_description(f"{image}\n```\ncode\n```\n본문.") == "본문."
+    assert derive_nav_description("`![a](b)` 문법.") == "`![a](b)` 문법."
+    html = "<div>보이는 글</div>"
+    assert derive_nav_description(f"{html}\n\n본문.") == html
 
 
 def test_derive_nav_description_is_frontmatter_aware():

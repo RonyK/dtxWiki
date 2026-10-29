@@ -126,8 +126,10 @@ def _render_public_workspace_llms_txt(
     for published_title, page, version in projections:
         encoded_slug = quote(page.slug, safe="")
         href = f"{base_url}/api/v1/public/w/{workspace.slug}/pages/{encoded_slug}"
-        description = version.nav_description or derive_nav_description(
-            version.body_md
+        description = (
+            version.nav_description
+            if version.nav_description is not None
+            else derive_nav_description(version.body_md)
         )
         if description:
             lines.append(f"- [{published_title}]({href}): {description}")

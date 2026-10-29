@@ -41,12 +41,14 @@ function preview(title: string): TreeIndexPreview {
       ? "44444444-4444-4444-8444-444444444444"
       : "55555555-5555-4555-8555-555555555555";
   const folderId = "33333333-3333-4333-8333-333333333333";
-  const markdownTitle = title.replace(/([\\[\]])/g, "\\$1");
+  const diagramsId = "66666666-6666-4666-8666-666666666666";
+  const markdownTitle = title.replace(/([\\[\]`<])/g, "\\$1");
   return {
     markdown: [
       "# workspace — knowledge index (Context/)",
       "",
-      `- [${markdownTitle}](dtxwiki://index/context/${id}) (draft) — Summary: Routing summary for this page. \\<script>alert('unsafe')\\</script>`,
+      `- [${markdownTitle}](dtxwiki://index/context/${id}) (draft) — Summary: Routing summary for this page. <script>alert('unsafe')</script> ![pixel](https://example.invalid/p.png) [same folder](dtxwiki://index/folder/${folderId})`,
+      `- [Diagrams](dtxwiki://index/folder/${diagramsId}) (1) — ![구조도](https://example.invalid/map.png)`,
       `- [Child folder](dtxwiki://index/folder/${folderId}) (3) — Generated: includes several items.`,
       "…and 2 more",
     ].join("\n"),
@@ -59,6 +61,15 @@ function preview(title: string): TreeIndexPreview {
         summary: "Routing summary for this page.",
         count: null,
         draft: true,
+      },
+      {
+        kind: "folder",
+        id: diagramsId,
+        title: "Diagrams",
+        href: `/workspaces/${workspaceId}/context/folders/${diagramsId}`,
+        summary: "![구조도](https://example.invalid/map.png)",
+        count: 1,
+        draft: false,
       },
       {
         kind: "folder",
@@ -213,8 +224,15 @@ describe("FolderSummaryCard", () => {
     expect(formatted?.textContent).not.toContain("— Generated:");
     expect(formatted?.textContent).toContain("…and 2 more");
     expect(formatted?.textContent).toContain("<script>alert('unsafe')</script>");
+    // Summaries are not escaped: their links, images and HTML stay text.
+    expect(formatted?.textContent).toContain("pixel same folder");
     expect(formatted?.querySelector("script, img")).toBeNull();
-    expect(formatted?.querySelector("a[href^='dtxwiki:']")).toBeNull();
+    expect(formatted?.querySelectorAll("a")).toHaveLength(3);
+    // An image-only summary still shows its alt text.
+    expect(
+      screen.getByRole("link", { name: "Diagrams" }).closest("li")
+        ?.querySelector(".index-preview__entry-summary")?.textContent,
+    ).toBe("구조도");
     expect(formatted?.querySelector(".index-preview__entry-ref")?.textContent).toBe(
       "dtxwiki://index/context/22222222-2222-4222-8222-222222222222",
     );
@@ -229,7 +247,7 @@ describe("FolderSummaryCard", () => {
     await waitFor(() => expect(document.querySelector(".index-preview__source code")?.textContent).toBe(preview("New [Doc]").markdown));
   });
 
-  it("does not refire on re-renders and falls back to exact source for unsupported or mismatched refs", async () => {
+  it("does not refire on re-renders and falls back to exact source for mismatched entries", async () => {
     const user = userEvent.setup();
     let resolveFirst: (value: TreeIndexPreview) => void = () => {};
     const loadPreview = vi
@@ -266,13 +284,6 @@ describe("FolderSummaryCard", () => {
     expect(source?.textContent).toBe(unsafe.markdown);
     expect(source?.querySelector("a, script, img")).toBeNull();
     expect(loadPreview).toHaveBeenCalledTimes(1);
-
-    const imagePayload = preview("Doc");
-    imagePayload.markdown += "\n![extra][pic]\n\n[pic]: https://example.invalid/p.png";
-    loadPreview.mockResolvedValueOnce(imagePayload);
-    await user.click(screen.getByRole("button", { name: /Refresh|새로고침/ }));
-    await waitFor(() => expect(document.querySelector(".index-preview__source code")?.textContent).toBe(imagePayload.markdown));
-    expect(document.querySelector(".index-preview__formatted img")).toBeNull();
 
     const missingEntriesPayload = {
       ...preview("Doc"),

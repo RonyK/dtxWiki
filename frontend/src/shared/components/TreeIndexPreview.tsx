@@ -1,5 +1,5 @@
-import { Children, cloneElement, isValidElement, useEffect, useId, useMemo, useRef, useState } from "react";
-import type { ReactElement, ReactNode } from "react";
+import { Children, isValidElement, useEffect, useId, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { ChevronDown, ChevronRight, LoaderCircle, RefreshCw } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import { Link } from "react-router-dom";
@@ -36,14 +36,6 @@ const INDEX_ROW_LINK_PATTERN = new RegExp(
   `^- \\[((?:\\\\.|[^\\]])*)\\]\\((dtxwiki://index/(?:folder|context|library|agent)/${UUID_PATTERN})\\)(.*)$`,
 );
 
-function isEscapedAt(value: string, index: number): boolean {
-  let backslashes = 0;
-  for (let cursor = index - 1; cursor >= 0 && value[cursor] === "\\"; cursor -= 1) {
-    backslashes += 1;
-  }
-  return backslashes % 2 === 1;
-}
-
 function indexRefKey(kind: string, id: string): string | null {
   if (!(kind === "folder" || kind === "context" || kind === "library" || kind === "agent")) {
     return null;
@@ -72,105 +64,35 @@ function canonicalEntryHref(entry: TreeIndexPreviewEntry): string | null {
   return `/workspaces/${workspaceId}/${section}/${routeKind}/${routeId}`;
 }
 
-function markdownLinkTargets(markdown: string): string[] | null {
-  const targets: string[] = [];
-  const linesWithLinks = new Map<number, number>();
-  for (let index = 0; index < markdown.length; index += 1) {
-    if (markdown[index] !== "]" || isEscapedAt(markdown, index) || markdown[index + 1] !== "(") {
-      continue;
-    }
-    const close = markdown.indexOf(")", index + 2);
-    if (close < 0) return null;
-    const destination = markdown.slice(index + 2, close).trim().split(/\s+/, 1)[0];
-    if (!destination) return null;
-    const lineStart = markdown.lastIndexOf("\n", index) + 1;
-    const lineEnd = markdown.indexOf("\n", index);
-    const line = markdown.slice(lineStart, lineEnd < 0 ? markdown.length : lineEnd);
+/** Refs of entry rows, taken from each row's leading link only. */
+function entryLineRefs(markdown: string): string[] {
+  return markdown.split("\n").flatMap((line) => {
     const row = INDEX_ROW_LINK_PATTERN.exec(line);
-    if (!row || row[2] !== destination) return null;
-    const lineNumber = markdown.slice(0, lineStart).split("\n").length;
-    linesWithLinks.set(lineNumber, (linesWithLinks.get(lineNumber) ?? 0) + 1);
-    targets.push(destination);
-    index = close;
-  }
-  if ([...linesWithLinks.values()].some((count) => count !== 1)) return null;
-  return targets;
+    return row ? [row[2]] : [];
+  });
 }
 
-function hasUnsupportedMarkdownReferences(markdown: string): boolean {
-  for (let index = 0; index < markdown.length; index += 1) {
-    if (markdown[index] === "!" && !isEscapedAt(markdown, index)
-      && markdown[index + 1] === "[" && !isEscapedAt(markdown, index + 1)) {
-      return true;
-    }
-    if (markdown[index] === "]" && !isEscapedAt(markdown, index)
-      && markdown[index + 1] === "[" && !isEscapedAt(markdown, index + 1)) {
-      return true;
-    }
-  }
-  return markdown.split("\n").some((line) => /^ {0,3}\[(?:\\.|[^\]])+\]:\s*\S/.test(line));
-}
-
-function hasUnescapedAngleMarkup(markdown: string): boolean {
-  for (let index = 0; index < markdown.length; index += 1) {
-    if (markdown[index] === "<" && !isEscapedAt(markdown, index)) return true;
-  }
-  return false;
-}
-
-function findIndexRefMarker(node: ReactNode): { ref: string; label: ReactNode } | null {
-  for (const child of Children.toArray(node)) {
-    if (!isValidElement(child)) continue;
-    const props = child.props as { children?: ReactNode; href?: unknown; "data-index-ref"?: unknown };
-    const ref = typeof props.href === "string" ? props.href : props["data-index-ref"];
-    if (typeof ref === "string" && INDEX_REF_PATTERN.test(ref)) {
-      return { ref, label: props.children };
-    }
-    const nested = findIndexRefMarker(props.children);
-    if (nested) return nested;
-  }
-  return null;
-}
-
-function removeIndexRefMarker(node: ReactNode): ReactNode {
-  if (Array.isArray(node)) {
-    return node.map(removeIndexRefMarker).filter((child) => child !== null);
-  }
-  if (!isValidElement(node)) return node;
-  const props = node.props as { children?: ReactNode; href?: unknown; "data-index-ref"?: unknown };
-  const ref = typeof props.href === "string" ? props.href : props["data-index-ref"];
-  if (typeof ref === "string" && INDEX_REF_PATTERN.test(ref)) return null;
-  if (props.children === undefined) return node;
-  return cloneElement(
-    node as ReactElement<{ children?: ReactNode }>,
-    {},
-    removeIndexRefMarker(props.children),
-  );
+/** The entry's leading link; links later in its summary stay plain text. */
+function leadingIndexRef(
+  children: ReactNode,
+): { ref: string; label: ReactNode; rest: ReactNode[] } | null {
+  const nodes = Children.toArray(children);
+  const start = nodes.findIndex((node) => typeof node !== "string" || node.trim() !== "");
+  const first = nodes[start];
+  if (!isValidElement(first)) return null;
+  const props = first.props as { children?: ReactNode; href?: unknown };
+  if (typeof props.href !== "string" || !INDEX_REF_PATTERN.test(props.href)) return null;
+  return { ref: props.href, label: props.children, rest: nodes.slice(start + 1) };
 }
 
 function hasVisibleText(node: ReactNode): boolean {
   if (typeof node === "string" || typeof node === "number") return String(node).trim() !== "";
   if (Array.isArray(node)) return node.some(hasVisibleText);
   if (!isValidElement(node)) return false;
-  return hasVisibleText((node.props as { children?: ReactNode }).children);
-}
-
-function plainTextFromSuffix(node: ReactNode): string | null {
-  if (node === null || node === undefined || typeof node === "boolean") return "";
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) {
-    let result = "";
-    for (const child of node) {
-      const text = plainTextFromSuffix(child);
-      if (text === null) return null;
-      result += text;
-    }
-    return result;
-  }
-  if (!isValidElement(node)) return null;
-  const props = node.props as { children?: ReactNode };
-  if (node.type !== "p" && node.type !== "div") return null;
-  return plainTextFromSuffix(props.children);
+  const props = node.props as { alt?: unknown; children?: ReactNode };
+  // An image renders as its alt text, so an image-only summary is visible.
+  if (typeof props.alt === "string" && props.alt.trim() !== "") return true;
+  return hasVisibleText(props.children);
 }
 
 function splitKnownEntrySuffix(
@@ -202,17 +124,16 @@ function SourceMarkdown({ markdown, label, hint }: { markdown: string; label: st
 }
 
 /**
- * Verify that every Markdown link is one of this payload's known index refs,
- * and that each entry supplies an internal canonical route for the same ID.
+ * Verify that each entry row's leading link is one of this payload's known
+ * index refs, and that each entry supplies an internal canonical route for the
+ * same ID.
  * If verification fails, the caller keeps the complete payload in source view.
  */
 function canonicalLinksForPreview(
   data: TreeIndexPreviewData,
 ): Map<string, string> | null {
   if (typeof data.markdown !== "string" || !Array.isArray(data.entries)) return null;
-  if (hasUnescapedAngleMarkup(data.markdown) || hasUnsupportedMarkdownReferences(data.markdown)) return null;
-  const targets = markdownLinkTargets(data.markdown);
-  if (!targets) return null;
+  const targets = entryLineRefs(data.markdown);
 
   const links = new Map<string, { href: string; remaining: number }>();
   let workspaceId: string | null = null;
@@ -258,36 +179,31 @@ function FormattedIndex({
   links: Map<string, string>;
 }) {
   const components = useMemo<Components>(() => ({
-    a({ href, children: linkLabel }) {
-      return (
-        <span className="index-preview__entry-source" data-index-ref={href ?? ""}>
-          {linkLabel}
-        </span>
-      );
+    a({ children: linkLabel }) {
+      return <span>{linkLabel}</span>;
+    },
+    img({ alt }) {
+      return <span>{alt}</span>;
     },
     li({ children, node: _node }) {
-      const marker = findIndexRefMarker(children);
-      const target = marker ? links.get(marker.ref) : undefined;
-      if (!marker || !target) return <li>{children}</li>;
-      const suffix = removeIndexRefMarker(children);
-      const hasSuffix = hasVisibleText(suffix);
-      const kind = INDEX_REF_PATTERN.exec(marker.ref)?.[1] ?? "";
-      const plainSuffix = plainTextFromSuffix(suffix);
-      const display = plainSuffix === null
-        ? null
-        : splitKnownEntrySuffix(plainSuffix, kind);
-      const titleSuffix = display?.titleSuffix ?? "";
+      const entry = leadingIndexRef(children);
+      const target = entry ? links.get(entry.ref) : undefined;
+      if (!entry || !target) return <li>{children}</li>;
+      const kind = INDEX_REF_PATTERN.exec(entry.ref)?.[1] ?? "";
+      const [head, ...tail] = entry.rest;
+      const display = typeof head === "string"
+        ? splitKnownEntrySuffix(head, kind)
+        : { titleSuffix: "", summary: head };
+      const summary = [display.summary, ...tail];
       return (
         <li className="index-preview__entry">
           <div className="index-preview__entry-title">
-            <Link to={target}><strong>{marker.label}</strong></Link>{titleSuffix}
+            <Link to={target}><strong>{entry.label}</strong></Link>{display.titleSuffix}
           </div>
-          {hasSuffix ? (
-            <div className="index-preview__entry-summary">
-              {display ? display.summary : suffix}
-            </div>
+          {hasVisibleText(summary) ? (
+            <div className="index-preview__entry-summary">{summary}</div>
           ) : null}
-          <code className="index-preview__entry-ref">{marker.ref}</code>
+          <code className="index-preview__entry-ref">{entry.ref}</code>
         </li>
       );
     },

@@ -34,7 +34,7 @@ from backend.services.index_refs import (
     index_line,
     one_line,
     parse_index_ref,
-    plain_text,
+    title_text,
 )
 from backend.services.tree_projection import TreeProjection, TreeProjectionService
 from backend.services.workspace_urls import (
@@ -94,7 +94,7 @@ class IndexEntry:
 
     def line(self) -> str:
         if self.ref is None:
-            return f"- {plain_text(self.title)}"
+            return f"- {title_text(self.title)}"
         if self.kind == "folder":
             suffix = f" ({self.count or 0})"
         else:
@@ -141,7 +141,7 @@ def build_routing_index(
             actor,
             token_budget=GET_INDEX_NODE_TOKEN_BUDGET - 64,
         )
-        title = plain_text(target.title)
+        title = title_text(target.title)
         header = f"# {workspace_slug} \u2014 knowledge index ({title}/)"
         markdown = "\n".join([header, "", *lines]).rstrip() + "\n"
         return RoutingIndex(markdown, tuple(entries), overflow, target)

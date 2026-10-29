@@ -391,12 +391,12 @@ TOOL_META = {
     "get_index": (
         "Get knowledge index",
         "Tier-1 navigational catalog of the workspace, filtered to what the "
-        "actor may see. Each entry is a Markdown link whose destination is the "
-        "exact system ref (dtxwiki://index/<kind>/<id>), followed by its "
-        "summary. Pass that destination unchanged to get_index node for a "
-        "folder or read_concept path for Context/Library, with the same "
-        "workspace_id. The ref is not a user-facing link: answer with read "
-        "results' link_markdown.",
+        "actor may see. Each entry line starts with a Markdown link whose "
+        "destination is the exact system ref (dtxwiki://index/<kind>/<id>); "
+        "later links on the line belong to its summary. Pass that destination "
+        "unchanged to get_index node for a folder or read_concept path for "
+        "Context/Library, with the same workspace_id. The ref is not a "
+        "user-facing link: answer with read results' link_markdown.",
         True,
     ),
     "read_concept": (

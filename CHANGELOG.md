@@ -2,12 +2,23 @@
 
 ## Unreleased
 
-- Advance the MCP tool contract to revision 18. Index entries use
-  `[title](dtxwiki://index/<kind>/<id>) — summary`; pass the exact link
-  destination to the scoped read tool, and use read results' `link_markdown`
-  in answers. Clients on earlier revisions must refresh `tools/list` and
-  cached schemas. Index previews offer formatted and exact-source views;
-  titles navigate through matching server-provided workspace routes.
+- Advance the MCP tool contract to revision 19. Context results use
+  `/p/<workspace_id>/<page_id>` links and no longer expose `concept_path` or
+  `resource_uri`; Library lookup paths remain available. Use `stable_url` or
+  `page_id` for page inputs and `link_markdown` for document links. `get_index`
+  entry lines start with `[title](dtxwiki://index/<kind>/<id>)`, followed by
+  the summary. Pass that exact destination with the same `workspace_id`:
+  folder refs to `get_index` `node`, Context or Library refs to `read_concept`
+  `path`; other page inputs reject refs, and `node:/...` paths remain accepted.
+  `link_markdown` is now also returned for Library reads and for the folder
+  selected by `node`. Refs copied into Context or Agent bodies are stored as
+  canonical links. Clients on earlier revisions must refresh `tools/list` and
+  cached output schemas. Index previews offer formatted and exact-source
+  views; titles navigate through matching server-provided workspace routes.
+- Page summaries skip paragraphs that contain only Markdown images, so an
+  image at the top of a page no longer becomes its summary; a page without
+  prose has an empty summary. Run `dtxwiki reindex` to refresh the stored
+  summaries of existing pages.
 - Address workspace screens and targets under `/workspaces/<workspace_id>/...`.
   Direct reads, edits, role checks, links, and workspace switching use the URL's
   workspace. Old target-bearing URLs cannot fall back to browser or account
@@ -15,20 +26,6 @@
   target lookup; connection management is available at `/account/integrations`.
   Stored links are projected from their source workspace without rewriting
   historical bytes. Ask activates only server-confirmed internal links.
-- Advance the MCP tool contract to revision 17. `get_index` lines start with
-  an internal `dtxwiki://index/<kind>/<id>` ref followed by the title and
-  summary, instead of Markdown links. Pass folder refs to `get_index` `node`
-  and Context or Library refs to `read_concept` `path` unchanged with the same
-  `workspace_id`; other page inputs reject refs. `node:/...` paths remain
-  accepted. Answer with `link_markdown`, now also returned for Library reads
-  and for the folder selected by `node`. Refs copied into Context or Agent
-  bodies are stored as canonical links. Clients on revision 16 must refresh
-  `tools/list` and cached output schemas.
-- Advance the MCP tool contract to revision 16. Context results use
-  `/p/<workspace_id>/<page_id>` links and no longer expose `concept_path` or
-  `resource_uri`; Library lookup paths remain available. Clients using an older
-  revision must refresh `tools/list` and cached output schemas. Use `stable_url`
-  or `page_id` for page inputs and `link_markdown` for document links.
 - Store and render workspace-scoped Context links across editors, readers,
   backlinks, and lint. Safe link fixes run through the shared save pipeline;
   scheduled lint can repair published pages without active edits or reviews.
