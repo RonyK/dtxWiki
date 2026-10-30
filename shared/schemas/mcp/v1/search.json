@@ -405,6 +405,248 @@
         "title": "MCPErrorDetail",
         "type": "object"
       },
+      "MCPRankedResult": {
+        "additionalProperties": false,
+        "properties": {
+          "archived": {
+            "default": false,
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "citation_available": {
+            "title": "Citation Available",
+            "type": "boolean"
+          },
+          "concept_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Concept Type"
+          },
+          "entity_ref": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Entity Ref"
+          },
+          "heading_path": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Heading Path"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "link_markdown": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Link Markdown"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Location"
+          },
+          "match_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "exact_id",
+                  "exact_slug",
+                  "exact_title",
+                  "exact_alias",
+                  "trigram",
+                  "keyword",
+                  "semantic",
+                  "hybrid",
+                  "associative"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Match Reason"
+          },
+          "matched_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Matched Name"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Library lookup path only.",
+            "title": "Path"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "section_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Section Id"
+          },
+          "snippet": {
+            "title": "Snippet",
+            "type": "string"
+          },
+          "source_ref": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Ref"
+          },
+          "stable_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Stable Url"
+          },
+          "stale": {
+            "default": false,
+            "deprecated": true,
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Summary"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "context_page",
+              "context_claim",
+              "library_item",
+              "library_artifact",
+              "feedback",
+              "change_set",
+              "agent_page",
+              "source"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version Id"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "title",
+          "snippet",
+          "score",
+          "citation_available"
+        ],
+        "title": "MCPRankedResult",
+        "type": "object"
+      },
       "MCPResultEnvelope": {
         "additionalProperties": false,
         "properties": {
@@ -653,224 +895,7 @@
         "title": "MCPResultEnvelope",
         "type": "object"
       },
-      "RankedResult": {
-        "additionalProperties": false,
-        "properties": {
-          "archived": {
-            "default": false,
-            "title": "Archived",
-            "type": "boolean"
-          },
-          "citation_available": {
-            "title": "Citation Available",
-            "type": "boolean"
-          },
-          "concept_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Concept Path"
-          },
-          "concept_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Concept Type"
-          },
-          "entity_ref": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Entity Ref"
-          },
-          "heading_path": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Heading Path"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "location": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Location"
-          },
-          "match_reason": {
-            "anyOf": [
-              {
-                "enum": [
-                  "exact_id",
-                  "exact_slug",
-                  "exact_title",
-                  "exact_alias",
-                  "trigram",
-                  "keyword",
-                  "semantic",
-                  "hybrid",
-                  "associative"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Match Reason"
-          },
-          "matched_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Matched Name"
-          },
-          "score": {
-            "title": "Score",
-            "type": "number"
-          },
-          "section_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Section Id"
-          },
-          "snippet": {
-            "title": "Snippet",
-            "type": "string"
-          },
-          "source_ref": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Source Ref"
-          },
-          "stale": {
-            "default": false,
-            "deprecated": true,
-            "title": "Stale",
-            "type": "boolean"
-          },
-          "summary": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Summary"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          },
-          "type": {
-            "enum": [
-              "context_page",
-              "context_claim",
-              "library_item",
-              "library_artifact",
-              "feedback",
-              "change_set",
-              "agent_page",
-              "source"
-            ],
-            "title": "Type",
-            "type": "string"
-          },
-          "version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Version Id"
-          }
-        },
-        "required": [
-          "id",
-          "type",
-          "title",
-          "snippet",
-          "score",
-          "citation_available"
-        ],
-        "title": "RankedResult",
-        "type": "object"
-      },
-      "SearchPayload": {
+      "MCPSearchPayload": {
         "additionalProperties": false,
         "properties": {
           "has_more": {
@@ -917,7 +942,7 @@
           },
           "ranked_results": {
             "items": {
-              "$ref": "#/$defs/RankedResult"
+              "$ref": "#/$defs/MCPRankedResult"
             },
             "title": "Ranked Results",
             "type": "array"
@@ -960,7 +985,7 @@
           "permission_note",
           "next_cursor"
         ],
-        "title": "SearchPayload",
+        "title": "MCPSearchPayload",
         "type": "object"
       },
       "TextMatchCandidate": {
@@ -1020,7 +1045,7 @@
       "data": {
         "anyOf": [
           {
-            "$ref": "#/$defs/SearchPayload"
+            "$ref": "#/$defs/MCPSearchPayload"
           },
           {
             "type": "null"

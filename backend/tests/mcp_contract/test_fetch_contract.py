@@ -492,12 +492,14 @@ def test_future_fetch_handler_returns_visible_page_through_dispatch(
     assert response.title == "Fetch dispatch success"
     assert response.text is not None
     assert "Visible needle body." in response.text
-    assert response.url == f"/workspaces/{page.workspace_id}/context/pages/{page.id}"
+    assert response.url == f"/p/{workspace_id}/{page.id}"
     assert response.metadata is not None
     assert response.metadata["type"] == "context_page"
-    assert response.metadata["version_id"] == str(
-        page.current_published_version_id
+    assert response.metadata["stable_url"] == f"/p/{workspace_id}/{page.id}"
+    assert response.metadata["link_markdown"] == (
+        f"[Fetch dispatch success](/p/{workspace_id}/{page.id})"
     )
+    assert response.metadata["version_id"] == str(page.current_published_version_id)
 
 
 def test_future_fetch_handler_refuses_excluded_and_missing_pairs(

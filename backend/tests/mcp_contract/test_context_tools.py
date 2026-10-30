@@ -637,7 +637,7 @@ def test_mcp_submit_feedback_creates_feedback(page_service, actor):
         {
             "workspace_id": str(workspace_id),
             "target_type": "context_page",
-            "target_id": str(created.page_id),
+            "target_id": f"/p/{workspace_id}/{created.page_id}",
             "body": "Needs better citation.",
             "severity": "major",
         },

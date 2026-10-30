@@ -11,7 +11,7 @@ from typing import Any
 from uuid import UUID
 
 from mcp.types import CallToolResult, TextContent
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel
 
 from backend.api.metrics import inc_mcp_tool_call
 from backend.app.container import ToolCallContext
@@ -29,6 +29,13 @@ from backend.mcp.protocol.output_validation import (
     validate_tool_output,
 )
 from backend.mcp.protocol.wire_defaults import omit_declared_defaults
+from backend.mcp.protocol.workspace_target import (
+    WorkspaceTargetInput as _WorkspaceTargetInput,
+)
+from backend.mcp.protocol.workspace_target import (
+    WorkspaceTargetValidationError as _WorkspaceTargetValidationError,
+)
+from backend.mcp.protocol.workspace_target import require_workspace_target
 from backend.mcp.router import dispatch
 from backend.mcp.scopes import (
     CONTENT_TOOLS,
@@ -144,20 +151,6 @@ def reset_trace_persistence_health() -> None:
 
 class _ConversationTokenCarrierConflict(ValueError):
     """Raised when one call supplies disagreeing conversation-token carriers."""
-
-
-class _WorkspaceTargetInput(BaseModel):
-    workspace_id: UUID
-
-    model_config = ConfigDict(extra="ignore")
-
-
-class _WorkspaceTargetValidationError(ValueError):
-    """Carries a target-only schema error through the common sanitize barrier."""
-
-    def __init__(self, validation_error: ValidationError) -> None:
-        super().__init__("workspace_id validation failed")
-        self.validation_error = validation_error
 
 
 class _ToolScopeDenied(PermissionError):
@@ -615,6 +608,10 @@ async def call_tool_async(
             payload,
             validate_contract=False,
         )
+        if isinstance(exc, _WorkspaceTargetValidationError):
+            # Invalid or missing workspace targets are rejected before domain
+            # access and leave no durable trace or conversation artifacts.
+            return _tool_result(payload, is_error=True)
         _persist_trace(
             session_factory=fallback_session_factory,
             db=db,
@@ -1032,10 +1029,7 @@ def _workspace_id_for_token(
     # Every current workspace-bound tool schema requires workspace_id. Validate
     # that field in isolation before any page/slug directory lookup; malformed
     # input must not use target existence to choose a shard or error shape.
-    try:
-        return _WorkspaceTargetInput.model_validate(arguments).workspace_id
-    except ValidationError as exc:
-        raise _WorkspaceTargetValidationError(exc) from exc
+    return require_workspace_target(arguments)
 
 
 def _workspace_id_from_arguments(arguments: dict[str, Any]) -> UUID | None:

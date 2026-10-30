@@ -319,8 +319,7 @@ def test_what_changed_follows_the_published_version(session_factory, page_servic
         page = session.get(ContextPage, page_id)
         assert resolve_version_as_of(session, page, _now()).id == v3
     assert [
-        (e.change_kind, e.version_id, e.previous_version_id, e.reason)
-        for e in entries
+        (e.change_kind, e.version_id, e.previous_version_id, e.reason) for e in entries
     ] == [
         ("updated", v3, v1, "approved through Context review"),
         ("archived", v3, v3, "delete tree node Head Moves"),
@@ -466,6 +465,10 @@ def test_what_changed_mcp_tool_cursor_roundtrip(
     assert [(entry.page_id, entry.version_id) for entry in first.entries] == (
         published[:2]
     )
+    assert first.entries[0].stable_url == (f"/p/{workspace_id}/{published[0][0]}")
+    assert first.entries[0].link_markdown == (
+        f"[Cursor 0](/p/{workspace_id}/{published[0][0]})"
+    )
     second = dispatch(
         "what_changed",
         {
@@ -482,6 +485,10 @@ def test_what_changed_mcp_tool_cursor_roundtrip(
     assert not second.has_more
     assert [(entry.page_id, entry.version_id) for entry in second.entries] == (
         published[2:]
+    )
+    assert second.entries[0].stable_url == (f"/p/{workspace_id}/{published[2][0]}")
+    assert second.entries[0].link_markdown == (
+        f"[Cursor 2](/p/{workspace_id}/{published[2][0]})"
     )
     assert second.next_cursor is None
 
@@ -514,7 +521,9 @@ def test_what_changed_rejects_negative_cursor(
     assert result.envelope.error_code == "validation_failed"
 
 
-def test_archive_surfaces_as_archived_delta(session_factory, page_service):
+def test_archive_surfaces_as_archived_delta(
+    session_factory, page_service, mcp_default_actor
+):
     from backend.models.tree import WorkspaceTreeNode
     from backend.services.tree_service import TreeService
 
@@ -554,3 +563,17 @@ def test_archive_surfaces_as_archived_delta(session_factory, page_service):
     archived = [e for e in entries if e.page_id == payload.id]
     assert len(archived) == 1
     assert archived[0].change_kind == "archived"
+
+    mcp_result = dispatch(
+        "what_changed",
+        {"workspace_id": str(workspace_id), "since": since.isoformat()},
+        actor=mcp_default_actor(scopes=("mcp:read",)),
+        page_service=page_service,
+    )
+    mcp_archived = [
+        entry for entry in mcp_result.entries if entry.page_id == payload.id
+    ]
+    assert len(mcp_archived) == 1
+    assert mcp_archived[0].change_kind == "archived"
+    assert mcp_archived[0].stable_url is None
+    assert mcp_archived[0].link_markdown is None

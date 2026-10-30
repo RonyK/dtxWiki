@@ -13,7 +13,11 @@ from backend.mcp.protocol.schema_projection import host_compatible_schema
 from backend.mcp.scopes import TOOL_REQUIRED_ROLES
 from backend.schemas.common import MCP_SCHEMA_VERSION, MCP_TOOL_CONTRACT_REVISION
 from backend.scripts.export_mcp_schemas import build_mcp_schemas
-from backend.spi.tool_presentation import KOREAN_TOOL_TITLES, TOOL_ACTIONS
+from backend.spi.tool_presentation import (
+    KOREAN_TOOL_TITLES,
+    MCP_CONTEXT_LINK_GUIDANCE,
+    TOOL_ACTIONS,
+)
 
 # Re-exported: this module is where callers inside backend/mcp look for tool
 # presentation data. The data itself lives in the shared layer because
@@ -162,7 +166,7 @@ TOOL_META = {
     "what_changed": (
         "What changed",
         "Published-change delta since a timestamp: created/updated/"
-        "archived/unpublished entries with paths, reasons and version ids. "
+        "archived/unpublished entries with stable links, reasons and version ids. "
         "created also marks a page published again after it was withdrawn "
         "or archived; the reason says why. Re-sync with this instead of "
         "re-crawling; use read_concept with as_of for point-in-time content.",
@@ -409,9 +413,10 @@ TOOL_META = {
     ),
     "read_concept": (
         "Read concept",
-        "Read one OKF concept by its index path as YAML frontmatter + Markdown "
-        "body: '/context/<slug>.md' (per-actor draft visibility) or "
-        "'/library/<id>.md' (extracted source text).",
+        "Read a Context page by UUID, stable_url, or its existing "
+        "'/context/<slug>.md' index path, or a Library item by "
+        "'/library/<id>.md'. Returns YAML frontmatter and Markdown with "
+        "per-actor visibility, plus link_markdown to use in answers.",
         True,
     ),
     "read_context_outline": (
@@ -449,7 +454,16 @@ TOOL_META = {
 _TOOL_META_VALUES = TOOL_META
 TOOL_META = {
     name: ToolMeta(
-        *values,
+        values[0],
+        values[1] + (
+            " " + MCP_CONTEXT_LINK_GUIDANCE
+            if name in {
+                "create_context_page", "begin_context_edit", "update_context_edit",
+                "patch_context_edit", "submit_context_edit_for_review", "read_concept",
+            }
+            else ""
+        ),
+        *values[2:],
         localized_titles={
             "en": values[0],
             **({"ko": KOREAN_TOOL_TITLES[name]} if name in KOREAN_TOOL_TITLES else {}),

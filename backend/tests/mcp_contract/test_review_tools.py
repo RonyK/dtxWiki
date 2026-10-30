@@ -6,12 +6,15 @@ conflict/expiry, idempotent retries, and the structural no-self-approval
 guarantee (no MCP tool can move a review to approved).
 """
 
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
 
+from backend.mcp import review_tools
 from backend.mcp.protocol.tool_descriptors import TOOL_META, list_dtxwiki_tools
 from backend.mcp.router import TOOL_HANDLERS, dispatch
 from backend.mcp.scopes import TOOL_REQUIRED_ROLES, TOOL_REQUIRED_SCOPES
@@ -20,8 +23,10 @@ from backend.models.mcp_chat import McpChatSession
 from backend.models.review import ReviewItem
 from backend.models.user import User
 from backend.models.workspace import MCPClient, Workspace
+from backend.policy.auth import ActorContext
 from backend.policy.rbac import grant_workspace_membership
 from backend.schemas.context_write import ReviewDecisionRequest, WriteDraftRequest
+from backend.schemas.mcp.review_tools import ListRequestedChangesPayload
 from backend.services.context_write_service import ContextWriteService
 from backend.services.review_service import CLAIM_TTL_MINUTES, ReviewService
 
@@ -39,9 +44,7 @@ def editor_actor(mcp_default_actor):
 
 def _workspace_id(page_service):
     with page_service.session_factory() as session:
-        return session.scalar(
-            select(Workspace).where(Workspace.slug == "default")
-        ).id
+        return session.scalar(select(Workspace).where(Workspace.slug == "default")).id
 
 
 def _make_user(session, email: str, workspace_id, role: str = "editor") -> User:
@@ -203,11 +206,74 @@ def test_list_requested_changes_shows_request_to_owner_principal(
     assert item.reason == "Add a citation."
     assert item.audience_kind == "requester"
     assert item.target is not None
+    assert item.target.stable_url == f"/p/{workspace_id}/{item.target.target_id}"
+    assert item.target.link_markdown == (
+        f"[Self Routed Page]({item.target.stable_url})"
+    )
+    assert item.evidence is not None
+    assert item.evidence.operations[0].document.reader_href == (
+        f"/workspaces/{workspace_id}/context/pages/{item.target.target_id}"
+    )
 
 
-def test_list_requested_changes_owner_less_caller_is_empty(
-    page_service, editor_actor
-):
+def test_requested_change_version_link_uses_authorized_document_id(monkeypatch):
+    """A version UUID identifies evidence, while its link must open the document."""
+    workspace_id, page_id, version_id, user_id = (uuid4() for _ in range(4))
+    data = ListRequestedChangesPayload.model_validate(
+        {
+            "items": [
+                {
+                    "review_item_id": uuid4(),
+                    "change_set_id": uuid4(),
+                    "target": {
+                        "target_type": "context_page_version",
+                        "target_id": version_id,
+                    },
+                    "evidence": {
+                        "operations": [
+                            {
+                                "operation_id": uuid4(),
+                                "target_type": "context_page_version",
+                                "target_id": version_id,
+                                "operation": "update",
+                                "document": {
+                                    "document_kind": "context",
+                                    "document_id": page_id,
+                                    "title": "Reviewed document",
+                                    "can_open": True,
+                                },
+                            }
+                        ]
+                    },
+                    "claim": {"claimed": False, "claimed_by_me": False},
+                }
+            ]
+        }
+    )
+    monkeypatch.setattr(
+        review_tools, "resolve_effective_principal", lambda *a, **k: user_id
+    )
+    monkeypatch.setattr(review_tools, "_principal_role", lambda *a, **k: "owner")
+    ctx = SimpleNamespace(
+        actor=ActorContext(actor_kind="human", actor_id=str(user_id), user_id=user_id),
+        workspace_id=workspace_id,
+        conversation_token=None,
+        session_factory=lambda: nullcontext(None),
+        services=SimpleNamespace(
+            review=SimpleNamespace(
+                list_requested_changes_for_principal=lambda **k: data
+            )
+        ),
+    )
+    result = review_tools.list_requested_changes({"workspace_id": workspace_id}, ctx)
+    assert result.envelope.result_status == "succeeded"
+    target = result.data.items[0].target
+    assert target.target_id == version_id
+    assert target.stable_url == f"/p/{workspace_id}/{page_id}"
+    assert target.link_markdown == f"[Reviewed document](/p/{workspace_id}/{page_id})"
+
+
+def test_list_requested_changes_owner_less_caller_is_empty(page_service, editor_actor):
     workspace_id = _workspace_id(page_service)
     token = f"conv-{uuid4()}"
     with page_service.session_factory.begin() as session:

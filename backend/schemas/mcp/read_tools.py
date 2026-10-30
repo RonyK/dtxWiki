@@ -2,7 +2,13 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    model_serializer,
+    model_validator,
+)
 
 from backend.schemas.common import (
     MCPConversationInput,
@@ -11,15 +17,23 @@ from backend.schemas.common import (
     SearchScope,
 )
 from backend.schemas.context_edit import SectionAddress
+from backend.schemas.mcp.context_projection import (
+    MCPContextCandidate,
+    MCPGuidePayload,
+    MCPSearchPayload,
+)
+from backend.schemas.mcp.page_input import (
+    MCPContextPathInput,
+    MCPPageInput,
+    MCPReadConceptPathInput,
+    validate_typed_target,
+)
 from backend.schemas.read import (
     SEARCH_QUERY_MAX_LENGTH,
     AgentCategoryEntry,
     AgentPageDetail,
-    DisambiguationCandidate,
-    GuidePayload,
     ListChangesPayload,
     SearchFilters,
-    SearchPayload,
     WorkspaceListData,
 )
 
@@ -57,7 +71,7 @@ class GuideInput(MCPConversationInput):
 
 class GuideOutput(BaseModel):
     envelope: MCPResultEnvelope
-    data: GuidePayload | None = None
+    data: MCPGuidePayload | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -89,7 +103,7 @@ class SearchInput(MCPConversationInput):
 
 class SearchOutput(BaseModel):
     envelope: MCPResultEnvelope
-    data: SearchPayload | None = None
+    data: MCPSearchPayload | None = None
     input_required: dict[str, Any] | None = None
 
     model_config = ConfigDict(extra="forbid")
@@ -108,8 +122,13 @@ FetchResultType = Literal[
 
 class FetchInput(MCPConversationInput):
     workspace_id: UUID
-    id: UUID
+    id: MCPPageInput
     type: FetchResultType
+
+    @model_validator(mode="before")
+    @classmethod
+    def _typed_id(cls, value):
+        return validate_typed_target(value, type_field="type", id_field="id")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -137,7 +156,15 @@ class ReadInput(MCPConversationInput):
         "feedback",
         "change_set",
     ]
-    target_id: UUID
+    target_id: MCPPageInput
+
+    @model_validator(mode="before")
+    @classmethod
+    def _typed_id(cls, value):
+        return validate_typed_target(
+            value, type_field="target_type", id_field="target_id"
+        )
+
     # D-2: the former ``range``/``include`` fields were accepted but silently
     # ignored — removed rather than deprecated (extra="forbid" now rejects
     # them loudly). Versions/diff -> list_changes; backlinks/citations ->
@@ -220,7 +247,8 @@ class ReadConceptInput(MCPConversationInput):
     # include_neighbors adds the 1-hop block (design 5.5); set false to save
     # tokens on pure content reads.
     workspace_id: UUID
-    path: str = Field(min_length=1, max_length=512)
+    path: MCPReadConceptPathInput
+
     include_neighbors: bool = True
     # Point-in-time read (design 17.2-B): resolve the version PUBLISHED at
     # this instant (superseded snapshots included). Names resolve at present;
@@ -240,6 +268,8 @@ class NeighborEntry(BaseModel):
     path: str | None = None
     edge_kind: str
     direction: Literal["in", "out"]
+    stable_url: str | None = None
+    link_markdown: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -261,19 +291,19 @@ class ReadConceptOutput(BaseModel):
     envelope: MCPResultEnvelope
     status: Literal["found", "redirected", "ambiguous", "not_found"] | None = None
     path: str | None = None
-    canonical_path: str | None = None
-    redirect_target_path: str | None = None
     # Concept identity across sections (A-8): context pages fill
     # target_kind="context_page" (target_id == page_id); library sources
     # fill target_kind="library_item".
     target_kind: Literal["context_page", "library_item"] | None = None
     target_id: UUID | None = None
     page_id: UUID | None = None
+    stable_url: str | None = None
+    link_markdown: str | None = None
     version_id: UUID | None = None
     version_status: str | None = None
     content: str | None = None
     frontmatter: dict[str, Any] | None = None
-    candidates: list[DisambiguationCandidate] = Field(default_factory=list)
+    candidates: list[MCPContextCandidate] = Field(default_factory=list)
     neighbors: ConceptNeighbors | None = None
     as_of: datetime | None = None
     mermaid: str | None = None
@@ -288,8 +318,8 @@ class ReadConceptOutput(BaseModel):
 
 
 class ContextOutlineTarget(BaseModel):
-    path: str | None = Field(default=None, min_length=1, max_length=512)
-    page_id: UUID | None = None
+    path: MCPContextPathInput | None = None
+    page_id: MCPPageInput | None = None
     version_id: UUID | None = None
 
     @model_validator(mode="after")
@@ -583,8 +613,13 @@ class WhatChangedInput(MCPConversationInput):
 class WhatChangedEntryModel(BaseModel):
     # One move of a page's published version, like a ref update (before ->
     # after). Why it moved is the reason, never an extra change_kind.
-    concept_path: str
     title: str
+    stable_url: str | None = Field(
+        ..., description="Permanent page link, null when archived."
+    )
+    link_markdown: str | None = Field(
+        ..., description="Markdown page link, null when archived."
+    )
     change_kind: Literal["created", "updated", "archived", "unpublished"] = Field(
         description=(
             "created: the page entered the published set, including publishing "
@@ -663,7 +698,15 @@ class ListChangesInput(MCPConversationInput):
         "workspace",
         "changeset",
     ]
-    target_id: UUID
+    target_id: MCPPageInput
+
+    @model_validator(mode="before")
+    @classmethod
+    def _typed_id(cls, value):
+        return validate_typed_target(
+            value, type_field="target_type", id_field="target_id"
+        )
+
     include_diff: bool = False
     limit: int = Field(default=50, ge=1, le=200)
 

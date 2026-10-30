@@ -3,6 +3,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import re
 from datetime import datetime
 from uuid import UUID
 
@@ -72,7 +73,16 @@ from backend.services.client_round_state import (
     ClientRoundStateCodec,
     ClientRoundStateError,
 )
-from backend.services.concept_resolution import resolve_context_concept
+from backend.services.concept_resolution import (
+    ConceptReadResult,
+    resolve_context_concept,
+)
+from backend.services.context_links import (
+    LinkContext,
+    PageLocatorNotFound,
+    parse_page_input,
+    resolve_page_input,
+)
 from backend.services.coverage_service import (
     record_coverage_gap,
     record_coverage_rewrite_attempt,
@@ -80,6 +90,13 @@ from backend.services.coverage_service import (
 )
 from backend.services.grep_wiki import grep_wiki as grep_wiki_service
 from backend.services.maintenance_rounds import UNTRUSTED_CONTEXT_NOTICE
+from backend.services.mcp_context_projection import (
+    context_record,
+    guide_payload,
+    library_links,
+    page_links,
+    search_payload,
+)
 from backend.services.mcp_read_projection import record_served_read
 from backend.services.okf import (
     build_workspace_index,
@@ -350,7 +367,9 @@ def guide(payload: dict, ctx: ToolCallContext) -> GuideOutput:
         return GuideOutput(
             envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
         )
-    return GuideOutput(envelope=ok_envelope(actor), data=data)
+    return GuideOutput(
+        envelope=ok_envelope(actor), data=guide_payload(data, ctx.workspace_id)
+    )
 
 
 def search(payload: dict, ctx: ToolCallContext) -> SearchOutput:
@@ -531,7 +550,7 @@ def search(payload: dict, ctx: ToolCallContext) -> SearchOutput:
     envelope = apply_payload_warnings(ok_envelope(actor), data.warnings)
     return SearchOutput(
         envelope=envelope,
-        data=data,
+        data=search_payload(data, ctx.workspace_id),
         input_required=input_required,
     )
 
@@ -541,10 +560,19 @@ def fetch(payload: dict, ctx: ToolCallContext) -> FetchOutput:
     try:
         request = FetchInput.model_validate(payload)
         with ctx.session_factory() as session:
+            resolved_page_id = (
+                resolve_page_input(
+                    request.id, LinkContext(session, ctx.workspace_id, actor)
+                )
+                if request.type == "context_page"
+                else None
+            )
             result = ctx.services.domain_read.fetch_target(
                 session=session,
                 workspace_id=ctx.workspace_id,
-                entity_id=request.id,
+                entity_id=(
+                    resolved_page_id if resolved_page_id is not None else request.id
+                ),
                 entity_type=request.type,
                 actor=actor,
             )
@@ -558,6 +586,19 @@ def fetch(payload: dict, ctx: ToolCallContext) -> FetchOutput:
         return FetchOutput(
             envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
         )
+    except PageLocatorNotFound:
+        return FetchOutput(envelope=error_envelope(actor, "not_found"))
+    metadata = result.get("metadata") or {}
+    if request.type in {"context_page", "context_claim"}:
+        page_id = (
+            resolved_page_id
+            if resolved_page_id is not None
+            else UUID(metadata["page_id"])
+        )
+        result["metadata"] = context_record(
+            metadata, ctx.workspace_id, page_id, result["title"]
+        )
+        result["url"] = result["metadata"]["stable_url"]
     return FetchOutput(envelope=ok_envelope(actor), **result)
 
 
@@ -717,11 +758,22 @@ def read(payload: dict, ctx: ToolCallContext) -> ReadOutput:
     try:
         request = ReadInput.model_validate(payload)
         with session_factory() as session:
+            resolved_page_id = (
+                resolve_page_input(
+                    request.target_id, LinkContext(session, ctx.workspace_id, actor)
+                )
+                if request.target_type == "context_page"
+                else None
+            )
             data = ctx.services.domain_read.read_target(
                 session=session,
                 workspace_id=ctx.workspace_id,
                 target_type=request.target_type,
-                target_id=request.target_id,
+                target_id=(
+                    resolved_page_id
+                    if resolved_page_id is not None
+                    else request.target_id
+                ),
                 actor=actor,
             )
     except ValidationError as exc:
@@ -734,6 +786,13 @@ def read(payload: dict, ctx: ToolCallContext) -> ReadOutput:
         return ReadOutput(
             envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
         )
+    except PageLocatorNotFound:
+        return ReadOutput(envelope=error_envelope(actor, "not_found"))
+    if request.target_type in {"context_page", "context_page_version"}:
+        # Both reads return a ContextPageDetail: id is the document identity,
+        # while version_info identifies the selected version. Claim reads have
+        # their own payload and do not carry document identity or lookup URLs.
+        data = context_record(data, ctx.workspace_id, UUID(data["id"]), data["title"])
     return ReadOutput(envelope=ok_envelope(actor), data=data)
 
 
@@ -802,9 +861,14 @@ def _concept_neighbors(session, ctx, page, actor):
                 kind=edge.kind,
                 id=edge.id,
                 title=edge.title,
-                path=edge.path,
+                path=None if edge.kind == EntityKind.CONTEXT_PAGE else edge.path,
                 edge_kind=edge.edge_kind,
                 direction=edge.direction,
+                **(
+                    page_links(ctx.workspace_id, edge.id, edge.title)
+                    if edge.kind == EntityKind.CONTEXT_PAGE
+                    else {}
+                ),
             )
             for edge in edges[:limit]
         ]
@@ -887,11 +951,22 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
                 actor, exc, allowed_fields=ReadConceptInput.model_fields
             )
         )
-    parsed = parse_concept_path(request.path)
-    if parsed is None:
+    library_match = request.path.startswith("/library/") and request.path.endswith(
+        ".md"
+    )
+    try:
+        locator = None if library_match else parse_page_input(request.path)
+    except ValueError:
+        locator = None
+    parsed = parse_concept_path(request.path) if library_match else None
+    if not library_match and locator is None:
         return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
-    section, slug = parsed
-    if section == "library":
+    if library_match:
+        if parsed is None:
+            return ReadConceptOutput(
+                envelope=error_envelope(actor, "validation_failed")
+            )
+        section, slug = parsed
         # A-8: get_index advertises /library/<id>.md — read_concept must
         # resolve it instead of dead-ending half the catalog.
         with session_factory() as session:
@@ -910,9 +985,9 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
             envelope=ok_envelope(actor),
             status="found",
             path=request.path,
-            canonical_path=request.path,
             target_kind="library_item",
             target_id=item_id,
+            **library_links(ctx.workspace_id, item.id, item.title or item.uri),
             content=content,
             frontmatter=frontmatter,
         )
@@ -920,9 +995,27 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
         workspace_slug = resolve_workspace_slug(session, ctx.workspace_id)
         if workspace_slug is None:
             return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
-        result = resolve_context_concept(
-            session, ctx.workspace_id, identifier=slug, actor=actor
-        )
+        if locator.kind in {"page_id", "stable_full", "stable_short"}:
+            try:
+                page_id = resolve_page_input(
+                    request.path, LinkContext(session, ctx.workspace_id, actor)
+                )
+            except PageLocatorNotFound:
+                return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
+            page, version = resolve_visible_context_version(
+                session,
+                workspace_id=ctx.workspace_id,
+                page_id=page_id,
+                version_id=None,
+                path=None,
+                version_preference="visible",
+                actor=actor,
+            )
+            result = ConceptReadResult(status="found", page=page, version=version)
+        else:
+            result = resolve_context_concept(
+                session, ctx.workspace_id, identifier=locator.slug, actor=actor
+            )
         if result.status == "not_found":
             return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
         if result.status == "ambiguous":
@@ -934,7 +1027,9 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
                     {
                         "id": candidate.page_id,
                         "title": candidate.title,
-                        "concept_path": candidate.path,
+                        **page_links(
+                            ctx.workspace_id, candidate.page_id, candidate.title
+                        ),
                         "match_reason": {
                             "slug": "exact_slug",
                             "title": "exact_title",
@@ -957,11 +1052,19 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
             version = resolve_version_as_of(session, page, request.as_of)
             if version is None:
                 return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
+        links = page_links(ctx.workspace_id, page.id, page.title)
         content = render_context_concept(page, version, workspace_slug=workspace_slug)
+        content = re.sub(
+            r"(?m)^resource:.*$",
+            f"resource: {links['stable_url']}",
+            content,
+            count=1,
+        )
         record_served_read("context_page", page.id, version)
         frontmatter = project_context_frontmatter(
             page, version, workspace_slug=workspace_slug
         )
+        frontmatter["resource"] = links["stable_url"]
         neighbors = (
             _concept_neighbors(session, ctx, page, actor)
             if request.include_neighbors and request.as_of is None
@@ -1015,11 +1118,10 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
         envelope=ok_envelope(actor),
         status=result.status,
         path=request.path,
-        canonical_path=result.canonical_path,
-        redirect_target_path=result.redirect_target_path,
         target_kind="context_page",
         target_id=page.id,
         page_id=page.id,
+        **links,
         version_id=version.id,
         version_status=version.version_status,
         content=content,
@@ -1038,12 +1140,19 @@ def _resolve_outline_version(
     actor,
 ):
     target = request.target
+    page_id = target.page_id
+    path = target.path
+    if page_id is not None or path is not None:
+        page_id = resolve_page_input(
+            page_id or path, LinkContext(session, ctx.workspace_id, actor)
+        )
+        path = None
     return resolve_visible_context_version(
         session,
         workspace_id=ctx.workspace_id,
-        page_id=target.page_id,
+        page_id=page_id,
         version_id=target.version_id,
-        path=target.path,
+        path=path,
         version_preference=request.version,
         actor=actor,
     )
@@ -1482,8 +1591,21 @@ def what_changed(payload: dict, ctx: ToolCallContext) -> WhatChangedOutput:
         envelope=ok_envelope(actor),
         entries=[
             WhatChangedEntryModel(
-                concept_path=entry.concept_path,
                 title=entry.title,
+                stable_url=(
+                    None
+                    if entry.change_kind == "archived"
+                    else page_links(ctx.workspace_id, entry.page_id, entry.title)[
+                        "stable_url"
+                    ]
+                ),
+                link_markdown=(
+                    None
+                    if entry.change_kind == "archived"
+                    else page_links(ctx.workspace_id, entry.page_id, entry.title)[
+                        "link_markdown"
+                    ]
+                ),
                 change_kind=entry.change_kind,
                 page_id=entry.page_id,
                 version_id=entry.version_id,
@@ -1522,7 +1644,12 @@ def grep_wiki(payload: dict, ctx: ToolCallContext) -> GrepWikiOutput:
         )
     return GrepWikiOutput(
         envelope=ok_envelope(actor),
-        matches=[match.as_dict() for match in matches],
+        matches=[
+            context_record(
+                match.as_dict(), ctx.workspace_id, match.page_id, match.title
+            )
+            for match in matches
+        ],
     )
 
 
@@ -1536,7 +1663,13 @@ def list_changes(payload: dict, ctx: ToolCallContext) -> ListChangesOutput:
                 session=session,
                 workspace_id=ctx.workspace_id,
                 target_type=request.target_type,
-                target_id=request.target_id,
+                target_id=(
+                    resolve_page_input(
+                        request.target_id, LinkContext(session, ctx.workspace_id, actor)
+                    )
+                    if request.target_type == "context_page"
+                    else request.target_id
+                ),
                 include_diff=request.include_diff,
                 limit=request.limit,
                 actor=actor,
@@ -1551,6 +1684,8 @@ def list_changes(payload: dict, ctx: ToolCallContext) -> ListChangesOutput:
         return ListChangesOutput(
             envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
         )
+    except PageLocatorNotFound:
+        return ListChangesOutput(envelope=error_envelope(actor, "not_found"))
     return ListChangesOutput(envelope=ok_envelope(actor), data=data)
 
 

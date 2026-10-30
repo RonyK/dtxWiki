@@ -26,6 +26,7 @@ from backend.services.mcp_chat_service import (
     resolve_effective_principal,
 )
 from backend.services.mcp_client_service import resolve_trace_mcp_client
+from backend.services.mcp_context_projection import page_links
 from backend.services.read_errors import ReadServiceError
 
 
@@ -72,6 +73,37 @@ def list_requested_changes(
         return ListRequestedChangesOutput(
             envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
         )
+    for item in data.items:
+        target = item.target
+        if target is None or target.target_type not in {
+            "context_page",
+            "context_page_version",
+        }:
+            continue
+        # Version targets identify a version. Use the authorized review
+        # evidence's document identity to produce a page link.
+        document = next(
+            (
+                operation.document
+                for operation in (item.evidence.operations if item.evidence else [])
+                if operation.target_type == target.target_type
+                and operation.target_id == target.target_id
+                and operation.document is not None
+                and operation.document.document_kind == "context"
+                and operation.document.can_open
+                and operation.document.document_id is not None
+            ),
+            None,
+        )
+        if document is None:
+            continue
+        links = page_links(
+            ctx.workspace_id,
+            document.document_id,
+            document.title or target.title or "",
+        )
+        target.stable_url = links["stable_url"]
+        target.link_markdown = links["link_markdown"]
     return ListRequestedChangesOutput(envelope=ok_envelope(actor), data=data)
 
 

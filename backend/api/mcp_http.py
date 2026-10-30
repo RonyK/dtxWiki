@@ -50,6 +50,10 @@ from backend.mcp.protocol.tool_descriptors import (
     list_dtxwiki_tools,
     mcp_server_version,
 )
+from backend.mcp.protocol.workspace_target import (
+    WorkspaceTargetValidationError,
+    require_workspace_target,
+)
 from backend.mcp.scopes import (
     TOOL_REQUIRED_ROLES,
     TOOL_REQUIRED_SCOPES,
@@ -791,17 +795,23 @@ def _build_dispatcher_server(app: FastAPI) -> MCPServer:
         # ``TOOL_REQUIRED_ROLES[name] is None`` (e.g. list_my_workspaces) is
         # a cross-workspace enumeration tool — skip the workspace check.
         action = _map_action(name)
-        if action is not None:
-            requested_workspace_id = _mcp_requested_workspace_id_from_arguments(
-                tool_arguments
-            )
-            with session_factory() as session:
-                resolve_and_check(
-                    session=session,
-                    actor=actor,
-                    action=action,
-                    requested_workspace_id=requested_workspace_id,
-                )
+        if action is not None and has_required_scope(
+            actor, TOOL_REQUIRED_SCOPES.get(name, ())
+        ):
+            try:
+                requested_workspace_id = require_workspace_target(tool_arguments)
+            except WorkspaceTargetValidationError:
+                # The runner formats the schema error. Do not invoke the
+                # ambient default-workspace resolver on malformed targets.
+                requested_workspace_id = None
+            if requested_workspace_id is not None:
+                with session_factory() as session:
+                    resolve_and_check(
+                        session=session,
+                        actor=actor,
+                        action=action,
+                        requested_workspace_id=requested_workspace_id,
+                    )
         return await call_tool_async(
             name,
             tool_arguments,
@@ -921,20 +931,21 @@ def _mcp_transport_workspace_check_required(body_bytes: bytes) -> bool:
 def _resolve_and_check_mcp_workspace(
     request: Request, actor, body: bytes
 ) -> JSONResponse | None:
-    """Resolve + access-check the workspace for an MCP POST.
+    """Require and access-check the explicit workspace for an MCP POST."""
 
-    Sprint_5 Phase_0~2 fix-round (SEC-1, SEC-6): the previous implementation
-    silently returned ``None`` when a client supplied ``params.arguments.
-    workspace_id`` and the resolver/checker raised, on the assumption that
-    per-tool ``enforce_workspace_role_for_tool`` would catch the deny later.
-    That assumption is fragile (defense-in-depth would degrade to a single
-    layer; a future tool with ``TOOL_REQUIRED_ROLES[name] is None`` would
-    bypass workspace policy entirely). Phase_1 §11.1 contract requires
-    ``WorkspaceAmbiguityError -> 400`` and ``PermissionError -> 403``
-    unconditionally.
-    """
-
-    requested_workspace_id = _mcp_requested_workspace_id(body)
+    tool_name = _mcp_request_tool_name(body)
+    required_scopes = TOOL_REQUIRED_SCOPES.get(tool_name, ())
+    if not has_required_scope(actor, required_scopes):
+        # Scope denial takes precedence over argument validation.
+        return None
+    try:
+        requested_workspace_id = require_workspace_target(
+            _mcp_request_tool_arguments(body)
+        )
+    except WorkspaceTargetValidationError:
+        # The common runner returns the tool-error envelope for both JSON and
+        # SSE, before any lookup, preference repair, trace, or chat write.
+        return None
     session_factory = get_session_factory_from_app(request)
     with session_factory.begin() as session:
         try:
@@ -964,18 +975,18 @@ def _resolve_and_check_mcp_workspace(
     return None
 
 
-def _mcp_requested_workspace_id(body_bytes: bytes) -> UUID | None:
+def _mcp_request_tool_arguments(body_bytes: bytes) -> dict:
     try:
         body = json.loads(body_bytes.decode() or "{}")
     except Exception:
-        return None
+        return {}
     if not isinstance(body, dict):
-        return None
+        return {}
     params = body.get("params")
     if not isinstance(params, dict):
-        return None
+        return {}
     arguments = params.get("arguments")
-    return _mcp_requested_workspace_id_from_arguments(arguments)
+    return arguments if isinstance(arguments, dict) else {}
 
 
 def _mcp_request_tool_name(body_bytes: bytes) -> str | None:
@@ -1009,6 +1020,9 @@ def _restricted_library_policy_error(
     actor: ActorContext,
     body: bytes,
 ) -> JSONResponse | None:
+    required_scopes = TOOL_REQUIRED_SCOPES.get(_mcp_request_tool_name(body), ())
+    if not has_required_scope(actor, required_scopes):
+        return None
     target = _mcp_read_library_target(body)
     if target is None:
         return None

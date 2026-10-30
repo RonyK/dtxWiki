@@ -810,6 +810,18 @@ and [MCP schemas](https://github.com/dtxSuite/dtxWiki/tree/main/shared/schemas/m
 MCP clients first call `list_my_workspaces`, then `guide` with the chosen
 `workspace_id`. Subsequent calls specify that workspace explicitly.
 
+Context page inputs accept UUIDs and stable `/p/<workspace_id>/<page_id>` links.
+Short `/p/<page_id>` locators resolve only inside the supplied workspace and
+are not browser permalinks. Use a read result's `link_markdown` in responses.
+Library `/library/<id>.md` paths remain lookup identifiers; the index format
+is unchanged. MCP-only projections replace Context `concept_path` and
+`resource_uri` with document links; shared REST schemas retain those fields.
+
+Reference metadata named `link_targets`, when provided by a read surface,
+means server-confirmed links, not permission to activate arbitrary authored
+references. An omitted or empty value confirms no additional references. This
+MCP revision does not add that metadata to read responses.
+
 - **MCP Streamable HTTP**: 29 tools are registered; the tools available to a
   particular client are determined by its permissions and returned by `tools/list`.
 

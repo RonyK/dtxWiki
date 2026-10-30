@@ -369,14 +369,24 @@ def test_mcp_schema_export_covers_all_advertised_tools(mcp_schemas):
 
     advertised = {tool.name for tool in list_dtxwiki_tools()}
     assert advertised == set(mcp_schemas)
-    assert "disambiguation" not in mcp_schemas["search"]["output"]["$defs"][
-        "SearchPayload"
-    ]["properties"]
+    search_output = mcp_schemas["search"]["output"]
+    (payload_ref,) = (
+        option["$ref"]
+        for option in search_output["properties"]["data"]["anyOf"]
+        if "$ref" in option
+    )
+    assert payload_ref.startswith("#/$defs/")
+    search_payload = search_output["$defs"][payload_ref.removeprefix("#/$defs/")]
+    assert "disambiguation" not in search_payload["properties"]
     filters = mcp_schemas["search"]["input"]["$defs"]["SearchFilters"]
     assert filters["properties"]["include_agents"]["type"] == "boolean"
     assert filters["properties"]["include_agents"]["default"] is True
     assert "include_agents" not in filters.get("required", [])
-    ranked = mcp_schemas["search"]["output"]["$defs"]["RankedResult"]
+    ranked_ref = search_payload["properties"]["ranked_results"]["items"]["$ref"]
+    assert ranked_ref.startswith("#/$defs/")
+    ranked = search_output["$defs"][ranked_ref.removeprefix("#/$defs/")]
+    assert {"stable_url", "link_markdown", "path"}.issubset(ranked["properties"])
+    assert {"concept_path", "resource_uri"}.isdisjoint(ranked["properties"])
     assert {"summary", "location"}.issubset(ranked["properties"])
     assert {"summary", "location"}.isdisjoint(ranked.get("required", []))
     assert ranked["properties"]["stale"]["deprecated"] is True
