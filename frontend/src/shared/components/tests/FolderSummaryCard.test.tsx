@@ -50,6 +50,8 @@ function preview(title: string): TreeIndexPreview {
       `- [${markdownTitle}](dtxwiki://index/context/${id}) (draft) — Summary: Routing summary for this page. <script>alert('unsafe')</script> ![pixel](https://example.invalid/p.png) [same folder](dtxwiki://index/folder/${folderId})`,
       `- [Diagrams](dtxwiki://index/folder/${diagramsId}) (1) — ![구조도](https://example.invalid/map.png)`,
       `- [Child folder](dtxwiki://index/folder/${folderId}) (3) — Generated: includes several items.`,
+      "- # Saved view",
+      "",
       "…and 2 more",
     ].join("\n"),
     entries: [
@@ -78,6 +80,15 @@ function preview(title: string): TreeIndexPreview {
         href: `/workspaces/${workspaceId}/context/folders/${folderId}`,
         summary: "Generated: includes several items.",
         count: 3,
+        draft: false,
+      },
+      {
+        kind: "other",
+        id: "77777777-7777-4777-8777-777777777777",
+        title: "# Saved view",
+        href: null,
+        summary: "",
+        count: null,
         draft: false,
       },
     ],
@@ -229,6 +240,12 @@ describe("FolderSummaryCard", () => {
     expect(formatted?.textContent).toContain("Generated: includes several items.");
     expect(formatted?.textContent).not.toContain("— Generated:");
     expect(formatted?.textContent).toContain("…and 2 more");
+    // The overflow notice is not part of the last entry's summary, and a
+    // title-only row rendered as a block does not disable formatting.
+    expect(formatted?.querySelector("li:last-of-type")?.textContent?.trim()).toBe("Saved view");
+    expect(
+      screen.getByRole("link", { name: "Child folder" }).closest("li")?.textContent,
+    ).not.toContain("more");
     expect(formatted?.textContent).toContain("<script>alert('unsafe')</script>");
     // Summaries are not escaped: their links, images and HTML stay text.
     expect(formatted?.textContent).toContain("pixel same folder");

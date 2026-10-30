@@ -88,6 +88,14 @@ function canonicalEntryHref(entry: TreeIndexPreviewEntry): string | null {
   return `/workspaces/${workspaceId}/${section}/${routeKind}/${routeId}`;
 }
 
+/** Whether a parsed subtree has anything that could render as a link. */
+function containsLink(node: { type: string; children?: unknown[] }): boolean {
+  if (["link", "linkReference", "definition", "html"].includes(node.type)) return true;
+  return (node.children ?? []).some((child) =>
+    containsLink(child as { type: string; children?: unknown[] }),
+  );
+}
+
 /** Refs of actual, tight list rows, in the order rendered by ReactMarkdown. */
 function entryRefs(markdown: string): (string | null)[] | null {
   const refs: (string | null)[] = [];
@@ -99,8 +107,13 @@ function entryRefs(markdown: string): (string | null)[] | null {
     if (block.type !== "list" || block.ordered || block.spread) return null;
     for (const item of block.children) {
       const paragraph = item.children[0];
-      if (item.spread || item.children.length !== 1 || paragraph?.type !== "paragraph") {
-        return null;
+      if (item.spread || item.children.length !== 1 || !paragraph) return null;
+      if (paragraph.type !== "paragraph") {
+        // A title-only row may start with block syntax ("# Notes") and render
+        // as that block. Without any link it is still a row with no ref.
+        if (containsLink(paragraph)) return null;
+        refs.push(null);
+        continue;
       }
       const first = paragraph.children.find((child) =>
         child.type !== "text" || child.value.trim() !== "",

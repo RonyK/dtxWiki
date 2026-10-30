@@ -442,6 +442,10 @@ def _node_entry_lines(
         rendered += 1
     overflow = len(children) - rendered
     if overflow > 0:
+        if lines:
+            # Without the blank line, Markdown continues the last entry's
+            # paragraph and reads the notice as that entry's summary.
+            lines.append("")
         lines.append(
             f"\u2026and {overflow} more \u2014 narrow via a child folder, or use search"
         )

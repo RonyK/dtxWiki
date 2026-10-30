@@ -227,7 +227,8 @@ def test_large_workspace_routes_and_descends(large_workspace):
         assert "knowledge index (Payments/)" in node_index
         # 60 children -> exactly 50 entries + "…and 10 more"
         assert node_index.count("](dtxwiki://index/context/") == 50
-        assert "…and 10 more" in node_index
+        # Its own paragraph: not a lazy continuation of the last entry.
+        assert "\n\n…and 10 more" in node_index
         # entries carry write-time nav descriptions
         assert "body paragraph." in node_index
         page = session.scalar(
