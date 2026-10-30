@@ -17,8 +17,10 @@ from backend.domain.input_policy import InputPolicyError
 from backend.mcp.router import dispatch
 from backend.models.change import ChangeOperation
 from backend.models.context import ContextPageVersion
-from backend.models.review import ReviewItem
+from backend.models.review import ReviewDecision, ReviewItem
 from backend.models.workspace import Workspace
+from backend.schemas.context_write import ReviewDecisionRequest
+from backend.services.review_service import ReviewService
 from backend.utils.block_identity import compute_block_map_with_ids
 
 
@@ -1343,3 +1345,179 @@ def test_a_stale_block_id_after_reordered_groups_is_not_found(page_service, acto
         _stored(page_service, created.version_id).content_hash
         == swapped.data.content_hash
     )
+
+
+def test_the_same_chat_keeps_refining_one_submitted_version(page_service, actor):
+    """One chat editing one page keeps one version.
+
+    An edit begun after a submit used to start again from the published
+    head, so each refine-and-submit round left a sibling draft and a pending
+    review, and only the newest could be approved. The chat's own pending
+    submission is reopened instead, whole-body saves and patches stay on it,
+    and the next submit replaces its review. Another chat still branches. A
+    begin receipt stored before begin knew its chat still replays from one.
+    """
+
+    workspace_id = _workspace(page_service)
+    published = page_service.write_page(
+        workspace_slug="default",
+        slug="same-chat-one-version",
+        title="Same Chat One Version",
+        body_md="# Public\n\nPublished text.",
+        actor_kind="human",
+        actor_id="session-flow-publisher",
+        actor_provenance="browser_session",
+    )
+
+    def call(tool, chat, **fields):
+        response = dispatch(
+            tool,
+            {
+                "workspace_id": str(workspace_id),
+                "page_id": str(published.id),
+                **fields,
+            },
+            actor=actor,
+            page_service=page_service,
+            conversation_token=chat,
+        )
+        assert response.envelope.result_status == "succeeded", response.envelope
+        return response.data
+
+    def submit(edit, key):
+        return call(
+            "submit_context_edit_for_review",
+            "conv_same",
+            version_id=str(edit.version_id),
+            expected_editing_revision=edit.editing_revision,
+            idempotency_key=key,
+        )
+
+    first = call("begin_context_edit", None, idempotency_key="b-1")
+    replayed = call(
+        "begin_context_edit", "conv_same", idempotency_key="b-1", retry_only=True
+    )
+    assert replayed.version_id == first.version_id
+    first = call(
+        "patch_context_edit",
+        "conv_same",
+        version_id=str(first.version_id),
+        expected_editing_revision=first.editing_revision,
+        operations=[{"op": "append_document", "content": "First change."}],
+        idempotency_key="p-1",
+    )
+    submitted = submit(first, "s-1")
+
+    reopened = call("begin_context_edit", "conv_same", idempotency_key="b-2")
+    assert reopened.version_id == first.version_id
+    assert reopened.editing_revision > submitted.editing_revision
+    assert "First change." in reopened.body_md
+    saved = call(
+        "update_context_edit",
+        "conv_same",
+        version_id=str(reopened.version_id),
+        expected_editing_revision=reopened.editing_revision,
+        body_md="# Public\n\nPublished text.\n\nFirst change.\n\nSecond change.",
+        idempotency_key="u-1",
+    )
+    patched = call(
+        "patch_context_edit",
+        "conv_same",
+        version_id=str(saved.version_id),
+        expected_editing_revision=saved.editing_revision,
+        operations=[{"op": "append_document", "content": "Third change."}],
+        idempotency_key="p-2",
+    )
+    resubmitted = submit(patched, "s-2")
+    assert saved.version_id == patched.version_id == resubmitted.version_id
+    assert resubmitted.version_id == first.version_id
+    assert resubmitted.review_item_id != submitted.review_item_id
+
+    other_chat = call("begin_context_edit", "conv_other", idempotency_key="b-3")
+    assert other_chat.version_id != first.version_id
+    with page_service.session_factory() as session:
+        drafts = session.scalars(
+            select(ContextPageVersion).where(
+                ContextPageVersion.page_id == published.id,
+                ContextPageVersion.version_status.in_(("draft", "editing")),
+            )
+        ).all()
+        assert {draft.parent_version_id for draft in drafts} == {published.version_id}
+        assert len(drafts) == 2
+    statuses = _review_statuses_for_page(page_service, published.id)
+    assert statuses.count("pending") == 1
+    assert statuses.count("superseded") == 1
+
+
+def test_a_submission_that_was_once_published_is_never_reopened(page_service, actor):
+    """Undoing an approval returns its draft to pending, but as_of reads still
+    serve that version for the time it was live. Reopening it would rewrite
+    published history, so the same chat gets a new version instead."""
+
+    workspace_id = _workspace(page_service)
+    published = page_service.write_page(
+        workspace_slug="default",
+        slug="published-once-not-reopened",
+        title="Published Once",
+        body_md="# Public\n\nPublished text.",
+        actor_kind="human",
+        actor_id="session-flow-publisher",
+        actor_provenance="browser_session",
+    )
+
+    def call(tool, **fields):
+        response = dispatch(
+            tool,
+            {
+                "workspace_id": str(workspace_id),
+                "page_id": str(published.id),
+                **fields,
+            },
+            actor=actor,
+            page_service=page_service,
+            conversation_token="conv_undo",
+        )
+        assert response.envelope.result_status == "succeeded", response.envelope
+        return response.data
+
+    edit = call("begin_context_edit", idempotency_key="b-1")
+    edit = call(
+        "patch_context_edit",
+        version_id=str(edit.version_id),
+        expected_editing_revision=edit.editing_revision,
+        operations=[{"op": "append_document", "content": "Approved change."}],
+        idempotency_key="p-1",
+    )
+    submitted = call(
+        "submit_context_edit_for_review",
+        version_id=str(edit.version_id),
+        expected_editing_revision=edit.editing_revision,
+        idempotency_key="s-1",
+    )
+    reviews = ReviewService()
+    owner = {
+        "actor_kind": "human",
+        "actor_id": "session-flow-owner",
+        "actor_role": "owner",
+        "actor_provenance": "browser_session",
+    }
+    with page_service.session_factory.begin() as session:
+        reviews.apply_decision(
+            session=session,
+            workspace_id=workspace_id,
+            review_item_id=submitted.review_item_id,
+            request=ReviewDecisionRequest(decision_type="approve"),
+            **owner,
+        )
+    with page_service.session_factory.begin() as session:
+        decision_id = session.scalar(
+            select(ReviewDecision.id).where(
+                ReviewDecision.review_item_id == submitted.review_item_id
+            )
+        )
+        reviews.undo_decision(
+            session, workspace_id, submitted.review_item_id, decision_id, **owner
+        )
+
+    begun = call("begin_context_edit", idempotency_key="b-2")
+    assert begun.version_id != edit.version_id

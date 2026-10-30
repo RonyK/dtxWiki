@@ -396,6 +396,8 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
     assert foreign_workspace["envelope"]["error_code"] == "not_found"
     token = foreign_workspace["envelope"]["conversation_token"]
 
+    # This round verifies independent historical image usage. A new chat
+    # creates v2; reopening in the submitting chat would reuse v1 instead.
     reopened = _mcp_structured(
         rest,
         headers,
@@ -405,7 +407,7 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
             "workspace_id": str(workspace_id),
             "page_id": page_id,
             "idempotency_key": "p0-3-http-begin-v2",
-            "conversation_token": token,
+            "conversation_token": "new",
         },
     )
     assert reopened["envelope"]["result_status"] == "succeeded"

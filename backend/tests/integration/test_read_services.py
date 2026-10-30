@@ -472,6 +472,21 @@ def test_workspace_read_service_lists_details_and_guide_payload():
     }
     assert brief.required_workflow[0].startswith("guide: this brief view")
     assert any("get_index(format='nodes')" in step for step in brief.required_workflow)
+    write_steps = [
+        step for step in brief.required_workflow if step.startswith("write:")
+    ]
+    assert len(write_steps) == 1
+    write_flow = write_steps[0]
+    assert "once per task" in write_flow and "as often as needed" in write_flow
+    assert "edit_receipt instead of re-reading" in write_flow
+    assert "submit_context_edit_for_review once when done" in write_flow
+    assert "pending submission in the same chat" in write_flow
+    assert "reopens that same version" in write_flow
+    assert (
+        normal.required_workflow
+        == detailed.required_workflow
+        == brief.required_workflow
+    )
     assert brief.workspace_routing.whole_read == "within_budget"
     assert brief.workspace_routing.bundle_resource is not None
     assert brief.library_policy_summary is None
