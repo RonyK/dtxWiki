@@ -621,7 +621,7 @@ def test_residual_consumers_keep_ready_selected_content(
             workspace_id,
         ) == (
             seeded.item.title,
-            f"/library?target={seeded.item.id}",
+            f"/workspaces/{workspace_id}/library/items/{seeded.item.id}",
         )
         # P5.1: every mcp_chat_artifact_link producer normalizes a
         # LibraryArtifact id to its parent LibraryItem id before writing a
@@ -831,7 +831,7 @@ def test_residual_consumers_accept_completed_legacy_projection(session_factory):
             item.id,
             actor,
             workspace_id,
-        ) == (item.title, f"/library?target={item.id}")
+        ) == (item.title, f"/workspaces/{workspace_id}/library/items/{item.id}")
         # P5.1: producers normalize a LibraryArtifact id to its parent
         # LibraryItem id before writing a library_item-kind link, so this
         # reader no longer probes LibraryArtifact ids -- see the matching

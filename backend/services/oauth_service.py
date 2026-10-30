@@ -1146,7 +1146,7 @@ class OAuthService:
             "authorization_servers": [self.issuer],
             "scopes_supported": list(ALLOWED_OAUTH_SCOPES),
             "bearer_methods_supported": ["header"],
-            "resource_documentation": f"{self.issuer}/settings/integrations",
+            "resource_documentation": f"{self.issuer}/account/integrations",
         }
 
     def authorization_server_metadata(self) -> dict[str, Any]:

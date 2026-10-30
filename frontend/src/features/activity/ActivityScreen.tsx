@@ -13,7 +13,7 @@ import type {
   ActivityLane,
   ActivityPeriod,
 } from "../../shared/api/operations";
-import { getCurrentWorkspaceId } from "../../shared/api/workspace";
+import { useRouteWorkspaceId, workspacePath } from "../../shared/lib/workspaceRoutes";
 import { ActivityEntryRow } from "../../shared/components/ActivityEntryRow";
 import { ActivityGroupingControl } from "../../shared/components/ActivityGroupingControl";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
@@ -61,14 +61,14 @@ function useActivityQuery() {
 }
 
 function useFeed(query: ActivityQuery, lane?: ActivityLane) {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const { t } = useTranslation("activity");
   const queryKey = `${lane ?? "overview"}:${activityQueryParams(query)}`;
   const result = useAsyncLoad<FeedScreenState>(async (signal) => {
-    const workspaceId = await getCurrentWorkspaceId();
-    if (!workspaceId) throw new Error("Workspace not found");
+    const workspaceId = routeWorkspaceId;
     const feed = await listActivityFeed(workspaceId, { ...query, lane, limit: lane ? LANE_PAGE_SIZE : OVERVIEW_LIMIT }, signal);
     return { workspaceId, queryKey, feed };
-  }, [queryKey], {
+  }, [routeWorkspaceId, queryKey], {
     signalAware: true,
     errorMessage: t("errors.load", { defaultValue: "Failed to load Activity" }),
   });
@@ -76,16 +76,17 @@ function useFeed(query: ActivityQuery, lane?: ActivityLane) {
   const reconcile = useCallback((token: string, events: ActivityFeedEvent[]) => {
     setData(current => current?.queryKey === queryKey ? reconcileFeedGroup(current, token, events) : current);
   }, [queryKey, setData]);
-  const loadGroup = useActivityGroupLoader(result.data?.workspaceId, reconcile, result.reload);
+  const loadGroup = useActivityGroupLoader(result.data?.workspaceId === routeWorkspaceId ? routeWorkspaceId : null, reconcile, result.reload);
   return { ...result, queryKey, loadGroup };
 }
 
 export function ActivityScreen() {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const { t } = useTranslation("activity");
   const { query, update, reset } = useActivityQuery();
   const { data, error, loading, reload, queryKey, loadGroup } = useFeed(query);
-  useScreenEntryRefresh("/activity", reload, { queryDeps: [queryKey] });
-  if (!data || data.queryKey !== queryKey) {
+  useScreenEntryRefresh(workspacePath(routeWorkspaceId, "activity"), reload, { queryDeps: [routeWorkspaceId, queryKey] });
+  if (!data || data.workspaceId !== routeWorkspaceId || data.queryKey !== queryKey) {
     if (error && !loading) return <ActivityLoadError error={error} reload={reload} />;
     return <RouteLoading />;
   }
@@ -115,7 +116,7 @@ export function ActivityScreen() {
         <section className="feature-section">
           <div className="metric-grid">
             {LANES.map(({ lane, title, tone }) => (
-              <Link className="metric-card linked" key={lane} to={activityHref(query, lane)}>
+              <Link className="metric-card linked" key={lane} to={activityHref(query, lane, routeWorkspaceId)}>
                 <div className="metric-card-title">{iconForActivityLane(lane)}<span>{t(`lanes.${lane}.title`, { defaultValue: title })}</span></div>
                 <strong>
                   {data.feed.lanes[lane]?.represented_event_count ?? activityEntryCounts(grouped.get(lane) ?? []).represented_event_count}
@@ -392,6 +393,7 @@ function ActivityLaneEmpty({
   filtered?: boolean;
 }) {
   const { t } = useTranslation("activity");
+  const routeWorkspaceId = useRouteWorkspaceId();
   const workspace = useOptionalWorkspaceContext();
   const showChats = isEditorRole(workspace?.selectedWorkspace?.role);
   const message =
@@ -436,21 +438,21 @@ function ActivityLaneEmpty({
       {kind === "all" ? null : <p>{message}</p>}
       {kind === "system" ? null : kind === "mcp" ? (
         <div className="empty-state-actions">
-          <Link className="icon-button text-button" to="/settings/integrations">
+          <Link className="icon-button text-button" to={`${workspacePath(routeWorkspaceId, "settings/integrations")}`}>
             {t("actions.openMcpSetup", { defaultValue: "Open MCP setup" })}
           </Link>
           {showChats ? (
-            <Link className="icon-button text-button" to="/chats">
+            <Link className="icon-button text-button" to={workspacePath(routeWorkspaceId, "chats")}>
               {t("actions.openChats", { defaultValue: "Open Chats" })}
             </Link>
           ) : null}
         </div>
       ) : (
         <div className="empty-state-actions">
-          <Link className="icon-button text-button" to="/context">
+          <Link className="icon-button text-button" to={workspacePath(routeWorkspaceId, "context")}>
             {t("actions.browseContext", { defaultValue: "Browse Context pages" })}
           </Link>
-          <Link className="icon-button text-button" to="/context/new?from=context">
+          <Link className="icon-button text-button" to={`${workspacePath(routeWorkspaceId, "context/pages/new")}?from=context`}>
             {t("actions.createPage", { defaultValue: "Create a new page" })}
           </Link>
         </div>
@@ -466,12 +468,13 @@ function ActivityLaneSection({ query, lane, title, entries, loadGroup }: {
   loadGroup: ActivityGroupLoader;
 }) {
   const { t } = useTranslation("activity");
+  const routeWorkspaceId = useRouteWorkspaceId();
   const preview = entries.slice(0, LANE_PREVIEW_LIMIT);
   const counts = activityEntryCounts(preview);
   const actionKey = { pending: "feed.seeAllPending", advisory: "feed.seeAllAdvisory", history: "feed.seeAllHistory" } as const;
   return <section className="feature-section activity-feed-panel">
     <ListPanelHeader title={title} count={preview.length} unit={t("feed.entryUnit", { count: preview.length, defaultValue: "entries" })}
-      action={<Link className="activity-feed-see-all" to={activityHref(query, lane)}>{t(actionKey[lane])}<ChevronRight size={14} aria-hidden="true" /></Link>} />
+      action={<Link className="activity-feed-see-all" to={activityHref(query, lane, routeWorkspaceId)}>{t(actionKey[lane])}<ChevronRight size={14} aria-hidden="true" /></Link>} />
     <div className="activity-feed-summary"><div><p className="activity-feed-counts">{activityCountLabel(counts.returned_entry_count, counts.represented_event_count)}</p><p className="activity-feed-scope">{t("feed.scope", { defaultValue: "Current query range" })}</p></div></div>
     {preview.length === 0 ? <ActivityLaneEmpty kind={query.kind} title={title} /> : <div className="operations-list activity-feed-list">{preview.map(entry => <ActivityEntryRow entry={entry} query={query} loadGroup={loadGroup} key={entry.id} />)}</div>}
   </section>;
@@ -482,6 +485,7 @@ function parseLane(value: string | undefined): ActivityLane | null {
 }
 
 export function ActivityLanePage() {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const { t } = useTranslation("activity");
   const { lane: laneParam } = useParams();
   const lane = parseLane(laneParam);
@@ -521,7 +525,7 @@ export function ActivityLanePage() {
       if (moreController.current === controller) { moreController.current = null; setLoadingMore(false); }
     }
   }
-  if (!lane) return <Navigate replace to={activityHref(query)} />;
+  if (!lane) return <Navigate replace to={activityHref(query, undefined, routeWorkspaceId)} />;
   if (!data || data.queryKey !== queryKey) {
     if (error && !loading) return <ActivityLoadError error={error} reload={reload} />;
     return <RouteLoading />;
@@ -529,7 +533,7 @@ export function ActivityLanePage() {
   const title = t(`lanes.${lane}.title`, { defaultValue: lane });
   const counts = activityEntryCounts(data.feed.entries);
   return <div className="workspace-screen single-column activity-screen"><section className="feature-main">
-    <Breadcrumbs items={[{ label: t("breadcrumb", { defaultValue: "Activity" }), href: activityHref(query) }, { label: title }]} />
+    <Breadcrumbs items={[{ label: t("breadcrumb", { defaultValue: "Activity" }), href: activityHref(query, undefined, routeWorkspaceId) }, { label: title }]} />
     <div className="feature-header"><div><p className="eyebrow">{t("header.eyebrow", { defaultValue: "Operations timeline" })}</p><h1>{title}</h1><p className="activity-feed-counts">{activityCountLabel(counts.returned_entry_count, counts.represented_event_count)}</p><p className="activity-feed-scope">{t("feed.scope", { defaultValue: "Current query range" })}</p></div></div>
     {error ? <StatusBanner tone="warning">{error}<button className="icon-button text-button activity-feed-reload" onClick={reload} type="button">{t("feed.reload", { defaultValue: "Reload activity" })}</button></StatusBanner> : null}
     <ActivityFiltersPanel kind={query.kind} kindFilterLabel={t("kind.label", { defaultValue: "Type" })} subtype={query.subtype} subtypeFilterLabel={t("subtype.label", { defaultValue: "Sub-type" })} period={query.period} periodFilterLabel={t("period.label", { defaultValue: "Period" })} groupReads={query.group_reads} onGroupingChange={group_reads => update({ group_reads })} onKindChange={kind => update({ kind })} onPeriodChange={period => update({ period })} onSubtypeChange={subtype => update({ subtype })} onReset={reset} />

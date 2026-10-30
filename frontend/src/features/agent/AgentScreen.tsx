@@ -13,7 +13,7 @@ import {
   X,
 } from "lucide-react";
 import type { FormEvent } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Link,
   useLocation,
@@ -22,6 +22,7 @@ import {
 } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
+import { NotFoundScreen } from "../errors/NotFoundScreen";
 import {
   activateAgentPage,
   createAgentPageDraft,
@@ -48,8 +49,8 @@ import {
   createTreeFolder,
   deleteTreeNode,
   fetchTreeNodeIndexPreview,
-  getCurrentWorkspaceId,
   listTreeData,
+  readTreeNode,
   moveTreeNode,
   reorderTreeNodeAt,
   updateTreeNode,
@@ -93,7 +94,6 @@ import {
 } from "../../shared/lib/historyVersionPair";
 import { agentHistoryNodes } from "./agentHistory";
 import { NewItemDialog } from "../../shared/components/NewItemDialog";
-import type { NewItemType } from "../../shared/components/NewItemDialog";
 import { ReaderTabs } from "../../shared/components/ReaderTabs";
 import { RouteLoading } from "../../shared/components/RouteLoading";
 import { StatusBanner } from "../../shared/components/StatusBanner";
@@ -109,8 +109,6 @@ import { targetBreadcrumbs } from "../../shared/components/treeBreadcrumbs";
 import {
   resolveExpandedNodeIds,
   TREE_EXPANDED_PARAM,
-  TREE_NEW_FOLDER_PARAM,
-  TREE_TARGET_PARAM,
   TREE_VERSION_PARAM,
   updateTreeSearchParams,
   writeExpandedNodeIdsToStorage,
@@ -120,6 +118,13 @@ import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh"
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { domainLabel, humanizeEnum } from "../../shared/lib/domainLabel";
 import { normalizeSlugInput, slugify } from "../../shared/text/slug";
+import {
+  useRouteWorkspaceId,
+  useWorkspaceRoute,
+  withWorkspaceQuery,
+  workspacePath,
+  workspaceTargetHref,
+} from "../../shared/lib/workspaceRoutes";
 import { ArtifactChatsSection } from "../mcp-chats/ArtifactChatsSection";
 import { MarkdownView } from "../pages/MarkdownView";
 import {
@@ -130,6 +135,7 @@ import {
 
 const VISIBLE_CATEGORIES = ["agent_guide", "persona", "skill", "memory"];
 const ADVANCED_CATEGORIES: string[] = [];
+class AgentRouteTargetNotFoundError extends Error {}
 const SENSITIVE_CATEGORIES = new Set(["agent_guide", "memory"]);
 const AGENT_PAGE_CATEGORIES = [...VISIBLE_CATEGORIES, ...ADVANCED_CATEGORIES];
 const SENSITIVITY_OPTIONS: AgentPageDraftPayload["sensitivity"][] = [
@@ -180,23 +186,36 @@ export function AgentScreen() {
   // `if (!state) return` below (Rules of Hooks). Backend RBAC still re-enforces.
   const auth = useOptionalAuth();
   const workspaceContext = useOptionalWorkspaceContext();
-  const workspaceRole = workspaceContext?.selectedWorkspace?.role ?? null;
+  const workspaceRoute = useWorkspaceRoute();
+  const routeWorkspaceId = useRouteWorkspaceId();
+  const routeWorkspace = (workspaceContext?.workspaces ?? []).find(
+    (workspace) => workspace.id === routeWorkspaceId,
+  ) ?? (workspaceContext?.selectedWorkspace?.id === routeWorkspaceId
+    ? workspaceContext.selectedWorkspace
+    : null);
+  const workspaceRole = routeWorkspace?.role ?? null;
   const canEdit = isEditorRole(workspaceRole);
   const [expandedNodeIds, setExpandedNodeIds] = useState<string[]>([]);
-  const [newItemDialog, setNewItemDialog] = useState<{
-    initialItemType: NewItemType;
-    parentNodeId: string | null;
-  } | null>(null);
   const [renameNode, setRenameNode] = useState<TreeNodePayload | null>(null);
   const [moveNode, setMoveNode] = useState<TreeNodePayload | null>(null);
   const [deleteNode, setDeleteNode] = useState<TreeNodePayload | null>(null);
   const [treeRefreshing, setTreeRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [routeNotFoundKey, setRouteNotFoundKey] = useState<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const requestedTargetId = searchParams.get(TREE_TARGET_PARAM);
+  const requestedTargetId = workspaceRoute?.targetId ?? null;
+  const routedPageId = workspaceRoute?.targetKind === "page" ? workspaceRoute.targetId : null;
   const selectedVersionId = searchParams.get(TREE_VERSION_PARAM);
+  const routeIdentity = `${routeWorkspaceId}:${location.pathname}`;
+  const routeIdentityRef = useRef(routeIdentity);
+  useLayoutEffect(() => {
+    routeIdentityRef.current = routeIdentity;
+    return () => {
+      if (routeIdentityRef.current === routeIdentity) routeIdentityRef.current = "";
+    };
+  }, [routeIdentity]);
   const previousSearchRef = useRef(location.search);
   const searchChangedRef = useRef(false);
   const suppressRouteSyncRef = useRef(false);
@@ -208,6 +227,10 @@ export function AgentScreen() {
   // re-clicking the same tree node would never re-run the route-sync effect.
   // Record the failed target and bump a retry token from selectPage instead.
   const failedDetailTargetRef = useRef<string | null>(null);
+  const unavailablePageIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    setRouteNotFoundKey(null);
+  }, [routeWorkspaceId, workspaceRoute?.suffix, workspaceRoute?.targetId]);
   const [detailRetryToken, setDetailRetryToken] = useState(0);
   const [loadingMoreAgentPages, setLoadingMoreAgentPages] = useState(false);
   const [activatingAgentPageId, setActivatingAgentPageId] = useState<
@@ -222,23 +245,41 @@ export function AgentScreen() {
     setError,
   } = useAsyncLoad<AgentState>(
     async () => {
-      const workspaceId = await getCurrentWorkspaceId();
-      if (!workspaceId) {
-        throw new Error("Workspace not found");
-      }
+      const workspaceId = routeWorkspaceId;
       const [categories, pagesResult, treeData] = await Promise.all([
         listAgentCategories(workspaceId),
         listAgentPages(workspaceId),
         listTreeData(workspaceId, "agent"),
       ]);
-      const pages = pagesResult.data;
-      const tree = treeData.nodes;
+      const unavailablePageId = unavailablePageIdRef.current;
+      const pages = unavailablePageId
+        ? pagesResult.data.filter((page) => page.id !== unavailablePageId)
+        : pagesResult.data;
+      const tree = unavailablePageId
+        ? treeData.nodes.filter((node) => node.target_id !== unavailablePageId)
+        : treeData.nodes;
+      if (workspaceRoute?.targetKind === "folder" && workspaceRoute.targetId) {
+        let folder = tree.find((node) => node.id === workspaceRoute.targetId);
+        if (!folder) {
+          try {
+            folder = await readTreeNode(workspaceId, workspaceRoute.targetId);
+          } catch (exc) {
+            if (exc instanceof ApiError && exc.status === 404) {
+              throw new AgentRouteTargetNotFoundError();
+            }
+            throw exc;
+          }
+        }
+        if (folder.section !== "agent" || folder.node_kind !== "folder") {
+          throw new AgentRouteTargetNotFoundError();
+        }
+      }
       const selectedNodeId = resolveRequestedNodeId(
         tree,
         pages,
         requestedTargetId,
       );
-      const selectedPageId = selectedPageIdForNode(tree, pages, selectedNodeId);
+      const selectedPageId = routedPageId ?? selectedPageIdForNode(tree, pages, selectedNodeId);
       let detail: AgentPageDetail | null = null;
       let history: AgentChangeHistory | null = null;
       let detailRestricted = false;
@@ -255,6 +296,9 @@ export function AgentScreen() {
           // instead of failing the whole screen.
           readAgentPageForDisplay(workspaceId, selectedPageId, version).catch(
             (exc) => {
+              if (exc instanceof ApiError && exc.status === 404) {
+                return null;
+              }
               if (exc instanceof ApiError && exc.status === 403) {
                 detailRestricted = true;
                 return null;
@@ -279,11 +323,18 @@ export function AgentScreen() {
         detailRestricted,
       };
     },
-    [],
+    [routeWorkspaceId],
     {
       errorMessage: "Failed to load Agent",
+      formatError: (exc, fallback) => {
+        if (exc instanceof AgentRouteTargetNotFoundError) {
+          setRouteNotFoundKey(`${routeWorkspaceId}:${workspaceRoute?.suffix ?? "agent"}`);
+          return "Agent target not found";
+        }
+        return apiErrorMessage(exc, fallback);
+      },
       fallbackData: {
-        workspaceId: "",
+        workspaceId: routeWorkspaceId,
         pages: [],
         pagesCursor: null,
         pagesHasMore: false,
@@ -308,7 +359,7 @@ export function AgentScreen() {
                 nextState.tree,
                 searchParams.get(TREE_EXPANDED_PARAM),
                 nextState.selectedNodeId ?? nextState.detail?.id ?? null,
-                { defaultMode: "none", storageKey: "agent" },
+                { defaultMode: "none", storageKey: "agent", workspaceId: nextState.workspaceId },
               )
             : current.filter((nodeId) => validNodeIds.has(nodeId)),
         );
@@ -316,11 +367,12 @@ export function AgentScreen() {
     },
   );
 
-  useScreenEntryRefresh("/agent", reload, {
+  useScreenEntryRefresh(workspacePath(routeWorkspaceId, "agent"), reload, {
     isHome:
       requestedTargetId === null &&
-      !searchParams.has(TREE_NEW_FOLDER_PARAM) &&
-      !searchParams.has("edit"),
+      !workspaceRoute?.create &&
+      !workspaceRoute?.edit,
+    queryDeps: [routeWorkspaceId],
   });
 
   const paginationGenerationRef = useRef(0);
@@ -374,7 +426,7 @@ export function AgentScreen() {
     }
   }
 
-  function selectPage(pageId: string, nodeId?: string | null) {
+  function selectPage(pageId: string) {
     if (!state) {
       return;
     }
@@ -383,23 +435,15 @@ export function AgentScreen() {
       failedDetailTargetRef.current = null;
       setDetailRetryToken((token) => token + 1);
     }
-    setSearchParams(
-      updateTreeSearchParams(searchParams, {
-        targetId: nodeId ?? nodeIdForPage(state.tree, pageId) ?? pageId,
-      }),
-      { replace: true },
-    );
+    navigate(withWorkspaceQuery(workspaceTargetHref(routeWorkspaceId, "agent", pageId, "page"), searchParams), { replace: true });
   }
 
   function selectNode(node: TreeNodePayload) {
     if (node.target_kind === "agent_page" && node.target_id) {
-      selectPage(node.target_id, node.id);
+      selectPage(node.target_id);
       return;
     }
-    setSearchParams(
-      updateTreeSearchParams(searchParams, { targetId: node.id }),
-      { replace: true },
-    );
+    navigate(withWorkspaceQuery(workspaceTargetHref(routeWorkspaceId, "agent", node.id, "folder"), searchParams), { replace: true });
   }
 
   async function createFolder(input: {
@@ -410,6 +454,13 @@ export function AgentScreen() {
     if (!state) {
       return;
     }
+    const originRouteIdentity = routeIdentity;
+    if (input.parentNodeId && !state.tree.some(
+      (node) => node.id === input.parentNodeId && node.section === "agent" && node.can_have_children,
+    )) {
+      setError(t("errors.folderParentUnavailable", { defaultValue: "The selected folder is unavailable" }));
+      return;
+    }
     setError(null);
     const folder = await createTreeFolder(state.workspaceId, {
       parent_id: input.parentNodeId,
@@ -417,17 +468,13 @@ export function AgentScreen() {
       slug: input.slug,
       title: input.title,
     });
+    if (routeIdentityRef.current !== originRouteIdentity) return;
     const nextExpandedNodeIds = expandNodeIds(
       expandedNodeIds,
       folder.parent_id,
     );
     setStoredExpandedNodeIds(nextExpandedNodeIds);
-    setSearchParams(
-      updateTreeSearchParams(searchParams, {
-        targetId: folder.id,
-      }),
-      { replace: true },
-    );
+    navigate(withWorkspaceQuery(workspaceTargetHref(routeWorkspaceId, "agent", folder.id, "folder"), searchParams), { replace: true });
     setState((current) =>
       current
         ? {
@@ -453,12 +500,14 @@ export function AgentScreen() {
     if (!state) {
       return;
     }
+    const originRouteIdentity = routeIdentity;
     const [treeData, pagesResult] = await Promise.all([
       listTreeData(state.workspaceId, "agent"),
       options.refreshOverview
         ? listAgentPages(state.workspaceId)
         : Promise.resolve(null),
     ]);
+    if (routeIdentityRef.current !== originRouteIdentity) return;
     const selectedNodeId = options.clearSelection
       ? null
       : (options.targetNodeId ?? state.selectedNodeId);
@@ -489,11 +538,12 @@ export function AgentScreen() {
           }
         : current,
     );
-    const nextParams = updateTreeSearchParams(searchParams, {
-      targetId: selectedNodeId,
-    });
-    if (nextParams.toString() !== searchParams.toString()) {
-      setSearchParams(nextParams, { replace: true });
+    if (options.clearSelection === true || options.targetNodeId !== undefined) {
+      const selectedNode = treeData.nodes.find((node) => node.id === selectedNodeId);
+      const destination = selectedNode
+        ? workspaceTargetHref(routeWorkspaceId, "agent", selectedNode.target_id ?? selectedNode.id, selectedNode.node_kind === "folder" ? "folder" : "page")
+        : workspacePath(routeWorkspaceId, "agent");
+      navigate(withWorkspaceQuery(destination, searchParams), { replace: true });
     }
   }
 
@@ -635,10 +685,7 @@ export function AgentScreen() {
   }
 
   function copyTreeNodeLink(node: TreeNodePayload) {
-    const params = updateTreeSearchParams(new URLSearchParams(), {
-      targetId: node.id,
-    });
-    const path = `/agent?${params.toString()}`;
+    const path = workspaceTargetHref(routeWorkspaceId, "agent", node.target_id ?? node.id, node.node_kind === "folder" ? "folder" : "page");
     const href =
       typeof window === "undefined" ? path : `${window.location.origin}${path}`;
     void navigator.clipboard?.writeText(href);
@@ -646,8 +693,12 @@ export function AgentScreen() {
 
   function setStoredExpandedNodeIds(nodeIds: string[]) {
     setExpandedNodeIds(nodeIds);
-    writeExpandedNodeIdsToStorage("agent", nodeIds);
+    writeExpandedNodeIdsToStorage("agent", nodeIds, routeWorkspaceId);
   }
+
+  useEffect(() => {
+    unavailablePageIdRef.current = null;
+  }, [routeWorkspaceId]);
 
   useEffect(() => {
     searchChangedRef.current = previousSearchRef.current !== location.search;
@@ -696,7 +747,7 @@ export function AgentScreen() {
           state.tree,
           current.join(","),
           targetNodeId,
-          { defaultMode: "none" },
+          { defaultMode: "none", workspaceId: routeWorkspaceId },
         );
         if (
           next.length === current.length &&
@@ -704,7 +755,7 @@ export function AgentScreen() {
         ) {
           return current;
         }
-        writeExpandedNodeIdsToStorage("agent", next);
+        writeExpandedNodeIdsToStorage("agent", next, routeWorkspaceId);
         return next;
       });
     }
@@ -809,6 +860,7 @@ export function AgentScreen() {
           return;
         }
         if (exc instanceof ApiError && exc.status === 404) {
+          unavailablePageIdRef.current = selectedPageId;
           failedDetailTargetRef.current = null;
           setState((current) =>
             current
@@ -827,11 +879,7 @@ export function AgentScreen() {
                 }
               : current,
           );
-          setSearchParams(
-            (current) =>
-              updateTreeSearchParams(current, { targetId: null }),
-            { replace: true },
-          );
+          navigate(workspacePath(routeWorkspaceId, "agent"), { replace: true });
           setError(
             t("errors.itemUnavailable", {
               defaultValue:
@@ -855,7 +903,10 @@ export function AgentScreen() {
     };
   }, [
     detailRetryToken,
+    navigate,
     requestedTargetId,
+    routedPageId,
+    routeWorkspaceId,
     selectedVersionId,
     setError,
     setSearchParams,
@@ -864,20 +915,10 @@ export function AgentScreen() {
     t,
   ]);
 
-  useEffect(() => {
-    // Only auto-open the create-folder dialog for editors; a viewer arriving via
-    // ?newFolder=1 (deep link / stale URL) must not be dropped into a create
-    // flow the backend would reject (mirrors ContextScreen).
-    if (!state || !canEdit || searchParams.get(TREE_NEW_FOLDER_PARAM) !== "1") {
-      return;
-    }
-    setNewItemDialog({ initialItemType: "folder", parentNodeId: null });
-    const nextParams = new URLSearchParams(searchParams);
-    nextParams.delete(TREE_NEW_FOLDER_PARAM);
-    setSearchParams(nextParams, { replace: true });
-  }, [canEdit, searchParams, setSearchParams, state]);
-
-  const editAgentPageId = canEdit ? searchParams.get("edit") : null;
+  const folderCreateRoute = Boolean(workspaceRoute?.create && workspaceRoute.section === "agent" && workspaceRoute.suffix.endsWith("folders/new"));
+  const creationRoute = Boolean(workspaceRoute?.create && workspaceRoute.section === "agent" && workspaceRoute.suffix.endsWith("pages/new"));
+  const routeFolderParentId = searchParams.get("parent");
+  const editAgentPageId = canEdit && workspaceRoute?.edit ? workspaceRoute.targetId : null;
   const readerEditDetail =
     state?.detail?.id === editAgentPageId ? state.detail : null;
   // The reader loads the ACTIVE body when an active version exists, but the
@@ -949,7 +990,10 @@ export function AgentScreen() {
     [loadedTree, t],
   );
 
-  if (!state) {
+  if (routeNotFoundKey === `${routeWorkspaceId}:${workspaceRoute?.suffix ?? "agent"}`) {
+    return <NotFoundScreen />;
+  }
+  if (!state || state.workspaceId !== routeWorkspaceId) {
     return (
       <RouteLoading label={t("loading", { defaultValue: "Loading Agent" })} />
     );
@@ -968,9 +1012,14 @@ export function AgentScreen() {
     ADVANCED_CATEGORIES.includes(page.category),
   );
   const agentPolicy = state.treePolicies.agent;
-  const itemParent = newItemDialog?.parentNodeId
-    ? (treeNodes.find((node) => node.id === newItemDialog.parentNodeId) ?? null)
+  const itemParent = routeFolderParentId
+    ? (treeNodes.find((node) => node.id === routeFolderParentId) ?? null)
     : null;
+  const routeFolderParentValid = !routeFolderParentId || Boolean(
+    itemParent?.section === "agent" && itemParent.can_have_children,
+  );
+  const activeFolderDialog = folderCreateRoute && canEdit &&
+    agentPolicy?.allow_user_folder_create === true && routeFolderParentValid;
   // F-5: folder destinations the new-folder dialog can target.
   const agentFolderNodes = treeNodes.filter((node) => node.can_have_children);
   const newItemParentNodeId = selectedNode?.can_have_children
@@ -984,11 +1033,9 @@ export function AgentScreen() {
     state.pages,
     requestedTargetId,
   );
-  const routePageId = selectedPageIdForNode(
-    state.tree,
-    state.pages,
-    routeNodeId,
-  );
+  const routePageId =
+    routedPageId ??
+    selectedPageIdForNode(state.tree, state.pages, routeNodeId);
   const visibleDetail =
     state.selectedNodeId === routeNodeId &&
     state.detail?.id === routePageId &&
@@ -999,14 +1046,18 @@ export function AgentScreen() {
   const detailRouteLoading = Boolean(
     routePageId && !visibleDetail && !state.detailRestricted && !error,
   );
-  const creationOpen = location.pathname === "/agent/new";
+  const creationOpen = creationRoute;
   const creationCategory = normalizeAgentCategory(searchParams.get("category"));
-  const creationParentNodeId = searchParams.get("parentId");
+  const creationParentNodeId = searchParams.get("parent");
   const editDetail = editNeedsDraftDetail
     ? editDraftDetail?.id === editAgentPageId
       ? editDraftDetail
       : null
     : readerEditDetail;
+
+  if (folderCreateRoute && !activeFolderDialog) {
+    return <NotFoundScreen />;
+  }
 
   function selectVersion(versionId: string | null) {
     setSearchParams(updateTreeSearchParams(searchParams, { versionId }), {
@@ -1014,28 +1065,44 @@ export function AgentScreen() {
     });
   }
 
+  function pageRoute(pageId: string, versionId?: string | null) {
+    const href = withWorkspaceQuery(
+      workspaceTargetHref(routeWorkspaceId, "agent", pageId, "page"),
+      searchParams,
+    );
+    return versionId
+      ? `${href}${href.includes("?") ? "&" : "?"}version=${encodeURIComponent(versionId)}`
+      : href;
+  }
+
   function openCreateAgentPage(category: string, parentNodeId?: string | null) {
     const params = new URLSearchParams({ category });
     if (parentNodeId) {
-      params.set("parentId", parentNodeId);
+      params.set("parent", parentNodeId);
     }
-    navigate(`/agent/new?${params.toString()}`);
+    navigate(`${workspacePath(routeWorkspaceId, "agent/pages/new")}?${params.toString()}`);
   }
 
   function closeCreateAgentPage() {
-    navigate("/agent", { replace: true });
+    navigate(workspacePath(routeWorkspaceId, "agent"), { replace: true });
   }
 
   function closeEditAgentPage() {
-    const params = new URLSearchParams(searchParams);
-    params.delete("edit");
-    setSearchParams(params, { replace: true });
+    if (editAgentPageId) {
+      navigate(workspaceTargetHref(routeWorkspaceId, "agent", editAgentPageId, "page"), { replace: true });
+    }
+  }
+
+  function openFolderDialog(parentNodeId: string | null) {
+    const parent = parentNodeId ? `?parent=${encodeURIComponent(parentNodeId)}` : "";
+    navigate(`${workspacePath(routeWorkspaceId, "agent/folders/new")}${parent}`);
   }
 
   async function createAgentPage(input: AgentPageDraftPayload) {
     if (!state) {
       return;
     }
+    const originRouteIdentity = routeIdentity;
     setError(null);
     setNotice(null);
     const result = await createAgentPageDraft(state.workspaceId, input);
@@ -1045,6 +1112,7 @@ export function AgentScreen() {
       readAgentPage(state.workspaceId, result.agent_page_id, "draft"),
       listAgentChanges(state.workspaceId, result.agent_page_id),
     ]);
+    if (routeIdentityRef.current !== originRouteIdentity) return;
     const pages = pagesResult.data;
     const targetNodeId =
       nodeIdForPage(treeData.nodes, result.agent_page_id) ??
@@ -1053,14 +1121,10 @@ export function AgentScreen() {
       treeData.nodes,
       searchParams.get(TREE_EXPANDED_PARAM),
       result.agent_page_id,
-      { defaultMode: "active-path", storageKey: "agent" },
+      { defaultMode: "active-path", storageKey: "agent", workspaceId: routeWorkspaceId },
     );
     setStoredExpandedNodeIds(nextExpandedNodeIds);
-    const nextParams = updateTreeSearchParams(new URLSearchParams(), {
-      targetId: targetNodeId,
-    });
-    suppressRouteSyncRef.current = true;
-    navigate(`/agent?${nextParams.toString()}`, { replace: true });
+    navigate(withWorkspaceQuery(workspaceTargetHref(routeWorkspaceId, "agent", result.agent_page_id, "page"), searchParams), { replace: true });
     setState((current) =>
       current
         ? {
@@ -1083,6 +1147,7 @@ export function AgentScreen() {
     if (!state || !editDetail) {
       return;
     }
+    const originRouteIdentity = routeIdentity;
     setError(null);
     setNotice(null);
     const result = await updateAgentPageDraft(
@@ -1096,6 +1161,7 @@ export function AgentScreen() {
       readAgentPage(state.workspaceId, result.agent_page_id, "draft"),
       listAgentChanges(state.workspaceId, result.agent_page_id),
     ]);
+    if (routeIdentityRef.current !== originRouteIdentity) return;
     const pages = pagesResult.data;
     const targetNodeId =
       nodeIdForPage(treeData.nodes, result.agent_page_id) ??
@@ -1104,15 +1170,10 @@ export function AgentScreen() {
       treeData.nodes,
       searchParams.get(TREE_EXPANDED_PARAM),
       result.agent_page_id,
-      { defaultMode: "active-path", storageKey: "agent" },
+      { defaultMode: "active-path", storageKey: "agent", workspaceId: routeWorkspaceId },
     );
     setStoredExpandedNodeIds(nextExpandedNodeIds);
-    const nextParams = updateTreeSearchParams(new URLSearchParams(), {
-      targetId: targetNodeId,
-      versionId: result.draft_version_id,
-    });
-    suppressRouteSyncRef.current = true;
-    navigate(`/agent?${nextParams.toString()}`, { replace: true });
+    navigate(pageRoute(result.agent_page_id, result.draft_version_id), { replace: true });
     setState((current) =>
       current
         ? {
@@ -1138,6 +1199,7 @@ export function AgentScreen() {
     if (!state) {
       return;
     }
+    const originRouteIdentity = routeIdentity;
     setError(null);
     const [pagesResult, treeData, detail, history] = await Promise.all([
       listAgentPages(state.workspaceId),
@@ -1145,6 +1207,7 @@ export function AgentScreen() {
       readAgentPage(state.workspaceId, agentPageId, "draft"),
       listAgentChanges(state.workspaceId, agentPageId),
     ]);
+    if (routeIdentityRef.current !== originRouteIdentity) return;
     const pages = pagesResult.data;
     const targetNodeId =
       nodeIdForPage(treeData.nodes, agentPageId) ?? agentPageId;
@@ -1152,7 +1215,7 @@ export function AgentScreen() {
       treeData.nodes,
       searchParams.get(TREE_EXPANDED_PARAM),
       agentPageId,
-      { defaultMode: "none", storageKey: "agent" },
+      { defaultMode: "none", storageKey: "agent", workspaceId: routeWorkspaceId },
     );
     setStoredExpandedNodeIds(nextExpandedNodeIds);
     setState((current) =>
@@ -1170,13 +1233,7 @@ export function AgentScreen() {
           }
         : current,
     );
-    setSearchParams(
-      updateTreeSearchParams(searchParams, {
-        targetId: targetNodeId,
-        versionId: draftVersionId,
-      }),
-      { replace: false },
-    );
+    navigate(pageRoute(agentPageId, draftVersionId), { replace: false });
   }
 
   async function activateDraft(detail: AgentPageDetail) {
@@ -1192,6 +1249,7 @@ export function AgentScreen() {
     if (!confirmed) {
       return;
     }
+    const originRouteIdentity = routeIdentity;
     setError(null);
     setNotice(null);
     setActivatingAgentPageId(detail.id);
@@ -1209,6 +1267,7 @@ export function AgentScreen() {
         listTreeData(state.workspaceId, "agent"),
         listAgentChanges(state.workspaceId, detail.id),
       ]);
+      if (routeIdentityRef.current !== originRouteIdentity) return;
       const targetNodeId =
         nodeIdForPage(treeData.nodes, detail.id) ??
         state.selectedNodeId ??
@@ -1228,13 +1287,7 @@ export function AgentScreen() {
             }
           : current,
       );
-      setSearchParams(
-        updateTreeSearchParams(searchParams, {
-          targetId: targetNodeId,
-          versionId: null,
-        }),
-        { replace: true },
-      );
+      navigate(pageRoute(detail.id), { replace: true });
       setNotice(
         t("notice.activated", {
           title: activeDetail.title,
@@ -1270,12 +1323,7 @@ export function AgentScreen() {
                   defaultValue: "Create Agent folder",
                 }),
                 label: t("layout.newFolder", { defaultValue: "New folder" }),
-                onClick: () => {
-                  setNewItemDialog({
-                    initialItemType: "folder",
-                    parentNodeId: newItemParentNodeId,
-                  });
-                },
+                onClick: () => openFolderDialog(newItemParentNodeId),
                 title: t("layout.createFolder", {
                   defaultValue: "Create Agent folder",
                 }),
@@ -1324,10 +1372,7 @@ export function AgentScreen() {
                       );
                       return;
                     }
-                    setNewItemDialog({
-                      initialItemType: "folder",
-                      parentNodeId,
-                    });
+                    openFolderDialog(parentNodeId);
                   }
                 : undefined
             }
@@ -1353,7 +1398,8 @@ export function AgentScreen() {
           <section className="feature-main feature-main--reader agent-main">
             <Breadcrumbs
               items={targetBreadcrumbs({
-                basePath: "/agent",
+                basePath: workspacePath(routeWorkspaceId, "agent"),
+                workspaceId: routeWorkspaceId,
                 rootLabel: t("title", { defaultValue: "Agent" }),
                 nodes: treeNodes,
                 targetId: visibleDetail?.id,
@@ -1390,7 +1436,7 @@ export function AgentScreen() {
                   ) : null}
                   <Link
                     className="icon-button text-button"
-                    to="/settings?section=agent-injection"
+                    to={`${workspacePath(routeWorkspaceId, "settings")}?section=agent-injection`}
                   >
                     <Settings2 size={16} aria-hidden="true" />
                     <span>
@@ -1535,22 +1581,26 @@ export function AgentScreen() {
         }
         inspector={
           visibleDetail ? (
-            <AgentDetail detail={visibleDetail} history={state.history} />
+            <AgentDetail detail={visibleDetail} history={state.history} workspaceId={state.workspaceId} />
           ) : undefined
         }
       />
-      {canEdit && newItemDialog ? (
+      {activeFolderDialog ? (
         <NewItemDialog
           canCreateFolder={agentPolicy?.allow_user_folder_create === true}
           canCreatePage={false}
           initialItemType="folder"
-          initialParentId={newItemDialog.parentNodeId ?? ""}
+          initialParentId={routeFolderParentId ?? ""}
           parentLabel={
             itemParent?.title ?? t("title", { defaultValue: "Agent" })
           }
           parentNodes={agentFolderNodes}
           rootLabel={t("title", { defaultValue: "Agent" })}
-          onClose={() => setNewItemDialog(null)}
+          onClose={(reason) => {
+            if (reason === "cancel") {
+              navigate(workspacePath(routeWorkspaceId, "agent"), { replace: true });
+            }
+          }}
           onSubmit={(input) =>
             createFolder({
               parentNodeId: input.parentNodeId,
@@ -2415,7 +2465,7 @@ function AgentReader({
           {canEdit ? (
             <Link
               className="icon-button text-button"
-              to={`/agent?target=${encodeURIComponent(detail.id)}&edit=${encodeURIComponent(detail.id)}`}
+              to={`${workspaceTargetHref(workspaceId, "agent", detail.id, "page")}/edit`}
             >
               <FileText size={16} aria-hidden="true" />
               <span>
@@ -2429,7 +2479,7 @@ function AgentReader({
           ) : null}
           <Link
             className="icon-button text-button"
-            to="/settings?section=agent-injection"
+            to={`${workspacePath(workspaceId, "settings")}?section=agent-injection`}
           >
             <Settings2 size={16} aria-hidden="true" />
             <span>
@@ -2960,9 +3010,11 @@ function SelectAgentPageHint() {
 function AgentDetail({
   detail,
   history,
+  workspaceId,
 }: {
   detail: AgentPageDetail | null;
   history: AgentChangeHistory | null;
+  workspaceId: string;
 }) {
   const { t } = useTranslation("agent");
   if (!detail) {
@@ -3049,7 +3101,7 @@ function AgentDetail({
         <div className="inspector-actions">
           <Link
             className="icon-button text-button"
-            to="/settings?section=agent-injection"
+            to={`${workspacePath(workspaceId, "settings")}?section=agent-injection`}
           >
             {t("detail.openPolicySettings", {
               defaultValue: "Open policy settings",
@@ -3212,6 +3264,14 @@ function resolveRequestedNodeId(
   }
   if (nodes.some((node) => node.id === requestedTargetId)) {
     return requestedTargetId;
+  }
+  const nodeForPage = nodes.find(
+    (node) =>
+      node.target_kind === "agent_page" &&
+      node.target_id === requestedTargetId,
+  );
+  if (nodeForPage) {
+    return nodeForPage.id;
   }
   if (pages.some((page) => page.id === requestedTargetId)) {
     return nodeIdForPage(nodes, requestedTargetId);

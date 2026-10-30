@@ -32,7 +32,6 @@ import {
 } from "../../shared/api/workspaceAccess";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
 import {
-  getCurrentWorkspaceId,
   listWorkspaces,
   type WorkspaceSummary,
 } from "../../shared/api/workspace";
@@ -42,6 +41,7 @@ import { Dialog } from "../../shared/components/Dialog";
 import { RouteLoading } from "../../shared/components/RouteLoading";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { formatDisplayDateTime } from "../../shared/lib/datetime";
+import { useRouteWorkspaceId } from "../../shared/lib/workspaceRoutes";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import { WorkspaceMemberAddDialog } from "./WorkspaceMemberAddDialog";
 import { WorkspaceMemberId } from "./WorkspaceMemberId";
@@ -1591,7 +1591,7 @@ function AccessChangeDialog({
 
 function useWorkspaceSettingsTarget() {
   const context = useOptionalWorkspaceContext();
-  const selectedContextId = context?.selectedWorkspace?.id ?? "";
+  const selectedContextId = useRouteWorkspaceId();
   const selectedContextWorkspace = context?.selectedWorkspace ?? null;
   const [target, setTarget] = useState<WorkspaceSettingsTarget | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1610,9 +1610,8 @@ function useWorkspaceSettingsTarget() {
     }
     void listWorkspaces()
       .then(async (response) => {
-        const workspaceId = selectedContextId || (await getCurrentWorkspaceId());
         const workspace = response.data.workspaces.find(
-          (candidate) => candidate.id === workspaceId,
+          (candidate) => candidate.id === selectedContextId,
         );
         if (!workspace) {
           throw new Error("Workspace not found");

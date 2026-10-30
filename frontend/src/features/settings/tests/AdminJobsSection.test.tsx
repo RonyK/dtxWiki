@@ -475,7 +475,7 @@ describe("AdminJobsSection", () => {
       throw new Error(`Unexpected request: ${url}`);
     });
 
-    const view = render(<AdminJobsSection scope="workspace" />);
+    const view = render(<AdminJobsSection scope="workspace" workspaceId={WORKSPACE_ID} />);
     await waitFor(() => expect(workspaceListRequests).toBe(1));
     expect(adminListRequests).toBe(0);
 

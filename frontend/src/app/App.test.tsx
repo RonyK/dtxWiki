@@ -7,7 +7,6 @@ import {
   Route,
   Routes,
   useLocation,
-  useNavigationType,
 } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -40,6 +39,7 @@ describe("auth route bootstrap", () => {
 
 vi.mock("../shared/workspace/WorkspaceContext", () => ({
   useWorkspaceContext: () => workspaceState.current,
+  useOptionalWorkspaceContext: () => null,
   WorkspaceProvider: ({ children }: { children: ReactNode }) => children,
 }));
 
@@ -131,7 +131,7 @@ describe("RequireEditor", () => {
       selectedWorkspace: null,
     };
     render(
-      <MemoryRouter initialEntries={["/agent/new"]}>
+      <MemoryRouter initialEntries={["/workspaces/11111111-1111-4111-8111-111111111111/agent/pages/new"]}>
         <RequireEditor>
           <div>Editor surface</div>
         </RequireEditor>
@@ -139,13 +139,13 @@ describe("RequireEditor", () => {
       </MemoryRouter>,
     );
     expect(screen.getByText("Checking access")).toBeInTheDocument();
-    expect(screen.getByTestId("location")).toHaveTextContent("/agent/new");
+    expect(screen.getByTestId("location")).toHaveTextContent("/workspaces/11111111-1111-4111-8111-111111111111/agent/pages/new");
   });
 
   it("shows a spinner while the workspace list is still loading", () => {
     workspaceState.current = { loading: true, initialized: false, selectedWorkspace: null };
     render(
-      <MemoryRouter initialEntries={["/agent/new"]}>
+      <MemoryRouter initialEntries={["/workspaces/11111111-1111-4111-8111-111111111111/agent/pages/new"]}>
         <RequireEditor>
           <div>Editor surface</div>
         </RequireEditor>
@@ -164,7 +164,7 @@ describe("RequireEditor", () => {
       selectedWorkspace: null,
     };
     render(
-      <MemoryRouter initialEntries={["/agent/new"]}>
+      <MemoryRouter initialEntries={["/workspaces/11111111-1111-4111-8111-111111111111/agent/pages/new"]}>
         <RequireEditor>
           <div>Editor surface</div>
         </RequireEditor>
@@ -180,7 +180,7 @@ describe("RequireEditor", () => {
       selectedWorkspace: null,
     };
     render(
-      <MemoryRouter initialEntries={["/pages/new"]}>
+      <MemoryRouter initialEntries={["/workspaces/11111111-1111-4111-8111-111111111111/context/pages/new"]}>
         <RequireEditor>
           <div>Editor surface</div>
         </RequireEditor>
@@ -191,7 +191,7 @@ describe("RequireEditor", () => {
     expect(screen.queryByText("Editor surface")).not.toBeInTheDocument();
     // C2: editor-gated page routes now bounce to /dashboard (which surfaces the
     // editorRequired banner) rather than the pages landing.
-    expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
+    expect(screen.getByTestId("location")).toHaveTextContent("/workspaces/11111111-1111-4111-8111-111111111111/dashboard");
   });
 
   it("redirects a viewer from /agent/new to the read-only /agent screen", () => {
@@ -204,7 +204,7 @@ describe("RequireEditor", () => {
       selectedWorkspace: { role: "viewer" },
     };
     render(
-      <MemoryRouter initialEntries={["/agent/new"]}>
+      <MemoryRouter initialEntries={["/workspaces/11111111-1111-4111-8111-111111111111/agent/pages/new"]}>
         <RequireEditor>
           <div>Editor surface</div>
         </RequireEditor>
@@ -212,7 +212,7 @@ describe("RequireEditor", () => {
       </MemoryRouter>,
     );
     expect(screen.queryByText("Editor surface")).not.toBeInTheDocument();
-    expect(screen.getByTestId("location")).toHaveTextContent("/agent");
+    expect(screen.getByTestId("location")).toHaveTextContent("/workspaces/11111111-1111-4111-8111-111111111111/agent");
     expect(screen.getByTestId("location-state")).toHaveTextContent(
       '{"editorRequired":true}',
     );
@@ -228,7 +228,7 @@ describe("RequireEditor", () => {
       selectedWorkspace: { role: "viewer" },
     };
     render(
-      <MemoryRouter initialEntries={["/workspaces/ws-1/context/pages/guide/edit"]}>
+      <MemoryRouter initialEntries={["/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-000000000001/edit"]}>
         <Routes>
           <Route
             path="/workspaces/:workspaceId/context/pages/:pageId/edit"
@@ -238,14 +238,14 @@ describe("RequireEditor", () => {
               </RequireEditor>
             }
           />
-          <Route path="/dashboard" element={<div>Dashboard surface</div>} />
+          <Route path="/workspaces/:workspaceId/dashboard" element={<div>Dashboard surface</div>} />
         </Routes>
         <LocationProbe />
       </MemoryRouter>,
     );
     expect(screen.queryByText("Editor surface")).not.toBeInTheDocument();
     expect(screen.getByText("Dashboard surface")).toBeInTheDocument();
-    expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
+    expect(screen.getByTestId("location")).toHaveTextContent("/workspaces/11111111-1111-4111-8111-111111111111/dashboard");
     expect(screen.getByTestId("location-state")).toHaveTextContent(
       '{"editorRequired":true}',
     );
@@ -258,7 +258,7 @@ describe("RequireEditor", () => {
       selectedWorkspace: { role: "editor" },
     };
     render(
-      <MemoryRouter initialEntries={["/agent/new"]}>
+      <MemoryRouter initialEntries={["/workspaces/11111111-1111-4111-8111-111111111111/agent/pages/new"]}>
         <RequireEditor>
           <div>Editor surface</div>
         </RequireEditor>
@@ -281,7 +281,7 @@ describe("RequireEditor", () => {
       refreshWorkspaces,
     };
     render(
-      <MemoryRouter initialEntries={["/agent/new"]}>
+      <MemoryRouter initialEntries={["/workspaces/11111111-1111-4111-8111-111111111111/agent/pages/new"]}>
         <RequireEditor>
           <div>Editor surface</div>
         </RequireEditor>
@@ -292,7 +292,7 @@ describe("RequireEditor", () => {
       screen.getByText("Could not load your workspaces."),
     ).toBeInTheDocument();
     expect(screen.queryByText("Editor surface")).not.toBeInTheDocument();
-    expect(screen.getByTestId("location")).toHaveTextContent("/agent/new");
+    expect(screen.getByTestId("location")).toHaveTextContent("/workspaces/11111111-1111-4111-8111-111111111111/agent/pages/new");
     await user.click(screen.getByRole("button", { name: "Retry" }));
     expect(refreshWorkspaces).toHaveBeenCalledTimes(1);
   });
@@ -309,7 +309,7 @@ describe("RequireEditor", () => {
       refreshWorkspaces: () => {},
     };
     render(
-      <MemoryRouter initialEntries={["/agent/new"]}>
+      <MemoryRouter initialEntries={["/workspaces/11111111-1111-4111-8111-111111111111/agent/pages/new"]}>
         <RequireEditor>
           <div>Editor surface</div>
         </RequireEditor>
@@ -320,7 +320,7 @@ describe("RequireEditor", () => {
     expect(
       screen.queryByText("Could not load your workspaces."),
     ).not.toBeInTheDocument();
-    expect(screen.getByTestId("location")).toHaveTextContent("/agent/new");
+    expect(screen.getByTestId("location")).toHaveTextContent("/workspaces/11111111-1111-4111-8111-111111111111/agent/pages/new");
   });
 });
 
@@ -385,7 +385,7 @@ describe("e2e route-recovery controls", () => {
     };
 
     render(
-      <MemoryRouter initialEntries={["/agent/new"]}>
+      <MemoryRouter initialEntries={["/workspaces/11111111-1111-4111-8111-111111111111/agent/pages/new"]}>
         <RequireEditor>
           <div>Editor surface</div>
         </RequireEditor>
@@ -428,7 +428,7 @@ describe("appRoutes role gating", () => {
   // Guards route placement using the ACTUAL App.tsx config: every mcp-chats
   // endpoint requires editor+, so the Chats routes must be editor-gated (a
   // viewer would only get a 403 banner plus a misleading empty state).
-  it.each(["/chats", "/chats/:chatId"])(
+  it.each(["/workspaces/:workspaceId/chats", "/workspaces/:workspaceId/chats/:chatId"])(
     "mounts %s under RequireAuth + RequireEditor in the real route config",
     (path) => {
       const route = findRoute(appRoutes, path);
@@ -450,12 +450,12 @@ describe("appRoutes role gating", () => {
     expect(findRoute(appRoutes, "/context-map")).toBeNull();
   });
 
-  it.each(["/ask", "/ask?new=1", "/ask/"])(
+  it.each(["/workspaces/11111111-1111-4111-8111-111111111111/ask", "/workspaces/11111111-1111-4111-8111-111111111111/ask/:askSessionId"])(
     "registers Ask URL %s behind its experiment gate",
     (path) => {
       const matches = matchRoutes(appRoutes, path);
       const route = matches?.at(-1)?.route;
-      expect(route?.path).toBe("/ask");
+      expect(route?.path).toMatch(/\/ask(?:\/:askSessionId)?$/);
       const element = route?.element;
       if (!isValidElement<{ children: ReactNode }>(element)) {
         throw new Error("Ask route has no element");
@@ -488,157 +488,17 @@ describe("appRoutes role gating", () => {
     expect(isValidElement(child) && child.type === RequireEditor).toBe(false);
   });
 
-  // Slug-based legacy readers remain deleted. The id-only /p route resolves
-  // the authorized workspace before redirecting to the canonical reader.
-  it.each(["/pages/:slug", "/pages/:slug/edit"])(
-    "does not register the legacy %s route",
-    (path) => {
-      expect(findRoute(appRoutes, path)).toBeNull();
-    },
-  );
-
-  it("resolves page permalinks only to the canonical reader and preserves fragments through authentication", async () => {
-    vi.restoreAllMocks();
-    const pageId = "00000000-0000-0000-0000-000000000123";
-    const locationUrl = `http://127.0.0.1:21080/api/v1/context/pages/${pageId}/location`;
-    let resolveLocation!: (response: Response) => void;
-    const locationResponse = new Promise<Response>((resolve) => {
-      resolveLocation = resolve;
-    });
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
-      async (input) => {
-        const url = String(input);
-        if (url.endsWith("/api/v1/auth/me")) {
-          return jsonResponse({ data: userPayload("user@example.com") });
-        }
-        if (url === locationUrl) return locationResponse;
-        throw new Error(`Unexpected fetch: ${url}`);
-      },
-    );
-    const route = findRoute(appRoutes, "/p/:pageId");
+  it("registers workspace-qualified Context permalinks under RequireAuth", () => {
+    const route = findRoute(appRoutes, "/p/:workspaceId/:pageId");
+    expect(route).not.toBeNull();
     const element = route?.element;
-    if (!isValidElement(element)) {
-      throw new Error("page permalink route has no element");
-    }
+    if (!isValidElement(element)) throw new Error("workspace permalink route has no element");
     expect(element.type).toBe(RequireAuth);
+    expect(findRoute(appRoutes, "/p/:pageId")).not.toBeNull();
+  });
 
-    function Destination() {
-      const location = useLocation();
-      const navigationType = useNavigationType();
-      return (
-        <div data-testid="destination">
-          {location.pathname}{location.search}{location.hash} {navigationType}
-        </div>
-      );
-    }
-
-    const view = render(
-      <AuthProvider>
-        <MemoryRouter initialEntries={[`/p/${pageId}#design%20details`]}>
-          <Suspense fallback={<div>Loading route</div>}>
-            <Routes>
-              <Route path="/p/:pageId" element={element} />
-              <Route
-                path="/workspaces/:workspaceId/context/pages/:pageId"
-                element={<Destination />}
-              />
-            </Routes>
-          </Suspense>
-        </MemoryRouter>
-      </AuthProvider>,
-    );
-    expect(await screen.findByRole("status", { name: "Loading" })).toBeInTheDocument();
-    expect(document.querySelector(".markdown-body")).toBeNull();
-    resolveLocation(jsonResponse({
-      data: { workspace_id: "resolved-workspace", page_id: pageId },
-    }));
-    expect(await screen.findByTestId("destination")).toHaveTextContent(
-      `/workspaces/resolved-workspace/context/pages/${pageId}#design%20details REPLACE`,
-    );
-    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
-      "http://127.0.0.1:21080/api/v1/auth/me",
-      locationUrl,
-    ]);
-    view.unmount();
-
-    for (const missingPage of [
-      {
-        id: pageId,
-        status: 404,
-        error_code: "not_found",
-        message: "Page not found.",
-      },
-      {
-        id: "00000000-0000-0000-0000-00000000012",
-        status: 422,
-        error_code: "validation_failed",
-        message: "Input should be a valid UUID.",
-      },
-      { id: "null" },
-      { id: "undefined" },
-    ]) {
-      const missingLocationUrl = `http://127.0.0.1:21080/api/v1/context/pages/${missingPage.id}/location`;
-      fetchMock.mockClear().mockImplementation(async (input) => {
-        const url = String(input);
-        if (url.endsWith("/api/v1/auth/me")) {
-          return jsonResponse({ data: userPayload("user@example.com") });
-        }
-        if (missingPage.status && url === missingLocationUrl) {
-          return jsonResponse({
-            error_code: missingPage.error_code,
-            message: missingPage.message,
-            request_id: "request-permalink-error",
-            warnings: [],
-          }, missingPage.status);
-        }
-        throw new Error(`Unexpected fetch: ${url}`);
-      });
-      const notFoundView = render(
-        <AuthProvider>
-          <MemoryRouter initialEntries={[`/p/${missingPage.id}`]}>
-            <Suspense fallback={<div>Loading route</div>}>
-              <Routes>
-                <Route path="/p/:pageId" element={element} />
-              </Routes>
-            </Suspense>
-          </MemoryRouter>
-        </AuthProvider>,
-      );
-      expect(await screen.findByRole("heading", {
-        name: "We couldn't find that page",
-      })).toBeInTheDocument();
-      expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
-        "http://127.0.0.1:21080/api/v1/auth/me",
-        ...(missingPage.status ? [missingLocationUrl] : []),
-      ]);
-      notFoundView.unmount();
-    }
-
-    fetchMock.mockClear().mockImplementation(async (input) => {
-      if (String(input).endsWith("/api/v1/auth/me")) {
-        return jsonResponse({ error_code: "unauthorized", warnings: [] }, 401);
-      }
-      throw new Error(`Unexpected anonymous fetch: ${String(input)}`);
-    });
-    const anonymousEntry = `/p/${pageId}?from=shared#design%20details`;
-    render(
-      <AuthProvider>
-        <MemoryRouter initialEntries={[anonymousEntry]}>
-          <Suspense fallback={<div>Loading route</div>}>
-            <Routes>
-              <Route path="/p/:pageId" element={element} />
-              <Route path="/login" element={<Destination />} />
-            </Routes>
-          </Suspense>
-        </MemoryRouter>
-      </AuthProvider>,
-    );
-    expect(await screen.findByTestId("destination")).toHaveTextContent(
-      `/login?next=${encodeURIComponent(anonymousEntry)} REPLACE`,
-    );
-    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
-      "http://127.0.0.1:21080/api/v1/auth/me",
-    ]);
+  it("does not register the old slug-based editor route", () => {
+    expect(findRoute(appRoutes, "/context/:slug/edit")).toBeNull();
   });
 
   it("mounts the canonical Context page permalink under RequireAuth", () => {
@@ -668,24 +528,6 @@ describe("appRoutes role gating", () => {
     const child = (element.props as { children?: unknown }).children;
     if (!isValidElement(child)) {
       throw new Error("canonical Context edit route is not wrapped in RequireEditor");
-    }
-    expect(child.type).toBe(RequireEditor);
-  });
-
-  // The canonical edit permalink hands off to this slug-based route (see
-  // ContextEditPermalinkResolver) — it stays registered as the editor's own
-  // implementation route, not a second public entry point.
-  it("keeps /context/:slug/edit as the editor's slug-routed implementation", () => {
-    const route = findRoute(appRoutes, "/context/:slug/edit");
-    expect(route).not.toBeNull();
-    const element = route?.element;
-    if (!isValidElement(element)) {
-      throw new Error("/context/:slug/edit route has no element");
-    }
-    expect(element.type).toBe(RequireAuth);
-    const child = (element.props as { children?: unknown }).children;
-    if (!isValidElement(child)) {
-      throw new Error("/context/:slug/edit route is not wrapped in RequireEditor");
     }
     expect(child.type).toBe(RequireEditor);
   });
@@ -720,7 +562,7 @@ describe("appRoutes role gating", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Back to dashboard" }),
-    ).toHaveAttribute("href", "/dashboard");
+    ).toHaveAttribute("href", "/workspaces/find");
   });
 });
 

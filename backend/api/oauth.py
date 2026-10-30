@@ -1749,7 +1749,7 @@ def oauth_authorize_error_response(exc: Exception, status_code: int) -> HTMLResp
         <div class="oauth-actions">
           <a
             class="oauth-button oauth-button-secondary"
-            href="/settings/integrations"
+            href="/account/integrations"
           >Open MCP settings</a>
           <a class="oauth-button oauth-button-primary" href="/">Open dtxWiki</a>
         </div>

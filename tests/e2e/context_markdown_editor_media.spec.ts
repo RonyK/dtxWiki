@@ -16,6 +16,7 @@ import {
   login,
   seededContextMediaOwnerEmail,
   signUp,
+  workspaceUrl,
 } from "./auth";
 import { EDITOR_COMMANDS } from "../../frontend/src/features/pages/editorCommands";
 import { parsePageDocument } from "../../frontend/src/features/pages/pageFrontmatter";
@@ -283,7 +284,7 @@ test("publishes real GIF and animated WebP uploads through the trusted Context r
     expect(await contentResponse.body()).toEqual(fixtures[index].buffer);
   }
 
-  await page.goto(`/context?target=${encodeURIComponent(created.id)}`);
+  await page.goto(workspaceUrl(workspace.id, `context/pages/${created.id}`));
   await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
   const reader = page
     .getByRole("tabpanel", { name: /^View/ })
@@ -427,7 +428,7 @@ test("preserves a five-image batch through retry, publication, revocation, and r
     });
 
     await test.step("expose one registry-driven ActionBar and slash surface with EN/KO keyboard focus", async () => {
-      await page.goto("/context/new?from=context");
+      await page.goto(workspaceUrl(workspace.id, "context/pages/new"));
       const editor = page.locator(".cm-content");
       await expect(editor).toBeVisible();
 
@@ -807,7 +808,7 @@ test("preserves a five-image batch through retry, publication, revocation, and r
       assertCanonicalBody(stored.body_md, RETAINED_UPLOAD_NAMES);
       canonicalBody = stored.body_md;
       await expect(page).toHaveURL(
-        new RegExp(`/context/${escapeRegExp(created.slug)}/edit$`),
+        new RegExp(`/workspaces/${workspace.id}/context/pages/${created.id}/edit$`),
       );
 
       const publishResponse = page.waitForResponse(
@@ -829,7 +830,7 @@ test("preserves a five-image batch through retry, publication, revocation, and r
       expect(published.current_published_version_id).toBe(created.version_id);
       created = published;
       await expect(page).toHaveURL(
-        new RegExp(`/context\\?target=${created.id}$`),
+        new RegExp(`/workspaces/${workspace.id}/context/pages/${created.id}$`),
       );
     });
 
@@ -874,7 +875,7 @@ test("preserves a five-image batch through retry, publication, revocation, and r
         200,
       );
 
-      await page.goto(`/context/${created.slug}/edit`);
+      await page.goto(workspaceUrl(workspace.id, `context/pages/${created.id}/edit`));
       await expect(page.getByLabel("Title")).toHaveValue(title);
       await page.getByRole("tab", { name: "Reading" }).click();
       const privateGeometry = await expectMediaGeometry(
@@ -885,7 +886,7 @@ test("preserves a five-image batch through retry, publication, revocation, and r
       );
 
       const versionPage = await page.context().newPage();
-      await versionPage.goto(`/context?target=${encodeURIComponent(created.id)}`);
+      await versionPage.goto(workspaceUrl(workspace.id, `context/pages/${created.id}`));
       await expect(
         versionPage.getByRole("heading", { name: title, exact: true }),
       ).toBeVisible();

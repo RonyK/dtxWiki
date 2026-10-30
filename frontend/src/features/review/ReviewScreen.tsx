@@ -11,7 +11,7 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -45,10 +45,11 @@ import type {
   ReviewScope,
   ReviewSelection,
 } from "../../shared/api/operations";
-import { getCurrentWorkspaceId, listWorkspaces } from "../../shared/api/workspace";
+import { listWorkspaces } from "../../shared/api/workspace";
+import { contextEditHref, useRouteWorkspaceId, useWorkspaceRoute, workspacePath, withWorkspaceQuery } from "../../shared/lib/workspaceRoutes";
+import { NotFoundScreen } from "../errors/NotFoundScreen";
 import { ApiError } from "../../shared/api/client";
 import { useOptionalAuth } from "../../shared/auth/AuthContext";
-import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import { CountChip } from "../../shared/components/CountChip";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { Dialog } from "../../shared/components/Dialog";
@@ -180,14 +181,34 @@ const DEFAULT_REVIEW_POLICY_SUMMARY: ReviewRiskPolicySummary = {
 const EDITOR_ROLES = new Set(["editor", "admin", "owner", "maintainer"]);
 
 export function ReviewScreen() {
+  const routeWorkspaceId = useRouteWorkspaceId();
+  const route = useWorkspaceRoute();
+  const reviewParam = route?.targetId ?? null;
+  const [reviewNotFoundKey, setReviewNotFoundKey] = useState<string | null>(null);
+  const reviewRouteIdentity = `${routeWorkspaceId}:${reviewParam ?? ""}`;
+  const reviewRouteIdentityRef = useRef(reviewRouteIdentity);
+  useLayoutEffect(() => {
+    reviewRouteIdentityRef.current = reviewRouteIdentity;
+    return () => { reviewRouteIdentityRef.current = ""; };
+  }, [reviewRouteIdentity]);
+  useEffect(() => {
+    setReviewNotFoundKey(null);
+  }, [reviewRouteIdentity]);
   const { i18n, t } = useTranslation("review");
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const auth = useOptionalAuth();
-  const workspaceContext = useOptionalWorkspaceContext();
   const [reasonDrafts, setReasonDrafts] = useState<Record<string, string>>({});
-  const searchParamsRef = useRef(searchParams);
-  useEffect(() => { searchParamsRef.current = searchParams; }, [searchParams]);
+  // Queue filters stay in the query; the selected review is owned by the path.
+  // Keep the existing workflow's synchronous selection snapshot for in-flight
+  // receipt/retry guards, without writing a competing review query parameter.
+  const searchParamsRef = useRef(new URLSearchParams(searchParams));
+  useLayoutEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    if (reviewParam) next.set("review", reviewParam);
+    else next.delete("review");
+    searchParamsRef.current = next;
+  }, [searchParams, reviewParam]);
   const writeReviewQuery = useCallback((updates: Record<string, string | null>, replace = false) => {
     const next = new URLSearchParams(searchParamsRef.current);
     for (const [key, value] of Object.entries(updates)) {
@@ -196,8 +217,14 @@ export function ReviewScreen() {
     }
     if (next.toString() === searchParamsRef.current.toString()) return;
     searchParamsRef.current = next;
-    setSearchParams(next, { replace });
-  }, [setSearchParams]);
+    const reviewId = next.get("review");
+    const query = new URLSearchParams(next);
+    query.delete("review");
+    navigate(withWorkspaceQuery(
+      workspacePath(routeWorkspaceId, reviewId ? `review/${encodeURIComponent(reviewId)}` : "review"),
+      query,
+    ), { replace });
+  }, [navigate, routeWorkspaceId]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -206,8 +233,8 @@ export function ReviewScreen() {
   const bulkOperationRef = useRef(0);
   const mountedRef = useRef(true);
   const bulkRunRef = useRef<number | null>(null);
-  const activeWorkspaceRef = useRef(workspaceContext?.selectedId);
-  useEffect(() => { activeWorkspaceRef.current = workspaceContext?.selectedId; }, [workspaceContext?.selectedId]);
+  const activeWorkspaceRef = useRef(routeWorkspaceId);
+  useEffect(() => { activeWorkspaceRef.current = routeWorkspaceId; }, [routeWorkspaceId]);
   const [bulkStopped, setBulkStopped] = useState(false);
   useEffect(() => {
     mountedRef.current = true;
@@ -277,7 +304,7 @@ export function ReviewScreen() {
     riskFilter,
     activeScopeFilter,
     includeDeferredReconciliations,
-    workspaceContext?.selectedId,
+    routeWorkspaceId,
   ]);
   const {
     data: state,
@@ -290,7 +317,7 @@ export function ReviewScreen() {
     riskFilter,
     activeScopeFilter,
     includeDeferredReconciliations,
-    workspaceContext?.selectedId,
+    routeWorkspaceId,
   ], {
     errorMessage: t("errors.load", { defaultValue: "Failed to load Review" }),
     formatError: reviewErrorMessage,
@@ -312,8 +339,7 @@ export function ReviewScreen() {
     },
   });
   const workspaceIsCurrent = Boolean(state?.workspaceId)
-    && (!workspaceContext || state?.workspaceId === workspaceContext.selectedId);
-  const reviewParam = searchParams.get("review");
+    && state?.workspaceId === routeWorkspaceId;
   const selectedDraftId = workspaceIsCurrent ? reviewParam : null;
   const draftKey = state?.workspaceId && selectedDraftId
     ? reviewDraftKey(auth?.user?.user_id ?? "preview", state.workspaceId, selectedDraftId)
@@ -330,9 +356,9 @@ export function ReviewScreen() {
     if (auth?.user) writeReviewDraft(draftKey, value);
   }
 
-  useScreenEntryRefresh("/review", reload, {
+  useScreenEntryRefresh(workspacePath(routeWorkspaceId, "review"), reload, {
     isHome: !reviewParam,
-    queryDeps: [activeReviewStatus, riskFilter, activeScopeFilter, includeDeferredReconciliations],
+    queryDeps: [activeReviewStatus, riskFilter, activeScopeFilter, includeDeferredReconciliations, routeWorkspaceId],
   });
 
   useEffect(() => {
@@ -352,7 +378,7 @@ export function ReviewScreen() {
     setDetachedReview(null);
     setRejectDialogKey(null);
     setRefreshFailed(false);
-  }, [workspaceContext?.selectedId, activeReviewStatus, riskFilter, activeScopeFilter, includeDeferredReconciliations]);
+  }, [routeWorkspaceId, activeReviewStatus, riskFilter, activeScopeFilter, includeDeferredReconciliations]);
 
   useEffect(() => {
     bulkRunRef.current = null;
@@ -362,7 +388,7 @@ export function ReviewScreen() {
     setBulkDiscardResult(null);
     setBulkDiscardOpen(false);
     setBulkDiscardReason("");
-  }, [workspaceContext?.selectedId]);
+  }, [routeWorkspaceId]);
 
   useEffect(() => {
     const normalized: Record<string, string | null> = {
@@ -384,7 +410,7 @@ export function ReviewScreen() {
     riskFilter,
     activeScopeFilter,
     includeDeferredReconciliations,
-    workspaceContext?.selectedId,
+    routeWorkspaceId,
   ]);
 
   useEffect(() => {
@@ -444,7 +470,12 @@ export function ReviewScreen() {
         if (review.workspace_id !== workspaceId || review.id !== reviewParam) throw new Error("Review mismatch");
         acceptDetail(review);
       }).catch((exc: unknown) => {
-        if (isCurrent()) setSelectedDetail({ key, review: null,
+        if (!isCurrent()) return;
+        if (exc instanceof ApiError && exc.status === 404) {
+          setReviewNotFoundKey(`${workspaceId}:${reviewParam}`);
+          return;
+        }
+        setSelectedDetail({ key, review: null,
           error: reviewErrorMessage(exc, t("errors.restore")) });
       });
     }
@@ -554,7 +585,7 @@ export function ReviewScreen() {
 
   async function loadReviews(): Promise<ReviewState> {
     const queuePage = queuePageRef.current;
-    const currentWorkspaceId = workspaceContext?.selectedId || await getCurrentWorkspaceId();
+    const currentWorkspaceId = routeWorkspaceId;
     if (!currentWorkspaceId) {
       throw new Error("Workspace not found");
     }
@@ -741,7 +772,7 @@ export function ReviewScreen() {
     const reason = (reasonOverride ?? decisionReason).trim();
     const reasonError = inputTextError(reason, 2000, false);
     if (reasonError) throw new Error(reasonError);
-    if (!state?.workspaceId || (workspaceContext?.selectedId && workspaceContext.selectedId !== state.workspaceId)
+    if (!state?.workspaceId || (routeWorkspaceId && routeWorkspaceId !== state.workspaceId)
         || !selected || !selectedDetail?.review || selectedDetail.key !== selectedDetailKey
         || busyId || bulkBusy || refreshing || refreshFailed || uncertainDecision
         || (decision === "request_changes" && !reason)) return "failed";
@@ -1298,8 +1329,11 @@ export function ReviewScreen() {
     if (!workspaceIsCurrent || !state?.workspaceId || busyId || bulkBusy || refreshFailed || uncertainDecision) {
       return;
     }
-    const slug = editableTargetSlug(review);
-    if (!slug) {
+    const target = reviewPrimaryOperation(review);
+    const targetPageId = target?.document?.document_kind === "context"
+      ? target.document.document_id
+      : target?.target_type === "context_page" ? target.target_id : null;
+    if (!targetPageId) {
       setError(
         t("editDirectly.noTarget", {
           defaultValue: "This change has no editable page target.",
@@ -1309,20 +1343,23 @@ export function ReviewScreen() {
     }
     setBusyId(review.id);
     const generation = loadMoreGenerationRef.current;
+    const operationRouteIdentity = reviewRouteIdentity;
     try {
       await claimReview(state.workspaceId, review.id);
-      if (generation !== loadMoreGenerationRef.current) {
-        setBusyId(null);
+      if (generation !== loadMoreGenerationRef.current || reviewRouteIdentityRef.current !== operationRouteIdentity) {
+        setBusyId((current) => current === review.id ? null : current);
         return;
       }
-      navigate(`/context/${slug}/edit?from=review&reviewItemId=${review.id}`);
+      navigate(`${contextEditHref(state.workspaceId, targetPageId)}?from=review&reviewItemId=${encodeURIComponent(review.id)}`);
     } catch (exc) {
-      if (generation === loadMoreGenerationRef.current) {
+      if (generation === loadMoreGenerationRef.current && reviewRouteIdentityRef.current === operationRouteIdentity) {
         setError(reviewErrorMessage(exc, t("errors.claim")));
       }
-      setBusyId(null);
+      setBusyId((current) => current === review.id ? null : current);
     }
   }
+
+  if (reviewNotFoundKey === reviewRouteIdentity) return <NotFoundScreen />;
 
   if (!state || (state.workspaceId && !workspaceIsCurrent)) {
     return <RouteLoading />;
@@ -1897,7 +1934,7 @@ export function ReviewScreen() {
               <ReviewOverview
                 counts={state.counts}
                 onOpenRiskPolicy={(risk) =>
-                  navigate(`/settings?section=review#auto-approve-${risk}`)
+                  navigate(`${workspacePath(routeWorkspaceId, "settings")}?section=review#auto-approve-${risk}`)
                 }
                 onSelectLifecycle={(status) => writeReviewQuery({ review: null, status: status === "pending" ? null : status, scope: null, outcome: null, older: status === "resolved" ? null : includeDeferredReconciliations ? "1" : null })}
                 onSelectLifecycleRisk={(status, risk) => {
@@ -2199,6 +2236,7 @@ function ReviewOverview({
   recentDecisions: ReviewDecisionRecentItem[];
   reviewPolicy: ReviewRiskPolicySummary;
 }) {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const { i18n, t } = useTranslation("review");
   return (
     <section className="review-overview" aria-labelledby="review-overview-title">
@@ -2248,7 +2286,7 @@ function ReviewOverview({
       <div className="feature-section review-policy-card">
         <div className="panel-header review-recent-header">
           <span>{t("policy.title", { defaultValue: "Review risk policy" })}</span>
-          <Link className="inline-action" to="/settings?section=review">
+          <Link className="inline-action" to={`${workspacePath(routeWorkspaceId, "settings")}?section=review`}>
             {t("policy.settingsLink", { defaultValue: "Open Settings" })}
           </Link>
         </div>
@@ -2343,7 +2381,7 @@ function ReviewOverview({
           </span>
           <Link
             className="inline-action"
-            to="/activity?kind=workspace&subtype=review"
+            to={`${workspacePath(routeWorkspaceId, "activity")}?kind=workspace&subtype=review`}
           >
             {t("actions.moreActivities", { defaultValue: "View all activity" })}
           </Link>
@@ -2368,7 +2406,7 @@ function ReviewOverview({
               <Link
                 className="history-row review-recent-decision-link"
                 key={decision.decision_id}
-                to={`/review?review=${encodeURIComponent(decision.review_item_id)}`}
+                to={workspacePath(routeWorkspaceId, `review/${encodeURIComponent(decision.review_item_id)}`)}
               >
                 <div>
                   <strong>
@@ -2425,6 +2463,7 @@ function ReviewRow({
   onToggleBulkSelected: (reviewItemId: string, selected: boolean) => void;
   showStatusPill: boolean;
 }) {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const { t } = useTranslation("review");
   // The rail sorts and groups by activity (resolution date for resolved
   // items), so the visible timestamp must follow the same axis or rows look
@@ -2444,7 +2483,7 @@ function ReviewRow({
   const isReconciliation = review.review_type === "context_reconciliation";
   const reconciliationChatHref =
     isReconciliation && review.reconciliation_chat_session_id
-      ? `/chats/${encodeURIComponent(review.reconciliation_chat_session_id)}`
+      ? workspacePath(routeWorkspaceId, `chats/${encodeURIComponent(review.reconciliation_chat_session_id)}`)
       : null;
   return (
     <div
@@ -2651,6 +2690,7 @@ function ReviewDetail({
     reason: string,
   ) => Promise<DecisionResult>;
 }) {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const isResolved = lifecycleTabForStatus(review.status) === "resolved";
   const isReadOnly = isResolved || decisionSaved;
   const [contentState, setContentState] = useState<"loading" | "ready" | "unavailable">("loading");
@@ -2685,15 +2725,14 @@ function ReviewDetail({
     review.reconciliation_available === true
     && review.reconciliation_page_id
     && review.reconciliation_version_id
-      ? `/context?${new URLSearchParams({
-          target: review.reconciliation_page_id,
+      ? `${workspacePath(routeWorkspaceId, `context/pages/${encodeURIComponent(review.reconciliation_page_id)}`)}?${new URLSearchParams({
           tab: "history",
           reconcile: review.reconciliation_version_id,
         }).toString()}`
       : null;
   const reconciliationChatHref =
     isReconciliation && review.reconciliation_chat_session_id
-      ? `/chats/${encodeURIComponent(review.reconciliation_chat_session_id)}`
+      ? workspacePath(routeWorkspaceId, `chats/${encodeURIComponent(review.reconciliation_chat_session_id)}`)
       : null;
   const hasReconciliationProvenance =
     review.reconciliation_base_version_no != null
@@ -3693,15 +3732,6 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function stringOrNull(value: unknown) {
   return typeof value === "string" && value ? value : null;
-}
-
-// First page-targeted operation's slug, used to route the editor. Section/claim
-// operations carry the parent page slug on target_slug as well.
-function editableTargetSlug(review: ReviewItem): string | null {
-  const operation = review.evidence?.operations.find(
-    (candidate) => candidate.target_slug,
-  );
-  return operation?.target_slug ?? null;
 }
 
 function audienceChipLabel(

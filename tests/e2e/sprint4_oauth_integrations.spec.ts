@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { expect, test, type APIRequestContext } from "./fixtures";
 
-import { authenticatePage, backendBaseUrl, currentWorkspace } from "./auth";
+import { authenticatePage, backendBaseUrl, currentWorkspace, workspaceUrl } from "./auth";
 import { evidenceLocatorScreenshot } from "./evidence";
 
 async function grantOAuthConsent(
@@ -66,7 +66,7 @@ test("Settings integrations lists and revokes OAuth MCP consent", async ({
   const clientName = `Settings Consent ${testInfo.workerIndex}-${Date.now()}`;
   await grantOAuthConsent(page.request, workspaceId, clientName);
 
-  await page.goto("/settings/integrations#oauth-consents");
+  await page.goto("/account/integrations#oauth-consents");
 
   await expect(page.getByRole("heading", { name: "MCP access" })).toBeVisible();
   const consentSection = page.locator("#oauth-consents");
@@ -120,7 +120,7 @@ test("MCP credential cards and search chrome stay balanced across responsive wid
   const clientName = `Responsive Consent ${testInfo.workerIndex}-${Date.now()}`;
   await grantOAuthConsent(page.request, workspaceId, clientName);
 
-  await page.goto("/settings/integrations#oauth-consents");
+  await page.goto(`${workspaceUrl(workspaceId, "settings/integrations")}#oauth-consents`);
   const oauthSection = page.locator("#oauth-consents");
   await oauthSection
     .getByRole("radiogroup", { name: "OAuth app state" })
@@ -295,8 +295,8 @@ test("Settings integrations exposes copy-paste MCP onboarding commands", async (
   page,
 }, testInfo) => {
   await authenticatePage(page, testInfo, "settings-mcp-onboarding");
-
-  await page.goto("/settings/integrations");
+  const workspace = await currentWorkspace(page.request);
+  await page.goto(workspaceUrl(workspace.id, "settings/integrations"));
 
   await expect(page.getByRole("heading", { name: "MCP access" })).toBeVisible();
   await expect(page.getByText("Access key setup")).toBeVisible();

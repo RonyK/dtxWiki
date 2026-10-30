@@ -29,7 +29,7 @@ describe("activity feed presenter", () => {
     expect(shown.action).toBe("logged");
   });
   it("uses the same codes for translated titles and repeated-read labels", async () => {
-    const event = feedEvent({ operation: "read", navigation: { target_kind: "context_page", target_id: "page-1", title: "Guide", href: "/context?target=page-1" } });
+    const event = feedEvent({ operation: "read", navigation: { target_kind: "context_page", target_id: "00000000-0000-4000-8000-000000000106", title: "Guide", href: "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000106" } });
     expect(presentActivityFeedEvent(event, 4).title).toBe("Read Guide 4 times");
     await i18n.changeLanguage("ko");
     expect(presentActivityFeedEvent(event, 4).title).toContain("4회 읽었습니다");
@@ -45,7 +45,7 @@ describe("activity feed presenter", () => {
       target: { target_kind: "workspace_tree_node", target_id: "node-1" },
       target_title: "Guide", operation: "edit",
       details: {
-        page_id: "page-1", reason: "Consolidate runbooks",
+        page_id: "00000000-0000-4000-8000-000000000106", reason: "Consolidate runbooks",
         move: {
           before: { path: ["Inbox"], provenance: "recorded" },
           after: { path: ["Operations"], provenance: "recorded" },
@@ -59,24 +59,24 @@ describe("activity feed presenter", () => {
 
 describe("activity navigation and query scope", () => {
   it("routes review title and chip from one exact URL", () => {
-    expect(activityNavigation(feedEvent({ lane: "pending", review_item_id: "review-1" })).href).toBe("/review?review=review-1");
+    expect(activityNavigation(feedEvent({ lane: "pending", review_item_id: "review-1" }), parseActivityQuery(new URLSearchParams()), "00000000-0000-4000-8000-000000000001").href).toBe("/workspaces/00000000-0000-4000-8000-000000000001/review/review-1");
   });
   it("never treats a tool call ID as a Chat or document id", () => {
     const query = parseActivityQuery(new URLSearchParams("period=week&kind=workspace&subtype=context&group_reads=0"));
-    const navigation = activityNavigation(feedEvent(), query);
+    const navigation = activityNavigation(feedEvent(), query, "00000000-0000-4000-8000-000000000001");
     expect(navigation.href).toBeNull();
-    expect(navigation.fallbackHref).toBe("/activity/history?period=week&kind=mcp&subtype=all&group_reads=0");
+    expect(navigation.fallbackHref).toBe("/workspaces/00000000-0000-4000-8000-000000000001/activity/history?period=week&kind=mcp&subtype=all&group_reads=0");
   });
   it("accepts only matching resource routes from the projection", () => {
-    const navigation = { target_kind: "context_page", target_id: "page-1", title: "Guide", href: "/context?target=page-1" };
-    expect(activityNavigation(feedEvent({ navigation })).href).toBe(navigation.href);
-    expect(activityNavigation(feedEvent({ navigation: { ...navigation, href: "https://example.com" } })).href).toBeNull();
+    const navigation = { target_kind: "context_page", target_id: "00000000-0000-4000-8000-000000000106", title: "Guide", href: "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000106" };
+    expect(activityNavigation(feedEvent({ navigation }), parseActivityQuery(new URLSearchParams()), "00000000-0000-4000-8000-000000000001").href).toBe(navigation.href);
+    expect(activityNavigation(feedEvent({ navigation: { ...navigation, href: "https://example.com" } }), parseActivityQuery(new URLSearchParams()), "00000000-0000-4000-8000-000000000001").href).toBeNull();
   });
   it("normalizes unknown filter values and preserves all scope on overview/lane links", () => {
     expect(parseActivityQuery(new URLSearchParams("kind=constructor&subtype=__proto__&period=never"))).toEqual({ kind: "all", subtype: "all", period: "all", group_reads: true });
     const query = parseActivityQuery(new URLSearchParams("kind=mcp&subtype=read&period=month&group_reads=0"));
-    expect(activityHref(query)).toBe("/activity?period=month&kind=mcp&subtype=read&group_reads=0");
-    expect(activityHref(query, "history")).toContain("/activity/history?");
+    expect(activityHref(query, undefined, "00000000-0000-4000-8000-000000000001")).toBe("/workspaces/00000000-0000-4000-8000-000000000001/activity?period=month&kind=mcp&subtype=read&group_reads=0");
+    expect(activityHref(query, "history", "00000000-0000-4000-8000-000000000001")).toContain("/workspaces/00000000-0000-4000-8000-000000000001/activity/history?");
   });
   it("distinguishes displayed entries from represented original events without a fake total", () => {
     const event = feedEvent();

@@ -1,8 +1,10 @@
 import { Compass } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
+import { workspaceIdFromPathname, workspacePath } from "../../shared/lib/workspaceRoutes";
+import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 
 /**
  * Real 404 surface. Rendered inside Shell (under RequireAuth) so the sidebar
@@ -12,6 +14,14 @@ import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
  */
 export function NotFoundScreen() {
   const { t } = useTranslation("shell");
+  const location = useLocation();
+  const workspaceContext = useOptionalWorkspaceContext();
+  const routedWorkspaceId = workspaceIdFromPathname(location.pathname);
+  const hasWorkspaceMembership = Boolean(
+    routedWorkspaceId && workspaceContext?.workspaces?.some((workspace) => workspace.id === routedWorkspaceId),
+  );
+  const dashboardHref = hasWorkspaceMembership ? workspacePath(routedWorkspaceId!, "dashboard") : "/workspaces/find";
+  const contextHref = hasWorkspaceMembership ? workspacePath(routedWorkspaceId!, "context") : "/workspaces/find";
   return (
     <div className="workspace-screen single-column">
       <section className="feature-main">
@@ -32,10 +42,10 @@ export function NotFoundScreen() {
             })}
           </p>
           <div className="empty-state-actions">
-            <Link className="icon-button text-button primary" to="/dashboard">
+            <Link className="icon-button text-button primary" to={dashboardHref}>
               {t("notFound.backToDashboard", { defaultValue: "Back to dashboard" })}
             </Link>
-            <Link className="icon-button text-button" to="/context">
+            <Link className="icon-button text-button" to={contextHref}>
               {t("notFound.openContext", { defaultValue: "Open Context" })}
             </Link>
           </div>

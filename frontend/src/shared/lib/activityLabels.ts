@@ -1,29 +1,29 @@
 import type { ActivityItem } from "../api/operations";
-import { TREE_TARGET_PARAM } from "../components/treeRouteState";
+import { workspaceTargetHref } from "./workspaceRoutes";
 import { i18n } from "../i18n";
 import { humanizeEnum } from "./domainLabel";
 import { contextActivityPresentation } from "./contextActivity";
 
 // F-8: deep-link an activity entry to the context/agent/library file it
-// touched. Audit-history items carry the entity target_kind + id; every tree
-// screen opens an entity via ?target=<id> (TREE_TARGET_PARAM).
+// touched. Audit-history items carry the entity target_kind + id; the caller
+// supplies the feed's Workspace for a typed browser destination.
 //
 // Shared rather than screen-local: Activity and Dashboard render the same
 // feed, and when only Activity had this, a Dashboard row had no way to reach
 // its target at all.
-export function activityTargetHref(item: ActivityItem): string | null {
+export function activityTargetHref(item: ActivityItem, workspaceId: string): string | null {
   const target = item.target;
-  if (!target?.target_id) {
+  if (!target?.target_id || !workspaceId) {
     return null;
   }
   switch (target.target_kind) {
     case "context_page":
-      return `/context?${TREE_TARGET_PARAM}=${target.target_id}`;
+      return workspaceTargetHref(workspaceId, "context", target.target_id);
     case "agent_page":
-      return `/agent?${TREE_TARGET_PARAM}=${target.target_id}`;
+      return workspaceTargetHref(workspaceId, "agent", target.target_id);
     case "source":
     case "library_item":
-      return `/library?${TREE_TARGET_PARAM}=${target.target_id}`;
+      return workspaceTargetHref(workspaceId, "library", target.target_id);
     default:
       return null;
   }

@@ -10,7 +10,7 @@ function item(overrides: Partial<ActivityItem> = {}): ActivityItem {
   return {
     id: "event-1", lane: "history", event_key: "tree.node.rename", event_args: {},
     title: "tree.node.rename", body: "tree.node.rename", target_title: "New name",
-    details: { page_id: "page-1", rename: { before: "Old name", after: "New name" } },
+    details: { page_id: "00000000-0000-4000-8000-000000000101", rename: { before: "Old name", after: "New name" } },
     actor: { actor_kind: "human", actor_id: null, display_name: "Actual author", is_current_user: true },
     target: { target_kind: "workspace_tree_node", target_id: "node-1" },
     created_at: "2026-10-28T10:00:00Z", review_item_id: null, affordances: ["open"],
@@ -20,7 +20,7 @@ function item(overrides: Partial<ActivityItem> = {}): ActivityItem {
 
 describe("ActivityEventCard", () => {
   it("shows the actual rename and preserves the author's name with keyboard-accessible details", async () => {
-    render(<MemoryRouter><ActivityEventCard item={item()} workspaceId="workspace-1" /></MemoryRouter>);
+    render(<MemoryRouter><ActivityEventCard item={item()} workspaceId="00000000-0000-4000-8000-000000000001" /></MemoryRouter>);
     const article = screen.getByRole("article");
     expect(within(article).getByText("Renamed")).toHaveClass("context-event-chip");
     expect(within(article).getByText("Old name")).toHaveClass("context-event-before");
@@ -38,14 +38,16 @@ describe("ActivityEventCard", () => {
     const data = item({
       event_key: "context_page.draft.publish", body: "context_page.draft.publish",
       details: {
-        page_id: "page-1", version: { id: "after", number: 8, immutable: true },
+        page_id: "00000000-0000-4000-8000-000000000101", version: { id: "after", number: 8, immutable: true },
         previous_published_version: { id: "before", number: 3, immutable: true },
       },
     });
-    const { rerender } = render(<MemoryRouter><ActivityEventCard item={data} workspaceId="workspace-1" /></MemoryRouter>);
-    expect(screen.getByRole("link", { name: "Compare changes" })).toHaveAttribute("href", "/workspaces/workspace-1/context/pages/page-1?tab=history&compareFrom=before&compareTo=after");
-    rerender(<MemoryRouter><ActivityEventCard item={{ ...data, event_key: "page.autosave.draft", body: "page.autosave.draft" }} workspaceId="workspace-1" /></MemoryRouter>);
+    const { rerender } = render(<MemoryRouter><ActivityEventCard item={data} workspaceId="00000000-0000-4000-8000-000000000001" /></MemoryRouter>);
+    expect(screen.getByRole("link", { name: "Compare changes" })).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000101?tab=history&compareFrom=before&compareTo=after");
+    rerender(<MemoryRouter><ActivityEventCard item={{ ...data, event_key: "page.autosave.draft", body: "page.autosave.draft" }} workspaceId="00000000-0000-4000-8000-000000000001" /></MemoryRouter>);
     expect(screen.queryByRole("link")).toBeNull();
     expect(screen.getByText("Change summary not recorded")).toBeInTheDocument();
+    rerender(<MemoryRouter><ActivityEventCard item={{ ...data, event_key: "page.submit_context_edit_for_review", body: "page.submit_context_edit_for_review", review_item_id: "review-1" }} workspaceId="00000000-0000-4000-8000-000000000001" /></MemoryRouter>);
+    expect(screen.getByRole("link", { name: "View review" })).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/review/review-1");
   });
 });

@@ -683,7 +683,7 @@ def test_review_reject_retry_redacts_sensitive_agent_page_target_for_non_owner(
     assert first.evidence.operations[0].target_slug == "leak03-sensitive-recall"
     assert first.evidence.operations[0].document.document_id == agent.id
     assert first.evidence.operations[0].document.reader_href == (
-        f"/agent?target={agent.id}"
+        f"/workspaces/{workspace_id}/agent/pages/{agent.id}"
     )
     assert first.evidence.operations[0].content.mode == "unsupported"
     assert first.evidence.operations[0].content.candidate_version_id == version.id
@@ -777,7 +777,12 @@ def test_review_library_artifact_and_version_resolve_to_visible_owning_document(
         assert len(sources) == 2
         for operation in sources:
             assert operation.document.document_id == item.id
-            assert operation.document.reader_href == f"/library?target={item.id}"
+            expected_reader = (
+                f"/workspaces/{workspace.id}/library/artifacts/{artifact.id}"
+                if operation.target_type == "library_artifact"
+                else f"/workspaces/{workspace.id}/library/items/{item.id}"
+            )
+            assert operation.document.reader_href == expected_reader
             assert operation.document.can_open is True
             assert operation.content.mode == "unsupported"
             assert operation.content.candidate_version_id == version.id

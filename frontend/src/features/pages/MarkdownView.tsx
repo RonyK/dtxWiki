@@ -1,5 +1,7 @@
 import {
   Children,
+  createContext,
+  useContext,
   isValidElement,
   useEffect,
   useId,
@@ -54,6 +56,9 @@ import { useTranslation } from "react-i18next";
 import "highlight.js/styles/github-dark.css";
 import "katex/dist/katex.min.css";
 
+import { formatCanonicalContextUrl, isWorkspaceUuid } from "../../shared/lib/workspaceIdentity";
+import { workspacePath } from "../../shared/lib/workspaceRoutes";
+
 import type { PageInlineComment } from "../../shared/api/pages";
 import {
   contextMediaAssetIdFromReference,
@@ -85,10 +90,8 @@ type MarkdownViewProps = {
     target_page_id: string | null;
     current_slug: string | null;
   }>;
-  // "internal" uses /context?target=<page-id> when the server supplied an
-  // actor-visible target ID, and /pages/{slug} only as a compatibility fallback.
-  // plain text with no anchor — used by the unauthenticated public reader so it
-  // never emits in-app links and never enumerates private targets (T16 27-f).
+  // Internal wikilinks require the source document's explicit workspace.
+  // Public readers keep internal references as plain text.
   wikilinkMode?: "internal" | "plain";
   // When true (editor split preview), stamp data-source-line on top-level
   // blocks so the editor can line-anchor its scroll sync, and skip the leading
@@ -106,10 +109,7 @@ type MarkdownViewProps = {
   // drops raw HTML and ambient resource URLs, and keeps every link as text so
   // untrusted content cannot create a navigation control.
   renderPolicy?: "page" | "untrusted-preview";
-  // P10.1: workspace id for the canonical `/workspaces/{id}/context/pages/{id}`
-  // wikilink permalink. Only needed in "internal" mode; a caller that omits it
-  // still gets a working query-param link when the target has a resolved page
-  // id, matching pre-P10.1 behavior.
+  // Authority comes from this source document/editor, never a landing hint.
   workspaceId?: string | null;
 };
 
@@ -125,6 +125,8 @@ type MarkdownAnchorProps = ComponentPropsWithoutRef<"a"> & {
   "data-internal"?: string;
   node?: unknown;
 };
+
+const MarkdownWorkspaceContext = createContext<string | null>(null);
 
 const MAX_INLINE_TOKEN_TRANSFORM_DEPTH = 128;
 const MAX_INLINE_COMMENT_HIGHLIGHTS = 50;
@@ -224,6 +226,7 @@ export function MarkdownView({
   }, [markdownBody, pageSourceLineNumbers]);
 
   return (
+    <MarkdownWorkspaceContext.Provider value={workspaceId ?? null}>
     <article className="markdown-body" ref={articleRef}>
       {pageSourceLineNumbers ? (
         <span
@@ -318,6 +321,7 @@ export function MarkdownView({
         />
       ) : null}
     </article>
+    </MarkdownWorkspaceContext.Provider>
   );
 }
 
@@ -708,7 +712,7 @@ function tokenizeTextNode(node: Text, options: DtxTokenOptions): DtxNode[] {
     } else if (match[4]) {
       nodes.push(highlightNode(match[4]));
     } else if (match[6]) {
-      nodes.push(inlineTagNode(match[6]));
+      nodes.push(inlineTagNode(match[6], options));
     }
     cursor = match.index + match[0].length;
     match = pattern.exec(node.value);
@@ -806,12 +810,12 @@ function wikilinkHref(
   workspaceId?: string | null,
 ) {
   if (pageId) {
-    const hash = headingSlug ? `#${CLOBBER_PREFIX}${headingSlug}` : "";
-    if (workspaceId) {
-      return `/workspaces/${encodeURIComponent(workspaceId)}/context/pages/${encodeURIComponent(pageId)}${hash}`;
+    if (!workspaceId || !isWorkspaceUuid(workspaceId) || !isWorkspaceUuid(pageId)) {
+      return "#";
     }
-    const target = new URLSearchParams({ target: pageId }).toString();
-    return `/context?${target}${hash}`;
+    return formatCanonicalContextUrl(
+      workspaceId, pageId, headingSlug ? `${CLOBBER_PREFIX}${headingSlug}` : undefined,
+    );
   }
   // P10.1: /pages/{slug} (the old slug-only compatibility fallback) is gone.
   // A non-empty `slug` here means the wikilink named a cross-page target the
@@ -883,14 +887,16 @@ function highlightNode(value: string): DtxInline {
   };
 }
 
-function inlineTagNode(rawTag: string): DtxInline {
+function inlineTagNode(rawTag: string, options: DtxTokenOptions): DtxInline {
   const safeTag = sanitizeInlineTag(rawTag);
   return {
     type: "dtxInlineTag",
     data: {
       hName: "a",
       hProperties: {
-        href: `/search?q=${encodeURIComponent(`#${safeTag}`)}`,
+        href: options.workspaceId && isWorkspaceUuid(options.workspaceId)
+          ? `${workspacePath(options.workspaceId, "search")}?q=${encodeURIComponent(`#${safeTag}`)}`
+          : undefined,
         className: ["inline-tag"],
         "data-tag": safeTag,
       },
@@ -927,12 +933,18 @@ function sanitizeInlineTag(value: string) {
 }
 
 function MarkdownLink({
-  href,
+  href: authoredHref,
   children,
   node: _node,
   ...props
 }: MarkdownAnchorProps) {
   const { t } = useTranslation("pages");
+  const sourceWorkspaceId = useContext(MarkdownWorkspaceContext);
+  const shortPage = authoredHref?.match(/^\/p\/([0-9a-f-]+)(#[^\s]*)?$/i);
+  const href = shortPage && sourceWorkspaceId && isWorkspaceUuid(sourceWorkspaceId)
+    && isWorkspaceUuid(shortPage[1])
+    ? formatCanonicalContextUrl(sourceWorkspaceId, shortPage[1], shortPage[2])
+    : authoredHref;
   // wikilinkNode() already sets the full "wikilink"/"wikilink-broken" class
   // list on hProperties.className for every data-internal anchor -- it is
   // the only producer of that attribute -- so re-deriving it here just

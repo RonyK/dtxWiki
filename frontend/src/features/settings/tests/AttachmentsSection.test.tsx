@@ -2,6 +2,8 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const WORKSPACE_ID = "00000000-0000-4000-8000-000000000006";
+
 vi.mock("../../../shared/api/contextMediaAttachments", () => ({
   listWorkspaceContextMediaAttachments: vi.fn(),
   listAdminContextMediaAttachments: vi.fn(),
@@ -38,7 +40,7 @@ import { AttachmentsSection } from "../AttachmentsSection";
 
 const ATTACHMENT = {
   asset_id: "00000000-0000-0000-0000-000000000301",
-  workspace_id: "ws-1",
+  workspace_id: "00000000-0000-4000-8000-000000000006",
   page_id: "00000000-0000-0000-0000-000000000601",
   page_title: "Release Notes Draft",
   created_for_version_id: "00000000-0000-0000-0000-000000000801",
@@ -57,7 +59,7 @@ const ATTACHMENT = {
   can_delete: true,
   usage_token: "token-301",
   content_url:
-    "/api/v1/workspaces/ws-1/context/pages/00000000-0000-0000-0000-000000000601/versions/00000000-0000-0000-0000-000000000801/media/00000000-0000-0000-0000-000000000301/content",
+    "/api/v1/workspaces/00000000-0000-4000-8000-000000000006/context/pages/00000000-0000-0000-0000-000000000601/versions/00000000-0000-0000-0000-000000000801/media/00000000-0000-0000-0000-000000000301/content",
   uploaded_by_display_name: "Tester",
   created_by_actor_kind: "human",
   created_by_actor_id: "00000000-0000-0000-0000-000000000501",
@@ -90,7 +92,7 @@ function page(items: unknown[], nextCursor: string | null = null) {
 describe("AttachmentsSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getCurrentWorkspaceId).mockResolvedValue("ws-1");
+    vi.mocked(getCurrentWorkspaceId).mockResolvedValue("00000000-0000-4000-8000-000000000006");
     vi.mocked(getApiBaseUrl).mockReturnValue("");
   });
 
@@ -101,11 +103,11 @@ describe("AttachmentsSection", () => {
     vi.mocked(listWorkspaceContextMediaAttachments).mockResolvedValue(
       page([ATTACHMENT]) as never,
     );
-    render(<AttachmentsSection scope="workspace" workspaceId="ws-1" />);
+    render(<AttachmentsSection scope="workspace" workspaceId="00000000-0000-4000-8000-000000000006" />);
 
     await waitFor(() =>
       expect(listWorkspaceContextMediaAttachments).toHaveBeenCalledWith(
-        "ws-1",
+        "00000000-0000-4000-8000-000000000006",
         expect.objectContaining({ scope: "mine" }),
       ),
     );
@@ -123,13 +125,13 @@ describe("AttachmentsSection", () => {
       <AttachmentsSection
         canViewEveryUpload
         scope="workspace"
-        workspaceId="ws-1"
+        workspaceId="00000000-0000-4000-8000-000000000006"
       />,
     );
 
     await waitFor(() =>
       expect(listWorkspaceContextMediaAttachments).toHaveBeenCalledWith(
-        "ws-1",
+        "00000000-0000-4000-8000-000000000006",
         expect.objectContaining({ scope: "workspace" }),
       ),
     );
@@ -145,14 +147,14 @@ describe("AttachmentsSection", () => {
     vi.mocked(listWorkspaceContextMediaAttachments).mockResolvedValue(
       page([ATTACHMENT]) as never,
     );
-    render(<AttachmentsSection scope="workspace" workspaceId="ws-1" />);
+    render(<AttachmentsSection scope="workspace" workspaceId="00000000-0000-4000-8000-000000000006" />);
     await screen.findByText("diagram.png");
 
     await userEvent.click(screen.getByRole("radio", { name: "Unused" }));
 
     await waitFor(() =>
       expect(listWorkspaceContextMediaAttachments).toHaveBeenLastCalledWith(
-        "ws-1",
+        "00000000-0000-4000-8000-000000000006",
         expect.objectContaining({ orphanOnly: true, scope: "mine" }),
       ),
     );
@@ -172,7 +174,7 @@ describe("AttachmentsSection", () => {
       <AttachmentsSection
         canViewEveryUpload
         scope="workspace"
-        workspaceId="ws-1"
+        workspaceId="00000000-0000-4000-8000-000000000006"
       />,
     );
     await screen.findByText("diagram.png");
@@ -181,7 +183,7 @@ describe("AttachmentsSection", () => {
 
     await waitFor(() =>
       expect(listWorkspaceContextMediaAttachments).toHaveBeenLastCalledWith(
-        "ws-1",
+        "00000000-0000-4000-8000-000000000006",
         expect.objectContaining({ orphanOnly: true, scope: "workspace" }),
       ),
     );
@@ -195,7 +197,7 @@ describe("AttachmentsSection", () => {
       <AttachmentsSection
         canViewEveryUpload
         scope="workspace"
-        workspaceId="ws-1"
+        workspaceId="00000000-0000-4000-8000-000000000006"
       />,
     );
 
@@ -208,7 +210,7 @@ describe("AttachmentsSection", () => {
     const pageLink = screen.getByRole("link", { name: "Release Notes Draft" });
     expect(pageLink).toHaveAttribute(
       "href",
-      `/context?target=${ATTACHMENT.page_id}`,
+      `/workspaces/${WORKSPACE_ID}/context/pages/${ATTACHMENT.page_id}`,
     );
   });
 
@@ -221,7 +223,7 @@ describe("AttachmentsSection", () => {
     vi.mocked(listWorkspaceContextMediaAttachments).mockResolvedValue(
       page([ATTACHMENT]) as never,
     );
-    render(<AttachmentsSection scope="workspace" workspaceId="ws-1" />);
+    render(<AttachmentsSection scope="workspace" workspaceId="00000000-0000-4000-8000-000000000006" />);
     await screen.findByText("diagram.png");
 
     expect(document.querySelector("img.attachments-preview")).toHaveAttribute(
@@ -246,7 +248,7 @@ describe("AttachmentsSection", () => {
       <AttachmentsSection
         canViewEveryUpload
         scope="workspace"
-        workspaceId="ws-1"
+        workspaceId="00000000-0000-4000-8000-000000000006"
       />,
     );
     await screen.findByText("diagram.png");
@@ -265,7 +267,7 @@ describe("AttachmentsSection", () => {
     vi.mocked(listWorkspaceContextMediaAttachments).mockResolvedValue(
       page([{ ...ATTACHMENT, bytes: 70 }]) as never,
     );
-    render(<AttachmentsSection scope="workspace" workspaceId="ws-1" />);
+    render(<AttachmentsSection scope="workspace" workspaceId="00000000-0000-4000-8000-000000000006" />);
 
     expect(await screen.findByText(/70 B/)).toBeInTheDocument();
     expect(screen.queryByText(/1 KB/)).not.toBeInTheDocument();
@@ -277,7 +279,7 @@ describe("AttachmentsSection", () => {
         { ...ATTACHMENT, workspace_title: "Other team", content_url: null },
       ]) as never,
     );
-    render(<AttachmentsSection scope="server" workspaceId="ws-1" />);
+    render(<AttachmentsSection scope="server" workspaceId="00000000-0000-4000-8000-000000000006" />);
     expect(
       await screen.findByText("Workspace: Other team"),
     ).toBeInTheDocument();
@@ -294,18 +296,36 @@ describe("AttachmentsSection", () => {
     );
     await waitFor(() =>
       expect(deleteAdminContextMediaAttachment).toHaveBeenCalledWith(
-        "ws-1",
+        "00000000-0000-4000-8000-000000000006",
         ATTACHMENT.asset_id,
         ATTACHMENT.usage_token,
       ),
     );
   });
 
+  it("loads global server attachments from the admin route without workspace identity", async () => {
+    vi.mocked(listAdminContextMediaAttachments).mockResolvedValue(
+      page([{ ...ATTACHMENT, workspace_title: "Other team", content_url: null }]) as never,
+    );
+    render(
+      <AttachmentManager
+        workspaceId={null}
+        isServerAdmin
+        canViewEveryUpload
+      />,
+    );
+
+    expect(await screen.findByText("Workspace: Other team")).toBeInTheDocument();
+    expect(listAdminContextMediaAttachments).toHaveBeenCalledTimes(1);
+    expect(listWorkspaceContextMediaAttachments).not.toHaveBeenCalled();
+    expect(screen.queryByRole("radiogroup", { name: /attachment scope/i })).toBeNull();
+  });
+
   it("shows a reassuring empty state, not an error, when there is nothing to clean up", async () => {
     vi.mocked(listWorkspaceContextMediaAttachments).mockResolvedValue(
       page([]) as never,
     );
-    render(<AttachmentsSection scope="workspace" workspaceId="ws-1" />);
+    render(<AttachmentsSection scope="workspace" workspaceId="00000000-0000-4000-8000-000000000006" />);
     await screen.findByText("You have not uploaded anything yet");
 
     await userEvent.click(screen.getByRole("radio", { name: "Unused" }));
@@ -319,7 +339,7 @@ describe("AttachmentsSection", () => {
       page([ATTACHMENT]) as never,
     );
     vi.mocked(deletePageContextMedia).mockResolvedValue({} as never);
-    render(<AttachmentsSection scope="workspace" workspaceId="ws-1" />);
+    render(<AttachmentsSection scope="workspace" workspaceId="00000000-0000-4000-8000-000000000006" />);
     await screen.findByText("diagram.png");
 
     await userEvent.click(screen.getByRole("button", { name: "Delete" }));
@@ -329,7 +349,7 @@ describe("AttachmentsSection", () => {
 
     await waitFor(() =>
       expect(deletePageContextMedia).toHaveBeenCalledWith(
-        "ws-1",
+        "00000000-0000-4000-8000-000000000006",
         ATTACHMENT.asset_id,
         "token-301",
       ),
@@ -351,7 +371,7 @@ describe("AttachmentsSection", () => {
         warnings: [],
       }),
     );
-    render(<AttachmentsSection scope="workspace" workspaceId="ws-1" />);
+    render(<AttachmentsSection scope="workspace" workspaceId="00000000-0000-4000-8000-000000000006" />);
     await screen.findByText("diagram.png");
 
     await userEvent.click(screen.getByRole("button", { name: "Delete" }));
@@ -371,7 +391,7 @@ describe("AttachmentsSection", () => {
     vi.mocked(listWorkspaceContextMediaAttachments).mockResolvedValue(
       page([ATTACHMENT]) as never,
     );
-    render(<AttachmentsSection scope="workspace" workspaceId="ws-1" />);
+    render(<AttachmentsSection scope="workspace" workspaceId="00000000-0000-4000-8000-000000000006" />);
     await screen.findByText("diagram.png");
 
     expect(screen.getByText("1 file")).toBeInTheDocument();
@@ -386,7 +406,7 @@ describe("AttachmentsSection", () => {
     vi.mocked(listWorkspaceContextMediaAttachments).mockResolvedValue(
       page([ATTACHMENT]) as never,
     );
-    render(<AttachmentsSection scope="workspace" workspaceId="ws-1" />);
+    render(<AttachmentsSection scope="workspace" workspaceId="00000000-0000-4000-8000-000000000006" />);
     await screen.findByText("diagram.png");
 
     const trigger = screen.getByRole("button", { name: "Delete" });
@@ -418,7 +438,7 @@ describe("AttachmentsSection", () => {
         warnings: [],
       }),
     );
-    render(<AttachmentsSection scope="workspace" workspaceId="ws-1" />);
+    render(<AttachmentsSection scope="workspace" workspaceId="00000000-0000-4000-8000-000000000006" />);
     await screen.findByText("diagram.png");
 
     await userEvent.click(screen.getByRole("button", { name: "Delete" }));
@@ -448,7 +468,7 @@ describe("AttachmentsSection", () => {
       <AttachmentsSection
         canViewEveryUpload
         scope="workspace"
-        workspaceId="ws-1"
+        workspaceId="00000000-0000-4000-8000-000000000006"
       />,
     );
     await screen.findByText("screenshot.jpg");
@@ -466,7 +486,7 @@ describe("AttachmentsSection", () => {
       <AttachmentsSection
         canViewEveryUpload
         scope="workspace"
-        workspaceId="ws-1"
+        workspaceId="00000000-0000-4000-8000-000000000006"
       />,
     );
     await screen.findByText("diagram.png");
@@ -476,7 +496,7 @@ describe("AttachmentsSection", () => {
     expect(await screen.findByText("screenshot.jpg")).toBeInTheDocument();
     expect(screen.getByText("diagram.png")).toBeInTheDocument();
     expect(listWorkspaceContextMediaAttachments).toHaveBeenLastCalledWith(
-      "ws-1",
+      "00000000-0000-4000-8000-000000000006",
       expect.objectContaining({ cursor: "cursor-2" }),
     );
   });
@@ -485,7 +505,7 @@ describe("AttachmentsSection", () => {
     vi.mocked(listWorkspaceContextMediaAttachments).mockRejectedValue(
       new Error("boom"),
     );
-    render(<AttachmentsSection scope="workspace" workspaceId="ws-1" />);
+    render(<AttachmentsSection scope="workspace" workspaceId="00000000-0000-4000-8000-000000000006" />);
 
     expect(
       await screen.findByText("Could not load attachments."),
@@ -497,7 +517,7 @@ describe("AttachmentsSection", () => {
     vi.mocked(listWorkspaceContextMediaAttachments).mockResolvedValue(
       page([ATTACHMENT]) as never,
     );
-    render(<AttachmentsSection scope="workspace" workspaceId="ws-1" />);
+    render(<AttachmentsSection scope="workspace" workspaceId="00000000-0000-4000-8000-000000000006" />);
     await screen.findByText("diagram.png");
 
     // The img keeps its tag and class; the button around it carries the name,
@@ -535,7 +555,7 @@ describe("AttachmentsSection", () => {
       <AttachmentsSection
         canViewEveryUpload
         scope="workspace"
-        workspaceId="ws-1"
+        workspaceId="00000000-0000-4000-8000-000000000006"
       />,
     );
     await screen.findByText("diagram.png");
@@ -556,7 +576,7 @@ describe("AttachmentsSection", () => {
 describe("unused attachment selection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getCurrentWorkspaceId).mockResolvedValue("ws-1");
+    vi.mocked(getCurrentWorkspaceId).mockResolvedValue("00000000-0000-4000-8000-000000000006");
   });
 
   const second = {
@@ -568,7 +588,7 @@ describe("unused attachment selection", () => {
 
   async function openUnused() {
     const user = userEvent.setup();
-    render(<AttachmentsSection canViewEveryUpload workspaceId="ws-1" />);
+    render(<AttachmentsSection canViewEveryUpload workspaceId="00000000-0000-4000-8000-000000000006" />);
     await screen.findByText("diagram.png");
     await user.click(screen.getByRole("radio", { name: "Unused" }));
     await screen.findByRole("checkbox", { name: /Select all/ });
@@ -682,7 +702,7 @@ describe("unused attachment selection", () => {
       "1 in use · 1 changed · 1 access denied · 1 request failed",
     );
     expect(vi.mocked(deletePageContextMedia).mock.calls).toEqual(
-      rows.map((row) => ["ws-1", row.asset_id, row.usage_token]),
+      rows.map((row) => ["00000000-0000-4000-8000-000000000006", row.asset_id, row.usage_token]),
     );
     expect(listWorkspaceContextMediaAttachments).toHaveBeenCalledTimes(3);
     expect(
@@ -707,11 +727,11 @@ it("stops a pending batch when workspace changes and keeps its result out of the
     ...ATTACHMENT,
     asset_id: "new-workspace-asset",
     original_filename: "new-workspace.png",
-    workspace_id: "ws-2",
+    workspace_id: "00000000-0000-4000-8000-000000000007",
   };
   vi.mocked(listWorkspaceContextMediaAttachments).mockImplementation(
     async (workspace) =>
-      page(workspace === "ws-2" ? [next] : [ATTACHMENT, second]) as never,
+      page(workspace === "00000000-0000-4000-8000-000000000007" ? [next] : [ATTACHMENT, second]) as never,
   );
   let finish!: () => void;
   vi.mocked(deletePageContextMedia).mockImplementation(
@@ -721,7 +741,7 @@ it("stops a pending batch when workspace changes and keeps its result out of the
       }),
   );
   const view = render(
-    <AttachmentsSection canViewEveryUpload workspaceId="ws-1" />,
+    <AttachmentsSection canViewEveryUpload workspaceId="00000000-0000-4000-8000-000000000006" />,
   );
   await screen.findByText("diagram.png");
   await user.click(screen.getByRole("radio", { name: "Unused" }));
@@ -729,7 +749,7 @@ it("stops a pending batch when workspace changes and keeps its result out of the
   await user.click(screen.getByRole("button", { name: "Delete selected" }));
   await user.click(screen.getByRole("button", { name: "Confirm deletion" }));
   expect(deletePageContextMedia).toHaveBeenCalledTimes(1);
-  view.rerender(<AttachmentsSection canViewEveryUpload workspaceId="ws-2" />);
+  view.rerender(<AttachmentsSection canViewEveryUpload workspaceId="00000000-0000-4000-8000-000000000007" />);
   await screen.findByText("new-workspace.png");
   await act(async () => finish());
   expect(deletePageContextMedia).toHaveBeenCalledTimes(1);
@@ -756,7 +776,7 @@ it("marks retention unknown after a failed later-page fetch while keeping readab
       },
     } as never)
     .mockRejectedValueOnce(new TypeError("offline"));
-  render(<AttachmentsSection canViewEveryUpload workspaceId="ws-1" />);
+  render(<AttachmentsSection canViewEveryUpload workspaceId="00000000-0000-4000-8000-000000000006" />);
   await screen.findByText("Unused file retention: 7 days");
   await user.click(screen.getByRole("button", { name: "Load more" }));
   await screen.findByText(/Could not confirm the unused file retention period/);
@@ -785,7 +805,7 @@ it("offers only administrators the two scopes and resets confirmations and filte
   );
   const user = userEvent.setup();
   const view = render(
-    <AttachmentManager workspaceId="ws-1" isServerAdmin canViewEveryUpload />,
+    <AttachmentManager workspaceId="00000000-0000-4000-8000-000000000006" isServerAdmin canViewEveryUpload />,
   );
   expect(
     screen.getByRole("radio", { name: "Current workspace" }),
@@ -807,7 +827,7 @@ it("offers only administrators the two scopes and resets confirmations and filte
   expect(screen.getByRole("radio", { name: "All" })).toBeChecked();
   view.rerender(
     <AttachmentManager
-      workspaceId="ws-1"
+      workspaceId="00000000-0000-4000-8000-000000000006"
       isServerAdmin={false}
       canViewEveryUpload
     />,
@@ -821,7 +841,7 @@ it("keeps identical asset IDs from separate workspaces independent during bulk c
   const first = { ...ATTACHMENT, workspace_title: "Team A", content_url: null };
   const second = {
     ...ATTACHMENT,
-    workspace_id: "ws-2",
+    workspace_id: "00000000-0000-4000-8000-000000000007",
     original_filename: "second-team.png",
     workspace_title: "Team B",
     content_url: null,
@@ -832,7 +852,7 @@ it("keeps identical asset IDs from separate workspaces independent during bulk c
   vi.mocked(deleteAdminContextMediaAttachment).mockReset();
   vi.mocked(deleteAdminContextMediaAttachment).mockResolvedValue(undefined);
   const user = userEvent.setup();
-  render(<AttachmentsSection scope="server" workspaceId="ws-1" />);
+  render(<AttachmentsSection scope="server" workspaceId="00000000-0000-4000-8000-000000000006" />);
   await screen.findByText("Workspace: Team B");
   await user.click(screen.getByRole("radio", { name: "Unused" }));
   await user.click(
@@ -846,7 +866,7 @@ it("keeps identical asset IDs from separate workspaces independent during bulk c
   await user.click(screen.getByRole("button", { name: "Confirm deletion" }));
   await screen.findByText("2 deleted, 0 failed");
   expect(vi.mocked(deleteAdminContextMediaAttachment).mock.calls).toEqual([
-    ["ws-1", ATTACHMENT.asset_id, ATTACHMENT.usage_token],
-    ["ws-2", ATTACHMENT.asset_id, ATTACHMENT.usage_token],
+    ["00000000-0000-4000-8000-000000000006", ATTACHMENT.asset_id, ATTACHMENT.usage_token],
+    ["00000000-0000-4000-8000-000000000007", ATTACHMENT.asset_id, ATTACHMENT.usage_token],
   ]);
 });

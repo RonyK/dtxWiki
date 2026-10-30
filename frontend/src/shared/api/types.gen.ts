@@ -975,23 +975,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/context/pages/{page_id}/location": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Read Page Location */
-        get: operations["read_page_location_api_v1_context_pages__page_id__location_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/public/w/{workspace_slug}": {
         parameters: {
             query?: never;
@@ -5675,24 +5658,6 @@ export interface components {
              * @default 0
              */
             total: number;
-        };
-        /** ContextPageLocation */
-        ContextPageLocation: {
-            /**
-             * Page Id
-             * Format: uuid
-             */
-            page_id: string;
-            /**
-             * Workspace Id
-             * Format: uuid
-             */
-            workspace_id: string;
-        };
-        /** ContextPageLocationResponse */
-        ContextPageLocationResponse: {
-            data: components["schemas"]["ContextPageLocation"];
-            envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** ContextPageSummary */
         ContextPageSummary: {
@@ -15299,73 +15264,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CapabilitiesResponse"];
-                };
-            };
-        };
-    };
-    read_page_location_api_v1_context_pages__page_id__location_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                page_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ContextPageLocationResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Too Many Requests */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
                 };
             };
         };

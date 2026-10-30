@@ -16,7 +16,6 @@ import { i18n } from "../../../shared/i18n";
 import {
   AUTOSAVE_CHECKPOINT_MS,
   editorMeta,
-  PageEditor,
   RoutedPageEditor,
 } from "../PageEditor";
 import { getMarkdownCommandState } from "../editorCommands";
@@ -43,8 +42,8 @@ vi.mock("../../../shared/auth/AuthContext", () => ({
 // assertions do exactly that, so the fixture is completed here rather than
 // cast away at the call site.
 const page = {
-  id: "p1",
-  workspace_id: "workspace-1",
+  id: "22222222-2222-4222-8222-222222222222",
+  workspace_id: "11111111-1111-4111-8111-111111111111",
   slug: "hello",
   title: "Hello",
   // `as const` because page_type is a literal union in the generated schema,
@@ -116,10 +115,13 @@ function renderWithRouter(initialEntry: string, routes: ReactNode) {
   const router = createMemoryRouter(createRoutesFromElements(
     <>
       {routes}
-      <Route path="/context" element={<PublishedContextDestination />} />
+      <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
+      <Route path="/workspaces/:workspaceId/context" element={<PublishedContextDestination />} />
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId" element={<PublishedContextDestination />} />
     </>,
   ), {
-    initialEntries: [initialEntry],
+    initialEntries: [canonicalEditorEntry(initialEntry)],
   });
   render(
     <RouterProvider
@@ -127,6 +129,24 @@ function renderWithRouter(initialEntry: string, routes: ReactNode) {
     />,
   );
   return router;
+}
+
+function canonicalEditorEntry(entry: string) {
+  const match = /^\/(?:pages|context)\/([^/?]+)\/edit(\?.*)?$/.exec(entry);
+  if (match) {
+    const id = ({ hello: "22222222-2222-4222-8222-222222222222", "release-notes": "22222222-2222-4222-8222-222222222222", "media-brief": "22222222-2222-4222-8222-222222222222", other: "33333333-3333-4333-8333-333333333333", missing: "44444444-4444-4444-8444-444444444444" } as Record<string, string>)[match[1]] ?? match[1];
+    return `/workspaces/11111111-1111-4111-8111-111111111111/context/pages/${id}/edit${match[2] ?? ""}`;
+  }
+  const create = /^\/(?:pages|context)\/new(\?.*)?$/.exec(entry);
+  if (create) {
+    const query = new URLSearchParams(create[1]?.slice(1) ?? "");
+    if (query.has("parentNodeId")) {
+      query.set("parent", query.get("parentNodeId") ?? "");
+      query.delete("parentNodeId");
+    }
+    return `/workspaces/11111111-1111-4111-8111-111111111111/context/pages/new${query.size ? `?${query}` : ""}`;
+  }
+  return entry;
 }
 
 function PublishedContextDestination() {
@@ -211,13 +231,13 @@ function mockPublicationFlow({
     if (url === `${BASE}/api/v1/workspaces`) {
       return workspaceResponse();
     }
-    if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+    if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
       return jsonResponse({ data: contextTreeNodes() });
     }
-    if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+    if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
       return jsonResponse({ data: [] });
     }
-    if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+    if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
       return jsonResponse({ data: [page], next_cursor: null });
     }
     if (init?.method === "POST" && url.endsWith("/autosave")) {
@@ -320,7 +340,7 @@ describe("PageEditor", () => {
 
   it("rejects a save when managed frontmatter puts the final body over its limit", async () => {
     const fetchMock = mockEditorPage("x".repeat(999_990));
-    renderWithRouter("/pages/hello/edit", <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />);
+    renderWithRouter("/pages/hello/edit", <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />);
     await screen.findByLabelText("Markdown body");
     await setEditorTitle(await findTitleEditor(), "Changed title");
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
@@ -336,13 +356,13 @@ describe("PageEditor", () => {
         if (url === `${BASE}/api/v1/workspaces`) {
           return workspaceResponse();
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
           return jsonResponse({ data: contextTreeNodes() });
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
           return jsonResponse({ data: [] });
         }
-        if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+        if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
           return jsonResponse({ data: [], next_cursor: null });
         }
         return jsonResponse({ data: page });
@@ -350,7 +370,7 @@ describe("PageEditor", () => {
 
       renderWithRouter(
         "/pages/new",
-        <Route path="/pages/new" element={<PageEditor mode="create" />} />,
+        <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />,
       );
 
       const titleInput = await findTitleEditor();
@@ -416,10 +436,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -427,7 +447,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -476,16 +496,16 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/tags?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/tags?")) {
         return jsonResponse({ data: ["Migration", "Infra"] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
       if (init?.method === "POST") {
@@ -497,9 +517,8 @@ describe("PageEditor", () => {
     const router = renderWithRouter(
       "/pages/new",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
-          <Route path="/pages/:slug/edit" element={<div>editing created page</div>} />
-          <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -551,7 +570,7 @@ describe("PageEditor", () => {
         // A hand-authored page lands at the Context root. Inbox stages writes
         // that arrive with no directory (MCP tool writes, Ask captures), which
         // never pass through this editor.
-        placement_parent_node_id: "context-root",
+        placement_parent_node_id: "66666666-6666-4666-8666-666666666666",
       });
       expect(createBody.body_md).toContain('title: "Release notes"');
       expect(createBody.body_md).toContain("slug: release-notes");
@@ -562,12 +581,12 @@ describe("PageEditor", () => {
       expect(createBody.body_md).toContain('aliases: ["Launch Plan"]');
     });
     expect(fetchMock.mock.calls.map((call) => call[0])).toContain(
-      `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`,
+      `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`,
     );
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/publish"))).toBe(false);
     await waitFor(() =>
       expect(router.state.location.pathname).toBe(
-        "/context/release-notes/edit",
+        "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
       ),
     );
     expect(screen.getByLabelText("Context tree")).toBeInTheDocument();
@@ -580,19 +599,19 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/tags?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/tags?")) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/versions?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/versions?limit=100`) {
         return jsonResponse({
           data: [
             {
@@ -632,7 +651,7 @@ describe("PageEditor", () => {
       }
       return jsonResponse({
         data:
-          url.includes("/by-slug/")
+          url.includes("/context/pages/22222222-2222-4222-8222-222222222222")
             ? {
                 ...page,
                 version_id: "v2",
@@ -648,7 +667,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/release-notes/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await findTitleEditor();
@@ -663,7 +682,7 @@ describe("PageEditor", () => {
     const fetchMock = mockPublicationFlow();
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await findTitleEditor();
@@ -693,7 +712,7 @@ describe("PageEditor", () => {
     const fetchMock = mockPublicationFlow();
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await findTitleEditor();
@@ -742,7 +761,7 @@ describe("PageEditor", () => {
     });
     const router = renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await findTitleEditor();
@@ -778,8 +797,8 @@ describe("PageEditor", () => {
     // description of the code rather than a literal translation of it.
     await waitFor(() => {
       expect(router.state.location).toMatchObject({
-        pathname: "/context",
-        search: "?target=p1",
+        pathname: "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222",
+        search: "",
         state: { contextPublishNotice: { kind: "published_with_findings" } },
       });
     });
@@ -799,7 +818,7 @@ describe("PageEditor", () => {
       });
       const router = renderWithRouter(
         "/pages/hello/edit",
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
       );
 
       await findTitleEditor();
@@ -833,7 +852,7 @@ describe("PageEditor", () => {
     });
     const router = renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await findTitleEditor();
@@ -858,7 +877,7 @@ describe("PageEditor", () => {
     mockPublicationFlow({ rejectPublishWithoutOverride: true });
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Server-only finding");
@@ -890,7 +909,7 @@ describe("PageEditor", () => {
       mockPublicationFlow({ rejectPublishWithoutOverride: true });
       renderWithRouter(
         "/pages/hello/edit",
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
       );
 
       await setEditorTitle(await findTitleEditor(), "Server-only finding");
@@ -923,7 +942,7 @@ describe("PageEditor", () => {
     });
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Server-only finding");
@@ -942,8 +961,8 @@ describe("PageEditor", () => {
   it("separates Save draft from exact-version Publish", async () => {
     const fetchMock = mockPublicationFlow();
     const router = renderWithRouter(
-      "/context/hello/edit",
-      <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />,
+      "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Published title");
@@ -953,7 +972,7 @@ describe("PageEditor", () => {
     });
     expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/publish"))).toBe(false);
     expect(router.state.location).toMatchObject({
-      pathname: "/context/hello/edit",
+      pathname: "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
       search: "",
     });
     // Publish stays disabled while the draft is in flight and then publishes
@@ -986,8 +1005,8 @@ describe("PageEditor", () => {
     );
     await waitFor(() => {
       expect(router.state.location).toMatchObject({
-        pathname: "/context",
-        search: "?target=p1",
+        pathname: "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222",
+        search: "",
       });
       expect(router.state.historyAction).toBe("REPLACE");
     });
@@ -996,8 +1015,8 @@ describe("PageEditor", () => {
   it("enables Save draft and Publish together and publishes a dirty edit directly", async () => {
     const fetchMock = mockPublicationFlow();
     const router = renderWithRouter(
-      "/context/hello/edit",
-      <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />,
+      "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Published directly");
@@ -1034,8 +1053,8 @@ describe("PageEditor", () => {
     });
     await waitFor(() => {
       expect(router.state.location).toMatchObject({
-        pathname: "/context",
-        search: "?target=p1",
+        pathname: "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222",
+        search: "",
       });
       expect(router.state.historyAction).toBe("REPLACE");
     });
@@ -1045,7 +1064,7 @@ describe("PageEditor", () => {
     const fetchMock = mockPublicationFlow();
     const router = renderWithRouter(
       "/context/new",
-      <Route path="/context/new" element={<PageEditor mode="create" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Publish without draft");
@@ -1057,7 +1076,7 @@ describe("PageEditor", () => {
       expect(
         fetchMock.mock.calls.some(
           (call) =>
-            String(call[0]) === `${BASE}/api/v1/workspaces/workspace-1/context/pages` &&
+            String(call[0]) === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages` &&
             call[1]?.method === "POST",
         ),
       ).toBe(true);
@@ -1067,8 +1086,8 @@ describe("PageEditor", () => {
     });
     await waitFor(() => {
       expect(router.state.location).toMatchObject({
-        pathname: "/context",
-        search: "?target=p1",
+        pathname: "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222",
+        search: "",
       });
     });
   });
@@ -1076,8 +1095,8 @@ describe("PageEditor", () => {
   it("does not claim a saved draft when direct publish fails before staging", async () => {
     const fetchMock = mockPublicationFlow({ rejectAutosave: true });
     const router = renderWithRouter(
-      "/context/hello/edit",
-      <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />,
+      "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Cannot stage this edit");
@@ -1093,7 +1112,7 @@ describe("PageEditor", () => {
       fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/publish")),
     ).toHaveLength(0);
     expect(router.state.location).toMatchObject({
-      pathname: "/context/hello/edit",
+      pathname: "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
       search: "",
     });
   });
@@ -1105,8 +1124,8 @@ describe("PageEditor", () => {
     });
     const fetchMock = mockPublicationFlow({ publishResponse: pendingPublish });
     const router = renderWithRouter(
-      "/context/hello/edit",
-      <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />,
+      "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Version being published");
@@ -1134,7 +1153,7 @@ describe("PageEditor", () => {
       ),
     ).toBeInTheDocument();
     expect(router.state.location).toMatchObject({
-      pathname: "/context/hello/edit",
+      pathname: "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
       search: "",
     });
     expect(getTitleEditor()).toHaveValue("Newer editor change");
@@ -1144,7 +1163,7 @@ describe("PageEditor", () => {
     const fetchMock = mockPublicationFlow();
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Honest label");
@@ -1186,10 +1205,10 @@ describe("PageEditor", () => {
       vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
         const url = String(input);
         if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
           return jsonResponse({ data: contextTreeNodes() });
         }
-        if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+        if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
           return jsonResponse({ data: [page], next_cursor: null });
         }
         return jsonResponse({ data: { ...page, ...overrides } });
@@ -1197,7 +1216,7 @@ describe("PageEditor", () => {
 
       renderWithRouter(
         "/pages/hello/edit",
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
       );
 
       await findTitleEditor();
@@ -1212,10 +1231,10 @@ describe("PageEditor", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({
@@ -1225,7 +1244,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await findTitleEditor();
@@ -1244,13 +1263,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return delayedWorkspace;
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
       throw new Error(`Unexpected request: ${url}`);
@@ -1258,7 +1277,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/new?title=Release%20plan",
-      <Route path="/pages/new" element={<PageEditor mode="create" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />,
     );
 
     expect(screen.getByRole("heading", { name: "Loading page" })).toBeInTheDocument();
@@ -1273,8 +1292,8 @@ describe("PageEditor", () => {
   });
 
   it("does not touch default-slug preferences before the selected workspace resolves", async () => {
-    const defaultPreferenceKey = "dtxwiki:editor:default:hello";
-    const personalPreferenceKey = "dtxwiki:editor:personal-space:hello";
+    const defaultPreferenceKey = "dtxwiki:editor:default:22222222-2222-4222-8222-222222222222";
+    const personalPreferenceKey = "dtxwiki:editor:personal-space:22222222-2222-4222-8222-222222222222";
     const defaultPreference = JSON.stringify({
       mode: "reading",
       splitPercent: 17,
@@ -1295,34 +1314,34 @@ describe("PageEditor", () => {
       }
       if (
         url ===
-        `${BASE}/api/v1/workspaces/workspace-personal/tree?section=context`
+        `${BASE}/api/v1/workspaces/22222222-2222-4222-8222-000000000005/tree?section=context`
       ) {
         return jsonResponse({ data: contextTreeNodes() });
       }
       if (
         url ===
-        `${BASE}/api/v1/workspaces/workspace-personal/library/items?limit=100`
+        `${BASE}/api/v1/workspaces/22222222-2222-4222-8222-000000000005/library/items?limit=100`
       ) {
         return jsonResponse({ data: [] });
       }
       if (
         url.includes(
-          "/api/v1/workspaces/workspace-personal/context/pages?",
+          "/api/v1/workspaces/22222222-2222-4222-8222-000000000005/context/pages?",
         )
       ) {
         return jsonResponse({
-          data: [{ ...page, workspace_id: "workspace-personal" }],
+          data: [{ ...page, workspace_id: "22222222-2222-4222-8222-000000000005" }],
           next_cursor: null,
         });
       }
       return jsonResponse({
-        data: { ...page, workspace_id: "workspace-personal" },
+        data: { ...page, workspace_id: "22222222-2222-4222-8222-000000000005" },
       });
     });
 
     renderWithRouter(
-      "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      "/workspaces/22222222-2222-4222-8222-000000000005/context/pages/22222222-2222-4222-8222-222222222222/edit",
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     expect(screen.getByRole("heading", { name: "Loading page" })).toBeInTheDocument();
@@ -1334,11 +1353,11 @@ describe("PageEditor", () => {
       resolveWorkspace(
         jsonResponse({
           data: {
-            current_workspace_id: "workspace-personal",
-            default_workspace_id: "workspace-personal",
+            current_workspace_id: "22222222-2222-4222-8222-000000000005",
+            default_workspace_id: "22222222-2222-4222-8222-000000000005",
             workspaces: [
               {
-                id: "workspace-personal",
+                id: "22222222-2222-4222-8222-000000000005",
                 slug: "personal-space",
                 title: "Personal Space",
                 name: "Personal Space",
@@ -1376,16 +1395,16 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/tags?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/tags?")) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
       if (init?.method === "POST") {
@@ -1397,11 +1416,10 @@ describe("PageEditor", () => {
     });
 
     renderWithRouter(
-      "/pages/new?from=context&parentNodeId=context-inbox&title=Nested%20Brief",
+      "/pages/new?from=context&parentNodeId=77777777-7777-4777-8777-777777777777&title=Nested%20Brief",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
-          <Route path="/pages/:slug/edit" element={<div>editing created page</div>} />
-          <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -1418,7 +1436,7 @@ describe("PageEditor", () => {
       const createCall = fetchMock.mock.calls.find((call) => call[1]?.method === "POST");
       expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
         title: "Nested Brief",
-        placement_parent_node_id: "context-inbox",
+        placement_parent_node_id: "77777777-7777-4777-8777-777777777777",
       });
     });
     expect(screen.getByLabelText("Context tree")).toBeInTheDocument();
@@ -1440,7 +1458,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Release notes");
@@ -1459,7 +1477,7 @@ describe("PageEditor", () => {
     const fetchMock = mockEditorPage("# Hello");
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -1507,16 +1525,16 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/tags?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/tags?")) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -1525,7 +1543,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new",
       <>
-        <Route path="/pages/new" element={<PageEditor mode="create" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
       </>,
     );
 
@@ -1544,13 +1562,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -1559,7 +1577,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -1588,19 +1606,19 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/by-slug/hello`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222`) {
         return jsonResponse({ data: page });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/autosave` && init?.method === "POST") {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave` && init?.method === "POST") {
         return jsonResponse({
           data: {
             ...page,
@@ -1612,7 +1630,7 @@ describe("PageEditor", () => {
         });
       }
       if (
-        url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/versions/v2/publish` &&
+        url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/versions/v2/publish` &&
         init?.method === "POST"
       ) {
         return jsonResponse({
@@ -1627,7 +1645,7 @@ describe("PageEditor", () => {
       }
       if (
         url ===
-          `${BASE}/api/v1/workspaces/workspace-1/reviews/review-1/decision` &&
+          `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/reviews/review-1/decision` &&
         init?.method === "POST"
       ) {
         decisionBody = JSON.parse(String(init.body));
@@ -1639,7 +1657,7 @@ describe("PageEditor", () => {
     const router = renderWithRouter(
       "/pages/hello/edit?from=review&reviewItemId=review-1",
       <>
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -1653,7 +1671,7 @@ describe("PageEditor", () => {
         fetchMock.mock.calls.some(
           (call) =>
             call[0] ===
-              `${BASE}/api/v1/workspaces/workspace-1/reviews/review-1/decision` &&
+              `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/reviews/review-1/decision` &&
             call[1]?.method === "POST",
         ),
       ).toBe(true);
@@ -1664,8 +1682,8 @@ describe("PageEditor", () => {
     });
     await waitFor(() => {
       expect(router.state.location).toMatchObject({
-        pathname: "/context",
-        search: "?target=p1",
+        pathname: "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222",
+        search: "",
         state: { contextPublishNotice: { kind: "review_completed" } },
       });
     });
@@ -1691,7 +1709,7 @@ describe("PageEditor", () => {
       const router = renderWithRouter(
         "/pages/hello/edit?from=review&reviewItemId=review-1",
         <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
           <Route path="/settings" element={<div>Settings destination</div>} />
         </>,
       );
@@ -1768,16 +1786,16 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/by-slug/missing`) {
+      if (url.includes(`${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/44444444-4444-4444-8444-444444444444`)) {
         return jsonResponse(
           {
             error_code: "not_found",
@@ -1794,7 +1812,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/missing/edit",
       <>
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -1810,7 +1828,15 @@ describe("PageEditor", () => {
     ).getAllByRole("link");
     expect(actions[0]).toHaveAccessibleName("Back to dashboard");
     expect(actions[0]).toHaveClass("primary");
+    expect(actions[0]).toHaveAttribute(
+      "href",
+      "/workspaces/11111111-1111-4111-8111-111111111111/dashboard",
+    );
     expect(actions[1]).toHaveAccessibleName("Open Context");
+    expect(actions[1]).toHaveAttribute(
+      "href",
+      "/workspaces/11111111-1111-4111-8111-111111111111/context",
+    );
     expect(screen.queryByTestId("page-title-editor")).toBeNull();
     expect(document.querySelector(".cm-editor")).toBeNull();
   });
@@ -1821,13 +1847,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ message: "source load failed" }, 500);
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -1836,7 +1862,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -1853,16 +1879,16 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/by-slug/hello`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222`) {
         return jsonResponse(
           {
             error_code: "internal_error",
@@ -1879,7 +1905,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -1898,13 +1924,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({
@@ -1929,7 +1955,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -1962,13 +1988,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodesWithPageBranch() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -1977,7 +2003,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -2006,19 +2032,19 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({
           data: contextTreeNodesWithPageBranch().map((node) =>
-            node.id === "context-inbox"
+            node.id === "77777777-7777-4777-8777-777777777777"
               ? { ...node, children_count: 1 }
               : node,
           ),
         });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -2027,7 +2053,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit?from=context",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -2062,16 +2088,16 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodesWithPageBranch() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/tags?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/tags?")) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -2080,7 +2106,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new?from=context",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
       </>,
     );
 
@@ -2123,13 +2149,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -2138,7 +2164,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -2271,16 +2297,16 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/by-slug/hello")) {
+      if ((!init?.method || init.method === "GET") && url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222`) {
         // First read is the editor's initial load; the reload triggered by
         // preserveAlternative's rebase is the one that must see the head
         // that made the earlier autosave stale.
@@ -2334,7 +2360,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -2362,7 +2388,7 @@ describe("PageEditor", () => {
     // Rebased onto the server head, not left on the preserved branch: the
     // buffer now shows "Server head", not "My alternative".
     expect(
-      fetchMock.mock.calls.some((call) => String(call[0]).includes("/by-slug/hello")),
+      fetchMock.mock.calls.some((call) => String(call[0]).includes("/context/pages/22222222-2222-4222-8222-222222222222")),
     ).toBe(true);
     await expectEditorTitle("Server head");
 
@@ -2406,17 +2432,17 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/by-slug/hello")) {
+      if ((!init?.method || init.method === "GET") && url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222`) {
         pageReadCount += 1;
         return jsonResponse({ data: pageReadCount === 1 ? page : serverLatest });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/p1/diff")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/diff")) {
         expect(url).toContain("from_version_id=v1");
         expect(url).toContain("to_version_id=v2");
         return jsonResponse({
@@ -2456,7 +2482,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -2498,16 +2524,16 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/p1/diff")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/diff")) {
         throw new Error(rawSecret);
       }
       if (init?.method === "POST" && url.endsWith("/autosave")) {
@@ -2528,7 +2554,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "My stale edit");
@@ -2555,10 +2581,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       if (init?.method === "POST" && url.endsWith("/autosave")) {
@@ -2582,7 +2608,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -2615,10 +2641,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       if (init?.method === "POST" && url.endsWith("/publish")) {
@@ -2649,7 +2675,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     // An unedited page in "published" state short-circuits save() entirely
@@ -2705,13 +2731,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave")) {
+      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave")) {
         return jsonResponse({
           data: {
             ...page,
@@ -2734,7 +2760,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
           <Route path="/pages/:slug" element={<div>reader page</div>} />
       </>,
     );
@@ -2758,13 +2784,13 @@ describe("PageEditor", () => {
     const autosaveCall = fetchMock.mock.calls.find(
       (call) =>
         call[1]?.method === "POST" &&
-        String(call[0]).endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave"),
+        String(call[0]).endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave"),
     );
     expect(JSON.parse(String(autosaveCall?.[1]?.body))).toMatchObject({
       title: "Autosaved title",
       base_version_id: "v1",
       session_version_id: null,
-      destination_node_id: "context-inbox",
+      destination_node_id: "77777777-7777-4777-8777-777777777777",
     });
     expect(screen.queryByText("reader page")).not.toBeInTheDocument();
     // PUB-09: autosaving a published page moves publicationState to
@@ -2792,13 +2818,13 @@ describe("PageEditor", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave")) {
+      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave")) {
         return jsonResponse({
           data: {
             ...page,
@@ -2823,7 +2849,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     const titleEditor = await findTitleEditor();
@@ -2855,7 +2881,7 @@ describe("PageEditor", () => {
     const savedPage = {
       ...page,
       is_public: false,
-      workspace_id: "workspace-1",
+      workspace_id: "11111111-1111-4111-8111-111111111111",
       editing_revision: 1,
       draft_saved_at: "2026-05-20T00:01:00.000Z",
     };
@@ -2871,13 +2897,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave")) {
+      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave")) {
         return jsonResponse({
           data: {
             ...page,
@@ -2893,7 +2919,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     const titleEditor = await findTitleEditor();
@@ -2938,16 +2964,16 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/tags?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/tags?")) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave")) {
+      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave")) {
         const payload = JSON.parse(String(init.body));
         autosavedTags = payload.tags;
         return pendingTagAutosave;
@@ -2957,7 +2983,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await expectEditorTitle("Hello");
@@ -3004,13 +3030,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave")) {
+      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave")) {
         return pendingAutosave;
       }
       return jsonResponse({ data: page });
@@ -3018,7 +3044,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     const titleEditor = await findTitleEditor();
@@ -3064,13 +3090,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave")) {
+      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave")) {
         return jsonResponse({
           data: {
             ...page,
@@ -3088,7 +3114,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -3138,13 +3164,13 @@ describe("PageEditor", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       if (init?.method === "POST" && url.endsWith("/autosave")) {
@@ -3166,7 +3192,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     const titleEditor = await findTitleEditor();
@@ -3220,7 +3246,7 @@ describe("PageEditor", () => {
     const fetchMock = mockPublicationFlow();
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
     await setEditorTitle(await findTitleEditor(), `Flush ${_label}`);
     trigger();
@@ -3244,7 +3270,7 @@ describe("PageEditor", () => {
     });
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
     await setEditorTitle(await findTitleEditor(), "Dismissal fingerprint");
 
@@ -3270,7 +3296,7 @@ describe("PageEditor", () => {
     });
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
     const titleEditor = await findTitleEditor();
     await setEditorTitle(titleEditor, "First dismissal");
@@ -3311,16 +3337,16 @@ describe("PageEditor", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
-      if (init?.method === "POST" && url === `${BASE}/api/v1/workspaces/workspace-1/context/pages`) {
+      if (init?.method === "POST" && url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages`) {
         return jsonResponse({ data: created }, 201);
       }
       if (init?.method === "POST" && url.includes("/publish")) {
@@ -3333,7 +3359,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/new",
-      <Route path="/pages/new" element={<PageEditor mode="create" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />,
     );
 
     const titleInput = await findTitleEditor();
@@ -3346,7 +3372,7 @@ describe("PageEditor", () => {
     await waitFor(() => {
       expect(
         fetchMock.mock.calls.filter(
-          (call) => call[1]?.method === "POST" && String(call[0]) === `${BASE}/api/v1/workspaces/workspace-1/context/pages`,
+          (call) => call[1]?.method === "POST" && String(call[0]) === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages`,
         ),
       ).toHaveLength(1);
     });
@@ -3363,13 +3389,13 @@ describe("PageEditor", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       if (init?.method === "POST" && url.endsWith("/autosave")) {
@@ -3395,10 +3421,10 @@ describe("PageEditor", () => {
       "/pages/hello/edit",
       <>
         <Route
-          path="/pages/:slug/edit"
+          path="/workspaces/:workspaceId/context/pages/:pageId/edit"
           element={(
             <>
-              <PageEditor mode="edit" />
+              <RoutedPageEditor mode="edit" />
               <ProgrammaticNavigationButton />
             </>
           )}
@@ -3410,7 +3436,7 @@ describe("PageEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Programmatic nav" }));
     await waitFor(() => expect(autosaveCalls(fetchMock)).toHaveLength(1));
     expect(sendBeacon).toHaveBeenCalledTimes(1);
-    expect(sendBeacon.mock.calls[0][0]).toBe(`${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/autosave`);
+    expect(sendBeacon.mock.calls[0][0]).toBe(`${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave`);
     expect(JSON.parse(await readBlobText(sendBeacon.mock.calls[0][1] as Blob))).toMatchObject({
       title: "Leaving now",
       base_version_id: "v1",
@@ -3423,7 +3449,7 @@ describe("PageEditor", () => {
     const fetchMock = mockPublicationFlow();
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
     const titleEditor = await findTitleEditor();
     await setEditorTitle(titleEditor, "Changed then restored");
@@ -3438,7 +3464,7 @@ describe("PageEditor", () => {
     const fetchMock = mockPublicationFlow();
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
     const titleEditor = await findTitleEditor();
     fireEvent.compositionStart(titleEditor);
@@ -3459,13 +3485,13 @@ describe("PageEditor", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       if (init?.method === "POST" && url.endsWith("/autosave")) {
@@ -3486,7 +3512,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     const titleEditor = await findTitleEditor();
@@ -3529,13 +3555,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -3550,10 +3576,10 @@ describe("PageEditor", () => {
       "/pages/hello/edit",
       <>
         <Route
-          path="/pages/:slug/edit"
+          path="/workspaces/:workspaceId/context/pages/:pageId/edit"
           element={(
             <>
-              <PageEditor mode="edit" />
+              <RoutedPageEditor mode="edit" />
               <ProgrammaticNavigationButton />
             </>
           )}
@@ -3568,7 +3594,7 @@ describe("PageEditor", () => {
 
     expect(sendBeacon).toHaveBeenCalledTimes(1);
     const [url, data] = sendBeacon.mock.calls[0];
-    expect(url).toBe(`${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/autosave`);
+    expect(url).toBe(`${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave`);
     const payload = JSON.parse(await readBlobText(data as Blob));
     expect(payload).toMatchObject({
       title: "Beacon title",
@@ -3593,13 +3619,13 @@ describe("PageEditor", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       if (init?.method === "POST" && url.endsWith("/autosave")) {
@@ -3615,7 +3641,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "One in-flight save");
@@ -3648,13 +3674,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       if (init?.method === "POST" && url.endsWith("/autosave")) {
@@ -3679,7 +3705,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -3701,10 +3727,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
       if (init?.method === "POST") {
@@ -3716,7 +3742,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
       </>,
     );
 
@@ -3733,16 +3759,16 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/tags?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/tags?")) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
       if (init?.method === "POST") {
@@ -3754,7 +3780,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
       </>,
     );
 
@@ -3801,16 +3827,16 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
-      if (init?.method === "POST" && url === `${BASE}/api/v1/workspaces/workspace-1/context/pages`) {
+      if (init?.method === "POST" && url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages`) {
         return createPromise;
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/by-slug/first-title")) {
+      if ((!init?.method || init.method === "GET") && url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222`) {
         return jsonResponse({
           data: {
             ...savedDraft,
@@ -3819,7 +3845,7 @@ describe("PageEditor", () => {
           },
         });
       }
-      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave")) {
+      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave")) {
         const autosaveCount = fetchMock.mock.calls.filter(
           (call) => String(call[0]).endsWith("/autosave"),
         ).length;
@@ -3844,9 +3870,8 @@ describe("PageEditor", () => {
     const router = renderWithRouter(
       "/pages/new",
       <>
-        <Route path="/pages/new" element={<PageEditor mode="create" />} />
-        <Route path="/pages/:slug/edit" element={<div>editing created page</div>} />
-        <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -3937,12 +3962,12 @@ describe("PageEditor", () => {
     });
     await waitFor(() => {
       expect(router.state.location).toMatchObject({
-        pathname: "/context",
-        search: "?target=p1",
+        pathname: "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222",
+        search: "",
       });
     });
     expect(await screen.findByTestId("published-context-destination")).toHaveTextContent(
-      "/context?target=p1",
+      "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222",
     );
   });
 
@@ -3953,13 +3978,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       if (init?.method === "POST" && url.endsWith("/autosave")) {
@@ -3970,7 +3995,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Save without leakage");
@@ -3984,6 +4009,7 @@ describe("PageEditor", () => {
 
   it("retries with autosave when a post-create follow-up save fails", async () => {
     let resolveCreate!: (response: Response) => void;
+    let savedPage = page;
     const createPromise = new Promise<Response>((resolve) => {
       resolveCreate = resolve;
     });
@@ -3992,13 +4018,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
-      if (init?.method === "POST" && url === `${BASE}/api/v1/workspaces/workspace-1/context/pages`) {
+      if (init?.method === "POST" && url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages`) {
         return createPromise;
       }
       if (init?.method === "POST" && url.endsWith("/autosave")) {
@@ -4014,27 +4040,25 @@ describe("PageEditor", () => {
           }, 500);
         }
         const body = JSON.parse(String(init.body));
-        return jsonResponse({
-          data: {
-            ...page,
-            slug: "first-title",
-            title: body.title,
-            body_md: body.body_md,
-            version_id: "v2",
-            current_version_id: "v2",
-            content_hash: "b".repeat(64),
-          },
-        });
+        savedPage = {
+          ...page,
+          slug: "first-title",
+          title: body.title,
+          body_md: body.body_md,
+          version_id: "v2",
+          current_version_id: "v2",
+          content_hash: "b".repeat(64),
+        };
+        return jsonResponse({ data: savedPage });
       }
-      return jsonResponse({ data: page });
+      return jsonResponse({ data: savedPage });
     });
 
-    renderWithRouter(
+    const router = renderWithRouter(
       "/pages/new",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
-          <Route path="/pages/:slug/edit" element={<div>editing created page</div>} />
-          <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -4056,12 +4080,13 @@ describe("PageEditor", () => {
 
     expect(await screen.findByText("Could not save changes. Try again.")).toBeInTheDocument();
     expect(
-      fetchMock.mock.calls.filter((call) => call[0] === `${BASE}/api/v1/workspaces/workspace-1/context/pages`),
+      fetchMock.mock.calls.filter((call) => call[0] === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages`),
     ).toHaveLength(1);
     expect(
       fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/autosave")),
     ).toHaveLength(1);
 
+    const createTitleEditor = getTitleEditor();
     await typist().click(screen.getByRole("button", { name: /Retry/ }));
     await waitFor(() => {
       expect(
@@ -4077,7 +4102,17 @@ describe("PageEditor", () => {
       base_content_hash: "a".repeat(64),
       session_version_id: "v1",
     });
-    expect(await screen.findByLabelText("Context tree")).toBeInTheDocument();
+    // Retry replaces the create editor after saving; its tree is already present
+    // before the response settles, so await the new editor and its saved content.
+    await waitFor(() => {
+      expect(router.state.location).toMatchObject({
+        pathname: "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
+        search: "",
+      });
+      expect(createTitleEditor).not.toBeInTheDocument();
+      expect(getTitleEditor()).toHaveValue("Second title");
+      expect(screen.getByLabelText("Context tree")).toBeInTheDocument();
+    });
   });
 
   it("serializes overlapping saves and still publishes the second request", async () => {
@@ -4093,13 +4128,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave")) {
+      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave")) {
         const autosaveCount = fetchMock.mock.calls.filter(
           (call) => String(call[0]).endsWith("/autosave"),
         ).length;
@@ -4125,7 +4160,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -4179,10 +4214,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -4192,7 +4227,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
           <Route path="/pages" element={<div>pages landing</div>} />
       </>,
     );
@@ -4214,10 +4249,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -4235,7 +4270,7 @@ describe("PageEditor", () => {
       renderWithRouter(
         "/pages/new",
         <>
-            <Route path="/pages/new" element={<PageEditor mode="create" />} />
+            <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
         </>,
       );
 
@@ -4256,10 +4291,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -4267,7 +4302,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
           <Route path="/pages/:slug" element={<div>reader page</div>} />
       </>,
     );
@@ -4284,10 +4319,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -4298,10 +4333,10 @@ describe("PageEditor", () => {
       "/pages/new",
       <>
         <Route
-          path="/pages/new"
+          path="/workspaces/:workspaceId/context/pages/new"
           element={(
             <>
-              <PageEditor mode="create" />
+              <RoutedPageEditor mode="create" />
               <ProgrammaticNavigationButton />
             </>
           )}
@@ -4325,10 +4360,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -4339,10 +4374,10 @@ describe("PageEditor", () => {
       "/pages/new",
       <>
         <Route
-          path="/pages/new"
+          path="/workspaces/:workspaceId/context/pages/new"
           element={(
             <>
-              <PageEditor mode="create" />
+              <RoutedPageEditor mode="create" />
               <ProgrammaticNavigationButton />
             </>
           )}
@@ -4367,10 +4402,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -4380,10 +4415,10 @@ describe("PageEditor", () => {
       createRoutesFromElements(
         <>
           <Route
-            path="/pages/new"
+            path="/workspaces/:workspaceId/context/pages/new"
             element={(
               <>
-                <PageEditor mode="create" />
+                <RoutedPageEditor mode="create" />
                 <ProgrammaticNavigationButton />
               </>
             )}
@@ -4391,7 +4426,7 @@ describe("PageEditor", () => {
           <Route path="/dashboard" element={<div>dashboard</div>} />
         </>,
       ),
-      { initialEntries: ["/pages/new"] },
+      { initialEntries: ["/workspaces/11111111-1111-4111-8111-111111111111/context/pages/new"] },
     );
 
     render(
@@ -4422,13 +4457,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
-        return jsonResponse({ data: [page, { ...page, id: "p2", slug: "other", title: "Other" }], next_cursor: null });
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
+        return jsonResponse({ data: [page, { ...page, id: "33333333-3333-4333-8333-333333333333", slug: "other", title: "Other" }], next_cursor: null });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/by-slug/other")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/33333333-3333-4333-8333-333333333333")) {
         return otherRead;
       }
       return jsonResponse({ data: page });
@@ -4438,10 +4473,10 @@ describe("PageEditor", () => {
       "/pages/hello/edit",
       <>
           <Route
-            path="/pages/:slug/edit"
+            path="/workspaces/:workspaceId/context/pages/:pageId/edit"
             element={(
               <>
-                <PageEditor mode="edit" />
+                <RoutedPageEditor mode="edit" />
                 <EditOtherButton />
               </>
             )}
@@ -4453,11 +4488,10 @@ describe("PageEditor", () => {
     expect(document.querySelector(".cm-content")?.textContent).toContain("# Hello");
 
     await typist().click(screen.getByRole("button", { name: "Edit other page" }));
-    await within(screen.getByRole("navigation", { name: "Page location" }))
-      .findByText("other");
+    await waitFor(() => expect(document.querySelector(".cm-content")).toBeNull());
     expect(document.querySelector(".cm-content")?.textContent ?? "").not.toContain("# Hello");
 
-    resolveOtherRead(jsonResponse({ data: { ...page, id: "p2", slug: "other", title: "Other", body_md: "# Other" } }));
+    resolveOtherRead(jsonResponse({ data: { ...page, id: "33333333-3333-4333-8333-333333333333", slug: "other", title: "Other", body_md: "# Other" } }));
     await expectEditorTitle("Other");
   });
 
@@ -4468,7 +4502,7 @@ describe("PageEditor", () => {
     });
     const otherPage = {
       ...page,
-      id: "p2",
+      id: "33333333-3333-4333-8333-333333333333",
       slug: "other",
       title: "Other",
       body_md: "# Other",
@@ -4477,25 +4511,25 @@ describe("PageEditor", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page, otherPage], next_cursor: null });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/by-slug/hello")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222")) {
         return jsonResponse({ data: page });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/by-slug/other")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/33333333-3333-4333-8333-333333333333")) {
         return jsonResponse({ data: otherPage });
       }
-      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave")) {
+      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave")) {
         return helloAutosave;
       }
-      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/workspace-1/context/pages/p2/autosave")) {
+      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/33333333-3333-4333-8333-333333333333/autosave")) {
         const payload = JSON.parse(String(init.body));
         return jsonResponse({
           data: {
@@ -4519,7 +4553,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <Route
-        path="/pages/:slug/edit"
+        path="/workspaces/:workspaceId/context/pages/:pageId/edit"
         element={(
           <>
             <RoutedPageEditor mode="edit" />
@@ -4534,7 +4568,7 @@ describe("PageEditor", () => {
     await waitFor(() => {
       expect(
         fetchMock.mock.calls.filter((call) =>
-          String(call[0]).endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave"),
+          String(call[0]).endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave"),
         ),
       ).toHaveLength(1);
     });
@@ -4559,14 +4593,14 @@ describe("PageEditor", () => {
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
     await waitFor(() => {
       const otherSave = fetchMock.mock.calls.find((call) =>
-        String(call[0]).endsWith("/api/v1/workspaces/workspace-1/context/pages/p2/autosave"),
+        String(call[0]).endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/33333333-3333-4333-8333-333333333333/autosave"),
       );
       expect(JSON.parse(String(otherSave?.[1]?.body))).toMatchObject({
         title: "Other updated",
       });
     });
     const helloBodies = fetchMock.mock.calls
-      .filter((call) => String(call[0]).endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave"))
+      .filter((call) => String(call[0]).endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave"))
       .map((call) => JSON.parse(String(call[1]?.body)));
     expect(helloBodies).toHaveLength(1);
     expect(helloBodies[0]).toMatchObject({ title: "Hello pending" });
@@ -4741,7 +4775,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
     await screen.findByLabelText("Markdown body");
 
@@ -5174,14 +5208,14 @@ describe("PageEditor", () => {
   it("uses an inert, focus-trapped Context drawer at 768px without collapsing editor modes", async () => {
     vi.stubGlobal("innerWidth", 768);
     window.localStorage.setItem(
-      "dtxwiki:editor:default:hello",
+      "dtxwiki:editor:default:22222222-2222-4222-8222-222222222222",
       JSON.stringify({ mode: "split" }),
     );
     mockEditorPage("# Hello\n\nBody");
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     expect(await screen.findByLabelText("Markdown body")).toBeInTheDocument();
@@ -5239,7 +5273,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     expect(await screen.findByLabelText("Markdown body")).toBeInTheDocument();
@@ -5257,7 +5291,7 @@ describe("PageEditor", () => {
     mockEditorPage("# Hello\n\nBody");
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -5279,7 +5313,7 @@ describe("PageEditor", () => {
     mockEditorPage("alpha");
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -5306,13 +5340,13 @@ describe("PageEditor", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/media/capabilities`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/media/capabilities`) {
         return jsonResponse({
           data: {
             max_upload_bytes: 1024,
@@ -5321,14 +5355,14 @@ describe("PageEditor", () => {
           },
         });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [{ ...page, body_md: "alpha" }], next_cursor: null });
       }
       return jsonResponse({ data: { ...page, body_md: "alpha" } });
     });
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -5349,10 +5383,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -5361,7 +5395,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -5400,10 +5434,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -5412,7 +5446,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -5446,10 +5480,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -5458,7 +5492,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -5482,10 +5516,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -5494,7 +5528,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -5518,10 +5552,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -5530,7 +5564,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -5569,10 +5603,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: { ...page, body_md: "**Hello** and `code`" } });
@@ -5581,7 +5615,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -5643,10 +5677,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: { ...page, body_md: "foo_bar_baz" } });
@@ -5655,7 +5689,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -5690,17 +5724,17 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/comments` && init?.method === "POST") {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/comments` && init?.method === "POST") {
         return jsonResponse({
           data: {
             id: "review-1",
-            page_id: "p1",
+            page_id: "22222222-2222-4222-8222-222222222222",
             review_item_id: "review-1",
             change_set_id: "change-1",
             change_operation_id: "op-1",
@@ -5719,7 +5753,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -5752,7 +5786,7 @@ describe("PageEditor", () => {
     });
     expect(await screen.findByText(/Comment created for review review-1/)).toBeInTheDocument();
     const commentCall = fetchMock.mock.calls.find(
-      (call) => String(call[0]) === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/comments`,
+      (call) => String(call[0]) === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/comments`,
     );
     expect(JSON.parse(String(commentCall?.[1]?.body))).toMatchObject({
       note: "Needs a source.",
@@ -5777,13 +5811,13 @@ describe("PageEditor", () => {
         if (url === `${BASE}/api/v1/workspaces`) {
           return workspaceResponse();
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
           return jsonResponse({ data: contextTreeNodes() });
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
           return jsonResponse({ data: [] });
         }
-        if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+        if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
           return jsonResponse({ data: [page], next_cursor: null });
         }
         return jsonResponse({ data: page });
@@ -5791,7 +5825,7 @@ describe("PageEditor", () => {
 
       renderWithRouter(
         "/pages/hello/edit",
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
       );
 
       await waitFor(() => {
@@ -5820,10 +5854,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -5832,7 +5866,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -5881,10 +5915,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -5911,7 +5945,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
     await screen.findByLabelText("Markdown body");
     const view = codeMirrorView();
@@ -5940,13 +5974,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -5955,7 +5989,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -5983,15 +6017,15 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
       if (
         url ===
-        `${BASE}/api/v1/workspaces/workspace-1/context/media/capabilities`
+        `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/media/capabilities`
       ) {
         return jsonResponse({
           data: {
@@ -6001,17 +6035,17 @@ describe("PageEditor", () => {
           },
         });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media` && init?.method === "POST") {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media` && init?.method === "POST") {
         return jsonResponse({
           data: {
             asset_id: "00000000-0000-4000-8000-000000000123",
             logical_ref:
               "dtx-media://asset/00000000-0000-4000-8000-000000000123",
             content_url:
-              "/api/v1/workspaces/workspace-1/context/pages/p1/media/00000000-0000-4000-8000-000000000123/content",
+              "/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media/00000000-0000-4000-8000-000000000123/content",
             mime: "image/png",
             bytes: 24,
             sha256: "a".repeat(64),
@@ -6024,7 +6058,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -6044,7 +6078,7 @@ describe("PageEditor", () => {
     });
     expect(editor.textContent).not.toContain("Uploading diagram.png");
     const uploadCall = fetchMock.mock.calls.find(
-      (call) => call[0] === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media`,
+      (call) => call[0] === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media`,
     );
     const uploadBody = uploadCall?.[1]?.body;
     expect(uploadBody).toBeInstanceOf(FormData);
@@ -6102,15 +6136,15 @@ describe("PageEditor", () => {
         if (url === `${BASE}/api/v1/workspaces`) {
           return workspaceResponse();
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
           return jsonResponse({ data: contextTreeNodes() });
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
           return jsonResponse({ data: [] });
         }
         if (
           url ===
-          `${BASE}/api/v1/workspaces/workspace-1/context/media/capabilities`
+          `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/media/capabilities`
         ) {
           return jsonResponse({
             data: {
@@ -6120,10 +6154,10 @@ describe("PageEditor", () => {
             },
           });
         }
-        if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+        if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
           return jsonResponse({ data: [page], next_cursor: null });
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media` && init?.method === "POST") {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media` && init?.method === "POST") {
           throw new Error(rawSecret);
         }
         return jsonResponse({ data: page });
@@ -6131,7 +6165,7 @@ describe("PageEditor", () => {
 
       renderWithRouter(
         "/pages/hello/edit",
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
       );
 
       await screen.findByLabelText(bodyLabel);
@@ -6181,15 +6215,15 @@ describe("PageEditor", () => {
         if (url === `${BASE}/api/v1/workspaces`) {
           return workspaceResponse();
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
           return jsonResponse({ data: contextTreeNodes() });
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
           return jsonResponse({ data: [] });
         }
         if (
           url ===
-          `${BASE}/api/v1/workspaces/workspace-1/context/media/capabilities`
+          `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/media/capabilities`
         ) {
           return jsonResponse({
             data: {
@@ -6202,10 +6236,10 @@ describe("PageEditor", () => {
             },
           });
         }
-        if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+        if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
           return jsonResponse({ data: [page], next_cursor: null });
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media` && init?.method === "POST") {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media` && init?.method === "POST") {
           throw new Error("batch rejection must happen before upload");
         }
         return jsonResponse({ data: page });
@@ -6213,7 +6247,7 @@ describe("PageEditor", () => {
 
       renderWithRouter(
         "/pages/hello/edit",
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
       );
 
       await screen.findByLabelText(bodyLabel);
@@ -6244,26 +6278,26 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/media/capabilities`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/media/capabilities`) {
         return currentContextMediaCapabilitiesResponse();
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media` && init?.method === "POST") {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media` && init?.method === "POST") {
         return jsonResponse({
           data: {
             asset_id: "00000000-0000-4000-8000-000000000456",
             logical_ref:
               "dtx-media://asset/00000000-0000-4000-8000-000000000456",
             content_url:
-              "/api/v1/workspaces/workspace-1/context/pages/p1/media/00000000-0000-4000-8000-000000000456/content",
+              "/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media/00000000-0000-4000-8000-000000000456/content",
             mime: "image/png",
             bytes: 24,
             sha256: "b".repeat(64),
@@ -6276,7 +6310,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -6301,7 +6335,7 @@ describe("PageEditor", () => {
     });
     expect(editor.textContent).not.toContain("image-url");
     const uploadCall = fetchMock.mock.calls.find(
-      (call) => call[0] === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media`,
+      (call) => call[0] === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media`,
     );
     const uploadBody = uploadCall?.[1]?.body;
     expect(uploadBody).toBeInstanceOf(FormData);
@@ -6318,15 +6352,15 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
       if (
         url ===
-        `${BASE}/api/v1/workspaces/workspace-1/context/media/capabilities`
+        `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/media/capabilities`
       ) {
         return jsonResponse({
           data: {
@@ -6341,10 +6375,10 @@ describe("PageEditor", () => {
           },
         });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media`) {
         const body = init?.body as FormData;
         const file = body.get("file") as File;
         const marker = String(body.get("marker_uuid"));
@@ -6352,7 +6386,7 @@ describe("PageEditor", () => {
           data: {
             asset_id: marker,
             logical_ref: `dtx-media://asset/${marker}`,
-            content_url: `/api/v1/workspaces/workspace-1/context/pages/p1/media/${marker}/content`,
+            content_url: `/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media/${marker}/content`,
             mime: file.type,
             bytes: file.size,
             sha256: "a".repeat(64),
@@ -6364,7 +6398,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -6399,7 +6433,7 @@ describe("PageEditor", () => {
     await waitFor(() => {
       expect(
         fetchMock.mock.calls.filter(
-          ([input]) => String(input) === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media`,
+          ([input]) => String(input) === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media`,
         ),
       ).toHaveLength(1);
     });
@@ -6414,13 +6448,13 @@ describe("PageEditor", () => {
     await waitFor(() => {
       expect(
         fetchMock.mock.calls.filter(
-          ([input]) => String(input) === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media`,
+          ([input]) => String(input) === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media`,
         ),
       ).toHaveLength(2);
     });
     expect(
       fetchMock.mock.calls
-        .filter(([input]) => String(input) === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media`)
+        .filter(([input]) => String(input) === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media`)
         .map(([, init]) => (init?.body as FormData).get("file"))
         .map((file) => file instanceof File ? [file.name, file.type] : null),
     ).toEqual([
@@ -6438,7 +6472,7 @@ describe("PageEditor", () => {
     await waitFor(() => {
       expect(
         fetchMock.mock.calls.filter(
-          ([input]) => String(input) === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media`,
+          ([input]) => String(input) === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media`,
         ),
       ).toHaveLength(2);
     });
@@ -6456,16 +6490,16 @@ describe("PageEditor", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/media/capabilities`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/media/capabilities`) {
         return capabilitiesResponse;
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -6473,7 +6507,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     expect(document.querySelector(
@@ -6503,13 +6537,13 @@ describe("PageEditor", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/media/capabilities`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/media/capabilities`) {
         return jsonResponse({
           data: {
             policy_revision: "context-images-schema-drift",
@@ -6521,7 +6555,7 @@ describe("PageEditor", () => {
           },
         });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -6529,7 +6563,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -6547,7 +6581,7 @@ describe("PageEditor", () => {
       /Current media upload limits are unavailable/,
     )).toBeInTheDocument();
     expect(fetchMock.mock.calls.filter(
-      ([input]) => String(input) === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media`,
+      ([input]) => String(input) === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media`,
     )).toHaveLength(0);
     expect(editor.textContent).not.toContain("Uploading gated.png");
   });
@@ -6556,13 +6590,13 @@ describe("PageEditor", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/media/capabilities`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/media/capabilities`) {
         return jsonResponse({
           error_code: "internal_error",
           message: "capabilities unavailable",
@@ -6570,7 +6604,7 @@ describe("PageEditor", () => {
           warnings: [],
         }, 500);
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -6578,7 +6612,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -6596,7 +6630,7 @@ describe("PageEditor", () => {
       /Current media upload limits are unavailable/,
     )).toBeInTheDocument();
     expect(fetchMock.mock.calls.filter(
-      ([input]) => String(input) === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media`,
+      ([input]) => String(input) === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media`,
     )).toHaveLength(0);
     expect(editor.textContent).not.toContain("Uploading gated.png");
   });
@@ -6614,13 +6648,13 @@ describe("PageEditor", () => {
       async (input, init) => {
         const url = String(input);
         if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
           return jsonResponse({ data: contextTreeNodes() });
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
           return jsonResponse({ data: [] });
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/context/media/capabilities`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/media/capabilities`) {
           capabilityRequests += 1;
           if (capabilityRequests === 1) {
             return jsonResponse({ data: {
@@ -6634,10 +6668,10 @@ describe("PageEditor", () => {
           }
           return policyRefreshResponse;
         }
-        if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+        if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
           return jsonResponse({ data: [page], next_cursor: null });
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media` && init?.method === "POST") {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media` && init?.method === "POST") {
           uploadRequests += 1;
           if (uploadRequests === 1) {
             return jsonResponse({
@@ -6650,7 +6684,7 @@ describe("PageEditor", () => {
           return jsonResponse({ data: {
             asset_id: marker,
             logical_ref: `dtx-media://asset/${marker}`,
-            content_url: `/api/v1/workspaces/workspace-1/context/pages/p1/media/${marker}/content`,
+            content_url: `/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media/${marker}/content`,
             mime: "image/png",
             bytes: 5,
             sha256: "e".repeat(64),
@@ -6662,7 +6696,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
     await screen.findByLabelText("Markdown body");
     const editor = document.querySelector(".cm-content") as HTMLElement;
@@ -6696,7 +6730,7 @@ describe("PageEditor", () => {
     expect(capabilityRequests).toBe(2);
     expect(uploadRequests).toBe(2);
     const uploadCalls = fetchMock.mock.calls.filter(
-      ([input]) => String(input) === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media`,
+      ([input]) => String(input) === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media`,
     );
     expect(uploadCalls.map(([, init]) =>
       new Headers(init?.headers).get("X-DTX-Media-Policy-Revision")))
@@ -6720,13 +6754,13 @@ describe("PageEditor", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/media/capabilities`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/media/capabilities`) {
         capabilityRequests += 1;
         return jsonResponse({ data: {
           policy_revision: capabilityRequests === 1 ? "policy-v1" : "policy-v2",
@@ -6737,10 +6771,10 @@ describe("PageEditor", () => {
           max_parallel_uploads: 2,
         } });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media` && init?.method === "POST") {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media` && init?.method === "POST") {
         uploadRequests += 1;
         return jsonResponse({
           error_code: "media_policy_changed",
@@ -6754,7 +6788,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
     await screen.findByLabelText("Markdown body");
     const editor = document.querySelector(".cm-content") as HTMLElement;
@@ -6799,19 +6833,19 @@ describe("PageEditor", () => {
         if (url === `${BASE}/api/v1/workspaces`) {
           return workspaceResponse();
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
           return jsonResponse({ data: contextTreeNodes() });
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
           return jsonResponse({ data: [] });
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/context/media/capabilities`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/media/capabilities`) {
           return currentContextMediaCapabilitiesResponse();
         }
-        if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+        if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
           return jsonResponse({ data: [page], next_cursor: null });
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media` && init?.method === "POST") {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media` && init?.method === "POST") {
           uploadAttempts += 1;
           if (uploadAttempts === 1) {
             return new Promise<Response>((_resolve, reject) => {
@@ -6831,7 +6865,7 @@ describe("PageEditor", () => {
               logical_ref:
                 "dtx-media://asset/00000000-0000-4000-8000-000000000789",
               content_url:
-                "/api/v1/workspaces/workspace-1/context/pages/p1/media/00000000-0000-4000-8000-000000000789/content",
+                "/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media/00000000-0000-4000-8000-000000000789/content",
               mime: "image/png",
               bytes: 5,
               sha256: "d".repeat(64),
@@ -6844,7 +6878,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -6896,7 +6930,7 @@ describe("PageEditor", () => {
     expect(screen.queryByText(/Image upload failed for retry.png/)).toBeNull();
     expect(
       fetchMock.mock.calls.filter(
-        ([input]) => String(input) === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media`,
+        ([input]) => String(input) === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media`,
       ),
     ).toHaveLength(2);
   });
@@ -6911,7 +6945,7 @@ describe("PageEditor", () => {
     });
     const otherPage = {
       ...page,
-      id: "p2",
+      id: "33333333-3333-4333-8333-333333333333",
       slug: "other",
       title: "Other",
       body_md: "# Other",
@@ -6923,27 +6957,27 @@ describe("PageEditor", () => {
       async (input, init) => {
         const url = String(input);
         if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
           return jsonResponse({ data: contextTreeNodes() });
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
           return jsonResponse({ data: [] });
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/context/media/capabilities`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/media/capabilities`) {
           return currentContextMediaCapabilitiesResponse();
         }
-        if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+        if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
           return jsonResponse({ data: [page, otherPage], next_cursor: null });
         }
-        if (url.includes("/api/v1/workspaces/workspace-1/context/pages/by-slug/hello")) {
-          return jsonResponse({ data: page });
-        }
-        if (url.includes("/api/v1/workspaces/workspace-1/context/pages/by-slug/other")) {
-          return jsonResponse({ data: otherPage });
-        }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media` && init?.method === "POST") {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media` && init?.method === "POST") {
           uploadSignal = init.signal as AbortSignal;
           return uploadResponse;
+        }
+        if (init?.method !== "POST" && url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222")) {
+          return jsonResponse({ data: page });
+        }
+        if (init?.method !== "POST" && url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/33333333-3333-4333-8333-333333333333")) {
+          return jsonResponse({ data: otherPage });
         }
         return jsonResponse({ data: page });
       },
@@ -6953,10 +6987,10 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <Route
-        path="/pages/:slug/edit"
+        path="/workspaces/:workspaceId/context/pages/:pageId/edit"
         element={(
           <>
-            <PageEditor mode="edit" />
+            <RoutedPageEditor mode="edit" />
             <EditOtherButton />
           </>
         )}
@@ -6983,7 +7017,7 @@ describe("PageEditor", () => {
         data: {
           asset_id: assetId,
           logical_ref: `dtx-media://asset/${assetId}`,
-          content_url: `/api/v1/workspaces/workspace-1/context/pages/p1/media/${assetId}/content`,
+          content_url: `/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media/${assetId}/content`,
           mime: "image/png",
           bytes: 5,
           sha256: "e".repeat(64),
@@ -7003,7 +7037,7 @@ describe("PageEditor", () => {
     });
     expect(
       fetchMock.mock.calls.filter(
-        ([input]) => String(input) === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media`,
+        ([input]) => String(input) === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media`,
       ),
     ).toHaveLength(1);
   });
@@ -7019,22 +7053,22 @@ describe("PageEditor", () => {
         if (url === `${BASE}/api/v1/workspaces`) {
           return workspaceResponse();
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
           return jsonResponse({ data: contextTreeNodes() });
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
           return jsonResponse({ data: [] });
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/context/media/capabilities`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/media/capabilities`) {
           return currentContextMediaCapabilitiesResponse();
         }
-        if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+        if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
           return jsonResponse({ data: [], next_cursor: null });
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages` && init?.method === "POST") {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages` && init?.method === "POST") {
           return pageCreationResponse;
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/new-page-1/media`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/55555555-5555-4555-8555-555555555555/media`) {
           throw new Error("cancelled upload must not reach the upload endpoint");
         }
         return jsonResponse({ data: page });
@@ -7043,7 +7077,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/new",
-      <Route path="/pages/new" element={<PageEditor mode="create" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -7075,14 +7109,14 @@ describe("PageEditor", () => {
     expect(editor.textContent).not.toContain("Uploading session.png");
     expect(
       fetchMock.mock.calls.filter(
-        ([input]) => String(input) === `${BASE}/api/v1/workspaces/workspace-1/context/pages/new-page-1/media`,
+        ([input]) => String(input) === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/55555555-5555-4555-8555-555555555555/media`,
       ),
     ).toHaveLength(0);
 
     resolvePageCreation(jsonResponse({
       data: {
         ...page,
-        id: "new-page-1",
+        id: "55555555-5555-4555-8555-555555555555",
         slug: "p-new-page-1",
         version_id: "version-1",
         current_version_id: "version-1",
@@ -7099,27 +7133,27 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/media/capabilities`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/media/capabilities`) {
         return currentContextMediaCapabilitiesResponse();
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/tags?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/tags?")) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
       // Page-first creation: no slug in the request body.
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages` && init?.method === "POST") {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages` && init?.method === "POST") {
         return jsonResponse({
           data: {
             ...page,
-            id: "new-page-1",
+            id: "55555555-5555-4555-8555-555555555555",
             slug: "media-brief",
             title: "Media Brief",
             version_id: "version-1",
@@ -7128,7 +7162,7 @@ describe("PageEditor", () => {
         }, 201);
       }
       if (
-        url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/new-page-1/media` &&
+        url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/55555555-5555-4555-8555-555555555555/media` &&
         init?.method === "POST"
       ) {
         return jsonResponse({
@@ -7139,18 +7173,18 @@ describe("PageEditor", () => {
             asset_id: assetId,
             logical_ref: `dtx-media://asset/${assetId}`,
             content_url:
-              `/api/v1/workspaces/workspace-1/context/pages/new-page-1/versions/version-1/media/${assetId}/content`,
+              `/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/55555555-5555-4555-8555-555555555555/versions/version-1/media/${assetId}/content`,
           },
         });
       }
       if (
-        url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/new-page-1/autosave` &&
+        url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/55555555-5555-4555-8555-555555555555/autosave` &&
         init?.method === "POST"
       ) {
         return jsonResponse({
           data: {
             ...page,
-            id: "new-page-1",
+            id: "55555555-5555-4555-8555-555555555555",
             slug: "media-brief",
             title: "Media Brief",
             version_id: "version-1",
@@ -7164,9 +7198,9 @@ describe("PageEditor", () => {
     const router = renderWithRouter(
       "/pages/new?title=Media%20Brief",
       <>
-        <Route path="/pages/new" element={<PageEditor mode="create" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
         <Route
-          path="/context/:slug/edit"
+          path="/workspaces/:workspaceId/context/pages/:pageId/edit"
           element={<div>editing persisted page</div>}
         />
       </>,
@@ -7192,11 +7226,11 @@ describe("PageEditor", () => {
     expect(
       fetchMock.mock.calls.filter(
         ([input, callInit]) =>
-          String(input) === `${BASE}/api/v1/workspaces/workspace-1/context/pages` && callInit?.method === "POST",
+          String(input) === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages` && callInit?.method === "POST",
       ),
     ).toHaveLength(1);
     const uploadCall = fetchMock.mock.calls.find(
-      (call) => String(call[0]) === `${BASE}/api/v1/workspaces/workspace-1/context/pages/new-page-1/media`,
+      (call) => String(call[0]) === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/55555555-5555-4555-8555-555555555555/media`,
     );
     expect((uploadCall?.[1]?.body as FormData).get("workspace_id")).toBeNull();
     expect((uploadCall?.[1]?.body as FormData).get("editing_version_id")).toBe(
@@ -7220,7 +7254,7 @@ describe("PageEditor", () => {
     const autosaveCall = await waitFor(() => {
       const call = fetchMock.mock.calls.find(
         (candidate) =>
-          String(candidate[0]) === `${BASE}/api/v1/workspaces/workspace-1/context/pages/new-page-1/autosave` &&
+          String(candidate[0]) === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/55555555-5555-4555-8555-555555555555/autosave` &&
           candidate[1]?.method === "POST",
       );
       expect(call).toBeTruthy();
@@ -7235,11 +7269,11 @@ describe("PageEditor", () => {
     expect(
       fetchMock.mock.calls.filter(
         ([input, callInit]) =>
-          String(input) === `${BASE}/api/v1/workspaces/workspace-1/context/pages` && callInit?.method === "POST",
+          String(input) === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages` && callInit?.method === "POST",
       ),
     ).toHaveLength(1);
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/context/media-brief/edit");
+      expect(router.state.location.pathname).toBe("/workspaces/11111111-1111-4111-8111-111111111111/context/pages/55555555-5555-4555-8555-555555555555/edit");
     });
     expect(await screen.findByText("editing persisted page")).toBeInTheDocument();
   });
@@ -7250,19 +7284,19 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (url.endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/media?usage=used")) {
+      if (url.endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media?usage=used")) {
         return jsonResponse({ data: [] });
       }
-      if (url.endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/media?usage=unused")) {
+      if (url.endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media?usage=unused")) {
         return jsonResponse({ data: [] });
       }
       return jsonResponse({ data: page });
@@ -7270,7 +7304,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -7295,10 +7329,10 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -7307,7 +7341,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
       </>,
     );
 
@@ -7316,7 +7350,7 @@ describe("PageEditor", () => {
   });
 
   it("migrates legacy split preview preference into split mode", async () => {
-    const preferenceKey = "dtxwiki:editor:default:hello";
+    const preferenceKey = "dtxwiki:editor:default:22222222-2222-4222-8222-222222222222";
     window.localStorage.setItem(
       preferenceKey,
       JSON.stringify({ mode: "source", split: true }),
@@ -7326,13 +7360,13 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -7341,7 +7375,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -7361,6 +7395,7 @@ describe("PageEditor", () => {
 
   it("does not double-submit while a save request is in flight", async () => {
     let resolveCreate!: (response: Response) => void;
+    const savedPage = { ...page, slug: "release-notes", title: "Release notes" };
     const createPromise = new Promise<Response>((resolve) => {
       resolveCreate = resolve;
     });
@@ -7371,33 +7406,31 @@ describe("PageEditor", () => {
         if (url === `${BASE}/api/v1/workspaces`) {
           return workspaceResponse();
         }
-        if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+        if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
           return jsonResponse({ data: contextTreeNodes() });
         }
-        if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+        if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
           return jsonResponse({ data: [], next_cursor: null });
         }
-        if (init?.method === "POST" && url === `${BASE}/api/v1/workspaces/workspace-1/context/pages`) {
+        if (init?.method === "POST" && url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages`) {
           return createPromise;
         }
         if (init?.method === "POST" && url.endsWith("/publish")) {
-          return jsonResponse({
-            data: { ...page, slug: "release-notes", title: "Release notes" },
-          });
+          return jsonResponse({ data: savedPage });
         }
-        return jsonResponse({ data: page });
+        return jsonResponse({ data: savedPage });
       });
 
-    renderWithRouter(
+    const router = renderWithRouter(
       "/pages/new",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
-          <Route path="/pages/:slug/edit" element={<div>editing created page</div>} />
-          <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
-    await setEditorTitle(await findTitleEditor(), "Release notes");
+    const createTitleEditor = await findTitleEditor();
+    await setEditorTitle(createTitleEditor, "Release notes");
 
     const saveButton = await publicationActions().findByRole("button", { name: "Save draft" });
     fireEvent.click(saveButton);
@@ -7418,12 +7451,17 @@ describe("PageEditor", () => {
     expect(window.dispatchEvent(unloadEvent)).toBe(false);
 
     resolveCreate(
-      jsonResponse(
-        { data: { ...page, slug: "release-notes", title: "Release notes" } },
-        201,
-      ),
+      jsonResponse({ data: savedPage }, 201),
     );
-    expect(await screen.findByLabelText("Context tree")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(router.state.location).toMatchObject({
+        pathname: "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
+        search: "",
+      });
+      expect(createTitleEditor).not.toBeInTheDocument();
+      expect(getTitleEditor()).toHaveValue("Release notes");
+      expect(screen.getByLabelText("Context tree")).toBeInTheDocument();
+    });
   });
 
   it("preserves explicit title input and rejects controls or more than 256 code points", async () => {
@@ -7432,16 +7470,16 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/tags?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/tags?")) {
         return jsonResponse({ data: [] });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
       return jsonResponse({ data: page });
@@ -7450,7 +7488,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new",
       <>
-        <Route path="/pages/new" element={<PageEditor mode="create" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
       </>,
     );
 
@@ -7532,22 +7570,22 @@ describe("PageEditor", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
         return jsonResponse({ data: contextTreeNodes() });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
         return jsonResponse({ data: [] });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/media/capabilities`) {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/media/capabilities`) {
         return currentContextMediaCapabilitiesResponse();
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media` && init?.method === "POST") {
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media` && init?.method === "POST") {
         return uploadResponse;
       }
-      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave")) {
+      if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave")) {
         return jsonResponse({
           data: {
             ...page,
@@ -7571,10 +7609,10 @@ describe("PageEditor", () => {
       "/pages/hello/edit",
       <>
         <Route
-          path="/pages/:slug/edit"
+          path="/workspaces/:workspaceId/context/pages/:pageId/edit"
           element={(
             <>
-              <PageEditor mode="edit" />
+              <RoutedPageEditor mode="edit" />
               <ProgrammaticNavigationButton />
             </>
           )}
@@ -7611,7 +7649,7 @@ describe("PageEditor", () => {
       fetchMock.mock.calls.filter(
         (call) =>
           call[1]?.method === "POST" &&
-          String(call[0]).endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave"),
+          String(call[0]).endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave"),
       ),
     ).toHaveLength(0);
 
@@ -7623,7 +7661,7 @@ describe("PageEditor", () => {
       fetchMock.mock.calls.filter(
         (call) =>
           call[1]?.method === "POST" &&
-          String(call[0]).endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave"),
+          String(call[0]).endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave"),
       ),
     ).toHaveLength(0);
     replaceEditorSelection(codeMirrorView(), pendingBody);
@@ -7643,7 +7681,7 @@ describe("PageEditor", () => {
       data: {
         asset_id: assetId,
         logical_ref: `dtx-media://asset/${assetId}`,
-        content_url: `/api/v1/workspaces/workspace-1/context/pages/p1/media/${assetId}/content`,
+        content_url: `/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media/${assetId}/content`,
         mime: "image/png",
         bytes: 24,
         sha256: "a".repeat(64),
@@ -7665,7 +7703,7 @@ describe("PageEditor", () => {
       const autosaveCall = fetchMock.mock.calls.find(
         (call) =>
           call[1]?.method === "POST" &&
-          String(call[0]).endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave"),
+          String(call[0]).endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/autosave"),
       );
       expect(autosaveCall).toBeTruthy();
       const autosaveBody = JSON.parse(String(autosaveCall?.[1]?.body));
@@ -7689,7 +7727,7 @@ function ProgrammaticNavigationButton() {
 function EditOtherButton() {
   const navigate = useNavigate();
   return (
-    <button type="button" onClick={() => navigate("/pages/other/edit")}>
+    <button type="button" onClick={() => navigate("/workspaces/11111111-1111-4111-8111-111111111111/context/pages/33333333-3333-4333-8333-333333333333/edit")}>
       Edit other page
     </button>
   );
@@ -7777,20 +7815,20 @@ async function renderDestinationPickerEditor() {
     if (url === `${BASE}/api/v1/workspaces`) {
       return workspaceResponse();
     }
-    if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+    if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
       return jsonResponse({ data: contextTreeNodesWithPageBranch() });
     }
-    if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+    if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
       return jsonResponse({ data: [] });
     }
     // P9.1 deleted the top-level /api/v1/pages* family; the audit branch
     // this test came from predates that. Left stale, the canonical calls
     // fell through to the catch-all below and got an object where a list
     // was expected, so the editor never finished mounting.
-    if (url.includes("/api/v1/workspaces/workspace-1/context/pages/tags")) {
+    if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/tags")) {
       return jsonResponse({ data: [] });
     }
-    if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+    if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
       return jsonResponse({ data: [], next_cursor: null });
     }
     return jsonResponse({ data: page });
@@ -7798,7 +7836,7 @@ async function renderDestinationPickerEditor() {
 
   renderWithRouter(
     "/pages/new?from=context",
-    <Route path="/pages/new" element={<PageEditor mode="create" />} />,
+    <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />,
   );
 
   await screen.findByLabelText("Markdown body");
@@ -7810,14 +7848,14 @@ async function renderDestinationPickerEditor() {
 async function renderMobileEditor() {
   vi.stubGlobal("innerWidth", 390);
   window.localStorage.setItem(
-    "dtxwiki:editor:default:hello",
+    "dtxwiki:editor:default:22222222-2222-4222-8222-222222222222",
     JSON.stringify({ mode: "split" }),
   );
   mockEditorPage("# Hello\n\nBody");
 
   renderWithRouter(
     "/pages/hello/edit",
-    <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+    <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
   );
 
   expect(await screen.findByLabelText("Markdown body")).toBeInTheDocument();
@@ -7828,7 +7866,7 @@ async function renderEditorOnHello() {
   mockEditorPage("# Hello");
   renderWithRouter(
     "/pages/hello/edit",
-    <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+    <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
   );
   await screen.findByLabelText("Markdown body");
 }
@@ -7985,16 +8023,16 @@ function mockEditorPage(bodyMd: string) {
     if (url === `${BASE}/api/v1/workspaces`) {
       return workspaceResponse();
     }
-    if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+    if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
       return jsonResponse({ data: contextTreeNodes() });
     }
-    if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+    if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
       return jsonResponse({ data: [] });
     }
-    if (url.includes("/api/v1/workspaces/workspace-1/context/pages/tags?")) {
+    if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/tags?")) {
       return jsonResponse({ data: [] });
     }
-    if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+    if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
       return jsonResponse({ data: [{ ...page, body_md: bodyMd }], next_cursor: null });
     }
     return jsonResponse({ data: { ...page, body_md: bodyMd } });
@@ -8026,10 +8064,10 @@ function readBlobText(blob: Blob) {
 function workspaceResponse() {
   return jsonResponse({
     data: {
-      current_workspace_id: "workspace-1",
+      current_workspace_id: "11111111-1111-4111-8111-111111111111",
       workspaces: [
         {
-          id: "workspace-1",
+          id: "11111111-1111-4111-8111-111111111111",
           slug: "default",
           title: "Default",
           name: "Default",
@@ -8059,7 +8097,7 @@ function currentContextMediaCapabilitiesResponse() {
 function contextTreeNodes() {
   return [
     {
-      id: "context-root",
+      id: "66666666-6666-4666-8666-666666666666",
       section: "context",
       title: "Context",
       slug: "context",
@@ -8076,12 +8114,12 @@ function contextTreeNodes() {
       breadcrumb: [],
     },
     {
-      id: "context-inbox",
+      id: "77777777-7777-4777-8777-777777777777",
       section: "context",
       title: "Inbox",
       slug: "inbox",
       node_kind: "folder",
-      parent_id: "context-root",
+      parent_id: "66666666-6666-4666-8666-666666666666",
       sort_key: "0001",
       target_kind: null,
       target_id: null,
@@ -8092,7 +8130,7 @@ function contextTreeNodes() {
       children_count: 0,
       breadcrumb: [
         {
-          id: "context-root",
+          id: "66666666-6666-4666-8666-666666666666",
           section: "context",
           title: "Context",
           slug: "context",
@@ -8112,10 +8150,10 @@ function contextTreeNodesWithPageBranch() {
       title: "Hello Page",
       slug: "hello",
       node_kind: "page_ref",
-      parent_id: "context-inbox",
+      parent_id: "77777777-7777-4777-8777-777777777777",
       sort_key: "0002",
       target_kind: "context_page",
-      target_id: "p1",
+      target_id: "22222222-2222-4222-8222-222222222222",
       is_system_node: false,
       can_have_children: true,
       primary_placement: true,
@@ -8123,14 +8161,14 @@ function contextTreeNodesWithPageBranch() {
       children_count: 1,
       breadcrumb: [
         {
-          id: "context-root",
+          id: "66666666-6666-4666-8666-666666666666",
           section: "context",
           title: "Context",
           slug: "context",
           node_kind: "folder",
         },
         {
-          id: "context-inbox",
+          id: "77777777-7777-4777-8777-777777777777",
           section: "context",
           title: "Inbox",
           slug: "inbox",
@@ -8155,14 +8193,14 @@ function contextTreeNodesWithPageBranch() {
       children_count: 0,
       breadcrumb: [
         {
-          id: "context-root",
+          id: "66666666-6666-4666-8666-666666666666",
           section: "context",
           title: "Context",
           slug: "context",
           node_kind: "folder",
         },
         {
-          id: "context-inbox",
+          id: "77777777-7777-4777-8777-777777777777",
           section: "context",
           title: "Inbox",
           slug: "inbox",

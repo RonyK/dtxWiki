@@ -99,6 +99,11 @@ from backend.services.mcp_trace_redaction import (
     null_previews,
 )
 from backend.services.read_errors import ReadNotFoundError
+from backend.services.workspace_urls import (
+    agent_page_url,
+    context_page_url,
+    library_item_url,
+)
 from backend.spi.tool_presentation import TOOL_ACTIONS
 
 ERROR_STATUSES = {"failed", "rejected_by_policy", "conflict"}
@@ -2001,7 +2006,7 @@ class McpChatService:
                 return None, None
             if shared_only and _author_private_page(page):
                 return None, None
-            return page.title, f"/context?target={page.id}"
+            return page.title, context_page_url(workspace_id, page.id)
         if resource_kind == McpChatArtifactKind.AGENT_PAGE.value:
             agent_page = get_in_workspace(
                 session,
@@ -2015,7 +2020,7 @@ class McpChatService:
                 agent_page, actor, workspace_id=workspace_id
             ):
                 return None, None
-            return agent_page.title, f"/agent?target={agent_page.id}"
+            return agent_page.title, agent_page_url(workspace_id, agent_page.id)
         if resource_kind == McpChatArtifactKind.LIBRARY_ITEM.value:
             # P5.1: every producer normalizes a LibraryArtifact id to its
             # parent LibraryItem id before writing a library_item-kind link
@@ -2035,7 +2040,7 @@ class McpChatService:
                 return None, None
             return source.title or fit_generated_title(
                 source.uri, fallback="Library item"
-            ), f"/library?target={source.id}"
+            ), library_item_url(workspace_id, source.id)
         if resource_kind == McpChatArtifactKind.CONTEXT_MEDIA_ASSET.value:
             # ContextMediaAsset has no title column; original_filename is the
             # only author-controlled label, and it is already sanitized at
@@ -2111,7 +2116,7 @@ class McpChatService:
                 created_for_version, actor
             ):
                 return None, None
-            return asset.original_filename, f"/context?target={page.id}"
+            return asset.original_filename, context_page_url(workspace_id, page.id)
         return None, None
 
     def _client_refs(

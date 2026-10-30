@@ -4,6 +4,7 @@ import {
   backendBaseUrl,
   currentWorkspace,
   signUp,
+  workspaceUrl,
 } from "./auth";
 
 const TWO_BY_TWO_PNG = Buffer.from(
@@ -86,7 +87,7 @@ test("trusted Context reader loads HTTPS images and contains external failures @
   expect(createResponse.ok()).toBeTruthy();
   const created = (await createResponse.json()).data as { id: string };
 
-  await page.goto(`/context?target=${encodeURIComponent(created.id)}`);
+  await page.goto(workspaceUrl(workspace.id, `context/pages/${created.id}`));
   const article = page.getByRole("article");
   await expect(article).toBeVisible();
 

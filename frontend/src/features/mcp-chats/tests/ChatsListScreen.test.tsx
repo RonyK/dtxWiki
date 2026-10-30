@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatsListScreen } from "../ChatsListScreen";
 
 const BASE = "http://127.0.0.1:21080";
-const WORKSPACE_ID = "workspace-1";
+const WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
 
 describe("ChatsListScreen", () => {
   beforeEach(() => {
@@ -49,7 +49,7 @@ describe("ChatsListScreen", () => {
     // claiming the loaded page is the whole set.
     expect(screen.getByText("1 session")).toBeInTheDocument();
     const card = screen.getByRole("link", { name: /Codex Research Session/ });
-    expect(card).toHaveAttribute("href", "/chats/chat-1");
+    expect(card).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/chats/chat-1");
     expect(
       within(card).getByText("Codex Research Session"),
     ).toBeInTheDocument();
@@ -123,7 +123,7 @@ describe("ChatsListScreen", () => {
       <MemoryRouter
         initialEntries={[
           {
-            pathname: "/chats",
+            pathname: "/workspaces/00000000-0000-4000-8000-000000000001/chats",
             state: { chatArchiveSuccess: { chatId: "chat-1" } },
           },
         ]}
@@ -201,7 +201,7 @@ describe("ChatsListScreen", () => {
         [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats?period=all&writes_only=true&archived=false&sort=last_activity_desc`]:
           chatsResponse([]),
       },
-      "/chats?writes_only=true",
+      "/workspaces/00000000-0000-4000-8000-000000000001/chats?writes_only=true",
     );
 
     expect(await screen.findByText("No chats with writes")).toBeInTheDocument();
@@ -339,7 +339,7 @@ describe("ChatsListScreen", () => {
       "datetime",
       groupedNewest.last_activity_at,
     );
-    expect(visibleChatLink("/chats/chat-group-oldest")).toBeUndefined();
+    expect(visibleChatLink("/workspaces/00000000-0000-4000-8000-000000000001/chats/chat-group-oldest")).toBeUndefined();
 
     toggle.focus();
     await user.keyboard("{Enter}");
@@ -350,7 +350,7 @@ describe("ChatsListScreen", () => {
       "chat-group-middle",
       "chat-group-oldest",
     ]) {
-      expect(visibleChatLink(`/chats/${id}`)).toBeInTheDocument();
+      expect(visibleChatLink(`/workspaces/00000000-0000-4000-8000-000000000001/chats/${id}`)).toBeInTheDocument();
     }
 
     await user.keyboard(" ");
@@ -386,15 +386,15 @@ describe("ChatsListScreen", () => {
     });
 
     await screen.findByRole("button", { name: /Conversation/ });
-    const independent = visibleChatLink("/chats/chat-ungrouped");
+    const independent = visibleChatLink("/workspaces/00000000-0000-4000-8000-000000000001/chats/chat-ungrouped");
     expect(independent).toBeDefined();
     expect(independent).toHaveClass("mcp-chat-card");
-    expect(independent).toHaveAttribute("href", "/chats/chat-ungrouped");
+    expect(independent).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/chats/chat-ungrouped");
     expect(within(independent!).getByText("3 calls")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Conversation/ }),
     ).toHaveAttribute("aria-expanded", "false");
-    expect(visibleChatLink("/chats/chat-group-newer")).toBeUndefined();
+    expect(visibleChatLink("/workspaces/00000000-0000-4000-8000-000000000001/chats/chat-group-newer")).toBeUndefined();
   });
 
   it("anchors a group at its newest member in the current sort and preserves payload order inside it", async () => {
@@ -429,11 +429,11 @@ describe("ChatsListScreen", () => {
         [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats?period=all&writes_only=false&archived=false&sort=write_count_desc`]:
           chatsResponse([groupedOlder, independent, groupedNewest]),
       },
-      "/chats?sort=write_count_desc",
+      "/workspaces/00000000-0000-4000-8000-000000000001/chats?sort=write_count_desc",
     );
 
     const toggle = await screen.findByRole("button", { name: /Conversation/ });
-    const middle = visibleChatLink("/chats/chat-independent");
+    const middle = visibleChatLink("/workspaces/00000000-0000-4000-8000-000000000001/chats/chat-independent");
     expect(middle).toBeDefined();
     expect(
       middle!.compareDocumentPosition(toggle) &
@@ -446,8 +446,8 @@ describe("ChatsListScreen", () => {
     expect(content).not.toBeNull();
     const memberLinks = within(content!).getAllByRole("link");
     expect(memberLinks.map((link) => link.getAttribute("href"))).toEqual([
-      "/chats/chat-group-older",
-      "/chats/chat-group-newest",
+      "/workspaces/00000000-0000-4000-8000-000000000001/chats/chat-group-older",
+      "/workspaces/00000000-0000-4000-8000-000000000001/chats/chat-group-newest",
     ]);
   });
 
@@ -463,10 +463,10 @@ describe("ChatsListScreen", () => {
     });
 
     await screen.findByRole("heading", { name: "Chats" });
-    const card = visibleChatLink("/chats/chat-1");
+    const card = visibleChatLink("/workspaces/00000000-0000-4000-8000-000000000001/chats/chat-1");
     expect(card).toBeDefined();
     expect(card).toHaveClass("mcp-chat-card");
-    expect(card).toHaveAttribute("href", "/chats/chat-1");
+    expect(card).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/chats/chat-1");
     expect(screen.queryByRole("button", { name: /Conversation/ })).toBeNull();
   });
 
@@ -480,7 +480,7 @@ describe("ChatsListScreen", () => {
         [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats?period=all&writes_only=false&archived=false&sort=last_activity_desc`]:
           chatsResponse([]),
       },
-      "/chats?q=missing&client=client-1&period=week&writes_only=true&archived=true&sort=write_count_desc",
+      "/workspaces/00000000-0000-4000-8000-000000000001/chats?q=missing&client=client-1&period=week&writes_only=true&archived=true&sort=write_count_desc",
     );
 
     expect(
@@ -523,7 +523,7 @@ describe("ChatsListScreen", () => {
     });
     const user = userEvent.setup();
     render(
-      <MemoryRouter initialEntries={[`/chats${initialSearch}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/00000000-0000-4000-8000-000000000001/chats${initialSearch}`]}>
         <ChatsListScreen />
         <LocationSearchProbe />
       </MemoryRouter>,
@@ -631,7 +631,7 @@ describe("ChatsListScreen", () => {
         chatsResponse([]),
     });
     render(
-      <MemoryRouter initialEntries={["/chats"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/chats"]}>
         <ChatsListScreen />
       </MemoryRouter>,
     );
@@ -712,7 +712,7 @@ describe("ChatsListScreen", () => {
       [`${prefix}&cursor=chat-search-v1%3A40`]: chatsResponse([found]),
     });
     render(
-      <MemoryRouter initialEntries={[`/chats?q=${encodeURIComponent(query)}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/00000000-0000-4000-8000-000000000001/chats?q=${encodeURIComponent(query)}`]}>
         <ChatsListScreen />
       </MemoryRouter>,
     );
@@ -767,7 +767,7 @@ describe("ChatsListScreen", () => {
       });
     const user = userEvent.setup();
     render(
-      <MemoryRouter initialEntries={["/chats?q=old"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/chats?q=old"]}>
         <ChatsListScreen />
       </MemoryRouter>,
     );
@@ -807,7 +807,7 @@ describe("ChatsListScreen", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Open MCP setup" }),
-    ).toHaveAttribute("href", "/settings/integrations");
+    ).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/settings/integrations");
     expect(screen.queryByRole("link", { name: "Open Ask" })).not.toBeInTheDocument();
   });
 
@@ -830,7 +830,7 @@ describe("ChatsListScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/chats"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/chats"]}>
         <ChatsListScreen />
       </MemoryRouter>,
     );
@@ -849,7 +849,7 @@ describe("ChatsListScreen", () => {
 
 function renderWithChats(
   responses: Record<string, unknown | (() => unknown | Promise<unknown>)>,
-  initialEntry = "/chats",
+  initialEntry = "/workspaces/00000000-0000-4000-8000-000000000001/chats",
 ) {
   mockFetch(responses);
   return render(
@@ -993,7 +993,7 @@ function chatFixture() {
         resource_kind: "context_page",
         resource_id: "page-1",
         artifact_title: "Authentication policy",
-        navigation_path: "/context?target=page-1",
+        navigation_path: "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/page-1",
         verb: "referenced",
         first_occurred_at: "2026-05-27T09:01:00Z",
         last_occurred_at: "2026-05-27T09:02:00Z",

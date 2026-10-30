@@ -13,6 +13,7 @@ import {
   authenticatePage,
   backendBaseUrl,
   currentWorkspace,
+  workspaceUrl,
 } from "./auth";
 import {
   evidenceLocatorScreenshot,
@@ -80,7 +81,8 @@ test.describe("Overall UI responsive acceptance", () => {
     }, testInfo) => {
       await page.setViewportSize({ width: 1280, height: 850 });
       await authenticatePage(page, testInfo, "fold-collapsed-sidebar");
-      await page.goto("/dashboard");
+      const workspace = await currentWorkspace(page.request);
+      await page.goto(workspaceUrl(workspace.id, "dashboard"));
       const shell = page.locator(".app-shell");
       const toggle = page.locator(".desktop-sidebar-toggle");
       await expect(toggle).toHaveAttribute("aria-expanded", "true");
@@ -144,7 +146,7 @@ test.describe("Overall UI responsive acceptance", () => {
       );
 
       await test.step("Library explorer trigger keeps a stable mobile row", async () => {
-        await page.goto("/library");
+        await page.goto(workspaceUrl(workspace.id, "library"));
         const explorerTrigger = page.locator(".workspace-mobile-drawer-toggle");
         if (viewport.width > 1024) {
           await expect(explorerTrigger).toHaveCount(0);
@@ -202,7 +204,7 @@ test.describe("Overall UI responsive acceptance", () => {
       });
 
       await test.step("Context folder uses five-item numeric pagination", async () => {
-        await page.goto(`/context?target=${fixture.parent.id}`);
+        await page.goto(workspaceUrl(workspace.id, `context/folders/${fixture.parent.id}`));
 
         const childRows = page.locator(".folder-child-list > .folder-child-row");
         const pagination = page.locator(".context-children-pagination");
@@ -239,7 +241,7 @@ test.describe("Overall UI responsive acceptance", () => {
       });
 
       await test.step("TreeRail keeps equal compact rows and actions", async () => {
-        await page.goto("/context");
+        await page.goto(workspaceUrl(workspace.id, "context"));
         await expectMinimumTouchTarget(
           page.locator(".context-list-filters select"),
           "Context draft filter",
@@ -418,7 +420,7 @@ test.describe("Overall UI responsive acceptance", () => {
         // subtree resolves its fixed position against the drawer instead of
         // the viewport and gets sliced off at the drawer's trailing edge, so
         // the menu has to render at the document root.
-        await page.goto("/context");
+        await page.goto(workspaceUrl(workspace.id, "context"));
         const desktopLayout = viewport.width > 1024;
         const drawer = page.locator(".workspace-left-panel");
         if (!desktopLayout) {
@@ -520,7 +522,7 @@ test.describe("Overall UI responsive acceptance", () => {
       });
 
       await test.step("Context History compares every successor, never v1", async () => {
-        await page.goto(`/context?target=${fixture.initialVersion.id}&tab=history`);
+        await page.goto(`${workspaceUrl(workspace.id, `context/pages/${fixture.initialVersion.id}`)}?tab=history`);
 
         if (viewport.width <= 1024) {
           const detailsTrigger = page.locator(".workspace-mobile-inspector-toggle");
@@ -695,7 +697,7 @@ test.describe("Overall UI responsive acceptance", () => {
       });
 
       await test.step("Library policy is typed, source-rule-free, and defaults to 20 MB", async () => {
-        await page.goto("/settings?section=library");
+        await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=library`);
 
         const policy = page.locator(".library-policy-card");
         const outerLimit = policy.locator(".library-workspace-limit");
@@ -724,9 +726,9 @@ test.describe("Overall UI responsive acceptance", () => {
       });
 
       for (const surface of [
-        { key: "lint", path: "/lint", ready: ".lint-filter-disclosure" },
-        { key: "chats", path: "/chats", ready: ".mcp-chats-screen" },
-        { key: "activity", path: "/activity", ready: ".activity-screen" },
+        { key: "lint", path: workspaceUrl(workspace.id, "lint"), ready: ".lint-filter-disclosure" },
+        { key: "chats", path: workspaceUrl(workspace.id, "chats"), ready: ".mcp-chats-screen" },
+        { key: "activity", path: workspaceUrl(workspace.id, "activity"), ready: ".activity-screen" },
       ] as const) {
         await test.step(`${surface.path} has no document-level horizontal overflow`, async () => {
           await page.goto(surface.path);
@@ -747,7 +749,7 @@ test.describe("Overall UI responsive acceptance", () => {
 
       if (viewport.width <= 1024) {
         await test.step("Activity active-filter Reset keeps a mobile touch target", async () => {
-          await page.goto("/activity?kind=workspace&subtype=review");
+          await page.goto(`${workspaceUrl(workspace.id, "activity")}?kind=workspace&subtype=review`);
           await expectMinimumTouchTarget(
             page.locator(".activity-filter-reset"),
             "Activity filter Reset",
@@ -755,21 +757,21 @@ test.describe("Overall UI responsive acceptance", () => {
         });
 
         await test.step("Ask direct access has a usable mobile recovery action", async () => {
-          await page.goto("/ask");
+          await page.goto(workspaceUrl(workspace.id, "ask"));
           await expect(
             page.getByRole("heading", { name: "We couldn't find that page" }),
           ).toBeVisible();
           await expect(page.locator(".ask-composer")).toHaveCount(0);
-          await expect(page.locator('a[href^="/ask"]')).toHaveCount(0);
+          await expect(page.locator('a[href^="/workspaces/"][href$="/ask"]')).toHaveCount(0);
           await expectMinimumTouchTarget(
             page.getByRole("link", { name: "Back to dashboard", exact: true }),
-            "Unavailable Ask recovery link",
+            "Unavailable Ask workspace dashboard recovery",
           );
           await expectNoHorizontalOverflow(page, "Unavailable Ask route");
         });
 
         await test.step("Settings form controls keep mobile touch targets", async () => {
-          await page.goto("/settings?section=workspace");
+          await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=workspace`);
           await expectMinimumTouchTarget(
             page.locator("#settings-workspace-title"),
             "Workspace title",
@@ -779,7 +781,7 @@ test.describe("Overall UI responsive acceptance", () => {
             "Workspace default language",
           );
 
-          await page.goto("/settings?section=review");
+          await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=review`);
           await expectMinimumTouchTarget(
             page.locator("#settings-review-preset"),
             "Review policy preset",
@@ -866,7 +868,8 @@ test.describe("Overall UI responsive acceptance", () => {
     // guard to reject it.
     await page.setViewportSize({ width: 390, height: 844 });
     await authenticatePage(page, testInfo, "overflow-guard-self-test");
-    await page.goto("/dashboard");
+    const workspace = await currentWorkspace(page.request);
+    await page.goto(workspaceUrl(workspace.id, "dashboard"));
     await expect(page.locator(".main-surface")).toBeVisible();
 
     // Baseline: the real screen passes.
@@ -934,7 +937,8 @@ test.describe("Overall UI responsive acceptance", () => {
     test.setTimeout(60_000);
     await page.setViewportSize({ width: 690, height: 844 });
     await authenticatePage(page, testInfo, "fold-down-scroll-left-resize");
-    await page.goto("/dashboard");
+    const workspace = await currentWorkspace(page.request);
+    await page.goto(workspaceUrl(workspace.id, "dashboard"));
 
     const featureMain = page.locator(".feature-main");
     await expect(featureMain).toBeVisible();
@@ -1002,11 +1006,12 @@ test.describe("Overall UI responsive acceptance", () => {
     test.setTimeout(60_000);
     await page.setViewportSize({ width: 390, height: 844 });
     await authenticatePage(page, testInfo, "phone-390x844-ko-library-policy");
+    const workspace = await currentWorkspace(page.request);
     await page.addInitScript(() => {
       window.localStorage.setItem("dtxwiki.uiLanguage", "ko");
     });
 
-    await page.goto("/settings?section=library");
+    await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=library`);
 
     await expect(page.locator("html")).toHaveAttribute("lang", "ko");
     const policy = page.locator(".library-policy-card");
@@ -1062,7 +1067,8 @@ test.describe("Overall UI responsive acceptance", () => {
     test.setTimeout(120_000);
     await page.setViewportSize({ width: 390, height: 844 });
     await authenticatePage(page, testInfo, "phone-390x844-library-family-editor");
-    await page.goto("/settings?section=library");
+    const workspace = await currentWorkspace(page.request);
+    await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=library`);
 
     const policy = page.locator(".library-policy-card");
     await expect(policy.getByText("No format families", { exact: true })).toBeVisible();
@@ -1352,7 +1358,7 @@ test.describe("Overall UI responsive acceptance", () => {
       );
     }
 
-    await page.goto(`/context?target=${parentPage.id}&tab=children&page=2`);
+    await page.goto(`${workspaceUrl(workspace.id, `context/pages/${parentPage.id}`)}?tab=children&page=2`);
     const childrenTab = page.getByRole("tab", { name: /Children/ });
     await expect(childrenTab).toHaveAttribute("aria-selected", "true");
     await expect(page).toHaveURL(/(?:\?|&)tab=children(?:&|$)/);

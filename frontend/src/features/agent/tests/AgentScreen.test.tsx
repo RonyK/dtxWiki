@@ -8,7 +8,7 @@ import { readAppStyles } from "../../../test-support/appStyles";
 import { AgentScreen } from "../AgentScreen";
 
 const BASE = "http://127.0.0.1:21080";
-const WORKSPACE_ID = "workspace-1";
+const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
 
 // AgentScreen reads role via useOptionalWorkspaceContext to gate write
 // affordances; the tests render it without a provider, so mock the role here.
@@ -42,12 +42,12 @@ describe("AgentScreen", () => {
     vi.restoreAllMocks();
     window.localStorage.clear();
     window.localStorage.setItem("dtxwiki:workspace-layout:v2:agent:left", "true");
-    agentWorkspace.current = { selectedWorkspace: { role: "owner" } };
+    agentWorkspace.current = { selectedWorkspace: { id: WORKSPACE_ID, role: "owner" } };
     consoleErrorSpy = vi.spyOn(console, "error");
   });
 
   it("refreshes the overview and tree after leaving the reader and clicking its menu again", async () => {
-    let pages = [agentPage("agent-1", "persona", "Existing item")];
+    let pages = [agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Existing item")];
     let listReads = 0;
     let treeReads = 0;
     mockFetch({
@@ -62,17 +62,17 @@ describe("AgentScreen", () => {
           treeNode(`node-${page.id}`, page.id, page.title),
         )) };
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=active`]: { data: agentDetail("agent-1", "persona", "Existing item", "Selected reader body") },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=active`]: { data: agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Existing item", "Selected reader body") },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/categories`]: { data: [category("persona", "always")] },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-1`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`]: {
         data: { versions: [], changesets: [], review_decisions: [], diffs: null },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1/bundles`]: { data: [] },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1/chats?limit=50`]: { data: { items: [], next_cursor: null } },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1/bundles`]: { data: [] },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1/chats?limit=50`]: { data: { items: [], next_cursor: null } },
     });
     const view = render(
-      <MemoryRouter initialEntries={["/agent?target=agent-1"]}>
-        <Link to="/agent">Main menu agent</Link>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`]}>
+        <Link to={`/workspaces/${WORKSPACE_ID}/agent`}>Main menu agent</Link>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -80,14 +80,14 @@ describe("AgentScreen", () => {
     const main = within(view.container.querySelector(".feature-main") as HTMLElement);
     expect([listReads, treeReads]).toEqual([1, 1]);
 
-    pages = [agentPage("fresh-1", "persona", "Fresh after reader"), ...pages];
+    pages = [agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa63", "persona", "Fresh after reader"), ...pages];
     await userEvent.click(screen.getByRole("link", { name: "Main menu agent" }));
     await screen.findByRole("treeitem", { name: "Fresh after reader" });
     expect(await main.findByRole("button", { name: /Fresh after reader/ })).toBeInTheDocument();
     expect(screen.queryByText("Selected reader body")).not.toBeInTheDocument();
     expect([listReads, treeReads]).toEqual([2, 2]);
 
-    pages = [agentPage("fresh-2", "persona", "Fresh while home"), ...pages];
+    pages = [agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa64", "persona", "Fresh while home"), ...pages];
     await userEvent.click(screen.getByRole("link", { name: "Main menu agent" }));
     await screen.findByRole("treeitem", { name: "Fresh while home" });
     expect(await main.findByRole("button", { name: /Fresh while home/ })).toBeInTheDocument();
@@ -133,23 +133,26 @@ describe("AgentScreen", () => {
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`]: {
         data: [
-          agentPage("agent-1", "persona", "Default Persona"),
-          agentPage("agent-2", "agent_guide", "Default System Prompt"),
+          agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona"),
+          agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2", "agent_guide", "Default System Prompt"),
         ],
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`]: {
         data: treeResponse("agent", [
-          treeNode("node-1", "agent-1", "Default Persona"),
-          folderNode("ancestor-0", "Advanced", "advanced", null, [], false, 1),
-          treeNode("node-2", "agent-2", "Default System Prompt", [
+          treeNode("node-1", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "Default Persona"),
+          folderNode("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4", "Advanced", "advanced", null, [], false, 1),
+          treeNode("node-2", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2", "Default System Prompt", [
             "Advanced",
           ]),
         ]),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=active`]: {
-        data: agentDetail("agent-1", "persona", "Default Persona", "# Persona"),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4`]: {
+        data: folderNode("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4", "Advanced", "advanced", null, [], false, 1),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-1`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=active`]: {
+        data: agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "# Persona"),
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`]: {
         data: {
           // Two versions: the active one (which offers no Restore, since that
           // would act on the version already being read) and a superseded one
@@ -178,7 +181,7 @@ describe("AgentScreen", () => {
           diffs: null,
         },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1/bundles`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1/bundles`]: {
         data: [
           {
             bundle_id: "bundle-12345678",
@@ -200,15 +203,15 @@ describe("AgentScreen", () => {
           },
         ],
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-2?version=active`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2?version=active`]: {
         data: agentDetail(
-          "agent-2",
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
           "agent_guide",
           "Default System Prompt",
           "# System",
         ),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-2`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2`]: {
         data: {
           versions: [
             {
@@ -228,7 +231,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -246,7 +249,7 @@ describe("AgentScreen", () => {
       screen.getByText(/not injected into prompts automatically/),
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Injection settings" }))
-      .toHaveAttribute("href", "/settings?section=agent-injection");
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/settings?section=agent-injection`);
     expect(screen.getAllByText("Default Persona").length).toBeGreaterThan(1);
     expect(screen.getAllByText("Default System Prompt")).toHaveLength(2);
     // UI-10: enum tokens are mapped through i18n labels, not shown raw.
@@ -309,9 +312,9 @@ describe("AgentScreen", () => {
     ).toHaveAttribute("aria-selected", "true");
     const breadcrumb = within(screen.getByLabelText("Breadcrumb"));
     expect(breadcrumb.getByRole("link", { name: "Agent" }))
-      .toHaveAttribute("href", "/agent");
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/agent`);
     expect(breadcrumb.getByRole("link", { name: "Advanced" }))
-      .toHaveAttribute("href", "/agent?target=ancestor-0");
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/agent/folders/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4`);
 
     await userEvent.click(breadcrumb.getByRole("link", { name: "Advanced" }));
 
@@ -339,7 +342,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -358,12 +361,12 @@ describe("AgentScreen", () => {
         data: [category("persona", "always")],
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`]: {
-        data: [agentPage("agent-1", "persona", "First Persona")],
+        data: [agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "First Persona")],
         next_cursor: "cursor-2",
         has_more: true,
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages?cursor=cursor-2`]: {
-        data: [agentPage("agent-2", "persona", "Older Persona")],
+        data: [agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2", "persona", "Older Persona")],
         next_cursor: null,
         has_more: false,
       },
@@ -373,7 +376,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -410,7 +413,7 @@ describe("AgentScreen", () => {
         url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`
       ) {
         return jsonResponse({
-          data: [agentPage("agent-1", "persona", "Deleted elsewhere")],
+          data: [agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Deleted elsewhere")],
           next_cursor: null,
           total: 1,
           has_more: false,
@@ -422,13 +425,13 @@ describe("AgentScreen", () => {
       ) {
         return jsonResponse({
           data: treeResponse("agent", [
-            treeNode("node-1", "agent-1", "Deleted elsewhere"),
+            treeNode("node-1", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "Deleted elsewhere"),
           ]),
         });
       }
       if (
         url ===
-        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-1`
+        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`
       ) {
         return jsonResponse({
           data: {
@@ -450,7 +453,7 @@ describe("AgentScreen", () => {
       }
       if (
         url ===
-        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=active`
+        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=active`
       ) {
         return jsonResponse(
           {
@@ -466,7 +469,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -490,8 +493,8 @@ describe("AgentScreen", () => {
   });
 
   it("resolves a tree node whose page is past the flat-list cap by reading it by id", async () => {
-    // The flat agent/pages list is capped and only returns agent-1; the tree is
-    // unbounded and also exposes node-60 -> agent-60. Selecting node-60 must
+    // The flat agent/pages list is capped and only returns aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1; the tree is
+    // unbounded and also exposes node-60 -> aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60. Selecting node-60 must
     // read the detail by target_id (active selector) instead of being a no-op.
     mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
@@ -501,21 +504,21 @@ describe("AgentScreen", () => {
         data: [category("persona", "always")],
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`]: {
-        data: [agentPage("agent-1", "persona", "Default Persona")],
+        data: [agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona")],
         next_cursor: "cursor-page-2",
         total: 60,
         has_more: true,
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`]: {
         data: treeResponse("agent", [
-          treeNode("node-1", "agent-1", "Default Persona"),
-          treeNode("node-60", "agent-60", "Hidden Persona"),
+          treeNode("node-1", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "Default Persona"),
+          treeNode("node-60", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60", "Hidden Persona"),
         ]),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-60?version=active`]: {
-        data: agentDetail("agent-60", "persona", "Hidden Persona", "# Hidden"),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60?version=active`]: {
+        data: agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60", "persona", "Hidden Persona", "# Hidden"),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-60`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60`]: {
         data: {
           versions: [agentVersion("version-1", 1, "active_snapshot")],
           changesets: [],
@@ -526,7 +529,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -553,21 +556,21 @@ describe("AgentScreen", () => {
         data: [category("persona", "always")],
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`]: {
-        data: [agentPage("agent-1", "persona", "Default Persona")],
+        data: [agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona")],
         next_cursor: "cursor-page-2",
         total: 60,
         has_more: true,
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`]: {
         data: treeResponse("agent", [
-          treeNode("node-1", "agent-1", "Default Persona"),
-          treeNode("node-60", "agent-60", "Hidden Persona"),
+          treeNode("node-1", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "Default Persona"),
+          treeNode("node-60", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60", "Hidden Persona"),
         ]),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-60?version=active`]: {
-        data: agentDetail("agent-60", "persona", "Hidden Persona", "# Hidden"),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60?version=active`]: {
+        data: agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60", "persona", "Hidden Persona", "# Hidden"),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-60`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60`]: {
         data: {
           versions: [agentVersion("version-1", 1, "active_snapshot")],
           changesets: [],
@@ -578,7 +581,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=node-60"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -590,7 +593,7 @@ describe("AgentScreen", () => {
 
   it("falls back to the draft for an inactive page past the flat-list cap", async () => {
     const activeWithoutVersion = {
-      ...agentDetail("agent-60", "persona", "Hidden Draft Persona", ""),
+      ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60", "persona", "Hidden Draft Persona", ""),
       lifecycle_status: "draft",
       current_active_version_id: null,
       latest_draft_version_id: "draft-version-60",
@@ -599,7 +602,7 @@ describe("AgentScreen", () => {
     };
     const draftDetail = {
       ...agentDetail(
-        "agent-60",
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60",
         "persona",
         "Hidden Draft Persona",
         "# Draft-only Agent body",
@@ -608,7 +611,7 @@ describe("AgentScreen", () => {
       current_active_version_id: null,
       latest_draft_version_id: "draft-version-60",
       version_info: {
-        ...agentDetail("agent-60", "persona", "Hidden Draft Persona", "")
+        ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60", "persona", "Hidden Draft Persona", "")
           .version_info,
         version_id: "draft-version-60",
         version_status: "draft",
@@ -622,24 +625,24 @@ describe("AgentScreen", () => {
         data: [category("persona", "always")],
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`]: {
-        data: [agentPage("agent-1", "persona", "Default Persona")],
+        data: [agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona")],
         next_cursor: "cursor-page-2",
         total: 60,
         has_more: true,
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`]: {
         data: treeResponse("agent", [
-          treeNode("node-1", "agent-1", "Default Persona"),
-          treeNode("node-60", "agent-60", "Hidden Draft Persona"),
+          treeNode("node-1", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "Default Persona"),
+          treeNode("node-60", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60", "Hidden Draft Persona"),
         ]),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-60?version=active`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60?version=active`]: {
         data: activeWithoutVersion,
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-60?version=draft`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60?version=draft`]: {
         data: draftDetail,
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-60`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60`]: {
         data: {
           versions: [agentVersion("draft-version-60", 1, "draft")],
           changesets: [],
@@ -650,7 +653,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=node-60"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa60`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -670,17 +673,17 @@ describe("AgentScreen", () => {
         data: [category("persona", "always")],
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`]: {
-        data: [agentPage("agent-1", "persona", "Default Persona")],
+        data: [agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona")],
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`]: {
         data: treeResponse("agent", [
-          treeNode("node-1", "agent-1", "Default Persona"),
+          treeNode("node-1", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "Default Persona"),
         ]),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=active`]: {
-        data: agentDetail("agent-1", "persona", "Default Persona", "# Persona"),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=active`]: {
+        data: agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "# Persona"),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-1`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`]: {
         data: {
           versions: [agentVersion("version-1", 1, "active_snapshot")],
           changesets: [],
@@ -691,7 +694,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -730,19 +733,19 @@ describe("AgentScreen", () => {
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`) {
         return jsonResponse({
-          data: [agentPage("agent-1", "persona", "Default Persona")],
+          data: [agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona")],
         });
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`) {
         return jsonResponse({
           data: treeResponse("agent", [
-            treeNode("node-1", "agent-1", "Default Persona"),
+            treeNode("node-1", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "Default Persona"),
           ]),
         });
       }
       if (
         url ===
-        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=active`
+        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=active`
       ) {
         detailCalls += 1;
         if (detailCalls === 1) {
@@ -757,12 +760,12 @@ describe("AgentScreen", () => {
           );
         }
         return jsonResponse({
-          data: agentDetail("agent-1", "persona", "Default Persona", "# Persona"),
+          data: agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "# Persona"),
         });
       }
       if (
         url ===
-        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-1`
+        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`
       ) {
         return jsonResponse({
           data: { versions: [], changesets: [], review_decisions: [], diffs: null },
@@ -772,7 +775,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -813,13 +816,13 @@ describe("AgentScreen", () => {
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`) {
         pageCallCount += 1;
-        return jsonResponse({ data: [agentPage("agent-1", "persona", "Default Persona")] });
+        return jsonResponse({ data: [agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona")] });
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`) {
         treeCallCount += 1;
         if (treeCallCount === 1) {
           return jsonResponse({
-            data: treeResponse("agent", [treeNode("node-1", "agent-1", "Default Persona")]),
+            data: treeResponse("agent", [treeNode("node-1", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "Default Persona")]),
           });
         }
         if (treeCallCount === 3) {
@@ -831,7 +834,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent`]}>
         <AgentNavigationProbe />
         <AgentScreen />
       </MemoryRouter>,
@@ -851,7 +854,7 @@ describe("AgentScreen", () => {
     expect(refreshingButton).toBeDisabled();
 
     treeRefresh.resolve(jsonResponse({
-      data: treeResponse("agent", [treeNode("node-1", "agent-1", "Default Persona")]),
+      data: treeResponse("agent", [treeNode("node-1", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "Default Persona")]),
     }));
 
     await waitFor(() => {
@@ -879,7 +882,7 @@ describe("AgentScreen", () => {
   it("preserves a manual collapse of the selected path across tree refresh", async () => {
     const nestedTree = [
       folderNode(
-        "folder-advanced",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
         "Advanced",
         "advanced",
         null,
@@ -889,10 +892,10 @@ describe("AgentScreen", () => {
       ),
       treeNode(
         "node-2",
-        "agent-2",
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
         "Default System Prompt",
         ["Advanced"],
-        "folder-advanced",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
       ),
     ];
     mockFetch({
@@ -904,21 +907,21 @@ describe("AgentScreen", () => {
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`]: {
         data: [
-          agentPage("agent-2", "agent_guide", "Default System Prompt"),
+          agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2", "agent_guide", "Default System Prompt"),
         ],
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`]: {
         data: treeResponse("agent", nestedTree),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-2?version=active`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2?version=active`]: {
         data: agentDetail(
-          "agent-2",
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
           "agent_guide",
           "Default System Prompt",
           "# System",
         ),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-2`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2`]: {
         data: {
           versions: [agentVersion("version-1", 1, "active_snapshot")],
           changesets: [],
@@ -929,7 +932,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=node-2"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -981,7 +984,7 @@ describe("AgentScreen", () => {
       ) {
         return jsonResponse({
           data: {
-            agent_page_id: "agent-new",
+            agent_page_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa62",
             draft_version_id: "version-new",
             change_set_id: "change-new",
             review_item_id: null,
@@ -996,7 +999,12 @@ describe("AgentScreen", () => {
             call[1]?.method === "POST",
         );
         return jsonResponse({
-          data: created ? [agentPage("agent-new", "persona", "Research Persona")] : [],
+          data: created ? [{
+            ...agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa62", "persona", "Research Persona"),
+            lifecycle_status: "draft",
+            current_active_version_id: null,
+            latest_draft_version_id: "version-new",
+          }] : [],
         });
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`) {
@@ -1008,18 +1016,18 @@ describe("AgentScreen", () => {
         return jsonResponse({
           data: treeResponse(
             "agent",
-            created ? [treeNode("node-new", "agent-new", "Research Persona")] : [],
+            created ? [treeNode("node-new", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa62", "Research Persona")] : [],
           ),
         });
       }
-      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-new?version=draft`) {
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa62?version=draft`) {
         return jsonResponse({
-          data: agentDetail("agent-new", "persona", "Research Persona", "# Research Persona"),
+          data: agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa62", "persona", "Research Persona", "# Research Persona"),
         });
       }
       if (
         url ===
-        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-new`
+        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa62`
       ) {
         return jsonResponse({ data: { versions: [], changesets: [], review_decisions: [], diffs: null } });
       }
@@ -1027,7 +1035,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -1078,7 +1086,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -1126,7 +1134,7 @@ describe("AgentScreen", () => {
       ) {
         return jsonResponse({
           data: {
-            agent_page_id: "agent-nested",
+            agent_page_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa61",
             draft_version_id: "version-nested",
             change_set_id: "change-nested",
             review_item_id: null,
@@ -1136,7 +1144,12 @@ describe("AgentScreen", () => {
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`) {
         return jsonResponse({
-          data: created ? [agentPage("agent-nested", "persona", "Nested Persona")] : [],
+          data: created ? [{
+            ...agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa61", "persona", "Nested Persona"),
+            lifecycle_status: "draft",
+            current_active_version_id: null,
+            latest_draft_version_id: "version-nested",
+          }] : [],
         });
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`) {
@@ -1145,23 +1158,23 @@ describe("AgentScreen", () => {
             "agent",
             created
               ? [
-                  folderNode("node-persona", "Persona", "persona", null, [], true, 1),
-                  treeNode("node-nested", "agent-nested", "Nested Persona", ["Persona"], "node-persona"),
+                  folderNode("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3", "Persona", "persona", null, [], true, 1),
+                  treeNode("node-nested", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa61", "Nested Persona", ["Persona"], "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3"),
                 ]
-              : [folderNode("node-persona", "Persona", "persona", null, [], true, 0)],
+              : [folderNode("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3", "Persona", "persona", null, [], true, 0)],
           ),
         });
       }
       if (
-        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-nested?version=draft`
+        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa61?version=draft`
       ) {
         return jsonResponse({
-          data: agentDetail("agent-nested", "persona", "Nested Persona", "# Nested Persona"),
+          data: agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa61", "persona", "Nested Persona", "# Nested Persona"),
         });
       }
       if (
         url ===
-        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-nested`
+        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa61`
       ) {
         return jsonResponse({ data: { versions: [], changesets: [], review_decisions: [], diffs: null } });
       }
@@ -1169,7 +1182,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -1189,7 +1202,7 @@ describe("AgentScreen", () => {
     );
     expect(JSON.parse(String(postCall?.[1]?.body))).toMatchObject({
       category: "persona",
-      parent_node_id: "node-persona",
+      parent_node_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3",
       slug: "nested-persona",
       title: "Nested Persona",
     });
@@ -1209,7 +1222,7 @@ describe("AgentScreen", () => {
         return jsonResponse({
           data: [
             {
-              ...agentPage("agent-1", "persona", "Default Persona"),
+              ...agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona"),
               latest_draft_version_id: updated ? "version-2" : null,
             },
           ],
@@ -1217,21 +1230,21 @@ describe("AgentScreen", () => {
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`) {
         return jsonResponse({
-          data: treeResponse("agent", [treeNode("node-1", "agent-1", "Default Persona")]),
+          data: treeResponse("agent", [treeNode("node-1", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "Default Persona")]),
         });
       }
-      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=active`) {
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=active`) {
         return jsonResponse({
-          data: agentDetail("agent-1", "persona", "Default Persona", "# Persona"),
+          data: agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "# Persona"),
         });
       }
-      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=draft`) {
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=draft`) {
         return jsonResponse({
           data: {
-            ...agentDetail("agent-1", "persona", "Default Persona", "# Persona\n\nEdited"),
+            ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "# Persona\n\nEdited"),
             latest_draft_version_id: "version-2",
             version_info: {
-              ...agentDetail("agent-1", "persona", "Default Persona", "").version_info,
+              ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "").version_info,
               version_id: "version-2",
               version_no: 2,
               version_status: "draft",
@@ -1240,23 +1253,23 @@ describe("AgentScreen", () => {
         });
       }
       if (
-        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1/draft` &&
+        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1/draft` &&
         init?.method === "POST"
       ) {
         updated = true;
         return jsonResponse({
           data: {
-            agent_page_id: "agent-1",
+            agent_page_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
             draft_version_id: "version-2",
             change_set_id: "change-edit",
-            review_item_id: "review-agent-1",
+            review_item_id: "review-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
             next_action: "review_required",
           },
         });
       }
       if (
         url ===
-        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-1`
+        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`
       ) {
         return jsonResponse({ data: { versions: [], changesets: [], review_decisions: [], diffs: null } });
       }
@@ -1264,14 +1277,14 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=agent-1"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
 
     await screen.findByRole("heading", { name: "Default Persona" });
     const editLink = screen.getByRole("link", { name: "Create draft" });
-    expect(editLink).toHaveAttribute("href", "/agent?target=agent-1&edit=agent-1");
+    expect(editLink).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1/edit`);
     expect(editLink.closest(".detail-heading-actions")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Show Explorer" })).toBeNull();
     expect(screen.getByRole("treeitem", { name: "Default Persona" })).toBeVisible();
@@ -1287,7 +1300,7 @@ describe("AgentScreen", () => {
       .toBeInTheDocument();
     const postCall = fetchMock.mock.calls.find(
       (call) =>
-        call[0] === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1/draft` &&
+        call[0] === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1/draft` &&
         call[1]?.method === "POST",
     );
     expect(JSON.parse(String(postCall?.[1]?.body))).toMatchObject({
@@ -1314,7 +1327,7 @@ describe("AgentScreen", () => {
         return jsonResponse({
           data: [
             {
-              ...agentPage("agent-1", "persona", "Default Persona"),
+              ...agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona"),
               current_active_version_id: activated ? "version-2" : "version-1",
               latest_draft_version_id: activated ? null : "version-2",
             },
@@ -1323,30 +1336,30 @@ describe("AgentScreen", () => {
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`) {
         return jsonResponse({
-          data: treeResponse("agent", [treeNode("node-1", "agent-1", "Default Persona")]),
+          data: treeResponse("agent", [treeNode("node-1", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "Default Persona")]),
         });
       }
-      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=active`) {
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=active`) {
         return jsonResponse({
           data: {
-            ...agentDetail("agent-1", "persona", "Default Persona", "# Persona"),
+            ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "# Persona"),
             latest_draft_version_id: "version-2",
           },
         });
       }
       if (
-        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1/activate` &&
+        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1/activate` &&
         init?.method === "POST"
       ) {
         activated = true;
         return jsonResponse({
           data: {
-            ...agentDetail("agent-1", "persona", "Default Persona", "# Persona\n\nActive"),
+            ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "# Persona\n\nActive"),
             current_active_version_id: "version-2",
             latest_draft_version_id: null,
             lifecycle_status: "active",
             version_info: {
-              ...agentDetail("agent-1", "persona", "Default Persona", "").version_info,
+              ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "").version_info,
               version_id: "version-2",
               version_no: 2,
               version_status: "active_snapshot",
@@ -1356,7 +1369,7 @@ describe("AgentScreen", () => {
       }
       if (
         url ===
-        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-1`
+        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`
       ) {
         return jsonResponse({
           data: {
@@ -1374,7 +1387,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=agent-1"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -1391,7 +1404,7 @@ describe("AgentScreen", () => {
     const activationCall = fetchMock.mock.calls.find(
       (call) =>
         call[0] ===
-          `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1/activate` &&
+          `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1/activate` &&
         call[1]?.method === "POST",
     );
     expect(JSON.parse(String(activationCall?.[1]?.body))).toEqual({
@@ -1404,10 +1417,10 @@ describe("AgentScreen", () => {
     const firstDraftLoad = deferredResponse();
     let draftAttempts = 0;
     const draftDetail = {
-      ...agentDetail("agent-1", "persona", "Default Persona", "# Persona\n\nDraft body"),
+      ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "# Persona\n\nDraft body"),
       latest_draft_version_id: "version-2",
       version_info: {
-        ...agentDetail("agent-1", "persona", "Default Persona", "").version_info,
+        ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "").version_info,
         version_id: "version-2",
         version_no: 2,
         version_status: "draft",
@@ -1425,7 +1438,7 @@ describe("AgentScreen", () => {
         return jsonResponse({
           data: [
             {
-              ...agentPage("agent-1", "persona", "Default Persona"),
+              ...agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona"),
               latest_draft_version_id: "version-2",
             },
           ],
@@ -1433,18 +1446,18 @@ describe("AgentScreen", () => {
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`) {
         return jsonResponse({
-          data: treeResponse("agent", [treeNode("node-1", "agent-1", "Default Persona")]),
+          data: treeResponse("agent", [treeNode("node-1", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "Default Persona")]),
         });
       }
-      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=active`) {
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=active`) {
         return jsonResponse({
           data: {
-            ...agentDetail("agent-1", "persona", "Default Persona", "# Persona\n\nActive body"),
+            ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "# Persona\n\nActive body"),
             latest_draft_version_id: "version-2",
           },
         });
       }
-      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=draft`) {
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=draft`) {
         draftAttempts += 1;
         if (draftAttempts === 1) {
           return firstDraftLoad.promise;
@@ -1452,12 +1465,12 @@ describe("AgentScreen", () => {
         return jsonResponse({ data: draftDetail });
       }
       if (
-        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1/draft` &&
+        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1/draft` &&
         init?.method === "POST"
       ) {
         return jsonResponse({
           data: {
-            agent_page_id: "agent-1",
+            agent_page_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
             draft_version_id: "version-2",
             change_set_id: "change-edit",
             review_item_id: null,
@@ -1467,7 +1480,7 @@ describe("AgentScreen", () => {
       }
       if (
         url ===
-        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-1`
+        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`
       ) {
         return jsonResponse({ data: { versions: [], changesets: [], review_decisions: [], diffs: null } });
       }
@@ -1475,7 +1488,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=agent-1"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -1515,7 +1528,7 @@ describe("AgentScreen", () => {
     await screen.findByText(/Owner activation is required/);
     const postCall = fetchMock.mock.calls.find(
       (call) =>
-        call[0] === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1/draft` &&
+        call[0] === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1/draft` &&
         call[1]?.method === "POST",
     );
     expect(JSON.parse(String(postCall?.[1]?.body))).toMatchObject({
@@ -1543,30 +1556,30 @@ describe("AgentScreen", () => {
           data: treeResponse(
             "agent",
             deleted
-              ? [folderNode("node-persona", "Persona", "persona", null, [], true, 0)]
+              ? [folderNode("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3", "Persona", "persona", null, [], true, 0)]
               : [
-                  folderNode("node-persona", "Persona", "persona", null, [], true, 1),
+                  folderNode("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3", "Persona", "persona", null, [], true, 1),
                   folderNode(
-                    "node-folder",
+                    "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5",
                     folderTitle,
                     "research-agents",
-                    "node-persona",
+                    "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3",
                     ["Persona"],
                     false,
                     0,
                   ),
-                  folderNode("node-archive", "Archive", "archive", null, [], false, 0),
+                  folderNode("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb6", "Archive", "archive", null, [], false, 0),
                 ],
           ),
         });
       }
       if (
-        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/node-folder` &&
+        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5` &&
         init?.method === "PATCH"
       ) {
         folderTitle = "Research Unit";
         return jsonResponse({
-          data: folderNode("node-folder", folderTitle, "research-agents", "node-persona", ["Persona"]),
+          data: folderNode("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5", folderTitle, "research-agents", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3", ["Persona"]),
         });
       }
       if (
@@ -1574,23 +1587,23 @@ describe("AgentScreen", () => {
         init?.method === "POST"
       ) {
         return jsonResponse({
-          data: folderNode("node-folder", folderTitle, "research-agents", "node-persona", ["Persona"]),
+          data: folderNode("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5", folderTitle, "research-agents", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3", ["Persona"]),
         });
       }
       if (
-        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/node-folder` &&
+        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5` &&
         init?.method === "DELETE"
       ) {
         deleted = true;
         return jsonResponse({
-          data: folderNode("node-folder", folderTitle, "research-agents", "node-persona", ["Persona"]),
+          data: folderNode("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5", folderTitle, "research-agents", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3", ["Persona"]),
         });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -1629,7 +1642,7 @@ describe("AgentScreen", () => {
     await screen.findByRole("button", { name: "Create item under Persona" });
     expect(fetchMock.mock.calls.some(
       (call) =>
-        call[0] === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/node-folder` &&
+        call[0] === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5` &&
         call[1]?.method === "PATCH" &&
         JSON.parse(String(call[1]?.body)).display_name === "Research Unit",
     )).toBe(true);
@@ -1638,11 +1651,11 @@ describe("AgentScreen", () => {
         call[0] === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/move` &&
         call[1]?.method === "POST" &&
         JSON.parse(String(call[1]?.body)).reason === "Reorder agent folders" &&
-        JSON.parse(String(call[1]?.body)).new_parent_id === "node-archive",
+        JSON.parse(String(call[1]?.body)).new_parent_id === "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb6",
     )).toBe(true);
     expect(fetchMock.mock.calls.some(
       (call) =>
-        call[0] === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/node-folder` &&
+        call[0] === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5` &&
         call[1]?.method === "DELETE",
     )).toBe(true);
     expect(
@@ -1670,7 +1683,7 @@ describe("AgentScreen", () => {
         return jsonResponse({
           data: [
             {
-              ...agentPage("agent-1", "persona", "Default Persona"),
+              ...agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona"),
               current_active_version_id: "version-3",
               latest_draft_version_id: restored ? "version-4" : null,
             },
@@ -1679,30 +1692,30 @@ describe("AgentScreen", () => {
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`) {
         return jsonResponse({
-          data: treeResponse("agent", [treeNode("node-1", "agent-1", "Default Persona")]),
+          data: treeResponse("agent", [treeNode("node-1", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "Default Persona")]),
         });
       }
-      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=active`) {
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=active`) {
         return jsonResponse({
           data: {
-            ...agentDetail("agent-1", "persona", "Default Persona", "# Persona\n\nCurrent"),
+            ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "# Persona\n\nCurrent"),
             current_active_version_id: "version-3",
             version_info: {
-              ...agentDetail("agent-1", "persona", "Default Persona", "").version_info,
+              ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "").version_info,
               version_id: "version-3",
               version_no: 3,
             },
           },
         });
       }
-      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=draft`) {
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=draft`) {
         return jsonResponse({
           data: {
-            ...agentDetail("agent-1", "persona", "Default Persona", "# Persona\n\nOriginal"),
+            ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "# Persona\n\nOriginal"),
             current_active_version_id: "version-3",
             latest_draft_version_id: "version-4",
             version_info: {
-              ...agentDetail("agent-1", "persona", "Default Persona", "").version_info,
+              ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "").version_info,
               version_id: "version-4",
               version_no: 4,
               version_status: "draft",
@@ -1712,7 +1725,7 @@ describe("AgentScreen", () => {
       }
       if (
         url ===
-        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-1`
+        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`
       ) {
         return jsonResponse({
           data: {
@@ -1730,7 +1743,7 @@ describe("AgentScreen", () => {
       }
       if (
         url ===
-        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1/diff?from_version_id=version-1&to_version_id=version-2`
+        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1/diff?from_version_id=version-1&to_version_id=version-2`
       ) {
         return jsonResponse({
           data: {
@@ -1745,7 +1758,7 @@ describe("AgentScreen", () => {
         });
       }
       if (
-        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1/restore` &&
+        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1/restore` &&
         init?.method === "POST"
       ) {
         restored = true;
@@ -1755,7 +1768,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -1798,7 +1811,7 @@ describe("AgentScreen", () => {
     const restoreCalls = () =>
       fetchMock.mock.calls.filter(
         (call) =>
-          call[0] === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1/restore`,
+          call[0] === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1/restore`,
       );
     await waitFor(() => expect(restoreCalls()).toHaveLength(1));
     expect(JSON.parse(String(restoreCalls()[0][1]?.body))).toEqual({
@@ -1819,7 +1832,7 @@ describe("AgentScreen", () => {
     restoreResponse.resolve(
       jsonResponse({
         data: {
-          agent_page_id: "agent-1",
+          agent_page_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
           draft_version_id: "version-4",
           change_set_id: "change-restore",
           review_item_id: null,
@@ -1835,10 +1848,10 @@ describe("AgentScreen", () => {
 
   it("loads the selected Agent history version and returns to the active head", async () => {
     const activeDetail = {
-      ...agentDetail("agent-1", "persona", "Default Persona", "# Persona\n\nActive body"),
+      ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "# Persona\n\nActive body"),
       current_active_version_id: "version-2",
       version_info: {
-        ...agentDetail("agent-1", "persona", "Default Persona", "").version_info,
+        ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "").version_info,
         version_id: "version-2",
         version_no: 2,
       },
@@ -1863,21 +1876,21 @@ describe("AgentScreen", () => {
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`]: {
         data: [
           {
-            ...agentPage("agent-1", "persona", "Default Persona"),
+            ...agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona"),
             current_active_version_id: "version-2",
           },
         ],
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`]: {
-        data: treeResponse("agent", [treeNode("node-1", "agent-1", "Default Persona")]),
+        data: treeResponse("agent", [treeNode("node-1", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "Default Persona")]),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=active`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=active`]: {
         data: activeDetail,
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=1`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=1`]: {
         data: historicalDetail,
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-1`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`]: {
         data: {
           versions: [
             agentVersion("version-2", 2, "active_snapshot"),
@@ -1891,7 +1904,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=agent-1"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -1905,7 +1918,7 @@ describe("AgentScreen", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=1`,
+        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=1`,
         expect.anything(),
       );
     });
@@ -1936,9 +1949,9 @@ describe("AgentScreen", () => {
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`) {
         return jsonResponse({
           data: [
-            agentPage("agent-1", "persona", "First Persona"),
+            agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "First Persona"),
             {
-              ...agentPage("agent-2", "persona", "Second Persona"),
+              ...agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2", "persona", "Second Persona"),
               current_active_version_id: "version-2",
             },
           ],
@@ -1947,21 +1960,21 @@ describe("AgentScreen", () => {
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`) {
         return jsonResponse({
           data: treeResponse("agent", [
-            treeNode("node-1", "agent-1", "First Persona"),
-            treeNode("node-2", "agent-2", "Second Persona"),
+            treeNode("node-1", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "First Persona"),
+            treeNode("node-2", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2", "Second Persona"),
           ]),
         });
       }
-      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=active`) {
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=active`) {
         return jsonResponse({
-          data: agentDetail("agent-1", "persona", "First Persona", "# First\n\nFirst body"),
+          data: agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "First Persona", "# First\n\nFirst body"),
         });
       }
-      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-2?version=active`) {
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2?version=active`) {
         return secondDetail.promise;
       }
       if (url.includes("/changesets?target_type=agent_page&target_id=")) {
-        const pageId = url.endsWith("agent-2") ? "version-2" : "version-1";
+        const pageId = url.endsWith("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2") ? "version-2" : "version-1";
         return jsonResponse({
           data: {
             versions: [agentVersion(pageId, 1, "active_snapshot")],
@@ -1975,7 +1988,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=agent-1"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -1988,9 +2001,9 @@ describe("AgentScreen", () => {
 
     secondDetail.resolve(jsonResponse({
       data: {
-        ...agentDetail("agent-2", "persona", "Second Persona", "# Second\n\nSecond body"),
+        ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2", "persona", "Second Persona", "# Second\n\nSecond body"),
         version_info: {
-          ...agentDetail("agent-2", "persona", "Second Persona", "").version_info,
+          ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2", "persona", "Second Persona", "").version_info,
           version_id: "version-2",
         },
       },
@@ -2012,30 +2025,30 @@ describe("AgentScreen", () => {
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`) {
         return jsonResponse({
           data: [{
-            ...agentPage("agent-1", "persona", "Default Persona"),
+            ...agentPage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona"),
             current_active_version_id: "version-3",
           }],
         });
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`) {
         return jsonResponse({
-          data: treeResponse("agent", [treeNode("node-1", "agent-1", "Default Persona")]),
+          data: treeResponse("agent", [treeNode("node-1", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "Default Persona")]),
         });
       }
-      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=active`) {
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=active`) {
         return jsonResponse({
           data: {
-            ...agentDetail("agent-1", "persona", "Default Persona", "# Current"),
+            ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "# Current"),
             current_active_version_id: "version-3",
             version_info: {
-              ...agentDetail("agent-1", "persona", "Default Persona", "").version_info,
+              ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "").version_info,
               version_id: "version-3",
               version_no: 3,
             },
           },
         });
       }
-      if (url.endsWith("/changesets?target_type=agent_page&target_id=agent-1")) {
+      if (url.endsWith("/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1")) {
         return jsonResponse({
           data: {
             versions: [
@@ -2059,7 +2072,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=agent-1"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -2233,7 +2246,7 @@ function treeNode(
     visibility_status: "visible",
     children_count: 0,
     breadcrumb: breadcrumb.map((ancestor, index) => ({
-      id: `ancestor-${index}`,
+      id: agentFolderFixtureId(ancestor, index),
       section: "agent",
       title: ancestor,
       slug: ancestor.toLowerCase(),
@@ -2267,13 +2280,22 @@ function folderNode(
     visibility_status: "visible",
     children_count: childrenCount,
     breadcrumb: breadcrumb.map((ancestor, index) => ({
-      id: `ancestor-${index}`,
+      id: agentFolderFixtureId(ancestor, index),
       section: "agent",
       title: ancestor,
       slug: ancestor.toLowerCase(),
       node_kind: "folder",
     })),
   };
+}
+
+function agentFolderFixtureId(title: string, index: number): string {
+  const known: Record<string, string> = {
+    Advanced: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4",
+    "Agent guide": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
+    Persona: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3",
+  };
+  return known[title] ?? `bbbbbbbb-bbbb-4bbb-8bbb-${String(index + 1).padStart(12, "0")}`;
 }
 
 function treeResponse(
@@ -2309,7 +2331,7 @@ test("renders the shared folder card for a selected agent category (C-6)", async
       data: {
         nodes: [
           {
-            id: "folder-persona",
+            id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3",
             section: "agent",
             title: "Persona",
             slug: "persona",
@@ -2329,10 +2351,10 @@ test("renders the shared folder card for a selected agent category (C-6)", async
           {
             ...treeNode(
               "node-1",
-              "agent-1",
+              "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
               "Default Persona",
               [],
-              "folder-persona",
+              "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3",
             ),
             target_meta: {
               category: "persona",
@@ -2347,7 +2369,7 @@ test("renders the shared folder card for a selected agent category (C-6)", async
   });
 
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent`]}>
       <AgentScreen />
     </MemoryRouter>,
   );
@@ -2381,7 +2403,7 @@ test("relabels the seeded category folders with the shared category label", asyn
     [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`]: {
       data: treeResponse("agent", [
         folderNode(
-          "folder-agent-guide",
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
           "Agent Guide",
           "agent_guide",
           null,
@@ -2389,13 +2411,13 @@ test("relabels the seeded category folders with the shared category label", asyn
           true,
           0,
         ),
-        folderNode("folder-persona", "Team Voice", "persona", null, [], true, 0),
+        folderNode("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3", "Team Voice", "persona", null, [], true, 0),
       ]),
     },
   });
 
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent`]}>
       <AgentScreen />
     </MemoryRouter>,
   );

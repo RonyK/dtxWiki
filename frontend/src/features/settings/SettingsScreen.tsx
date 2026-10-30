@@ -1,3 +1,4 @@
+import { useRouteWorkspaceId, useWorkspaceRoute, workspacePath } from "../../shared/lib/workspaceRoutes";
 import {
   AlertTriangle,
   Ban,
@@ -98,7 +99,6 @@ import type {
 } from "../../shared/api/operations";
 import {
   deleteWorkspace,
-  getCurrentWorkspaceId,
   listWorkspaces,
   setDefaultWorkspace,
   type WorkspaceSummary,
@@ -412,25 +412,25 @@ function MaybeDisclosure({
  * The provider has to sit outside the screen, because the screen is what asks
  * the registry whether anything is dirty.
  */
-export function SettingsScreen() {
+export function SettingsScreen({ scope = "workspace" }: { scope?: "workspace" | "account" | "server" }) {
   return (
     <SettingsDirtyProvider>
-      <SettingsScreenBody />
+      <SettingsScreenBody scope={scope} />
     </SettingsDirtyProvider>
   );
 }
 
-function SettingsScreenBody() {
+function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "server" }) {
+  const routeWorkspaceId = useWorkspaceRoute()?.workspaceId ?? null;
   const { t } = useTranslation("settings");
   const hasUnsavedSettings = useSettingsDirtyCheck();
   const workspaceContext = useOptionalWorkspaceContext();
-  const selectedWorkspaceId =
-    workspaceContext?.selectedWorkspace?.id ?? "current-workspace";
+  const selectedWorkspaceId = routeWorkspaceId ?? scope;
   // The line above is a STATE-BUCKET KEY, not a workspace id -- it falls back
   // to a sentinel string so per-workspace UI state can be keyed even before a
   // workspace resolves. Anything that actually calls an API needs the real id
   // or nothing at all.
-  const selectedWorkspaceApiId = workspaceContext?.selectedWorkspace?.id ?? null;
+  const selectedWorkspaceApiId = routeWorkspaceId;
   const selectedWorkspaceKeyRef = useRef(selectedWorkspaceId);
   selectedWorkspaceKeyRef.current = selectedWorkspaceId;
   const [consents, setConsents] = useState<OAuthConsent[]>([]);
@@ -603,9 +603,7 @@ function SettingsScreenBody() {
   const [fallbackDefaultWorkspaceId, setFallbackDefaultWorkspaceId] = useState<
     string | null
   >(null);
-  const [fallbackCurrentWorkspaceId, setFallbackCurrentWorkspaceId] = useState<
-    string | null
-  >(null);
+
   const [newKeyWorkspaceIds, setNewKeyWorkspaceIds] = useState<string[]>([]);
   const [newKeyWorkspacesTouched, setNewKeyWorkspacesTouched] = useState(false);
   const [workspaceScopeEdit, setWorkspaceScopeEdit] =
@@ -656,15 +654,16 @@ function SettingsScreenBody() {
     reload: reloadPolicies,
     setData: setPolicies,
     setError: setPoliciesError,
-  } = useAsyncLoad<SettingsPolicies>(
+  } = useAsyncLoad<SettingsPolicies | null>(
     async () => {
-      const workspaceId = await getCurrentWorkspaceId();
+      if (scope !== "workspace") return null;
+      const workspaceId = routeWorkspaceId;
       if (!workspaceId) {
         throw new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable);
       }
       return getSettingsPolicies(workspaceId);
     },
-    [],
+    [routeWorkspaceId, scope],
     {
       errorMessage: t("errors.loadFailed", {
         defaultValue: "Could not load Settings.",
@@ -673,12 +672,13 @@ function SettingsScreenBody() {
     },
   );
 
-  const { section: activeSection, tab: activePolicyTab } =
-    settingsRouteFromLocation(
+  const routeSettings = settingsRouteFromLocation(
       location.pathname,
       searchParams.get("section"),
       searchParams.get("tab"),
     );
+  const activeSection: SettingsSection = scope === "account" ? routeSettings.section === "labs" ? "labs" : "mcp" : scope === "server" ? (["deployment", "users", "jobs", "attachments"].includes(routeSettings.section) ? routeSettings.section : "deployment") : routeSettings.section;
+  const activePolicyTab = routeSettings.tab;
   useEffect(() => {
     // An unrecognised ?section= silently rendered Workspace while the bogus
     // value stayed in the address bar, so a mistyped or retired link looked
@@ -719,12 +719,12 @@ function SettingsScreenBody() {
     }
   }, [activeSection]);
   const mcpClientPages = useCursorPage<SettingsMcpClient, SettingsMcpClientPage>({
-    enabled: activeSection === "mcp",
+    enabled: activeSection === "mcp" && Boolean(routeWorkspaceId),
     errorMessage: t("connections.loadFailed", {
       defaultValue: "Could not load MCP clients.",
     }),
     load: async (cursor, signal) => {
-      const workspaceId = await getCurrentWorkspaceId();
+      const workspaceId = routeWorkspaceId;
       if (!workspaceId) {
         throw new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable);
       }
@@ -769,7 +769,11 @@ function SettingsScreenBody() {
     policiesSnapshotRef.current = policies;
   }, [policies]);
   // Workspace is the Settings home; returning to it refreshes the shared data.
-  useScreenEntryRefresh("/settings", () => {
+  useScreenEntryRefresh(
+    scope === "workspace" && routeWorkspaceId
+      ? workspacePath(routeWorkspaceId, "settings")
+      : "/account/integrations",
+    () => {
     if (!hasUnsavedSettings()) {
       const snapshot = policies;
       const workspaceKey = selectedWorkspaceId;
@@ -782,45 +786,54 @@ function SettingsScreenBody() {
         !hasUnsavedSettings();
       // Only this passive read preserves unsaved edits. Save-conflict recovery
       // uses reloadPolicies and must adopt the server's current revision.
-      void getCurrentWorkspaceId()
-        .then((workspaceId) => {
-          if (!workspaceId) {
-            throw new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable);
-          }
-          return getSettingsPolicies(workspaceId);
-        })
-        .then((next) => {
-          if (canApply()) {
-            setPolicies(next);
-            setPoliciesError(null);
-          }
-        })
-        .catch((caught) => {
-          if (canApply()) {
-            setPoliciesError(errorMessage(caught));
-          }
-        });
+      const workspaceId = routeWorkspaceId;
+      if (!workspaceId) {
+        setPoliciesError(new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable).message);
+      } else {
+        void getSettingsPolicies(workspaceId)
+          .then((next) => {
+            if (canApply()) {
+              setPolicies(next);
+              setPoliciesError(null);
+            }
+          })
+          .catch((caught) => {
+            if (canApply()) {
+              setPoliciesError(errorMessage(caught));
+            }
+          });
+      }
     }
-    // The key count also appears in the section navigation, including Workspace.
-    void accessKeyPages.reload();
-  }, { isHome: activeSection === "workspace" });
+      // The key count also appears in the section navigation, including Workspace.
+      void accessKeyPages.reload();
+    },
+    { isHome: activeSection === "workspace", queryDeps: [routeWorkspaceId, scope] },
+  );
 
   const tokens = useMemo(
     () => accessKeyPages.page?.data ?? [],
     [accessKeyPages.page],
   );
 
-  // Deep links from the Account page (e.g. /settings/integrations#oauth-consents)
-  // land on the MCP Access section; scroll to the requested subsection once it
-  // has rendered.
+  // Deep links land on a subsection once it has rendered: the Account page's
+  // /account/integrations#oauth-consents, or the account deletion notice's
+  // ?section=workspace#workspace-danger-title, which renders after policies
+  // load. Each navigation scrolls at most once, so a later policy reload does
+  // not pull the page back to the anchor.
+  const scrolledHashRef = useRef<string | null>(null);
   useEffect(() => {
-    if (activeSection !== "mcp" || !location.hash) {
+    const navigationKey = `${location.key}${location.hash}`;
+    if (!location.hash || scrolledHashRef.current === navigationKey) {
       return;
     }
     const targetId = location.hash.slice(1);
     const frame = window.requestAnimationFrame(() => {
       const target = document.getElementById(targetId);
-      if (target && elementIsOutsideScrollViewport(target)) {
+      if (!target) {
+        return;
+      }
+      scrolledHashRef.current = navigationKey;
+      if (elementIsOutsideScrollViewport(target)) {
         target.scrollIntoView({
           behavior: prefersReducedMotion() ? "auto" : "smooth",
           block: "start",
@@ -828,7 +841,7 @@ function SettingsScreenBody() {
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [activeSection, location.hash, selectedWorkspaceId]);
+  }, [activeSection, location.hash, location.key, selectedWorkspaceId, policies]);
 
   useEffect(() => {
     if (
@@ -973,11 +986,10 @@ function SettingsScreenBody() {
     workspaceContext?.workspaces?.length
       ? workspaceContext.workspaces
       : fallbackWorkspaces;
-  // Without a WorkspaceProvider the shell's selected id is not available, so
-  // the account-scope copy resolves the current workspace from the same
-  // `listWorkspaces()` answer the fallback role gate already reads.
+  // Account-wide credential pickers may list memberships, while the current
+  // workspace is present only on an explicitly scoped settings route.
   const currentWorkspaceId =
-    selectedWorkspaceApiId ?? fallbackCurrentWorkspaceId;
+    selectedWorkspaceApiId;
   const pickerDefaultWorkspaceId =
     workspaceContext?.defaultWorkspaceId ??
     fallbackDefaultWorkspaceId ??
@@ -1169,7 +1181,7 @@ function SettingsScreenBody() {
       option: McpConnectionOption,
       shellOverride?: SetupShell,
     ) => {
-      const workspaceId = await getCurrentWorkspaceId();
+      const workspaceId = routeWorkspaceId;
       if (!workspaceId) {
         throw new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable);
       }
@@ -1185,16 +1197,16 @@ function SettingsScreenBody() {
       );
       return assertMcpSetupPlanMatchesSelection(owner, option, plan);
     },
-    [mcpAppLocale, mcpPlatform, setupShell],
+    [mcpAppLocale, mcpPlatform, setupShell, routeWorkspaceId],
   );
 
   useEffect(() => {
-    if (activeSection !== "mcp") return;
+    if (activeSection !== "mcp" || !routeWorkspaceId) return;
     const controller = new AbortController();
     setMcpAppCatalog(null);
     setMcpAppCatalogLoading(true);
     setMcpAppCatalogError(null);
-    void getCurrentWorkspaceId()
+    void Promise.resolve(routeWorkspaceId)
       .then((workspaceId) => {
         if (!workspaceId) {
           throw new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable);
@@ -1229,6 +1241,7 @@ function SettingsScreenBody() {
     mcpCatalogReloadRevision,
     mcpPlatform,
     selectedWorkspaceId,
+    routeWorkspaceId,
     setupShell,
     t,
   ]);
@@ -1313,20 +1326,18 @@ function SettingsScreenBody() {
   async function refreshFallbackWorkspaces() {
     try {
       const response = await listWorkspaces();
-      const workspaceId = await getCurrentWorkspaceId();
+      const workspaceId = routeWorkspaceId;
       const workspace = response.data.workspaces.find(
         (candidate) => candidate.id === workspaceId,
       );
       setFallbackSettingsRole(workspace?.role?.toLowerCase() ?? null);
       setFallbackWorkspaces(response.data.workspaces);
-      setFallbackCurrentWorkspaceId(workspaceId ?? null);
       setFallbackDefaultWorkspaceId(
         response.data.default_workspace_id ?? workspaceId ?? null,
       );
     } catch {
       setFallbackSettingsRole(null);
       setFallbackWorkspaces([]);
-      setFallbackCurrentWorkspaceId(null);
       setFallbackDefaultWorkspaceId(null);
     }
   }
@@ -1412,7 +1423,8 @@ function SettingsScreenBody() {
   }
 
   async function refreshPoliciesNow() {
-    const workspaceId = await getCurrentWorkspaceId();
+    if (scope !== "workspace") return;
+    const workspaceId = routeWorkspaceId;
     if (!workspaceId) {
       throw new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable);
     }
@@ -1785,7 +1797,7 @@ function SettingsScreenBody() {
     setMcpClientBusyId(clientId);
     setMcpClientError(null);
     try {
-      const workspaceId = await getCurrentWorkspaceId();
+      const workspaceId = routeWorkspaceId;
       if (!workspaceId) {
         throw new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable);
       }
@@ -1813,7 +1825,7 @@ function SettingsScreenBody() {
     setMcpClientBusyId(clientId);
     setMcpClientError(null);
     try {
-      const workspaceId = await getCurrentWorkspaceId();
+      const workspaceId = routeWorkspaceId;
       if (!workspaceId) {
         throw new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable);
       }
@@ -1933,7 +1945,7 @@ function SettingsScreenBody() {
     let saved = false;
     let updatedPolicies: SettingsPolicies | null = null;
     try {
-      const workspaceId = await getCurrentWorkspaceId();
+      const workspaceId = routeWorkspaceId;
       if (!workspaceId) {
         throw new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable);
       }
@@ -1984,6 +1996,12 @@ function SettingsScreenBody() {
     return saved;
   }
 
+  function settingsDestination(section: SettingsSection) {
+    if (["deployment", "users"].includes(section) || scope === "server" && ["jobs", "attachments"].includes(section)) return "/settings/server";
+    if (section === "mcp" && scope !== "workspace" || section === "labs") return "/account/integrations";
+    return routeWorkspaceId ? workspacePath(routeWorkspaceId, "settings") : "/workspaces/find";
+  }
+
   function selectSection(section: SettingsSection, tab?: SettingsPolicyTab) {
     // An explicit hash, because react-router's resolvePath defaults `hash` to
     // "" when the target string carries none -- which would silently drop the
@@ -1993,7 +2011,7 @@ function SettingsScreenBody() {
       // made the next destination look broken.
       setPolicySaveError(null);
       navigate({
-        pathname: "/settings",
+        pathname: settingsDestination(section),
         search:
           // Searching "lint" from anywhere is the one genuinely useful thing
           // this filter does, and it only works if the row can carry the tab
@@ -2013,7 +2031,7 @@ function SettingsScreenBody() {
       setPolicySaveError(null);
       navigate(
         {
-          pathname: "/settings",
+          pathname: routeWorkspaceId ? workspacePath(routeWorkspaceId, "settings") : "/workspaces/find",
           search:
             tab === DEFAULT_POLICY_TAB
               ? "?section=policies"
@@ -2072,7 +2090,7 @@ function SettingsScreenBody() {
     headingRef.current?.focus({ preventScroll: true });
   }, [activeSection]);
 
-  if (!policies) {
+  if (!policies && scope === "workspace") {
     if (error) {
       return (
         <main className="route-loading">
@@ -2095,7 +2113,7 @@ function SettingsScreenBody() {
     }
     return <RouteLoading label={t("loading", { defaultValue: "Loading Settings" })} />;
   }
-  const reviewPolicy = policies.review;
+  const reviewPolicy = policies?.review;
   // Three outcomes, not two. "We could not read the capability" is not the
   // same claim as "this server cannot offer OAuth", and saying the latter when
   // a request simply failed tells an operator to go reconfigure a server that
@@ -3729,7 +3747,7 @@ function SettingsScreenBody() {
                 <WorkspaceAccessSharingSection collapsible />
               </section>
             ) : null}
-            {activeSection === "workspace" ? (
+            {activeSection === "workspace" && policies ? (
               // Settings > Workspace must hold ONLY settings that belong to the
               // current workspace itself (identity/policy + danger zone).
               // Account-level or per-user preferences — e.g. the user's default
@@ -3755,14 +3773,14 @@ function SettingsScreenBody() {
                   if (!workspaceContext) return;
                   const deleted = await deleteWorkspace(workspace.id, options);
                   const remaining = workspaceContext.workspaces.filter((candidate) => candidate.id !== deleted.deleted_workspace_id);
-                  workspaceContext.removeWorkspace(deleted.deleted_workspace_id);
+                  const localFallback = workspaceContext.removeWorkspace(deleted.deleted_workspace_id)?.id;
                   const refreshed = await workspaceContext.refreshWorkspaces();
-                  navigate((refreshed?.workspaces ?? remaining).length === 0 ? "/workspaces/find" : "/dashboard", { replace: true });
+                  const fallbackId = refreshed?.selectedWorkspace?.id ?? localFallback ?? remaining[0]?.id ?? null;
+                  navigate(fallbackId ? workspacePath(fallbackId, "dashboard") : "/workspaces/find", { replace: true });
                 }}
-                resolveWorkspaceId={getCurrentWorkspaceId}
               />
             ) : null}
-            {activeSection === "policies" ? (
+            {activeSection === "policies" && policies ? (
               <>
                 {/* Wrapped rather than given a className: ReaderTabs takes
                     none, and adding one would touch a component five other
@@ -3834,9 +3852,9 @@ function SettingsScreenBody() {
               </section>
             ) : null}
             {activePolicyTab === "lint" ? (
-              <LintRulesSection readOnly={!canEditPolicies} />
+              <LintRulesSection key={routeWorkspaceId} readOnly={!canEditPolicies} workspaceId={routeWorkspaceId!} />
             ) : null}
-            {activePolicyTab === "review" ? (
+            {activePolicyTab === "review" && reviewPolicy ? (
               <section className="feature-section">
                 <PolicyGroupView
                   card={{
@@ -3878,7 +3896,7 @@ function SettingsScreenBody() {
                 {mcpClientError ? (
                   <StatusBanner tone="warning">{mcpClientError}</StatusBanner>
                 ) : null}
-                {mcpAppHub}
+                {routeWorkspaceId ? mcpAppHub : <section className="feature-section"><label>{t("access.chooseSetupWorkspace", { defaultValue: "Choose a workspace to set up a connection" })}<select value="" onChange={event => { if (event.target.value) navigate(workspacePath(event.target.value, "settings/integrations")); }}><option value="">{t("access.chooseWorkspace", { defaultValue: "Choose a workspace" })}</option>{membershipWorkspaces.map(workspace => <option key={workspace.id} value={workspace.id}>{workspace.title}</option>)}</select></label></section>}
                 {accessKeyIsFallback ? (
                   <>
                     {oauthAppsCard}
@@ -3896,7 +3914,7 @@ function SettingsScreenBody() {
                     viewer keeps the read access they have today — hiding it
                     would silently remove information, which the plan does not
                     ask for and an existing regression pins. */}
-                {connectedClientsCard}
+                {routeWorkspaceId ? connectedClientsCard : null}
               </>
             ) : null}
           </div>
@@ -5482,7 +5500,7 @@ function McpClientList({
 export function WorkspaceSettingsSection({
   workspace, workspaceLoading, defaultWorkspaceId, workspaces, onDefaultChanged,
   policies, busyKey, onFieldsSave, saveNotice, readOnly, onPoliciesChanged,
-  onSlugChanged, onDelete, resolveWorkspaceId,
+  onSlugChanged, onDelete,
 }: {
   workspace: WorkspaceSummary | null;
   workspaceLoading: boolean;
@@ -5497,7 +5515,6 @@ export function WorkspaceSettingsSection({
   onPoliciesChanged: (policies: SettingsPolicies) => void;
   onSlugChanged: (slug: string) => Promise<void>;
   onDelete: (workspace: WorkspaceSummary, options: { purgeContents?: boolean; purgeGrant?: string }) => Promise<void>;
-  resolveWorkspaceId?: () => Promise<string | null>;
 }) {
   const { t } = useTranslation("settings");
   return (
@@ -5526,7 +5543,6 @@ export function WorkspaceSettingsSection({
         readOnly={readOnly}
         onSlugChanged={onSlugChanged}
         onDelete={onDelete}
-        resolveWorkspaceId={resolveWorkspaceId}
       />
     </section>
   );
@@ -5734,7 +5750,6 @@ export function WorkspaceDangerZone({
   workspaceLoading = false,
   onSlugChanged,
   onDelete,
-  resolveWorkspaceId,
 }: {
   currentSlug: string;
   onPoliciesChanged: (policies: SettingsPolicies) => void;
@@ -5743,8 +5758,8 @@ export function WorkspaceDangerZone({
   workspaceLoading?: boolean;
   onSlugChanged: (slug: string) => Promise<void>;
   onDelete: (workspace: WorkspaceSummary, options: { purgeContents?: boolean; purgeGrant?: string }) => Promise<void>;
-  resolveWorkspaceId?: () => Promise<string | null>;
 }) {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const { t } = useTranslation("settings");
   const activeSlug = workspace?.slug ?? currentSlug;
   const [slugDraft, setSlugDraft] = useState(activeSlug);
@@ -5795,7 +5810,7 @@ export function WorkspaceDangerZone({
     setSlugError(null);
     setSlugStatus(null);
     try {
-      const workspaceId = workspace?.id ?? (await resolveWorkspaceId?.());
+      const workspaceId = routeWorkspaceId;
       if (!workspaceId) {
         throw new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable);
       }
@@ -7343,6 +7358,7 @@ export function LibraryPolicyView({
   readOnly: boolean;
   saveNotice: PolicySaveNotice | null;
 }) {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const { t } = useTranslation("settings");
   const baseline = useMemo(() => libraryPolicyDraft(card.policy), [card.policy]);
   const [draft, setDraft] = useState<LibraryPolicyDraft>(baseline);
@@ -7364,7 +7380,7 @@ export function LibraryPolicyView({
     reload: reloadCapabilities,
   } = useAsyncLoad<LibraryCapabilities>(
     async () => {
-      const workspaceId = await getCurrentWorkspaceId();
+      const workspaceId = routeWorkspaceId;
       if (!workspaceId) {
         throw new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable);
       }

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   createBrowserRouter,
@@ -21,6 +21,9 @@ import {
 } from "../shared/workspace/WorkspaceContext";
 import { useLabsPreferences } from "../shared/hooks/useLabsPreferences";
 import { isEditorRole } from "../shared/workspace/permissions";
+import { getCurrentWorkspaceId } from "../shared/api/workspace";
+import { hasConflictingWorkspaceQuery, legacyWorkspaceEntry, parseWorkspaceRoute, workspacePath } from "../shared/lib/workspaceRoutes";
+import { isWorkspaceUuid } from "../shared/lib/workspaceIdentity";
 
 const RoutedPageEditor = lazy(() =>
   import("../features/pages/PageEditor").then((module) => ({
@@ -30,11 +33,6 @@ const RoutedPageEditor = lazy(() =>
 const NotFoundScreen = lazy(() =>
   import("../features/errors/NotFoundScreen").then((module) => ({
     default: module.NotFoundScreen,
-  })),
-);
-const ContextEditPermalinkResolver = lazy(() =>
-  import("../features/context/ContextEditPermalinkResolver").then((module) => ({
-    default: module.ContextEditPermalinkResolver,
   })),
 );
 const PagePermalinkRedirect = lazy(() =>
@@ -135,11 +133,6 @@ const SettingsScreen = lazy(() =>
     default: module.SettingsScreen,
   })),
 );
-const WorkspaceScopedSettingsScreen = lazy(() =>
-  import("../features/settings/WorkspaceScopedSettingsScreen").then((module) => ({
-    default: module.WorkspaceScopedSettingsScreen,
-  })),
-);
 const SetupScreen = lazy(() =>
   import("../features/setup/SetupScreen").then((module) => ({ default: module.SetupScreen })),
 );
@@ -155,269 +148,93 @@ const WorkspaceDirectoryScreen = lazy(() =>
 // Exported so route-level tests can mount the REAL config (e.g. assert the
 // public /w/:workspaceSlug/pages/:slug route is NOT under RequireAuth).
 export const appRoutes = createRoutesFromElements(
-    <Route errorElement={<RootRouteError />}>
-      {/* Public, unauthenticated published-page reader (T16 27-a). Lives OUTSIDE
-          RequireAuth and OUTSIDE AppFrame (no AuthProvider/WorkspaceProvider/Shell)
-          so an anonymous visitor renders the page without any redirect to /login. */}
-      <Route element={<PublicFrame />}>
-        <Route path="/w/:workspaceSlug/pages/:slug" element={<PublishedPageReader />} />
-      </Route>
-      <Route element={<ScopedSettingsFrame />}>
-        <Route path="/workspaces/:workspaceId/settings" element={<RequireAuth><WorkspaceScopedSettingsScreen /></RequireAuth>} />
-      </Route>
-      <Route element={<AppFrame />}>
-      <Route
-        path="/"
-        element={
-          <RequireAuth>
-            <Navigate to="/dashboard" replace />
-          </RequireAuth>
-        }
-      />
+  <Route errorElement={<RootRouteError />}>
+    <Route element={<PublicFrame />}>
+      <Route path="/w/:workspaceSlug/pages/:slug" element={<PublishedPageReader />} />
+    </Route>
+    <Route element={<AppFrame />}>
       <Route path="/login" element={<AuthScreen />} />
       <Route path="/forgot-password" element={<ForgotPasswordScreen />} />
       <Route path="/reset-password" element={<ResetPasswordScreen />} />
       <Route path="/verify-email" element={<VerifyEmailScreen />} />
       <Route path="/auth/verify" element={<IdentityVerificationScreen />} />
-      <Route
-        path="/account"
-        element={
-          <RequireAuth>
-            <AccountSecurityScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/account/password"
-        element={
-          <RequireAuth>
-            <AccountPasswordScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/workspaces/find"
-        element={
-          <RequireAuth>
-            <WorkspaceDirectoryScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/library"
-        element={
-          <RequireAuth>
-            <LibraryScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/context"
-        element={
-          <RequireAuth>
-            <ContextScreen />
-          </RequireAuth>
-        }
-      />
-      {/* P10.1: canonical Context page permalink — the only workspace-in-path
-          URL in this SPA. Mounts the same ContextScreen; its requestedTargetId
-          derivation reads :pageId as a fallback under the query-param target. */}
-      <Route
-        path="/workspaces/:workspaceId/context/pages/:pageId"
-        element={
-          <RequireAuth>
-            <ContextScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/p/:pageId"
-        element={
-          <RequireAuth>
-            <PagePermalinkRedirect />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/agent"
-        element={
-          <RequireAuth>
-            <AgentScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/ask"
-        element={
-          <RequireAuth>
-            <RequireAskEnabled>
-              <AskScreen />
-            </RequireAskEnabled>
-          </RequireAuth>
-        }
-      />
-      {/* Every mcp-chats endpoint (including reads) requires editor+, so the
-          Chats routes are editor-gated too — a viewer would only see a 403
-          banner plus a misleading empty state. */}
-      <Route
-        path="/chats"
-        element={
-          <RequireAuth>
-            <RequireEditor>
-              <ChatsListScreen />
-            </RequireEditor>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/chats/:chatId"
-        element={
-          <RequireAuth>
-            <RequireEditor>
-              <ChatsDetailScreen />
-            </RequireEditor>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/agent/new"
-        element={
-          <RequireAuth>
-            <RequireEditor>
-              <AgentScreen />
-            </RequireEditor>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/activity"
-        element={
-          <RequireAuth>
-            <ActivityScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/activity/:lane"
-        element={
-          <RequireAuth>
-            <ActivityLanePage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/inbox"
-        element={
-          <RequireAuth>
-            <InboxScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/review"
-        element={
-          <RequireAuth>
-            <ReviewScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/settings"
-        element={
-          <RequireAuth>
-            <SettingsScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/settings/integrations"
-        element={
-          <RequireAuth>
-            <SettingsScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/dashboard"
-        element={
-          <RequireAuth>
-            <DashboardScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/search"
-        element={
-          <RequireAuth>
-            <SearchScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/lint"
-        element={
-          <RequireAuth>
-            <LintScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/setup"
-        element={
-          <RequireAuth>
-            <SetupScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/context/new"
-        element={
-          <RequireAuth>
-            <RequireEditor>
-              <RoutedPageEditor mode="create" />
-            </RequireEditor>
-          </RequireAuth>
-        }
-      />
-      {/* Still slug-routed: PageEditor's own data-fetch (readPageBySlug), its
-          autosave-to-edit address-bar transition, and its draft-recovery keys
-          are all slug-keyed end to end. Rewriting it to be id-native is out of
-          scope for P10.1 (see the handoff report) — this stays the actual
-          editor implementation route, not a public entry point; new links use
-          the canonical id-based route below, which hands off here. */}
-      <Route
-        path="/context/:slug/edit"
-        element={
-          <RequireAuth>
-            <RequireEditor>
-              <RoutedPageEditor mode="edit" />
-            </RequireEditor>
-          </RequireAuth>
-        }
-      />
-      {/* P10.1: canonical edit permalink. Resolves :pageId to a slug, then
-          hands off to /context/:slug/edit above. */}
-      <Route
-        path="/workspaces/:workspaceId/context/pages/:pageId/edit"
-        element={
-          <RequireAuth>
-            <RequireEditor>
-              <ContextEditPermalinkResolver />
-            </RequireEditor>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="*"
-        element={
-          <RequireAuth>
-            <NotFoundScreen />
-          </RequireAuth>
-        }
-      />
-      </Route>
-    </Route>,
+      <Route path="/account" element={<RequireAuth><AccountSecurityScreen /></RequireAuth>} />
+      <Route path="/account/password" element={<RequireAuth><AccountPasswordScreen /></RequireAuth>} />
+      <Route path="/account/integrations" element={<RequireAuth><SettingsScreen scope="account" /></RequireAuth>} />
+      <Route path="/settings/server" element={<RequireAuth><SettingsScreen scope="server" /></RequireAuth>} />
+      <Route path="/workspaces/find" element={<RequireAuth><WorkspaceDirectoryScreen /></RequireAuth>} />
+      <Route path="/p/:workspaceId/:pageId" element={<RequireAuth><PagePermalinkRedirect /></RequireAuth>} />
+      <Route path="/p/:pageId" element={<RequireAuth><NotFoundScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId" element={<RequireAuth><WorkspaceHomeRedirect /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/dashboard" element={<RequireAuth><DashboardScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/context" element={<RequireAuth><ContextScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/context/folders/new" element={<RequireAuth><RequireEditor><ContextScreen /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/context/folders/:nodeId" element={<RequireAuth><ContextScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/context/pages/new" element={<RequireAuth><RequireEditor><RoutedPageEditor mode="create" /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId" element={<RequireAuth><ContextScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RequireAuth><RequireEditor><RoutedPageEditor mode="edit" /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/library" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/library/items/new" element={<RequireAuth><RequireEditor><LibraryScreen /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/library/items/:itemId" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/library/artifacts/:artifactId" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/library/folders/new" element={<RequireAuth><RequireEditor><LibraryScreen /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/library/folders/:nodeId" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent" element={<RequireAuth><AgentScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent/pages/new" element={<RequireAuth><RequireEditor><AgentScreen /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent/pages/:agentPageId" element={<RequireAuth><AgentScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent/pages/:agentPageId/edit" element={<RequireAuth><RequireEditor><AgentScreen /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent/folders/new" element={<RequireAuth><RequireEditor><AgentScreen /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent/folders/:nodeId" element={<RequireAuth><AgentScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/activity" element={<RequireAuth><ActivityScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/activity/:lane" element={<RequireAuth><ActivityLanePage /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/review" element={<RequireAuth><ReviewScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/review/:reviewItemId" element={<RequireAuth><ReviewScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/lint" element={<RequireAuth><LintScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/lint/findings/:findingId" element={<RequireAuth><LintScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/chats" element={<RequireAuth><RequireEditor><ChatsListScreen /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/chats/:chatId" element={<RequireAuth><RequireEditor><ChatsDetailScreen /></RequireEditor></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/ask" element={<RequireAuth><RequireAskEnabled><AskScreen /></RequireAskEnabled></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/ask/:askSessionId" element={<RequireAuth><RequireAskEnabled><AskScreen /></RequireAskEnabled></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/search" element={<RequireAuth><SearchScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/settings" element={<RequireAuth><SettingsScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/settings/integrations" element={<RequireAuth><SettingsScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/setup" element={<RequireAuth><SetupScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/inbox" element={<RequireAuth><InboxScreen /></RequireAuth>} />
+      <Route path="/inbox" element={<RequireAuth><InboxScreen /></RequireAuth>} />
+      {[
+        "/", "/dashboard", "/context", "/library", "/agent", "/ask",
+        "/chats", "/activity", "/activity/:lane", "/review", "/lint",
+        "/search", "/settings", "/settings/integrations", "/setup",
+      ].map((path) => (
+        <Route key={path} path={path} element={<RequireAuth><LegacyWorkspaceLanding /></RequireAuth>} />
+      ))}
+      <Route path="*" element={<RequireAuth><NotFoundScreen /></RequireAuth>} />
+    </Route>
+  </Route>,
 );
+
+function WorkspaceHomeRedirect() {
+  const location = useLocation();
+  const route = parseWorkspaceRoute(location.pathname);
+  return route ? <Navigate to={`${workspacePath(route.workspaceId, "dashboard")}${location.search}${location.hash}`} replace state={location.state} /> : <NotFoundScreen />;
+}
+
+function LegacyWorkspaceLanding() {
+  const location = useLocation();
+  const suffix = legacyWorkspaceEntry(location.pathname, location.search);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!suffix) return;
+    let active = true;
+    void getCurrentWorkspaceId().then(id => { if (active) { setWorkspaceId(id); setFailed(!id); } }).catch(() => { if (active) setFailed(true); });
+    return () => { active = false; };
+  }, [suffix]);
+  if (!suffix || hasConflictingWorkspaceQuery(location.search)) return <NotFoundScreen />;
+  if (failed) return <Navigate to="/workspaces/find" replace />;
+  if (!workspaceId) return <RouteLoading />;
+  return <Navigate to={workspacePath(workspaceId, suffix) + location.search + location.hash} replace />;
+}
 
 const appRouter = createBrowserRouter(appRoutes);
 
@@ -426,6 +243,8 @@ export function App() {
 }
 
 export function RootRouteError() {
+  const workspaceId = parseWorkspaceRoute(useLocation().pathname)?.workspaceId;
+  const routeWorkspaceId = workspaceId && isWorkspaceUuid(workspaceId) ? workspaceId : null;
   const { t } = useTranslation("shell");
   return (
     <main className="route-loading">
@@ -452,10 +271,10 @@ export function RootRouteError() {
               defaultValue: "Load the latest version",
             })}
           </button>
-          <Link className="icon-button text-button" to="/dashboard">
-            {t("routeError.dashboard", {
+          <Link className="icon-button text-button" to={routeWorkspaceId ? workspacePath(routeWorkspaceId, "dashboard") : "/workspaces/find"}>
+            {routeWorkspaceId ? t("routeError.dashboard", {
               defaultValue: "Go to Dashboard",
-            })}
+            }) : t("workspaceResolution.find")}
           </Link>
         </div>
       </section>
@@ -472,7 +291,7 @@ export function RootRouteError() {
 function PublicFrame() {
   const { t } = useTranslation("pages");
   const location = useLocation();
-  const next = encodeURIComponent(`${location.pathname}${location.search}`);
+  const next = encodeURIComponent(`${location.pathname}${location.search}${location.hash}`);
   return (
     <div className="public-frame">
       <header className="public-frame-bar">
@@ -485,14 +304,6 @@ function PublicFrame() {
         <Outlet />
       </Suspense>
     </div>
-  );
-}
-
-function ScopedSettingsFrame() {
-  return (
-    <AuthProvider>
-      <Suspense fallback={<RouteLoading />}><Outlet /></Suspense>
-    </AuthProvider>
   );
 }
 
@@ -521,6 +332,7 @@ function AppFrame() {
 // ancestor (see WorkspaceContext.test.tsx's bare renders).
 export function WorkspaceScope({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  const routeWorkspaceId = parseWorkspaceRoute(useLocation().pathname)?.workspaceId ?? null;
   // Account switches can preserve the workspace ID. Remount the authenticated
   // subtree so loaded personal flags and permission-dependent content cannot
   // cross that identity boundary while the new actor's requests are pending.
@@ -528,6 +340,7 @@ export function WorkspaceScope({ children }: { children: ReactNode }) {
     <WorkspaceProvider
       key={user?.user_id ?? "anonymous"}
       sessionUserId={user?.user_id ?? null}
+      routeWorkspaceId={routeWorkspaceId}
     >
       {children}
     </WorkspaceProvider>
@@ -625,7 +438,7 @@ export function RequireEditor({ children }: { children: ReactNode }) {
   // on `loading` alone (which starts false) would bounce a legitimate editor.
   // A resolved-but-empty list (initialized, not loading) still falls through to
   // the role check and redirects rather than hanging forever.
-  if (loading || !initialized) {
+  if (!initialized || (loading && !selectedWorkspace)) {
     return <RouteLoading label={t("accessGuard.checking")} />;
   }
   // Only surface the retry banner when an error left NO usable workspace (the
@@ -660,9 +473,8 @@ export function RequireEditor({ children }: { children: ReactNode }) {
     // page edit/create gates to /dashboard instead of a random page reader that
     // drops the editorRequired banner. The Dashboard renders the banner so the
     // reason for the redirect survives regardless of workspace contents.
-    const fallback = location.pathname.startsWith("/agent")
-      ? "/agent"
-      : "/dashboard";
+    const route = parseWorkspaceRoute(location.pathname);
+    const fallback = route ? workspacePath(route.workspaceId, route.section === "agent" ? "agent" : "dashboard") : "/workspaces/find";
     if (location.pathname === fallback) {
       // Already at the bounce target (only possible while RequireEditor stays
       // mounted across the redirect); navigating again would loop.

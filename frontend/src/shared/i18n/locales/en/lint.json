@@ -280,7 +280,8 @@
     "run": "Failed to run lint",
     "decide": "Failed to update the lint finding",
     "workspaceNotFound": "Workspace not found",
-    "batchPartialFailure": "Failed to update {{count}} findings."
+    "batchPartialFailure": "Failed to update {{count}} findings.",
+    "findingNotFound": "This finding is unavailable in this workspace."
   },
   "runState": {
     "queued": "queued",

@@ -18,7 +18,7 @@ import { AuthProvider, useOptionalAuth } from "../../../shared/auth/AuthContext"
 import { reviewDraftKey } from "../../../shared/lib/reviewDraftStorage";
 
 const BASE = "http://127.0.0.1:21080";
-const WORKSPACE_ID = "workspace-1";
+const WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
 
 function workspaceResponse(role?: string) {
   return {
@@ -73,7 +73,7 @@ describe("ReviewScreen", () => {
   it("keeps the Preview badge out of the Review rail header", async () => {
     mockReviewQueue([reviewItem()]);
     const { container } = render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -90,7 +90,7 @@ describe("ReviewScreen", () => {
       new Error("raw request req-private-review-load"),
     );
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -129,7 +129,7 @@ describe("ReviewScreen", () => {
       throw new Error(`Unexpected request: ${url}`);
     });
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -209,7 +209,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -312,12 +312,12 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/review?retained=value"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review?retained=value"]}>
         <ReviewScreen />
         <LocationDisplay />
         <HistoryControls />
-        <NavigateButton to="/review?retained=value&older=1" label="Older-only empty queue" />
-        <NavigateButton to="/review?retained=value&older=1&risk=high" label="Filtered empty queue" />
+        <NavigateButton to="/workspaces/00000000-0000-4000-8000-000000000001/review?retained=value&older=1" label="Older-only empty queue" />
+        <NavigateButton to="/workspaces/00000000-0000-4000-8000-000000000001/review?retained=value&older=1&risk=high" label="Filtered empty queue" />
       </MemoryRouter>,
     );
 
@@ -350,7 +350,7 @@ describe("ReviewScreen", () => {
     await user.click(within(document.querySelector<HTMLElement>(".review-rail-empty")!)
       .getByRole("button", { name: "Clear filters" }));
     expect(await screen.findByText("No pending items")).toBeInTheDocument();
-    expect(screen.getByTestId("location-search").textContent).toBe("?retained=value");
+    expect(screen.getByTestId("location-search").textContent).toBe("/workspaces/00000000-0000-4000-8000-000000000001/review?retained=value");
   });
 
   it("distinguishes same-type queue rows by their target titles", async () => {
@@ -383,7 +383,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -405,7 +405,7 @@ describe("ReviewScreen", () => {
     ]);
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -453,7 +453,7 @@ describe("ReviewScreen", () => {
     ]);
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -501,7 +501,7 @@ describe("ReviewScreen", () => {
     );
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -539,7 +539,7 @@ describe("ReviewScreen", () => {
       ]);
 
       render(
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
           <ReviewScreen />
         </MemoryRouter>,
       );
@@ -560,7 +560,7 @@ describe("ReviewScreen", () => {
     ]);
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -624,7 +624,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -683,7 +683,7 @@ describe("ReviewScreen", () => {
       ]);
 
       render(
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
           <ReviewScreen />
         </MemoryRouter>,
       );
@@ -742,7 +742,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -778,7 +778,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -876,7 +876,7 @@ describe("ReviewScreen", () => {
         return jsonResponse({ data: { items: [], next_cursor: null } });
       }
     });
-    render(<MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-1"]}><ReviewScreen /></MemoryRouter>);
 
     const comparison = await screen.findByRole("group", { name: "Comparison baseline" });
     const parent = within(comparison).getByRole("button", { name: "This draft's change (v2 → v3)" });
@@ -998,7 +998,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1065,7 +1065,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1106,7 +1106,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1149,7 +1149,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1197,7 +1197,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/review?review=review-1"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-1"]}>
         <ReviewScreen /><HistoryControls />
       </MemoryRouter>,
     );
@@ -1288,7 +1288,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1355,7 +1355,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1423,7 +1423,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1472,7 +1472,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1528,7 +1528,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1576,7 +1576,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1599,7 +1599,7 @@ describe("ReviewScreen", () => {
     const user = userEvent.setup();
     mockReviewQueue([reviewItem()], null, url => url.endsWith("/decision")
       ? Promise.reject(new Error("raw request req-private-review-routing")) : undefined);
-    render(<MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-1"]}><ReviewScreen /></MemoryRouter>);
     await waitFor(() => expect(screen.getByRole("button", { name: action })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: action }));
     const dialog = screen.getByRole("dialog");
@@ -1643,7 +1643,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1708,7 +1708,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1720,7 +1720,7 @@ describe("ReviewScreen", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("No decisions yet")).not.toBeInTheDocument();
     const recentDecision = screen.getByRole("link", { name: /Pricing page/ });
-    expect(recentDecision).toHaveAttribute("href", "/review?review=rev-1");
+    expect(recentDecision).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/review/rev-1");
     expect(recentDecision.tabIndex).toBe(0);
     recentDecision.focus();
     expect(recentDecision).toHaveFocus();
@@ -1732,7 +1732,7 @@ describe("ReviewScreen", () => {
     });
     expect(moreActivities).toHaveAttribute(
       "href",
-      "/activity?kind=workspace&subtype=review",
+      "/workspaces/00000000-0000-4000-8000-000000000001/activity?kind=workspace&subtype=review",
     );
   });
 
@@ -1776,14 +1776,14 @@ describe("ReviewScreen", () => {
       });
 
       render(
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
           <ReviewScreen />
         </MemoryRouter>,
       );
 
       const localized = "Context 초안을 리뷰해야 합니다";
       expect(await screen.findByRole("link", { name: new RegExp(localized) }))
-        .toHaveAttribute("href", "/review?review=rev-coded");
+        .toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/review/rev-coded");
       expect(screen.queryByText("context draft requires review")).toBeNull();
     } finally {
       await act(async () => {
@@ -1856,10 +1856,10 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
         <LocationDisplay />
-        <NavigateButton to="/review?review=review-second" label="Go to second recent review" />
+        <NavigateButton to="/workspaces/00000000-0000-4000-8000-000000000001/review/review-second" label="Go to second recent review" />
       </MemoryRouter>,
     );
 
@@ -1872,7 +1872,7 @@ describe("ReviewScreen", () => {
       await screen.findByRole("heading", { level: 2, name: "Second target" }),
     ).toBeInTheDocument();
     expect(screen.getByTestId("location-search")).toHaveTextContent(
-      "?review=review-second",
+      "/workspaces/00000000-0000-4000-8000-000000000001/review/review-second",
     );
 
     await act(async () => { releaseFirst(); });
@@ -1928,7 +1928,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2000,7 +2000,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <AuthProvider><MemoryRouter>
+      <AuthProvider><MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen /><AuthIdentity />
       </MemoryRouter></AuthProvider>,
     );
@@ -2078,7 +2078,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/review?review=review-99"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-99"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2105,7 +2105,7 @@ describe("ReviewScreen", () => {
       } });
       return undefined;
     });
-    render(<MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-1"]}><ReviewScreen /></MemoryRouter>);
     await screen.findByRole("heading", { name: "First detail", level: 2 });
     expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
@@ -2160,7 +2160,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/review?review=review-9"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-9"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2200,7 +2200,7 @@ describe("ReviewScreen", () => {
     ]);
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2230,7 +2230,7 @@ describe("ReviewScreen", () => {
         canDecide: false,
         summary: "Resolve the diverged Context branch",
         reconciliationAvailable: true,
-        reconciliationPageId: "context-1",
+        reconciliationPageId: "00000000-0000-4000-8000-000000000104",
         reconciliationVersionId: "version-alt",
         reconciliationBaseVersionNo: 12,
         reconciliationHeadAdvanceCount: 3,
@@ -2242,7 +2242,7 @@ describe("ReviewScreen", () => {
     ]);
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2257,7 +2257,7 @@ describe("ReviewScreen", () => {
       screen.getByRole("link", {
         name: "Open conversation for Feedback Target",
       }),
-    ).toHaveAttribute("href", "/chats/chat-42");
+    ).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/chats/chat-42");
 
     await userEvent.click(
       screen.getByText("Resolve the diverged Context branch"),
@@ -2267,12 +2267,12 @@ describe("ReviewScreen", () => {
       screen.getByRole("link", { name: "Open reconciliation" }),
     ).toHaveAttribute(
       "href",
-      "/context?target=context-1&tab=history&reconcile=version-alt",
+      "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000104?tab=history&reconcile=version-alt",
     );
     expect(screen.getByText("Reconciliation provenance")).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Open source conversation" }),
-    ).toHaveAttribute("href", "/chats/chat-42");
+    ).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/chats/chat-42");
   });
 
   it("bulk-discards only explicitly eligible reconciliation reviews with a reason", async () => {
@@ -2334,7 +2334,7 @@ describe("ReviewScreen", () => {
     );
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2396,26 +2396,27 @@ describe("ReviewScreen", () => {
         if (retry) return jsonResponse({ data: reviewItem({ id: "review-404" }) });
         return new Response(
           JSON.stringify({
-            error_code: "not_found",
-            message: "Review not found",
+            error_code: "internal_error",
+            message: "Review temporarily unavailable",
             request_id: "req-404",
             warnings: [],
           }),
-          { status: 404, headers: { "Content-Type": "application/json" } },
+          { status: 503, headers: { "Content-Type": "application/json" } },
         );
       }
       throw new Error(`Unexpected request: ${url}`);
     });
 
     render(
-      <MemoryRouter initialEntries={["/review?review=review-404"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-404"]}>
         <ReviewScreen />
         <LocationDisplay />
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("The requested item could not be found.")).toBeInTheDocument();
-    expect(screen.getByTestId("location-search")).toHaveTextContent("review=review-404");
+    // Missing targets use Not Found; transient reads retain the explicit retry.
+    expect(await screen.findByRole("button", { name: i18n.t("review:workflow.retryDetail") })).toBeEnabled();
+    expect(screen.getByTestId("location-search")).toHaveTextContent("/workspaces/00000000-0000-4000-8000-000000000001/review/review-404");
     expect(screen.queryByText(i18n.t("review:workflow.outsideFilters"))).not.toBeInTheDocument();
     // Flush every loader continuation: entering the screen loads the queue once.
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
@@ -2463,7 +2464,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2507,7 +2508,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2525,6 +2526,13 @@ describe("ReviewScreen", () => {
   it("lets an editor claim and edit a change directly", async () => {
     const user = userEvent.setup();
     let claimed = false;
+    let changesRequestedLoaded = false;
+    let releaseDetail: (() => void) | undefined;
+    const claimableReview = reviewItem({
+      audienceKind: "workspace_editors",
+      canClaim: true,
+      status: "changes_requested",
+    });
     mockReviewFetch(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -2540,17 +2548,18 @@ describe("ReviewScreen", () => {
         return jsonResponse({ data: { items: [reviewItem()], next_cursor: null } });
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews?status=changes_requested&limit=50`) {
+        changesRequestedLoaded = true;
         return jsonResponse({
           data: {
-            items: [
-              reviewItem({
-                audienceKind: "workspace_editors",
-                canClaim: true,
-                status: "changes_requested",
-              }),
-            ],
+            items: [claimableReview],
             next_cursor: null,
           },
+        });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/review-1`) {
+        if (!changesRequestedLoaded) return jsonResponse({ data: reviewItem() });
+        return new Promise<Response>((resolve) => {
+          releaseDetail = () => resolve(jsonResponse({ data: claimableReview }));
         });
       }
       if (
@@ -2560,11 +2569,7 @@ describe("ReviewScreen", () => {
         claimed = true;
         return jsonResponse({
           data: {
-            ...reviewItem({
-              audienceKind: "workspace_editors",
-              canClaim: true,
-              status: "changes_requested",
-            }),
+            ...claimableReview,
             claimed_by: "me",
           },
         });
@@ -2573,10 +2578,10 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/review"]}>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <Routes>
-          <Route path="/review" element={<ReviewScreen />} />
-          <Route path="/context/:slug/edit" element={<PageEditorDestination />} />
+          <Route path="/workspaces/00000000-0000-4000-8000-000000000001/review/*" element={<ReviewScreen />} />
+          <Route path="/workspaces/00000000-0000-4000-8000-000000000001/context/pages/:pageId/edit" element={<PageEditorDestination />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -2586,7 +2591,11 @@ describe("ReviewScreen", () => {
     expect(screen.queryByRole("button", { name: "Edit directly" })).toBeNull();
     await user.click(screen.getByRole("tab", { name: /Changes requested/ }));
     await user.click(await screen.findByText("Publish the selected Context draft"));
-    await user.click(screen.getByRole("button", { name: "Edit directly" }));
+    // Queue content renders before the detail request supplies action permissions.
+    await waitFor(() => expect(releaseDetail).toBeDefined());
+    expect(screen.queryByRole("button", { name: "Edit directly" })).toBeNull();
+    releaseDetail!();
+    await user.click(await screen.findByRole("button", { name: "Edit directly" }));
 
     expect(await screen.findByText("Page editor")).toBeInTheDocument();
     expect(screen.getByText(/\?from=review&reviewItemId=review-1/))
@@ -2657,7 +2666,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2697,7 +2706,7 @@ describe("ReviewScreen", () => {
       }
       return undefined;
     });
-    render(<MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-1"]}><ReviewScreen /></MemoryRouter>);
     await screen.findByRole("heading", { name: "Decided first", level: 2 });
     await user.click(screen.getByRole("button", { name: "Load more" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
@@ -2798,7 +2807,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2875,7 +2884,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2913,7 +2922,7 @@ describe("ReviewScreen", () => {
     sessionStorage.setItem(reviewDraftKey("actor-1", "other-workspace", first.id), "Other workspace note");
     const mount = () => render(
       <AuthProvider>
-        <MemoryRouter initialEntries={["/review?review=first&retained=value"]}>
+        <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/first?retained=value"]}>
           <ReviewScreen /><AuthIdentity /><LocationDisplay /><HistoryControls />
         </MemoryRouter>
       </AuthProvider>,
@@ -3030,7 +3039,7 @@ describe("ReviewScreen", () => {
       }
       return undefined;
     });
-    render(<MemoryRouter initialEntries={["/review?review=current"]}><ReviewScreen /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/current"]}><ReviewScreen /></MemoryRouter>);
     const rail = await screen.findByRole("complementary", { name: "Review queue" });
     const group = await within(rail).findByRole("region", { name: "Grouped document" });
     await user.click(screen.getByRole("button", { name: "Collapse all" }));
@@ -3135,7 +3144,7 @@ describe("ReviewScreen", () => {
     mockReviewQueue([current, metadata], null, url => url.endsWith("/decision") ? new Response(JSON.stringify({
       error_code: "legacy_media_cutover_conflict", message: "Media cutover changed. Refresh this draft before publishing.", warnings: [],
     }), { status: 409, headers: { "Content-Type": "application/json" } }) : undefined);
-    render(<MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-1"]}><ReviewScreen /></MemoryRouter>);
     await screen.findByRole("heading", { name: "Exact candidate", level: 2 });
     expect(screen.getByText(/Current published version v2 → Review version v3/)).toBeVisible();
     expect(await screen.findByText("Approving publishes v3 in place of v2.")).toBeVisible();
@@ -3146,7 +3155,7 @@ describe("ReviewScreen", () => {
     expect(pagesApi.readPage).toHaveBeenCalledWith(WORKSPACE_ID, "exact-page", "version-3");
     expect(pagesApi.diffPageVersions).toHaveBeenCalledWith(WORKSPACE_ID, "exact-page", "version-2", "version-3", expect.objectContaining({ signal: expect.any(AbortSignal) }));
     const documentLink = screen.getByRole("link", { name: "Open current document: Exact candidate (new tab)" });
-    expect(documentLink).toHaveAttribute("href", "/context?target=exact-page");
+    expect(documentLink).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/exact-page");
     expect(documentLink).toHaveAttribute("target", "_blank");
     expect(screen.getByRole("heading", { name: "Exact candidate", level: 3 }).closest("a")).toBeNull();
     expect(document.querySelectorAll(".review-evidence-document")).toHaveLength(1);
@@ -3253,7 +3262,7 @@ describe("ReviewScreen", () => {
       if (saved && url.endsWith("/reviews/review-1")) return jsonResponse({ data: { ...current, status: "approved" } });
       return undefined;
     });
-    render(<AuthProvider><MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /><AuthIdentity /><LocationDisplay /></MemoryRouter></AuthProvider>);
+    render(<AuthProvider><MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-1"]}><ReviewScreen /><AuthIdentity /><LocationDisplay /></MemoryRouter></AuthProvider>);
     await screen.findByText("Authenticated actor: actor-1");
     await screen.findByRole("heading", { name: "Saved first", level: 2 });
     await user.click(within(within(screen.getByRole("complementary", { name: "Review queue" })).getByRole("region", { name: "Saved first" })).getByRole("checkbox", { name: /Select all reviews matching/ }));
@@ -3281,7 +3290,7 @@ describe("ReviewScreen", () => {
     expect(screen.getByRole("tab", { name: /Pending.*1/ })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Next review" }));
     await screen.findByRole("heading", { name: "Next document", level: 2 });
-    expect(screen.getByTestId("location-search")).toHaveTextContent("review=next-review");
+    expect(screen.getByTestId("location-search")).toHaveTextContent("/workspaces/00000000-0000-4000-8000-000000000001/review/next-review");
     expect(screen.getByLabelText("Decision reason")).toHaveValue("");
     expect(decisions).toHaveLength(1);
   });
@@ -3296,7 +3305,7 @@ describe("ReviewScreen", () => {
         approved = true;
         return jsonResponse({ data: { ...current, status: "approved", undo: {
           decision_id: "decision-1", decision_type: "approve", available: true,
-          reason_code: null, restore_version_id: null, restore_version_no: null, page_id: "context-1",
+          reason_code: null, restore_version_id: null, restore_version_no: null, page_id: "00000000-0000-4000-8000-000000000104",
         } } });
       }
       if (url.includes("/reviews/review-1/decisions/")) {
@@ -3306,7 +3315,7 @@ describe("ReviewScreen", () => {
       if (url.includes("/reviews?")) return jsonResponse({ data: { items: approved ? [] : [current], next_cursor: null } });
       return undefined;
     });
-    render(<MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-1"]}><ReviewScreen /></MemoryRouter>);
     await screen.findByRole("heading", { name: "Undo target", level: 2 });
     await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Approve" }));
@@ -3345,7 +3354,7 @@ describe("ReviewScreen", () => {
       if (committed && url.includes("/reviews?")) return jsonResponse({ data: { items: [older, next], next_cursor: "not-needed" } });
       return undefined;
     });
-    const mount = () => render(<AuthProvider><MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /><AuthIdentity /></MemoryRouter></AuthProvider>);
+    const mount = () => render(<AuthProvider><MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-1"]}><ReviewScreen /><AuthIdentity /></MemoryRouter></AuthProvider>);
     const view = mount();
     await screen.findByText("Authenticated actor: actor-1");
     await screen.findByRole("heading", { name: "Feedback Target", level: 2 });
@@ -3401,7 +3410,7 @@ describe("ReviewScreen", () => {
       if (url.includes("/reviews?") && url.includes("risk_level=low")) return jsonResponse({ data: { items: [], next_cursor: null } });
       return undefined;
     });
-    const view = render(<MemoryRouter initialEntries={["/review?risk=low", "/review"]}>
+    const view = render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review?risk=low", "/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
       <ReviewScreen /><HistoryControls />
     </MemoryRouter>);
     await user.click(await screen.findByRole("checkbox", { name: "Select all 3 shown" }));
@@ -3428,6 +3437,102 @@ describe("ReviewScreen", () => {
       .map(([, init]) => JSON.parse(String(init?.body)).batch_limit)).toEqual([50, 50]);
   });
 
+
+
+  it("does not keep the previous review actionable while a new route target loads", async () => {
+    let resolveReviewTwo!: (response: Response) => void;
+    const reviewTwoResponse = new Promise<Response>((resolve) => { resolveReviewTwo = resolve; });
+    let resolveClaim!: (response: Response) => void;
+    const claimResponse = new Promise<Response>((resolve) => { resolveClaim = resolve; });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url === `${BASE}/api/v1/workspaces`) return jsonResponse(workspaceResponse("editor"));
+      if (isReviewCountsUrl(url)) return jsonResponse({ data: reviewCounts({ pending: 1 }) });
+      if (isRecentDecisionsUrl(url)) return jsonResponse(emptyReviewPage());
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews?status=pending&limit=50`) {
+        return jsonResponse({ data: { items: [], next_cursor: null } });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/review-1`) return jsonResponse({ data: reviewItem({ id: "review-1", targetTitle: "First review target", status: "changes_requested", canClaim: true }) });
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/review-1/claim`) return claimResponse;
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/review-2`) return reviewTwoResponse;
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-1"]}>
+        <ReviewScreen />
+        <ReviewRouteSwitch />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "First review target", level: 2 })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Edit directly" }));
+    await userEvent.click(screen.getByRole("button", { name: "Navigate to review-2" }));
+    expect(screen.queryByRole("heading", { name: "First review target", level: 2 })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
+
+    await act(async () => {
+      resolveReviewTwo(jsonResponse({ data: reviewItem({ id: "review-2", targetTitle: "Second review target" }) }));
+    });
+    expect(await screen.findByRole("heading", { name: "Second review target", level: 2 })).toBeInTheDocument();
+    await act(async () => {
+      resolveClaim(new Response(JSON.stringify({ error: { code: "claim_conflict", message: "Previous review claim failed" } }), { status: 409, headers: { "content-type": "application/json" } }));
+    });
+    expect(screen.queryByText(/Previous review claim failed|Failed to claim Review/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+  });
+
+  it("keeps a missing review deep link explicit and shows Not Found", async () => {
+    let available = false;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return jsonResponse(workspaceResponse("editor"));
+      }
+      if (isReviewCountsUrl(url)) {
+        return jsonResponse({ data: reviewCounts() });
+      }
+      if (isRecentDecisionsUrl(url)) {
+        return jsonResponse(emptyReviewPage());
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews?status=pending&limit=50`) {
+        return jsonResponse({ data: { items: [], next_cursor: null } });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/review-404`) {
+        if (available) return jsonResponse({ data: reviewItem({ id: "review-404", targetTitle: "Restored access" }) });
+        return new Response(
+          JSON.stringify({
+            error_code: "not_found",
+            message: "Review not found",
+            request_id: "req-404",
+            warnings: [],
+          }),
+          { status: 404, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-404"]}>
+        <ReviewScreen />
+        <LocationDisplay />
+        <NavigateButton to="/workspaces/00000000-0000-4000-8000-000000000001/review" label="Open review queue" />
+        <NavigateButton to="/workspaces/00000000-0000-4000-8000-000000000001/review/review-404" label="Revisit review" />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "We couldn't find that page" })).toBeInTheDocument();
+    expect(screen.getByTestId("location-search")).toHaveTextContent(
+      "/workspaces/00000000-0000-4000-8000-000000000001/review/review-404",
+    );
+    available = true;
+    await userEvent.click(screen.getByRole("button", { name: "Open review queue" }));
+    expect(await screen.findByRole("heading", { name: "Review operations", level: 1 })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Revisit review" }));
+    expect(await screen.findByRole("heading", { name: "Restored access", level: 2 })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "We couldn't find that page" })).toBeNull();
+  });
 });
 
 function PageEditorDestination() {
@@ -3435,14 +3540,14 @@ function PageEditorDestination() {
   return (
     <div>
       <p>Page editor</p>
-      <p>{location.search}</p>
+      <p>{location.pathname}{location.search}</p>
     </div>
   );
 }
 
 function LocationDisplay() {
   const location = useLocation();
-  return <p data-testid="location-search">{location.search}</p>;
+  return <p data-testid="location-search">{location.pathname}{location.search}</p>;
 }
 
 // Lists and write receipts intentionally omit the detail-only preflight capabilities.
@@ -3662,7 +3767,7 @@ function reviewItem(
       edit_directly: { allowed: overrides.canClaim ?? false, reason_code: null },
     },
     reject_effect: {
-      effect: "hide_unpublished", document_id: overrides.targetId ?? "context-1",
+      effect: "hide_unpublished", document_id: overrides.targetId ?? "00000000-0000-4000-8000-000000000104",
       candidate_version_id: `version-${overrides.targetVersionNo ?? 1}`,
       candidate_version_no: overrides.targetVersionNo ?? 1,
       published_version_id: null, published_version_no: null,
@@ -3700,7 +3805,7 @@ function reviewItem(
         {
           operation_id: `${overrides.id ?? "review-1"}-operation`,
           target_type: "context_page",
-          target_id: overrides.targetId ?? "context-1",
+          target_id: overrides.targetId ?? "00000000-0000-4000-8000-000000000104",
           target_title:
             overrides.targetTitle === undefined
               ? "Feedback Target"
@@ -3711,9 +3816,9 @@ function reviewItem(
           diff_summary: overrides.diffSummary ?? null,
           diff_ref: `context_page_version:version-${overrides.targetVersionNo ?? 1}`,
           document: overrides.document === undefined ? {
-            document_kind: "context", document_id: overrides.targetId ?? "context-1",
+            document_kind: "context", document_id: overrides.targetId ?? "00000000-0000-4000-8000-000000000104",
             title: overrides.targetTitle === undefined ? "Feedback Target" : overrides.targetTitle,
-            slug: "feedback-target", reader_href: `/context?target=${overrides.targetId ?? "context-1"}`,
+            slug: "feedback-target", reader_href: `/workspaces/${WORKSPACE_ID}/context/pages/${overrides.targetId ?? "00000000-0000-4000-8000-000000000104"}`,
             can_open: true, unavailable_reason: null,
           } : overrides.document,
           content: overrides.content ?? {
@@ -3776,4 +3881,9 @@ function AuthIdentity() {
 
 function savedDecisionLabel() {
   return i18n.t("review:workflow.savedDecision", { version: "v1", decision: i18n.t("review:overview.decisionType.approve") });
+}
+
+function ReviewRouteSwitch() {
+  const navigate = useNavigate();
+  return <button type="button" onClick={() => navigate("/workspaces/00000000-0000-4000-8000-000000000001/review/review-2")}>Navigate to review-2</button>;
 }

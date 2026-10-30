@@ -15,7 +15,7 @@ function artifact(
     resource_kind: "context_page",
     resource_id: "page-1",
     artifact_title: "Authentication policy",
-    navigation_path: "/context?target=page-1",
+    navigation_path: "/workspaces/workspace-1/context/pages/page-1",
     verb: "referenced",
     first_occurred_at: "2026-05-27T09:01:00Z",
     last_occurred_at: "2026-05-27T09:02:00Z",

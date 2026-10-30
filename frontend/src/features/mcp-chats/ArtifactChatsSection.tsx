@@ -7,7 +7,7 @@ import {
   type McpChatArtifactKind,
   type McpChatProvenanceEntry,
 } from "../../shared/api/operations";
-import { getCurrentWorkspaceId } from "../../shared/api/workspace";
+import { useRouteWorkspaceId, workspacePath } from "../../shared/lib/workspaceRoutes";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { StatusPill } from "../../shared/components/StatusPill";
@@ -28,12 +28,9 @@ export function ArtifactChatsSection({
   variant = "inspector",
 }: ArtifactChatsSectionProps) {
   const { t } = useTranslation("chats");
+  const workspaceId = useRouteWorkspaceId();
   const { data, error, loading, reload } = useAsyncLoad<McpChatProvenanceEntry[]>(
     async () => {
-      const workspaceId = await getCurrentWorkspaceId();
-      if (!workspaceId) {
-        return [];
-      }
       const provenance = await listArtifactProvenance(
         workspaceId,
         resourceKind,
@@ -41,7 +38,7 @@ export function ArtifactChatsSection({
       );
       return provenance.items;
     },
-    [resourceKind, resourceId],
+    [workspaceId, resourceKind, resourceId],
     {
       errorMessage: t("provenance.loadFailed"),
       formatError: safeChatErrorMessage,
@@ -96,7 +93,7 @@ export function ArtifactChatsSection({
             <Link
               className="mcp-provenance-link"
               key={`${entry.chat_session.id}-${entry.verb}`}
-              to={`/chats/${entry.chat_session.id}`}
+              to={workspacePath(workspaceId, `chats/${entry.chat_session.id}`)}
             >
               <ClientChip client={entry.chat_session.client} />
               <StatusPill

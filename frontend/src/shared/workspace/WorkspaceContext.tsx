@@ -57,6 +57,7 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 export function WorkspaceProvider({
   children,
   sessionUserId = null,
+  routeWorkspaceId = null,
 }: {
   children: ReactNode;
   // WS-05: optional so existing bare `<WorkspaceProvider>` renders (tests,
@@ -64,6 +65,7 @@ export function WorkspaceProvider({
   // behaving exactly as before — the reset effect below never fires when
   // this stays at its default `null`.
   sessionUserId?: string | null;
+  routeWorkspaceId?: string | null;
 }) {
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -82,10 +84,20 @@ export function WorkspaceProvider({
   useEffect(() => {
     defaultWorkspaceIdRef.current = defaultWorkspaceId;
   }, [defaultWorkspaceId]);
+  const activeId = routeWorkspaceId ?? selectedId;
   const selectedWorkspace = useMemo(
-    () => workspaces.find((workspace) => workspace.id === selectedId) ?? null,
-    [selectedId, workspaces],
+    () => workspaces.find((workspace) => workspace.id === activeId) ?? null,
+    [activeId, workspaces],
   );
+  useEffect(() => {
+    if (routeWorkspaceId && selectedWorkspace?.id === routeWorkspaceId) {
+      // Once membership confirms the URL's Workspace, keep the unscoped
+      // provider selection and landing preference aligned with that identity.
+      // Do not persist unknown route IDs before they resolve in this list.
+      setSelectedId(routeWorkspaceId);
+      setSelectedWorkspace(selectedWorkspace);
+    }
+  }, [routeWorkspaceId, selectedWorkspace]);
 
   const previousSessionUserId = useRef<string | null>(sessionUserId);
   useEffect(() => {
@@ -268,7 +280,7 @@ export function WorkspaceProvider({
       refreshWorkspaces,
       removeWorkspace,
       selectWorkspaceId,
-      selectedId,
+      selectedId: activeId,
       selectedWorkspace,
       workspaceSlug: selectedWorkspace?.slug ?? null,
       workspaces,
@@ -282,7 +294,7 @@ export function WorkspaceProvider({
       refreshWorkspaces,
       removeWorkspace,
       selectWorkspaceId,
-      selectedId,
+      activeId,
       selectedWorkspace,
       workspaces,
     ],

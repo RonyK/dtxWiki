@@ -2122,7 +2122,9 @@ def test_read_api_uses_library_policy_upload_limit(page_service):
     body = rejected.json()
     assert body["error_code"] == "library_upload_too_large"
     assert body["limit_bytes"] == 1000
-    assert body["settings_link"] == "/settings?section=library"
+    assert body["settings_link"] == (
+        f"/workspaces/{workspace_id}/settings?section=library"
+    )
     assert "1 KB" in body["message"]
 
 

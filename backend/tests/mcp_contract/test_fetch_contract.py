@@ -492,7 +492,7 @@ def test_future_fetch_handler_returns_visible_page_through_dispatch(
     assert response.title == "Fetch dispatch success"
     assert response.text is not None
     assert "Visible needle body." in response.text
-    assert response.url == f"/context?target={page.id}"
+    assert response.url == f"/workspaces/{page.workspace_id}/context/pages/{page.id}"
     assert response.metadata is not None
     assert response.metadata["type"] == "context_page"
     assert response.metadata["version_id"] == str(

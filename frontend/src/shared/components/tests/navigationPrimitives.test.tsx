@@ -256,13 +256,12 @@ describe("navigation primitives", () => {
     const expanded = resolveExpandedNodeIds(nodes, null, "page-1");
     const collapsed = resolveExpandedNodeIds(nodes, "", "page-1");
     const params = updateTreeSearchParams(new URLSearchParams("view=context"), {
-      targetId: "page-1",
       expandedNodeIds: collapsed,
     });
 
     expect(expanded).toEqual(["node-1"]);
     expect(collapsed).toEqual(["node-1"]);
-    expect(params.toString()).toBe("view=context&target=page-1&expanded=node-1");
+    expect(params.toString()).toBe("view=context&expanded=node-1");
   });
 
   it("unions the selected ancestor into an otherwise collapsed default", () => {
@@ -286,7 +285,7 @@ describe("navigation primitives", () => {
     expect(
       resolveExpandedNodeIds(nodes, null, "page-1", {
         defaultMode: "none",
-        storageKey: "context",
+        storageKey: "context", workspaceId: "workspace-1",
       }),
     ).toEqual(["node-1"]);
   });
@@ -303,9 +302,9 @@ describe("navigation primitives", () => {
       treeNode({ id: "unrelated", node_kind: "folder", can_have_children: true, children_count: 1 }),
     ];
     if (stored) {
-      writeExpandedNodeIdsToStorage("context", stored);
+      writeExpandedNodeIdsToStorage("context", stored, "workspace-1");
     }
-    expect(resolveExpandedNodeIds(nodes, encoded, "node-3", { defaultMode: "none", storageKey: "context" })).toEqual(expected);
+    expect(resolveExpandedNodeIds(nodes, encoded, "node-3", { defaultMode: "none", storageKey: "context", workspaceId: "workspace-1" })).toEqual(expected);
   });
 
   it("restores client-only tree expansion state from localStorage", () => {
@@ -326,12 +325,12 @@ describe("navigation primitives", () => {
       }),
     ];
 
-    writeExpandedNodeIdsToStorage("context", ["node-1", "missing", "node-1"]);
+    writeExpandedNodeIdsToStorage("context", ["node-1", "missing", "node-1"], "workspace-1");
 
     expect(
       resolveExpandedNodeIds(nodes, null, "page-1", {
         defaultMode: "none",
-        storageKey: "context",
+        storageKey: "context", workspaceId: "workspace-1",
       }),
     ).toEqual(["node-1"]);
   });
@@ -355,16 +354,16 @@ describe("navigation primitives", () => {
     ];
 
     window.localStorage.setItem("dtxwiki.selectedWorkspaceId", "workspace-a");
-    writeExpandedNodeIdsToStorage("context", ["node-1"]);
+    writeExpandedNodeIdsToStorage("context", ["node-1"], "workspace-1");
 
     window.localStorage.setItem("dtxwiki.selectedWorkspaceId", "workspace-b");
-    writeExpandedNodeIdsToStorage("context", ["workspace-b-node"]);
+    writeExpandedNodeIdsToStorage("context", ["workspace-b-node"], "workspace-b");
 
     window.localStorage.setItem("dtxwiki.selectedWorkspaceId", "workspace-a");
     expect(
       resolveExpandedNodeIds(nodes, null, "page-1", {
         defaultMode: "none",
-        storageKey: "context",
+        storageKey: "context", workspaceId: "workspace-1",
       }),
     ).toEqual(["node-1"]);
   });
@@ -387,17 +386,17 @@ describe("navigation primitives", () => {
       }),
     ];
 
-    writeExpandedNodeIdsToStorage("context", ["other-workspace-node"]);
+    writeExpandedNodeIdsToStorage("context", ["other-workspace-node"], "workspace-1");
 
     expect(
       resolveExpandedNodeIds(nodes, null, "page-1", {
         defaultMode: "active-path",
-        storageKey: "context",
+        storageKey: "context", workspaceId: "workspace-1",
       }),
     ).toEqual(["node-1"]);
   });
 
-  it("falls back to legacy unscoped expansion entries after selecting a workspace", () => {
+  it("does not import legacy unscoped expansion into an explicit workspace", () => {
     const nodes = [
       treeNode({
         id: "node-1",
@@ -422,11 +421,11 @@ describe("navigation primitives", () => {
     window.localStorage.setItem("dtxwiki.selectedWorkspaceId", "workspace-a");
 
     expect(
-      resolveExpandedNodeIds(nodes, null, "page-1", {
+      resolveExpandedNodeIds(nodes, null, null, {
         defaultMode: "none",
-        storageKey: "context",
+        storageKey: "context", workspaceId: "workspace-1",
       }),
-    ).toEqual(["node-1"]);
+    ).toEqual([]);
   });
 });
 

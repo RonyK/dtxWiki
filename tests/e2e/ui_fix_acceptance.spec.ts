@@ -1,5 +1,6 @@
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import type { Request as PlaywrightRequest, Response as PlaywrightResponse } from "@playwright/test";
 
 import {
   expect,
@@ -17,6 +18,7 @@ import {
   authenticatePage,
   backendBaseUrl,
   currentWorkspace,
+  workspaceUrl,
 } from "./auth";
 import { evidenceScreenshot } from "./evidence";
 import { redactFailedRequest } from "./redact-network";
@@ -87,7 +89,7 @@ test.describe("2026-08-09 UI fix acceptance", () => {
         `Move target child ${suffix}`,
       );
 
-      await page.goto("/context");
+      await page.goto(workspaceUrl(workspace.id, "context"));
       const sourceParentRow = page.getByRole("treeitem", {
         exact: true,
         name: sourceParent.title,
@@ -270,7 +272,7 @@ test.describe("2026-08-09 UI fix acceptance", () => {
       "# UI fix editor\n\n1. First numbered item\n\nA paragraph for preview geometry.",
     );
 
-    await page.goto(`/context/${seededPage.slug}/edit`);
+    await page.goto(workspaceUrl(workspace.id, `context/pages/${seededPage.id}/edit`));
     await expect(page.locator(".cm-content")).toBeVisible();
 
     await test.step("Page properties puts Aliases under Advanced and removes Cover URL", async () => {
@@ -431,7 +433,7 @@ test.describe("2026-08-09 UI fix acceptance", () => {
     const workspace = await currentWorkspace(page.request);
 
     await test.step("Review rail header no longer repeats Preview", async () => {
-      await page.goto("/review");
+      await page.goto(workspaceUrl(workspace.id, "review"));
       const header = page.locator(".review-rail-header");
       await expect(header).toBeVisible();
       await expect(header.getByText("Preview", { exact: true })).toHaveCount(0);
@@ -448,7 +450,7 @@ test.describe("2026-08-09 UI fix acceptance", () => {
     });
 
     await test.step("Library detail uses an 8px action gap and one mobile Upload", async () => {
-      await page.goto("/library");
+      await page.goto(workspaceUrl(workspace.id, "library"));
       await expect(
         page.getByRole("heading", { name: "Library", exact: true }),
       ).toBeVisible();
@@ -477,7 +479,7 @@ test.describe("2026-08-09 UI fix acceptance", () => {
         "upload Library UI fixture",
       );
       await expect(page).toHaveURL(
-        new RegExp(`(?:\\?|&)target=${uploaded.id}(?:&|$)`),
+        `${workspaceUrl(workspace.id, `library/items/${uploaded.id}`)}`,
       );
       const actions = page.locator(".library-reader-actions");
       await expect(actions).toBeVisible();
@@ -628,7 +630,7 @@ async function verifyF10ContextLocationPicker(
   );
 
   await page.setViewportSize(viewport);
-  await page.goto(`${backendBaseUrl}/context/new`, { waitUntil: "networkidle" });
+  await page.goto(workspaceUrl(workspaceId, "context/pages/new"), { waitUntil: "networkidle" });
   const propertiesTrigger = page.getByRole("button", {
     name: "Page properties",
     exact: true,
@@ -688,7 +690,7 @@ async function verifyF10ContextLocationPicker(
   });
 
   const writes: string[] = [];
-  const recordPageWrite = (request: Request) => {
+  const recordPageWrite = (request: PlaywrightRequest) => {
     const pathname = new URL(request.url()).pathname;
     if (
       ["PATCH", "POST", "PUT"].includes(request.method())
@@ -787,7 +789,7 @@ async function verifyF10ContextLocationPicker(
     await createResponse,
     `save F10 Context page at ${viewportKey}`,
   );
-  await expect(page).toHaveURL(new RegExp(`/context/${saved.slug}/edit`));
+  await expect(page).toHaveURL(new RegExp(`/workspaces/${workspaceId}/context/pages/${saved.id}/edit`));
   await editorBootstrap;
   await expect(page.getByLabel("Title", { exact: true })).toHaveValue(pageTitle);
   await page.reload({ waitUntil: "networkidle" });
@@ -796,7 +798,10 @@ async function verifyF10ContextLocationPicker(
   expect(placement.parent_id).toBe(parent.id);
 }
 
-async function waitForContextEditorBootstrap(page: Page, workspaceId: string) {
+async function waitForContextEditorBootstrap(
+  page: Page,
+  workspaceId: string,
+) {
   const workspacePrefix = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}`;
   const responses = await Promise.all([
     page.waitForResponse(
@@ -823,9 +828,8 @@ async function waitForContextEditorBootstrap(page: Page, workspaceId: string) {
     page.waitForResponse(
       (response) =>
         response.request().method() === "GET"
-        && new URL(response.url()).pathname.startsWith(
-          `${workspacePrefix}/context/pages/by-slug/`,
-        ),
+          && new RegExp(`^${workspacePrefix}/context/pages/[0-9a-f-]{36}$`)
+            .test(new URL(response.url()).pathname),
     ),
   ]);
   await Promise.all(
@@ -859,7 +863,10 @@ async function pagePlacement(
   return placement!;
 }
 
-async function responseData<T>(response: APIResponse, label: string): Promise<T> {
+async function responseData<T>(
+  response: APIResponse | PlaywrightResponse,
+  label: string,
+): Promise<T> {
   if (!response.ok()) {
     throw new Error(
       `${label} failed with ${response.status()}: ${await response.text()}`,

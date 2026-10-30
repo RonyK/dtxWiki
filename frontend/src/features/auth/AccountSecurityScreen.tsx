@@ -442,7 +442,7 @@ export function AccountSecurityScreen() {
               <div className="account-quick-grid">
                 <Link
                   className="metric-card linked"
-                  to="/settings/integrations#integrations"
+                  to="/account/integrations#integrations"
                 >
                   <div className="metric-card-title">
                     <KeyRound size={16} aria-hidden="true" />
@@ -457,7 +457,7 @@ export function AccountSecurityScreen() {
                 </Link>
                 <Link
                   className="metric-card linked"
-                  to="/settings/integrations#oauth-consents"
+                  to="/account/integrations#oauth-consents"
                 >
                   <div className="metric-card-title">
                     <LinkIcon size={16} aria-hidden="true" />

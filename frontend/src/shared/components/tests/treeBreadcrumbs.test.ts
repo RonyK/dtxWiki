@@ -29,7 +29,7 @@ describe("targetBreadcrumbs", () => {
       ],
     });
     expect(
-      targetBreadcrumbs({
+      targetBreadcrumbs({ workspaceId: "11111111-1111-4111-8111-111111111111",
         basePath: "/context",
         rootLabel: "Localized Context",
         nodes: [root, folder, page],
@@ -38,7 +38,7 @@ describe("targetBreadcrumbs", () => {
     ).toEqual(["Localized Context", "Context", "Child"]);
   });
   it("links root and ancestor path segments to their tree targets", () => {
-    const items = targetBreadcrumbs({
+    const items = targetBreadcrumbs({ workspaceId: "11111111-1111-4111-8111-111111111111",
       basePath: "/context",
       rootLabel: "Context",
       nodes: [
@@ -62,8 +62,8 @@ describe("targetBreadcrumbs", () => {
     });
 
     expect(items).toEqual([
-      { label: "Context", href: "/context" },
-      { label: "Operations", href: "/context?target=folder-node" },
+      { label: "Context", href: "/workspaces/11111111-1111-4111-8111-111111111111/context" },
+      { label: "Operations", href: "/workspaces/11111111-1111-4111-8111-111111111111/context/folders/folder-node" },
       { label: "Runbook" },
     ]);
   });
@@ -78,21 +78,21 @@ describe("targetBreadcrumbs", () => {
     });
 
     expect(
-      targetBreadcrumbs({
+      targetBreadcrumbs({ workspaceId: "11111111-1111-4111-8111-111111111111",
         basePath: "/context",
         rootLabel: "Context",
         nodes: [page],
         targetNodeId: page.id,
       }),
     ).toEqual([
-      { label: "Context", href: "/context" },
-      { label: "Operations", href: "/context?target=folder-node" },
+      { label: "Context", href: "/workspaces/11111111-1111-4111-8111-111111111111/context" },
+      { label: "Operations", href: "/workspaces/11111111-1111-4111-8111-111111111111/context/folders/folder-node" },
       { label: "Runbook" },
     ]);
   });
 
   it("can build breadcrumbs for selected folder nodes", () => {
-    const items = targetBreadcrumbs({
+    const items = targetBreadcrumbs({ workspaceId: "11111111-1111-4111-8111-111111111111",
       basePath: "/agent",
       rootLabel: "Agent",
       nodes: [
@@ -117,7 +117,7 @@ describe("targetBreadcrumbs", () => {
     });
 
     expect(items).toEqual([
-      { label: "Agent", href: "/agent" },
+      { label: "Agent", href: "/workspaces/11111111-1111-4111-8111-111111111111/agent" },
       { label: "Persona" },
     ]);
   });
@@ -126,8 +126,9 @@ describe("targetBreadcrumbs", () => {
   // Context page to the canonical permalink — a folder ancestor has no page
   // id to canonicalize and always keeps the query-param tree-target link.
   it("links a Context-page ancestor to its canonical permalink when a workspace id is supplied", () => {
+    const ancestorPageId = "44444444-4444-4444-8444-444444444444";
     const pageAncestor = treeNode("ancestor-page-node", "Runbook Index", {
-      target_id: "ancestor-page-id",
+      target_id: ancestorPageId,
       target_kind: "context_page",
     });
     const folderAncestor = treeNode("folder-node", "Operations", {
@@ -146,17 +147,17 @@ describe("targetBreadcrumbs", () => {
     expect(
       targetBreadcrumbs({
         basePath: "/context",
-        workspaceId: "workspace-1",
+        workspaceId: "11111111-1111-4111-8111-111111111111",
         rootLabel: "Context",
         nodes: [folderAncestor, pageAncestor, page],
         targetNodeId: page.id,
       }),
     ).toEqual([
-      { label: "Context", href: "/context" },
-      { label: "Operations", href: "/context?target=folder-node" },
+      { label: "Context", href: "/workspaces/11111111-1111-4111-8111-111111111111/context" },
+      { label: "Operations", href: "/workspaces/11111111-1111-4111-8111-111111111111/context/folders/folder-node" },
       {
         label: "Runbook Index",
-        href: "/workspaces/workspace-1/context/pages/ancestor-page-id",
+        href: `/workspaces/11111111-1111-4111-8111-111111111111/context/pages/${ancestorPageId}`,
       },
       { label: "Runbook" },
     ]);
@@ -177,7 +178,7 @@ describe("targetBreadcrumbs", () => {
     });
 
     expect(
-      targetBreadcrumbs({
+      targetBreadcrumbs({ workspaceId: "11111111-1111-4111-8111-111111111111",
         basePath: "/context",
         rootLabel: "컨텍스트",
         nodes: [root, page],

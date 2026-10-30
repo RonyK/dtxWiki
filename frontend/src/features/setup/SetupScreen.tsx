@@ -7,13 +7,13 @@ import { Link } from "react-router-dom";
 import { listAgentPages } from "../../shared/api/agent";
 import { listContextPages } from "../../shared/api/context";
 import { listLibraryItems } from "../../shared/api/library";
-import { getCurrentWorkspaceId } from "../../shared/api/workspace";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { RouteLoading } from "../../shared/components/RouteLoading";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
 import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
+import { useRouteWorkspaceId, workspacePath } from "../../shared/lib/workspaceRoutes";
 
 type SetupMetric = {
   count: number;
@@ -21,26 +21,26 @@ type SetupMetric = {
 };
 
 type SetupState = {
+  workspaceId: string;
   sources: SetupMetric;
   contextPages: SetupMetric;
   agentPages: SetupMetric;
 };
 
 export function SetupScreen() {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const { t } = useTranslation("settings");
   const { preferences } = useLabsPreferences();
   const { data: state, error, reload } = useAsyncLoad<SetupState>(
     async () => {
-      const workspaceId = await getCurrentWorkspaceId();
-      if (!workspaceId) {
-        throw new Error("Workspace not found");
-      }
+      const workspaceId = routeWorkspaceId;
       const [sources, contextPages, agentPages] = await Promise.all([
         listLibraryItems(workspaceId),
         listContextPages(workspaceId),
         preferences.agent ? listAgentPages(workspaceId) : null,
       ]);
       return {
+        workspaceId,
         sources: setupMetric(sources),
         contextPages: setupMetric(contextPages),
         agentPages: agentPages
@@ -48,7 +48,7 @@ export function SetupScreen() {
           : { count: 0, isLowerBound: false },
       };
     },
-    [preferences.agent],
+    [routeWorkspaceId, preferences.agent],
     {
       errorMessage: t("setupScreen.loadError", {
         defaultValue: "Failed to load Setup",
@@ -56,15 +56,16 @@ export function SetupScreen() {
     },
   );
 
+  const visibleState = state?.workspaceId === routeWorkspaceId ? state : null;
   const cards = useMemo(
-    () => readinessCards(state, t, preferences.agent),
-    [state, t, preferences.agent],
+    () => readinessCards(visibleState, t, preferences.agent, routeWorkspaceId),
+    [visibleState, t, preferences.agent, routeWorkspaceId],
   );
   const readyCount = cards.filter((card) => card.ready).length;
   const nextCard = cards.find((card) => !card.ready) ?? cards[0];
   const readiness = readinessPill(readyCount, cards.length, t);
 
-  if (!state) {
+  if (!visibleState) {
     if (error) {
       return (
         <main className="route-loading">
@@ -156,7 +157,7 @@ export function SetupScreen() {
             </span>
           </div>
           <div className="operations-list">
-            <Link className="operations-row compact linked" to="/settings?section=workspace">
+            <Link className="operations-row compact linked" to={`${workspacePath(routeWorkspaceId, "settings")}?section=workspace`}>
               <Settings2 size={16} aria-hidden="true" />
               <div>
                 <strong>
@@ -177,7 +178,7 @@ export function SetupScreen() {
                 <ArrowRight size={14} aria-hidden="true" />
               </span>
             </Link>
-            <Link className="operations-row compact linked" to="/settings?section=citation-write">
+            <Link className="operations-row compact linked" to={`${workspacePath(routeWorkspaceId, "settings")}?section=citation-write`}>
               <CheckCircle2 size={16} aria-hidden="true" />
               <div>
                 <strong>
@@ -197,7 +198,7 @@ export function SetupScreen() {
                 <ArrowRight size={14} aria-hidden="true" />
               </span>
             </Link>
-            <Link className="operations-row compact linked" to="/settings?section=agent-injection">
+            <Link className="operations-row compact linked" to={`${workspacePath(routeWorkspaceId, "settings")}?section=agent-injection`}>
               <Bot size={16} aria-hidden="true" />
               <div>
                 <strong>
@@ -217,7 +218,7 @@ export function SetupScreen() {
                 <ArrowRight size={14} aria-hidden="true" />
               </span>
             </Link>
-            <Link className="operations-row compact linked" to="/settings?section=mcp">
+            <Link className="operations-row compact linked" to={`${workspacePath(routeWorkspaceId, "settings")}?section=mcp`}>
               <Plug size={16} aria-hidden="true" />
               <div>
                 <strong>
@@ -254,6 +255,7 @@ function SetupReadinessCallout({
   nextCard: ReturnType<typeof readinessCards>[number] | undefined;
   t: TFunction<"settings">;
 }) {
+  const routeWorkspaceId = useRouteWorkspaceId();
   if (readyCount === totalCount) {
     return (
       <section className="feature-section">
@@ -272,7 +274,7 @@ function SetupReadinessCallout({
               })}
             </p>
           </div>
-          <Link className="icon-button primary" to="/context">
+          <Link className="icon-button primary" to={workspacePath(routeWorkspaceId, "context")}>
             {t("setupScreen.callout.openContext", { defaultValue: "Open Context" })}
           </Link>
         </div>
@@ -298,7 +300,7 @@ function SetupReadinessCallout({
               })}
             </p>
           </div>
-          <Link className="icon-button primary" to="/library">
+          <Link className="icon-button primary" to={workspacePath(routeWorkspaceId, "library")}>
             {t("setupScreen.callout.addFirstSource", {
               defaultValue: "Add your first source",
             })}
@@ -340,6 +342,7 @@ function readinessCards(
   state: SetupState | null,
   t: TFunction<"settings">,
   showAgent: boolean,
+  workspaceId: string,
 ) {
   if (!state) {
     return [];
@@ -359,7 +362,7 @@ function readinessCards(
       emptyText: t("setupScreen.cards.library.empty", {
         defaultValue: "None yet · Add your first source",
       }),
-      href: "/library",
+      href: workspacePath(workspaceId, "library"),
       actionLabel:
         state.sources.count > 0
           ? t("setupScreen.cards.library.openAction", {
@@ -393,7 +396,7 @@ function readinessCards(
       emptyText: t("setupScreen.cards.context.empty", {
         defaultValue: "None yet · Create a knowledge page",
       }),
-      href: "/context",
+      href: workspacePath(workspaceId, "context"),
       actionLabel:
         state.contextPages.count > 0
           ? t("setupScreen.cards.context.openAction", {
@@ -426,7 +429,7 @@ function readinessCards(
       emptyText: t("setupScreen.cards.agent.empty", {
         defaultValue: "None yet · Add an AI rule",
       }),
-      href: "/agent",
+      href: workspacePath(workspaceId, "agent"),
       actionLabel:
         state.agentPages.count > 0
           ? t("setupScreen.cards.agent.openAction", {

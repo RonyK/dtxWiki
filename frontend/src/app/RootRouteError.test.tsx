@@ -39,13 +39,13 @@ describe("root route error boundary", () => {
             errorElement: rootErrorElement,
             children: [
               {
-                path: "broken",
+                path: "workspaces/22222222-2222-4222-8222-000000000001/activity/broken",
                 element: <BrokenRoute />,
               },
             ],
           },
         ],
-        { initialEntries: ["/broken"] },
+        { initialEntries: ["/workspaces/22222222-2222-4222-8222-000000000001/activity/broken"] },
       );
 
       render(
@@ -60,7 +60,7 @@ describe("root route error boundary", () => {
       expect(screen.getByRole("button", { name: reload })).toBeInTheDocument();
       expect(screen.getByRole("link", { name: dashboard })).toHaveAttribute(
         "href",
-        "/dashboard",
+        "/workspaces/22222222-2222-4222-8222-000000000001/dashboard",
       );
       expect(
         screen.queryByText("RAW_CHUNK_STACK_MUST_STAY_HIDDEN"),

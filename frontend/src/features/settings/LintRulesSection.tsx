@@ -9,7 +9,7 @@ import {
   updateSettingsPolicy,
   type LintRuleInfo,
 } from "../../shared/api/operations";
-import { getCurrentWorkspaceId } from "../../shared/api/workspace";
+import { workspacePath } from "../../shared/lib/workspaceRoutes";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import {
@@ -33,7 +33,7 @@ function isEditable(rule: LintRuleInfo): boolean {
 // Settings > Lint: per-workspace rule toggles, grouped by layer. The catalog
 // (GET /lint/rules) carries every rule's effective enabled state; flipping a
 // toggle writes the `lint` policy ({rule_id: bool}) via updateSettingsPolicy.
-export function LintRulesSection({ readOnly }: { readOnly: boolean }) {
+export function LintRulesSection({ readOnly, workspaceId: routeWorkspaceId }: { readOnly: boolean; workspaceId: string }) {
   const { t } = useTranslation("settings");
   const { t: lintT } = useTranslation("lint");
   const [rules, setRules] = useState<LintRuleInfo[] | null>(null);
@@ -50,12 +50,13 @@ export function LintRulesSection({ readOnly }: { readOnly: boolean }) {
     // user switches language) would refetch and clobber state on every language
     // toggle; labels read `t` at render time instead. (M10/I1)
     let cancelled = false;
+    setWorkspaceId(routeWorkspaceId);
+    setRules(null);
+    setAutoFix(false);
+    setError(null);
     (async () => {
       try {
-        const wid = await getCurrentWorkspaceId();
-        if (!wid) {
-          throw new Error("no workspace");
-        }
+        const wid = routeWorkspaceId;
         const data = await getLintRules(wid);
         if (!cancelled) {
           setWorkspaceId(wid);
@@ -84,7 +85,7 @@ export function LintRulesSection({ readOnly }: { readOnly: boolean }) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [routeWorkspaceId]);
 
   function markBusy(keys: string[], value: boolean) {
     setBusy((current) => {
@@ -235,7 +236,7 @@ export function LintRulesSection({ readOnly }: { readOnly: boolean }) {
           <span aria-live="polite" className="policy-card-saved">
             {savedNotice}
           </span>
-          <Link className="icon-button text-button" to="/lint">
+          <Link className="icon-button text-button" to={workspacePath(routeWorkspaceId, "lint")}>
             {t("lint.openQueue", { defaultValue: "Open lint queue" })}
           </Link>
         </div>

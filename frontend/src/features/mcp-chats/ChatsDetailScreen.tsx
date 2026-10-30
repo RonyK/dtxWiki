@@ -28,7 +28,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import {
   archiveMcpChat,
@@ -41,9 +41,10 @@ import {
 } from "../../shared/api/operations";
 import {
   currentWorkspaceSelection,
-  getCurrentWorkspaceId,
   type WorkspaceSummary,
 } from "../../shared/api/workspace";
+import { useRouteWorkspaceId, useWorkspaceRoute, workspacePath } from "../../shared/lib/workspaceRoutes";
+import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import { AdvancedSection } from "../../shared/components/AdvancedSection";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { CountChip } from "../../shared/components/CountChip";
@@ -103,8 +104,21 @@ const NARROW_FLOW_QUERY = "(max-width: 1024px)";
 
 export function ChatsDetailScreen() {
   const { t } = useTranslation("chats");
-  const { chatId = "" } = useParams();
+  const routeWorkspaceId = useRouteWorkspaceId();
+  const route = useWorkspaceRoute();
+  const workspaceContext = useOptionalWorkspaceContext();
+  const routeWorkspace = workspaceContext?.selectedWorkspace;
+  const chatId = route?.section === "chats" && route.targetKind === "chat"
+    ? route.targetId ?? ""
+    : "";
   const navigate = useNavigate();
+  const routeIdentity = `${routeWorkspaceId}:${chatId}`;
+  const routeIdentityRef = useRef(routeIdentity);
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const [editTitle, setEditTitle] = useState<string | null>(null);
   const [savingTitle, setSavingTitle] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -115,6 +129,19 @@ export function ChatsDetailScreen() {
   const mutationActionRef = useRef<HTMLButtonElement | null>(null);
   const titleHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
+  useLayoutEffect(() => {
+    routeIdentityRef.current = routeIdentity;
+    setEditTitle(null);
+    setSavingTitle(false);
+    setActionError(null);
+    setActionNotice(null);
+    setArchiveOpen(false);
+    setPurgeOpen(false);
+    setUnarchiving(false);
+    return () => {
+      routeIdentityRef.current = "";
+    };
+  }, [routeIdentity]);
   const {
     data: state,
     error,
@@ -123,30 +150,31 @@ export function ChatsDetailScreen() {
   } = useAsyncLoad<{
     workspaceId: string;
     chat: McpChatDetail;
-    isOwner: boolean;
     workspaces: WorkspaceSummary[];
   }>(
     async () => {
-      const workspaceId = await getCurrentWorkspaceId();
-      if (!workspaceId || !chatId) {
+      const workspaceId = routeWorkspaceId;
+      if (!chatId) {
         throw new Error(t("detail.errors.notFound"));
       }
       const chat = await readMcpChat(workspaceId, chatId);
-      // Only gates whether the owner-only action is offered; the server
-      // refuses anyone else regardless.
-      const isOwner = currentWorkspaceSelection().workspace?.role === "owner";
+      const workspaces = currentWorkspaceSelection().data.workspaces;
       return {
-        workspaceId, chat, isOwner,
-        workspaces: currentWorkspaceSelection().data.workspaces,
+        workspaceId, chat,
+        workspaces,
       };
     },
-    [chatId],
+    [routeWorkspaceId, chatId],
     {
       errorMessage: t("detail.errors.loadFailed"),
       formatError: (caught, fallback) =>
         safeChatErrorMessage(caught, fallback, [t("detail.errors.notFound")]),
     },
   );
+
+  function isMutationRouteCurrent(identity: string) {
+    return mountedRef.current && routeIdentityRef.current === identity;
+  }
 
   async function saveTitle() {
     if (!state || editTitle === null || savingTitle) {
@@ -168,23 +196,32 @@ export function ChatsDetailScreen() {
     setActionError(null);
     setActionNotice(null);
     setSavingTitle(true);
+    const operationIdentity = routeIdentity;
+    const operationWorkspaceId = state.workspaceId;
+    const operationChatId = state.chat.id;
     try {
       const updatedChat = await updateMcpChatTitle(
-        state.workspaceId,
-        state.chat.id,
+        operationWorkspaceId,
+        operationChatId,
         trimmed,
       );
-      setData((current) => current
+      if (!isMutationRouteCurrent(operationIdentity)) return;
+      setData((current) => current &&
+        current.workspaceId === operationWorkspaceId &&
+        current.chat.id === operationChatId &&
+        isMutationRouteCurrent(operationIdentity)
         ? { ...current, chat: updatedChat }
         : current);
       setEditTitle(null);
       setActionNotice(t("detail.titleSaveSuccess"));
       window.requestAnimationFrame(() => titleHeadingRef.current?.focus());
     } catch {
-      setActionError(t("detail.errors.titleUpdateFailed"));
-      window.requestAnimationFrame(() => titleInputRef.current?.focus());
+      if (isMutationRouteCurrent(operationIdentity)) {
+        setActionError(t("detail.errors.titleUpdateFailed"));
+        window.requestAnimationFrame(() => titleInputRef.current?.focus());
+      }
     } finally {
-      setSavingTitle(false);
+      if (isMutationRouteCurrent(operationIdentity)) setSavingTitle(false);
     }
   }
 
@@ -197,9 +234,16 @@ export function ChatsDetailScreen() {
     setUnarchiving(true);
     setActionError(null);
     setActionNotice(null);
+    const operationIdentity = routeIdentity;
+    const operationWorkspaceId = state.workspaceId;
+    const operationChatId = state.chat.id;
     try {
-      await unarchiveMcpChat(state.workspaceId, state.chat.id);
-      setData((current) => current
+      await unarchiveMcpChat(operationWorkspaceId, operationChatId);
+      if (!isMutationRouteCurrent(operationIdentity)) return;
+      setData((current) => current &&
+        current.workspaceId === operationWorkspaceId &&
+        current.chat.id === operationChatId &&
+        isMutationRouteCurrent(operationIdentity)
         ? {
             ...current,
             chat: { ...current.chat, archived_at: null },
@@ -208,19 +252,21 @@ export function ChatsDetailScreen() {
       setActionNotice(t("detail.restoreSuccess"));
       reload();
     } catch {
-      setActionError(t("detail.errors.unarchiveFailed"));
+      if (isMutationRouteCurrent(operationIdentity)) setActionError(t("detail.errors.unarchiveFailed"));
     } finally {
-      setUnarchiving(false);
-      window.requestAnimationFrame(() => mutationActionRef.current?.focus());
+      if (isMutationRouteCurrent(operationIdentity)) {
+        setUnarchiving(false);
+        window.requestAnimationFrame(() => mutationActionRef.current?.focus());
+      }
     }
   }
 
-  if (!state) {
+  if (!state || state.workspaceId !== routeWorkspaceId || state.chat.id !== chatId) {
     return (
       <div className="workspace-screen single-column">
         <section className="feature-main">
           <Breadcrumbs
-            items={[{ label: t("breadcrumb"), href: "/chats" }, { label: t("detail.breadcrumb") }]}
+            items={[{ label: t("breadcrumb"), href: workspacePath(routeWorkspaceId, "chats") }, { label: t("detail.breadcrumb") }]}
           />
           {error ? (
             // A terminally failed load (404 chat, non-editor 403) must not
@@ -241,7 +287,7 @@ export function ChatsDetailScreen() {
                 {error}
               </StatusBanner>
               <div>
-                <Link className="icon-button text-button" to="/chats">
+                <Link className="icon-button text-button" to={workspacePath(routeWorkspaceId, "chats")}>
                   <ChevronLeft size={16} aria-hidden="true" />
                   {t("detail.backToChats")}
                 </Link>
@@ -256,18 +302,26 @@ export function ChatsDetailScreen() {
   }
 
   const { chat } = state;
+  const routeWorkspaceSummary = routeWorkspace?.id === routeWorkspaceId
+    ? routeWorkspace
+    : workspaceContext?.workspaces.find((workspace) => workspace.id === routeWorkspaceId)
+      ?? state.workspaces.find((workspace) => workspace.id === routeWorkspaceId)
+      ?? null;
+  // Only gates whether the owner-only action is offered; the server
+  // refuses anyone else regardless.
+  const isOwner = routeWorkspaceSummary?.role === "owner";
   // The stored title remains editable/debuggable, but the visible title is
   // composed from semantic read-time facts so action/kind/tool labels localize.
   const displayTitle = chatPresentationLine(chat, t);
   const visibleTitle = editTitle ?? displayTitle;
   const summaryLine = chatSummaryLine(chat);
-  const canPurgePreviews = state.isOwner && chatHasEditPreviews(chat.timeline);
+  const canPurgePreviews = isOwner && chatHasEditPreviews(chat.timeline);
 
   return (
     <div className="workspace-screen single-column">
       <section className="feature-main mcp-chat-detail-screen">
         <Breadcrumbs
-          items={[{ label: t("breadcrumb"), href: "/chats" }, { label: displayTitle }]}
+          items={[{ label: t("breadcrumb"), href: workspacePath(routeWorkspaceId, "chats") }, { label: displayTitle }]}
         />
         <div className="feature-header mcp-chat-detail-header">
           <div className="mcp-chat-title-bar">
@@ -414,7 +468,7 @@ export function ChatsDetailScreen() {
         </section>
         <SessionInfoSection chat={chat} />
         {chat.linked_artifacts.length > 0 ? <ArtifactsSection chat={chat} /> : null}
-        <ChatWorkspaces.Provider value={state.workspaces}>
+        <ChatWorkspaces.Provider value={workspaceContext?.workspaces ?? state.workspaces}>
           <ChatFlowSection timeline={chat.timeline} workspaceId={state.workspaceId} />
         </ChatWorkspaces.Provider>
       </section>
@@ -424,7 +478,7 @@ export function ChatsDetailScreen() {
           onClose={() => setArchiveOpen(false)}
           onSubmit={async () => {
             await archiveMcpChat(state.workspaceId, chat.id);
-            navigate("/chats", {
+            navigate(workspacePath(routeWorkspaceId, "chats"), {
               replace: true,
               state: {
                 chatArchiveSuccess: {
@@ -819,6 +873,7 @@ function ArtifactsSection({ chat }: { chat: McpChatDetail }) {
 }
 
 function LinkedArtifactCard({ group: { latest, links } }: { group: LinkedArtifactGroup }) {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const { t } = useTranslation("chats");
   const title = artifactDisplayTitle(latest, t);
   const lastSeen = formatVersionTimestamp(latest.last_occurred_at);
@@ -831,7 +886,7 @@ function LinkedArtifactCard({ group: { latest, links } }: { group: LinkedArtifac
       ].join(", ")}
       className="mcp-artifact-card"
       data-kind={latest.resource_kind}
-      to={artifactNavigationPath(latest)}
+      to={artifactNavigationPath(latest, routeWorkspaceId)}
     >
       <span className="mcp-artifact-card-icon" aria-hidden="true">
         {iconForArtifactKind(latest.resource_kind)}
@@ -1380,6 +1435,7 @@ function hasInputDetail(item: McpChatTimelineItem) {
 }
 
 function ChatDisplayItems({ items }: { items: ChatDisplayItem[] }) {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const { t } = useTranslation("chats");
   return (
     <dl className="mcp-tool-display-items">
@@ -1404,7 +1460,7 @@ function ChatDisplayItems({ items }: { items: ChatDisplayItem[] }) {
                   className="mcp-chat-dl-link"
                   to={artifactNavigationPath({
                     navigation_path: displayItem.navigation_path ?? null,
-                  })}
+                  }, routeWorkspaceId)}
                 >
                   <ExternalLink size={13} aria-hidden="true" />
                   <span>{displayItem.text}</span>
@@ -1428,14 +1484,14 @@ function ChatDisplayItems({ items }: { items: ChatDisplayItem[] }) {
   );
 }
 
-function artifactNavigationPath(artifact: { navigation_path: string | null }) {
+function artifactNavigationPath(artifact: { navigation_path: string | null }, workspaceId: string) {
   // The server (mcp_chat_service.py's _artifact_title_and_path) already
   // computes this per resource_kind and returns null when the resource is
   // missing or not visible to the requesting actor. Rebuilding a path
   // client-side from resource_kind/resource_id alone would bypass that
   // visibility gate and link to a resource the actor was never shown as
   // accessible, so navigation_path is the only source of truth here.
-  return artifact.navigation_path ?? "/chats";
+  return artifact.navigation_path ?? workspacePath(workspaceId, "chats");
 }
 
 function iconForArtifactKind(kind: string): ReactNode {
@@ -1470,6 +1526,7 @@ function TimelineTabPanel({
   phase: ChatFlowPhase;
   tab: TimelineTab;
 }) {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const { t } = useTranslation("chats");
   if (tab === "inputs") {
     const entries = Object.entries(item.input_summary);
@@ -1634,7 +1691,7 @@ function TimelineTabPanel({
               className="mcp-artifact-card"
               data-kind={artifact.resource_kind}
               key={`${artifact.resource_kind}:${artifact.resource_id}:${artifact.verb}`}
-              to={artifactNavigationPath(artifact)}
+              to={artifactNavigationPath(artifact, routeWorkspaceId)}
             >
               <span className="mcp-artifact-card-icon" aria-hidden="true">
                 {iconForArtifactKind(artifact.resource_kind)}

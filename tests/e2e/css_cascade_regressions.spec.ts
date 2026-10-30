@@ -7,6 +7,7 @@ import {
   currentWorkspace,
   frontendBaseUrl,
   signUp,
+  workspaceUrl,
 } from "./auth";
 import {
   requestIdentity,
@@ -31,7 +32,8 @@ import {
 test.describe("CSS cascade regressions @cross-browser", () => {
   test.beforeEach(async ({ page }, testInfo) => {
     await authenticatePage(page, testInfo, "css-cascade");
-    await page.goto("/dashboard");
+    const workspace = await currentWorkspace(page.request);
+    await page.goto(workspaceUrl(workspace.id, "dashboard"));
     // Wait for the app's stylesheets to be applied, not merely requested.
     await expect(page.locator("body")).toBeVisible();
   });
@@ -218,7 +220,7 @@ test.describe("U-1/U-5/U-7: entity-row badge grid overflow", () => {
     );
     expect(autosaveResponse.ok(), await autosaveResponse.text()).toBeTruthy();
 
-    await page.goto("/context");
+    await page.goto(workspaceUrl(workspace.id, "context"));
     const row = page.locator(".entity-row", {
       hasText: "U1 Alpha Published Plus Draft",
     });
@@ -296,7 +298,7 @@ test.describe("U-1/U-5/U-7: entity-row badge grid overflow", () => {
     } = await retryOnceAfterNetworkChange(
       page,
       [
-        requestIdentity(new URL("/context", frontendBaseUrl).href, "GET"),
+        requestIdentity(new URL(workspaceUrl(workspace.id, "context"), frontendBaseUrl).href, "GET"),
         requestIdentity(
           `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages`,
           "GET",
@@ -315,7 +317,7 @@ test.describe("U-1/U-5/U-7: entity-row badge grid overflow", () => {
             },
             { timeout: 15_000 },
           ),
-          page.goto("/context"),
+          page.goto(workspaceUrl(workspace.id, "context")),
         ]);
         return response;
       },
@@ -337,7 +339,7 @@ test.describe("U-1/U-5/U-7: entity-row badge grid overflow", () => {
     const networkChangeRecoveries: Array<{
       path: string;
       recovered: RequestIdentity[];
-    }> = retried ? [{ path: "/context", recovered }] : [];
+    }> = retried ? [{ path: workspaceUrl(workspace.id, "context"), recovered }] : [];
     if (networkChangeRecoveries.length > 0) {
       await testInfo.attach("network-change-recoveries", {
         body: Buffer.from(JSON.stringify(networkChangeRecoveries, null, 2)),
@@ -386,7 +388,7 @@ test.describe("U-1/U-5/U-7: entity-row badge grid overflow", () => {
 
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: 900 });
-      await page.goto("/search?q=embedding");
+      await page.goto(`${workspaceUrl(workspace.id, "search")}?q=embedding`);
       const row = page.getByRole("link", { name: `Open ${title}`, exact: true });
       await expect(row).toBeVisible();
       await expect(row).toHaveAttribute("href", `/workspaces/${workspace.id}/context/pages/${pageId}`);
@@ -406,7 +408,7 @@ test.describe("U-1/U-5/U-7: entity-row badge grid overflow", () => {
         const preview = card.querySelector<HTMLElement>(".search-result-snippet")!;
         const path = card.querySelector<HTMLElement>(".search-result-location")!;
         const reason = card.querySelector<HTMLElement>(".search-result-reason")!;
-        const rect = (element: HTMLElement) => {
+        const rect = (element: Element) => {
           const { x, y, width, height, right, bottom } = element.getBoundingClientRect();
           return { x, y, width, height, right, bottom };
         };

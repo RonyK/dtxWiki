@@ -8,11 +8,12 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
-import { useEffect, type ReactElement } from "react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { useEffect, type ReactElement, type ReactNode } from "react";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setLocale } from "../../../shared/i18n";
+import { parseWorkspaceRoute, workspacePath } from "../../../shared/lib/workspaceRoutes";
 import {
   useWorkspaceContext,
   WorkspaceProvider,
@@ -44,7 +45,11 @@ vi.mock("../../../shared/auth/AuthContext", () => ({
 }));
 
 function render(element: ReactElement) {
-  return testingLibraryRender(<MemoryRouter>{element}</MemoryRouter>);
+  return testingLibraryRender(
+    <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=access-sharing`]}>
+      {element}
+    </MemoryRouter>,
+  );
 }
 
 describe("Workspace Settings membership and access", () => {
@@ -275,12 +280,14 @@ describe("Workspace Settings membership and access", () => {
     });
 
     testingLibraryRender(
-      <MemoryRouter>
-        <WorkspaceProvider>
+      <MemoryRouter initialEntries={[`${workspacePath(WORKSPACE_ID, "settings/integrations")}?section=members`]}>
+        <RouteWorkspaceProvider>
           <WorkspaceContextProbe />
           <WorkspaceSwitchControl workspaceId={nextWorkspaceId} />
-          <WorkspaceMembersSection />
-        </WorkspaceProvider>
+          <Routes>
+            <Route path="/workspaces/:workspaceId/settings/integrations" element={<WorkspaceMembersSection />} />
+          </Routes>
+        </RouteWorkspaceProvider>
       </MemoryRouter>,
     );
     await screen.findByRole("combobox", { name: "Role for Owner" });
@@ -1308,7 +1315,7 @@ describe("Workspace Settings membership and access", () => {
     });
 
     testingLibraryRender(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/access-sharing`]}>
         <WorkspaceProvider>
           <WorkspaceContextProbe />
           <WorkspaceAccessSharingSection />
@@ -1719,7 +1726,7 @@ describe("Workspace Settings membership and access", () => {
       throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
     });
 
-    renderWithWorkspaceProvider("/settings/access/");
+    renderWithWorkspaceProvider(`/workspaces/${WORKSPACE_ID}/settings/access/`);
     const ownerRow = (await screen.findByText("You")).closest(
       '[role="listitem"]',
     );
@@ -1796,7 +1803,9 @@ describe("Workspace Settings membership and access", () => {
 
 });
 
-function renderWithWorkspaceProvider(initialEntry = "/settings") {
+function renderWithWorkspaceProvider(
+  initialEntry = `/workspaces/${WORKSPACE_ID}/settings`,
+) {
   return testingLibraryRender(
     <MemoryRouter initialEntries={[initialEntry]}>
       <WorkspaceProvider>
@@ -1813,7 +1822,8 @@ function WorkspaceHarness() {
   }, [refreshWorkspaces]);
   return (
     <Routes>
-      <Route path="/settings/*" element={<WorkspaceMembersSection />} />
+      <Route path="/workspaces/:workspaceId/settings/*" element={<WorkspaceMembersSection />} />
+      <Route path="/workspaces/:workspaceId/dashboard" element={<FallbackRoute />} />
       <Route path="/" element={<FallbackRoute />} />
       <Route path="/workspaces/find" element={<WorkspaceDiscoveryRoute />} />
     </Routes>
@@ -1834,8 +1844,14 @@ function WorkspaceContextProbe() {
 }
 
 function WorkspaceSwitchControl({ workspaceId }: { workspaceId: string }) {
-  const { selectWorkspaceId } = useWorkspaceContext();
-  return <button onClick={() => selectWorkspaceId(workspaceId)}>Switch workspace</button>;
+  const navigate = useNavigate();
+  return <button onClick={() => navigate(`${workspacePath(workspaceId, "settings/integrations")}?section=members`)}>Switch workspace</button>;
+}
+
+function RouteWorkspaceProvider({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const routeWorkspaceId = parseWorkspaceRoute(location.pathname)?.workspaceId ?? null;
+  return <WorkspaceProvider routeWorkspaceId={routeWorkspaceId}>{children}</WorkspaceProvider>;
 }
 
 function FallbackRoute() {

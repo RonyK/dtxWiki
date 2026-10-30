@@ -12,7 +12,6 @@ import {
 } from "../../shared/api/adminJobs";
 import { listWorkspaceJobs } from "../../shared/api/operations";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
-import { getCurrentWorkspaceId } from "../../shared/api/workspace";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import {
@@ -105,11 +104,8 @@ export function AdminJobsSection({
               ] as const;
             })()
           : await (async () => {
-              // The prop is authoritative when the host knows the selection;
-              // the global stays the fallback for a host with no workspace
-              // context at all, where there is no selection to go stale.
-              const resolvedWorkspaceId =
-                workspaceId ?? (await getCurrentWorkspaceId());
+              // The host supplies the explicit workspace route identity.
+              const resolvedWorkspaceId = workspaceId;
               if (!resolvedWorkspaceId) {
                 throw new Error("no current workspace");
               }
@@ -201,8 +197,7 @@ export function AdminJobsSection({
             cursor: nextCursor,
           })
         : await (async () => {
-            const resolvedWorkspaceId =
-              workspaceId ?? (await getCurrentWorkspaceId());
+            const resolvedWorkspaceId = workspaceId;
             if (!resolvedWorkspaceId) {
               throw new Error("no current workspace");
             }

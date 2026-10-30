@@ -13,12 +13,15 @@ import {
   type ChangeEvent,
   type DragEvent,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useSearchParams } from "react-router-dom";
+
+import { NotFoundScreen } from "../errors/NotFoundScreen";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../../shared/api/client";
 import { translate } from "../../shared/i18n";
@@ -33,6 +36,8 @@ import {
   libraryUploadAccept,
   listLibraryItemReferences,
   listLibraryItems,
+  readLibraryArtifact,
+  readLibraryVersion,
   LibraryUploadApiError,
   matchingLibraryFormat,
   readLibraryItem,
@@ -41,15 +46,17 @@ import {
 } from "../../shared/api/library";
 import type {
   LibraryCapabilities,
+  LibraryArtifactPayload,
   LibraryItemDetail,
   LibraryItemReference,
   LibraryItemSummary,
+  LibraryItemVersionPayload,
 } from "../../shared/api/library";
 import {
   createTreeFolder,
   deleteTreeNode,
-  getCurrentWorkspaceId,
   listTreeData,
+  readTreeNode,
   moveTreeNode,
   reorderTreeNodeAt,
   updateTreeNode,
@@ -84,8 +91,6 @@ import { targetBreadcrumbs } from "../../shared/components/treeBreadcrumbs";
 import {
   resolveExpandedNodeIds,
   TREE_EXPANDED_PARAM,
-  TREE_TARGET_PARAM,
-  updateTreeSearchParams,
   writeExpandedNodeIdsToStorage,
 } from "../../shared/components/treeRouteState";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
@@ -96,6 +101,14 @@ import { domainLabel } from "../../shared/lib/domainLabel";
 import { buildHistoryGraph } from "../../shared/lib/historyGraph";
 import { isAbortError } from "../../shared/lib/abortError";
 import { createUuidV4 } from "../../shared/lib/uuidV4";
+import {
+  contextPageHref,
+  useRouteWorkspaceId,
+  useWorkspaceRoute,
+  withWorkspaceQuery,
+  workspacePath,
+  workspaceTargetHref,
+} from "../../shared/lib/workspaceRoutes";
 import { libraryHistoryNodes } from "./libraryHistory";
 import {
   UploadQueue,
@@ -122,6 +135,9 @@ type LibraryState = {
   tree: TreeNodePayload[];
   treePolicies: Record<string, TreeSectionPolicy>;
   detail: LibraryItemDetail | null;
+  selectedArtifactId: string | null;
+  selectedArtifact: LibraryArtifactPayload | null;
+  selectedArtifactVersion: LibraryItemVersionPayload | null;
 };
 
 type UploadStatus = ResilientUploadQueueStatus;
@@ -143,19 +159,26 @@ const LIBRARY_NEW_ITEM_TYPE_ORDER: readonly NewItemType[] = [
   "folder",
 ];
 
+class LibraryRouteTargetNotFoundError extends Error {}
+
 export function LibraryScreen() {
   const { t } = useTranslation("library");
+  const routeWorkspaceId = useRouteWorkspaceId();
+  const route = useWorkspaceRoute();
+  const location = useLocation();
+  const navigate = useNavigate();
   // Codex #25: hide write affordances from viewers (the backend re-enforces).
   const auth = useOptionalAuth();
   const workspaceContext = useOptionalWorkspaceContext();
-  const canEdit = isEditorRole(workspaceContext?.selectedWorkspace?.role);
+  const routeWorkspace = (workspaceContext?.workspaces ?? []).find(
+    (workspace) => workspace.id === routeWorkspaceId,
+  ) ?? (workspaceContext?.selectedWorkspace?.id === routeWorkspaceId
+    ? workspaceContext.selectedWorkspace
+    : null);
+  const canEdit = isEditorRole(routeWorkspace?.role);
   const [expandedNodeIds, setExpandedNodeIds] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadEntries, setUploadEntries] = useState<UploadEntry[]>([]);
-  const [createDialog, setCreateDialog] = useState<{
-    initialItemType: NewItemType;
-    parentNodeId: string | null;
-  } | null>(null);
   const [renameNode, setRenameNode] = useState<TreeNodePayload | null>(null);
   const [moveNode, setMoveNode] = useState<TreeNodePayload | null>(null);
   const [deleteNode, setDeleteNode] = useState<TreeNodePayload | null>(null);
@@ -166,23 +189,54 @@ export function LibraryScreen() {
   const pageSize = 10;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadQueueRef = useRef<UploadQueue<UploadEntry, true> | null>(null);
+  const uploadRunGenerationRef = useRef(0);
+  const unavailableItemIdRef = useRef<string | null>(null);
+  const uploadWorkspaceIdRef = useRef<string | null>(routeWorkspaceId);
   const uploadParentNodeIdRef = useRef<string | null>(null);
   const uploadSequenceRef = useRef(0);
-  // Uploads select their item locally before the router commits the matching
-  // target param; while this ref is set the URL is known-stale, so the
-  // reconcile effect below must not clear errors or refetch from it.
-  const localTargetIdRef = useRef<string | null>(null);
-  // A detail 404 removes a stale row and clears the route. Keep the failed id
-  // fenced during the render before that route update commits, otherwise the
-  // bare-id resolver immediately issues the same doomed request again and
-  // clears the explanatory notice.
-  const unavailableTargetIdRef = useRef<string | null>(null);
   // A route target expands its ancestors once. Subsequent tree/detail refreshes
   // must preserve an intentional user collapse instead of reopening the path.
   const revealedRouteTargetRef = useRef<string | null>(null);
   const expandedWorkspaceRef = useRef<string | null>(null);
-  const [searchParams, setSearchParams] = useSearchParams();
-  const requestedTargetId = searchParams.get(TREE_TARGET_PARAM);
+  useLayoutEffect(() => {
+    uploadWorkspaceIdRef.current = routeWorkspaceId;
+    return () => {
+      uploadWorkspaceIdRef.current = null;
+      uploadRunGenerationRef.current += 1;
+    };
+  }, [routeWorkspaceId]);
+  useEffect(() => {
+    uploadRunGenerationRef.current += 1;
+    uploadQueueRef.current = null;
+    setIsUploading(false);
+    setUploadEntries([]);
+    setErrorActionLink(null);
+  }, [routeWorkspaceId]);
+  const [routeNotFoundKey, setRouteNotFoundKey] = useState<string | null>(null);
+  const [itemUnavailableNotice, setItemUnavailableNotice] = useState<string | null>(null);
+  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
+  const [uploadNoticeActionLink, setUploadNoticeActionLink] = useState<string | null>(null);
+  const routeIdentity = `${routeWorkspaceId}:${location.pathname}`;
+  const routeIdentityRef = useRef(routeIdentity);
+  useLayoutEffect(() => {
+    routeIdentityRef.current = routeIdentity;
+    return () => {
+      if (routeIdentityRef.current === routeIdentity) routeIdentityRef.current = "";
+    };
+  }, [routeIdentity]);
+  useEffect(() => {
+    setRouteNotFoundKey(null);
+  }, [routeWorkspaceId, route?.suffix, route?.targetId]);
+  useEffect(() => {
+    setUploadNotice(null);
+    setUploadNoticeActionLink(null);
+  }, [routeWorkspaceId]);
+  useEffect(() => {
+    unavailableItemIdRef.current = null;
+    setItemUnavailableNotice(null);
+  }, [routeWorkspaceId]);
+  const [searchParams] = useSearchParams();
+  const requestedTargetId = route?.targetId ?? null;
   const {
     data: state,
     revision: overviewRevision,
@@ -192,25 +246,72 @@ export function LibraryScreen() {
     setError,
   } = useAsyncLoad<LibraryState>(
     async () => {
-      const workspaceId = await getCurrentWorkspaceId();
-      if (!workspaceId) {
-        throw new Error("Workspace not found");
-      }
+      const workspaceId = routeWorkspaceId;
       const [itemsPage, treeData, capabilities] = await Promise.all([
         listLibraryItems(workspaceId, { limit: pageSize }),
         listTreeData(workspaceId, "library"),
         getLibraryCapabilities(workspaceId).catch(() => UNAVAILABLE_LIBRARY_CAPABILITIES),
       ]);
-      const items = itemsPage.data;
-      const tree = treeData.nodes;
-      const selectedItemId = resolveRequestedLibraryItemId(
-        items,
-        tree,
-        requestedTargetId,
-      );
+      const unavailableItemId = unavailableItemIdRef.current;
+      const items = unavailableItemId
+        ? itemsPage.data.filter((item) => item.id !== unavailableItemId)
+        : itemsPage.data;
+      const tree = unavailableItemId
+        ? treeData.nodes.filter((node) => node.target_id !== unavailableItemId)
+        : treeData.nodes;
+      if (route?.targetKind === "folder" && route.targetId) {
+        let folder = tree.find((node) => node.id === route.targetId);
+        if (!folder) {
+          try {
+            folder = await readTreeNode(workspaceId, route.targetId);
+          } catch (exc) {
+            if (exc instanceof ApiError && exc.status === 404) {
+              throw new LibraryRouteTargetNotFoundError();
+            }
+            throw exc;
+          }
+        }
+        if (folder.section !== "library" || folder.node_kind !== "folder") {
+          throw new LibraryRouteTargetNotFoundError();
+        }
+      }
+      let selectedArtifact: LibraryArtifactPayload | null = null;
+      let selectedArtifactVersion: LibraryItemVersionPayload | null = null;
+      let selectedItemId: string | null;
+      if (route?.targetKind === "artifact" && route.targetId) {
+        try {
+          selectedArtifact = await readLibraryArtifact(workspaceId, route.targetId);
+          selectedArtifactVersion = await readLibraryVersion(
+            workspaceId,
+            selectedArtifact.library_item_version_id,
+          );
+        } catch (exc) {
+          if (exc instanceof ApiError && exc.status === 404) {
+            throw new LibraryRouteTargetNotFoundError();
+          }
+          throw exc;
+        }
+        selectedItemId = selectedArtifactVersion.library_item_id;
+      } else if (route?.targetKind === "item" && route.targetId) {
+        selectedItemId = route.targetId;
+      } else {
+        selectedItemId = resolveRequestedLibraryItemId(items, tree, requestedTargetId);
+      }
       const detail = selectedItemId
-        ? await readLibraryItem(workspaceId, selectedItemId)
+        ? await readLibraryItem(workspaceId, selectedItemId).catch((exc) => {
+            if (
+              (route?.targetKind === "item" || route?.targetKind === "artifact") &&
+              exc instanceof ApiError &&
+              exc.status === 404
+            ) {
+              throw new LibraryRouteTargetNotFoundError();
+            }
+            throw exc;
+          })
         : null;
+      if (detail && detail.id !== selectedItemId) {
+        throw new LibraryRouteTargetNotFoundError();
+      }
       return {
         workspaceId,
         capabilities,
@@ -221,13 +322,23 @@ export function LibraryScreen() {
         tree,
         treePolicies: treeData.policies,
         detail,
+        selectedArtifactId: selectedArtifact?.id ?? null,
+        selectedArtifact,
+        selectedArtifactVersion,
       };
     },
-    [pageSize, t],
+    [routeWorkspaceId, route?.targetKind === "artifact" ? route.targetId : null, pageSize, t],
     {
       errorMessage: t("errors.load"),
+      formatError: (exc, fallback) => {
+        if (exc instanceof LibraryRouteTargetNotFoundError) {
+          setRouteNotFoundKey(`${routeWorkspaceId}:${route?.suffix ?? "library"}`);
+          return "Library target not found";
+        }
+        return libraryErrorMessage(exc, fallback);
+      },
       fallbackData: {
-        workspaceId: "",
+        workspaceId: routeWorkspaceId,
         capabilities: UNAVAILABLE_LIBRARY_CAPABILITIES,
         items: [],
         itemsCursor: null,
@@ -236,14 +347,20 @@ export function LibraryScreen() {
         tree: [],
         treePolicies: {},
         detail: null,
+        selectedArtifactId: null,
+        selectedArtifact: null,
+        selectedArtifactVersion: null,
       },
       onSuccess: (nextState) => {
         const libraryTree = libraryExplorerTreeNodes(nextState.tree);
-        const selectedNode = requestedTargetId
+        const expansionTargetId = route?.targetKind === "artifact"
+          ? nextState.selectedArtifactVersion?.library_item_id ?? null
+          : requestedTargetId;
+        const selectedNode = expansionTargetId
           ? (libraryTree.find(
               (node) =>
-                node.id === requestedTargetId ||
-                node.target_id === requestedTargetId,
+                node.id === expansionTargetId ||
+                node.target_id === expansionTargetId,
             ) ?? null)
           : null;
         const selectedNodeId = selectedNode?.id ?? null;
@@ -259,7 +376,7 @@ export function LibraryScreen() {
               libraryTree,
               searchParams.get(TREE_EXPANDED_PARAM),
               selectedNodeId,
-              { defaultMode: "none", storageKey: "library" },
+              { defaultMode: "none", storageKey: "library", workspaceId: routeWorkspaceId },
             );
           }
           if (revealKey && revealedRouteTargetRef.current !== revealKey) {
@@ -278,9 +395,9 @@ export function LibraryScreen() {
     },
   );
 
-  useScreenEntryRefresh("/library", reload, {
-    isHome: requestedTargetId === null,
-    queryDeps: [pageSize, t],
+  useScreenEntryRefresh(workspacePath(routeWorkspaceId, "library"), reload, {
+    isHome: requestedTargetId === null && !route?.create,
+    queryDeps: [routeWorkspaceId, route?.targetKind === "artifact" ? route.targetId : null, pageSize, t],
   });
 
   const libraryWorkspaceId = state?.workspaceId ?? "";
@@ -307,7 +424,79 @@ export function LibraryScreen() {
       cursor: state?.itemsCursor ?? null,
     });
   }, [overviewBaseKey, state?.itemsCursor]);
-  const selectedDetail = state?.detail ?? null;
+  const routedItemId = route?.targetKind === "item"
+    ? route.targetId
+    : route?.targetKind === "artifact"
+      ? state?.selectedArtifactId === route.targetId
+        ? state.selectedArtifactVersion?.library_item_id ?? null
+        : null
+      : null;
+  const selectedDetail = routedItemId && state?.detail?.id === routedItemId
+    ? state.detail
+    : null;
+  useEffect(() => {
+    if (
+      !state?.workspaceId ||
+      route?.targetKind !== "item" ||
+      !route.targetId ||
+      state.detail?.id === route.targetId
+    ) {
+      return;
+    }
+    const workspaceId = state.workspaceId;
+    const itemId = route.targetId;
+    let cancelled = false;
+    void readLibraryItem(workspaceId, itemId)
+      .then((detail) => {
+        if (cancelled) return;
+        if (detail.id !== itemId) {
+          throw new LibraryRouteTargetNotFoundError();
+        }
+        setState((current) =>
+          current?.workspaceId === workspaceId
+            ? { ...current, detail }
+            : current,
+        );
+      })
+      .catch((exc) => {
+        if (cancelled) return;
+        if (exc instanceof ApiError && exc.status === 404) {
+          unavailableItemIdRef.current = itemId;
+          setState((current) =>
+            current?.workspaceId === workspaceId
+              ? {
+                  ...current,
+                  items: current.items.filter((item) => item.id !== itemId),
+                  tree: current.tree.filter((node) => node.target_id !== itemId),
+                  detail: null,
+                }
+              : current,
+          );
+          setAppended((current) => ({
+            ...current,
+            items: current.items.filter((item) => item.id !== itemId),
+          }));
+          navigate(withWorkspaceQuery(workspacePath(routeWorkspaceId, "library"), searchParams), { replace: true });
+          setItemUnavailableNotice(
+            t("errors.itemUnavailable", {
+              defaultValue: "That Library item is no longer available. It was removed from the list.",
+            }),
+          );
+          return;
+        }
+        setError(libraryErrorMessage(exc, t("errors.loadDetail")));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate, route?.targetId, route?.targetKind, routeWorkspaceId, searchParams, setError, setState, state?.detail?.id, state?.workspaceId, t]);
+  const readerDetail = selectedDetail && route?.targetKind === "artifact" && state?.selectedArtifactVersion
+    ? libraryDetailAtArtifactVersion(
+        selectedDetail,
+        state.selectedArtifactVersion,
+        state.selectedArtifact,
+      )
+    : selectedDetail;
   useEffect(() => {
     if (!selectedDetail) {
       return;
@@ -388,147 +577,22 @@ export function LibraryScreen() {
     }
     setErrorActionLink(null);
     setError(null);
-    setSearchParams(
-      updateTreeSearchParams(searchParams, { targetId: libraryItemId }),
-      { replace: true },
-    );
+    setItemUnavailableNotice(null);
+    navigate(workspaceTargetHref(routeWorkspaceId, "library", libraryItemId, "item"), { replace: true });
   }
 
-  useEffect(() => {
-    if (!state?.workspaceId) {
-      return;
-    }
-    const targetNode = requestedTargetId
-      ? (state.tree.find(
-          (node) =>
-            node.id === requestedTargetId ||
-            node.target_id === requestedTargetId,
-        ) ?? null)
-      : null;
-    if (targetNode) {
-      const revealKey = `${state.workspaceId}:${targetNode.id}`;
-      if (revealedRouteTargetRef.current !== revealKey) {
-        revealedRouteTargetRef.current = revealKey;
-        setExpandedNodeIds((current) => {
-          const next = resolveExpandedNodeIds(
-            state.tree,
-            current.join(","),
-            targetNode.id,
-            { defaultMode: "none" },
-          );
-          if (
-            next.length === current.length &&
-            next.every((nodeId, index) => nodeId === current[index])
-          ) {
-            return current;
-          }
-          writeExpandedNodeIdsToStorage("library", next);
-          return next;
-        });
-      }
-    } else {
-      revealedRouteTargetRef.current = null;
-    }
-    if (unavailableTargetIdRef.current) {
-      if (requestedTargetId === unavailableTargetIdRef.current) {
-        return;
-      }
-      unavailableTargetIdRef.current = null;
-    }
-    const selectedItemId = resolveRequestedLibraryItemId(
-      state.items,
-      state.tree,
-      requestedTargetId,
-    );
-    if (localTargetIdRef.current) {
-      if (selectedItemId !== localTargetIdRef.current) {
-        return;
-      }
-      localTargetIdRef.current = null;
-    }
-    if (!selectedItemId) {
-      if (state.detail) {
-        setState((current) =>
-          current ? { ...current, detail: null } : current,
-        );
-      }
-      return;
-    }
-    if (state.detail?.id === selectedItemId) {
-      return;
-    }
-
-    let cancelled = false;
-    setErrorActionLink(null);
-    setError(null);
-    void readLibraryItem(state.workspaceId, selectedItemId)
-      .then((detail) => {
-        if (cancelled) {
-          return;
-        }
-        setState((current) => (current ? { ...current, detail } : current));
-      })
-      .catch((exc) => {
-        if (cancelled) {
-          return;
-        }
-        if (exc instanceof ApiError && exc.status === 404) {
-          unavailableTargetIdRef.current = requestedTargetId ?? selectedItemId;
-          setAppended((current) => ({
-            ...current,
-            items: current.items.filter(
-              (item) => item.id !== selectedItemId,
-            ),
-          }));
-          setState((current) =>
-            current
-              ? {
-                  ...current,
-                  items: current.items.filter(
-                    (item) => item.id !== selectedItemId,
-                  ),
-                  itemsTotal:
-                    current.itemsTotal === null
-                      ? null
-                      : Math.max(0, current.itemsTotal - 1),
-                  tree: current.tree.filter(
-                    (node) => node.target_id !== selectedItemId,
-                  ),
-                  detail: null,
-                }
-              : current,
-          );
-          setSearchParams(
-            (current) =>
-              updateTreeSearchParams(current, { targetId: null }),
-            { replace: true },
-          );
-          setError(
-            t("errors.itemUnavailable", {
-              defaultValue:
-                "That Library item is no longer available. It was removed from the list.",
-            }),
-          );
-          return;
-        }
-        setError(libraryErrorMessage(exc, t("errors.loadDetail")));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [requestedTargetId, setError, setSearchParams, setState, state, t]);
-
-  const selectedProcessingStatus = state?.detail
-    ? libraryProcessingStatus(state.detail)
+  const selectedProcessingStatus = selectedDetail
+    ? libraryProcessingStatus(selectedDetail)
     : null;
   const shouldPollSelectedItem = isPollingStatus(selectedProcessingStatus);
   useEffect(() => {
     const workspaceId = state?.workspaceId;
-    const itemId = state?.detail?.id;
-    const currentVersionId = state?.detail?.current_version?.id ?? null;
+    const itemId = selectedDetail?.id;
+    const currentVersionId = selectedDetail?.current_version?.id ?? null;
     if (!workspaceId || !itemId || !shouldPollSelectedItem) {
       return;
     }
+    if (route?.targetKind === "artifact") return;
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let delayMs = 1_000;
@@ -578,8 +642,9 @@ export function LibraryScreen() {
   }, [
     setState,
     shouldPollSelectedItem,
-    state?.detail?.current_version?.id,
-    state?.detail?.id,
+    route?.targetKind,
+    selectedDetail?.current_version?.id,
+    selectedDetail?.id,
     state?.workspaceId,
   ]);
 
@@ -591,6 +656,13 @@ export function LibraryScreen() {
     if (!state) {
       return;
     }
+    const originRouteIdentity = routeIdentity;
+    if (input.parentNodeId && !state.tree.some(
+      (node) => node.id === input.parentNodeId && node.section === "library" && node.can_have_children,
+    )) {
+      setError(t("errors.folderParentUnavailable", { defaultValue: "The selected folder is unavailable" }));
+      return;
+    }
     clearError();
     const folder = await createTreeFolder(state.workspaceId, {
       parent_id: input.parentNodeId,
@@ -598,17 +670,16 @@ export function LibraryScreen() {
       slug: input.slug,
       title: input.title,
     });
+    if (routeIdentityRef.current !== originRouteIdentity) return;
     const nextExpandedNodeIds = expandNodeIds(
       expandedNodeIds,
       folder.parent_id,
     );
     setStoredExpandedNodeIds(nextExpandedNodeIds);
-    setSearchParams(
-      updateTreeSearchParams(searchParams, {
-        targetId: folder.id,
-      }),
-      { replace: true },
-    );
+    navigate(withWorkspaceQuery(
+      workspaceTargetHref(routeWorkspaceId, "library", folder.id, "folder"),
+      searchParams,
+    ), { replace: true });
     setState((current) =>
       current
         ? {
@@ -710,10 +781,9 @@ export function LibraryScreen() {
   }
 
   function copyTreeNodeLink(node: TreeNodePayload) {
-    const params = updateTreeSearchParams(new URLSearchParams(), {
-      targetId: node.id,
-    });
-    const path = `/library?${params.toString()}`;
+    const path = node.target_kind === "library_item" && node.target_id
+      ? workspaceTargetHref(routeWorkspaceId, "library", node.target_id, "item")
+      : workspaceTargetHref(routeWorkspaceId, "library", node.id, "folder");
     const href =
       typeof window === "undefined" ? path : `${window.location.origin}${path}`;
     void navigator.clipboard?.writeText(href);
@@ -786,6 +856,14 @@ export function LibraryScreen() {
     if (!state || entries.length === 0) {
       return;
     }
+    const originWorkspaceId = state.workspaceId;
+    const originRouteIdentity = routeIdentity;
+    const runGeneration = ++uploadRunGenerationRef.current;
+    const isCurrentRun = () =>
+      uploadRunGenerationRef.current === runGeneration &&
+      uploadWorkspaceIdRef.current === originWorkspaceId &&
+      routeWorkspaceId === originWorkspaceId;
+    const isOriginRoute = () => routeIdentityRef.current === originRouteIdentity;
     setIsUploading(true);
     clearError();
     const failures: { file: File; error: unknown }[] = [];
@@ -826,8 +904,9 @@ export function LibraryScreen() {
           }
         },
         errorMessage: (error) =>
-          libraryUploadError(error, t("errors.upload")).message,
+          libraryUploadError(error, t("errors.upload"), routeWorkspaceId).message,
         onChange: (entry) => {
+          if (!isCurrentRun()) return;
           const failure = entry.status === "failed"
             ? libraryUploadRetryMetadata(errorsById.get(entry.id))
             : null;
@@ -851,29 +930,20 @@ export function LibraryScreen() {
           });
         }
       }
+      if (!isCurrentRun()) return;
       const lastUploaded = Array.from(uploadedById.values()).at(-1) ?? null;
+      const uploadedHref = lastUploaded
+        ? workspaceTargetHref(routeWorkspaceId, "library", lastUploaded.id, "item")
+        : null;
       if (lastUploaded) {
-        const uploaded = lastUploaded;
-        setState((current) =>
-          current
-            ? {
-                ...current,
-                detail: uploaded,
-              }
-            : current,
-        );
-        localTargetIdRef.current = uploaded.id;
-        setSearchParams(
-          updateTreeSearchParams(searchParams, { targetId: uploaded.id }),
-          { replace: true },
-        );
         try {
           const [itemsPage, treeData] = await Promise.all([
             listLibraryItems(state.workspaceId, { limit: pageSize }),
             listTreeData(state.workspaceId, "library"),
           ]);
+          if (!isCurrentRun()) return;
           const tree = treeData.nodes;
-          const libraryTree = libraryExplorerTreeNodes(tree);
+          const selectUploaded = isOriginRoute();
           setState((current) =>
             current
               ? {
@@ -884,18 +954,32 @@ export function LibraryScreen() {
                   itemsHasMore: itemsPage.has_more,
                   tree,
                   treePolicies: treeData.policies,
-                  detail: uploaded,
+                  ...(selectUploaded ? { detail: lastUploaded } : {}),
                 }
               : current,
           );
-          const uploadedNode = libraryTree.find(
-            (node) => node.target_id === uploaded.id,
-          );
-          setStoredExpandedNodeIds(
-            expandNodeIds(expandedNodeIds, uploadedNode?.parent_id ?? null),
-          );
+          if (selectUploaded) {
+            const uploadedNode = libraryExplorerTreeNodes(tree).find(
+              (node) => node.target_id === lastUploaded.id,
+            );
+            setStoredExpandedNodeIds(
+              expandNodeIds(expandedNodeIds, uploadedNode?.parent_id ?? null),
+            );
+          }
         } catch {
+          if (!isCurrentRun()) return;
+          if (isOriginRoute()) {
+            setState((current) =>
+              current ? { ...current, detail: lastUploaded } : current,
+            );
+          }
           setError(
+            t("upload.refreshFailed", {
+              defaultValue:
+                "File upload succeeded, but Library could not be refreshed. Reload to see the latest item.",
+            }),
+          );
+          setUploadNotice(
             t("upload.refreshFailed", {
               defaultValue:
                 "File upload succeeded, but Library could not be refreshed. Reload to see the latest item.",
@@ -903,16 +987,23 @@ export function LibraryScreen() {
           );
         }
       }
+      if (!isCurrentRun()) return;
       if (failures.length > 0) {
         reportUploadFailures(entries.length, failures);
       }
+      if (uploadedHref && isOriginRoute()) {
+        navigate(uploadedHref, { replace: true });
+      }
     } catch (exc) {
-      const uploadError = libraryUploadError(exc, t("errors.upload"));
+      if (!isCurrentRun()) return;
+      const uploadError = libraryUploadError(exc, t("errors.upload"), routeWorkspaceId);
       setErrorActionLink(uploadError.settingsLink);
       setError(uploadError.message);
     } finally {
-      uploadQueueRef.current = null;
-      setIsUploading(false);
+      if (uploadRunGenerationRef.current === runGeneration) {
+        uploadQueueRef.current = null;
+        setIsUploading(false);
+      }
     }
   }
 
@@ -949,16 +1040,19 @@ export function LibraryScreen() {
     failures: { file: File; error: unknown }[],
   ) {
     const uploadErrors = failures.map(({ error }) =>
-      libraryUploadError(error, t("errors.upload")),
+      libraryUploadError(error, t("errors.upload"), routeWorkspaceId),
     );
     setErrorActionLink(
       uploadErrors.find((entry) => entry.settingsLink)?.settingsLink ?? null,
     );
+    setUploadNoticeActionLink(
+      uploadErrors.find((entry) => entry.settingsLink)?.settingsLink ?? null,
+    );
     if (totalCount === 1) {
-      setError(uploadErrors[0].message);
+      setUploadNotice(uploadErrors[0].message);
       return;
     }
-    setError(
+    setUploadNotice(
       t("upload.partialFailure", {
         defaultValue:
           "Failed to upload {{failedCount}} of {{totalCount}} files. {{details}}",
@@ -1006,21 +1100,27 @@ export function LibraryScreen() {
   function clearError() {
     setErrorActionLink(null);
     setError(null);
+    setUploadNoticeActionLink(null);
+    setUploadNotice(null);
   }
 
   function setStoredExpandedNodeIds(nodeIds: string[]) {
     setExpandedNodeIds(nodeIds);
-    writeExpandedNodeIdsToStorage("library", nodeIds);
+    writeExpandedNodeIdsToStorage("library", nodeIds, routeWorkspaceId);
   }
 
   useDocumentTitle(
-    state?.detail ? libraryItemDisplayTitle(state.detail) : null,
+    selectedDetail ? libraryItemDisplayTitle(selectedDetail) : null,
     " - ",
   );
 
-  if (!state) {
+  if (routeNotFoundKey === `${routeWorkspaceId}:${route?.suffix ?? "library"}`) {
+    return <NotFoundScreen />;
+  }
+  if (!state || state.workspaceId !== routeWorkspaceId) {
     return <RouteLoading label={t("loading")} />;
   }
+  const workspaceId = state.workspaceId;
   const libraryTree = libraryExplorerTreeNodes(state.tree);
   const libraryPolicy = state.treePolicies.library;
   const uploadAccept = libraryUploadAccept(state.capabilities);
@@ -1032,23 +1132,41 @@ export function LibraryScreen() {
   // on the same policy.
   const canCreateLibraryFolder =
     canEdit && (libraryPolicy?.allow_user_folder_create ?? false);
-  const detailFormatCapability = state.detail
-    ? findLibraryFormatCapability(state.detail, state.capabilities)
+  const detailFormatCapability = selectedDetail
+    ? findLibraryFormatCapability(selectedDetail, state.capabilities)
     : null;
-  const createDialogParent = createDialog?.parentNodeId
-    ? (libraryTree.find((node) => node.id === createDialog.parentNodeId) ??
-      null)
+  const createItemRoute = Boolean(route?.create && route.section === "library" && route.suffix.endsWith("items/new"));
+  const createFolderRoute = Boolean(route?.create && route.section === "library" && route.suffix.endsWith("folders/new"));
+  const createParentId = searchParams.get("parent");
+  const createDialogParent = createParentId
+    ? libraryTree.find((node) => node.id === createParentId) ?? null
     : null;
+  const createParentValid = !createParentId || Boolean(
+    createDialogParent?.section === "library" && createDialogParent.can_have_children,
+  );
   // F-5: folder destinations the new-folder dialog's location picker can target.
   const libraryFolderNodes = state.tree.filter(
     (node) => node.can_have_children,
   );
-  const selectedNode = requestedTargetId
+  const treeTargetId = route?.targetKind === "artifact"
+    ? selectedDetail?.id ?? null
+    : requestedTargetId;
+  const selectedNode = treeTargetId
     ? (libraryTree.find(
         (node) =>
-          node.id === requestedTargetId || node.target_id === requestedTargetId,
+          node.id === treeTargetId || node.target_id === treeTargetId,
       ) ?? null)
     : null;
+
+  function openCreate(itemType: NewItemType, parentNodeId: string | null) {
+    if (itemType === "upload" && !canCreateLibraryFolder) {
+      pickFiles(parentNodeId);
+      return;
+    }
+    const segment = itemType === "folder" ? "folders" : "items";
+    const query = parentNodeId ? `?parent=${encodeURIComponent(parentNodeId)}` : "";
+    navigate(`${workspacePath(routeWorkspaceId, `library/${segment}/new`)}${query}`);
+  }
 
   function pickFiles(parentNodeId: string | null = null) {
     uploadParentNodeIdRef.current = parentNodeId;
@@ -1073,7 +1191,7 @@ export function LibraryScreen() {
             title={t("libraryName")}
             accent="library"
             nodes={libraryTree}
-            activeTargetId={state.detail?.id}
+            activeTargetId={selectedDetail?.id}
             activeNodeId={selectedNode?.id ?? null}
             expandedNodeIds={expandedNodeIds}
             forceActivePathExpanded={false}
@@ -1097,7 +1215,7 @@ export function LibraryScreen() {
                       pickFiles(parentNodeId);
                       return;
                     }
-                    setCreateDialog({ initialItemType: itemType, parentNodeId });
+                openCreate(itemType, parentNodeId);
                   }
                 : undefined
             }
@@ -1118,10 +1236,10 @@ export function LibraryScreen() {
                 selectLibraryItem(node.target_id);
                 return;
               }
-              setSearchParams(
-                updateTreeSearchParams(searchParams, { targetId: node.id }),
-                { replace: true },
-              );
+              navigate(withWorkspaceQuery(
+                workspaceTargetHref(routeWorkspaceId, "library", node.id, "folder"),
+                searchParams,
+              ), { replace: true });
             }}
           />
         )}
@@ -1152,17 +1270,18 @@ export function LibraryScreen() {
             ) : null}
             <Breadcrumbs
               items={targetBreadcrumbs({
-                basePath: "/library",
+                basePath: workspacePath(workspaceId, "library"),
+                workspaceId,
                 rootLabel: t("libraryName"),
                 nodes: libraryTree,
-                targetId: state.detail?.id,
+                targetId: selectedDetail?.id,
                 targetNodeId: selectedNode?.id,
-                fallbackLabel: state.detail
-                  ? libraryItemDisplayTitle(state.detail)
+                fallbackLabel: selectedDetail
+                  ? libraryItemDisplayTitle(selectedDetail)
                   : undefined,
               })}
             />
-            {!state.detail ? (
+            {!selectedDetail ? (
               <div className="feature-header">
                 <div>
                   <p className="eyebrow">
@@ -1210,21 +1329,21 @@ export function LibraryScreen() {
                 })}
               </StatusBanner>
             ) : null}
-            {error ? (
+            {error || itemUnavailableNotice || uploadNotice ? (
               <StatusBanner
                 tone="warning"
                 action={
-                  errorActionLink ? (
+                  (errorActionLink ?? uploadNoticeActionLink) ? (
                     <Link
                       className="icon-button text-button"
-                      to={errorActionLink}
+                      to={errorActionLink ?? uploadNoticeActionLink!}
                     >
                       {t("upload.openPolicySettings")}
                     </Link>
                   ) : undefined
                 }
               >
-                {error}
+                {error ?? itemUnavailableNotice ?? uploadNotice}
               </StatusBanner>
             ) : null}
             <UploadStatusRegion
@@ -1233,11 +1352,12 @@ export function LibraryScreen() {
               onCancel={cancelUpload}
               onRetry={retryUpload}
             />
-            {!state.detail ? (
+            {!selectedDetail ? (
               overviewItems.length === 0 ? (
                 <LibraryList
                   activeId={null}
                   onSelect={selectLibraryItem}
+                  workspaceId={routeWorkspaceId}
                   onUpload={
                     canUpload ? () => pickFiles() : undefined
                   }
@@ -1314,8 +1434,8 @@ export function LibraryScreen() {
               canEdit={canEdit}
               canUpload={canUpload}
               capabilities={state.capabilities}
-              detail={state.detail}
-              key={`${state.workspaceId}:${state.detail?.id ?? "none"}:${state.detail?.current_version?.id ?? "none"}`}
+              detail={readerDetail}
+              key={`${state.workspaceId}:${readerDetail?.id ?? "none"}:${readerDetail?.current_version?.id ?? "none"}`}
               workspaceId={state.workspaceId}
               previewKind={detailFormatCapability?.preview_kind ?? null}
               onConversionRetried={(retriedDetail) => {
@@ -1333,8 +1453,8 @@ export function LibraryScreen() {
                 );
               }}
               onDelete={() => {
-                if (state.detail) {
-                  setDeleteItem(state.detail);
+                if (selectedDetail) {
+                  setDeleteItem(selectedDetail);
                 }
               }}
               onVersionAdded={(updatedDetail) => {
@@ -1350,26 +1470,27 @@ export function LibraryScreen() {
           </section>
         }
         inspector={
-          state.detail ? <LibraryInspector detail={state.detail} /> : undefined
+          readerDetail ? <LibraryInspector detail={readerDetail} /> : undefined
         }
       />
-      {createDialog ? (
+      {(createItemRoute || createFolderRoute) && canEdit && createParentValid ? (
         <NewItemDialog
+          key={`${location.pathname}?${searchParams.toString()}`}
           canCreateFolder={libraryPolicy?.allow_user_folder_create ?? false}
           canCreatePage={false}
           canUpload={canUpload}
           typeOrder={LIBRARY_NEW_ITEM_TYPE_ORDER}
           uploadAccept={uploadAccept}
-          initialItemType={
-            canUpload && createDialog.initialItemType !== "folder"
-              ? "upload"
-              : createDialog.initialItemType
-          }
-          initialParentId={createDialog.parentNodeId ?? ""}
+          initialItemType={createFolderRoute ? "folder" : "upload"}
+          initialParentId={createParentId ?? ""}
           parentLabel={createDialogParent?.title ?? t("libraryName")}
           parentNodes={libraryFolderNodes}
           rootLabel={t("libraryName")}
-          onClose={() => setCreateDialog(null)}
+          onClose={(reason) => {
+            if (reason === "cancel" || createItemRoute) {
+              navigate(withWorkspaceQuery(workspacePath(routeWorkspaceId, "library"), searchParams), { replace: true });
+            }
+          }}
           onPickFiles={(files, parentNodeId) =>
             uploadFiles(files, parentNodeId)
           }
@@ -1422,11 +1543,7 @@ export function LibraryScreen() {
           onDeleted={() => {
             const deletedId = deleteItem.id;
             setDeleteItem(null);
-            unavailableTargetIdRef.current = requestedTargetId ?? deletedId;
-            setSearchParams(
-              updateTreeSearchParams(searchParams, { targetId: null }),
-              { replace: true },
-            );
+            navigate(withWorkspaceQuery(workspacePath(routeWorkspaceId, "library"), searchParams), { replace: true });
             // Drop every cached occurrence before the route update commits.
             // The overview has a separate Load-more accumulator, so filtering
             // only the first page leaves a dead selectable row behind when the
@@ -1696,7 +1813,7 @@ function LibraryDeleteDialog({
             <ul className="library-reference-list">
               {references!.map((reference) => (
                 <li key={reference.id}>
-                  <Link to={`/workspaces/${workspaceId}/context/pages/${reference.id}`}>
+                  <Link to={contextPageHref(workspaceId, reference.id)}>
                     {reference.title ?? reference.slug}
                   </Link>
                 </li>
@@ -1754,7 +1871,7 @@ class LibraryUploadValidationError extends Error {
   }
 }
 
-function libraryUploadError(exc: unknown, fallback: string) {
+function libraryUploadError(exc: unknown, fallback: string, workspaceId: string) {
   if (
     exc instanceof ApiError &&
     (exc.body.error_code === "library_upload_too_large" ||
@@ -1762,7 +1879,7 @@ function libraryUploadError(exc: unknown, fallback: string) {
   ) {
     return {
       message: exc.message,
-      settingsLink: exc.body.settings_link ?? "/settings?section=library",
+      settingsLink: exc.body.settings_link ?? `${workspacePath(workspaceId, "settings")}?section=library`,
     };
   }
   return {
@@ -1776,11 +1893,13 @@ function LibraryList({
   activeId,
   onSelect,
   onUpload,
+  workspaceId,
 }: {
   items: LibraryItemSummary[];
   activeId: string | null;
   onSelect: (libraryItemId: string) => void;
   onUpload?: () => void;
+  workspaceId: string;
 }) {
   const { t } = useTranslation("library");
   if (items.length === 0) {
@@ -1807,7 +1926,7 @@ function LibraryList({
               })}
             </button>
           ) : null}
-          <Link className="icon-button text-button" to="/context">
+          <Link className="icon-button text-button" to={workspacePath(workspaceId, "context")}>
             {t("overview.openContext", { defaultValue: "Open Context" })}
           </Link>
         </div>
@@ -2212,7 +2331,7 @@ function LibraryAddVersionAction({
       setStatus("idle");
       onVersionAdded(updated);
     } catch (exc) {
-      const uploadError = libraryUploadError(exc, t("errors.upload"));
+      const uploadError = libraryUploadError(exc, t("errors.upload"), workspaceId);
       setStatus("failed");
       setError(uploadError.message);
       setErrorActionLink(uploadError.settingsLink);
@@ -2839,6 +2958,25 @@ function resolveRequestedLibraryItemId(
   }
   // No matching node: treat the target as a bare library-item id deep link.
   return requestedTargetId;
+}
+
+function libraryDetailAtArtifactVersion(
+  detail: LibraryItemDetail,
+  version: LibraryItemVersionPayload,
+  artifact: LibraryArtifactPayload | null,
+): LibraryItemDetail {
+  return {
+    ...detail,
+    current_version: version,
+    current_version_id: version.id,
+    current_ready_version: null,
+    current_ready_version_id: null,
+    current_preview_version_id: version.id,
+    versions: [...detail.versions.filter((item) => item.id !== version.id), version],
+    artifacts: artifact
+      ? [...detail.artifacts.filter((item) => item.id !== artifact.id), artifact]
+      : detail.artifacts,
+  };
 }
 
 function selectableMoveTargets(

@@ -23,7 +23,7 @@ import {
   type McpChatSessionRef,
   type McpChatSort,
 } from "../../shared/api/operations";
-import { getCurrentWorkspaceId } from "../../shared/api/workspace";
+import { useRouteWorkspaceId, workspacePath } from "../../shared/lib/workspaceRoutes";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { CountChip } from "../../shared/components/CountChip";
 import { RelativeTime } from "../../shared/components/RelativeTime";
@@ -54,6 +54,7 @@ const SORTS: McpChatSort[] = ["last_activity_desc", "write_count_desc"];
 const SEARCH_AUTO_ADVANCE_MAX_HOPS = 8;
 
 export function ChatsListScreen() {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const { t, i18n } = useTranslation("chats");
   const location = useLocation();
   const navigate = useNavigate();
@@ -95,16 +96,14 @@ export function ChatsListScreen() {
     chats: McpChatListData;
   }>(
     async () => {
-      const workspaceId = await getCurrentWorkspaceId();
-      if (!workspaceId) {
-        throw new Error(t("errors.workspaceNotFound"));
-      }
+      const workspaceId = routeWorkspaceId;
       return {
         workspaceId,
         chats: await listMcpChats(workspaceId, filters),
       };
     },
     [
+      routeWorkspaceId,
       filters.q,
       filters.client,
       filters.period,
@@ -126,9 +125,10 @@ export function ChatsListScreen() {
         safeChatErrorMessage(caught, fallback, [t("errors.workspaceNotFound")]),
     },
   );
-  useScreenEntryRefresh("/chats", reload, {
+  useScreenEntryRefresh(workspacePath(routeWorkspaceId, "chats"), reload, {
     readArrivalNotice: readArchiveSuccess,
     queryDeps: [
+      routeWorkspaceId,
       filters.q,
       filters.client,
       filters.period,
@@ -829,13 +829,14 @@ function ConversationGroup({ chats }: { chats: McpChatSessionRef[] }) {
 }
 
 function ChatCard({ chat }: { chat: McpChatSessionRef }) {
+  const workspaceId = useRouteWorkspaceId();
   const { t, i18n } = useTranslation("chats");
   const artifactHint = linkedArtifactHint(chat.linked_artifacts, t);
   const summaryLine = chatSummaryLine(chat);
   const failures = chatFailureCounts(chat);
   const title = chatPresentationLine(chat, t);
   return (
-    <Link className="mcp-chat-card" to={`/chats/${chat.id}`}>
+    <Link className="mcp-chat-card" to={workspacePath(workspaceId, `chats/${chat.id}`)}>
       <ClientChip client={chat.client} />
       <div className="mcp-chat-card-body">
         <div className="mcp-chat-card-header">
@@ -979,6 +980,7 @@ function ChatsEmptyState({
   onReset: () => void;
 }) {
   const { t } = useTranslation("chats");
+  const routeWorkspaceId = useRouteWorkspaceId();
   if (writesOnly) {
     return (
       <div className="empty-state empty-state-rich">
@@ -1023,7 +1025,7 @@ function ChatsEmptyState({
       <h2>{t("empty.zeroTitle")}</h2>
       <p>{t("empty.zeroBody")}</p>
       <div className="empty-state-actions">
-        <Link className="icon-button text-button" to="/settings/integrations">
+        <Link className="icon-button text-button" to={workspacePath(routeWorkspaceId, "settings/integrations")}>
           {t("empty.openMcpSetup")}
         </Link>
       </div>

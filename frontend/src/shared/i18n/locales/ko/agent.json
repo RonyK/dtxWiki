@@ -52,7 +52,8 @@
     "moveTreeNode": "Agent 트리 노드를 이동하지 못했습니다",
     "refreshTree": "Agent 트리를 새로 고치지 못했습니다",
     "reorderTreeNode": "Agent 트리 노드 순서를 변경하지 못했습니다",
-    "itemUnavailable": "해당 Agent 페이지를 더 이상 사용할 수 없어 목록에서 제거했습니다."
+    "itemUnavailable": "해당 Agent 페이지를 더 이상 사용할 수 없어 목록에서 제거했습니다.",
+    "folderParentUnavailable": "이 Workspace에서 상위 폴더를 찾을 수 없습니다."
   },
   "labels": {
     "unset": "미설정",

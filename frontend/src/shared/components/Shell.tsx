@@ -44,6 +44,8 @@ import { domainLabel } from "../lib/domainLabel";
 import { inputTextError, textInputLimit, trimShortText } from "../lib/inputPolicy";
 import { SEARCH_QUERY_MAX_LENGTH } from "../lib/searchLimits";
 import { searchResultHref } from "../lib/searchResultHref";
+import { isValidWorkspaceRoute, legacyWorkspaceEntry, parseWorkspaceRoute, workspacePath, workspaceSwitchHref } from "../lib/workspaceRoutes";
+import { NotFoundScreen } from "../../features/errors/NotFoundScreen";
 import { trapTabFocus } from "../lib/trapTabFocus";
 import { isEditorRole } from "../workspace/permissions";
 import {
@@ -422,6 +424,10 @@ export function Shell({ children }: ShellProps) {
     : "app-shell app-shell-public";
   const shellLabels = useMemo(() => shellLabelsFromT(t), [t]);
   const workspaceContext = useOptionalWorkspaceContext();
+  const routeWorkspaceId = parseWorkspaceRoute(location.pathname)?.workspaceId ?? null;
+  // Account routes carry no workspace; the sidebar still links to explicit
+  // workspace URLs for the selected membership instead of dead-ending.
+  const navigationWorkspaceId = routeWorkspaceId ?? workspaceContext?.selectedWorkspace?.id ?? null;
   const { preferences: labsPreferences } = useLabsPreferences();
   const selectedRole = workspaceContext?.selectedWorkspace?.role;
   const canWriteSelectedWorkspace = isEditorRole(selectedRole);
@@ -443,9 +449,18 @@ export function Shell({ children }: ShellProps) {
         (item.key !== "chats" || !hideChatsNav) &&
         (item.key !== "agent" || labsPreferences.agent) &&
         (item.key !== "ask" || labsPreferences.ask),
-      ),
+      ).map((item) => ({
+        ...item,
+        to: navigationWorkspaceId
+          ? workspacePath(navigationWorkspaceId, item.to)
+          : item.key === "inbox"
+            ? "/inbox"
+            : item.key === "settings"
+              ? "/account/integrations"
+              : "/workspaces/find",
+      })),
     }));
-  }, [hideChatsNav, labsPreferences.agent, labsPreferences.ask, shellLabels]);
+  }, [hideChatsNav, labsPreferences.agent, labsPreferences.ask, shellLabels, navigationWorkspaceId]);
 
   function closeMobileNav() {
     restoreMobileNavFocusRef.current = true;
@@ -520,7 +535,7 @@ export function Shell({ children }: ShellProps) {
             // is no workspace-agnostic surface to send an authenticated
             // reader to. Signed out, the glyph+name stay plain: /dashboard
             // would only bounce them straight to /login.
-            <Link className="topbar-brand-link" to="/dashboard">
+            <Link className="topbar-brand-link" to={navigationWorkspaceId ? workspacePath(navigationWorkspaceId, "dashboard") : "/workspaces/find"}>
               <PrismGlyph />
               <span className="brand-name">dtxWiki</span>
             </Link>
@@ -542,7 +557,7 @@ export function Shell({ children }: ShellProps) {
         {/* Remount to clear previews and abort requests when Agent visibility changes. */}
         {isAuthenticated ? (
           <CommandSearchBox
-            key={String(labsPreferences.agent)}
+            key={`${routeWorkspaceId}:${String(labsPreferences.agent)}`}
             includeAgents={labsPreferences.agent}
             labels={shellLabels}
             navGroups={navGroups}
@@ -581,7 +596,7 @@ export function Shell({ children }: ShellProps) {
                   defaultValue: "Open Search",
                 })}
                 className="icon-button mobile-search-link"
-                to="/search"
+                to={navigationWorkspaceId ? workspacePath(navigationWorkspaceId, "search") : "/workspaces/find"}
                 title={t("topbar.searchTitle", { defaultValue: "Search" })}
               >
                 <Search size={16} aria-hidden="true" />
@@ -589,7 +604,7 @@ export function Shell({ children }: ShellProps) {
               <NavLink
                 aria-label={t("topbar.inbox", { defaultValue: "Inbox" })}
                 className="icon-button"
-                to="/inbox"
+                to={navigationWorkspaceId ? workspacePath(navigationWorkspaceId, "inbox") : "/inbox"}
                 title={t("topbar.inbox", { defaultValue: "Inbox" })}
               >
                 <Inbox size={16} aria-hidden="true" />
@@ -597,7 +612,7 @@ export function Shell({ children }: ShellProps) {
               <NavLink
                 aria-label={t("topbar.settings", { defaultValue: "Settings" })}
                 className="icon-button"
-                to="/settings"
+                to={navigationWorkspaceId ? workspacePath(navigationWorkspaceId, "settings") : "/account/integrations"}
                 title={t("topbar.settings", { defaultValue: "Settings" })}
               >
                 <Settings size={16} aria-hidden="true" />
@@ -680,7 +695,7 @@ export function Shell({ children }: ShellProps) {
             : "main-surface"
         }
         id="main-content"
-        key={workspaceRouteVersion}
+        key={`${routeWorkspaceId ?? "global"}:${workspaceRouteVersion}`}
         ref={backgroundInertRef}
         tabIndex={-1}
       >
@@ -725,47 +740,65 @@ function WorkspaceRouteBoundary({ children }: { children: ReactNode }) {
     selectWorkspaceId,
     workspaces,
   } = useWorkspaceContext();
+  const route = parseWorkspaceRoute(location.pathname);
+  const routeKey = route ? `${location.key}:${route.workspaceId}` : null;
+  const validRoute = Boolean(route && isValidWorkspaceRoute(route, location.search));
+  const [lastAttemptedRefreshKey, setLastAttemptedRefreshKey] = useState<string | null>(null);
+  const [refreshingRouteKey, setRefreshingRouteKey] = useState<string | null>(null);
+  const shouldRefreshUnknownRoute = Boolean(
+    route && validRoute && routeKey && initialized && !loading && !error &&
+    selectedWorkspace?.id !== route.workspaceId && lastAttemptedRefreshKey !== routeKey,
+  );
   const normalizedPathname = location.pathname.replace(/\/+$/, "") || "/";
-  const workspaceIndependentRoute =
-    normalizedPathname === "/account" ||
-    normalizedPathname === "/account/password" ||
-    normalizedPathname === "/workspaces/find";
+  const isLegacyWorkspaceLanding = legacyWorkspaceEntry(location.pathname, "") !== null;
+  const workspaceIndependentRoute = [
+    "/account", "/account/password", "/account/integrations", "/settings/server",
+    "/workspaces/find", "/inbox", "/auth/verify", "/login", "/forgot-password",
+    "/reset-password", "/verify-email", "/p",
+  ].includes(normalizedPathname) || isLegacyWorkspaceLanding || normalizedPathname.startsWith("/p/");
 
-  if (workspaceIndependentRoute || selectedWorkspace) {
-    return children;
+  useEffect(() => {
+    if (!shouldRefreshUnknownRoute || !routeKey) return;
+    setLastAttemptedRefreshKey(routeKey);
+    setRefreshingRouteKey(routeKey);
+    void refreshWorkspaces().finally(() => {
+      setRefreshingRouteKey((current) => current === routeKey ? null : current);
+    });
+  }, [refreshWorkspaces, routeKey, shouldRefreshUnknownRoute]);
+
+  if (normalizedPathname.startsWith("/workspaces/") && !route && normalizedPathname !== "/workspaces/find") {
+    return <NotFoundScreen />;
   }
+  if (route) {
+    if (!validRoute) return <NotFoundScreen />;
+    if (initialized && selectedWorkspace?.id === route.workspaceId) return children;
+    if (loading || !initialized || shouldRefreshUnknownRoute || refreshingRouteKey === routeKey) {
+      return <RouteLoading label={t("workspaceResolution.loading", { defaultValue: "Loading workspaces" })} />;
+    }
+    if (error) {
+      return (
+        <section className="workspace-resolution-card">
+          <StatusBanner tone="warning">{error}</StatusBanner>
+          <button className="icon-button" data-testid="workspace-resolution-retry" onClick={() => void refreshWorkspaces()} type="button">
+            {t("workspaceResolution.retry", { defaultValue: "Retry" })}
+          </button>
+        </section>
+      );
+    }
+    return <NotFoundScreen />;
+  }
+
+  if (workspaceIndependentRoute || selectedWorkspace) return children;
   if (loading || !initialized) {
-    return (
-      <RouteLoading
-        label={t("workspaceResolution.loading", {
-          defaultValue: "Loading workspaces",
-        })}
-      />
-    );
+    return <RouteLoading label={t("workspaceResolution.loading", { defaultValue: "Loading workspaces" })} />;
   }
   if (error) {
     return (
-      <section
-        aria-labelledby="workspace-resolution-error-title"
-        className="workspace-resolution-card"
-      >
-        <p className="eyebrow">
-          {t("workspaceResolution.eyebrow", {
-            defaultValue: "Workspace access",
-          })}
-        </p>
-        <h1 id="workspace-resolution-error-title">
-          {t("workspaceResolution.loadErrorTitle", {
-            defaultValue: "Could not load your workspaces",
-          })}
-        </h1>
+      <section aria-labelledby="workspace-resolution-error-title" className="workspace-resolution-card">
+        <p className="eyebrow">{t("workspaceResolution.eyebrow", { defaultValue: "Workspace access" })}</p>
+        <h1 id="workspace-resolution-error-title">{t("workspaceResolution.loadErrorTitle", { defaultValue: "Could not load your workspaces" })}</h1>
         <StatusBanner tone="warning">{error}</StatusBanner>
-        <button
-          className="icon-button primary"
-          data-testid="workspace-resolution-retry"
-          onClick={() => void refreshWorkspaces()}
-          type="button"
-        >
+        <button className="icon-button primary" data-testid="workspace-resolution-retry" onClick={() => void refreshWorkspaces()} type="button">
           {t("workspaceResolution.retry", { defaultValue: "Retry" })}
         </button>
       </section>
@@ -773,45 +806,14 @@ function WorkspaceRouteBoundary({ children }: { children: ReactNode }) {
   }
   if (workspaces.length === 0) {
     return (
-      <section
-        aria-labelledby="workspace-resolution-empty-title"
-        className="workspace-resolution-card"
-      >
-        <p className="eyebrow">
-          {t("workspaceResolution.eyebrow", {
-            defaultValue: "Workspace access",
-          })}
-        </p>
-        <h1 id="workspace-resolution-empty-title">
-          {t("workspaceResolution.emptyTitle", {
-            defaultValue: "Find or create a workspace",
-          })}
-        </h1>
-        <p>
-          {t("workspaceResolution.emptyDescription", {
-            defaultValue:
-              "This account has no workspace membership. Find a workspace to join, or create one from the workspace switcher.",
-          })}
-        </p>
-        <p className="meta-line">
-          {t("workspaceResolution.emptySupport", {
-            defaultValue:
-              "If access was just granted, retry to refresh your workspace list.",
-          })}
-        </p>
+      <section aria-labelledby="workspace-resolution-empty-title" className="workspace-resolution-card">
+        <p className="eyebrow">{t("workspaceResolution.eyebrow", { defaultValue: "Workspace access" })}</p>
+        <h1 id="workspace-resolution-empty-title">{t("workspaceResolution.emptyTitle", { defaultValue: "Find or create a workspace" })}</h1>
+        <p>{t("workspaceResolution.emptyDescription", { defaultValue: "This account has no workspace membership. Find a workspace to join, or create one from the workspace switcher." })}</p>
+        <p className="meta-line">{t("workspaceResolution.emptySupport", { defaultValue: "If access was just granted, retry to refresh your workspace list." })}</p>
         <div className="workspace-resolution-actions">
-          <button
-            className="icon-button"
-            onClick={() => void refreshWorkspaces()}
-            type="button"
-          >
-            {t("workspaceResolution.retry", { defaultValue: "Retry" })}
-          </button>
-          <Link className="icon-button primary" to="/workspaces/find">
-            {t("workspaceResolution.find", {
-              defaultValue: "Find workspaces",
-            })}
-          </Link>
+          <button className="icon-button" onClick={() => void refreshWorkspaces()} type="button">{t("workspaceResolution.retry", { defaultValue: "Retry" })}</button>
+          <Link className="icon-button primary" to="/workspaces/find">{t("workspaceResolution.find", { defaultValue: "Find workspaces" })}</Link>
         </div>
       </section>
     );
@@ -823,56 +825,22 @@ function WorkspaceRouteBoundary({ children }: { children: ReactNode }) {
   }
 
   return (
-    <section
-      aria-labelledby="workspace-resolution-picker-title"
-      className="workspace-resolution-card"
-    >
-      <p className="eyebrow">
-        {t("workspaceResolution.eyebrow", {
-          defaultValue: "Workspace access",
-        })}
-      </p>
-      <h1 id="workspace-resolution-picker-title">
-        {t("workspaceResolution.chooseTitle", {
-          defaultValue: "Choose a workspace",
-        })}
-      </h1>
-      <p>
-        {t("workspaceResolution.chooseDescription", {
-          defaultValue:
-            "This account has more than one membership and no saved workspace preference. Choose where to continue.",
-        })}
-      </p>
+    <section aria-labelledby="workspace-resolution-picker-title" className="workspace-resolution-card">
+      <p className="eyebrow">{t("workspaceResolution.eyebrow", { defaultValue: "Workspace access" })}</p>
+      <h1 id="workspace-resolution-picker-title">{t("workspaceResolution.chooseTitle", { defaultValue: "Choose a workspace" })}</h1>
+      <p>{t("workspaceResolution.chooseDescription", { defaultValue: "This account has more than one membership and no saved workspace preference. Choose where to continue." })}</p>
       <ul className="workspace-resolution-list">
         {workspaces.map((workspace) => (
           <li key={workspace.id}>
-            <button
-              className="workspace-resolution-option"
-              onClick={() => chooseWorkspace(workspace)}
-              type="button"
-            >
-              <span className="workspace-initials">
-                {workspaceInitials(workspace.title)}
-              </span>
+            <button className="workspace-resolution-option" onClick={() => chooseWorkspace(workspace)} type="button">
+              <span className="workspace-initials">{workspaceInitials(workspace.title)}</span>
               <span>
                 <strong>{workspace.title}</strong>
                 <small>
-                  {t(`status.${workspace.role ?? "member"}`, {
-                    defaultValue: workspace.role ?? "member",
-                  })}
+                  {t(`status.${workspace.role ?? "member"}`, { defaultValue: workspace.role ?? "member" })}
                   {" · "}
-                  {t(`status.${workspace.visibility}`, {
-                    defaultValue: workspace.visibility,
-                  })}
-                  {workspace.owner_display_name ? (
-                    <>
-                      {" · "}
-                      {t("workspace.ownedBy", {
-                        defaultValue: "Owned by {{name}}",
-                        name: workspace.owner_display_name,
-                      })}
-                    </>
-                  ) : null}
+                  {t(`status.${workspace.visibility}`, { defaultValue: workspace.visibility })}
+                  {workspace.owner_display_name ? <>{" · "}{t("workspace.ownedBy", { defaultValue: "Owned by {{name}}", name: workspace.owner_display_name })}</> : null}
                 </small>
               </span>
             </button>
@@ -894,7 +862,7 @@ function CommandSearchBox({
 }) {
   const navigate = useNavigate();
   const { t: tSearch } = useTranslation("search");
-  const { selectedId } = useWorkspaceContext();
+  const selectedId = parseWorkspaceRoute(useLocation().pathname)?.workspaceId ?? "";
   const containerRef = useRef<HTMLFormElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const isApple = useMemo(() => isApplePlatform(), []);
@@ -926,18 +894,18 @@ function CommandSearchBox({
           ? labels.searchFor(trimmedQuery)
           : labels.openSearch,
         to: trimmedQuery
-          ? `/search?q=${encodeURIComponent(trimmedQuery)}`
-          : "/search",
+          ? selectedId ? `${workspacePath(selectedId, "search")}?q=${encodeURIComponent(trimmedQuery)}` : "/workspaces/find"
+          : selectedId ? workspacePath(selectedId, "search") : "/workspaces/find",
         group: labels.nav.search,
       },
     ];
-  }, [labels, navGroups, trimmedQuery]);
+  }, [labels, navGroups, trimmedQuery, selectedId]);
   const previewOptions = useMemo(
     () =>
       previewResults
-        .filter((result) => Boolean(searchResultHref(result)))
+        .filter((result) => Boolean(searchResultHref(result, selectedId)))
         .map((result) => ({ kind: "preview" as const, result })),
-    [previewResults],
+    [previewResults, selectedId],
   );
   const selectableOptions = useMemo<CommandSearchOption[]>(
     () => [
@@ -1055,7 +1023,7 @@ function CommandSearchBox({
   }
 
   function submitToSearch() {
-    navigate(`/search?q=${encodeURIComponent(trimmedQuery)}`);
+    navigate(selectedId ? `${workspacePath(selectedId, "search")}?q=${encodeURIComponent(trimmedQuery)}` : "/workspaces/find");
     setOpen(false);
     setQuery("");
     setPreviewResults([]);
@@ -1072,7 +1040,7 @@ function CommandSearchBox({
   }
 
   function openPreviewResult(result: RankedSearchResult) {
-    const href = searchResultHref(result);
+    const href = searchResultHref(result, selectedId);
     if (!href) {
       return;
     }
@@ -1167,7 +1135,7 @@ function CommandSearchBox({
                 <div className="command-empty">{labels.searching}</div>
               ) : previewResults.length > 0 ? (
                 previewResults.map((result) => {
-                  const href = searchResultHref(result);
+                  const href = searchResultHref(result, selectedId);
                   const optionIndex = selectableOptions.findIndex(
                     (option) =>
                       option.kind === "preview" && option.result === result,
@@ -1280,6 +1248,7 @@ const CREATE_MENU_TRIGGER_ID = "shell-create-menu-trigger";
 const CREATE_MENU_ID = "shell-create-menu";
 
 function CreateMenu({ labels }: { labels: ShellLabels }) {
+  const workspaceId = parseWorkspaceRoute(useLocation().pathname)?.workspaceId ?? null;
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -1430,7 +1399,7 @@ function CreateMenu({ labels }: { labels: ShellLabels }) {
             onClick={() => closeMenu()}
             role="menuitem"
             tabIndex={-1}
-            to="/context/new?from=context"
+            to={workspaceId ? workspacePath(workspaceId, "context/pages/new") : "/workspaces/find"}
           >
             <FileText size={15} aria-hidden="true" />
             <span>{labels.newContextPage}</span>
@@ -1440,7 +1409,7 @@ function CreateMenu({ labels }: { labels: ShellLabels }) {
             onClick={() => closeMenu()}
             role="menuitem"
             tabIndex={-1}
-            to="/context?newFolder=1"
+            to={workspaceId ? workspacePath(workspaceId, "context/folders/new") : "/workspaces/find"}
           >
             <FolderPlus size={15} aria-hidden="true" />
             <span>{labels.newFolder}</span>
@@ -1450,7 +1419,7 @@ function CreateMenu({ labels }: { labels: ShellLabels }) {
             onClick={() => closeMenu()}
             role="menuitem"
             tabIndex={-1}
-            to="/setup"
+            to={workspaceId ? workspacePath(workspaceId, "setup") : "/workspaces/find"}
           >
             <Library size={15} aria-hidden="true" />
             <span>{labels.addLibraryItem}</span>
@@ -1590,6 +1559,7 @@ function WorkspaceControls({
     const requestGeneration = ++createRequestGenerationRef.current;
 
     if (intent.kind === "select") {
+      if (parseWorkspaceRoute(location.pathname)?.workspaceId !== intent.workspaceId) return;
       const workspace =
         workspaces.find((candidate) => candidate.id === intent.workspaceId) ??
         null;
@@ -1621,6 +1591,7 @@ function WorkspaceControls({
           return;
         }
         addWorkspace(created);
+        navigate(workspacePath(created.id, "dashboard"), { replace: true });
         setNewWorkspaceTitle("");
         setWorkspacePurpose(WORKSPACE_PURPOSE_PRESETS[0].key);
         onWorkspaceLocaleChange(created.default_language);
@@ -1690,7 +1661,7 @@ function WorkspaceControls({
     // workspace-neutral landing page instead of retaining a stale deep link.
     // Selection is intentionally deferred until that navigation commits: a
     // dirty editor can cancel the transition without any workspace side effect.
-    navigate("/dashboard", {
+    navigate(workspaceSwitchHref(workspaceId, location.pathname), {
       replace: true,
       state: workspaceNavigationState({
         kind: "select",
@@ -1750,7 +1721,7 @@ function WorkspaceControls({
       ) ?? WORKSPACE_PURPOSE_PRESETS[0];
     // Creating is also a post-commit effect. Otherwise cancelling a dirty-page
     // blocker would still leave a newly-created server workspace behind.
-    navigate("/dashboard", {
+    navigate("/workspaces/find", {
       state: workspaceNavigationState({
         goal: purpose.goal,
         kind: "create",
@@ -1879,111 +1850,61 @@ function WorkspaceControls({
                 </p>
                 <div role="list">
                   {visibleWorkspaces.map((workspace) => (
-                    <div
-                      className="workspace-menu-row"
-                      key={workspace.id}
-                      role="listitem"
-                    >
+                    <div className="workspace-menu-row" key={workspace.id} role="listitem">
                       <button
                         aria-pressed={workspace.id === selectedId}
-                        className={`workspace-menu-item ${
-                          workspace.id === selectedId ? "active" : ""
-                        }`}
+                        className={`workspace-menu-item ${workspace.id === selectedId ? "active" : ""}`}
                         onClick={() => selectWorkspace(workspace.id)}
                         type="button"
                       >
-                        <span className="workspace-initials">
-                          {workspaceInitials(workspace.title)}
-                        </span>
+                        <span className="workspace-initials">{workspaceInitials(workspace.title)}</span>
                         <span className="workspace-menu-item-copy">
                           <strong>{workspace.title}</strong>
                           <small className="workspace-menu-meta">
                             {workspace.owner_display_name ? (
-                              <span>
-                                {t("workspace.ownedBy", {
-                                  defaultValue: "Owned by {{name}}",
-                                  name: workspace.owner_display_name,
-                                })}
-                              </span>
+                              <span>{t("workspace.ownedBy", { defaultValue: "Owned by {{name}}", name: workspace.owner_display_name })}</span>
                             ) : null}
-                            <span>
-                              {t(`status.${workspace.role ?? "member"}`, {
-                                defaultValue: workspace.role ?? "member",
-                              })}
-                            </span>
-                            <span>
-                              {t(`status.${workspace.visibility}`, {
-                                defaultValue: workspace.visibility,
-                              })}
-                            </span>
+                            <span>{t(`status.${workspace.role ?? "member"}`, { defaultValue: workspace.role ?? "member" })}</span>
+                            <span>{t(`status.${workspace.visibility}`, { defaultValue: workspace.visibility })}</span>
                             {(workspace.member_count ?? 0) >= 2 ? (
-                              <span>
-                                {t("workspace.memberCount", {
-                                  count: workspace.member_count,
-                                  defaultValue:
-                                    "Shared · {{count}} members",
-                                })}
-                              </span>
+                              <span>{t("workspace.memberCount", { count: workspace.member_count, defaultValue: "Shared · {{count}} members" })}</span>
                             ) : null}
                             {workspace.id === defaultWorkspaceId ? (
                               <span className="workspace-default-mini-badge">
-                                <CheckCircle2
-                                  size={10}
-                                  aria-hidden="true"
-                                />
-                                {t("workspace.defaultBadge", {
-                                  defaultValue: "Default",
-                                })}
+                                <CheckCircle2 size={10} aria-hidden="true" />
+                                {t("workspace.defaultBadge", { defaultValue: "Default" })}
                               </span>
                             ) : null}
                           </small>
                         </span>
                       </button>
                       <div
-                        aria-label={t("workspace.rowActions", {
-                          defaultValue: "Actions for {{title}}",
-                          title: workspace.title,
-                        })}
+                        aria-label={t("workspace.rowActions", { defaultValue: "Actions for {{title}}", title: workspace.title })}
                         className="workspace-menu-item-actions"
                         role="group"
                       >
                         <Link
-                          state={workspaceRouteNavigationState(
-                            workspace.id,
-                            "settings",
-                          )}
-                          to="/settings?section=workspace"
+                          state={workspaceRouteNavigationState(workspace.id, "settings")}
+                          to={workspacePath(workspace.id, "settings")}
                         >
                           <Settings aria-hidden="true" size={12} />
-                          {t("workspace.settingsAction", {
-                            defaultValue: "Settings",
-                          })}
+                          {t("workspace.settingsAction", { defaultValue: "Settings" })}
                         </Link>
                         {workspace.role === "owner" ? (
                           <Link
-                            state={workspaceRouteNavigationState(
-                              workspace.id,
-                              "sharing",
-                            )}
-                            to="/settings?section=access-sharing"
+                            state={workspaceRouteNavigationState(workspace.id, "sharing")}
+                            to={`${workspacePath(workspace.id, "settings/integrations")}?section=access-sharing`}
                           >
                             <Share2 aria-hidden="true" size={12} />
-                            {t("workspace.shareAction", {
-                              defaultValue: "Share",
-                            })}
+                            {t("workspace.shareAction", { defaultValue: "Share" })}
                           </Link>
                         ) : null}
                         <Link
-                          state={workspaceRouteNavigationState(
-                            workspace.id,
-                            "members",
-                          )}
-                          to="/settings?section=members"
+                          state={workspaceRouteNavigationState(workspace.id, "members")}
+                          to={`${workspacePath(workspace.id, "settings/integrations")}?section=members`}
                         >
                           <Users aria-hidden="true" size={12} />
-                          {t("workspace.membersAction", {
-                            defaultValue: "Members",
-                          })}
+                          {t("workspace.membersAction", { defaultValue: "Members" })}
                         </Link>
                       </div>
                     </div>
@@ -2169,7 +2090,7 @@ function MobileNavDrawer({
             <Link
               className="topbar-brand-link"
               onClick={onNavigate}
-              to="/dashboard"
+              to={navGroups.flatMap(group => group.items).find(item => item.key === "dashboard")?.to ?? "/workspaces/find"}
             >
               <PrismGlyph />
               <span className="brand-name">dtxWiki</span>
@@ -2199,7 +2120,7 @@ function MobileNavDrawer({
                       className={({ isActive }) =>
                         `nav-item${isActive ? " active" : ""}`
                       }
-                      key={item.to}
+                      key={item.key}
                       onClick={onNavigate}
                       title={title}
                       to={item.to}
@@ -2259,7 +2180,7 @@ function Sidebar({
                       className={({ isActive }) =>
                         `nav-item${isActive ? " active" : ""}`
                       }
-                      key={item.to}
+                      key={item.key}
                       title={title}
                       to={item.to}
                     >

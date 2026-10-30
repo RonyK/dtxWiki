@@ -8,7 +8,9 @@ import {
 
 import {
   authenticatePage,
+  currentWorkspace,
   login,
+  workspaceUrl,
   seededMcpAccessEmail,
 } from "./auth";
 import { evidenceScreenshot } from "./evidence";
@@ -18,7 +20,8 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     page,
   }, testInfo) => {
     await login(page.request, seededMcpAccessEmail(testInfo.project.name));
-    await page.goto("/settings/integrations");
+    const workspace = await currentWorkspace(page.request);
+    await page.goto(workspaceUrl(workspace.id, "settings/integrations"));
 
     const section = page.locator(".mcp-clients-section");
     await expect(section.getByText("Connected MCP clients")).toBeVisible();
@@ -74,7 +77,7 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
 
   test("paginates and deletes only inactive Access Keys", async ({ page }, testInfo) => {
     await login(page.request, seededMcpAccessEmail(testInfo.project.name));
-    await page.goto("/settings/integrations");
+    await page.goto("/account/integrations");
 
     const section = page.locator(".mcp-keys-section");
     await expect(section.locator(".mcp-key-row")).toHaveCount(20);
@@ -136,7 +139,8 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     page,
   }, testInfo) => {
     await authenticatePage(page, testInfo, "mcp-app-hub");
-    await page.goto("/settings/integrations");
+    const workspace = await currentWorkspace(page.request);
+    await page.goto(workspaceUrl(workspace.id, "settings/integrations"));
 
     const hub = page.locator("#mcp-app-hub");
     await expect(hub.getByRole("button", { name: /Claude Code/ })).toBeVisible();
@@ -419,6 +423,7 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     page,
   }, testInfo) => {
     await login(page.request, seededMcpAccessEmail(testInfo.project.name));
+    const workspace = await currentWorkspace(page.request);
 
     // A second workspace, so "a set" is observable rather than notional.
     const secondTitle = `R8 Second ${testInfo.project.name}`;
@@ -427,7 +432,7 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     });
     expect(created.status()).toBe(201);
 
-    await page.goto("/settings/integrations");
+    await page.goto(workspaceUrl(workspace.id, "settings/integrations"));
     // One blanket "this screen lists every MCP connection on your account"
     // line was replaced by a sentence per card, each naming the workspaces it
     // covers -- SettingsScreen.test.tsx pins that the old sentence is gone, so
@@ -457,6 +462,12 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     await expect(dialog).toBeHidden();
     await expect(opener).toBeFocused();
 
+    const client = page.getByRole("group", { name: "Client" });
+    await client.getByRole("button", { name: "Browse all AI apps" }).click();
+    const appDialog = page.getByRole("dialog", { name: "Choose an AI app" });
+    await appDialog.getByRole("button", { name: /Codex CLI/ }).click();
+    await expect(appDialog).toBeHidden();
+    await page.getByRole("radio", { name: "Windows" }).click();
     await page.getByLabel("Key name").fill("E2E two-workspace key");
     await expect(generate).toBeEnabled();
     await generate.click();
