@@ -958,7 +958,7 @@ describe("ContextScreen", () => {
     await waitFor(() => expect(publishedRow).toHaveFocus());
   });
 
-  it("renders an actor-hidden or invalid target as the generic Not Found surface", async () => {
+  it("renders an actor-hidden or invalid target as the uniform unavailable surface", async () => {
     const fetchMock = mockDecisionLogRoutes();
     const currentImplementation = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (input, init) => {
@@ -980,7 +980,7 @@ describe("ContextScreen", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: "We couldn't find that page" }),
+      await screen.findByRole("heading", { name: "This item can't be opened" }),
     ).toBeInTheDocument();
     expect(screen.queryByText("Needle body")).not.toBeInTheDocument();
   });
@@ -2259,7 +2259,7 @@ describe("ContextScreen", () => {
       expect(screen.queryByText("Decision Log")).not.toBeInTheDocument();
     });
     expect(
-      screen.queryByRole("heading", { name: "We couldn't find that page" }),
+      screen.queryByRole("heading", { name: "This item can't be opened" }),
     ).not.toBeInTheDocument();
     expect(listReads).toBeGreaterThanOrEqual(2);
   });
@@ -2356,7 +2356,7 @@ describe("ContextScreen", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: "We couldn't find that page" }),
+      await screen.findByRole("heading", { name: "This item can't be opened" }),
     ).toBeInTheDocument();
   });
 

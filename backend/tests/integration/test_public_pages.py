@@ -27,6 +27,7 @@ PUBLIC_FIELDS = {
     "body_md",
     "updated_at",
     "exposure_scope",
+    "link_targets",
 }
 # Internal fields that must NEVER appear in the public payload.
 LEAKED_FIELDS = {
@@ -125,6 +126,33 @@ def _make_page(page_service, slug: str, *, published: bool, public: bool):
 def test_public_read_returns_published_head_without_auth(page_service):
     # Structural RBAC isolation: no Authorization header and no session cookie.
     created = _make_page(page_service, "public-intro", published=True, public=True)
+    # Budget exception: these anonymous-exposure states require real published
+    # exposure pointers and the REST payload; helper-only tests cannot prove
+    # that a public URL is emitted without a private target or metadata leak.
+    # Revocation below must recheck that exposure against the persisted pin.
+    public_target = _make_page(
+        page_service, "public-link-target", published=True, public=True
+    )
+    private_target = _make_page(
+        page_service, "private-link-target", published=True, public=False
+    )
+    public_href = f"/p/{created.workspace_id}/{public_target.id}#details"
+    private_href = f"/p/{created.workspace_id}/{private_target.id}"
+    created = page_service.write_page(
+        workspace_slug="default",
+        slug="public-intro",
+        title="Public Intro",
+        body_md=(
+            "# public-intro\n\nPublished body for public-intro.\n\n"
+            f"[Public]({public_href}) [Private]({private_href}) "
+            "[[public-link-target]]"
+        ),
+        actor_kind="human",
+        actor_id="dev-local-user",
+        actor_provenance="browser_session",
+        base_version_id=created.version_id,
+        base_content_hash=created.content_hash,
+    )
     anon = _anon_client(page_service)
 
     resp = anon.get("/api/v1/public/w/default/pages/public-intro")
@@ -142,6 +170,29 @@ def test_public_read_returns_published_head_without_auth(page_service):
     # Indexed public Workspace pages remain discoverable.
     assert "X-Robots-Tag" not in resp.headers
     assert "Cache-Control" not in resp.headers
+
+    targets = {entry["locator"]: entry for entry in data["link_targets"]}
+    assert targets[public_href] == {
+        "locator": public_href,
+        "href": "/w/default/pages/public-link-target#details",
+        "state": "ok",
+        "target_page_id": None,
+    }
+    assert targets["[[public-link-target]]"]["href"] == (
+        "/w/default/pages/public-link-target"
+    )
+    assert targets[private_href] == {
+        "locator": private_href,
+        "href": None,
+        "state": "unavailable",
+        "target_page_id": None,
+    }
+    # Revocation is checked live, even though the source's pin remains valid.
+    with page_service.session_factory.begin() as session:
+        clear_public_page_exposure(session.get(ContextPage, public_target.id))
+    revoked = anon.get("/api/v1/public/w/default/pages/public-intro").json()["data"]
+    assert all(entry["state"] == "unavailable" for entry in revoked["link_targets"])
+    assert all(entry["href"] is None for entry in revoked["link_targets"])
 
 
 def test_public_read_404_when_page_archived(page_service):

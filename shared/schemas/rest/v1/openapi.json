@@ -3557,6 +3557,13 @@
             "title": "Id",
             "type": "string"
           },
+          "link_targets": {
+            "items": {
+              "$ref": "#/components/schemas/ContextLinkTarget"
+            },
+            "title": "Link Targets",
+            "type": "array"
+          },
           "placement_confidence": {
             "anyOf": [
               {
@@ -4928,6 +4935,52 @@
         "title": "ContextIngressRejectRequest",
         "type": "object"
       },
+      "ContextLinkTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Href"
+          },
+          "locator": {
+            "title": "Locator",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "ok",
+              "unavailable"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "target_page_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Page Id"
+          }
+        },
+        "required": [
+          "locator",
+          "state"
+        ],
+        "title": "ContextLinkTarget",
+        "type": "object"
+      },
       "ContextMediaAssetListResponse": {
         "additionalProperties": false,
         "properties": {
@@ -5915,6 +5968,13 @@
               }
             ],
             "title": "Latest Draft Version Id"
+          },
+          "link_targets": {
+            "items": {
+              "$ref": "#/components/schemas/ContextLinkTarget"
+            },
+            "title": "Link Targets",
+            "type": "array"
           },
           "next_reconciliation_version_id": {
             "anyOf": [
@@ -16398,6 +16458,13 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "link_targets": {
+            "items": {
+              "$ref": "#/components/schemas/ContextLinkTarget"
+            },
+            "title": "Link Targets",
+            "type": "array"
           },
           "slug": {
             "title": "Slug",

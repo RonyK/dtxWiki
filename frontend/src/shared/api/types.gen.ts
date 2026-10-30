@@ -4649,6 +4649,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Link Targets */
+            link_targets?: components["schemas"]["ContextLinkTarget"][];
             /** Placement Confidence */
             placement_confidence: string | null;
             /** Promoted Context Page Id */
@@ -5118,6 +5120,20 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** ContextLinkTarget */
+        ContextLinkTarget: {
+            /** Href */
+            href?: string | null;
+            /** Locator */
+            locator: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "ok" | "unavailable";
+            /** Target Page Id */
+            target_page_id?: string | null;
+        };
         /** ContextMediaAssetListResponse */
         ContextMediaAssetListResponse: {
             /** Data */
@@ -5555,6 +5571,8 @@ export interface components {
             is_visible_head: boolean;
             /** Latest Draft Version Id */
             latest_draft_version_id?: string | null;
+            /** Link Targets */
+            link_targets?: components["schemas"]["ContextLinkTarget"][];
             /** Next Reconciliation Version Id */
             next_reconciliation_version_id?: string | null;
             /**
@@ -9301,6 +9319,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Link Targets */
+            link_targets?: components["schemas"]["ContextLinkTarget"][];
             /** Slug */
             slug: string;
             /** Title */

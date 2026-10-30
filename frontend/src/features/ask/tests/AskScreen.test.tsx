@@ -298,7 +298,13 @@ describe("AskScreen", () => {
           data: sessionDetail([
             askTurn({
               assistant_message:
-                "## Invoice cycle\n\n| Stage | Owner |\n| --- | --- |\n| Metering | platform |\n",
+                "## Invoice cycle\n\n| Stage | Owner |\n| --- | --- |\n| Metering | platform |\n\n[Confirmed](/context/confirmed.md) [Unconfirmed](/context/unconfirmed.md)",
+              link_targets: [{
+                locator: "/context/confirmed.md",
+                href: `/p/${WORKSPACE_ID}/22222222-2222-4222-8222-222222222222`,
+                target_page_id: "22222222-2222-4222-8222-222222222222",
+                state: "ok",
+              }],
             }),
           ]),
         };
@@ -318,6 +324,8 @@ describe("AskScreen", () => {
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Stage" })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "Metering" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Confirmed" })).toHaveAttribute("href", `/p/${WORKSPACE_ID}/22222222-2222-4222-8222-222222222222`);
+    expect(screen.getByText("Unconfirmed").closest("a")).toBeNull();
     expect(
       screen.queryByText(/\| Stage \| Owner \|/),
     ).not.toBeInTheDocument();

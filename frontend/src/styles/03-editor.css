@@ -3589,7 +3589,208 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 
 .markdown-body .wikilink-broken {
   border-bottom-style: dashed;
-  color: #92400e;
+  color: var(--ink-muted);
+}
+
+.markdown-body .unavailable-reference {
+  position: relative;
+  display: inline;
+  vertical-align: baseline;
+}
+
+.markdown-body .unavailable-reference__trigger {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  border: 0;
+  border-bottom: 1px dashed var(--ink-muted);
+  background: transparent;
+  color: var(--ink-muted);
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  vertical-align: baseline;
+  cursor: pointer;
+}
+
+.markdown-body .unavailable-reference__trigger:hover {
+  color: var(--ink);
+}
+
+.markdown-body .unavailable-reference__icon,
+.markdown-body .unavailable-reference__help-icon {
+  flex: 0 0 auto;
+  color: var(--ink-muted);
+}
+
+.markdown-body .unavailable-reference--wikilink .unavailable-reference__trigger::before,
+.markdown-body .unavailable-reference--wikilink .unavailable-reference__trigger::after {
+  color: var(--ink-faint);
+  font-weight: 800;
+}
+
+.markdown-body .unavailable-reference--wikilink .unavailable-reference__trigger::before {
+  content: "[[";
+}
+
+.markdown-body .unavailable-reference--wikilink .unavailable-reference__trigger::after {
+  content: "]]";
+}
+
+.unavailable-reference__popover {
+  position: fixed;
+  z-index: 80;
+  display: grid;
+  gap: 8px;
+  width: min(320px, calc(100vw - 24px));
+  max-height: min(340px, calc(100dvh - 24px));
+  overflow: auto;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  color: var(--ink);
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.unavailable-reference__popover-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.unavailable-reference__popover[hidden] {
+  display: none;
+}
+
+.unavailable-reference__popover-heading {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+  font-weight: 700;
+  line-height: 1.5;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.unavailable-reference__guidance {
+  color: var(--ink-muted);
+}
+
+.unavailable-reference__source-row {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  align-self: start;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  padding: 4px 6px;
+}
+
+.markdown-body .unavailable-reference__source {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overflow-wrap: normal;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  user-select: text;
+}
+
+.unavailable-reference__action,
+.unavailable-reference__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-muted);
+  padding: 6px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.unavailable-reference__close {
+  margin: -3px -3px 0 0;
+}
+
+.unavailable-reference__action:hover,
+.unavailable-reference__close:hover {
+  background: var(--surface-active);
+  color: var(--ink);
+}
+
+.unavailable-reference__action:focus-visible,
+.unavailable-reference__close:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+
+.unavailable-reference__status {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+@media (pointer: coarse) {
+  .unavailable-reference__action,
+  .unavailable-reference__close {
+    width: 40px;
+    height: 40px;
+  }
+
+  .unavailable-reference__popover {
+    width: min(336px, calc(100vw - 24px));
+  }
+}
+
+.markdown-body .workspace-link-badge {
+  display: inline-block;
+  max-width: min(220px, 44vw);
+  overflow: hidden;
+  margin-inline-start: 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  color: var(--ink-muted);
+  padding: 1px 7px;
+  font-size: 0.76em;
+  font-weight: 650;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  vertical-align: 0.08em;
+  white-space: nowrap;
+}
+
+.markdown-body .workspace-link-badge--known {
+  border-color: color-mix(in srgb, var(--info) 35%, var(--border));
+  color: var(--info);
+}
+
+.markdown-body .workspace-link-badge__icon {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  margin-inline-end: 3px;
+  vertical-align: -0.08em;
 }
 
 .markdown-body .inline-tag {

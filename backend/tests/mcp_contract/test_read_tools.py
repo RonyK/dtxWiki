@@ -161,6 +161,13 @@ def test_mcp_search_read_and_list_changes_tools(page_service, actor):
     assert search.envelope.result_status == "succeeded"
     assert search.data.ranked_results[0].type == "context_page"
     assert read.data["body_markdown"] == "# MCP Read Context\n\nNeedle body"
+    # read.data is generic JSON: this optional read projection is additive and
+    # stays empty for a body without references, including after wire omission.
+    from backend.mcp.protocol.wire_defaults import omit_declared_defaults
+
+    assert read.data["link_targets"] == []
+    wire = omit_declared_defaults(type(read), read.model_dump(mode="json"))
+    assert wire["data"]["link_targets"] == []
     assert changes.data.changesets[0].status == "applied"
     assert changes.data.diffs[0]["target_type"] == "context_page"
 

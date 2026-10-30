@@ -715,6 +715,26 @@ def test_session_detail_batches_graph_context_for_all_turns(session_factory):
     with session_factory.begin() as session:
         workspace = _ws(session)
         seed = _seed_page(session, workspace.id)
+        version = ContextPageVersion(
+            workspace_id=workspace.id,
+            page_id=seed.id,
+            version_no=1,
+            body_md="# Deployment Plan\n\nVisible source.",
+            content_hash="ask-link-target-v1",
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id=ACTOR_ID,
+            version_status="published_snapshot",
+        )
+        session.add(version)
+        session.flush()
+        seed.current_version_id = version.id
+        seed.current_published_version_id = version.id
+        # Budget exception: this existing DB fixture needs real published-page
+        # provenance to prove Ask exposes only a confirmed same-workspace link
+        # and omits an external target. Pure projection tests cannot verify the
+        # service's publication and source-page checks; both links share this
+        # one existing fixture and add no separate DB scenario.
         graph = BatchGraphSpy()
         service = AskService(
             search_service=FakeSemanticSearch(),
@@ -733,7 +753,14 @@ def test_session_detail_batches_graph_context_for_all_turns(session_factory):
                 ask_session_id=ask_session.id,
                 turn_no=turn_no,
                 user_message=f"Question {turn_no}",
-                assistant_message=f"Answer {turn_no}",
+                assistant_message=(
+                    f"Answer {turn_no}"
+                    if turn_no != 1
+                    else (
+                        f"[Grounding](/context?target={seed.id}) "
+                        "[outside](https://outside.example/secret)"
+                    )
+                ),
                 placement_confidence="medium",
             )
             session.add(turn)
@@ -757,3 +784,9 @@ def test_session_detail_batches_graph_context_for_all_turns(session_factory):
     assert len(detail.turns) == 50
     assert graph.calls == 1
     assert graph.page_ids == [seed.id]
+    assert len(detail.turns[0].link_targets) == 1
+    link_target = detail.turns[0].link_targets[0]
+    assert link_target.locator == f"/context?target={seed.id}"
+    assert link_target.href == f"/p/{workspace.id}/{seed.id}"
+    assert link_target.target_page_id == seed.id
+    assert link_target.state == "ok"

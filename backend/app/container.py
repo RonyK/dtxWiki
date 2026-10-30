@@ -406,12 +406,14 @@ class ServiceRegistry:
 
     @cached_property
     def domain_read(self):
+        from backend.services.context_links import configured_self_origins
         from backend.services.domain_read import DomainReadService
 
         return DomainReadService(
             self.tree_read,
             library_blob_repository_factory=self.library_blob_repository_factory,
             lint_registry=self.lint_registry,
+            context_link_origins=configured_self_origins(self.settings),
         )
 
     @cached_property

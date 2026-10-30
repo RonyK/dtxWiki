@@ -636,7 +636,9 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
     assert detail.wikilink_targets[0].target_page_id == target.id
     assert detail.wikilink_targets[0].current_slug == "renamed-korean-page"
 
-    assert not hasattr(detail, "link_targets")
+    assert len(detail.link_targets) == 6
+    assert all(entry.state == "ok" for entry in detail.link_targets)
+    assert all(entry.target_page_id == target.id for entry in detail.link_targets)
     assert restored.body_md == linked.body_md
     backlinks = service.list_backlinks(page_id=target.id)
     assert [entry.id for entry in backlinks] == [linked.id]

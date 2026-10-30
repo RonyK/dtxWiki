@@ -50,6 +50,7 @@ function detail(overrides: Partial<ContextPageDetail> = {}): ContextPageDetail {
     children_count: 0,
     backlink_count: 0,
     wikilink_targets: [],
+    link_targets: [],
     warnings: [],
     pending_draft_version_id: null,
     pending_draft_warnings: [],

@@ -2590,6 +2590,8 @@ function AgentReader({
           {detail.body_markdown ? (
             <MarkdownView
               body={detail.body_markdown}
+              workspaceId={workspaceId}
+              allowWorkspaceNavigationLinks
               stripLeadingHeading={detail.title}
             />
           ) : (

@@ -1,10 +1,14 @@
 import { Check, Copy, ExternalLink, Eye, Globe, Info, Lock, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../../shared/api/client";
 import { setPagePublic } from "../../shared/api/operations";
 import { readPage, type PagePayload } from "../../shared/api/pages";
+import {
+  contextMediaPageVersionContentUrl,
+  type ContextMediaAssetUrlResolver,
+} from "../../shared/api/contextMedia";
 import { Dialog } from "../../shared/components/Dialog";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import {
@@ -51,6 +55,7 @@ export function PagePublicShareControl({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewPage, setPreviewPage] = useState<PagePayload | null>(null);
+  const [previewVersionId, setPreviewVersionId] = useState<string | null>(null);
   const [latestPublishedVersionId, setLatestPublishedVersionId] = useState(
     publishedVersionId,
   );
@@ -73,6 +78,7 @@ export function PagePublicShareControl({
     setAcknowledgedExposure(false);
     setPreviewOpen(false);
     setPreviewPage(null);
+    setPreviewVersionId(null);
     setPreviewError(null);
     setLatestPublishedVersionId(publishedVersionId);
     setLatestPublishedVersionNo(publishedVersionNo);
@@ -162,15 +168,38 @@ export function PagePublicShareControl({
     setPreviewLoading(true);
     setPreviewError(null);
     try {
-      setPreviewPage(
-        await readPage(workspaceId, pageId, latestPublishedVersionId),
+      const publishedPage = await readPage(
+        workspaceId,
+        pageId,
+        latestPublishedVersionId,
       );
+      if (publishedPage.version_id !== latestPublishedVersionId) {
+        throw new Error("Published preview returned a different version.");
+      }
+      setPreviewVersionId(publishedPage.version_id);
+      setPreviewPage(publishedPage);
     } catch {
       setPreviewError(t("reader.visibilityPreviewFailed"));
     } finally {
       setPreviewLoading(false);
     }
   }
+
+  const resolvePreviewMediaAsset = useMemo<ContextMediaAssetUrlResolver>(
+    () => (assetId: string) =>
+      previewVersionId && workspaceId
+        ? {
+            status: "ready",
+            url: contextMediaPageVersionContentUrl(
+              workspaceId,
+              pageId,
+              previewVersionId,
+              assetId,
+            ),
+          }
+        : { status: "unavailable", reason: "version_unavailable" },
+    [pageId, previewVersionId, workspaceId],
+  );
 
   return (
     <div className="publish-control">
@@ -321,8 +350,21 @@ export function PagePublicShareControl({
               <article className="published-version-preview-body">
                 <h1>{previewPage.title}</h1>
                 <MarkdownView
+                  allowWorkspaceNavigationLinks
                   body={previewPage.body_md}
+                  linkTargets={previewPage.link_targets?.map((target) => ({
+                    ...target,
+                    href: target.href ?? null,
+                    target_page_id: target.target_page_id ?? null,
+                  }))}
+                  resolveContextMediaAsset={resolvePreviewMediaAsset}
                   stripLeadingHeading={previewPage.title}
+                  wikilinkTargets={previewPage.wikilink_targets?.map((target) => ({
+                    target_slug: target.target_slug,
+                    target_page_id: target.target_page_id ?? null,
+                    current_slug: target.current_slug ?? null,
+                  }))}
+                  workspaceId={workspaceId}
                 />
               </article>
             ) : null}

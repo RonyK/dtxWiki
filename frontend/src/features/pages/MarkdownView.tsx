@@ -1,7 +1,6 @@
 import {
   Children,
   createContext,
-  useContext,
   isValidElement,
   useEffect,
   useId,
@@ -9,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useContext,
   type CSSProperties,
   type ComponentPropsWithoutRef,
   type ReactNode,
@@ -50,14 +50,16 @@ import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
 import remarkGithubBlockquoteAlert from "remark-github-blockquote-alert";
 import remarkMath from "remark-math";
-import { Link } from "react-router-dom";
+import { Link, useInRouterContext, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import "highlight.js/styles/github-dark.css";
 import "katex/dist/katex.min.css";
 
-import { formatCanonicalContextUrl, isWorkspaceUuid } from "../../shared/lib/workspaceIdentity";
-import { workspacePath } from "../../shared/lib/workspaceRoutes";
+import { classifyContextLink, formatContextPageUrl, isContextId, normalizeContextHeading, type ContextLinkTarget } from "../../shared/lib/contextLinks";
+import { canPreservePageHref } from "../../shared/lib/customPageHref";
+import { createReferenceReturnState } from "../../shared/lib/navigationRecovery";
+import { hasConflictingWorkspaceQuery, workspacePath } from "../../shared/lib/workspaceRoutes";
 
 import type { PageInlineComment } from "../../shared/api/pages";
 import {
@@ -73,6 +75,8 @@ import {
   type MarkdownImageProps,
 } from "./MarkdownImage";
 import { MermaidZoomViewer } from "./MermaidZoomViewer";
+import { UnavailableReference } from "./UnavailableReference";
+import { WorkspaceLinkBadge } from "./WorkspaceLinkBadge";
 import { hasUnsafeCss, resolveMermaidStylesheet } from "./mermaidStylesheet";
 import { parsePageDocument } from "./pageFrontmatter";
 
@@ -81,17 +85,19 @@ type MarkdownViewProps = {
   comments?: PageInlineComment[];
   stripLeadingHeading?: string;
   wikilinkPages?: Array<{
+    id?: string;
     aliases?: string[];
     slug: string;
     title: string;
   }>;
+  linkTargets?: ContextLinkTarget[];
   wikilinkTargets?: Array<{
     target_slug: string;
     target_page_id: string | null;
     current_slug: string | null;
   }>;
-  // Internal wikilinks require the source document's explicit workspace.
-  // Public readers keep internal references as plain text.
+  // Authenticated readers use scoped permanent links. Public readers use only
+  // public URLs confirmed in linkTargets; every other internal link is text.
   wikilinkMode?: "internal" | "plain";
   // When true (editor split preview), stamp data-source-line on top-level
   // blocks so the editor can line-anchor its scroll sync, and skip the leading
@@ -108,9 +114,13 @@ type MarkdownViewProps = {
   // Uploaded and converted documents are not authored Page content. This mode
   // drops raw HTML and ambient resource URLs, and keeps every link as text so
   // untrusted content cannot create a navigation control.
-  renderPolicy?: "page" | "untrusted-preview";
-  // Authority comes from this source document/editor, never a landing hint.
+  renderPolicy?: "page" | "untrusted-preview" | "confirmed-links";
+  // The source document/editor workspace supplies authority for short links.
+  // Never infer it from whichever workspace the reader most recently selected.
   workspaceId?: string | null;
+  // Trusted authored previews/readers may activate only syntactically valid,
+  // explicit workspace routes; public readers and untrusted previews stay closed.
+  allowWorkspaceNavigationLinks?: boolean;
 };
 
 type DeletedSourceMark = {
@@ -123,10 +133,36 @@ export const MARKDOWN_GEOMETRY_CHANGE_EVENT =
 
 type MarkdownAnchorProps = ComponentPropsWithoutRef<"a"> & {
   "data-internal"?: string;
+  "data-dtx-unavailable-reference"?: string;
   node?: unknown;
 };
 
-const MarkdownWorkspaceContext = createContext<string | null>(null);
+type MarkdownAuthoredReference = { locator: string; wikilink: boolean };
+
+type MarkdownLinkBehavior = {
+  sourceWorkspaceId: string | null;
+  authenticatedAuthored: boolean;
+  infoMode: "ask" | "public" | null;
+};
+
+type MarkdownRouteState = {
+  sourceHref: string;
+};
+
+const MarkdownLinkBehaviorContext = createContext<MarkdownLinkBehavior | null>(null);
+const MarkdownRouteStateContext = createContext<MarkdownRouteState | null>(null);
+
+function MarkdownRouteStateProvider({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const value = useMemo(() => ({
+    sourceHref: `${location.pathname}${location.search}${location.hash}`,
+  }), [location.hash, location.pathname, location.search]);
+  return (
+    <MarkdownRouteStateContext.Provider value={value}>
+      {children}
+    </MarkdownRouteStateContext.Provider>
+  );
+}
 
 const MAX_INLINE_TOKEN_TRANSFORM_DEPTH = 128;
 const MAX_INLINE_COMMENT_HIGHLIGHTS = 50;
@@ -142,6 +178,8 @@ const SVG_NUMBER_PATTERN = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
 // anchor/DOM namespace; rehypePrefixFragmentHrefs keeps same-page fragment
 // links pointing at the prefixed ids.
 const CLOBBER_PREFIX = "user-content-";
+const TRUSTED_REFERENCE_NODE = "dtxTrustedReference";
+const TRUSTED_INLINE_TAG_NODE = "dtxTrustedInlineTag";
 // remark-rehype would otherwise prefix GFM footnote ids itself; emit them raw
 // so rehype-sanitize's clobberPrefix stays the single place ids gain the
 // prefix (a second prefix here would orphan footnote links).
@@ -170,14 +208,17 @@ export function MarkdownView({
   stripLeadingHeading,
   wikilinkPages = [],
   wikilinkTargets = [],
+  linkTargets,
   wikilinkMode = "internal",
   sourceLineNumbers = false,
   deletedSources = [],
   resolveContextMediaAsset,
   renderPolicy = "page",
   workspaceId,
+  allowWorkspaceNavigationLinks = false,
 }: MarkdownViewProps) {
   const articleRef = useRef<HTMLElement | null>(null);
+  const inRouter = useInRouterContext();
   const pageSourceLineNumbers = renderPolicy === "page" && sourceLineNumbers;
   const parsedBody = renderPolicy === "page" ? parsePageDocument(body).body : body;
   // The editor split preview renders from the full body (no string-level strip)
@@ -201,7 +242,6 @@ export function MarkdownView({
         wikilinkPages,
         wikilinkTargets,
       ),
-      plainWikilinks: wikilinkMode === "plain",
       resolveDeletedSource: buildDeletedSourceResolver(deletedSources),
       sourceLineNumbers: pageSourceLineNumbers,
       workspaceId,
@@ -209,12 +249,19 @@ export function MarkdownView({
     [
       wikilinkPages,
       wikilinkTargets,
-      wikilinkMode,
       deletedSources,
       pageSourceLineNumbers,
       workspaceId,
     ],
   );
+  const contextLinkPluginOptions = useMemo(() => ({
+    targets: linkTargets,
+    workspaceId,
+    publicReader: wikilinkMode === "plain",
+    confirmedOnly: renderPolicy === "confirmed-links",
+    allowWorkspaceNavigation:
+      renderPolicy === "page" && wikilinkMode === "internal" && allowWorkspaceNavigationLinks,
+  }), [linkTargets, workspaceId, wikilinkMode, renderPolicy, allowWorkspaceNavigationLinks]);
   const contextMediaPluginOptions = useMemo(
     () => ({ resolveAssetUrl: resolveContextMediaAsset }),
     [resolveContextMediaAsset],
@@ -225,8 +272,109 @@ export function MarkdownView({
     }
   }, [markdownBody, pageSourceLineNumbers]);
 
+  const linkBehavior = useMemo<MarkdownLinkBehavior>(() => ({
+    sourceWorkspaceId: workspaceId ?? null,
+    authenticatedAuthored: renderPolicy === "page" && wikilinkMode === "internal",
+    infoMode: renderPolicy === "confirmed-links"
+      ? "ask"
+      : renderPolicy === "page" && wikilinkMode === "plain"
+        ? "public"
+        : null,
+  }), [workspaceId, renderPolicy, wikilinkMode]);
+  const markdownContent = useMemo(() => (
+    <ReactMarkdown
+      components={
+        renderPolicy === "page"
+          ? {
+              a: MarkdownLink,
+              img: MarkdownImage,
+              input: MarkdownTaskState,
+              pre: MarkdownCodeBlock,
+              table: MarkdownTable,
+              video: MarkdownVideo,
+            }
+          : {
+              a: renderPolicy === "confirmed-links" ? MarkdownLink : UntrustedPreviewLink,
+              img: UntrustedPreviewImage,
+              input: MarkdownTaskState,
+              pre: UntrustedPreviewCodeBlock,
+              table: MarkdownTable,
+            }
+      }
+      remarkPlugins={
+        renderPolicy === "page"
+          ? [
+              remarkGfm,
+              remarkMarkMarkdownReferences,
+              remarkMath,
+              remarkGithubBlockquoteAlert,
+              [remarkDtxTokens, tokenPluginOptions],
+              ...(pageSourceLineNumbers
+                ? [() => (tree: Root) => dropDuplicateHeading(tree, stripLeadingHeading)]
+                : []),
+            ]
+          : renderPolicy === "confirmed-links"
+            ? [remarkGfm, remarkMarkMarkdownReferences]
+            : [remarkGfm]
+      }
+      rehypePlugins={
+        renderPolicy === "page"
+          ? [
+              rehypeWrapRegisteredReferences,
+              [rehypeRaw, { passThrough: [TRUSTED_REFERENCE_NODE, TRUSTED_INLINE_TAG_NODE] }],
+              [rehypeResolveContextLinks, contextLinkPluginOptions],
+              [rehypeResolveContextMedia, contextMediaPluginOptions],
+              rehypeConstrainPageImageSources,
+              rehypeSlug,
+              [rehypeInlineCommentAnchors, anchorPluginOptions],
+              [rehypeAutolinkHeadings, { behavior: "wrap" }],
+              rehypePrefixFragmentHrefs,
+              rehypeTableAlignment,
+              rehypePreservePageAnchorHrefs,
+              [rehypeSanitize, markdownSanitizeSchema],
+              rehypeRestorePageAnchorHrefs,
+              // Sanitize authored Markdown before KaTeX emits its trusted
+              // layout spans. KaTeX needs generated styles to render fractions.
+              rehypeKatex,
+              [rehypeHighlight, {
+                detect: true,
+                ignoreMissing: true,
+                languages: HIGHLIGHT_LANGUAGES,
+              }],
+              ...(pageSourceLineNumbers ? [rehypeSourceLines] : []),
+            ]
+          : renderPolicy === "confirmed-links"
+            ? [
+                rehypeWrapRegisteredReferences,
+                [rehypeResolveContextLinks, contextLinkPluginOptions],
+                [rehypeSanitize, markdownSanitizeSchema],
+              ]
+            : [rehypeTableAlignment, [rehypeSanitize, markdownSanitizeSchema]]
+      }
+      remarkRehypeOptions={REMARK_REHYPE_OPTIONS}
+      skipHtml={renderPolicy !== "page"}
+      urlTransform={
+        renderPolicy === "untrusted-preview"
+          ? untrustedPreviewUrlTransform
+          : renderPolicy === "confirmed-links"
+            ? confirmedPreviewUrlTransform
+            : pageUrlTransform
+      }
+    >
+      {markdownBody}
+    </ReactMarkdown>
+  ), [
+    markdownBody,
+    renderPolicy,
+    tokenPluginOptions,
+    pageSourceLineNumbers,
+    stripLeadingHeading,
+    contextLinkPluginOptions,
+    contextMediaPluginOptions,
+    anchorPluginOptions,
+  ]);
+
   return (
-    <MarkdownWorkspaceContext.Provider value={workspaceId ?? null}>
     <article className="markdown-body" ref={articleRef}>
       {pageSourceLineNumbers ? (
         <span
@@ -236,82 +384,11 @@ export function MarkdownView({
           data-source-line={1}
         />
       ) : null}
-      <ReactMarkdown
-        components={
-          renderPolicy === "page"
-            ? {
-                a: MarkdownLink,
-                img: MarkdownImage,
-                input: MarkdownTaskState,
-                pre: MarkdownCodeBlock,
-                table: MarkdownTable,
-                video: MarkdownVideo,
-              }
-            : {
-                a: UntrustedPreviewLink,
-                img: UntrustedPreviewImage,
-                input: MarkdownTaskState,
-                pre: UntrustedPreviewCodeBlock,
-                table: MarkdownTable,
-              }
-        }
-        remarkPlugins={
-          renderPolicy === "page"
-            ? [
-                remarkGfm,
-                remarkMath,
-                remarkGithubBlockquoteAlert,
-                [remarkDtxTokens, tokenPluginOptions],
-                ...(pageSourceLineNumbers
-                  ? [
-                      () => (tree: Root) =>
-                        dropDuplicateHeading(tree, stripLeadingHeading),
-                    ]
-                  : []),
-              ]
-            : [remarkGfm]
-        }
-        rehypePlugins={
-          renderPolicy === "page"
-            ? [
-                rehypeRaw,
-                [rehypeResolveContextMedia, contextMediaPluginOptions],
-                rehypeConstrainPageImageSources,
-                rehypeSlug,
-                [rehypeInlineCommentAnchors, anchorPluginOptions],
-                [rehypeAutolinkHeadings, { behavior: "wrap" }],
-                rehypePrefixFragmentHrefs,
-                rehypeTableAlignment,
-                [rehypeSanitize, markdownSanitizeSchema],
-                // Sanitize authored Markdown before KaTeX emits its trusted
-                // layout spans. KaTeX needs its generated inline positioning
-                // styles for fractions and super/subscripts to render correctly.
-                rehypeKatex,
-                [
-                  rehypeHighlight,
-                  {
-                    detect: true,
-                    ignoreMissing: true,
-                    languages: HIGHLIGHT_LANGUAGES,
-                  },
-                ],
-                ...(pageSourceLineNumbers ? [rehypeSourceLines] : []),
-              ]
-            : [
-                rehypeTableAlignment,
-                [rehypeSanitize, markdownSanitizeSchema],
-              ]
-        }
-        remarkRehypeOptions={REMARK_REHYPE_OPTIONS}
-        skipHtml={renderPolicy === "untrusted-preview"}
-        urlTransform={
-          renderPolicy === "untrusted-preview"
-            ? untrustedPreviewUrlTransform
-            : pageUrlTransform
-        }
-      >
-        {markdownBody}
-      </ReactMarkdown>
+      <MarkdownLinkBehaviorContext.Provider value={linkBehavior}>
+        {inRouter ? (
+          <MarkdownRouteStateProvider>{markdownContent}</MarkdownRouteStateProvider>
+        ) : markdownContent}
+      </MarkdownLinkBehaviorContext.Provider>
       {pageSourceLineNumbers ? (
         <span
           aria-hidden="true"
@@ -321,7 +398,6 @@ export function MarkdownView({
         />
       ) : null}
     </article>
-    </MarkdownWorkspaceContext.Provider>
   );
 }
 
@@ -333,11 +409,20 @@ function untrustedPreviewUrlTransform(
   return undefined;
 }
 
+function confirmedPreviewUrlTransform(value: string, key: string, node: Readonly<HastElement>) {
+  return node.tagName === "a" && key === "href" && value.startsWith("/") && !value.startsWith("//")
+    ? value
+    : undefined;
+}
+
 function pageUrlTransform(
   value: string,
   key: string,
   node: Readonly<HastElement>,
 ) {
+  if (node.tagName === "a" && key === "href") {
+    return canPreservePageHref(value) ? value : undefined;
+  }
   return node.tagName === "img" && key === "src"
     ? trustedPageImageSource(value)
     : defaultUrlTransform(value);
@@ -361,6 +446,233 @@ function rehypeConstrainPageImageSources() {
   return (tree: HastRoot) => {
     constrainPageImageSources(tree);
   };
+}
+
+// Preserve authored hrefs without widening sanitizer protocols
+// for images, MathML or other URL-bearing elements. Raw HTML attributes cannot
+// create node.data; only this transform can carry an href past sanitization.
+function transformPageAnchorHrefs(tree: HastRoot, restore: boolean) {
+  function visit(parent: HastParent) {
+    for (const child of parent.children) {
+      if (!isHastElement(child)) continue;
+      visit(child);
+      if (child.tagName !== "a") continue;
+      if (restore) {
+        const data = child.data as Record<string, unknown> | undefined;
+        const original = data?.dtxPreservedPageHref;
+        if (typeof original === "string" && canPreservePageHref(original)) {
+          child.properties.href = original;
+        }
+        if (data) delete data.dtxPreservedPageHref;
+      } else {
+        const href = child.properties.href;
+        if (typeof href === "string" && canPreservePageHref(href)) {
+          child.data = Object.assign({}, child.data, { dtxPreservedPageHref: href });
+          child.properties.href = "/";
+        }
+      }
+    }
+  }
+  visit(tree);
+}
+
+function rehypePreservePageAnchorHrefs() {
+  return (tree: HastRoot) => transformPageAnchorHrefs(tree, false);
+}
+
+function rehypeRestorePageAnchorHrefs() {
+  return (tree: HastRoot) => transformPageAnchorHrefs(tree, true);
+}
+
+type ContextLinkResolverOptions = {
+  targets?: ContextLinkTarget[];
+  workspaceId?: string | null;
+  publicReader: boolean;
+  confirmedOnly?: boolean;
+  allowWorkspaceNavigation?: boolean;
+};
+
+function rehypeWrapRegisteredReferences() {
+  return (tree: HastRoot) => {
+    const visit = (parent: HastParent) => {
+      parent.children = parent.children.flatMap((child): HastNode[] => {
+        if (!isHastElement(child)) return [child];
+        // Inline tag links are generated from the app's `#tag` syntax. Preserve
+        // their provenance through rehypeRaw without treating an authored raw
+        // HTML `data-tag` attribute as proof of provenance.
+        const className = child.properties.className;
+        if (
+          child.tagName === "a" &&
+          Array.isArray(className) &&
+          className.includes("inline-tag") &&
+          typeof (child.properties.dataTag ?? child.properties["data-tag"]) === "string"
+        ) {
+          return [{
+            type: TRUSTED_INLINE_TAG_NODE,
+            children: [child],
+          } as unknown as HastNode];
+        }
+        const rawLocator = child.properties.dataDtxReferenceLocator ??
+          child.properties["data-dtx-reference-locator"];
+        if (child.tagName === "a" && typeof rawLocator === "string") {
+          const wikilink = child.properties.dataDtxReferenceWikilink ??
+            child.properties["data-dtx-reference-wikilink"];
+          delete child.properties.dataDtxReferenceLocator;
+          delete child.properties["data-dtx-reference-locator"];
+          delete child.properties.dataDtxReferenceWikilink;
+          delete child.properties["data-dtx-reference-wikilink"];
+          return [{
+            type: TRUSTED_REFERENCE_NODE,
+            data: { reference: { locator: rawLocator, wikilink: wikilink === "true" } },
+            children: [child],
+          } as unknown as HastNode];
+        }
+        visit(child);
+        return [child];
+      }) as HastParent["children"];
+    };
+    visit(tree);
+  };
+}
+
+function readMarkdownAuthoredReference(value: unknown): MarkdownAuthoredReference | null {
+  if (!value || typeof value !== "object") return null;
+  const reference = value as Record<string, unknown>;
+  return typeof reference.locator === "string" && typeof reference.wikilink === "boolean"
+    ? { locator: reference.locator, wikilink: reference.wikilink }
+    : null;
+}
+
+function readMarkdownReferenceFromNode(node: unknown): MarkdownAuthoredReference | null {
+  if (!node || typeof node !== "object") return null;
+  const data = (node as { data?: unknown }).data;
+  if (!data || typeof data !== "object") return null;
+  return readMarkdownAuthoredReference(
+    (data as Record<string, unknown>).dtxUnavailableReference,
+  );
+}
+
+function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
+  const targets = new Map((options.targets ?? []).map((target) => [target.locator, target]));
+  const withFragmentPrefix = (href: string) => {
+    const index = href.indexOf("#");
+    if (index < 0 || index === href.length - 1 || href.slice(index + 1).startsWith(CLOBBER_PREFIX)) return href;
+    return `${href.slice(0, index + 1)}${CLOBBER_PREFIX}${href.slice(index + 1)}`;
+  };
+  function resolveAnchor(child: HastElement, reference: MarkdownAuthoredReference | null): HastNode[] {
+      const props = child.properties;
+      // Raw HTML may claim these marker names, but it never passes through the
+      // private HAST wrapper that carries Markdown-authored reference data.
+      delete props.dataDtxReferenceLocator;
+      delete props["data-dtx-reference-locator"];
+      delete props.dataDtxReferenceToken;
+      delete props["data-dtx-reference-token"];
+      delete props.dataDtxReferenceWikilink;
+      delete props["data-dtx-reference-wikilink"];
+      delete props.dataDtxUnavailableReference;
+      delete props["data-dtx-unavailable-reference"];
+      delete props.ariaDisabled;
+      delete props["aria-disabled"];
+      const href = typeof props.href === "string" ? props.href : "";
+      const locator = reference?.locator ?? href;
+      const target = targets.get(locator);
+      const unavailable = (): HastNode[] => {
+        if (!reference) return child.children;
+        delete props.href;
+        delete props.title;
+        delete props.ariaDisabled;
+        delete props["aria-disabled"];
+        delete props.dataInternalPageId;
+        delete props["data-internal-page-id"];
+        delete props.dataInternal;
+        delete props["data-internal"];
+        delete props.dataContextLinkLocator;
+        delete props["data-context-link-locator"];
+        props.className = [];
+        props["data-dtx-unavailable-reference"] = "true";
+        child.data = Object.assign({}, child.data, {
+          dtxUnavailableReference: reference,
+        }) as typeof child.data;
+        return [child];
+      };
+      if (options.confirmedOnly) {
+        if (!target || target.state !== "ok" || !target.href || !target.href.startsWith("/") || target.href.startsWith("//")) return unavailable();
+        props.href = withFragmentPrefix(target.href);
+        return [child];
+      }
+      const classification = classifyContextLink(locator, {
+        workspaceId: options.workspaceId,
+        allowWorkspaceNavigation: true,
+      });
+      const wikilink = reference?.wikilink === true;
+      // An unrecognized href belongs to its author. Only a positively known
+      // app locator or a server-resolved target can acquire internal policy.
+      const internal = target || wikilink || [
+        "page_id", "stable_full", "stable_short", "canonical_route",
+        "nav_target", "concept_path", "slug", "resource_uri", "workspace_navigation",
+      ].includes(classification.kind);
+      if (!internal) return [child];
+      delete props.dataContextLinkLocator;
+      delete props["data-context-link-locator"];
+      const legacyPageId = props.dataInternalPageId ?? props["data-internal-page-id"];
+      const resolvedHref = target?.state === "ok" ? target.href
+        : target ? null
+        : wikilink && classification.lookup === "" && href.startsWith("#") && href !== "#" ? href
+        : options.publicReader ? null
+        : classification.kind === "workspace_navigation" && !options.allowWorkspaceNavigation ? null
+        : classification.stableUrl ?? (wikilink && legacyPageId && href !== "#" ? href : null);
+      if (options.publicReader && !resolvedHref) return unavailable();
+      if (resolvedHref) {
+        props.href = withFragmentPrefix(resolvedHref);
+        if (wikilink) props.className = ["wikilink"];
+        const pageId = target?.target_page_id ?? classification.pageId ?? legacyPageId;
+        if (!options.publicReader && pageId) props.dataInternalPageId = pageId;
+        if (options.publicReader) {
+          delete props.dataInternalPageId;
+          delete props["data-internal-page-id"];
+        }
+        return [child];
+      }
+      return unavailable();
+  }
+  function resolve(parent: HastParent) {
+    parent.children = parent.children.flatMap((child): HastNode[] => {
+      if ((child as { type: string }).type === TRUSTED_INLINE_TAG_NODE) {
+        const trustedNode = child as unknown as { children?: HastNode[] };
+        const anchor = trustedNode.children?.[0];
+        if (!anchor || !isHastElement(anchor) || anchor.tagName !== "a") {
+          return trustedNode.children ?? [];
+        }
+        return [anchor];
+      }
+      if ((child as { type: string }).type === TRUSTED_REFERENCE_NODE) {
+        const trustedNode = child as unknown as {
+          data?: { reference?: unknown };
+          children?: HastNode[];
+        };
+        const anchor = trustedNode.children?.[0];
+        if (!anchor || !isHastElement(anchor) || anchor.tagName !== "a") {
+          return trustedNode.children ?? [];
+        }
+        const reference = readMarkdownAuthoredReference(trustedNode.data?.reference);
+        resolve(anchor);
+        const recoveredSiblings = (trustedNode.children?.slice(1) ?? []).flatMap((sibling): HastNode[] => {
+          if (!isHastElement(sibling)) return [sibling];
+          resolve(sibling);
+          return sibling.tagName === "a" ? resolveAnchor(sibling, null) : [sibling];
+        });
+        return [
+          ...resolveAnchor(anchor, reference),
+          ...recoveredSiblings,
+        ];
+      }
+      if (!isHastElement(child)) return [child];
+      resolve(child);
+      if (child.tagName !== "a") return [child];
+      return resolveAnchor(child, null);
+    }) as HastParent["children"];
+  }
+  return (tree: HastRoot) => resolve(tree);
 }
 
 function constrainPageImageSources(parent: HastParent) {
@@ -495,9 +807,6 @@ type DtxInline = {
 
 type DtxTokenOptions = {
   resolveWikilinkTarget?: (rawTarget: string) => WikilinkResolution;
-  // When true, render [[wikilinks]] as plain text (no anchor). Used by the
-  // public reader so it never emits in-app links or probes private targets.
-  plainWikilinks?: boolean;
   // Maps an `@cite{...}` slug to a tombstone label when its source was deleted.
   resolveDeletedSource?: (sourceId: string) => string | undefined;
   sourceLineNumbers?: boolean;
@@ -529,6 +838,46 @@ function remarkDtxTokens(options: DtxTokenOptions = {}) {
   return (tree: Root) => {
     transformFencedBlocks(tree, options.sourceLineNumbers ?? false);
     transformInlineTokens(tree as unknown as DtxParent, options);
+  };
+}
+
+function remarkMarkMarkdownReferences() {
+  return (tree: Root) => {
+    const definitions = new Map<string, string>();
+    const visit = (node: unknown, callback: (node: Record<string, unknown>) => void) => {
+      if (!node || typeof node !== "object") return;
+      const value = node as Record<string, unknown>;
+      callback(value);
+      if (Array.isArray(value.children)) {
+        value.children.forEach((child) => visit(child, callback));
+      }
+    };
+    visit(tree, (node) => {
+      if (node.type === "definition" && typeof node.identifier === "string" && typeof node.url === "string") {
+        definitions.set(node.identifier, node.url);
+      }
+    });
+    visit(tree, (node) => {
+      if (node.type !== "link" && node.type !== "linkReference") return;
+      const locator = node.type === "link"
+        ? node.url
+        : typeof node.identifier === "string" ? definitions.get(node.identifier) : undefined;
+      if (typeof locator !== "string") return;
+      const priorData = node.data && typeof node.data === "object"
+        ? node.data as Record<string, unknown>
+        : {};
+      const priorProperties = priorData.hProperties && typeof priorData.hProperties === "object"
+        ? priorData.hProperties as Record<string, unknown>
+        : {};
+      node.data = {
+        ...priorData,
+        hProperties: {
+          ...priorProperties,
+          "data-dtx-reference-locator": locator,
+          "data-dtx-reference-wikilink": "false",
+        },
+      };
+    });
   };
 }
 
@@ -696,23 +1045,13 @@ function tokenizeTextNode(node: Text, options: DtxTokenOptions): DtxNode[] {
       nodes.push(textNode(node.value.slice(cursor, tokenStart)));
     }
     if (match[1]) {
-      // Public reader (plainWikilinks): emit the link text as plain text only.
-      // We do NOT resolve targets here — resolving publicness per link would
-      // require an authenticated lookup and could enumerate private slugs/titles
-      // (T16 27-f). Future: resolve to /w/{ws}/pages/{slug} only for targets the
-      // public read endpoint confirms are public, without a private list fetch.
-      if (options.plainWikilinks) {
-        const plainText = (match[2] || match[1]).trim() || "Untitled link";
-        nodes.push(textNode(plainText));
-      } else {
-        nodes.push(wikilinkNode(match[1], match[2], options));
-      }
+      nodes.push(wikilinkNode(match[1], match[2], options, match[0]));
     } else if (match[3]) {
       nodes.push(citationNode(match[3], options));
     } else if (match[4]) {
       nodes.push(highlightNode(match[4]));
     } else if (match[6]) {
-      nodes.push(inlineTagNode(match[6], options));
+      nodes.push(inlineTagNode(match[6], options.workspaceId));
     }
     cursor = match.index + match[0].length;
     match = pattern.exec(node.value);
@@ -726,7 +1065,7 @@ function tokenizeTextNode(node: Text, options: DtxTokenOptions): DtxNode[] {
   return nodes;
 }
 
-function wikilinkNode(rawTarget: string, alias: string | undefined, options: DtxTokenOptions): DtxInline {
+function wikilinkNode(rawTarget: string, alias: string | undefined, options: DtxTokenOptions, locator: string): DtxInline {
   const target = parseWikilinkTarget(rawTarget);
   const resolution = target.pageTarget
     ? options.resolveWikilinkTarget?.(target.pageTarget) ?? {
@@ -745,6 +1084,10 @@ function wikilinkNode(rawTarget: string, alias: string | undefined, options: Dtx
         href,
         className: href !== "#" ? ["wikilink"] : ["wikilink", "wikilink-broken"],
         "data-internal": "true",
+        "data-context-link-locator": locator,
+        "data-dtx-reference-locator": locator,
+        "data-dtx-reference-wikilink": "true",
+        ...(resolution.pageId ? { "data-internal-page-id": resolution.pageId } : {}),
       },
     },
     children: [textNode(title || "Untitled link")],
@@ -768,6 +1111,7 @@ function buildWikilinkResolver(
     ),
   );
   const knownSlugs = new Set<string>();
+  const pageIdBySlug = new Map(pages.filter((page) => page.id).map((page) => [page.slug, page.id!]));
   const aliasToSlug = new Map<string, string>();
   for (const page of pages) {
     if (!page.slug) {
@@ -787,12 +1131,10 @@ function buildWikilinkResolver(
       return pinnedTargets.get(slugCandidate) ?? { pageId: null, slug: "" };
     }
     if (knownSlugs.has(slugCandidate)) {
-      return { pageId: null, slug: slugCandidate };
+      return { pageId: pageIdBySlug.get(slugCandidate) ?? null, slug: slugCandidate };
     }
-    return {
-      pageId: null,
-      slug: aliasToSlug.get(wikilinkAliasKey(rawTarget)) ?? slugCandidate,
-    };
+    const slug = aliasToSlug.get(wikilinkAliasKey(rawTarget)) ?? slugCandidate;
+    return { pageId: pageIdBySlug.get(slug) ?? null, slug };
   };
 }
 
@@ -810,12 +1152,11 @@ function wikilinkHref(
   workspaceId?: string | null,
 ) {
   if (pageId) {
-    if (!workspaceId || !isWorkspaceUuid(workspaceId) || !isWorkspaceUuid(pageId)) {
-      return "#";
+    const hash = headingSlug ? `#${CLOBBER_PREFIX}${headingSlug}` : "";
+    if (workspaceId && isContextId(workspaceId) && isContextId(pageId)) {
+      return formatContextPageUrl(workspaceId, pageId, hash);
     }
-    return formatCanonicalContextUrl(
-      workspaceId, pageId, headingSlug ? `${CLOBBER_PREFIX}${headingSlug}` : undefined,
-    );
+    return "#";
   }
   // P10.1: /pages/{slug} (the old slug-only compatibility fallback) is gone.
   // A non-empty `slug` here means the wikilink named a cross-page target the
@@ -887,16 +1228,15 @@ function highlightNode(value: string): DtxInline {
   };
 }
 
-function inlineTagNode(rawTag: string, options: DtxTokenOptions): DtxInline {
+function inlineTagNode(rawTag: string, workspaceId?: string | null): DtxInline {
   const safeTag = sanitizeInlineTag(rawTag);
+  const validWorkspaceId = workspaceId && isContextId(workspaceId) ? workspaceId : null;
   return {
     type: "dtxInlineTag",
     data: {
-      hName: "a",
+      hName: validWorkspaceId ? "a" : "mark",
       hProperties: {
-        href: options.workspaceId && isWorkspaceUuid(options.workspaceId)
-          ? `${workspacePath(options.workspaceId, "search")}?q=${encodeURIComponent(`#${safeTag}`)}`
-          : undefined,
+        ...(validWorkspaceId ? { href: `${workspacePath(validWorkspaceId, "search")}?q=${encodeURIComponent(`#${safeTag}`)}` } : {}),
         className: ["inline-tag"],
         "data-tag": safeTag,
       },
@@ -910,13 +1250,7 @@ function textNode(value: string): Text {
 }
 
 function slugifyHeadingAnchor(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/-{2,}/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
+  return normalizeContextHeading(value);
 }
 
 function sanitizeTokenAttribute(value?: string) {
@@ -933,29 +1267,40 @@ function sanitizeInlineTag(value: string) {
 }
 
 function MarkdownLink({
-  href: authoredHref,
+  href,
   children,
-  node: _node,
+  "data-dtx-unavailable-reference": unavailableToken,
+  node,
   ...props
 }: MarkdownAnchorProps) {
   const { t } = useTranslation("pages");
-  const sourceWorkspaceId = useContext(MarkdownWorkspaceContext);
-  const shortPage = authoredHref?.match(/^\/p\/([0-9a-f-]+)(#[^\s]*)?$/i);
-  const href = shortPage && sourceWorkspaceId && isWorkspaceUuid(sourceWorkspaceId)
-    && isWorkspaceUuid(shortPage[1])
-    ? formatCanonicalContextUrl(sourceWorkspaceId, shortPage[1], shortPage[2])
-    : authoredHref;
-  // wikilinkNode() already sets the full "wikilink"/"wikilink-broken" class
-  // list on hProperties.className for every data-internal anchor -- it is
-  // the only producer of that attribute -- so re-deriving it here just
-  // duplicated the classes (measured DOM: class="wikilink wikilink").
+  const behavior = useContext(MarkdownLinkBehaviorContext);
+  const routeState = useContext(MarkdownRouteStateContext);
+  const unavailableReference = unavailableToken === "true"
+    ? readMarkdownReferenceFromNode(node)
+    : null;
+  if (unavailableReference) {
+    const unavailableTrigger = (linkChildren: ReactNode) => (
+      <UnavailableReference
+        infoMode={behavior?.infoMode ?? "public"}
+        infoOnly={!behavior?.authenticatedAuthored}
+        reference={behavior?.authenticatedAuthored ? unavailableReference.locator : null}
+        wikilink={unavailableReference.wikilink}
+      >
+        {linkChildren}
+      </UnavailableReference>
+    );
+    return containsMarkdownImage(children)
+      ? <MarkdownLinkedContent renderLink={unavailableTrigger}>{children}</MarkdownLinkedContent>
+      : unavailableTrigger(children);
+  }
   const className = props.className;
   const accessibleProps = {
     ...props,
     "aria-label": props["aria-label"] ?? linkedImageFallbackLabel(children, t),
   };
   const renderLink = (linkChildren: ReactNode) => {
-    if (!href) {
+    if (href == null) {
       return <a {...accessibleProps} className={className}>{linkChildren}</a>;
     }
     if (href.startsWith("#")) {
@@ -965,10 +1310,25 @@ function MarkdownLink({
         </a>
       );
     }
-    if (href.startsWith("/") && !href.startsWith("//")) {
+    const navigationHref = behavior?.authenticatedAuthored && behavior.sourceWorkspaceId
+      ? referenceNavigationHref(href, behavior.sourceWorkspaceId)
+      : null;
+    const renderedHref = navigationHref ?? href;
+    const knownNavigation = classifyContextLink(renderedHref, {
+      workspaceId: behavior?.sourceWorkspaceId,
+      allowWorkspaceNavigation: true,
+    });
+    if (renderedHref.startsWith("/") && !renderedHref.startsWith("//") &&
+        (navigationHref || ["stable_full", "stable_short", "canonical_route", "workspace_navigation", "public_reader"].includes(knownNavigation.kind))) {
+      const returnState = navigationHref && routeState
+        ? createReferenceReturnState(routeState.sourceHref)
+        : undefined;
       return (
-        <Link to={href} {...accessibleProps} className={className}>
+        <Link to={renderedHref} state={returnState} {...accessibleProps} className={className}>
           {linkChildren}
+          {behavior?.authenticatedAuthored ? (
+            <WorkspaceLinkBadge href={renderedHref} sourceWorkspaceId={behavior.sourceWorkspaceId} />
+          ) : null}
         </Link>
       );
     }
@@ -992,6 +1352,34 @@ function MarkdownLink({
     );
   }
   return renderLink(children);
+}
+
+function referenceNavigationHref(href: string, workspaceId: string): string | null {
+  if (/[\\\u0000-\u0020\u007f]/.test(href) || href !== href.trim() || href.startsWith("//")) return null;
+  const options = {
+    workspaceId,
+    allowWorkspaceNavigation: true,
+  };
+  let classification = classifyContextLink(href, options);
+  const hashAt = href.indexOf("#");
+  const queryAt = href.indexOf("?");
+  if (classification.kind === "unknown" && queryAt >= 0 && (hashAt < 0 || queryAt < hashAt)) {
+    const query = href.slice(queryAt, hashAt < 0 ? undefined : hashAt);
+    if (!hasConflictingWorkspaceQuery(query)) {
+      const withoutQuery = href.slice(0, queryAt) + (hashAt < 0 ? "" : href.slice(hashAt));
+      const route = classifyContextLink(withoutQuery, options);
+      if (route.kind === "stable_full") classification = route;
+    }
+  }
+  const recognized = classification.kind === "workspace_navigation" ||
+    classification.kind === "canonical_route" ||
+    classification.kind === "stable_full";
+  if (!recognized) return null;
+  // Classify the authored path before stripping the origin: URL.pathname
+  // would silently normalize dot segments that must remain rejected.
+  return /^https?:\/\//i.test(href)
+    ? /^https?:\/\/[^/?#]*(.*)$/i.exec(href)?.[1] || "/"
+    : href;
 }
 
 function MarkdownLinkedContent({
@@ -2342,6 +2730,10 @@ const markdownSanitizeSchema = {
       "data-internal",
       "data-tag",
       "dataInternal",
+      "dataInternalPageId",
+      "data-internal-page-id",
+      "data-dtx-unavailable-reference",
+      "dataDtxUnavailableReference",
       "dataTag",
       "target",
       "rel",
