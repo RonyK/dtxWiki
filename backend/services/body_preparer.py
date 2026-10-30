@@ -85,6 +85,34 @@ class BodyPreparer:
         # "Format now" is an explicit request even when save-time fixing is off.
         return self._prepare(BodyInput(markdown), ctx, preview=True)
 
+    def inspect(self, markdown: str, ctx: WriteContext) -> PreparedBody:
+        """Report stored-body findings without validating or transforming bytes."""
+        policy = self.policy_factory(ctx.workspace)
+        lint_ctx = LintContext(
+            session=ctx.session, workspace_id=ctx.workspace.id, actor=ctx,
+            page=ctx.page, version=ctx.version, self_origins=self.self_origins,
+        )
+        findings = tuple(
+            finding
+            for rule in self.registry.rules_for(
+                LintStage.SAVE, policy, target_type="context_page"
+            )
+            for finding in rule.check_body(markdown, lint_ctx)
+        )
+        return PreparedBody(markdown, content_hash(markdown), findings=findings)
+
+    def auto_approval_matches(
+        self, base_body: str, new_body: str, ctx: WriteContext
+    ) -> bool:
+        prepared = self.prepare(BodyInput(base_body), ctx)
+        policy = self.policy_factory(ctx.workspace)
+        changed = dict(prepared.module_fix_counts)
+        return prepared.body == new_body and all(
+            policy.auto_approve(module)
+            for module in self.registry.modules
+            if module.module_id in changed
+        )
+
     def _prepare(
         self,
         input: BodyInput,
@@ -114,8 +142,11 @@ class BodyPreparer:
             actor=ctx,
             page=ctx.page,
             version=ctx.version,
+            self_origins=self.self_origins,
         )
         fixes: list[str] = []
+        module_fix_counts: list[tuple[str, int]] = []
+        fix_details: list[dict] = []
         for module in self.registry.fixers_for_save(policy, preview=preview):
             try:
                 result = module.fixer.fix(body, lint_ctx)
@@ -130,6 +161,18 @@ class BodyPreparer:
                     "Lint fixer %s failed; retaining the prior body", module.module_id
                 )
                 continue
+            if next_body != body:
+                module_fix_counts.append((module.module_id, max(1, len(next_fixes))))
+                details = getattr(result, "details", ())
+                if details:
+                    fix_details.extend(details)
+                else:
+                    fix_details.append(
+                        {
+                            "module_id": module.module_id,
+                            "count": max(1, len(next_fixes)),
+                        }
+                    )
             body = next_body
             fixes.extend(next_fixes)
 
@@ -150,7 +193,15 @@ class BodyPreparer:
             )
             for finding in rule.check_body(body, lint_ctx)
         )
-        return PreparedBody(body, content_hash(body), metadata, tuple(fixes), findings)
+        return PreparedBody(
+            body,
+            content_hash(body),
+            metadata,
+            tuple(fixes),
+            findings,
+            tuple(module_fix_counts),
+            tuple(fix_details),
+        )
 
     @staticmethod
     def _sync_metadata(input: BodyInput) -> tuple[str, PreparedMetadata]:

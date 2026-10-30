@@ -5573,6 +5573,13 @@ export interface components {
             latest_draft_version_id?: string | null;
             /** Link Targets */
             link_targets?: components["schemas"]["ContextLinkTarget"][];
+            /**
+             * Lint Report
+             * @description Save-time fixes and findings for the final stored body.
+             */
+            lint_report?: {
+                [key: string]: unknown;
+            };
             /** Next Reconciliation Version Id */
             next_reconciliation_version_id?: string | null;
             /**

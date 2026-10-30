@@ -511,6 +511,10 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
     )
     service = configured.get_page_service()
     reader = configured.get_services().domain_read
+    with service.session_factory.begin() as session:
+        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+        # This fixture exercises stored legacy locators, not the save fixer.
+        workspace.lint_policy = {"link_fix_mode": "suggest"}
     target = service.write_page(
         workspace_slug="default",
         slug="한글-문서",

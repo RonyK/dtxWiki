@@ -244,6 +244,12 @@
             "title": "Id",
             "type": "string"
           },
+          "lint_report": {
+            "additionalProperties": true,
+            "description": "Save-time fixes and findings for the final stored body.",
+            "title": "Lint Report",
+            "type": "object"
+          },
           "publish_blocked_reasons": {
             "items": {
               "$ref": "#/$defs/DraftReviewReason"

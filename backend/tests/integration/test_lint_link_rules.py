@@ -64,9 +64,10 @@ def test_unresolved_and_healthy_links(session_factory):
         assert [finding.message_args["written_slug"] for finding in unresolved] == [
             "missing-target"
         ]
-        assert _check(session, "link.broken-slug", broken) == []
+        assert _check(session, "link.internal-noncanonical", broken) == []
         assert _check(session, "link.unresolved", healthy) == []
-        assert _check(session, "link.broken-slug", healthy) == []
+        assert _check(session, "link.internal-noncanonical", healthy) == []
+
 
 
 def test_renamed_pinned_link_is_broken_slug_not_unresolved(session_factory):
@@ -78,11 +79,13 @@ def test_renamed_pinned_link_is_broken_slug_not_unresolved(session_factory):
         session.flush()
 
         assert _check(session, "link.unresolved", source) == []
-        findings = _check(session, "link.broken-slug", source)
+        findings = _check(session, "link.internal-noncanonical", source)
         assert len(findings) == 1
         assert findings[0].message_args == {
             "written_slug": "old-target",
-            "current_slug": "new-target",
+            "locator_kind": "wikilink",
+            "locator": "[[old-target]]",
+            "replacement": f"/p/{workspace_id}/{target.id}",
             # LEAK-01: link findings now carry provenance like format findings,
             # so list_findings can hide a draft-only finding from a viewer.
             # This fixture only sets current_published_version_id.
@@ -158,7 +161,7 @@ def test_link_finding_body_scopes_track_which_body_the_defect_is_in(session_fact
         target.slug = "private-new"
         session.flush()
         assert _check(session, "link.unresolved", private_source) == []
-        assert _check(session, "link.broken-slug", private_source) == []
+        assert _check(session, "link.internal-noncanonical", private_source) == []
 
 
 def test_rebuild_coalesces_two_repaired_slugs_without_losing_pin(session_factory):

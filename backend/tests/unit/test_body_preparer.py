@@ -127,6 +127,12 @@ def test_body_preparer_is_idempotent_and_honors_injected_modules_and_policy():
     assert result.fixes == ("link.canonicalized", "format.list_marker")
     assert [finding.rule_id for finding in result.findings] == ["test.final_body"]
     assert result.findings[0].target_id == page.id
+    assert result.module_fix_counts == (("links", 1), ("format", 1))
+    assert result.lint_report["fixes"] == [
+        {"module_id": "links", "count": 1},
+        {"module_id": "format", "count": 1},
+    ]
+    assert result.lint_report["findings"][0]["target_id"] == str(page.id)
     assert len(observed) == 1
     body_seen, lint_ctx = observed[0]
     assert body_seen == result.body
@@ -135,3 +141,11 @@ def test_body_preparer_is_idempotent_and_honors_injected_modules_and_policy():
     assert lint_ctx.actor is ctx
     assert lint_ctx.page is page
     assert lint_ctx.version is version
+    # The same injected link module has no approval opt-in: matching its
+    # normalized bytes must still honor that module's approval veto.
+    assert not injected.auto_approval_matches(
+        "# Body\n\n* draft-link\n", result.body, ctx
+    )
+    inspected = injected.inspect("# Body\n\n* draft-link\n", ctx)
+    assert inspected.body == "# Body\n\n* draft-link\n"
+    assert inspected.lint_report["fixes"] == []

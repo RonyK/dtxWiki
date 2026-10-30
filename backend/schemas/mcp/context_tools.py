@@ -127,6 +127,10 @@ class ContextEditResult(BaseModel):
     review_item_id: UUID | None = None
     change_set_id: UUID | None = None
     publish_blocked_reasons: list[DraftReviewReason] = Field(default_factory=list)
+    lint_report: dict[str, Any] = Field(
+        default_factory=lambda: {"fixes": [], "findings": []},
+        description="Save-time fixes and findings for the final stored body.",
+    )
     edit_receipt: EditReceipt | None = Field(
         default=None,
         description=(

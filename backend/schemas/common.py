@@ -206,7 +206,10 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        Library lookup paths stay distinct from browser links. Archived
 #        what_changed links are required-nullable, and Review evidence links
 #        use document identity. Index output and input formats are unchanged.
-MCP_TOOL_CONTRACT_REVISION = 23
+#  24 -- Context write results add lint_report with save-time fixes and
+#        findings for the final stored body, including compact MCP edit
+#        results. Refresh tool and result-schema caches.
+MCP_TOOL_CONTRACT_REVISION = 24
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their
 # declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
 # a field carrying this marker is always sent, so an absent value can never be

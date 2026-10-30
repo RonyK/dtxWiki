@@ -136,9 +136,9 @@
       "description": "Flags a Mermaid block that is empty or has no recognized diagram type."
     },
     "link_unresolved": {
-      "label": "Unresolved wiki link",
-      "message": "The wiki link [[{{written_slug}}]] does not resolve to a page.",
-      "description": "Flags a wiki link that has never resolved to a page."
+      "label": "Unavailable internal link",
+      "message": "This internal document link is unavailable.",
+      "description": "Flags a missing, archived, or inaccessible target in this workspace."
     },
     "link_broken-slug": {
       "label": "Stale wiki-link slug",
@@ -229,6 +229,21 @@
       "label": "Evaluation query candidates",
       "message": "An external maintenance run proposed search evaluation queries.",
       "description": "Records search evaluation queries proposed by an external maintenance run."
+    },
+    "link_foreign": {
+      "label": "Cross-workspace reference",
+      "message": "Use a full permanent link for a document in another workspace.",
+      "description": "Flags a lookup-only resource address that cannot resolve in this workspace."
+    },
+    "link_target-unpublished": {
+      "label": "Unpublished link target",
+      "message": "The linked document has no published version.",
+      "description": "Flags a published document linking to a target readers cannot yet open."
+    },
+    "link_internal-noncanonical": {
+      "label": "Legacy internal link",
+      "message": "Use the permanent document link.",
+      "description": "Flags resolvable legacy addresses that can safely become permanent links."
     }
   },
   "empty": {

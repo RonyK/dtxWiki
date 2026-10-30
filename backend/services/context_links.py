@@ -1,7 +1,8 @@
-"""Workspace-scoped authored link identity, resolution, and extraction.
+"""Workspace-scoped authored link identity, resolution, extraction and fixes.
 
 Foreign locators never cause a target database read, and an existing pin
-always precedes a name lookup. This module only classifies and reads links.
+always precedes a name lookup. Lint findings and save-time fixes share one
+decision per link.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from types import SimpleNamespace
 from urllib.parse import parse_qs, unquote, urlsplit
 from uuid import UUID
 
@@ -282,13 +284,22 @@ def _chunks(values: list, size: int = _LINK_LOOKUP_CHUNK_SIZE):
 class LinkResolutionBatch:
     """Request-local, workspace-scoped reads shared by authored-link resolvers.
 
-    This is only a read snapshot for one response. Callers that need write-time
-    freshness continue to use ``resolve`` without a batch.
+    The snapshot lasts for one read or preparation pass inside the caller's
+    transaction; it is never reused across writes.
     """
 
-    def __init__(self, locators: list[Locator], ctx: LinkContext) -> None:
+    def __init__(
+        self,
+        locators: list[Locator],
+        ctx: LinkContext,
+        *,
+        include_navigation: bool = False,
+    ) -> None:
         self.workspace_id = ctx.workspace_id
         self.source_version_id = ctx.source_version_id
+        self.navigation_targets: dict[tuple[str, UUID], object] = {}
+        if include_navigation:
+            self._prefetch_navigation(locators, ctx)
         self.pins: dict[str, UUID] = {}
         self.latest_pins: dict[str, tuple[datetime, UUID]] = {}
         self.node_page_ids: dict[UUID, UUID] = {}
@@ -492,6 +503,53 @@ class LinkResolutionBatch:
                 )
             )
             self.versions.update((version.id, version) for version in versions)
+
+    def _prefetch_navigation(self, locators: list[Locator], ctx: LinkContext) -> None:
+        from backend.services.context_link_targets import (
+            _parse_workspace_navigation_reference,
+        )
+
+        ids: dict[str, set[UUID]] = {}
+        for locator in locators:
+            if locator.kind != "unknown":
+                continue
+            reference = _parse_workspace_navigation_reference(
+                locator.href, self_origins=ctx.self_origins
+            )
+            if reference is None:
+                continue
+            section, kind, target_id, workspace_id = reference
+            route_kind = _WORKSPACE_ROUTE_KINDS.get((section, kind))
+            if (
+                route_kind is not None
+                and target_id is not None
+                and workspace_id == ctx.workspace_id
+            ):
+                ids.setdefault(route_kind, set()).add(target_id)
+        if not ids:
+            return
+        from backend.models.agent import AgentPage
+        from backend.models.library import LibraryItem
+        from backend.models.tree import WorkspaceTreeNode
+
+        models = {
+            "library": LibraryItem,
+            "agent": AgentPage,
+            "folder": WorkspaceTreeNode,
+        }
+        for kind, target_ids in ids.items():
+            model = models[kind]
+            for id_chunk in _chunks(list(target_ids)):
+                targets = ctx.session.scalars(
+                    select_in_workspace(
+                        model,
+                        workspace_id=ctx.workspace_id,
+                        conditions=(model.id.in_(id_chunk),),
+                    )
+                )
+                self.navigation_targets.update(
+                    ((kind, target.id), target) for target in targets
+                )
 
     def _add_page(self, page: ContextPage) -> None:
         self.pages_by_id[page.id] = page
@@ -1107,3 +1165,302 @@ def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
             )
         )
     return tuple(result)
+
+
+@dataclass(frozen=True)
+class LinkDecision:
+    action: str
+    href: str | None = None
+    finding: str | None = None
+    severity: str = "warning"
+
+
+def decide(
+    locator: Locator,
+    resolution: Resolution,
+    *,
+    context_workspace_id: UUID | None = None,
+    source_is_published: bool = False,
+) -> LinkDecision:
+    if resolution.state == "ignored":
+        return LinkDecision("keep")
+    if resolution.state == "foreign":
+        # Foreign slug resources are not stable identities, so retain their
+        # existing diagnostic. Full UUID links are already explicit and must
+        # remain untouched without claiming that an unread foreign target is
+        # broken or noncanonical.
+        if locator.kind == "resource_uri":
+            return LinkDecision("finding", finding="link.foreign")
+        return LinkDecision("keep")
+    if resolution.state != "ok":
+        return LinkDecision("finding", finding="link.unresolved")
+    if source_is_published and not resolution.published:
+        return LinkDecision(
+            "finding", finding="link.target-unpublished", severity="info"
+        )
+    noncanonical = (
+        locator.kind not in {"stable_full", "wikilink", "page_id"} or locator.absolute
+    )
+    if locator.kind == "wikilink" and locator.slug != resolution.target_slug:
+        noncanonical = True
+    if noncanonical:
+        return LinkDecision("fix", resolution.href, "link.internal-noncanonical")
+    return LinkDecision("keep")
+
+
+def editor_link_actor(actor_kind: str, actor_id: str) -> SimpleNamespace:
+    """The link authority of an authorized writer: its identity, editor role.
+
+    A write context carries provenance, not an ActorContext; the ingress has
+    already authorized the write, so link checks see the writer as an editor.
+    """
+    return SimpleNamespace(
+        actor_kind=actor_kind,
+        actor_id=actor_id,
+        workspace_role="editor",
+        role="editor",
+    )
+
+
+_WORKSPACE_ROUTE_KINDS = {
+    ("library", "item"): "library",
+    ("agent", "page"): "agent",
+    ("agent", "page_edit"): "agent",
+    ("context", "folder"): "folder",
+    ("library", "folder"): "folder",
+    ("agent", "folder"): "folder",
+}
+
+
+def _live_route(
+    ctx: LinkContext,
+    kind: str,
+    target_id: UUID,
+    section: str | None = None,
+    *,
+    batch: LinkResolutionBatch | None = None,
+) -> str | None:
+    """Canonical route of a live Library item, Agent page or folder in W.
+
+    Only existence and lifecycle are checked here; who may open the target is
+    decided by its own reader when the link is followed.
+    """
+    from backend.models.agent import AgentPage
+    from backend.models.library import LibraryItem
+    from backend.models.tree import WorkspaceTreeNode
+    from backend.repositories.workspace_scoped import get_in_workspace
+    from backend.services.okf import EXCLUDED_LIBRARY_LIFECYCLE_STATUSES
+    from backend.services.workspace_urls import (
+        agent_page_url,
+        folder_url,
+        library_item_url,
+    )
+
+    model = {"library": LibraryItem, "agent": AgentPage, "folder": WorkspaceTreeNode}
+    target = (
+        batch.navigation_targets.get((kind, target_id))
+        if batch is not None
+        else get_in_workspace(
+            ctx.session,
+            model[kind],
+            workspace_id=ctx.workspace_id,
+            resource_id=target_id,
+        )
+    )
+    if target is None:
+        return None
+    if kind == "library":
+        if target.lifecycle_status in EXCLUDED_LIBRARY_LIFECYCLE_STATUSES:
+            return None
+        return library_item_url(ctx.workspace_id, target.id)
+    if kind == "agent":
+        if target.lifecycle_status == "archived":
+            return None
+        return agent_page_url(ctx.workspace_id, target.id)
+    if (
+        target.node_kind != "folder"
+        or target.visibility_status != "visible"
+        or (section is not None and target.section != section)
+    ):
+        return None
+    return folder_url(ctx.workspace_id, target.section, target.id)
+
+
+def _workspace_route(
+    href: str, ctx: LinkContext, *, batch: LinkResolutionBatch | None = None
+) -> tuple[bool, str | None]:
+    """Typed Library item, Agent page and folder routes in an authored body.
+
+    Another workspace's route is kept as written; that workspace decides when
+    it is followed. Other product routes keep the Context resolver's result.
+    """
+    from backend.services.context_link_targets import (
+        _parse_workspace_navigation_reference,
+    )
+
+    reference = _parse_workspace_navigation_reference(
+        href, self_origins=ctx.self_origins
+    )
+    if reference is None:
+        return False, None
+    section, kind, target_id, workspace_id = reference
+    route_kind = _WORKSPACE_ROUTE_KINDS.get((section, kind))
+    if route_kind is None or workspace_id is None or target_id is None:
+        # These are syntactically valid workspace UI destinations, but this
+        # resolver is a Context-link lint/write boundary, not the readers for
+        # reviews, chats, Ask, Lint, or Library artifacts. Keep their authored
+        # bytes and let each route's reader decide availability and access.
+        if workspace_id is not None and (
+            kind == "overview"
+            or section in {"review", "ask", "chats", "lint"}
+            or (section == "library" and kind == "artifact")
+        ):
+            return True, href
+        return False, None
+    if workspace_id != ctx.workspace_id:
+        return True, href
+    return True, _live_route(ctx, route_kind, target_id, section, batch=batch)
+
+
+def link_decision_batch(
+    occurrences: tuple[LinkOccurrence, ...], ctx: LinkContext
+) -> LinkResolutionBatch:
+    from backend.services.context_link_targets import _classify_context_navigation
+
+    return LinkResolutionBatch(
+        [
+            _classify_context_navigation(occurrence.href, ctx.self_origins)
+            for occurrence in occurrences
+        ],
+        ctx,
+        include_navigation=True,
+    )
+
+
+def decide_link(
+    href: str, ctx: LinkContext, *, batch: LinkResolutionBatch | None = None
+) -> tuple[Locator, Resolution | None, LinkDecision]:
+    """One decision for an authored link, shared by lint findings and fixes."""
+    locator = classify(href, ctx.self_origins)
+    try:
+        has_query = bool(urlsplit(href).query)
+    except ValueError:
+        has_query = False
+    if has_query:
+        # Preserve the authored view state after proving its route/query grammar.
+        # Identity overrides fail this classifier and remain unavailable.
+        from backend.services.context_link_targets import (
+            _classify_context_navigation,
+        )
+
+        view_locator = _classify_context_navigation(href, ctx.self_origins)
+        if view_locator.kind in {
+            "canonical_route",
+            "stable_full",
+            "stable_short",
+        }:
+            resolution = resolve(view_locator, ctx, batch=batch)
+            decision = decide(
+                view_locator,
+                resolution,
+                context_workspace_id=ctx.workspace_id,
+                source_is_published=ctx.source_is_published,
+            )
+            if decision.action == "fix":
+                decision = LinkDecision("keep")
+            return view_locator, resolution, decision
+    if locator.kind == "unknown":
+        handled, target = _workspace_route(href, ctx, batch=batch)
+        if handled:
+            return locator, None, (
+                LinkDecision("keep")
+                if target is not None
+                else LinkDecision("finding", finding="link.unresolved")
+            )
+    resolution = resolve(locator, ctx, batch=batch)
+    return (
+        locator,
+        resolution,
+        decide(
+            locator,
+            resolution,
+            context_workspace_id=ctx.workspace_id,
+            source_is_published=ctx.source_is_published,
+        ),
+    )
+
+
+def rewrite_links_with_report(
+    body: str, ctx: LinkContext
+) -> tuple[str, tuple[str, ...], tuple[dict, ...]]:
+    """Apply only proved destination edits; all other source bytes are reused."""
+    changes = []
+    details = []
+    occurrences = extract_links(body)
+    batch = link_decision_batch(occurrences, ctx)
+    for occurrence in occurrences:
+        locator, resolution, decision = decide_link(occurrence.href, ctx, batch=batch)
+        if decision.action != "fix" or not decision.href:
+            continue
+        # A draft-only destination cannot be newly disclosed by a published
+        # source; retain its written bytes and let the info finding explain it.
+        if (
+            resolution is not None
+            and ctx.source_is_published
+            and resolution.state == "ok"
+            and not resolution.published
+        ):
+            continue
+        replacement = decision.href
+        if occurrence.kind in {"wikilink", "autolink", "literal_autolink"}:
+            # A new [ immediately after ! would turn a visible link into an
+            # image. Keep the source and finding when this span is not safe.
+            if (
+                occurrence.span.char_start
+                and body[occurrence.span.char_start - 1] == "!"
+            ):
+                continue
+            label = occurrence.label or occurrence.slug or occurrence.href
+            replacement = f"[{escape_link_label(label)}]({decision.href})"
+        after_locator = classify(decision.href, ctx.self_origins)
+        if resolution is None:
+            continue
+        after = resolve(after_locator, ctx, batch=batch)
+        same_target = after.state == "ok" and after.page_id == resolution.page_id
+        if same_target:
+            changes.append((occurrence.span, replacement))
+            details.append(
+                {
+                    "module_id": "links",
+                    "rule_id": "link.internal-noncanonical",
+                    "before": occurrence.href,
+                    "after": decision.href,
+                    "category": "format"
+                    if locator.kind
+                    in {
+                        "stable_full",
+                        "stable_short",
+                        "canonical_route",
+                        "wikilink",
+                    }
+                    else "repair",
+                }
+            )
+    parts = []
+    cursor = 0
+    for span, replacement in changes:
+        if span.char_start < cursor:
+            return body, (), ()
+        parts.extend((body[cursor : span.char_start], replacement))
+        cursor = span.char_end
+    parts.append(body[cursor:])
+    return (
+        "".join(parts),
+        tuple("link.internal-noncanonical" for _ in changes),
+        tuple(details),
+    )
+
+
+def rewrite_links(body: str, ctx: LinkContext) -> tuple[str, tuple[str, ...]]:
+    rewritten, fixes, _ = rewrite_links_with_report(body, ctx)
+    return rewritten, fixes

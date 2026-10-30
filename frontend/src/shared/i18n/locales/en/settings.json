@@ -617,7 +617,13 @@
     "toggleLayerAria": "Toggle every {{layer}} rule",
     "saved": "Saved",
     "empty": "No lint rules",
-    "emptyHint": "This server reports no lint rules, so nothing runs when a page is saved."
+    "emptyHint": "This server reports no lint rules, so nothing runs when a page is saved.",
+    "linkFixMode": "Fix internal links",
+    "linkFixModeHint": "Normalize resolvable links to permanent page URLs while preserving their destinations.",
+    "linkFixAuto": "Automatically",
+    "linkFixSuggest": "Suggest only",
+    "autoApproveLinkFixes": "Automatically approve safe link fixes",
+    "autoApproveLinkFixesHint": "Approve only changes that preserve every target page and pass the usual review safeguards."
   },
   "summary": {
     "workspace": "The name, owner, and default language for this workspace.",

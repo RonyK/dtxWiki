@@ -910,8 +910,36 @@ def test_missing_backlink_rule_batches_many_outbound_targets(
         finally:
             event.remove(session.get_bind(), "before_cursor_execute", count_query)
 
-    assert len(findings) == len(targets)
-    assert query_count <= 2
+        assert len(findings) == len(targets)
+        assert query_count <= 2
+
+        # The save-time link pass uses the same many-link body and must share
+        # its resolver snapshot, rather than querying each destination again.
+        from backend.services.context_links import (
+            LinkContext,
+            editor_link_actor,
+            rewrite_links_with_report,
+        )
+
+        query_count = 0
+        event.listen(session.get_bind(), "before_cursor_execute", count_query)
+        try:
+            rewritten, fixes, details = rewrite_links_with_report(
+                source.body_md,
+                LinkContext(
+                    session,
+                    workspace_id,
+                    editor_link_actor("human", "tester"),
+                    source_page.id,
+                    source_page.current_published_version_id,
+                    True,
+                ),
+            )
+        finally:
+            event.remove(session.get_bind(), "before_cursor_execute", count_query)
+        assert rewritten == source.body_md
+        assert fixes == details == ()
+        assert query_count <= 8
 
 
 def test_lint_run_request_rejects_unsupported_scope():

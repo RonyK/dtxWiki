@@ -54,7 +54,11 @@ def test_get_policies_includes_lint_card_default_empty(session_factory):
         )
     assert policies.lint.name == "lint"
     # Rule toggles are empty by default; the auto-fix mode flag defaults to off.
-    assert policies.lint.policy == {"auto_fix": False}
+    assert policies.lint.policy == {
+        "auto_fix": False,
+        "link_fix_mode": "auto",
+        "auto_approve_link_fixes": True,
+    }
 
 
 def test_auto_fix_toggle_via_lint_settings(session_factory):
@@ -72,6 +76,21 @@ def test_auto_fix_toggle_via_lint_settings(session_factory):
             workspace_id=ws.id,
         )
         assert policies.lint.policy["auto_fix"] is True
+        svc._update_lint_policy(ws, "link_fix_mode", "suggest")
+        svc._update_lint_policy(ws, "auto_approve_link_fixes", False)
+        policies = svc.get_policies(
+            control_session=session,
+            workspace_session=session,
+            workspace_id=ws.id,
+        )
+        assert policies.lint.policy["link_fix_mode"] == "suggest"
+        assert policies.lint.policy["auto_approve_link_fixes"] is False
+        svc._update_lint_policy(ws, "link_fix_mode", "auto")
+        assert ws.lint_policy["link_fix_mode"] == "auto"
+        # One additional logical input: a list must reach typed validation,
+        # rather than raising TypeError during membership in the allowed set.
+        with pytest.raises(SettingsPolicyUpdateRejected, match="auto or suggest"):
+            svc._update_lint_policy(ws, "link_fix_mode", ["auto"])
         with pytest.raises(SettingsPolicyUpdateRejected, match="boolean"):
             svc._update_lint_policy(ws, "auto_fix", "yes")
 
