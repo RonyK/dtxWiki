@@ -127,7 +127,9 @@ def test_builtin_registry_and_container_module_injection_preserve_publication_fl
         "kb.duplicate_concept",
         "kb.term_collision",
         "link.unresolved",
-        "link.broken-slug",
+        "link.foreign",
+        "link.internal-noncanonical",
+        "link.target-unpublished",
         "maintenance.nav_summary_suggestion",
         "maintenance.coverage_gap_verdict",
         "maintenance.page_meta_suggestion",
@@ -195,6 +197,10 @@ def test_builtin_registry_and_container_module_injection_preserve_publication_fl
         "md.table_wellformed",
         "md.image_ref",
         "md.mermaid_block",
+        "link.unresolved",
+        "link.foreign",
+        "link.internal-noncanonical",
+        "link.target-unpublished",
     }
     assert [
         rule.rule_id for rule in registry.rules_for(LintStage.PUBLISH_FLOOR, policy)

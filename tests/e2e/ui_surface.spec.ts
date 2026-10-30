@@ -69,7 +69,7 @@ async function expectLabsCommands(
   await page.keyboard.press("Escape");
 }
 
-test.describe("Sprint 2 UI surface", () => {
+test.describe("UI surface", () => {
   for (const surface of SURFACES) {
     test(`renders ${surface.path}`, async ({ page }, testInfo) => {
       const pageErrors: string[] = [];

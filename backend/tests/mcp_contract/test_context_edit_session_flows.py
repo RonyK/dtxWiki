@@ -157,13 +157,17 @@ def _stored(page_service, version_id) -> ContextPageVersion:
 def test_repeated_updates_stay_on_one_editing_row_until_submit(page_service, actor):
     workspace_id = _workspace(page_service)
     created = _create(page_service, actor, workspace_id, "# Hello\n\nInitial body.")
+    short_link = f"/p/{created.id}"
+    full_link = f"/p/{workspace_id}/{created.id}"
 
     first = _update(
-        page_service, actor, workspace_id, created, "# Hello\n\nFirst save.", "u-1"
+        page_service, actor, workspace_id, created,
+        f"# Hello\n\nFirst save. [Self]({short_link})", "u-1"
     )
     assert first.envelope.result_status == "succeeded", first.envelope
     second = _update(
-        page_service, actor, workspace_id, first.data, "# Hello\n\nSecond save.", "u-2"
+        page_service, actor, workspace_id, first.data,
+        f"# Hello\n\nSecond save. [Self]({short_link})", "u-2"
     )
     assert second.envelope.result_status == "succeeded", second.envelope
 
@@ -175,12 +179,17 @@ def test_repeated_updates_stay_on_one_editing_row_until_submit(page_service, act
     assert _review_statuses_for_page(page_service, created.id) == []
     assert second.data.review_item_id is None
 
+    operations = [{
+        "op": "replace_text",
+        "old_text": f"Second save. [Self]({full_link})",
+        "new_text": f"Patched. [Self]({short_link})",
+    }]
     patched = _patch(
         page_service,
         actor,
         workspace_id,
         second.data,
-        [{"op": "replace_text", "old_text": "Second save.", "new_text": "Patched."}],
+        operations,
         "p-1",
     )
     assert patched.envelope.result_status == "succeeded", patched.envelope
@@ -199,6 +208,30 @@ def test_repeated_updates_stay_on_one_editing_row_until_submit(page_service, act
     assert resumed.data.version_id == created.version_id
     assert resumed.data.history_status == "current_editing"
     assert resumed.data.inconsistency_reasons == []
+
+    # The existing session fixture checks final normalized bytes at MCP update
+    # and typed patch boundaries; the stored map, report and retry must agree.
+    patch_replay = _patch(
+        page_service, actor, workspace_id, second.data, operations, "p-1"
+    )
+    assert patch_replay.data.model_dump() == patched.data.model_dump()
+    structure = _structure_map(page_service, actor, workspace_id, created.id)
+    stored = _stored(page_service, created.version_id)
+    assert not structure.document.map_repaired
+    assert (
+        structure.document.root_hash == patched.data.content_hash == stored.content_hash
+    )
+    assert {block["id"]: block["hash"] for block in stored.block_map} == {
+        block.id: block.hash for block in structure.blocks
+    }
+    assert stored.body_md == f"# Hello\n\nPatched. [Self]({full_link})"
+    assert patched.data.lint_report == {
+        "fixes": [{
+            "module_id": "links", "rule_id": "link.internal-noncanonical",
+            "before": short_link, "after": full_link, "category": "format",
+        }],
+        "findings": [],
+    }
 
     submitted = dispatch(
         "submit_context_edit_for_review",

@@ -669,6 +669,12 @@ class SettingsService:
                 policy={
                     **dict(workspace.lint_policy or {}),
                     "auto_fix": workspace.auto_fix_enabled,
+                    "link_fix_mode": (workspace.lint_policy or {}).get(
+                        "link_fix_mode", "auto"
+                    ),
+                    "auto_approve_link_fixes": (workspace.lint_policy or {}).get(
+                        "auto_approve_link_fixes", True
+                    ),
                 },
             ),
             mcp_clients=mcp_payload,
@@ -1133,6 +1139,21 @@ class SettingsService:
         setattr(workspace, key, text)
 
     def _update_lint_policy(self, workspace: Workspace, key: str, value) -> None:
+        if key in {"link_fix_mode", "auto_approve_link_fixes"}:
+            if key == "link_fix_mode" and (
+                not isinstance(value, str) or value not in {"auto", "suggest"}
+            ):
+                raise SettingsPolicyUpdateRejected(
+                    "link_fix_mode must be auto or suggest"
+                )
+            if key == "auto_approve_link_fixes" and not isinstance(value, bool):
+                raise SettingsPolicyUpdateRejected(
+                    "auto_approve_link_fixes must be a boolean"
+                )
+            policy = dict(workspace.lint_policy or {})
+            policy[key] = value
+            workspace.lint_policy = policy
+            return
         # Lint toggles are dynamic ({rule_id: bool}), so they bypass the
         # fixed-key _update_json_policy. The reserved "auto_fix" key sets the
         # workspace auto-fix mode (F2); everything else is a rule_id toggle

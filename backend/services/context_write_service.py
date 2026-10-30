@@ -732,9 +732,10 @@ class ContextWriteService:
         actor_provenance: str,
     ) -> bool:
         try:
-            return (
-                self._prepare_body(
-                    base_version.body_md,
+            return self.body_preparer.auto_approval_matches(
+                base_version.body_md,
+                new_body,
+                WriteContext(
                     workspace=workspace,
                     session=session,
                     page=page,
@@ -742,10 +743,9 @@ class ContextWriteService:
                     actor_kind=actor_kind,
                     actor_id=actor_id,
                     actor_provenance=actor_provenance,
-                ).body
-                == new_body
+                ),
             )
-        except (InputPolicyError, RejectedByPolicyError):
+        except (InputPolicyError, RejectedByPolicyError, MarkdownMediaPolicyError):
             # Historical invalid bytes can still be repaired by a valid new
             # write. They cannot establish a format-only auto-approval proof.
             return False
@@ -2969,8 +2969,7 @@ class ContextWriteService:
             "review_required_from_risk", "low"
         )
         format_only = (
-            workspace.auto_fix_enabled
-            and classification.format_only_eligible
+            classification.format_only_eligible
             and not metadata_patch
             and not citations
             and bool(new_body)

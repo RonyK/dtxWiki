@@ -293,7 +293,7 @@ npm run test:e2e
 npm run test:e2e -- --project=chromium
 npm run test:e2e -- --project=firefox --project=webkit
 # 단일 spec / 패턴 / headed
-npm run test:e2e -- tests/e2e/sprint4_oauth_integrations.spec.ts
+npm run test:e2e -- tests/e2e/oauth_integrations.spec.ts
 npm run test:e2e -- --grep "OAuth consent revoke"
 npm run test:e2e -- --headed --grep "C5"
 npm run test:e2e -- kosweep.spec.ts   # ko 화면 영어 누출 회귀 게이트(전 화면 sweep)

@@ -38,6 +38,8 @@ export function LintRulesSection({ readOnly, workspaceId: routeWorkspaceId }: { 
   const { t: lintT } = useTranslation("lint");
   const [rules, setRules] = useState<LintRuleInfo[] | null>(null);
   const [autoFix, setAutoFix] = useState(false);
+  const [linkFixMode, setLinkFixMode] = useState<"auto" | "suggest">("auto");
+  const [autoApproveLinkFixes, setAutoApproveLinkFixes] = useState(true);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   // Per-rule, so saving one rule no longer freezes every other checkbox on the
   // page. `auto_fix` shares the set under its own key.
@@ -53,6 +55,8 @@ export function LintRulesSection({ readOnly, workspaceId: routeWorkspaceId }: { 
     setWorkspaceId(routeWorkspaceId);
     setRules(null);
     setAutoFix(false);
+    setLinkFixMode("auto");
+    setAutoApproveLinkFixes(true);
     setError(null);
     (async () => {
       try {
@@ -69,6 +73,8 @@ export function LintRulesSection({ readOnly, workspaceId: routeWorkspaceId }: { 
           const policies = await getSettingsPolicies(wid);
           if (!cancelled) {
             setAutoFix(Boolean(policies.lint?.policy?.auto_fix));
+            setLinkFixMode(policies.lint?.policy?.link_fix_mode === "suggest" ? "suggest" : "auto");
+            setAutoApproveLinkFixes(policies.lint?.policy?.auto_approve_link_fixes !== false);
           }
         } catch {
           if (!cancelled) {
@@ -209,6 +215,23 @@ export function LintRulesSection({ readOnly, workspaceId: routeWorkspaceId }: { 
     }
   }
 
+  async function saveLinkPolicy(key: "link_fix_mode" | "auto_approve_link_fixes", value: string | boolean) {
+    if (!workspaceId || busy.has(key)) return;
+    markBusy([key], true);
+    setError(null);
+    setSavedNotice("");
+    try {
+      await updateSettingsPolicy(workspaceId, { group: "lint", key, value });
+      if (key === "link_fix_mode") setLinkFixMode(value === "suggest" ? "suggest" : "auto");
+      else setAutoApproveLinkFixes(Boolean(value));
+      announceSaved();
+    } catch {
+      setError(t("lint.saveError", { defaultValue: "Failed to update the rule." }));
+    } finally {
+      markBusy([key], false);
+    }
+  }
+
   return (
     <section className="feature-section">
       {/* F-7: match the other settings sections — a policy-card with an
@@ -280,6 +303,34 @@ export function LintRulesSection({ readOnly, workspaceId: routeWorkspaceId }: { 
               })}
             </span>
           </div>
+        </div>
+        <div className="lint-autofix lint-link-fix-policy">
+          <label className="lint-rule-copy" htmlFor="lint-link-fix-mode">
+            <span className="lint-rule-label">{t("lint.linkFixMode")}</span>
+            <span className="lint-rule-description">{t("lint.linkFixModeHint")}</span>
+          </label>
+          <select
+            id="lint-link-fix-mode"
+            value={linkFixMode}
+            disabled={readOnly || !workspaceId || busy.has("link_fix_mode")}
+            onChange={(event) => void saveLinkPolicy("link_fix_mode", event.target.value)}
+          >
+            <option value="auto">{t("lint.linkFixAuto")}</option>
+            <option value="suggest">{t("lint.linkFixSuggest")}</option>
+          </select>
+        </div>
+        <div className="lint-autofix lint-rule-row">
+          <input
+            id="lint-auto-approve-link-fixes"
+            type="checkbox"
+            checked={autoApproveLinkFixes}
+            disabled={readOnly || !workspaceId || busy.has("auto_approve_link_fixes")}
+            onChange={() => void saveLinkPolicy("auto_approve_link_fixes", !autoApproveLinkFixes)}
+          />
+          <label className="lint-rule-copy" htmlFor="lint-auto-approve-link-fixes">
+            <span className="lint-rule-label">{t("lint.autoApproveLinkFixes")}</span>
+            <span className="lint-rule-description">{t("lint.autoApproveLinkFixesHint")}</span>
+          </label>
         </div>
         {/* Lint had no empty state at all: a server that reports no rules
             rendered the auto-fix toggle above and then simply stopped, with

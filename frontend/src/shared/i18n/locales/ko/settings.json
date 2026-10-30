@@ -617,7 +617,13 @@
     "toggleLayerAria": "{{layer}} 규칙 전체 전환",
     "saved": "저장됨",
     "empty": "린트 규칙 없음",
-    "emptyHint": "이 서버에는 린트 규칙이 없어서 페이지를 저장할 때 실행되는 검사가 없습니다."
+    "emptyHint": "이 서버에는 린트 규칙이 없어서 페이지를 저장할 때 실행되는 검사가 없습니다.",
+    "linkFixMode": "내부 링크 수정",
+    "linkFixModeHint": "대상을 유지하면서 해석 가능한 링크를 문서 영구 주소로 정리합니다.",
+    "linkFixAuto": "자동 수정",
+    "linkFixSuggest": "제안만",
+    "autoApproveLinkFixes": "안전한 링크 수정 자동 승인",
+    "autoApproveLinkFixesHint": "모든 대상 문서를 유지하고 기존 검토 안전 조건을 통과한 변경만 승인합니다."
   },
   "summary": {
     "workspace": "이 워크스페이스의 이름, 소유자, 기본 언어입니다.",

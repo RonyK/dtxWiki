@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Safe Lint fixes on save
+
+- Canonicalize supported links to visible documents in the current workspace
+  when saving, preserving labels, fragments, code, and unrelated source text.
+  Lint settings offer automatic fixes or suggestions and a separate approval
+  setting for link-only fixes; existing review gates still apply.
+- Context write responses include `lint_report` with applied fixes and findings
+  for the final stored body. Stored history, restores, and copied edits retain
+  their original text. Existing published documents are unchanged by Lint runs.
+- MCP tool contract revision 24 adds `lint_report` to Context write result
+  schemas, including compact edit results. Clients should refresh their tool
+  catalog and result-schema caches when the server version changes.
+
 ### MCP workspace and document URLs
 
 - MCP tool contract revision 23 requires an explicit `workspace_id` for every
