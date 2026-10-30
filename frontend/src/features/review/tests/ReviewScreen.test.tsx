@@ -2526,6 +2526,13 @@ describe("ReviewScreen", () => {
   it("lets an editor claim and edit a change directly", async () => {
     const user = userEvent.setup();
     let claimed = false;
+    let changesRequestedLoaded = false;
+    let releaseDetail: (() => void) | undefined;
+    const claimableReview = reviewItem({
+      audienceKind: "workspace_editors",
+      canClaim: true,
+      status: "changes_requested",
+    });
     mockReviewFetch(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -2541,17 +2548,18 @@ describe("ReviewScreen", () => {
         return jsonResponse({ data: { items: [reviewItem()], next_cursor: null } });
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews?status=changes_requested&limit=50`) {
+        changesRequestedLoaded = true;
         return jsonResponse({
           data: {
-            items: [
-              reviewItem({
-                audienceKind: "workspace_editors",
-                canClaim: true,
-                status: "changes_requested",
-              }),
-            ],
+            items: [claimableReview],
             next_cursor: null,
           },
+        });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/review-1`) {
+        if (!changesRequestedLoaded) return jsonResponse({ data: reviewItem() });
+        return new Promise<Response>((resolve) => {
+          releaseDetail = () => resolve(jsonResponse({ data: claimableReview }));
         });
       }
       if (
@@ -2561,11 +2569,7 @@ describe("ReviewScreen", () => {
         claimed = true;
         return jsonResponse({
           data: {
-            ...reviewItem({
-              audienceKind: "workspace_editors",
-              canClaim: true,
-              status: "changes_requested",
-            }),
+            ...claimableReview,
             claimed_by: "me",
           },
         });
@@ -2587,7 +2591,11 @@ describe("ReviewScreen", () => {
     expect(screen.queryByRole("button", { name: "Edit directly" })).toBeNull();
     await user.click(screen.getByRole("tab", { name: /Changes requested/ }));
     await user.click(await screen.findByText("Publish the selected Context draft"));
-    await user.click(screen.getByRole("button", { name: "Edit directly" }));
+    // Queue content renders before the detail request supplies action permissions.
+    await waitFor(() => expect(releaseDetail).toBeDefined());
+    expect(screen.queryByRole("button", { name: "Edit directly" })).toBeNull();
+    releaseDetail!();
+    await user.click(await screen.findByRole("button", { name: "Edit directly" }));
 
     expect(await screen.findByText("Page editor")).toBeInTheDocument();
     expect(screen.getByText(/\?from=review&reviewItemId=review-1/))

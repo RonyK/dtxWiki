@@ -4009,6 +4009,7 @@ describe("PageEditor", () => {
 
   it("retries with autosave when a post-create follow-up save fails", async () => {
     let resolveCreate!: (response: Response) => void;
+    let savedPage = page;
     const createPromise = new Promise<Response>((resolve) => {
       resolveCreate = resolve;
     });
@@ -4039,22 +4040,21 @@ describe("PageEditor", () => {
           }, 500);
         }
         const body = JSON.parse(String(init.body));
-        return jsonResponse({
-          data: {
-            ...page,
-            slug: "first-title",
-            title: body.title,
-            body_md: body.body_md,
-            version_id: "v2",
-            current_version_id: "v2",
-            content_hash: "b".repeat(64),
-          },
-        });
+        savedPage = {
+          ...page,
+          slug: "first-title",
+          title: body.title,
+          body_md: body.body_md,
+          version_id: "v2",
+          current_version_id: "v2",
+          content_hash: "b".repeat(64),
+        };
+        return jsonResponse({ data: savedPage });
       }
-      return jsonResponse({ data: page });
+      return jsonResponse({ data: savedPage });
     });
 
-    renderWithRouter(
+    const router = renderWithRouter(
       "/pages/new",
       <>
           <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
@@ -4086,6 +4086,7 @@ describe("PageEditor", () => {
       fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/autosave")),
     ).toHaveLength(1);
 
+    const createTitleEditor = getTitleEditor();
     await typist().click(screen.getByRole("button", { name: /Retry/ }));
     await waitFor(() => {
       expect(
@@ -4101,7 +4102,17 @@ describe("PageEditor", () => {
       base_content_hash: "a".repeat(64),
       session_version_id: "v1",
     });
-    expect(await screen.findByLabelText("Context tree")).toBeInTheDocument();
+    // Retry replaces the create editor after saving; its tree is already present
+    // before the response settles, so await the new editor and its saved content.
+    await waitFor(() => {
+      expect(router.state.location).toMatchObject({
+        pathname: "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
+        search: "",
+      });
+      expect(createTitleEditor).not.toBeInTheDocument();
+      expect(getTitleEditor()).toHaveValue("Second title");
+      expect(screen.getByLabelText("Context tree")).toBeInTheDocument();
+    });
   });
 
   it("serializes overlapping saves and still publishes the second request", async () => {
@@ -7384,6 +7395,7 @@ describe("PageEditor", () => {
 
   it("does not double-submit while a save request is in flight", async () => {
     let resolveCreate!: (response: Response) => void;
+    const savedPage = { ...page, slug: "release-notes", title: "Release notes" };
     const createPromise = new Promise<Response>((resolve) => {
       resolveCreate = resolve;
     });
@@ -7404,14 +7416,12 @@ describe("PageEditor", () => {
           return createPromise;
         }
         if (init?.method === "POST" && url.endsWith("/publish")) {
-          return jsonResponse({
-            data: { ...page, slug: "release-notes", title: "Release notes" },
-          });
+          return jsonResponse({ data: savedPage });
         }
-        return jsonResponse({ data: page });
+        return jsonResponse({ data: savedPage });
       });
 
-    renderWithRouter(
+    const router = renderWithRouter(
       "/pages/new",
       <>
           <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />
@@ -7419,7 +7429,8 @@ describe("PageEditor", () => {
       </>,
     );
 
-    await setEditorTitle(await findTitleEditor(), "Release notes");
+    const createTitleEditor = await findTitleEditor();
+    await setEditorTitle(createTitleEditor, "Release notes");
 
     const saveButton = await publicationActions().findByRole("button", { name: "Save draft" });
     fireEvent.click(saveButton);
@@ -7440,12 +7451,17 @@ describe("PageEditor", () => {
     expect(window.dispatchEvent(unloadEvent)).toBe(false);
 
     resolveCreate(
-      jsonResponse(
-        { data: { ...page, slug: "release-notes", title: "Release notes" } },
-        201,
-      ),
+      jsonResponse({ data: savedPage }, 201),
     );
-    expect(await screen.findByLabelText("Context tree")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(router.state.location).toMatchObject({
+        pathname: "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
+        search: "",
+      });
+      expect(createTitleEditor).not.toBeInTheDocument();
+      expect(getTitleEditor()).toHaveValue("Release notes");
+      expect(screen.getByLabelText("Context tree")).toBeInTheDocument();
+    });
   });
 
   it("preserves explicit title input and rejects controls or more than 256 code points", async () => {

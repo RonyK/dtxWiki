@@ -1072,7 +1072,7 @@ describe("ContextScreen", () => {
       screen.getByRole("treeitem", { name: "Decision Log" }),
     );
     const readerTabs = within(
-      screen.getByRole("tablist", { name: "Context reader views" }),
+      await screen.findByRole("tablist", { name: "Context reader views" }),
     );
     const englishGraphTab = readerTabs.getByRole("tab", {
       name: "Graph, Preview",
@@ -1279,7 +1279,7 @@ describe("ContextScreen", () => {
     await userEvent.click(
       await screen.findByRole("treeitem", { name: "Decision Log" }),
     );
-    await userEvent.click(screen.getByRole("tab", { name: /History/ }));
+    await userEvent.click(await screen.findByRole("tab", { name: /History/ }));
     const panel = screen.getByRole("tabpanel", { name: /History/ });
 
     const expectedStates = [
@@ -1369,7 +1369,7 @@ describe("ContextScreen", () => {
       screen.getByRole("treeitem", { name: "Architecture Notes" }),
     );
     const readerTabs = within(
-      screen.getByRole("tablist", { name: "Context reader views" }),
+      await screen.findByRole("tablist", { name: "Context reader views" }),
     );
     await userEvent.click(readerTabs.getByRole("tab", { name: /History/ }));
     const historyPanel = screen.getByRole("tabpanel", { name: /History/ });
@@ -1442,6 +1442,7 @@ describe("ContextScreen", () => {
       screen.getByRole("treeitem", { name: "Architecture Notes" }),
     );
 
+    await screen.findByText("Selected second page");
     expect(screen.queryByRole("button", { name: "Reconcile" })).toBeNull();
     expect(screen.queryByText(/requires reconciliation/i)).toBeNull();
   });
@@ -1452,7 +1453,7 @@ describe("ContextScreen", () => {
       screen.getByRole("treeitem", { name: "Architecture Notes" }),
     );
     const readerTabs = within(
-      screen.getByRole("tablist", { name: "Context reader views" }),
+      await screen.findByRole("tablist", { name: "Context reader views" }),
     );
     await userEvent.click(readerTabs.getByRole("tab", { name: /^Activity$/ }));
 
@@ -2956,7 +2957,7 @@ describe("ContextScreen", () => {
     await userEvent.click(
       await screen.findByRole("treeitem", { name: "Decision Log" }),
     );
-    await userEvent.click(screen.getByRole("tab", { name: /History/ }));
+    await userEvent.click(await screen.findByRole("tab", { name: /History/ }));
 
     const historyPanel = screen.getByRole("tabpanel", { name: /History/ });
     const versionOne = within(historyPanel)
@@ -4183,7 +4184,7 @@ describe("ContextScreen", () => {
     await userEvent.click(
       await screen.findByRole("treeitem", { name: "Decision Log" }),
     );
-    await userEvent.click(screen.getByRole("tab", { name: /History/ }));
+    await userEvent.click(await screen.findByRole("tab", { name: /History/ }));
     const panel = screen.getByRole("tabpanel", { name: /History/ });
     const firstVersion = within(panel)
       .getByText("v1")
