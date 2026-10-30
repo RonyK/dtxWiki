@@ -103,7 +103,7 @@ test("ko sweep: no English chrome leaks across screens", async ({ page }, testIn
   await visit("06-search", "Search (ko)", workspaceUrl(workspace.id, "search"));
   await visit("07-review", "Review (ko)", workspaceUrl(workspace.id, "review"));
   await visit("08-ask-unavailable", "질문 직접 접근 — 찾을 수 없음 (ko)", workspaceUrl(workspace.id, "ask"));
-  await expect(page.getByRole("heading", { name: "해당 페이지를 찾을 수 없습니다" }))
+  await expect(page.getByRole("heading", { name: "이 항목을 열 수 없습니다" }))
     .toBeVisible();
   await expect(page.locator(".ask-composer")).toHaveCount(0);
   await visit("11-account", "Account (ko) — role pill", "/account");

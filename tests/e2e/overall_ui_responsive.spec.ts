@@ -759,15 +759,25 @@ test.describe("Overall UI responsive acceptance", () => {
         await test.step("Ask direct access has a usable mobile recovery action", async () => {
           await page.goto(workspaceUrl(workspace.id, "ask"));
           await expect(
-            page.getByRole("heading", { name: "We couldn't find that page" }),
+            page.getByRole("heading", { name: "This item can't be opened" }),
           ).toBeVisible();
           await expect(page.locator(".ask-composer")).toHaveCount(0);
           await expect(page.locator('a[href^="/workspaces/"][href$="/ask"]')).toHaveCount(0);
+          const recoveryButton = page.getByRole("button", {
+            name: `Open ${workspace.title} dashboard`, exact: true,
+          });
           await expectMinimumTouchTarget(
-            page.getByRole("link", { name: "Back to dashboard", exact: true }),
+            recoveryButton,
             "Unavailable Ask workspace dashboard recovery",
           );
           await expectNoHorizontalOverflow(page, "Unavailable Ask route");
+          await recoveryButton.click();
+          await expect(page).toHaveURL(
+            new URL(workspaceUrl(workspace.id, "dashboard"), backendBaseUrl).href,
+          );
+          await expect(
+            page.getByRole("heading", { name: "Workspace Operations", exact: true }),
+          ).toBeVisible();
         });
 
         await test.step("Settings form controls keep mobile touch targets", async () => {
