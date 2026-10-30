@@ -17,6 +17,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from backend.models.base import utc_now
+from backend.services.db_read_snapshot import acquire_consistent_read_snapshot
 from backend.services.inbox import entries
 from backend.services.inbox.base import (
     InboxDisplay,
@@ -31,22 +32,23 @@ from backend.services.inbox.base import (
     InboxState,
     InboxViewer,
 )
+from backend.services.inbox.config import DEFAULT_INBOX_CONFIG, InboxListingConfig
 from backend.services.inbox.entries import InboxEntryRow
 from backend.services.inbox.registry import UNREGISTERED_DISPLAY, InboxRegistry
 from backend.services.read_errors import ReadNotFoundError, ReadValidationError
 
-# Upper bound on what one kind's status scan returns per list request.
-STATUS_ITEM_LIMIT = 20
-# A page reads ahead at most this many batches past items the viewer cannot see.
-_SCAN_BATCHES = 5
-
 
 class InboxService:
     def __init__(
-        self, registry: InboxRegistry, listeners: Iterable[InboxListener] = ()
+        self,
+        registry: InboxRegistry,
+        listeners: Iterable[InboxListener] = (),
+        *,
+        listing: InboxListingConfig = DEFAULT_INBOX_CONFIG.listing,
     ) -> None:
         self.registry = registry
         self.listeners = tuple(listeners)
+        self.listing = listing
 
     def put(
         self,
@@ -61,12 +63,18 @@ class InboxService:
         ref: Mapping[str, Any] | None = None,
     ) -> None:
         """Create or update an item for each recipient, in the caller's
-        transaction. The kind's source decides whether it can be written."""
+        transaction. Producers hold their source locks before this call; the
+        scope then locks and filters recipients before entries or delivery
+        outboxes are written. The kind's source decides whether it is writable.
+        """
 
         if not item_key or not revision:
             raise ValueError("inbox item_key and revision must be non-empty")
         spec = self.registry.writable(scope.name, kind)
         recipients = tuple(sorted(set(recipient_ids)))
+        if not recipients:
+            return
+        recipients = scope.writable_recipients(session, recipients)
         if not recipients:
             return
         snapshot = InboxSnapshot(item_key, revision, event_at, ref)
@@ -81,11 +89,17 @@ class InboxService:
         *,
         state: InboxState = "all",
         cursor: str | None = None,
-        limit: int = 30,
+        limit: int | None = None,
     ) -> InboxPage:
         """Status items come whole on the first page; stored items page by
-        keyset, reading ahead past items the viewer can no longer see."""
+        keyset, reading ahead past items the viewer can no longer see.
 
+        Call on a fresh session: the read-mark counts, status scans and marks
+        are read from one database snapshot."""
+
+        acquire_consistent_read_snapshot(session)
+        if limit is None:
+            limit = self.listing.page_size_default
         scope = viewer.scope
         kinds = self.registry.in_scope(scope.name)
         status_items: list[InboxItem] = []
@@ -101,7 +115,7 @@ class InboxService:
         position = _decode_cursor(cursor) if cursor is not None else None
         items: list[InboxItem] = []
         last: InboxEntryRow | None = None
-        for _ in range(_SCAN_BATCHES):
+        for _ in range(self.listing.stream_scan_batches):
             rows = entries.stored_page(
                 session,
                 scope,
@@ -141,22 +155,26 @@ class InboxService:
     ) -> InboxMarkResult:
         """Set the viewer's marks for the revision they saw.
 
-        One procedure for every kind: take the scope's write lock, lock the
-        viewer's row for the item, then ask the kind's source for the current
-        state. A missing or invisible item raises not-found, which rolls back
-        any row created for it. A valid item whose revision moved on is left
-        unchanged and reported as not applied, so a late request cannot mark
-        newer news as read.
+        One procedure for every kind: take the scope's write lock, lock its
+        recipient lifecycle, lock the viewer's row for the item, then ask the
+        kind's source for the current state. A missing or invisible item raises
+        not-found, which rolls back any row created for it. A valid item whose
+        revision moved on is left unchanged and reported as not applied, so a
+        late request cannot mark newer news as read.
         """
 
         if read is None and archived is None:
             raise ReadValidationError("set read or archived")
         scope = viewer.scope
+        if archived is not None and not self.registry.archivable(scope.name, kind):
+            raise ReadValidationError("a status item is read or unread, not archived")
         spec = self.registry.kind(scope.name, kind)
         scope.acquire_write(session)
-        # A savepoint removes the row created for a missing item, whatever the
-        # caller then does with its transaction.
+        # A savepoint removes any recipient and entry rows created for a missing
+        # item, whatever the caller then does with its transaction.
         with session.begin_nested():
+            if not scope.writable_recipients(session, (viewer.user_id,)):
+                raise ReadNotFoundError("inbox item not found")
             entry = entries.lock_entry(session, scope, viewer.user_id, kind, item_key)
             current = spec.source.current(
                 session, viewer, kind, item_key, entries.stored_snapshot(entry)
@@ -182,13 +200,31 @@ class InboxService:
     def _status(
         self, session: Session, viewer: InboxViewer, spec: InboxKind, state: InboxState
     ) -> tuple[list[InboxItem], list[InboxOverflow]]:
-        scan = spec.source.status(session, viewer, spec.name, STATUS_ITEM_LIMIT)
-        found = list(scan.items)[:STATUS_ITEM_LIMIT]
-        overflow = (
-            [InboxOverflow(spec.name, scan.total)] if scan.total > len(found) else []
-        )
+        """A kind's current items for this view, at most the per-kind limit.
+
+        The source applies who may see an item before its limit, so only the
+        viewer's own marks can hide a candidate. Every candidate a mark hides
+        has a mark row, so an unread view asks for one more candidate per read
+        mark, up to a cap. The overflow total is the source's own count.
+        """
+
+        if state == "archived":
+            return [], []
+        shown = self.listing.status_items_per_kind
+        extra = 0
+        if state == "unread":
+            extra = entries.count_read_marks(
+                session,
+                viewer.scope,
+                viewer.user_id,
+                spec.name,
+                cap=self.listing.read_mark_scan_cap,
+            )
+        wanted = shown + extra
+        scan = spec.source.status(session, viewer, spec.name, wanted)
+        found = list(scan.items)[:wanted]
         if not found:
-            return [], overflow
+            return [], [InboxOverflow(spec.name, scan.total)] if scan.total else []
         marks = entries.marks_for(
             session,
             viewer.scope,
@@ -198,11 +234,17 @@ class InboxService:
         )
         displays = self._resolve(session, viewer, spec, found)
         items = [
-            _item(spec, snapshot, marks.get(snapshot.item_key), display)
+            item
             for snapshot in found
             if (display := displays.get(snapshot.item_key)) is not None
+            and _matches(
+                item := _item(spec, snapshot, marks.get(snapshot.item_key), display),
+                state,
+            )
         ]
-        return [item for item in items if _matches(item, state)], overflow
+        more = scan.total > len(found) or len(items) > shown
+        overflow = [InboxOverflow(spec.name, scan.total)] if more else []
+        return items[:shown], overflow
 
     def _resolve_rows(
         self, session: Session, viewer: InboxViewer, rows: Sequence[InboxEntryRow]

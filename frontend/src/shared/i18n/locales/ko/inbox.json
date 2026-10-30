@@ -37,5 +37,29 @@
     "markUnread": "안 읽음으로 표시",
     "archive": "보관",
     "unarchive": "수신함으로 되돌리기"
+  },
+  "kinds": {
+    "review": {
+      "untitled": "리뷰 항목"
+    },
+    "review_attention": {
+      "pending": "검토를 기다리고 있습니다",
+      "changesRequested": "나에게 변경 요청이 왔습니다"
+    },
+    "review_result": {
+      "approved": "내 변경이 승인되었습니다",
+      "rejected": "내 변경이 거절되었습니다"
+    },
+    "workspace_join": {
+      "untitled": "workspace",
+      "pending": "{{requester}} 님이 {{workspace}} 가입을 요청했습니다",
+      "approved": "{{workspace}}에 가입되었습니다",
+      "rejected": "{{workspace}} 가입 요청이 거절되었습니다"
+    },
+    "access_key_expiry": {
+      "untitled": "Access Key",
+      "expiring": "{{date, datetime}} 만료 예정",
+      "expired": "{{date, datetime}} 만료됨"
+    }
   }
 }

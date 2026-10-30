@@ -37,5 +37,29 @@
     "markUnread": "Mark as unread",
     "archive": "Archive",
     "unarchive": "Move back to Inbox"
+  },
+  "kinds": {
+    "review": {
+      "untitled": "A review"
+    },
+    "review_attention": {
+      "pending": "Waiting for your review",
+      "changesRequested": "Changes requested from you"
+    },
+    "review_result": {
+      "approved": "Your change was approved",
+      "rejected": "Your change was rejected"
+    },
+    "workspace_join": {
+      "untitled": "A workspace",
+      "pending": "{{requester}} asked to join {{workspace}}",
+      "approved": "You joined {{workspace}}",
+      "rejected": "Your request to join {{workspace}} was declined"
+    },
+    "access_key_expiry": {
+      "untitled": "An Access Key",
+      "expiring": "Expires {{date, datetime}}",
+      "expired": "Expired {{date, datetime}}"
+    }
   }
 }

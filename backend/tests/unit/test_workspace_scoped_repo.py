@@ -11,6 +11,7 @@ from backend.models.api_token import ApiToken
 from backend.models.audit import AuditEvent
 from backend.models.base import Base
 from backend.models.context_media import ContextMediaAsset
+from backend.models.inbox import WorkspaceInboxRecipient
 from backend.models.library import LibraryItem
 from backend.models.user import User
 from backend.models.workspace_join import WorkspaceJoinRequest
@@ -153,8 +154,11 @@ def test_scoped_batch_excludes_other_workspaces_and_handles_empty_ids():
 def test_scoped_batch_rejects_unsupported_model_shapes(model):
     with pytest.raises(TypeError):
         select_in_workspace_by_ids(model, workspace_id=uuid4(), resource_ids=[uuid4()])
-    with pytest.raises(TypeError):
-        select_in_workspace(model, workspace_id=uuid4())
+    # Only identity-based batches reject composite keys; ordinary scoped
+    # statements still reject control- and mixed-plane models.
+    if model is not ContextMediaAsset:
+        with pytest.raises(TypeError):
+            select_in_workspace(model, workspace_id=uuid4())
 
 
 def test_get_in_workspace_rejects_workspace_plane_composite_identity():
@@ -290,9 +294,49 @@ def test_scoped_batch_and_statement_helpers_always_constrain_foreign_id_candidat
         assert session.scalars(narrowed).all() == [own]
         with pytest.raises(TypeError, match="selected workspace model"):
             where_in_workspace(select(User), LibraryItem, workspace_id=home.id)
-        for unsupported in (User, AuditEvent, ContextMediaAsset):
+        for unsupported in (User, AuditEvent):
             with pytest.raises(TypeError):
                 list_in_workspace(session, unsupported, workspace_id=home.id)
+
+        # A composite identity needs the same workspace gate without being
+        # misrepresented as the single-id identity API's resource_id.
+        user_id = uuid4()
+        own_recipient = WorkspaceInboxRecipient(workspace_id=home.id, user_id=user_id)
+        foreign_recipient = WorkspaceInboxRecipient(
+            workspace_id=other.id, user_id=user_id
+        )
+        session.add_all([own_recipient, foreign_recipient])
+        session.flush()
+        assert session.scalars(
+            select_in_workspace(
+                WorkspaceInboxRecipient,
+                workspace_id=home.id,
+                conditions=(WorkspaceInboxRecipient.user_id == user_id,),
+            )
+        ).all() == [own_recipient]
+        assert (
+            session.scalars(
+                select_in_workspace(
+                    WorkspaceInboxRecipient,
+                    workspace_id=home.id,
+                    criteria=(WorkspaceInboxRecipient.workspace_id == other.id,),
+                )
+            ).all()
+            == []
+        )
+        with pytest.raises(TypeError, match=r"exact primary key \(id\)"):
+            get_in_workspace(
+                session,
+                WorkspaceInboxRecipient,
+                workspace_id=home.id,
+                resource_id=user_id,
+            )
+        with pytest.raises(TypeError, match=r"exact primary key \(id\)"):
+            select_in_workspace_by_ids(
+                WorkspaceInboxRecipient,
+                workspace_id=home.id,
+                resource_ids=[user_id],
+            )
 
 
 def test_statement_adapter_rejects_an_unbounded_first_entity_or_scalar_projection():

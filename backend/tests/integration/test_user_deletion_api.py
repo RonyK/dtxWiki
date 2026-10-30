@@ -23,15 +23,16 @@ from backend.models import (
     Workspace,
     WorkspaceCredentialGrant,
     WorkspaceInboxEntry,
+    WorkspaceInboxRecipient,
     WorkspaceMembership,
     WorkspaceTreeNode,
 )
 from backend.models.base import utc_now
 from backend.schemas.context_write import ReviewDecisionRequest, WriteDraftRequest
+from backend.scripts.seed_dev import seed_default_workspace
 from backend.services.context_write_service import ContextWriteService
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.library_blob_storage import FilesystemLibraryBlobStore
-from backend.services.review_service import ReviewService
 from backend.services.server_admin_service import grant_server_admin
 from backend.services.user_admin_service import UserAdminService
 from backend.services.user_deletion_service import UserDeletionService
@@ -277,8 +278,29 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         session.flush()
         foreign_version_id = foreign_version.id
     # The leaver reviewed a change and routed the fix to themself.
-    reviews = ReviewService()
+    reviews = app.state.container.services.review
     with factory.begin() as session:
+        seed_default_workspace(session, slug="team-held", title="Team held")
+        # This submitted change is the former member's only cleanup footprint
+        # in this workspace. Author history stays even after account removal.
+        late_draft = ContextWriteService().write_draft(
+            session=session,
+            workspace_id=team_id,
+            request=WriteDraftRequest(
+                title="Submitted before leaving",
+                page_type="overview",
+                body_markdown="# Submitted before leaving\n\nShared work.",
+                reason="retained submitted change",
+            ),
+            actor_kind="human",
+            actor_id=str(target.user_id),
+            actor_role="editor",
+        )
+        late_review_id = late_draft.review_item_id
+        late_change_id = late_draft.change_set_id
+        session.get(
+            ContextPageVersion, late_draft.draft_version_id
+        ).actor_display_name = None
         draft = ContextWriteService().write_draft(
             session=session,
             workspace_id=shared_id,
@@ -669,6 +691,10 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         assert session.get(User, target.user_id) is None
         assert session.get(User, admin.user_id) is not None
         assert (
+            session.get(WorkspaceInboxRecipient, (team_id, target.user_id)).deleted_at
+            is not None
+        )
+        assert (
             session.get(
                 WorkspaceInboxEntry,
                 (inbox_workspace_id, target.user_id, "test.workspace", "notice"),
@@ -742,6 +768,31 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
             )
             is None
         )
+    # Shared reviews can finish after the author is gone. Final cleanup must
+    # prevent this later producer from recreating their personal Inbox data.
+    with factory.begin() as session:
+        decided = reviews.apply_decision(
+            session=session,
+            workspace_id=team_id,
+            review_item_id=late_review_id,
+            request=ReviewDecisionRequest(decision_type="approve"),
+            actor_kind="human",
+            actor_id=str(colleague.user_id),
+            actor_user_id=colleague.user_id,
+            actor_role="owner",
+            actor_provenance="browser_session",
+        )
+        assert decided.status == "approved"
+        assert session.get(ChangeSet, late_change_id).actor_id == target.user_id
+        assert (
+            session.scalar(
+                select(WorkspaceInboxEntry).where(
+                    WorkspaceInboxEntry.user_id == target.user_id
+                )
+            )
+            is None
+        )
+    assert service.purge_due(blob_store_provider=provider, now=deadline) == 0
     assert not store.path_for_key(stored.storage_key).exists()
     recreated = users.add_user(email=target.email, password="replacement-password")
     assert isinstance(recreated.user_id, UUID) and recreated.user_id != target.user_id

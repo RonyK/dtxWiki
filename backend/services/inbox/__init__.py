@@ -16,22 +16,29 @@ from backend.services.inbox.base import (
     StatusSource,
     WritableSource,
 )
-from backend.services.inbox.kinds import BUILTIN_INBOX_KINDS
+from backend.services.inbox.config import (
+    DEFAULT_INBOX_CONFIG,
+    InboxConfig,
+    InboxListingConfig,
+)
+from backend.services.inbox.kinds import build_builtin_inbox_kinds
 from backend.services.inbox.registry import InboxRegistry
 from backend.services.inbox.scopes import AccountInbox, WorkspaceInbox
 from backend.services.inbox.service import InboxService
 from backend.services.inbox.sources import STORED, ComputedSource, StoredSource
 
 __all__ = [
-    "BUILTIN_INBOX_KINDS",
+    "DEFAULT_INBOX_CONFIG",
     "STORED",
     "AccountInbox",
     "ComputedScan",
     "ComputedSource",
+    "InboxConfig",
     "InboxDisplay",
     "InboxItem",
     "InboxKind",
     "InboxListener",
+    "InboxListingConfig",
     "InboxMarkResult",
     "InboxPage",
     "InboxRegistry",
@@ -45,4 +52,5 @@ __all__ = [
     "StoredSource",
     "WorkspaceInbox",
     "WritableSource",
+    "build_builtin_inbox_kinds",
 ]

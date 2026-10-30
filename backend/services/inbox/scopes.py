@@ -12,6 +12,7 @@ from backend.services.db_write_intent import (
     acquire_write_intent,
 )
 from backend.services.inbox.base import InboxDisplay, InboxScope
+from backend.services.inbox.recipients import writable_workspace_recipients
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,13 @@ class WorkspaceInbox(InboxScope):
 
     def acquire_write(self, session: Session) -> None:
         acquire_workspace_write_intent(session)
+
+    def writable_recipients(
+        self, session: Session, recipient_ids: tuple[UUID, ...]
+    ) -> tuple[UUID, ...]:
+        return writable_workspace_recipients(
+            session, workspace_id=self.workspace_id, recipient_ids=recipient_ids
+        )
 
     def check_display(self, display: InboxDisplay) -> None:
         # Entity links name their workspace; nothing resolves against the

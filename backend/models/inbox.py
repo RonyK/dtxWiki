@@ -6,6 +6,10 @@ holds only the recipient's marks for an item a computed source derives on
 read, so the item itself is never stored. Marks record the revision the
 recipient saw: an entry is unread while ``read_revision`` differs from the
 current revision.
+
+A workspace recipient row serializes message producers with final account
+cleanup. Its deletion marker stays after personal entries are removed, so
+retained shared history cannot recreate an inbox for a deleted account.
 """
 
 from datetime import datetime
@@ -23,6 +27,14 @@ _MODE_COLUMNS_CHECK = (
     " OR (mode = 'mark' AND revision IS NULL AND ref IS NULL"
     " AND event_at IS NULL)"
 )
+
+
+class WorkspaceInboxRecipient(Base):
+    __tablename__ = "workspace_inbox_recipient"
+
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
 
 class WorkspaceInboxEntry(Base):

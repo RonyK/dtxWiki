@@ -13,13 +13,15 @@ from backend.services.inbox import (
     InboxDisplay,
     InboxKind,
     InboxListener,
+    InboxListingConfig,
     InboxRegistry,
     InboxService,
     InboxSnapshot,
     InboxViewer,
     WorkspaceInbox,
 )
-from backend.services.read_errors import ReadNotFoundError
+from backend.services.inbox.recipients import retire_workspace_recipient
+from backend.services.read_errors import ReadNotFoundError, ReadValidationError
 
 
 def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
@@ -47,8 +49,9 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
         "test.status",
         "workspace",
         ComputedSource(
-            scan=lambda _s, _v, _limit: ComputedScan(
-                list(status.values()), len(status)
+            scan=lambda _s, _v, limit: ComputedScan(
+                sorted(status.values(), key=lambda s: s.event_at, reverse=True)[:limit],
+                len(status),
             ),
             get=lambda _s, _v, key: status.get(key),
         ),
@@ -149,3 +152,63 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
         ).all()
     assert [(row.item_key, row.read_revision) for row in rows] == [("queue", "r1")]
     assert all(i.kind != "test.status" for i in page(state="all").items)
+
+    # A status item is read or unread; it leaves when resolved, not archived.
+    with pytest.raises(ReadValidationError):
+        mark("queue", "r2", kind="test.status", archived=True)
+
+    # Read items do not crowd unread ones out of a short status list: each
+    # read mark buys one more candidate, up to the cap, and the overflow keeps
+    # the source's total.
+    status.clear()
+    status.update(
+        {
+            f"q{n}": InboxSnapshot(f"q{n}", "r1", start - timedelta(minutes=n))
+            for n in range(1, 7)
+        }
+    )
+    for n in range(1, 5):
+        assert mark(f"q{n}", "r1", kind="test.status", read=True).applied
+    capped = InboxService(
+        InboxRegistry((computed,)),
+        listing=InboxListingConfig(status_items_per_kind=2, read_mark_scan_cap=3),
+    )
+
+    def capped_page(state):
+        with session_factory() as session:
+            return capped.list_items(session, viewer(alice), state=state)
+
+    unread = capped_page("unread")
+    assert [i.item_key for i in unread.status_items] == ["q5"]
+    assert [(o.kind, o.total) for o in unread.status_overflow] == [("test.status", 6)]
+    everything = capped_page("all")
+    assert [i.item_key for i in everything.status_items] == ["q1", "q2"]
+    assert [o.total for o in everything.status_overflow] == [6]
+    assert capped_page("archived").status_items == []
+
+    # Final account cleanup closes the recipient to every producer and
+    # delivery channel, even when retained history generates a later event.
+    with session_factory.begin() as session:
+        retire_workspace_recipient(session, workspace_id=workspace_id, user_id=alice)
+    previous_deliveries = list(delivered)
+    put("after-deletion", "v1", 6)
+    # Authorization obtained before deletion cannot recreate a personal mark
+    # after waiting for the purge transaction to finish.
+    with pytest.raises(ReadNotFoundError):
+        mark("q5", "r1", kind="test.status", read=True)
+    assert delivered == previous_deliveries
+    with session_factory() as session:
+        assert (
+            session.get(
+                WorkspaceInboxEntry,
+                (workspace_id, alice, "test.note", "after-deletion"),
+            )
+            is None
+        )
+        assert (
+            session.get(
+                WorkspaceInboxEntry,
+                (workspace_id, alice, "test.status", "q5"),
+            )
+            is None
+        )

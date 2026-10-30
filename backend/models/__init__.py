@@ -56,7 +56,11 @@ from backend.models.delegated_task import ClientDelegatedTask
 from backend.models.favorite import UserFavorite
 from backend.models.feedback import FeedbackItem
 from backend.models.graph import KnowledgeNodeStat
-from backend.models.inbox import AccountInboxEntry, WorkspaceInboxEntry
+from backend.models.inbox import (
+    AccountInboxEntry,
+    WorkspaceInboxEntry,
+    WorkspaceInboxRecipient,
+)
 from backend.models.job import Job, WorkspaceJobHint
 from backend.models.library import (
     LibraryArtifact,
@@ -260,6 +264,7 @@ __all__ = [
     "WorkspaceMembership",
     "WorkspaceCredentialGrant",
     "WorkspaceInboxEntry",
+    "WorkspaceInboxRecipient",
     "WorkspaceJoinRequest",
     "WorkspacePurgeGrant",
 ]

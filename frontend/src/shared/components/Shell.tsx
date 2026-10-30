@@ -52,6 +52,7 @@ import {
   useOptionalWorkspaceContext,
   useWorkspaceContext,
 } from "../workspace/WorkspaceContext";
+import { useInboxUnread } from "../inbox/useInboxUnread";
 import { PanelVisibilityIcon } from "./PanelVisibilityIcon";
 import { PrismGlyph } from "./PrismGlyph";
 import { RouteLoading } from "./RouteLoading";
@@ -424,6 +425,10 @@ export function Shell({ children }: ShellProps) {
     : "app-shell app-shell-public";
   const shellLabels = useMemo(() => shellLabelsFromT(t), [t]);
   const workspaceContext = useOptionalWorkspaceContext();
+  const inboxUnread = useInboxUnread(
+    workspaceContext?.selectedWorkspace ?? null,
+    isAuthenticated,
+  );
   const routeWorkspaceId = parseWorkspaceRoute(location.pathname)?.workspaceId ?? null;
   // Account routes carry no workspace; the sidebar still links to explicit
   // workspace URLs for the selected membership instead of dead-ending.
@@ -602,12 +607,17 @@ export function Shell({ children }: ShellProps) {
                 <Search size={16} aria-hidden="true" />
               </NavLink>
               <NavLink
-                aria-label={t("topbar.inbox", { defaultValue: "Inbox" })}
-                className="icon-button"
+                aria-label={
+                  inboxUnread
+                    ? t("topbar.inboxUnread", { defaultValue: "Inbox, unread messages" })
+                    : t("topbar.inbox", { defaultValue: "Inbox" })
+                }
+                className="icon-button topbar-inbox-link"
                 to={navigationWorkspaceId ? workspacePath(navigationWorkspaceId, "inbox") : "/inbox"}
                 title={t("topbar.inbox", { defaultValue: "Inbox" })}
               >
                 <Inbox size={16} aria-hidden="true" />
+                {inboxUnread ? <span className="topbar-inbox-dot" aria-hidden="true" /> : null}
               </NavLink>
               <NavLink
                 aria-label={t("topbar.settings", { defaultValue: "Settings" })}

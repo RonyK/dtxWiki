@@ -77,6 +77,22 @@
   font-size: 13px;
 }
 
+/* Topbar entry: a dot when an open inbox has an unread item. */
+.topbar-inbox-link {
+  position: relative;
+}
+
+.topbar-inbox-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
 @media (max-width: 640px) {
   .inbox-row {
     grid-template-columns: 16px minmax(0, 1fr);

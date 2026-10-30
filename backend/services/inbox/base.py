@@ -69,6 +69,17 @@ class InboxScope(ABC):
     def acquire_write(self, session: Session) -> None:
         """Serialize writers before reading state that a write depends on."""
 
+    def writable_recipients(
+        self, session: Session, recipient_ids: tuple[UUID, ...]
+    ) -> tuple[UUID, ...]:
+        """Apply the scope's recipient lifecycle and hold any required locks.
+
+        Producers acquire their source locks first; entry writes follow this
+        gate. Scopes without recipient lifecycle state accept every recipient.
+        """
+
+        return recipient_ids
+
     def check_display(self, display: InboxDisplay) -> None:
         """Reject a display this scope cannot show, such as a foreign link.
 

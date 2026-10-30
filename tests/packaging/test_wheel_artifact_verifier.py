@@ -13,7 +13,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VERIFIER = REPO_ROOT / "scripts" / "verify_wheel_artifact.py"
-CURRENT_HEAD = "af62c98d0731"
+CURRENT_HEAD = "6f4a9f50c046"
 REVISION_DIRECTORY = (
     REPO_ROOT
     / "backend"

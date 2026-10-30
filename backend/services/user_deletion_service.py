@@ -60,6 +60,7 @@ from backend.repositories.workspace_scoped import (
 from backend.services.audit_service import AuditService
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.db_write_intent import acquire_write_intent
+from backend.services.inbox.recipients import retire_workspace_recipient
 from backend.services.oauth_service import revoke_live_token_grant_families
 from backend.services.workspace_membership_service import WorkspaceMembershipService
 from backend.services.workspace_write import WorkspaceWriteService
@@ -1148,7 +1149,13 @@ class UserDeletionService:
         workspace_id: UUID,
     ) -> None:
         model = entry.model
-        if entry.cleanup == "private_versions":
+        if entry.cleanup == "preserve":
+            return
+        if entry.cleanup == "retire_inbox_recipient":
+            retire_workspace_recipient(
+                session, workspace_id=workspace_id, user_id=user_id
+            )
+        elif entry.cleanup == "private_versions":
             self._scrub_private_context_versions(
                 session, user_id=user_id, workspace_id=workspace_id
             )
