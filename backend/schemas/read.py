@@ -417,6 +417,7 @@ class ContextPageDetail(ContextPageSummary):
     children_count: int = 0
     backlink_count: int = 0
     wikilink_targets: list[WikilinkTarget] = Field(default_factory=list)
+    link_targets: list[ContextLinkTarget] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     # F1: a draft awaiting review + the open review item, so the Context surface
     # can show "pending draft" + an inline approve/request-changes affordance.

@@ -466,5 +466,15 @@
     "current": "Current zoom {{percent}}%",
     "in": "Zoom in",
     "reset": "Reset zoom"
+  },
+  "unavailable": {
+    "breadcrumb": "Unavailable",
+    "title": "This item can't be opened",
+    "body": "This item may be missing, or your current account may not have access. Confirm the link or ask the sender to check its sharing settings.",
+    "previous": "Return to previous page",
+    "workspaces": "Your workspaces",
+    "selectWorkspace": "Select a workspace",
+    "closeChooser": "Close workspace chooser",
+    "openWorkspace": "Open {{title}} dashboard"
   }
 }

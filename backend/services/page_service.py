@@ -90,6 +90,7 @@ from backend.services.context_lifecycle import (
     record_unarchive,
     rejected_draft_restart,
 )
+from backend.services.context_link_targets import context_link_targets
 from backend.services.context_media_legacy_cutover import (
     LegacyMediaCutoverConflictError,
     require_no_visible_legacy_media,
@@ -589,6 +590,11 @@ class PageService:
                 # editing activity to anonymous observers.
                 updated_at=version.created_at,
                 exposure_scope=exposure_scope,
+                link_targets=context_link_targets(
+                    session, page=page, version=version, public=True,
+                    workspace=workspace,
+                    self_origins=self.body_preparer.self_origins,
+                ),
             )
 
     def set_page_public(

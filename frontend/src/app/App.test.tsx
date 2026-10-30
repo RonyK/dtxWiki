@@ -561,7 +561,7 @@ describe("appRoutes role gating", () => {
       screen.queryByRole("heading", { name: "No context pages yet" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "Back to dashboard" }),
+      screen.getByRole("link", { name: "Find workspaces" }),
     ).toHaveAttribute("href", "/workspaces/find");
   });
 });

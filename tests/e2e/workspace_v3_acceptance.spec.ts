@@ -1291,7 +1291,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           { path: workspaceUrl(workspace.id, `context/pages/${decision.id}`), name: decisionTitle },
           { path: workspaceUrl(workspace.id, "library"), name: "Library" },
           { path: workspaceUrl(workspace.id, "agent"), name: "Agent pages" },
-          { path: workspaceUrl(workspace.id, "ask"), name: "We couldn't find that page" },
+          { path: workspaceUrl(workspace.id, "ask"), name: "This item can't be opened" },
           // The Review queue rail becomes a drawer on narrow screens and
           // intentionally loses its desktop complementary landmark. The main
           // operations heading is the route-level readiness signal in both

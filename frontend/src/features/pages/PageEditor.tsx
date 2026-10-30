@@ -695,6 +695,7 @@ export function PageEditor({
   }, []);
   const closeContextRail = useCallback(() => setContextRailOpen(false), []);
   const imageUploadOptions = useMemo<EditorPasteOptions>(() => ({
+    getWorkspaceId: () => workspaceIdRef.current,
     getUploadBatchCapabilities() {
       return contextMediaCapabilitiesRef.current;
     },
@@ -973,7 +974,7 @@ export function PageEditor({
         base: markdownLanguage,
       }),
       autocompletion({
-        override: [createEditorCompletionSource(pagesRef, sourceSuggestionsRef)],
+        override: [createEditorCompletionSource(pagesRef, sourceSuggestionsRef, workspaceIdRef)],
       }),
       createEditorPasteHandlers(imageUploadOptions),
       // CodeMirror's parsed `Mod-/` key descriptor is not dispatched by
@@ -5394,6 +5395,8 @@ export function PageEditor({
                 sourceLineNumbers
                 stripLeadingHeading={title}
                 wikilinkPages={pages}
+                workspaceId={workspaceId}
+                allowWorkspaceNavigationLinks
               />
             </div>
           ) : null}

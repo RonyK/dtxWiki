@@ -1,8 +1,12 @@
 import {
+  insertCompletionText,
+  pickedCompletion,
   type Completion,
   type CompletionContext,
   type CompletionResult,
 } from "@codemirror/autocomplete";
+
+import { formatContextPageMarkdown } from "../../shared/lib/contextLinks";
 
 import type { PageSummary } from "../../shared/api/pages";
 import type { LibraryItemSummary } from "../../shared/api/library";
@@ -14,13 +18,14 @@ type CompletionDataRef<T> = {
 export function createEditorCompletionSource(
   pagesRef: CompletionDataRef<PageSummary>,
   sourcesRef: CompletionDataRef<LibraryItemSummary>,
+  workspaceRef: { current: string | null } = { current: null },
 ) {
   return (context: CompletionContext): CompletionResult | null => {
     const wikilink = context.matchBefore(/\[\[[^\]\n|]*$/);
     if (wikilink && (context.explicit || wikilink.from < wikilink.to)) {
       return {
         from: wikilink.from + 2,
-        options: pageCompletionOptions(pagesRef.current),
+        options: workspaceRef.current ? pageCompletionOptions(pagesRef.current, workspaceRef.current) : [],
         validFor: /^[^\]\n|]*$/,
       };
     }
@@ -38,9 +43,18 @@ export function createEditorCompletionSource(
   };
 }
 
-function pageCompletionOptions(pages: PageSummary[]): Completion[] {
-  return pages.map((page) => ({
-    apply: `${page.slug}|${page.title}]]`,
+function pageCompletionOptions(pages: PageSummary[], workspaceId: string): Completion[] {
+  return pages.map<Completion>((page) => ({
+    apply(view, completion, from, to) {
+      const link = formatContextPageMarkdown(page.title, workspaceId, page.id);
+      // closeBrackets inserts these after [[. They belong to the trigger,
+      // but must stay outside CodeMirror's query range while filtering.
+      const end = view.state.sliceDoc(to, to + 2) === "]]" ? to + 2 : to;
+      view.dispatch({
+        ...insertCompletionText(view.state, link, from - 2, end),
+        annotations: pickedCompletion.of(completion),
+      });
+    },
     displayLabel: page.title,
     detail: page.slug,
     label: `${page.title} ${page.slug}`,

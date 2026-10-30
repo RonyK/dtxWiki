@@ -158,24 +158,34 @@ describe("PublishedPageReader", () => {
     );
   });
 
-  it("renders wikilinks as plain text (no in-app links, no target enumeration)", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
-      jsonResponse({ data: publicPage }),
-    );
-
+  it("renders private targets as plain text and only confirmed public targets as public links", async () => {
+    // Public resolution comes only from the anonymous response, never from
+    // authenticated target enumeration. Wiki and Markdown use the same map.
+    const privateUrl = "/p/11111111-1111-4111-8111-111111111111/33333333-3333-4333-8333-333333333333";
+    const publicUrl = "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222";
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => jsonResponse({ data: {
+      ...publicPage,
+      body_md: `${publicPage.body_md}\n\n[Private target](${privateUrl}) [Public target](${publicUrl}) [[Public Wiki]]`,
+      link_targets: [
+        { locator: "[[Secret Page]]", href: null, target_page_id: null, state: "unavailable" },
+        { locator: privateUrl, href: null, target_page_id: null, state: "unavailable" },
+        { locator: publicUrl, href: "/w/acme/pages/target", target_page_id: null, state: "ok" },
+        { locator: "[[Public Wiki]]", href: "/w/acme/pages/target", target_page_id: null, state: "ok" },
+      ],
+    } }));
     renderPublicRoute("/w/acme/pages/welcome");
-
     const article = await waitFor(() => {
       const node = document.querySelector(".markdown-body");
       expect(node).not.toBeNull();
       return node as HTMLElement;
     });
-    // The [[Secret Page]] wikilink renders as plain text, not an anchor, so the
-    // public reader leaks no in-app /pages link and probes no private target.
     expect(within(article).getByText(/Secret Page/)).toBeInTheDocument();
-    expect(article.querySelector("a.wikilink")).toBeNull();
-    expect(article.querySelector('a[href*="/pages/"]')).toBeNull();
-    expect(article.querySelector('a[href*="/w/"]')).toBeNull();
+    expect(within(article).getByText("Private target").closest("a")).toBeNull();
+    expect(within(article).getByRole("link", { name: "Public target" })).toHaveAttribute("href", "/w/acme/pages/target");
+    expect(within(article).getByRole("link", { name: "Public Wiki" })).toHaveAttribute("href", "/w/acme/pages/target");
+    expect(article.querySelector('a[href^="/p/"]')).toBeNull();
+    expect(article.querySelector('[data-internal-page-id]')).toBeNull();
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([PUBLIC_URL]);
   });
 
   it("keeps an indexed public page discoverable", async () => {

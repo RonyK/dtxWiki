@@ -18,6 +18,16 @@
 - Refresh `tools/list` and cached MCP schemas after upgrading. Shared REST
   projections and compact Context editing receipts retain their existing shape.
 
+### Body references and workspace recovery
+
+- Project visible link targets in Context, public-page and Ask responses. Readers
+  show unavailable-reference explanations; public pages and Ask answers activate
+  only internal links confirmed for that view. Preserve authored unknown links
+  in authenticated readers and previews.
+- Show other-workspace badges from existing memberships and provide a safe return
+  or workspace choice when a destination is unavailable. Editor completion and
+  paste produce workspace-qualified Context permalinks.
+
 ### Explicit workspace URLs
 
 - Route workspace screens, data requests, navigation, and Context permalinks

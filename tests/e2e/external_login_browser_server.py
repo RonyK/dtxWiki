@@ -10,7 +10,7 @@ import secrets
 from dataclasses import replace
 
 import uvicorn
-from fastapi import Request
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from backend.api.middleware.security_headers import (
@@ -67,7 +67,6 @@ def main():
     factory = make_session_factory(engine)
     with factory.begin() as session:
         seed_default_workspace(session)
-    app = create_app(settings=settings, page_service=PageService(factory))
     providers = ProviderRegistry(settings, [BrowserPostMethod()])
     for slug in ("company", "secondary"):
         providers.add(
@@ -78,9 +77,9 @@ def main():
                 "trust_email_verified": True,
             }
         )
-    app.state.auth_providers = providers
+    fixture_router = APIRouter()
 
-    @app.get("/authorize")
+    @fixture_router.get("/authorize")
     def authorize(request: Request, state: str, provider: str):
         providers.get(provider)
         nonce = secrets.token_urlsafe(24)
@@ -100,9 +99,16 @@ def main():
             },
         )
 
-    @app.get("/fixture/done")
+    @fixture_router.get("/fixture/done")
     def done():
         return HTMLResponse("<!doctype html><title>Flow complete</title>Complete")
+
+    app = create_app(
+        settings=settings,
+        page_service=PageService(factory),
+        extra_mount=lambda app: app.include_router(fixture_router),
+    )
+    app.state.auth_providers = providers
 
     uvicorn.run(
         app,

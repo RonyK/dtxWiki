@@ -79,6 +79,7 @@ from backend.services.actor_visible_read import (
 )
 from backend.services.context_lifecycle import project_context_version
 from backend.services.context_link_targets import (
+    context_link_targets,
     legacy_wikilink_targets,
     page_link_target_condition,
 )
@@ -247,10 +248,12 @@ class DomainReadService:
         *,
         library_blob_repository_factory: LibraryBlobRepositoryFactory | None = None,
         lint_registry: LintRegistry | None = None,
+        context_link_origins: frozenset[str] | None = None,
     ) -> None:
         self.lint_registry = (
             lint_registry if lint_registry is not None else LintRegistry.builtin()
         )
+        self.context_link_origins = context_link_origins
         self.tree_read_service = tree_read_service or TreeReadService()
         # Doc §3-D: History's per-version download button needs a
         # server-authoritative "is the original still retrievable" answer,
@@ -1101,6 +1104,13 @@ class DomainReadService:
             ),
             "backlink_count": backlink_count,
             "wikilink_targets": wikilink_targets,
+            "link_targets": (
+                context_link_targets(
+                    session, page=page, version=version, actor=actor,
+                    self_origins=self.context_link_origins,
+                )
+                if version is not None else []
+            ),
             "warnings": warnings,
             "pending_draft_version_id": pending_draft_version_id,
             "pending_draft_warnings": pending_draft_warnings,

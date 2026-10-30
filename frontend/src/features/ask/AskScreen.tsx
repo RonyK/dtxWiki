@@ -1499,15 +1499,17 @@ function TurnCard({
       </div>
       <div className="turn-bubble user">{turn.user_message}</div>
       <div className={`turn-bubble assistant ${noEvidence ? "no-evidence" : ""}`}>
-        {/* M-9 (260908 UI audit): this was a <pre> of the raw string, so a
-            markdown table or [[wikilink]] in the model's answer rendered as
-            literal syntax instead of the table/link every other markdown
-            surface in the app shows. untrusted-preview matches how the app
-            already treats other AI/externally-derived markdown previews. */}
+        {/* Model answers render Markdown, with internal links activated only
+            when the server confirms their cited targets for this turn. */}
         <MarkdownView
           body={turn.assistant_message ?? copy.turns.noAnswer}
-          renderPolicy="untrusted-preview"
+          renderPolicy="confirmed-links"
           workspaceId={workspaceId}
+          linkTargets={(turn.link_targets ?? []).map(target => ({
+            ...target,
+            href: target.href ?? null,
+            target_page_id: target.target_page_id ?? null,
+          }))}
           wikilinkMode="plain"
         />
       </div>

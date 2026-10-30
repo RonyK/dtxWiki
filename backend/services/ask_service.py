@@ -45,6 +45,7 @@ from backend.services.actor_visible_read import (
     context_page_visible,
 )
 from backend.services.audit_service import AuditService
+from backend.services.context_link_targets import ask_context_link_targets
 from backend.services.coverage_service import record_coverage_gap, resolve_coverage_gap
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.graph_service import GraphService
@@ -979,6 +980,16 @@ class AskService:
             visible_page_ids = []
             visible_artifact_ids = []
             turn_graph_context = []
+        link_targets = (
+            ask_context_link_targets(
+                session,
+                body=assistant_message or "",
+                workspace_id=ask_session.workspace_id,
+                actor=actor,
+            )
+            if evidence_visible and assistant_message
+            else []
+        )
         return AskTurnDetail(
             id=turn.id,
             ask_session_id=turn.ask_session_id,
@@ -1003,6 +1014,7 @@ class AskService:
             fallback_disclosure=turn.fallback_disclosure,
             warning_codes=turn.warning_codes or [],
             graph_context=turn_graph_context,
+            link_targets=link_targets,
         )
 
     def _session_graph_contexts(
