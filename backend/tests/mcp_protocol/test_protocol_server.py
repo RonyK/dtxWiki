@@ -413,6 +413,14 @@ def test_prompts_and_resources_are_exposed_for_active_agent_pages(
                 "dtxwiki.context_workflow",
             }.issubset({prompt.name for prompt in prompts.prompts})
 
+            # Even a single bound workspace cannot supply a missing prompt
+            # target; the actor otherwise has access (positive controls below).
+            with pytest.raises(McpError) as missing_workspace:
+                await client.get_prompt("dtxwiki.context_workflow", {})
+            assert (
+                missing_workspace.value.error.data["error_code"] == "validation_failed"
+            )
+
             resources = await client.list_resources()
             templates = await client.list_resource_templates()
             resource_names = {resource.name for resource in resources.resources}

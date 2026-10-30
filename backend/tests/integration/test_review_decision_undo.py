@@ -161,7 +161,16 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
             session, workspace.id, since=since, actor=_actor(workspace.id, "editor"),
         )
         assert not has_more and len(entries) == 1
-        entry = WhatChangedEntryModel(**vars(entries[0]))
+        wire_entry = {
+            key: value
+            for key, value in vars(entries[0]).items()
+            if key != "concept_path"
+        }
+        entry = WhatChangedEntryModel(
+            **wire_entry,
+            stable_url=f"/p/{workspace.id}/{first.page_id}",
+            link_markdown=f"[Undo first](/p/{workspace.id}/{first.page_id})",
+        )
         assert (entry.change_kind, entry.page_id) == ("unpublished", first.page_id)
         assert (entry.version_id, entry.previous_version_id) == (
             None,

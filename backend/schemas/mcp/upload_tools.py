@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from backend.context_media.domain.image_formats import ContextImageMediaType
 from backend.context_media.domain.policy import MAX_CONTEXT_IMAGE_UPLOAD_BYTES
 from backend.schemas.common import MCPResultEnvelope
+from backend.schemas.mcp.page_input import MCPPageInput
 
 ImageMimeType = ContextImageMediaType
 MCP_MAX_IMAGE_BYTES = MAX_CONTEXT_IMAGE_UPLOAD_BYTES
@@ -27,7 +28,7 @@ class UploadImageInput(BaseModel):
     mime_type: ImageMimeType
     content_base64: str = Field(min_length=1, max_length=MAX_ENCODED_IMAGE_CHARS)
     marker_uuid: UUID
-    page_id: UUID
+    page_id: MCPPageInput
     editing_version_id: UUID = Field(
         description=(
             "The caller's own currently-open editing version for this page. "
@@ -48,9 +49,7 @@ class UploadImageInput(BaseModel):
     @field_validator("filename")
     @classmethod
     def _filename_is_plain(cls, value: str) -> str:
-        if value != value.strip() or any(
-            char in value for char in ("/", "\\", "\x00")
-        ):
+        if value != value.strip() or any(char in value for char in ("/", "\\", "\x00")):
             raise ValueError(
                 "filename must be a plain filename without path separators"
             )

@@ -98,187 +98,6 @@
         "title": "EnvelopeWarning",
         "type": "object"
       },
-      "GuidePayload": {
-        "additionalProperties": false,
-        "description": "The workspace guide at one detail level.\n\nbrief (the default) carries what reading, editing and exploring need;\nnormal and detailed add fields, never unbounded lists.",
-        "properties": {
-          "actor_context": {
-            "additionalProperties": true,
-            "title": "Actor Context",
-            "type": "object"
-          },
-          "agent_injection_policy": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Agent Injection Policy"
-          },
-          "agent_page_taxonomy": {
-            "items": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "title": "Agent Page Taxonomy",
-            "type": "array"
-          },
-          "available_prompts": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Available Prompts",
-            "type": "array"
-          },
-          "available_resources": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Available Resources",
-            "type": "array"
-          },
-          "available_tools": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Available Tools",
-            "type": "array"
-          },
-          "citation_policy": {
-            "additionalProperties": true,
-            "title": "Citation Policy",
-            "type": "object"
-          },
-          "context_page_taxonomy": {
-            "items": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "title": "Context Page Taxonomy",
-            "type": "array"
-          },
-          "detail_level": {
-            "enum": [
-              "brief",
-              "normal",
-              "detailed"
-            ],
-            "title": "Detail Level",
-            "type": "string"
-          },
-          "detail_levels": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Detail Levels",
-            "type": "object"
-          },
-          "field_explanations": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Field Explanations",
-            "type": "object"
-          },
-          "hot_concepts": {
-            "items": {
-              "$ref": "#/$defs/HotConceptEntry"
-            },
-            "title": "Hot Concepts",
-            "type": "array"
-          },
-          "library_policy_summary": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Library Policy Summary"
-          },
-          "recommended_agent_guidance_flow": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Recommended Agent Guidance Flow",
-            "type": "array"
-          },
-          "required_workflow": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Required Workflow",
-            "type": "array"
-          },
-          "workspace_routing": {
-            "$ref": "#/$defs/WorkspaceRouting"
-          },
-          "workspace_summary": {
-            "additionalProperties": true,
-            "title": "Workspace Summary",
-            "type": "object"
-          }
-        },
-        "required": [
-          "detail_level",
-          "detail_levels",
-          "workspace_summary",
-          "actor_context",
-          "citation_policy",
-          "workspace_routing",
-          "required_workflow"
-        ],
-        "title": "GuidePayload",
-        "type": "object"
-      },
-      "HotConceptEntry": {
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "path": {
-            "title": "Path",
-            "type": "string"
-          },
-          "score": {
-            "title": "Score",
-            "type": "integer"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "id",
-          "title",
-          "path",
-          "score"
-        ],
-        "title": "HotConceptEntry",
-        "type": "object"
-      },
       "MCPActor": {
         "additionalProperties": false,
         "properties": {
@@ -374,6 +193,205 @@
           "message"
         ],
         "title": "MCPErrorDetail",
+        "type": "object"
+      },
+      "MCPGuidePayload": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_context": {
+            "additionalProperties": true,
+            "title": "Actor Context",
+            "type": "object"
+          },
+          "agent_injection_policy": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Agent Injection Policy"
+          },
+          "agent_page_taxonomy": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Agent Page Taxonomy",
+            "type": "array"
+          },
+          "available_prompts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Available Prompts",
+            "type": "array"
+          },
+          "available_resources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Available Resources",
+            "type": "array"
+          },
+          "available_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Available Tools",
+            "type": "array"
+          },
+          "citation_policy": {
+            "additionalProperties": true,
+            "title": "Citation Policy",
+            "type": "object"
+          },
+          "context_page_taxonomy": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Context Page Taxonomy",
+            "type": "array"
+          },
+          "detail_level": {
+            "enum": [
+              "brief",
+              "normal",
+              "detailed"
+            ],
+            "title": "Detail Level",
+            "type": "string"
+          },
+          "detail_levels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Detail Levels",
+            "type": "object"
+          },
+          "field_explanations": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Field Explanations",
+            "type": "object"
+          },
+          "hot_concepts": {
+            "items": {
+              "$ref": "#/$defs/MCPHotConceptEntry"
+            },
+            "title": "Hot Concepts",
+            "type": "array"
+          },
+          "library_policy_summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Library Policy Summary"
+          },
+          "recommended_agent_guidance_flow": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Recommended Agent Guidance Flow",
+            "type": "array"
+          },
+          "required_workflow": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Workflow",
+            "type": "array"
+          },
+          "workspace_routing": {
+            "$ref": "#/$defs/WorkspaceRouting"
+          },
+          "workspace_summary": {
+            "additionalProperties": true,
+            "title": "Workspace Summary",
+            "type": "object"
+          }
+        },
+        "required": [
+          "detail_level",
+          "detail_levels",
+          "workspace_summary",
+          "actor_context",
+          "citation_policy",
+          "workspace_routing",
+          "required_workflow"
+        ],
+        "title": "MCPGuidePayload",
+        "type": "object"
+      },
+      "MCPHotConceptEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Path"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "stable_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Stable Url"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "title",
+          "score"
+        ],
+        "title": "MCPHotConceptEntry",
         "type": "object"
       },
       "MCPResultEnvelope": {
@@ -734,7 +752,7 @@
       "data": {
         "anyOf": [
           {
-            "$ref": "#/$defs/GuidePayload"
+            "$ref": "#/$defs/MCPGuidePayload"
           },
           {
             "type": "null"

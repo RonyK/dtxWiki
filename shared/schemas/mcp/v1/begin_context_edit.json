@@ -51,7 +51,10 @@
         "type": "string"
       },
       "page_id": {
-        "format": "uuid",
+        "description": "Context page UUID or stable_url: /p/<workspace_id>/<page_id> or /p/<page_id> in this workspace.",
+        "maxLength": 512,
+        "minLength": 1,
+        "pattern": "^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|/p/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?:/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?(?:#[^\\s]*)?)$",
         "title": "Page Id",
         "type": "string"
       },

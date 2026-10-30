@@ -52,6 +52,8 @@ class RequestedChangeTarget(BaseModel):
     target_id: UUID
     slug: str | None = None
     title: str | None = None
+    stable_url: str | None = None
+    link_markdown: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 

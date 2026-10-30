@@ -12,6 +12,7 @@ from backend.schemas.context_write import (
     SubmitFeedbackResult,
 )
 from backend.schemas.edit_receipt import EditReceipt
+from backend.schemas.mcp.page_input import MCPPageInput, validate_typed_target
 from backend.schemas.page import (
     CONTENT_HASH_PATTERN,
     CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD,
@@ -42,6 +43,7 @@ CONVERSATION_TOKEN_FIELD = Field(
 
 class CiteInput(CiteRequest):
     workspace_id: UUID
+    target_page_id: MCPPageInput | None = None
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
     wire: Literal["stable", "mrtr_preview"] = "stable"
     resume_token: str | None = Field(default=None, max_length=4096)
@@ -68,7 +70,15 @@ class CiteToolOutput(BaseModel):
 
 class SubmitFeedbackInput(SubmitFeedbackRequest):
     workspace_id: UUID
+    target_id: MCPPageInput
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
+
+    @model_validator(mode="before")
+    @classmethod
+    def _typed_target(cls, value):
+        return validate_typed_target(
+            value, type_field="target_type", id_field="target_id"
+        )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -142,7 +152,7 @@ class CreateContextPageToolOutput(BaseModel):
 
 class BeginContextEditInput(BeginContextEditRequest):
     workspace_id: UUID
-    page_id: UUID
+    page_id: MCPPageInput
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
 
     model_config = ConfigDict(extra="forbid")
@@ -157,7 +167,7 @@ class BeginContextEditToolOutput(BaseModel):
 
 class UpdateContextEditInput(UpdateContextEditRequest):
     workspace_id: UUID
-    page_id: UUID
+    page_id: MCPPageInput
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
 
     model_config = ConfigDict(extra="forbid")
@@ -172,7 +182,7 @@ class UpdateContextEditToolOutput(BaseModel):
 
 class SubmitContextEditForReviewInput(SubmitContextEditRequest):
     workspace_id: UUID
-    page_id: UUID
+    page_id: MCPPageInput
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
 
     model_config = ConfigDict(extra="forbid")
@@ -187,7 +197,7 @@ class SubmitContextEditForReviewToolOutput(BaseModel):
 
 class DiscardContextEditInput(DiscardContextEditRequest):
     workspace_id: UUID
-    page_id: UUID
+    page_id: MCPPageInput
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
 
     model_config = ConfigDict(extra="forbid")
@@ -238,7 +248,7 @@ class PatchContextEditInput(BaseModel):
     """
 
     workspace_id: UUID
-    page_id: UUID
+    page_id: MCPPageInput
     version_id: UUID
     operations: list[EditOperation] = Field(
         min_length=1,

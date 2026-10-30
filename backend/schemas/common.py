@@ -198,7 +198,15 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        node as well as its children, so its node_id can be used for placement
 #        without first reading its parent. guide's normal/detailed tool lists
 #        include the full actor-filtered catalog, including the guide resource.
-MCP_TOOL_CONTRACT_REVISION = 22
+#  23 -- All workspace tools and dynamic prompts require explicit workspace_id;
+#        missing or malformed tool targets use the existing error envelope.
+#        MCP Context reads/search use stable_url/link_markdown instead of
+#        concept_path/resource_uri; guide hot concepts use stable_url. Page inputs
+#        accept UUID or scoped stable links within the explicit workspace;
+#        Library lookup paths stay distinct from browser links. Archived
+#        what_changed links are required-nullable, and Review evidence links
+#        use document identity. Index output and input formats are unchanged.
+MCP_TOOL_CONTRACT_REVISION = 23
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their
 # declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
 # a field carrying this marker is always sent, so an absent value can never be

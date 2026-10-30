@@ -90,7 +90,7 @@ def test_read_only_actor_cannot_create_context_page(
     assert not hasattr(response, "data")
 
 
-def test_begin_context_edit_idempotently_resumes_own_open_session(
+def test_begin_context_edit_idempotently_resumes_session_by_stable_url(
     page_service, actor
 ):
     workspace_id = _workspace(page_service)
@@ -100,7 +100,7 @@ def test_begin_context_edit_idempotently_resumes_own_open_session(
         "begin_context_edit",
         {
             "workspace_id": str(workspace_id),
-            "page_id": str(created.id),
+            "page_id": f"/p/{workspace_id}/{created.id}",
             "idempotency_key": "begin-resume-1",
         },
         actor=actor,
@@ -187,7 +187,7 @@ def test_update_context_edit_rejects_stale_base_as_conflict(page_service, actor)
     assert stale.data is None
 
 
-def test_discard_context_edit_archives_a_never_published_page(page_service, actor):
+def test_discard_context_edit_archives_page_by_stable_url(page_service, actor):
     workspace_id = _workspace(page_service)
     created = _create_page(page_service, actor, workspace_id)
 
@@ -195,7 +195,7 @@ def test_discard_context_edit_archives_a_never_published_page(page_service, acto
         "discard_context_edit",
         {
             "workspace_id": str(workspace_id),
-            "page_id": str(created.id),
+            "page_id": f"/p/{workspace_id}/{created.id}",
             "version_id": str(created.version_id),
             "idempotency_key": "discard-1",
         },

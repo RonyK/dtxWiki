@@ -25,6 +25,7 @@ from backend.policy.trust_boundaries import (
     actor_kind_for_check,
     actor_with_target_workspace_scope,
 )
+from backend.repositories.workspace_scoped import select_in_workspace
 from backend.services.actor_visible_read import context_version_is_visible
 from backend.services.public_page_exposure import (
     exposure_scope_for_workspace,
@@ -101,14 +102,33 @@ class ContextMediaAccessPolicy:
                 hide_membership=False,
             )
 
-    def assert_page_not_archived(self, page_id: UUID) -> None:
+    def assert_page_not_archived(
+        self, page_id: UUID, *, expected_workspace_id: UUID | None = None
+    ) -> None:
         """Assert that a page exists and is active without authorizing a caller.
 
         The MCP dispatcher (``backend.mcp.router.resolve_target_actor`` /
         ``dispatch``) has already resolved workspace access before upload
         handlers call this method.  This is deliberately not an authorization
         boundary and must not be reused for membership or role checks.
+
+        Workspace-bound transports may pass their already-authorized workspace
+        to avoid a global page-to-workspace directory lookup. Callers that do
+        not know the workspace retain the directory-based behavior.
         """
+        if expected_workspace_id is not None:
+            with self._db.session_for(expected_workspace_id)() as session:
+                page = session.scalar(
+                    select_in_workspace(
+                        ContextPage,
+                        workspace_id=expected_workspace_id,
+                        conditions=(ContextPage.id == page_id,),
+                    )
+                )
+                if page is None or page.lifecycle_status == "archived":
+                    raise _not_found("page not found")
+            return
+
         control_factory = self._db.control_session_factory()
         with control_factory() as session:
             workspace_id = self._directory.workspace_id_by_context_page(

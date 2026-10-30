@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### MCP workspace and document URLs
+
+- MCP tool contract revision 23 requires an explicit `workspace_id` for every
+  workspace-scoped tool and dynamic prompt. Missing or malformed tool targets
+  return the existing tool-error envelope without creating a trace or chat.
+  `list_my_workspaces` remains available without a workspace target.
+- MCP Context read, search, and review results use workspace-qualified
+  `stable_url` and `link_markdown` instead of `concept_path` and `resource_uri`;
+  guide hot concepts provide `stable_url` instead of a Context lookup path.
+  Pass a Context page UUID or `/p/<workspace_id>/<page_id>` as a page input;
+  `/p/<page_id>` is also accepted inside the explicitly supplied workspace.
+  Library `/library/<id>.md` lookup paths and the existing index format remain
+  supported. Archived change entries expose null document links.
+- Refresh `tools/list` and cached MCP schemas after upgrading. Shared REST
+  projections and compact Context editing receipts retain their existing shape.
+
 ### Explicit workspace URLs
 
 - Route workspace screens, data requests, navigation, and Context permalinks

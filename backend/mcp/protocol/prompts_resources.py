@@ -64,6 +64,7 @@ def list_dtxwiki_prompts(
     tool_context: ToolCallContext | None = None,
 ) -> list[types.Prompt]:
     actor, db = _resolve_bindings(actor, tool_context)
+    was_workspace_unbound = actor.workspace_id is None
     # LIST is actor-scoped and can return generic descriptors even when the
     # actor's default Workspace is outside an OAuth token claim. Enforce every
     # live token-bound lifecycle before either that early return or scope
@@ -138,6 +139,10 @@ def list_dtxwiki_prompts(
             return prompts if _has_prompt_resource_scope(actor) else []
     if not _has_prompt_resource_scope(scoped_actor):
         return []
+    if was_workspace_unbound:
+        # The static prompt descriptors require an explicit workspace. Do not
+        # advertise per-page names selected from a lifecycle fallback workspace.
+        return prompts
     enforce_mcp_surface_lifecycle(
         actor=scoped_actor,
         session_factory=workspace_factory,
@@ -160,10 +165,8 @@ def list_dtxwiki_prompts(
                     arguments=[
                         types.PromptArgument(
                             name="workspace_id",
-                            description=(
-                                "Workspace UUID. Defaults to the bound MCP workspace."
-                            ),
-                            required=False,
+                            description="Workspace UUID.",
+                            required=True,
                         )
                     ],
                 )
@@ -182,7 +185,7 @@ def get_dtxwiki_prompt(
     actor, db = _resolve_bindings(actor, tool_context)
     args = arguments or {}
     if name == CONTEXT_WORKFLOW_PROMPT_NAME:
-        workspace_id = _workspace_id_from_args_or_actor(args, actor)
+        workspace_id = _required_workspace_id(args)
         control_factory = _control_session_factory(db, session_factory)
         workspace_factory = _workspace_session_factory(
             db,
@@ -255,7 +258,7 @@ def get_dtxwiki_prompt(
     elif name != AGENT_PAGE_PROMPT_NAME:
         raise ValueError("unknown prompt")
 
-    workspace_id = _workspace_id_from_args_or_actor(args, actor)
+    workspace_id = _required_workspace_id(args)
     agent_page_id = _optional_uuid(args, "agent_page_id")
     slug = page_slug_from_name or args.get("slug")
     control_factory = _control_session_factory(db, session_factory)
@@ -318,11 +321,14 @@ def list_dtxwiki_resources(
     tool_context: ToolCallContext | None = None,
 ) -> list[types.Resource]:
     actor, db = _resolve_bindings(actor, tool_context)
+    was_workspace_unbound = actor.workspace_id is None
     actor = enforce_actor_mcp_surface_lifecycle(
         actor=actor,
         fallback_session_factory=session_factory,
         db=db,
     )
+    if was_workspace_unbound:
+        return []
     workspace_id = actor.workspace_id
     if workspace_id is None:
         return []
@@ -453,11 +459,45 @@ def list_dtxwiki_resource_templates(
     """Advertise direct Context reads without flattening every page into list."""
 
     actor, db = _resolve_bindings(actor, tool_context)
+    was_workspace_unbound = actor.workspace_id is None
     actor = enforce_actor_mcp_surface_lifecycle(
         actor=actor,
         fallback_session_factory=session_factory,
         db=db,
     )
+    if was_workspace_unbound:
+        if not actor.token_workspace_ids or not _has_prompt_resource_scope(actor):
+            return []
+        return [
+            types.ResourceTemplate(
+                name="context-page",
+                title="Context page",
+                uriTemplate=(
+                    f"{RESOURCE_SCHEME}://{RESOURCE_AUTHORITY}/{{workspace_id}}"
+                    "/context/pages/{slug}"
+                ),
+                description=(
+                    "Read one actor-visible Context page by slug. Set workspace_id "
+                    "to an authorized workspace UUID."
+                ),
+                mimeType="text/markdown",
+                annotations=types.Annotations(audience=["assistant"]),
+            ),
+            types.ResourceTemplate(
+                name="agent-page",
+                title="Agent page",
+                uriTemplate=(
+                    f"{RESOURCE_SCHEME}://{RESOURCE_AUTHORITY}/{{workspace_id}}"
+                    "/agent/pages/{slug}"
+                ),
+                description=(
+                    "Read one active AgentPage by slug. Set workspace_id to an "
+                    "authorized workspace UUID."
+                ),
+                mimeType="text/markdown",
+                annotations=types.Annotations(audience=["assistant"]),
+            ),
+        ]
     if actor.workspace_id is None:
         return []
     workspace_id = actor.workspace_id
@@ -846,33 +886,16 @@ def _optional_uuid(arguments: dict[str, str], key: str) -> UUID | None:
     return UUID(value) if value else None
 
 
-def _workspace_id_from_args_or_actor(
+def _required_workspace_id(
     arguments: dict[str, str],
-    actor: ActorContext,
 ) -> UUID:
-    """Resolve an explicit or defaulted workspace target for a prompt call.
-
-    P10.3 T2 fix: this ran before ``enforce_actor_mcp_surface_lifecycle``
-    resolves ``actor.workspace_id``, so under D-01v2 a pat/oauth_jwt actor's
-    ``workspace_id`` is unresolved (``None``) here even when the prompt
-    argument omits ``workspace_id`` and the actor's credential is allowed
-    exactly one workspace -- the documented "Defaults to the bound MCP
-    workspace" contract silently broke for every such caller. Fall back to
-    ``token_workspace_ids`` directly (D-01v2: an omitted ``workspace_id`` is
-    only unambiguous when the credential's allowed set has exactly one
-    member, matching ``backend.policy.workspace_resolution.
-    resolve_workspace_for_actor``); a multi-workspace credential must name
-    its target explicitly.
-    """
-
     value = arguments.get("workspace_id")
-    if value:
+    if not value:
+        raise _invalid_params("validation_failed")
+    try:
         return UUID(value)
-    if actor.workspace_id is not None:
-        return actor.workspace_id
-    if len(actor.token_workspace_ids) == 1:
-        return actor.token_workspace_ids[0]
-    raise ValueError("workspace_id is required")
+    except (ValueError, TypeError) as exc:
+        raise _invalid_params("validation_failed") from exc
 
 
 def _invalid_params(error_code: str) -> McpError:

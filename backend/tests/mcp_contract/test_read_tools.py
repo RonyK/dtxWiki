@@ -49,9 +49,7 @@ def test_mcp_lists_actor_workspaces(page_service):
         )
         session.add(user)
         session.flush()
-        workspace = session.scalar(
-            select(Workspace).where(Workspace.slug == "default")
-        )
+        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         assert workspace is not None
         grant_workspace_membership(
             session,
@@ -235,7 +233,11 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
 
     assert redirected.envelope.result_status == "succeeded"
     assert redirected.status == "redirected"
-    assert redirected.canonical_path == "/context/canonical-alpha.md"
+    assert "canonical_path" not in redirected.model_dump()
+    assert redirected.stable_url == f"/p/{workspace_id}/{alpha.id}"
+    assert (
+        redirected.link_markdown == f"[Canonical Alpha](/p/{workspace_id}/{alpha.id})"
+    )
     assert redirected.page_id is not None
     assert redirected.version_id is not None
     assert "# Canonical Alpha" in redirected.content
@@ -243,27 +245,30 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
     assert redirected.neighbors is not None
     assert [item.id for item in redirected.neighbors.co_access] == [beta.id]
     assert redirected.neighbors.co_access[0].kind == "context_page"
+    assert redirected.neighbors.co_access[0].path is None
+    assert (
+        redirected.neighbors.co_access[0].stable_url == f"/p/{workspace_id}/{beta.id}"
+    )
     assert redirected.neighbors.co_access[0].edge_kind == "co_access"
     assert redirected.neighbors.co_access[0].direction == "out"
     assert mermaid.mermaid is not None
     assert mermaid.mermaid.startswith("graph LR")
     assert ambiguous.envelope.result_status == "succeeded"
     assert ambiguous.status == "ambiguous"
-    assert {candidate.concept_path for candidate in ambiguous.candidates} == {
-        "/context/canonical-alpha.md",
-        "/context/canonical-beta.md",
+    assert {candidate.stable_url for candidate in ambiguous.candidates} == {
+        f"/p/{workspace_id}/{alpha.id}",
+        f"/p/{workspace_id}/{beta.id}",
     }
     assert set(type(ambiguous.candidates[0]).model_fields) == {
         "id",
         "title",
-        "concept_path",
         "match_reason",
+        "stable_url",
+        "link_markdown",
     }
 
 
-def test_read_context_outline_duplicate_sections_and_selected_hash(
-    page_service, actor
-):
+def test_read_context_outline_duplicate_sections_and_selected_hash(page_service, actor):
     workspace_id = _workspace_id(page_service)
     body = "# Root\n\nIntro\n\n## Repeat\n\nfirst\n\n## Repeat\n\nsecond\n"
     page = page_service.write_page(
@@ -452,8 +457,7 @@ def test_read_context_outline_hides_frontmatter_and_separates_raw_hash(
         )
     assert raw_pages[0].document.content_hash == raw_pages[1].document.content_hash
     assert (
-        raw_pages[0].document.body_raw_sha256
-        != raw_pages[1].document.body_raw_sha256
+        raw_pages[0].document.body_raw_sha256 != raw_pages[1].document.body_raw_sha256
     )
 
 
@@ -481,7 +485,10 @@ def test_mcp_grep_wiki_returns_visible_line_context(page_service, actor):
     )
 
     assert response.envelope.result_status == "succeeded"
-    assert response.matches[0]["concept_path"] == "/context/grep-target.md"
+    assert response.matches[0]["stable_url"] == (
+        f"/p/{workspace_id}/{response.matches[0]['page_id']}"
+    )
+    assert "concept_path" not in response.matches[0]
     assert response.matches[0]["line"] == "literal/needle"
     assert "Before" in response.matches[0]["context"]
     assert "After" in response.matches[0]["context"]
@@ -853,7 +860,9 @@ def test_read_concept_resolves_library_paths(
             title="A8 Source",
             raw_text="# A8 Source\n\nExtracted source text needle.",
         )
-        ExtractionService(media_installer_factory=media_installer_factory).extract_library_item_version(
+        ExtractionService(
+            media_installer_factory=media_installer_factory
+        ).extract_library_item_version(
             session=session,
             library_item_version_id=registration.version.id,
         )

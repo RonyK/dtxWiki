@@ -38,16 +38,15 @@ def upload_image(payload: dict, ctx: ToolCallContext) -> UploadImageToolOutput:
         # (backend/spi/context.py) already resolves to
         # ctx.db.session_for(ctx.workspace_id) once router.py binds it for
         # the 'editor' role this tool requires, so use it directly instead of
-        # re-deriving from the request. The two values are equal today only
-        # because resolve_workspace_id_for_tool rejects a workspace_id/page_id
-        # mismatch before dispatch (backend/mcp/router.py); routing by the
-        # authorized value rather than the requested one means a future
-        # decoupling fails closed instead of writing into an unauthorized
-        # plane.
+        # re-deriving from the request. The router authorizes workspace_id;
+        # the scoped preflight below checks page ownership and archived state
+        # before ingest can write into that workspace plane.
         session_factory = ctx.session_factory
         ContextMediaAccessPolicy(
             ctx.db, ctx.services.workspace_directory
-        ).assert_page_not_archived(request.page_id)
+        ).assert_page_not_archived(
+            request.page_id, expected_workspace_id=ctx.workspace_id
+        )
         result = ctx.services.context_image_ingest.ingest(
             session_factory=session_factory,
             command=ContextImageIngestCommand(
@@ -103,9 +102,7 @@ def upload_image(payload: dict, ctx: ToolCallContext) -> UploadImageToolOutput:
             asset_id=result.asset_id,
             logical_ref=result.logical_ref,
             content_url=result.content_url,
-            markdown=(
-                f"![{_escape_alt_text(request.alt_text)}]({result.logical_ref})"
-            ),
+            markdown=(f"![{_escape_alt_text(request.alt_text)}]({result.logical_ref})"),
             mime_type=result.canonical_media_type,
             bytes=result.byte_size,
             sha256=result.sha256,

@@ -234,19 +234,26 @@ def test_upload_image_uses_workspace_plane_not_control_plane(
     ``ingest`` call site in upload_tools.py routes via
     ``ctx.db.session_for(request.workspace_id)``.
 
-    D-1 already routes ``assert_page_not_archived``'s authorization read
-    through ``session_for(workspace_id)`` -- ``ContextPage`` is a
-    workspace-plane domain table, resolved through the directory on the
-    control session but read for real on the workspace session. The
-    control-plane page below is poisoned (``lifecycle_status="archived"``)
-    while the workspace-plane page carries the real, published status: if
-    ``assert_page_not_archived`` ever reverted to reading lifecycle_status
-    off the single control session (the directory-then-route pattern
-    undone), it would see the poisoned archived status and the upload would
-    fail instead of succeeding.
+    ``assert_page_not_archived`` receives the authorized workspace and reads
+    directly from that workspace plane, without a global page-directory
+    lookup. The control-plane page below is poisoned
+    (``lifecycle_status="archived"``) while the workspace-plane page carries
+    the real, published status: if ``assert_page_not_archived`` ever read
+    lifecycle_status from the control session, the upload would fail instead
+    of succeeding.
     """
 
     monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path))
+    page_directory_lookups = []
+
+    def _unexpected_page_directory_lookup(_self, _session, requested_page_id):
+        page_directory_lookups.append(requested_page_id)
+        return None
+
+    monkeypatch.setattr(
+        "backend.app.container.WorkspaceDirectory.workspace_id_by_context_page",
+        _unexpected_page_directory_lookup,
+    )
     control_factory = _real_session_factory()
     workspace_factory = _real_session_factory()
 
@@ -329,6 +336,7 @@ def test_upload_image_uses_workspace_plane_not_control_plane(
     assert output.envelope.result_status == "succeeded", output.envelope
     assert captured["session_factory"] is workspace_factory
     assert captured["session_factory"] is not control_factory
+    assert page_directory_lookups == []
 
 
 def test_marker_idempotency_and_different_bytes_rejection(
@@ -367,12 +375,15 @@ def test_marker_idempotency_and_different_bytes_rejection(
     assert conflict.envelope.result_status == "conflict"
     assert conflict.envelope.retryable is False
     with page_service.session_factory() as session:
-        assert session.scalar(
-            select(func.count(ContextMediaUploadRequest.marker_uuid)).where(
-                ContextMediaUploadRequest.workspace_id == workspace_id,
-                ContextMediaUploadRequest.marker_uuid == marker_uuid,
+        assert (
+            session.scalar(
+                select(func.count(ContextMediaUploadRequest.marker_uuid)).where(
+                    ContextMediaUploadRequest.workspace_id == workspace_id,
+                    ContextMediaUploadRequest.marker_uuid == marker_uuid,
+                )
             )
-        ) == 1
+            == 1
+        )
 
 
 def test_upload_image_rejects_cross_workspace_page(
@@ -404,7 +415,7 @@ def test_upload_image_rejects_cross_workspace_page(
             editing_version_id=uuid4(),
         ),
     )
-    assert response.envelope.error_code == "inconsistent_identifier"
+    assert response.envelope.error_code == "not_found"
 
 
 def test_upload_image_rejects_missing_page_as_not_found(
@@ -513,8 +524,8 @@ def test_upload_image_rejects_visible_page_from_a_different_workspace(
         ),
     )
 
-    assert response.envelope.error_code == "inconsistent_identifier"
-    assert response.envelope.result_status == "rejected_by_policy"
+    assert response.envelope.error_code == "not_found"
+    assert response.envelope.result_status == "failed"
 
 
 def test_upload_image_page_target_binds_asset_to_the_open_editing_version(
@@ -776,8 +787,9 @@ def test_failing_upload_redacts_trace_error_chat_params_and_audit(
     # not be silently dropped by later passes. This trace has no other row
     # (no AuditEvent for the failure) to recover the fingerprint from.
     failure_trace = next(
-        trace for trace in traces if trace.input_summary.get("marker_uuid")
-        == str(marker_uuid)
+        trace
+        for trace in traces
+        if trace.input_summary.get("marker_uuid") == str(marker_uuid)
         and trace.input_summary.get("mime_type") == "image/jpeg"
     )
     expected_sha256 = hashlib.sha256(JPEG).hexdigest()

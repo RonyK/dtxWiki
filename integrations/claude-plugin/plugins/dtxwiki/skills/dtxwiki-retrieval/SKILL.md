@@ -5,13 +5,13 @@ description: Choose and sequence dtxWiki MCP retrieval tools for workspace disco
 
 # dtxWiki Retrieval
 
-Call `guide` first when the workspace or live tool availability is not already established. Do not copy its tool inventory, workspace names, or policy values into durable instructions.
+Choose an accessible `workspace_id` with `list_my_workspaces`, then call `guide` with that explicit ID when the workspace or live tool availability is not already established. Every workspace-scoped tool requires `workspace_id`; connection and account defaults never supply it. Do not copy the tool inventory, workspace names, or policy values into durable instructions.
 
 ## Choose the retrieval surface
 
 - Use `search` to resolve a question, title, path, identifier, or broad knowledge need.
 - After choosing a search hit, use `fetch` with that hit's returned identity and type to read its complete actor-visible content. Do not treat a search snippet as the full source.
-- Use `read` when the target type and target ID are already known.
+- Use `read` when the target type and target ID are already known. Context page inputs accept the returned `stable_url` or page UUID inside the explicit workspace. Use a read result's `link_markdown` for document links in answers; keep Library lookup paths separate from browser links.
 - Use `get_index` to survey navigable Context and Library entry points, then `read_concept` for a selected concept path.
 - Use `read_context_outline` to read a Context version's heading outline, and to pull one selected section's body in the same response. The heading list is capped: read `outline_total` and `outline_omitted_count`, and send the returned `outline_next_cursor` back as `outline_cursor` on the next call. Never send it as `cursor`: that is a separate token that pages the body of the section named by `select`. Raise `max_sections` (max 2000) for fewer round trips.
 - Use `read_structure_map` for a version's block-level structure (block ids, row ids, content hashes). Its `document.version_id` is the preferred `patch_context_edit` base; `root_hash` is an integrity value, not a version identity, and `line_span` and `preview` are recomputed per request and are not stable across versions. Blocks and table rows are capped independently, `document.block_count` is the document total rather than the number returned, and every block and row stays reachable by following `next_cursor` in document order.
