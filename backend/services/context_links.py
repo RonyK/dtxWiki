@@ -306,6 +306,7 @@ class LinkResolutionBatch:
         self.workspace_id = ctx.workspace_id
         self.source_version_id = ctx.source_version_id
         self.navigation_targets: dict[tuple[str, UUID], object] = {}
+        self.visible_index_folders: set[UUID] = set()
         if include_navigation:
             self._prefetch_navigation(locators, ctx)
         self.pins: dict[str, UUID] = {}
@@ -519,10 +520,13 @@ class LinkResolutionBatch:
         )
 
         ids: dict[str, set[UUID]] = {}
+        index_folder_ids: set[UUID] = set()
         for locator in locators:
             ref = parse_index_ref(locator.href)
             if ref is not None and ref.kind != "context":
                 ids.setdefault(ref.kind, set()).add(ref.target_id)
+                if ref.kind == "folder":
+                    index_folder_ids.add(ref.target_id)
                 continue
             if locator.kind != "unknown":
                 continue
@@ -563,6 +567,19 @@ class LinkResolutionBatch:
                 self.navigation_targets.update(
                     ((kind, target.id), target) for target in targets
                 )
+        if index_folder_ids and ctx.actor is not None:
+            from backend.services.tree_read import TreeReadService
+
+            # One actor-filtered projection covers all folder refs and their
+            # ancestor chains. Authored SPA routes retain their old policy.
+            folders = [
+                target
+                for (kind, target_id), target in self.navigation_targets.items()
+                if kind == "folder" and target_id in index_folder_ids
+            ]
+            self.visible_index_folders = TreeReadService.visible_node_ids(
+                ctx.session, folders, ctx.actor
+            )
 
     def _add_page(self, page: ContextPage) -> None:
         self.pages_by_id[page.id] = page
@@ -1221,17 +1238,39 @@ def decide(
     return LinkDecision("keep")
 
 
-def editor_link_actor(actor_kind: str, actor_id: str) -> SimpleNamespace:
-    """The link authority of an authorized writer: its identity, editor role.
+def editor_link_actor(
+    actor_kind: str,
+    actor_id: str,
+    *,
+    workspace_id: UUID | None = None,
+    actor_context: object | None = None,
+) -> object:
+    """Keep the scoped caller's capabilities, or conservative write authority.
 
-    A write context carries provenance, not an ActorContext; the ingress has
-    already authorized the write, so link checks see the writer as an editor.
+    Legacy internal writers supply identity and provenance only. An editor
+    fallback keeps their own Context edits readable without inventing owner
+    roles or token scopes for restricted Library and sensitive Agent targets.
     """
+    if (
+        actor_context is not None
+        and getattr(actor_context, "actor_kind", None) == actor_kind
+        and getattr(actor_context, "actor_id", None) == actor_id
+        and (
+            getattr(actor_context, "workspace_id", None) == workspace_id
+            or actor_kind == "system"
+        )
+    ):
+        return actor_context
     return SimpleNamespace(
         actor_kind=actor_kind,
         actor_id=actor_id,
+        workspace_id=workspace_id,
         workspace_role="editor",
         role="editor",
+        scopes=(),
+        token_kind=None,
+        user_id=None,
+        token_workspace_ids=(),
     )
 
 
@@ -1297,6 +1336,40 @@ def _live_route(
     ):
         return None
     return folder_url(ctx.workspace_id, target.section, target.id)
+
+
+def _visible_index_route(
+    ctx: LinkContext,
+    kind: str,
+    target_id: UUID,
+    *,
+    batch: LinkResolutionBatch | None,
+) -> str | None:
+    """Resolve system refs with the ordinary reader's visibility in W."""
+    from backend.services.actor_visible_read import (
+        agent_page_visible,
+        library_item_visible,
+    )
+    from backend.services.index_refs import format_index_ref
+
+    if batch is None:
+        batch = LinkResolutionBatch(
+            [Locator("index_ref", href=format_index_ref(kind, target_id))],
+            ctx,
+            include_navigation=True,
+        )
+    target = batch.navigation_targets.get((kind, target_id))
+    if target is None:
+        return None
+    if kind == "library":
+        visible = library_item_visible(target, ctx.actor, workspace_id=ctx.workspace_id)
+    elif kind == "agent":
+        visible = agent_page_visible(target, ctx.actor, workspace_id=ctx.workspace_id)
+    else:
+        visible = target_id in batch.visible_index_folders
+    if not visible:
+        return None
+    return _live_route(ctx, kind, target_id, batch=batch)
 
 
 def _workspace_route(
@@ -1370,7 +1443,7 @@ def decide_link(
             href=href,
         )
         if ref.kind != "context":
-            target = _live_route(ctx, ref.kind, ref.target_id, batch=batch)
+            target = _visible_index_route(ctx, ref.kind, ref.target_id, batch=batch)
             return locator, None, (
                 LinkDecision("fix", target, "link.internal-noncanonical")
                 if target is not None

@@ -108,6 +108,8 @@ class AgentPageService:
         actor_provenance: str,
         agent_page_id: UUID | None = None,
         origin_chat_session_id: UUID | None = None,
+        actor: ActorContext | None = None,
+        normalize_index_refs: bool = True,
     ) -> AgentPageDraftResult:
         # SQLite: FOR UPDATE is a no-op and pysqlite defers BEGIN until the
         # first DML, so take write intent before the page resolve and the
@@ -168,11 +170,22 @@ class AgentPageService:
 
         # Index refs are system-internal; an Agent draft stores their
         # canonical links like a Context body does.
-        body_markdown, _, _ = rewrite_links_with_report(
-            request.body_markdown,
-            LinkContext(session, workspace_id, editor_link_actor(actor_kind, actor_id)),
-            index_refs_only=True,
-        )
+        body_markdown = request.body_markdown
+        if normalize_index_refs:
+            body_markdown, _, _ = rewrite_links_with_report(
+                request.body_markdown,
+                LinkContext(
+                    session,
+                    workspace_id,
+                    editor_link_actor(
+                        actor_kind,
+                        actor_id,
+                        workspace_id=workspace_id,
+                        actor_context=actor,
+                    ),
+                ),
+                index_refs_only=True,
+            )
         # Canonical folder URLs can be longer than their authored index refs.
         validate_agent_markdown_input(body_markdown)
         version = AgentPageVersion(
@@ -559,6 +572,7 @@ class AgentPageService:
             actor_kind=actor_kind,
             actor_id=actor_id,
             actor_provenance=actor_provenance,
+            normalize_index_refs=False,
         )
 
     def _resolve_or_create_page(

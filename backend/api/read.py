@@ -51,7 +51,11 @@ from backend.media.application import if_none_match_matches
 from backend.media.domain import MediaStagingError
 from backend.media.ports import MediaInstallInProgressError
 from backend.policy.auth import ActorContext
-from backend.policy.rbac import WorkspaceAccess, role_allows
+from backend.policy.rbac import (
+    WorkspaceAccess,
+    rebind_actor_to_workspace_access,
+    role_allows,
+)
 from backend.policy.trust_boundaries import (
     actor_can_read_drafts,
     check_actor_can_access,
@@ -2530,7 +2534,7 @@ def create_agent_page_draft(
     workspace_id: UUID,
     request_body: AgentPageDraftRequest,
     actor: RestActorDep,
-    _access: WorkspaceViewerAccessDep,
+    access: WorkspaceViewerAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
     response: Response,
 ):
@@ -2545,6 +2549,7 @@ def create_agent_page_draft(
                 session=session,
                 workspace_id=workspace_id,
                 request=request_body,
+                actor=rebind_actor_to_workspace_access(actor, access),
                 actor_kind=actor.actor_kind,
                 actor_id=actor.actor_id,
                 actor_provenance=actor.provenance,
@@ -2639,7 +2644,7 @@ def update_agent_page_draft(
     agent_page_id: UUID,
     request_body: AgentPageDraftRequest,
     actor: RestActorDep,
-    _access: WorkspaceViewerAccessDep,
+    access: WorkspaceViewerAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
 ):
     try:
@@ -2649,6 +2654,7 @@ def update_agent_page_draft(
                     session=session,
                     workspace_id=workspace_id,
                     request=request_body,
+                    actor=rebind_actor_to_workspace_access(actor, access),
                     actor_kind=actor.actor_kind,
                     actor_id=actor.actor_id,
                     actor_provenance=actor.provenance,
@@ -3094,7 +3100,7 @@ def accept_context_ingress_proposal(
                     request=request_body,
                     actor_kind=actor.actor_kind,
                     actor_id=actor.actor_id,
-                    actor=actor,
+                    actor=rebind_actor_to_workspace_access(actor, _access),
                 )
             }
     except ReadServiceError as exc:
@@ -4297,6 +4303,7 @@ def format_markdown(
             actor_kind=_actor.actor_kind,
             actor_id=_actor.actor_id,
             actor_provenance=_actor.provenance,
+            actor=rebind_actor_to_workspace_access(_actor, _access),
         )
     return {"data": {"markdown": prepared.body}}
 

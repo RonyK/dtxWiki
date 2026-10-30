@@ -6,7 +6,7 @@ are reachable within 3 hops from the section root with each intermediate
 folder present in its parent's render, ③ fanout truncation is honest.
 """
 
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select
@@ -19,9 +19,10 @@ from backend.services.index_refs import format_index_ref, title_text
 from backend.services.okf import build_workspace_index
 from backend.services.okf_index import (
     GET_INDEX_NODE_TOKEN_BUDGET,
+    build_routing_index,
     estimate_index_tokens,
 )
-from backend.services.tree_projection import TreeProjectionService
+from backend.services.tree_projection import TreeProjection, TreeProjectionService
 from backend.services.tree_service import TreeService, create_tree_node
 
 pytestmark = pytest.mark.integration
@@ -193,6 +194,36 @@ def test_index_token_budget_per_node(session_factory_module, scale_workspace):
         )
     # sanity: this is genuinely the routing mode over 1,000+ pages
     assert "](dtxwiki://index/folder/" in renders["root"]
+
+    # One pure projection covers a different budget boundary: a maximum-size
+    # Unicode folder title grows the header beyond the old 64-token reserve.
+    # The English scale fixture above cannot expose this; no extra DB case is
+    # needed to prove that the complete response, including its tail, fits.
+    root_id, folder_id = uuid4(), uuid4()
+
+    def folder(node_id, title, slug, parent_id, summary="x"):
+        return WorkspaceTreeNode(
+            id=node_id, workspace_id=workspace_id, section="context",
+            node_kind="folder", title=title, slug=slug, parent_id=parent_id,
+            sort_key=slug, nav_summary=summary,
+        )
+
+    root = folder(root_id, "Context", "context", None)
+    target = folder(folder_id, "한" * 80, "r", root_id)
+    children = [
+        folder(uuid4(), "나" * 80, f"folder-{i}", folder_id, "글" * 132 + "a" * 28)
+        for i in range(50)
+    ]
+    nodes = {node.id: node for node in [root, target, *children]}
+    projection = TreeProjection(nodes, set(nodes))
+    projection._children = {root_id: [target], folder_id: children}
+    document = build_routing_index(
+        None, workspace_id, actor=None, workspace_slug="default",
+        node=format_index_ref("folder", folder_id), projection=projection,
+    )
+    assert estimate_index_tokens(document.markdown) <= GET_INDEX_NODE_TOKEN_BUDGET
+    assert document.overflow == len(children) - len(document.entries)
+    assert f"\n\n…and {document.overflow} more" in document.markdown
 
 
 def test_golden_pages_reachable_within_three_hops(

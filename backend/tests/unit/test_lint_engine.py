@@ -177,6 +177,7 @@ def test_builtin_registry_and_container_module_injection_preserve_publication_fl
         SimpleNamespace(
             session_factory=container.db.control_session_factory(),
             services=services,
+            actor=None,
         )
     )
     assert mcp_pages.body_preparer is services.body_preparer

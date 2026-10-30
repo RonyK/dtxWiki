@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
     from backend.models.context import ContextPage, ContextPageVersion
     from backend.models.workspace import Workspace
+    from backend.policy.auth import ActorContext
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ class WriteContext:
     page: ContextPage | None = None
     version: ContextPageVersion | None = None
     session: Session | None = None
+    actor: ActorContext | None = None
 
 
 class BodyPreparer:

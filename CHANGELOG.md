@@ -14,10 +14,11 @@
   canonical server link match. Unrecognized responses retain their source.
 - Copied system index refs become supported canonical links on Agent drafts
   and on Context saves with save-time link fixes (`link_fix_mode=auto`, the
-  default). In suggest mode, or when the target cannot be resolved, the ref
-  stays in the source with a Lint finding and readers show it as an
-  unavailable reference rather than a browser link. Unrelated authored links
-  keep their existing rules.
+  default), when the caller can read the target. Unresolved refs stay in the
+  source and readers show them as unavailable references. Context saves in
+  suggest mode retain the refs with Lint findings. Unrelated authored links
+  keep their existing rules. Agent restores preserve historical Markdown
+  without normalizing saved index refs.
 - Navigation summaries skip image-only paragraphs and store an empty string
   when no prose exists. Run `dtxwiki reindex` to refresh stored summaries;
   legacy NULL summaries still derive on read.

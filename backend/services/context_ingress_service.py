@@ -283,6 +283,7 @@ class ContextIngressService:
             parent=parent,
             body=body,
             change_set=change_set,
+            actor=actor,
             actor_kind=actor_kind,
             actor_id=actor_id,
             actor_provenance=actor.provenance if actor is not None else "internal",
@@ -395,6 +396,7 @@ class ContextIngressService:
         actor_kind: str,
         actor_id: str,
         actor_provenance: str,
+        actor: ActorContext | None = None,
     ) -> tuple[
         ContextPage | None,
         ContextPageVersion | None,
@@ -485,6 +487,7 @@ class ContextIngressService:
         prepared = self.body_preparer.prepare(
             BodyInput(body),
             WriteContext(
+                actor=actor,
                 workspace=session.get(Workspace, workspace_id),
                 actor_kind=actor_kind,
                 actor_id=actor_id,

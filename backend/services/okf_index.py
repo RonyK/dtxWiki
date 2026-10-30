@@ -142,15 +142,16 @@ def build_routing_index(
         )
     if node is not None:
         target = _resolve_node_ref(session, workspace_id, projection, node)
+        title = title_text(target.title)
+        header = f"# {workspace_slug} \u2014 knowledge index ({title}/)"
+        header_tokens = estimate_index_tokens(header + "\n\n")
         lines, entries, overflow = _node_entry_lines(
             session,
             projection,
             target.id,
             actor,
-            token_budget=GET_INDEX_NODE_TOKEN_BUDGET - 64,
+            token_budget=GET_INDEX_NODE_TOKEN_BUDGET - header_tokens,
         )
-        title = title_text(target.title)
-        header = f"# {workspace_slug} \u2014 knowledge index ({title}/)"
         markdown = "\n".join([header, "", *lines]).rstrip() + "\n"
         return RoutingIndex(markdown, tuple(entries), overflow, target)
 
