@@ -60,6 +60,7 @@
           }
         ],
         "default": null,
+        "description": "Folder to descend into: pass the exact destination of a dtxwiki://index/folder/<id> Markdown link from the previous index, unchanged and with the same workspace_id. With format='nodes', pass a child's node_id.",
         "title": "Node"
       },
       "sections": {
@@ -663,6 +664,19 @@
         "default": null,
         "title": "Index"
       },
+      "link_markdown": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Copyable Markdown link to the selected folder for answers.",
+        "title": "Link Markdown"
+      },
       "nodes": {
         "anyOf": [
           {
@@ -673,6 +687,19 @@
           }
         ],
         "default": null
+      },
+      "stable_url": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Browser URL of the folder selected by node; null without node.",
+        "title": "Stable Url"
       }
     },
     "required": [

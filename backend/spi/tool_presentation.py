@@ -76,5 +76,8 @@ TOOL_ACTIONS = {
 MCP_CONTEXT_LINK_GUIDANCE = (
     "Link to another dtxWiki document with the result's link_markdown. "
     "For a Context page input, pass its stable_url or page_id unchanged. "
-    "Never use concept_path or resource_uri as a link."
+    "Never use concept_path, resource_uri, or dtxwiki://index refs as links. "
+    "Pass the index entry's exact Markdown destination unchanged to "
+    "get_index.node for folders or read_concept.path for Context/Library, "
+    "with the same explicit workspace_id."
 )

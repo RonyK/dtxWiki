@@ -10842,10 +10842,46 @@ export interface components {
             /** Sort Key */
             sort_key?: string | null;
         };
+        /** TreeNodeIndexPreviewEntry */
+        TreeNodeIndexPreviewEntry: {
+            /** Count */
+            count?: number | null;
+            /**
+             * Draft
+             * @default false
+             */
+            draft: boolean;
+            /** Href */
+            href?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "folder" | "context" | "library" | "agent" | "other";
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /** Title */
+            title: string;
+        };
         /** TreeNodeIndexPreviewPayload */
         TreeNodeIndexPreviewPayload: {
+            /** Entries */
+            entries?: components["schemas"]["TreeNodeIndexPreviewEntry"][];
             /** Markdown */
             markdown: string;
+            /**
+             * Overflow
+             * @default 0
+             */
+            overflow: number;
         };
         /** TreeNodeIndexPreviewResponse */
         TreeNodeIndexPreviewResponse: {

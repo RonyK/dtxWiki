@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 import pytest
 from sqlalchemy import func, select, update
 
@@ -8,6 +10,7 @@ from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.review import ReviewItem
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
+from backend.policy.auth import ActorContext
 from backend.schemas.agent import AgentPageDraftRequest
 from backend.schemas.context_write import ReviewDecisionRequest
 from backend.scripts.seed_dev import (
@@ -19,6 +22,7 @@ from backend.services.agent_page_service import (
     AgentPageService,
 )
 from backend.services.bundle_service import AgentInputBundleService
+from backend.services.index_refs import format_index_ref
 from backend.services.read_errors import ScopeDeniedError, StaleBaseVersionError
 from backend.services.review_service import ReviewService
 
@@ -72,6 +76,26 @@ def test_agent_body_heading_is_independent_and_invalid_legacy_activation_is_atom
             == 1_000_000
         )
 
+        # Budget exception: restore reuses the ordinary draft writer but must
+        # preserve historical bytes instead of running its new index-ref fixer.
+        root_id = session.scalar(select(WorkspaceTreeNode.id).where(
+            WorkspaceTreeNode.workspace_id == workspace_id,
+            WorkspaceTreeNode.section == "context",
+            WorkspaceTreeNode.parent_id.is_(None),
+        ))
+        historical_body = f"[Historical]({format_index_ref('folder', root_id)})\n"
+        session.get(AgentPageVersion, activation.active_version_id).body_markdown = (
+            historical_body
+        )
+        restored = service.restore_version(
+            session=session, workspace_id=workspace_id,
+            agent_page_id=draft.agent_page_id, version_id=activation.active_version_id,
+            actor_kind="human", actor_id=ACTOR_ID,
+            actor_provenance="browser_session",
+        )
+        restored_version = session.get(AgentPageVersion, restored.draft_version_id)
+        assert restored_version.body_markdown == historical_body
+
         # Historical bodies have no new CHECK. Restore must report a policy
         # error before constructing a Pydantic request or a new change set.
         session.execute(
@@ -121,6 +145,23 @@ def test_agent_page_draft_service_creates_non_sensitive_draft(session_factory):
 
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
+        root_id = session.scalar(
+            select(WorkspaceTreeNode.id).where(
+                WorkspaceTreeNode.workspace_id == workspace_id,
+                WorkspaceTreeNode.section == "context",
+                WorkspaceTreeNode.parent_id.is_(None),
+            )
+        )
+        missing_ref = format_index_ref("library", uuid4())
+        guide_id = session.scalar(select(AgentPage.id).where(
+            AgentPage.workspace_id == workspace_id,
+            AgentPage.category == "agent_guide",
+        ))
+        owner = ActorContext(
+            actor_kind="human", actor_id=ACTOR_ID, workspace_id=workspace_id,
+            workspace_role="owner", role="owner", token_kind="api_token",
+            token_workspace_ids=(workspace_id,), scopes=("mcp:write",),
+        )
         result = service.write_draft(
             session=session,
             workspace_id=workspace_id,
@@ -128,12 +169,18 @@ def test_agent_page_draft_service_creates_non_sensitive_draft(session_factory):
                 category="persona",
                 title="Research Persona",
                 slug="research-persona",
-                body_markdown="# Research Persona\n\nPrefer source-grounded notes.",
+                body_markdown=(
+                    "# Research Persona\n\nPrefer source-grounded notes in "
+                    f"[Context]({format_index_ref('folder', root_id)}), not "
+                    f"[gone]({missing_ref}). "
+                    f"[Guide]({format_index_ref('agent', guide_id)})"
+                ),
                 reason="add persona draft",
             ),
             actor_kind="human",
             actor_id=ACTOR_ID,
             actor_provenance="browser_session",
+            actor=owner,
         )
 
         page = session.get(AgentPage, result.agent_page_id)
@@ -152,6 +199,16 @@ def test_agent_page_draft_service_creates_non_sensitive_draft(session_factory):
     assert page.injection_policy == "default_on"
     assert version.version_status == "draft"
     assert version.version_no == 1
+    # Known index refs persist as canonical links; unknown refs keep their bytes.
+    assert (
+        f"[Context](/workspaces/{workspace_id}/context/folders/{root_id})"
+        f", not [gone]({missing_ref})" in version.body_markdown
+    )
+    # Budget exception: the Agent service has a separate caller seam from
+    # Context preparation. Its real owner/admin scope must not be discarded.
+    assert f"[Guide](/workspaces/{workspace_id}/agent/pages/{guide_id})" in (
+        version.body_markdown
+    )
     assert change_set.trigger_type == "agent_page_draft"
     assert change_set.risk_level == "low"
     assert operation.operation == "create_draft"

@@ -529,6 +529,7 @@ describe("MarkdownView", () => {
             '[Parent relative](../manual/topic?view=print#raw-anchor)',
             '[Unrecognized root](/unregistered/path?x=1#raw-anchor)',
             '[Unrecognized own URI](dtxwiki://different-namespace/topic?x=1#raw-anchor)',
+            '[Index ref](dtxwiki://index/context/33333333-3333-4333-8333-333333333333)',
             '[Encoded path](/unregistered/%2e%2e/topic)',
             '<a href="odd format:value with spaces">Opaque syntax</a>',
             '',
@@ -583,6 +584,11 @@ describe("MarkdownView", () => {
       expect(screen.queryByRole("link", { name })).toBeNull();
       expect(screen.getByText(name)).toBeInTheDocument();
     }
+    // A system index ref left in a body (suggest mode, unresolved target) is
+    // never a browser link, unlike other dtxwiki:// namespaces above.
+    expect(screen.queryByRole("link", { name: "Index ref" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Index ref" }))
+      .toHaveClass("unavailable-reference__trigger");
     // Budget exception: legacy destination pins, short preview inheritance,
     // reference links, and unavailable navigation are distinct render paths.
     expect(screen.queryByRole("link", { name: "Missing" })).not.toBeInTheDocument();

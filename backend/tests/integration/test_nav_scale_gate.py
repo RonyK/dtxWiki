@@ -6,6 +6,8 @@ are reachable within 3 hops from the section root with each intermediate
 folder present in its parent's render, ③ fanout truncation is honest.
 """
 
+from uuid import UUID, uuid4
+
 import pytest
 from sqlalchemy import select
 
@@ -13,12 +15,14 @@ from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.schemas.tree import TreeFolderCreateRequest
+from backend.services.index_refs import format_index_ref, title_text
 from backend.services.okf import build_workspace_index
 from backend.services.okf_index import (
     GET_INDEX_NODE_TOKEN_BUDGET,
+    build_routing_index,
     estimate_index_tokens,
 )
-from backend.services.tree_projection import TreeProjectionService
+from backend.services.tree_projection import TreeProjection, TreeProjectionService
 from backend.services.tree_service import TreeService, create_tree_node
 
 pytestmark = pytest.mark.integration
@@ -36,7 +40,7 @@ def _workspace_id(session):
 def scale_workspace(session_factory_module):
     session_factory = session_factory_module
     tree = TreeService()
-    golden: list[tuple[str, list[str]]] = []
+    golden: list[tuple[UUID, str, list[str]]] = []
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         root = session.scalar(
@@ -124,11 +128,12 @@ def scale_workspace(session_factory_module):
                     if p == 0:
                         golden.append(
                             (
-                                slug,
+                                page.id,
+                                page.title,
                                 [
                                     "/context",
-                                    f"/context/domain-{d1}",
-                                    f"/context/domain-{d1}/area-{d1}-{d2}",
+                                    format_index_ref("folder", level1.id),
+                                    format_index_ref("folder", level2.id),
                                 ],
                             )
                         )
@@ -188,7 +193,37 @@ def test_index_token_budget_per_node(session_factory_module, scale_workspace):
             f"node {name} estimates {estimated} tokens > {GET_INDEX_NODE_TOKEN_BUDGET}"
         )
     # sanity: this is genuinely the routing mode over 1,000+ pages
-    assert "(node:" in renders["root"]
+    assert "](dtxwiki://index/folder/" in renders["root"]
+
+    # One pure projection covers a different budget boundary: a maximum-size
+    # Unicode folder title grows the header beyond the old 64-token reserve.
+    # The English scale fixture above cannot expose this; no extra DB case is
+    # needed to prove that the complete response, including its tail, fits.
+    root_id, folder_id = uuid4(), uuid4()
+
+    def folder(node_id, title, slug, parent_id, summary="x"):
+        return WorkspaceTreeNode(
+            id=node_id, workspace_id=workspace_id, section="context",
+            node_kind="folder", title=title, slug=slug, parent_id=parent_id,
+            sort_key=slug, nav_summary=summary,
+        )
+
+    root = folder(root_id, "Context", "context", None)
+    target = folder(folder_id, "한" * 80, "r", root_id)
+    children = [
+        folder(uuid4(), "나" * 80, f"folder-{i}", folder_id, "글" * 132 + "a" * 28)
+        for i in range(50)
+    ]
+    nodes = {node.id: node for node in [root, target, *children]}
+    projection = TreeProjection(nodes, set(nodes))
+    projection._children = {root_id: [target], folder_id: children}
+    document = build_routing_index(
+        None, workspace_id, actor=None, workspace_slug="default",
+        node=format_index_ref("folder", folder_id), projection=projection,
+    )
+    assert estimate_index_tokens(document.markdown) <= GET_INDEX_NODE_TOKEN_BUDGET
+    assert document.overflow == len(children) - len(document.entries)
+    assert f"\n\n…and {document.overflow} more" in document.markdown
 
 
 def test_golden_pages_reachable_within_three_hops(
@@ -214,17 +249,18 @@ def test_golden_pages_reachable_within_three_hops(
                 )
             return renders[node_ref]
 
-        for slug, hops in scale_workspace["golden"]:
+        for page_id, title, hops in scale_workspace["golden"]:
             assert len(hops) <= 3
             # each hop's folder appears in the parent hop's render
             for parent_ref, child_ref in zip(hops, hops[1:], strict=False):
                 parent_render = render(parent_ref)
-                assert f"(node:{child_ref})" in parent_render, (
+                assert f"]({child_ref})" in parent_render, (
                     f"{child_ref} missing from {parent_ref} render"
                 )
             # the page itself appears in the leaf render
             leaf_render = render(hops[-1])
-            assert f"/context/{slug}.md" in leaf_render
+            page_ref = format_index_ref("context", page_id)
+            assert f"- [{title_text(title)}]({page_ref}) — " in leaf_render
 
 
 def test_fanout_truncation_is_honest(session_factory_module, scale_workspace):
@@ -240,7 +276,7 @@ def test_fanout_truncation_is_honest(session_factory_module, scale_workspace):
             workspace_slug="default",
             node="/context/domain-0/area-0-0",
         )
-        assert leaf.count("* [Doc 0-0-") == PAGES_PER_LEAF
+        assert leaf.count("](dtxwiki://index/context/") == PAGES_PER_LEAF
         assert "…and" not in leaf
 
 

@@ -146,9 +146,20 @@
     "placeholder": "Describe which queries belong in this folder — and which do not ('see X for ~').",
     "autoBadge": "auto",
     "saveError": "Could not save the folder summary.",
-    "previewTitle": "Index preview (how agents see this folder)",
+    "previewTitle": "Index preview",
+    "previewMode": "Index display mode",
+    "previewFormatted": "Formatted",
+    "previewSource": "Source",
+    "previewSourceLabel": "Index source",
+    "previewHint": "Open the agent-facing index preview below.",
+    "previewSourceHint": "Exact index text returned by the server.",
+    "previewFormatFallback": "Some refs could not be matched safely. Showing the exact source.",
     "previewLoading": "Loading…",
-    "previewError": "Could not load the index preview."
+    "previewUpdated": "Index updated.",
+    "previewError": "Could not load the index preview.",
+    "previewRefresh": "Refresh",
+    "previewOverflow": "…and {{count}} more",
+    "previewEmpty": "This index has no entries."
   },
   "favorite": {
     "add": "Add to my favorites",

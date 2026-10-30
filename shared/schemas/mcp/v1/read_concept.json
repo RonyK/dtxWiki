@@ -45,7 +45,7 @@
         "type": "boolean"
       },
       "path": {
-        "description": "Context page UUID or stable URL, a legacy /context/<slug>.md path, or a Library lookup path /library/<id>.md.",
+        "description": "Exact dtxwiki://index/context/<id> or dtxwiki://index/library/<id> Markdown destination from get_index, unchanged with the same workspace_id; or a Context page UUID, stable URL, legacy /context/<slug>.md path, or /library/<id>.md lookup path.",
         "maxLength": 512,
         "minLength": 1,
         "title": "Path",
@@ -755,6 +755,7 @@
           }
         ],
         "default": null,
+        "description": "Copyable Markdown link to the read target; use it in answers.",
         "title": "Link Markdown"
       },
       "mermaid": {
@@ -815,6 +816,7 @@
           }
         ],
         "default": null,
+        "description": "Permanent URL of the read target: /p/<workspace_id>/<page_id> for a Context page, /workspaces/<workspace_id>/library/items/<id> for a Library item.",
         "title": "Stable Url"
       },
       "status": {

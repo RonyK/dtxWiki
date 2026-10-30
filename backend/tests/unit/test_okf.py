@@ -7,6 +7,7 @@ from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.library import LibraryItem
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
+from backend.services.index_refs import format_index_ref
 from backend.services.okf import (
     build_workspace_index,
     parse_concept_path,
@@ -91,9 +92,11 @@ def _add_library_item(session, workspace_id, *, uri, title, trust_level="unknown
 
 
 def test_derive_nav_description_skips_headings_and_truncates():
-    assert derive_nav_description("# Title\n\nFirst para.\n\nSecond.") == "First para."
-    assert derive_nav_description("") is None
-    assert derive_nav_description("# only heading") is None
+    assert derive_nav_description(
+        "# Title\n\n![구조도](/api/media/1)\n\nFirst para.\n\nSecond."
+    ) == "First para."
+    assert derive_nav_description("") == ""
+    assert derive_nav_description("# only heading") == ""
     long = "word " * 100
     out = derive_nav_description(long, max_length=20)
     assert out is not None and len(out) <= 20 and out.endswith("…")
@@ -106,7 +109,7 @@ def test_derive_nav_description_skips_headings_and_truncates():
         )
         == "Actual subject paragraph."
     )
-    assert derive_nav_description("# Title\n\n- list only\n- no prose") is None
+    assert derive_nav_description("# Title\n\n- list only\n- no prose") == ""
 
 
 def test_derive_nav_description_is_frontmatter_aware():
@@ -195,10 +198,10 @@ def test_render_context_concept_has_frontmatter_and_body(session_factory):
 def test_index_published_visible_to_all_drafts_only_to_editors(session_factory):
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
-        _add_context_page(
+        pub = _add_context_page(
             session, workspace_id, slug="pub", title="Published", body="Pub body."
         )
-        _add_context_page(
+        draft = _add_context_page(
             session,
             workspace_id,
             slug="draft",
@@ -221,12 +224,15 @@ def test_index_published_visible_to_all_drafts_only_to_editors(session_factory):
             workspace_slug="default",
         )
 
-    assert "[Published](/context/pub.md)" in editor_index
-    assert "[Draftive](/context/draft.md)" in editor_index
-    assert "*(draft)*" in editor_index
+    pub_line = f"- [Published]({format_index_ref('context', pub.id)})"
+    assert pub_line in editor_index
+    assert (
+        f"- [Draftive]({format_index_ref('context', draft.id)}) (draft)"
+        in editor_index
+    )
     # Viewer sees the published concept but not the draft-only one.
-    assert "[Published](/context/pub.md)" in viewer_index
-    assert "/context/draft.md" not in viewer_index
+    assert pub_line in viewer_index
+    assert str(draft.id) not in viewer_index
 
 
 def test_index_restricted_library_filtered_by_actor(session_factory):
@@ -328,5 +334,7 @@ def test_draft_capable_actor_reads_draft_head_over_published(session_factory):
 
     assert editor_version.body_md == "Draft body."
     assert viewer_version.body_md == "Published body."
-    assert "[Dual Head](/context/dual-head.md)" in editor_index
-    assert "*(draft)*" in editor_index
+    assert (
+        f"- [Dual Head]({format_index_ref('context', page.id)}) (draft)"
+        in editor_index
+    )

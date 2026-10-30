@@ -34,6 +34,7 @@ from backend.policy.rbac import (
 )
 from backend.policy.trust_boundaries import actor_with_target_workspace_scope
 from backend.services.context_links import PageLocatorNotFound
+from backend.services.index_refs import IndexRefInputError
 from backend.services.mcp_read_projection import (
     capture_served_reads,
     finish_served_read,
@@ -171,6 +172,10 @@ def dispatch(
             return MCPErrorResponse(envelope=error_envelope(actor, exc.error_code))
         except PageLocatorNotFound:
             return MCPErrorResponse(envelope=error_envelope(actor, "not_found"))
+        except IndexRefInputError as exc:
+            return MCPErrorResponse(
+                envelope=error_envelope(actor, "validation_failed", message=str(exc))
+            )
         except ValueError:
             return MCPErrorResponse(envelope=error_envelope(actor, "validation_failed"))
         response = handler(normalized_payload, ctx)
@@ -312,6 +317,10 @@ def resolve_workspace_id_for_tool(
                     and locator.workspace_id != explicit_workspace_id
                 ):
                     return PolicyRejection("not_found")
+            except IndexRefInputError:
+                # Authorize the explicit workspace and scope first; the input
+                # normalization stage then returns the ref's repair guidance.
+                return explicit_workspace_id
             except ValueError:
                 return PolicyRejection("validation_failed")
     return explicit_workspace_id

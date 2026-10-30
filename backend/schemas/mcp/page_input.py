@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BeforeValidator, WithJsonSchema
 
 from backend.services.context_links import MCP_PAGE_INPUT_PATTERN
+from backend.services.index_refs import looks_like_index_ref, parse_index_ref
 
 
 def validate_page_input(value: object) -> UUID | str:
@@ -76,7 +77,14 @@ def validate_read_concept_path_input(value: object) -> str:
     raw = str(value)
     if len(raw) > 512:
         raise ValueError("Page locator must be at most 512 characters")
-    if raw.startswith("/library/"):
+    if looks_like_index_ref(raw):
+        ref = parse_index_ref(raw)
+        if ref is None or ref.kind not in {"context", "library"}:
+            raise ValueError(
+                "read_concept accepts exact dtxwiki://index/context/<id> or "
+                "dtxwiki://index/library/<id> refs; pass folder refs to get_index.node."
+            )
+    elif raw.startswith("/library/"):
         suffix = raw[len("/library/") :]
         if not suffix.endswith(".md") or not suffix[: -len(".md")]:
             raise ValueError("Invalid Library path")
@@ -94,8 +102,10 @@ MCPReadConceptPathInput = Annotated[
             "minLength": 1,
             "maxLength": 512,
             "description": (
-                "Context page UUID or stable URL, a legacy /context/<slug>.md "
-                "path, or a Library lookup path /library/<id>.md."
+                "Exact dtxwiki://index/context/<id> or dtxwiki://index/library/<id> "
+                "Markdown destination from get_index, unchanged with the same "
+                "workspace_id; or a Context page UUID, stable URL, legacy "
+                "/context/<slug>.md path, or /library/<id>.md lookup path."
             ),
         }
     ),

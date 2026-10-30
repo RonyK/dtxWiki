@@ -879,7 +879,7 @@ def test_read_concept_resolves_library_paths(
         "read_concept",
         {
             "workspace_id": str(workspace_id),
-            "path": f"/library/{item_id}.md",
+            "path": f"dtxwiki://index/library/{item_id}",
         },
         actor=actor,
         page_service=page_service,
@@ -898,7 +898,7 @@ def test_read_concept_resolves_library_paths(
         actor=actor,
         page_service=page_service,
     )
-    assert f"/library/{item_id}.md" in index.index
+    assert f"dtxwiki://index/library/{item_id}" in index.index
 
 
 def test_read_concept_library_gates_return_not_found(page_service, actor):

@@ -24,10 +24,15 @@ def link_context(ctx: LintContext) -> LinkContext | None:
     if ctx.session is None or ctx.workspace_id is None:
         return None
     actor = ctx.actor
-    # WriteContext carries authenticated write provenance, not an ActorContext.
-    # The ingress already authorized it; retain identity for private own edits.
+    # Keep the scoped caller's read authority when supplied by the ingress.
+    # Legacy internal writers retain identity for private own edits.
     if actor is not None and hasattr(actor, "actor_provenance"):
-        actor = editor_link_actor(actor.actor_kind, actor.actor_id)
+        actor = editor_link_actor(
+            actor.actor_kind,
+            actor.actor_id,
+            workspace_id=ctx.workspace_id,
+            actor_context=getattr(actor, "actor", None),
+        )
     return LinkContext(
         ctx.session,
         ctx.workspace_id,

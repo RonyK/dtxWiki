@@ -21,6 +21,18 @@ _INDEX_REF = re.compile(
 )
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
 _TITLE_SYNTAX = re.compile(r"([\\\[\]`<])")
+PAGE_INPUT_REF_GUIDANCE = (
+    "Index refs work only in read_concept (context/library) and get_index "
+    "(folder). Extract the exact destination from the get_index Markdown "
+    "link. For other page tools, pass the page UUID or read_concept's "
+    "target_id/stable_url."
+)
+
+
+class IndexRefInputError(ValueError):
+    """An index ref sent to a tool input that does not take one."""
+
+
 @dataclass(frozen=True)
 class IndexRef:
     kind: IndexRefKind

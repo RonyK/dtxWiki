@@ -3,6 +3,7 @@ import re
 import unicodedata
 from bisect import bisect_right
 from collections.abc import Callable, Mapping, Sequence
+from copy import copy
 from dataclasses import dataclass, replace
 from uuid import UUID
 
@@ -652,13 +653,21 @@ class ContextWriteService:
         | None = None,
         media_installer_factory: Callable[[Session, UUID], object] | None = None,
         body_preparer: BodyPreparer | None = None,
+        actor_context: ActorContext | None = None,
     ) -> None:
         self.audit_service = audit_service or AuditService()
+        self.actor_context = actor_context
         self.risk_resolver = ReviewRiskResolver()
         self.job_queue = job_queue or JobQueueService()
         self.context_media_repository_factory = context_media_repository_factory
         self.media_installer_factory = media_installer_factory
         self.body_preparer = body_preparer or BodyPreparer()
+
+    def with_actor(self, actor: ActorContext) -> "ContextWriteService":
+        """Bind read authority to this call without mutating registry services."""
+        scoped = copy(self)
+        scoped.actor_context = actor
+        return scoped
 
     def _refresh_page_links(
         self, session: Session, *, page: ContextPage, version: ContextPageVersion
@@ -686,6 +695,7 @@ class ContextWriteService:
             return self.body_preparer.prepare(
                 BodyInput(markdown),
                 WriteContext(
+                    actor=self.actor_context,
                     workspace=workspace,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
@@ -707,10 +717,12 @@ class ContextWriteService:
         actor_kind: str,
         actor_id: str,
         actor_provenance: str,
+        actor: ActorContext | None = None,
     ) -> PreparedBody:
         return self.body_preparer.preview(
             markdown,
             WriteContext(
+                actor=actor if actor is not None else self.actor_context,
                 workspace=self._require_workspace(session, workspace_id),
                 actor_kind=actor_kind,
                 actor_id=actor_id,
@@ -736,6 +748,7 @@ class ContextWriteService:
                 base_version.body_md,
                 new_body,
                 WriteContext(
+                    actor=self.actor_context,
                     workspace=workspace,
                     session=session,
                     page=page,

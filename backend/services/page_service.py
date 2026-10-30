@@ -404,8 +404,10 @@ class PageService:
         | None = None,
         lint_registry: LintRegistry | None = None,
         body_preparer: BodyPreparer | None = None,
+        actor_context: ActorContext | None = None,
     ) -> None:
         self.session_factory = session_factory
+        self.actor_context = actor_context
         self.body_preparer = (
             body_preparer if body_preparer is not None else BodyPreparer(lint_registry)
         )
@@ -1108,6 +1110,7 @@ class PageService:
                 job_queue=self.job_queue,
                 context_media_repository_factory=self.context_media_repository_factory,
                 body_preparer=self.body_preparer,
+                actor_context=actor,
             ).patch_draft(
                 session=session,
                 workspace_id=actor.workspace_id,
@@ -1307,6 +1310,7 @@ class PageService:
                     audit_service=self.change_audit_recorder.audit_service,
                     job_queue=self.job_queue,
                     body_preparer=self.body_preparer,
+                    actor_context=self.actor_context,
                     context_media_repository_factory=(
                         self.context_media_repository_factory
                     ),
@@ -1741,6 +1745,7 @@ class PageService:
                     ),
                 ),
                 WriteContext(
+                    actor=self.actor_context,
                     workspace=workspace,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
@@ -2504,6 +2509,7 @@ class PageService:
                 prepared = self._prepare_body(
                     BodyInput(applied.body),
                     WriteContext(
+                        actor=self.actor_context,
                         workspace=self._workspace_for(session, page.workspace_id),
                         actor_kind=actor_kind,
                         actor_id=actor_id,
@@ -2665,6 +2671,7 @@ class PageService:
                     ),
                 ),
                 WriteContext(
+                    actor=self.actor_context,
                     workspace=workspace,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
@@ -2710,6 +2717,7 @@ class PageService:
                             ),
                         ),
                         WriteContext(
+                            actor=self.actor_context,
                             workspace=workspace,
                             actor_kind=actor_kind,
                             actor_id=actor_id,
@@ -3021,6 +3029,7 @@ class PageService:
                     ),
                 ),
                 WriteContext(
+                    actor=self.actor_context,
                     workspace=self._workspace_for(session, page.workspace_id),
                     actor_kind=actor_kind,
                     actor_id=actor_id,
@@ -3888,6 +3897,7 @@ class PageService:
                 ),
             ),
             WriteContext(
+                actor=self.actor_context,
                 workspace=workspace,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
@@ -5210,6 +5220,7 @@ class PageService:
         return self.body_preparer.inspect(
             version.body_md,
             WriteContext(
+                actor=self.actor_context,
                 workspace=self._workspace_for(session, page.workspace_id),
                 actor_kind=actor_kind,
                 actor_id=actor_id,

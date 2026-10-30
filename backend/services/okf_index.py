@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import base64
 import math
+from dataclasses import dataclass
+from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import select
@@ -27,8 +29,21 @@ from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.tree import WorkspaceTreeNode
 from backend.policy.auth import ActorContext
 from backend.services.context_visibility import visible_context_version_id
-from backend.services.entity_ref import context_concept_path, library_concept_path
+from backend.services.index_refs import (
+    IndexRefKind,
+    format_index_ref,
+    index_line,
+    one_line,
+    parse_index_ref,
+    title_text,
+)
 from backend.services.tree_projection import TreeProjection, TreeProjectionService
+from backend.services.workspace_urls import (
+    agent_page_url,
+    context_page_url,
+    folder_url,
+    library_item_url,
+)
 from backend.utils.page_frontmatter import derive_nav_description
 from backend.utils.uuid import parse_uuid_or_none
 
@@ -51,6 +66,58 @@ class IndexNodeNotFoundError(LookupError):
     """The requested index node does not exist or is not visible."""
 
 
+@dataclass(frozen=True)
+class IndexEntry:
+    """One index row; the text line and the REST preview entry share it.
+
+    ``other`` rows (saved views, Ask or artifact placements) have no index
+    ref kind: they stay title-only in both the text and the preview.
+    """
+
+    kind: IndexRefKind | Literal["other"]
+    target_id: UUID
+    title: str
+    section: str
+    summary: str = ""
+    count: int | None = None
+    draft: bool = False
+
+    @property
+    def ref(self) -> str | None:
+        if self.kind == "other":
+            return None
+        return format_index_ref(self.kind, self.target_id)
+
+    def href(self, workspace_id: UUID) -> str | None:
+        """Browser route for the UI preview; never part of the MCP text."""
+        if self.kind == "other":
+            return None
+        if self.kind == "folder":
+            return folder_url(workspace_id, self.section, self.target_id)
+        return {
+            "context": context_page_url,
+            "library": library_item_url,
+            "agent": agent_page_url,
+        }[self.kind](workspace_id, self.target_id)
+
+    def line(self) -> str:
+        if self.ref is None:
+            return f"- {title_text(self.title)}"
+        if self.kind == "folder":
+            suffix = f" ({self.count or 0})"
+        else:
+            suffix = " (draft)" if self.draft else ""
+        return index_line(self.ref, self.title, suffix=suffix, summary=self.summary)
+
+
+@dataclass(frozen=True)
+class RoutingIndex:
+    markdown: str
+    entries: tuple[IndexEntry, ...] = ()
+    overflow: int = 0
+    node: WorkspaceTreeNode | None = None
+
+
 def count_content_nodes(projection: TreeProjection) -> int:
     return sum(
         1
@@ -68,30 +135,31 @@ def build_routing_index(
     sections: tuple[str, ...] = ("context", "library"),
     node: str | None = None,
     projection: TreeProjection | None = None,
-) -> str:
+) -> RoutingIndex:
     if projection is None:
         projection = TreeProjectionService().load(
             session, workspace_id, actor, sections=sections
         )
     if node is not None:
         target = _resolve_node_ref(session, workspace_id, projection, node)
-        path = _node_path(projection, target)
-        lines = [
-            f"# {workspace_slug} — knowledge index (node: {path})",
-            "",
-            *_node_entry_lines(
-                session,
-                projection,
-                target.id,
-                actor,
-                token_budget=GET_INDEX_NODE_TOKEN_BUDGET - 64,
-            ),
-        ]
-        return "\n".join(lines).rstrip() + "\n"
+        title = title_text(target.title)
+        header = f"# {workspace_slug} \u2014 knowledge index ({title}/)"
+        header_tokens = estimate_index_tokens(header + "\n\n")
+        lines, entries, overflow = _node_entry_lines(
+            session,
+            projection,
+            target.id,
+            actor,
+            token_budget=GET_INDEX_NODE_TOKEN_BUDGET - header_tokens,
+        )
+        markdown = "\n".join([header, "", *lines]).rstrip() + "\n"
+        return RoutingIndex(markdown, tuple(entries), overflow, target)
 
     from backend.services.tree_service import section_root_node
 
-    lines = [f"# {workspace_slug} — knowledge index", ""]
+    lines = [f"# {workspace_slug} \u2014 knowledge index", ""]
+    all_entries: list[IndexEntry] = []
+    total_overflow = 0
     section_budget = max(
         512,
         (GET_INDEX_NODE_TOKEN_BUDGET - 96) // max(len(sections), 1),
@@ -102,16 +170,19 @@ def build_routing_index(
         except Exception:  # a section without a root renders empty
             continue
         lines.append(f"## {section.capitalize()}")
-        entries = _node_entry_lines(
+        section_lines, entries, overflow = _node_entry_lines(
             session,
             projection,
             root.id,
             actor,
             token_budget=section_budget,
         )
-        lines.extend(entries or ["_(none)_"])
+        lines.extend(section_lines or ["_(none)_"])
         lines.append("")
-    return "\n".join(lines).rstrip() + "\n"
+        all_entries.extend(entries)
+        total_overflow += overflow
+    markdown = "\n".join(lines).rstrip() + "\n"
+    return RoutingIndex(markdown, tuple(all_entries), total_overflow)
 
 
 def build_index_nodes(
@@ -192,34 +263,72 @@ def _resolve_node_ref(
     """Resolve a node reference: UUID or a slash path of folder slugs rooted
     at the section root (e.g. ``/context/payments/gateway``)."""
 
+    original_ref = ref
+    index_ref = parse_index_ref(ref)
+    if index_ref is not None:
+        if index_ref.kind != "folder":
+            raise IndexNodeNotFoundError(original_ref)
+        folder = projection.nodes.get(index_ref.target_id)
+        if (
+            folder is None
+            or folder.node_kind != "folder"
+            or not projection.is_visible(folder.id)
+        ):
+            raise IndexNodeNotFoundError(original_ref)
+        return folder
+    if ref.startswith("node:"):
+        # Routing indexes emit links in this exact URI form. Keep the URI
+        # wrapper deliberately narrow: these paths are scoped by the
+        # workspace_id supplied to get_index, and must not be URL-decoded or
+        # normalized before the tree lookup.
+        if not ref.startswith("node:/") or ref.startswith("node://"):
+            raise IndexNodeNotFoundError(original_ref)
+        path = ref[len("node:") :]
+        if (
+            path.startswith("//")
+            or any(char in path for char in "?#%\\")
+            or any(ord(char) <= 32 or ord(char) == 127 for char in path)
+        ):
+            raise IndexNodeNotFoundError(original_ref)
+        parts = path[1:].split("/")
+        if (
+            not parts
+            or parts[0] not in {"context", "library"}
+            or any(not part or part in {".", ".."} for part in parts)
+        ):
+            raise IndexNodeNotFoundError(original_ref)
+        ref = path
+
     node_id = parse_uuid_or_none(ref)
     if node_id is not None:
         node = projection.nodes.get(node_id)
         if node is None or not projection.is_visible(node.id):
-            raise IndexNodeNotFoundError(ref)
+            raise IndexNodeNotFoundError(original_ref)
         return node
 
     parts = [part for part in ref.strip().strip("/").split("/") if part]
     if not parts:
-        raise IndexNodeNotFoundError(ref)
+        raise IndexNodeNotFoundError(original_ref)
     from backend.services.tree_service import section_root_node
 
     section = parts[0]
     try:
         current = section_root_node(session, workspace_id, section)
     except Exception as exc:
-        raise IndexNodeNotFoundError(ref) from exc
+        raise IndexNodeNotFoundError(original_ref) from exc
+    if current.id not in projection.nodes or not projection.is_visible(current.id):
+        raise IndexNodeNotFoundError(original_ref)
     for slug in parts[1:]:
         match = next(
             (
                 child
                 for child in projection.visible_children(current.id)
-                if child.node_kind == "folder" and child.slug == slug
+                if child.node_kind == "folder" and (child.slug or str(child.id)) == slug
             ),
             None,
         )
         if match is None:
-            raise IndexNodeNotFoundError(ref)
+            raise IndexNodeNotFoundError(original_ref)
         current = match
     return current
 
@@ -240,7 +349,7 @@ def _node_entry_lines(
     actor: ActorContext | None,
     *,
     token_budget: int,
-) -> list[str]:
+) -> tuple[list[str], list[IndexEntry], int]:
     children = projection.visible_children(node_id, folders_first=True)
     shown = children[:GET_INDEX_NODE_FANOUT]
 
@@ -289,44 +398,65 @@ def _node_entry_lines(
         }
 
     lines: list[str] = []
+    entries: list[IndexEntry] = []
     rendered = 0
     for child in shown:
         if child.node_kind == "folder":
             summary = child.nav_summary or _heuristic_folder_summary(
                 session, projection, child
             )
-            count = counts.get(child.id, 0)
-            path = _node_path(projection, child)
-            line = f"* \U0001f4c1 [{child.title}/](node:{path}) ({count})"
-            if summary:
-                line += f" \u2014 {_clip(summary)}"
+            entry = IndexEntry(
+                "folder",
+                child.id,
+                child.title,
+                child.section,
+                summary=_clip(summary),
+                count=counts.get(child.id, 0),
+            )
         elif child.target_kind == "context_page":
             page = pages.get(child.target_id)
             if page is None:
                 continue
-            path = context_concept_path(page.slug)
-            description = descriptions.get(page.id) or ""
-            suffix = " *(draft)*" if drafts.get(page.id) else ""
-            line = f"* [{page.title}]({path})"
-            if description:
-                line += f" \u2014 {_clip(description)}"
-            line += suffix
-        elif child.target_kind == "library_item":
-            path = library_concept_path(child.target_id)
-            line = f"* [{child.title}]({path})"
+            entry = IndexEntry(
+                "context",
+                page.id,
+                page.title,
+                child.section,
+                summary=_clip(descriptions.get(page.id) or ""),
+                draft=drafts.get(page.id, False),
+            )
+        elif child.target_kind in _ENTRY_KINDS and child.target_id is not None:
+            entry = IndexEntry(
+                _ENTRY_KINDS[child.target_kind],
+                child.target_id,
+                child.title,
+                child.section,
+            )
         else:
-            line = f"* {child.title}"
+            entry = IndexEntry("other", child.id, child.title, child.section)
+        line = entry.line()
         candidate_tokens = estimate_index_tokens("\n".join([*lines, line]))
         if candidate_tokens + _TOKEN_BUDGET_TAIL_RESERVE > token_budget:
             break
         lines.append(line)
+        entries.append(entry)
         rendered += 1
     overflow = len(children) - rendered
     if overflow > 0:
+        if lines:
+            # Without the blank line, Markdown continues the last entry's
+            # paragraph and reads the notice as that entry's summary.
+            lines.append("")
         lines.append(
             f"\u2026and {overflow} more \u2014 narrow via a child folder, or use search"
         )
-    return lines
+    return lines, entries, overflow
+
+
+_ENTRY_KINDS: dict[str, IndexRefKind] = {
+    "library_item": "library",
+    "agent_page": "agent",
+}
 
 
 def estimate_index_tokens(text: str) -> int:
@@ -378,7 +508,7 @@ def _heuristic_folder_summary(
 
 
 def _clip(text: str, limit: int = _ENTRY_SUMMARY_MAX) -> str:
-    collapsed = " ".join(text.split())
+    collapsed = one_line(text)
     if len(collapsed) <= limit:
         return collapsed
     return collapsed[: limit - 1].rstrip() + "…"

@@ -21,6 +21,7 @@ from backend.schemas.read import (
 from backend.services.read_errors import ReadNotFoundError
 from backend.services.review_risk_policy import ai_writes_require_human_review
 from backend.services.settings_service import normalized_library_policy
+from backend.spi.tool_presentation import MCP_CONTEXT_LINK_GUIDANCE
 from backend.spi.types import AI_PROVENANCES
 
 CONTEXT_PAGE_TAXONOMY = [
@@ -121,6 +122,7 @@ REQUIRED_WORKFLOW = [
         "pass the chosen node_id as placement_parent_node_id (omit it for "
         "Inbox)."
     ),
+    MCP_CONTEXT_LINK_GUIDANCE,
     (
         "for an image: upload_image first; store data.markdown or "
         "data.logical_ref, never data.content_url or an /api/v1 transport URL; "

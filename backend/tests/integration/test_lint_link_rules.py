@@ -3,11 +3,16 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
+from backend.models.agent import AgentPage
 from backend.models.context import ContextPage, ContextPageVersion, PageLink
+from backend.models.library import LibraryItem
+from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
+from backend.policy.auth import ActorContext
+from backend.services.body_preparer import BodyInput, BodyPreparer, WriteContext
 from backend.services.lint import LintContext, LintRegistry
 from backend.services.lint.scopes import findings_for_target
-from backend.services.page_service import refresh_page_links
+from backend.services.page_service import PageService, refresh_page_links
 
 pytestmark = pytest.mark.integration
 
@@ -50,15 +55,22 @@ def _check(session, rule_id, page):
 
 
 def test_unresolved_and_healthy_links(session_factory):
+    from backend.services.context_links import (
+        LinkContext,
+        editor_link_actor,
+        rewrite_links_with_report,
+    )
+    from backend.services.index_refs import format_index_ref
+
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
-        _page(session, workspace_id, "healthy-target", "Target.\n")
+        target, _ = _page(session, workspace_id, "healthy-target", "Target.\n")
         broken, _ = _page(
             session, workspace_id, "broken-source", "[[missing-target]]\n"
         )
-        healthy, _ = _page(
-            session, workspace_id, "healthy-source", "[[healthy-target]]\n"
-        )
+        # Reuse the existing visible-target fixture for copied system refs.
+        body = f"[Target]({format_index_ref('context', target.id)})\n"
+        healthy, _ = _page(session, workspace_id, "healthy-source", body)
 
         unresolved = _check(session, "link.unresolved", broken)
         assert [finding.message_args["written_slug"] for finding in unresolved] == [
@@ -66,7 +78,114 @@ def test_unresolved_and_healthy_links(session_factory):
         ]
         assert _check(session, "link.internal-noncanonical", broken) == []
         assert _check(session, "link.unresolved", healthy) == []
-        assert _check(session, "link.internal-noncanonical", healthy) == []
+        canonical = f"/p/{workspace_id}/{target.id}"
+        [finding] = _check(session, "link.internal-noncanonical", healthy)
+        assert finding.message_args["replacement"] == canonical
+        assert rewrite_links_with_report(
+            body,
+            LinkContext(session, workspace_id, editor_link_actor("human", "test")),
+        )[0] == f"[Target]({canonical})\n"
+
+        # Budget exception: these security paths differ from Context visibility.
+        # Restricted Library, sensitive Agent and a folder under a hidden Agent
+        # ancestor must each match the ordinary reader. Reuse this DB traversal
+        # to prove real caller capabilities survive the preparation seam; a pure
+        # locator test cannot detect an ingress replacing an owner with editor.
+        restricted = LibraryItem(
+            workspace_id=workspace_id,
+            connector_type="manual_upload",
+            uri="https://example.invalid/restricted-ref",
+            title="Restricted",
+            trust_level="restricted",
+            lifecycle_status="ready",
+        )
+        session.add(restricted)
+        guide = session.scalar(select(AgentPage).where(
+            AgentPage.workspace_id == workspace_id,
+            AgentPage.category == "agent_guide",
+        ))
+        parent = session.scalar(select(WorkspaceTreeNode).where(
+            WorkspaceTreeNode.workspace_id == workspace_id,
+            WorkspaceTreeNode.target_kind == "agent_page",
+            WorkspaceTreeNode.target_id == guide.id,
+        ))
+        folder = WorkspaceTreeNode(
+            workspace_id=workspace_id, section="agent", node_kind="folder",
+            parent_id=parent.id, sort_key="0001", title="Private descendant",
+            slug="private-descendant", visibility_status="visible",
+        )
+        session.add(folder)
+        session.flush()
+        library_ref = format_index_ref("library", restricted.id)
+        agent_ref = format_index_ref("agent", guide.id)
+        folder_ref = format_index_ref("folder", folder.id)
+        missing_ref = format_index_ref("library", uuid4())
+        authored_route = f"/workspaces/{workspace_id}/library/items/{restricted.id}"
+        protected_body = (
+            f"[Restricted]({library_ref}) [Guide]({agent_ref}) "
+            f"[Folder]({folder_ref}) [Missing]({missing_ref}) "
+            f"[Authored]({authored_route})\n"
+        )
+        owner = ActorContext(
+            actor_kind="human", actor_id="test", workspace_id=workspace_id,
+            workspace_role="owner", role="owner", token_kind="api_token",
+            token_workspace_ids=(workspace_id,), scopes=("mcp:write",),
+        )
+        preparer = BodyPreparer()
+
+        def prepare_for(actor):
+            return preparer.prepare(
+                BodyInput(protected_body),
+                WriteContext(
+                    workspace=session.get(Workspace, workspace_id),
+                    session=session, actor_kind=actor.actor_kind,
+                    actor_id=actor.actor_id, actor_provenance="internal", actor=actor,
+                ),
+            )
+
+        editor = ActorContext(
+            actor_kind="human", actor_id="test", workspace_id=workspace_id,
+            workspace_role="editor", role="editor", token_kind="session",
+        )
+        denied = prepare_for(editor)
+        assert denied.body == protected_body
+        unavailable = [f for f in denied.findings if f.rule_id == "link.unresolved"]
+        assert {f.message_args["locator"] for f in unavailable} == {
+            library_ref, agent_ref, folder_ref, missing_ref,
+        }
+        assert {f.suggested_action for f in unavailable} == {
+            "This document link is unavailable.",
+        }
+        allowed_body = (
+            protected_body.replace(library_ref, authored_route)
+            .replace(agent_ref, f"/workspaces/{workspace_id}/agent/pages/{guide.id}")
+            .replace(
+                folder_ref, f"/workspaces/{workspace_id}/agent/folders/{folder.id}"
+            )
+        )
+        assert prepare_for(owner).body == allowed_body
+        limited = ActorContext(
+            actor_kind="human", actor_id="test", workspace_id=workspace_id,
+            workspace_role="owner", role="owner", token_kind="api_token",
+            token_workspace_ids=(workspace_id,), scopes=("mcp:agent",),
+        )
+        # An owner role alone must not invent the admin scope of an MCP caller.
+        assert prepare_for(limited).body == protected_body.replace(
+            library_ref, authored_route
+        )
+        system = ActorContext(
+            actor_kind="system", actor_id="lint-autofix", workspace_id=workspace_id,
+            workspace_role="editor", role="editor",
+        )
+        assert prepare_for(system).body == allowed_body
+
+    scoped_pages = PageService(session_factory, actor_context=owner)
+    saved = scoped_pages.write_page(
+        workspace_slug="default", slug="scoped-ref-authority", title="Authority",
+        body_md=protected_body, actor_kind="human", actor_id="test",
+        actor_provenance="personal_access_token",
+    )
+    assert saved.body_md == allowed_body
 
 
 

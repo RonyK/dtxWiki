@@ -498,14 +498,32 @@ export async function updateTreeNode(
   return response.data;
 }
 
+export type TreeIndexPreviewEntry = {
+  /** "other" rows (saved views, Ask or artifact placements) have no link. */
+  kind: "folder" | "context" | "library" | "agent" | "other";
+  id: string;
+  title: string;
+  href: string | null;
+  summary: string;
+  count: number | null;
+  draft: boolean;
+};
+
+/** The agent-facing index text plus the same rows linked to browser routes. */
+export type TreeIndexPreview = {
+  markdown: string;
+  entries: TreeIndexPreviewEntry[];
+  overflow: number;
+};
+
 export async function fetchTreeNodeIndexPreview(
   workspaceId: string,
   nodeId: string,
-): Promise<string> {
-  const response = await apiRequest<{ data: { markdown: string } }>(
+): Promise<TreeIndexPreview> {
+  const response = await apiRequest<{ data: TreeIndexPreview }>(
     `/api/v1/workspaces/${workspaceId}/tree/nodes/${nodeId}/index-preview`,
   );
-  return response.data.markdown;
+  return response.data;
 }
 
 export async function moveTreeNode(

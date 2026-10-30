@@ -28,6 +28,12 @@ from backend.models.context import (
 )
 from backend.repositories.workspace_scoped import join_in_workspace, select_in_workspace
 from backend.services.context_visibility import visible_context_version_id
+from backend.services.index_refs import (
+    PAGE_INPUT_REF_GUIDANCE,
+    IndexRefInputError,
+    looks_like_index_ref,
+    parse_index_ref,
+)
 
 _UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 MCP_PAGE_INPUT_PATTERN = rf"^(?:{_UUID}|/p/{_UUID}(?:/{_UUID})?(?:#[^\s]*)?)$"
@@ -239,6 +245,8 @@ def classify(href: str, self_origins=()) -> Locator:
 
 
 def parse_page_input(value: str | UUID) -> Locator:
+    if looks_like_index_ref(value):
+        raise IndexRefInputError(PAGE_INPUT_REF_GUIDANCE)
     locator = classify(str(value))
     # Legacy MCP paths historically accepted a title/alias containing spaces.
     # This is input compatibility, never a second body-URL classification rule.
@@ -298,6 +306,7 @@ class LinkResolutionBatch:
         self.workspace_id = ctx.workspace_id
         self.source_version_id = ctx.source_version_id
         self.navigation_targets: dict[tuple[str, UUID], object] = {}
+        self.visible_index_folders: set[UUID] = set()
         if include_navigation:
             self._prefetch_navigation(locators, ctx)
         self.pins: dict[str, UUID] = {}
@@ -315,6 +324,7 @@ class LinkResolutionBatch:
             if locator.kind
             not in {"external", "public_reader", "local", "media", "unknown"}
             and locator.workspace_id in {None, ctx.workspace_id}
+            and (locator.kind != "index_ref" or locator.page_id is not None)
         ]
         if not eligible:
             return
@@ -510,7 +520,14 @@ class LinkResolutionBatch:
         )
 
         ids: dict[str, set[UUID]] = {}
+        index_folder_ids: set[UUID] = set()
         for locator in locators:
+            ref = parse_index_ref(locator.href)
+            if ref is not None and ref.kind != "context":
+                ids.setdefault(ref.kind, set()).add(ref.target_id)
+                if ref.kind == "folder":
+                    index_folder_ids.add(ref.target_id)
+                continue
             if locator.kind != "unknown":
                 continue
             reference = _parse_workspace_navigation_reference(
@@ -550,6 +567,19 @@ class LinkResolutionBatch:
                 self.navigation_targets.update(
                     ((kind, target.id), target) for target in targets
                 )
+        if index_folder_ids and ctx.actor is not None:
+            from backend.services.tree_read import TreeReadService
+
+            # One actor-filtered projection covers all folder refs and their
+            # ancestor chains. Authored SPA routes retain their old policy.
+            folders = [
+                target
+                for (kind, target_id), target in self.navigation_targets.items()
+                if kind == "folder" and target_id in index_folder_ids
+            ]
+            self.visible_index_folders = TreeReadService.visible_node_ids(
+                ctx.session, folders, ctx.actor
+            )
 
     def _add_page(self, page: ContextPage) -> None:
         self.pages_by_id[page.id] = page
@@ -1208,17 +1238,39 @@ def decide(
     return LinkDecision("keep")
 
 
-def editor_link_actor(actor_kind: str, actor_id: str) -> SimpleNamespace:
-    """The link authority of an authorized writer: its identity, editor role.
+def editor_link_actor(
+    actor_kind: str,
+    actor_id: str,
+    *,
+    workspace_id: UUID | None = None,
+    actor_context: object | None = None,
+) -> object:
+    """Keep the scoped caller's capabilities, or conservative write authority.
 
-    A write context carries provenance, not an ActorContext; the ingress has
-    already authorized the write, so link checks see the writer as an editor.
+    Legacy internal writers supply identity and provenance only. An editor
+    fallback keeps their own Context edits readable without inventing owner
+    roles or token scopes for restricted Library and sensitive Agent targets.
     """
+    if (
+        actor_context is not None
+        and getattr(actor_context, "actor_kind", None) == actor_kind
+        and getattr(actor_context, "actor_id", None) == actor_id
+        and (
+            getattr(actor_context, "workspace_id", None) == workspace_id
+            or actor_kind == "system"
+        )
+    ):
+        return actor_context
     return SimpleNamespace(
         actor_kind=actor_kind,
         actor_id=actor_id,
+        workspace_id=workspace_id,
         workspace_role="editor",
         role="editor",
+        scopes=(),
+        token_kind=None,
+        user_id=None,
+        token_workspace_ids=(),
     )
 
 
@@ -1286,6 +1338,40 @@ def _live_route(
     return folder_url(ctx.workspace_id, target.section, target.id)
 
 
+def _visible_index_route(
+    ctx: LinkContext,
+    kind: str,
+    target_id: UUID,
+    *,
+    batch: LinkResolutionBatch | None,
+) -> str | None:
+    """Resolve system refs with the ordinary reader's visibility in W."""
+    from backend.services.actor_visible_read import (
+        agent_page_visible,
+        library_item_visible,
+    )
+    from backend.services.index_refs import format_index_ref
+
+    if batch is None:
+        batch = LinkResolutionBatch(
+            [Locator("index_ref", href=format_index_ref(kind, target_id))],
+            ctx,
+            include_navigation=True,
+        )
+    target = batch.navigation_targets.get((kind, target_id))
+    if target is None:
+        return None
+    if kind == "library":
+        visible = library_item_visible(target, ctx.actor, workspace_id=ctx.workspace_id)
+    elif kind == "agent":
+        visible = agent_page_visible(target, ctx.actor, workspace_id=ctx.workspace_id)
+    else:
+        visible = target_id in batch.visible_index_folders
+    if not visible:
+        return None
+    return _live_route(ctx, kind, target_id, batch=batch)
+
+
 def _workspace_route(
     href: str, ctx: LinkContext, *, batch: LinkResolutionBatch | None = None
 ) -> tuple[bool, str | None]:
@@ -1329,7 +1415,15 @@ def link_decision_batch(
 
     return LinkResolutionBatch(
         [
-            _classify_context_navigation(occurrence.href, ctx.self_origins)
+            (
+                Locator(
+                    "index_ref",
+                    page_id=ref.target_id if ref.kind == "context" else None,
+                    href=occurrence.href,
+                )
+                if (ref := parse_index_ref(occurrence.href)) is not None
+                else _classify_context_navigation(occurrence.href, ctx.self_origins)
+            )
             for occurrence in occurrences
         ],
         ctx,
@@ -1340,8 +1434,23 @@ def link_decision_batch(
 def decide_link(
     href: str, ctx: LinkContext, *, batch: LinkResolutionBatch | None = None
 ) -> tuple[Locator, Resolution | None, LinkDecision]:
-    """One decision for an authored link, shared by lint findings and fixes."""
-    locator = classify(href, ctx.self_origins)
+    """Resolve known index refs inside W; otherwise retain authored-link rules."""
+    ref = parse_index_ref(href)
+    if ref is not None:
+        locator = Locator(
+            "index_ref",
+            page_id=ref.target_id if ref.kind == "context" else None,
+            href=href,
+        )
+        if ref.kind != "context":
+            target = _visible_index_route(ctx, ref.kind, ref.target_id, batch=batch)
+            return locator, None, (
+                LinkDecision("fix", target, "link.internal-noncanonical")
+                if target is not None
+                else LinkDecision("finding", finding="link.unresolved")
+            )
+    else:
+        locator = classify(href, ctx.self_origins)
     try:
         has_query = bool(urlsplit(href).query)
     except ValueError:
@@ -1391,12 +1500,16 @@ def decide_link(
 
 
 def rewrite_links_with_report(
-    body: str, ctx: LinkContext
+    body: str, ctx: LinkContext, *, index_refs_only: bool = False
 ) -> tuple[str, tuple[str, ...], tuple[dict, ...]]:
     """Apply only proved destination edits; all other source bytes are reused."""
     changes = []
     details = []
-    occurrences = extract_links(body)
+    occurrences = tuple(
+        occurrence
+        for occurrence in extract_links(body)
+        if not index_refs_only or parse_index_ref(occurrence.href) is not None
+    )
     batch = link_decision_batch(occurrences, ctx)
     for occurrence in occurrences:
         locator, resolution, decision = decide_link(occurrence.href, ctx, batch=batch)
@@ -1424,9 +1537,12 @@ def rewrite_links_with_report(
             replacement = f"[{escape_link_label(label)}]({decision.href})"
         after_locator = classify(decision.href, ctx.self_origins)
         if resolution is None:
-            continue
-        after = resolve(after_locator, ctx, batch=batch)
-        same_target = after.state == "ok" and after.page_id == resolution.page_id
+            # Non-Context index targets were proved by the workspace-scoped
+            # lifecycle lookup above; their route is not a Context locator.
+            same_target = locator.kind == "index_ref"
+        else:
+            after = resolve(after_locator, ctx, batch=batch)
+            same_target = after.state == "ok" and after.page_id == resolution.page_id
         if same_target:
             changes.append((occurrence.span, replacement))
             details.append(
@@ -1442,6 +1558,7 @@ def rewrite_links_with_report(
                         "stable_short",
                         "canonical_route",
                         "wikilink",
+                        "index_ref",
                     }
                     else "repair",
                 }

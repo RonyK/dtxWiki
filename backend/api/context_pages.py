@@ -187,6 +187,7 @@ def read_page_by_slug(
     session_factory = get_container_from_app(request).db.session_for(workspace_id)
     page_service = PageService(
         session_factory,
+        actor_context=actor,
         job_queue=services.job_queue,
         body_preparer=services.body_preparer,
         lint_registry=services.lint_registry,
@@ -981,6 +982,7 @@ def _workspace_page_service(
         scoped_actor,
         PageService(
             container.db.session_for(workspace_id),
+            actor_context=scoped_actor,
             job_queue=services.job_queue,
             body_preparer=services.body_preparer,
             lint_registry=services.lint_registry,

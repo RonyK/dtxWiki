@@ -165,6 +165,8 @@ function MarkdownRouteStateProvider({ children }: { children: ReactNode }) {
 }
 
 const MAX_INLINE_TOKEN_TRANSFORM_DEPTH = 128;
+// get_index's system namespace; other dtxwiki:// hrefs stay authored links.
+const SYSTEM_INDEX_REF_PREFIX = "dtxwiki://index/";
 const MAX_INLINE_COMMENT_HIGHLIGHTS = 50;
 const MAX_INLINE_COMMENT_HIGHLIGHT_BODY_CHARS = 100_000;
 const MERMAID_LANGUAGE = "mermaid";
@@ -607,7 +609,9 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
       const wikilink = reference?.wikilink === true;
       // An unrecognized href belongs to its author. Only a positively known
       // app locator or a server-resolved target can acquire internal policy.
-      const internal = target || wikilink || [
+      // A system index ref is known but never a browser URL: without a server
+      // target it stays an unavailable reference.
+      const internal = target || wikilink || locator.startsWith(SYSTEM_INDEX_REF_PREFIX) || [
         "page_id", "stable_full", "stable_short", "canonical_route",
         "nav_target", "concept_path", "slug", "resource_uri", "workspace_navigation",
       ].includes(classification.kind);

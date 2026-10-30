@@ -20879,12 +20879,88 @@
         "title": "TreeMoveRequest",
         "type": "object"
       },
+      "TreeNodeIndexPreviewEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
+          "draft": {
+            "default": false,
+            "title": "Draft",
+            "type": "boolean"
+          },
+          "href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Href"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "folder",
+              "context",
+              "library",
+              "agent",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "title"
+        ],
+        "title": "TreeNodeIndexPreviewEntry",
+        "type": "object"
+      },
       "TreeNodeIndexPreviewPayload": {
         "additionalProperties": false,
         "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/TreeNodeIndexPreviewEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
           "markdown": {
             "title": "Markdown",
             "type": "string"
+          },
+          "overflow": {
+            "default": 0,
+            "title": "Overflow",
+            "type": "integer"
           }
         },
         "required": [

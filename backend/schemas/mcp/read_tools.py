@@ -184,13 +184,22 @@ class GetIndexInput(MCPConversationInput):
     # OKF navigational catalog (Tier-1 retrieval): returns an index.md the agent
     # surveys before READing concepts. Per-actor filtered (restricted/drafts).
     # Small workspaces render one flat catalog; larger ones render routing
-    # nodes — pass ``node`` (a "node:" link target from a prior response:
-    # slash path like "/context/payments", or a node UUID) to descend.
+    # nodes. Legacy ``node:/context/...`` paths, bare paths and node UUIDs
+    # remain accepted. The workspace_id always scopes lookup.
     workspace_id: UUID
     sections: list[Literal["context", "library"]] = Field(
         default_factory=lambda: ["context", "library"]
     )
-    node: str | None = Field(default=None, max_length=512)
+    node: str | None = Field(
+        default=None,
+        max_length=512,
+        description=(
+            "Folder to descend into: pass the exact destination of a "
+            "dtxwiki://index/folder/<id> Markdown link from the previous index, "
+            "unchanged and with the same workspace_id. With format='nodes', "
+            "pass a child's node_id."
+        ),
+    )
     format: Literal["markdown", "nodes"] = Field(
         default="markdown",
         description=(
@@ -236,6 +245,14 @@ class IndexNodesPayload(BaseModel):
 class GetIndexOutput(BaseModel):
     envelope: MCPResultEnvelope
     index: str | None = None
+    stable_url: str | None = Field(
+        default=None,
+        description="Browser URL of the folder selected by node; null without node.",
+    )
+    link_markdown: str | None = Field(
+        default=None,
+        description="Copyable Markdown link to the selected folder for answers.",
+    )
     nodes: IndexNodesPayload | None = None
 
     model_config = ConfigDict(extra="forbid")
@@ -297,8 +314,18 @@ class ReadConceptOutput(BaseModel):
     target_kind: Literal["context_page", "library_item"] | None = None
     target_id: UUID | None = None
     page_id: UUID | None = None
-    stable_url: str | None = None
-    link_markdown: str | None = None
+    stable_url: str | None = Field(
+        default=None,
+        description=(
+            "Permanent URL of the read target: /p/<workspace_id>/<page_id> for a "
+            "Context page, /workspaces/<workspace_id>/library/items/<id> for a "
+            "Library item."
+        ),
+    )
+    link_markdown: str | None = Field(
+        default=None,
+        description="Copyable Markdown link to the read target; use it in answers.",
+    )
     version_id: UUID | None = None
     version_status: str | None = None
     content: str | None = None

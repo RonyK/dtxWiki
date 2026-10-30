@@ -73,6 +73,7 @@ def write_agent_page_draft(
                     session=session,
                     workspace_id=ctx.workspace_id,
                     request=draft_request,
+                    actor=actor,
                     actor_kind=actor.actor_kind,
                     actor_id=actor.actor_id,
                     actor_provenance=actor.provenance,
