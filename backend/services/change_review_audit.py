@@ -92,6 +92,7 @@ class ChangeReviewAuditRecorder:
         payload: dict[str, Any] | None = None,
         body: str | None = None,
         needs_review: bool = False,
+        risk_signals: dict[str, bool] | None = None,
     ) -> ChangeReviewAuditResult:
         ai_authored = actor_provenance in AI_PROVENANCES
         operation_kind = "create" if action == "page.create" else "update"
@@ -111,6 +112,7 @@ class ChangeReviewAuditRecorder:
             workspace_id=workspace_id,
             event="direct_page_write_audit",
             signals={
+                **(risk_signals or {}),
                 "ai_authored": ai_authored,
                 **gate.force_signals(),
             },
