@@ -7,6 +7,7 @@ from uuid import UUID
 
 import pg8000.dbapi
 import pytest
+from click import unstyle
 from sqlalchemy import delete, select
 from sqlalchemy.exc import DBAPIError
 from typer.testing import CliRunner
@@ -231,6 +232,7 @@ def test_graph_reproject_requires_exactly_one_workspace_selector(tmp_path: Path)
     missing = runner.invoke(
         app,
         ["graph", "reproject", "--db", database_url],
+        env={"FORCE_COLOR": "1"},
     )
     conflicting = runner.invoke(
         app,
@@ -243,14 +245,18 @@ def test_graph_reproject_requires_exactly_one_workspace_selector(tmp_path: Path)
             "--db",
             database_url,
         ],
+        env={"FORCE_COLOR": "1"},
     )
 
     assert missing.exit_code == 2, missing.output
     assert conflicting.exit_code == 2, conflicting.output
-    assert "--workspace" in missing.output
-    assert "--all-workspaces" in missing.output
-    assert "--workspace" in conflicting.output
-    assert "--all-workspaces" in conflicting.output
+    # Rich can insert ANSI styling inside option names in CI.
+    missing_output = unstyle(missing.output)
+    conflicting_output = unstyle(conflicting.output)
+    assert "--workspace" in missing_output
+    assert "--all-workspaces" in missing_output
+    assert "--workspace" in conflicting_output
+    assert "--all-workspaces" in conflicting_output
 
 
 def test_graph_reproject_rolls_back_only_the_failing_workspace(

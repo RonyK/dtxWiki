@@ -692,7 +692,7 @@ def test_current_period_keeps_authored_relations_at_the_second_frontier(
 @pytest.mark.parametrize("direction", ["out", "in", "both"])
 @pytest.mark.parametrize("depth", [1, 2])
 def test_current_period_preserves_induced_h1_and_h2_relations(
-    page_service, graph_client, direction, depth
+    page_service, graph_client, direction, depth, monkeypatch
 ):
     pages = {
         name: _publish(page_service, f"induced-{name}", f"# {name}")
@@ -722,6 +722,11 @@ def test_current_period_preserves_induced_h1_and_h2_relations(
     ]
     start = min(row.occurred_at for row in observations)
     end = max(row.occurred_at for row in observations)
+    # Read after all publications, even if the host wall clock moves backwards.
+    monkeypatch.setattr(
+        "backend.services.graph_query_service.utc_now",
+        lambda: end + timedelta(microseconds=1),
+    )
     unfiltered = _query(
         graph_client, pages["seed"].id, direction=direction, depth=depth
     )
