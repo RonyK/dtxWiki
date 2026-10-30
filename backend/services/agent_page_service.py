@@ -24,6 +24,11 @@ from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.page import PageVersionDiff
 from backend.services.actor_visible_read import agent_version_is_visible
 from backend.services.audit_service import AuditService
+from backend.services.context_links import (
+    LinkContext,
+    editor_link_actor,
+    rewrite_links_with_report,
+)
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.read_errors import (
     ReadNotFoundError,
@@ -161,11 +166,20 @@ class AgentPageService:
         session.add(change_set)
         session.flush()
 
+        # Index refs are system-internal; an Agent draft stores their
+        # canonical links like a Context body does.
+        body_markdown, _, _ = rewrite_links_with_report(
+            request.body_markdown,
+            LinkContext(session, workspace_id, editor_link_actor(actor_kind, actor_id)),
+            index_refs_only=True,
+        )
+        # Canonical folder URLs can be longer than their authored index refs.
+        validate_agent_markdown_input(body_markdown)
         version = AgentPageVersion(
             workspace_id=page.workspace_id,
             agent_page_id=page.id,
             version_no=self._next_version_no(session=session, page_id=page.id),
-            body_markdown=request.body_markdown,
+            body_markdown=body_markdown,
             frontmatter={
                 **request.frontmatter,
                 PROPOSED_PAGE_META_KEY: {

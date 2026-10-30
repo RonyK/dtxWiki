@@ -57,7 +57,9 @@ def compose_context_doc_source(
         path=context_concept_path(page.slug),
         breadcrumb=breadcrumb,
         nav_description=(
-            version.nav_description or derive_nav_description(version.body_md)
+            version.nav_description
+            if version.nav_description is not None
+            else derive_nav_description(version.body_md)
         ),
         first_heading=title_from_markdown_heading(parsed.body),
     )

@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Index navigation and formatted previews
+
+- MCP indexes use exact `dtxwiki://index/<kind>/<id>` Markdown destinations
+  scoped to the explicit workspace. Pass folder refs to `get_index.node` and
+  Context or Library refs to `read_concept.path`; other page tools explain how
+  to obtain a page UUID or browser link. Normal exports retain their lookup paths.
+- Context, Library, and Agent index previews share structured entries and a
+  formatted/source switch. Source view preserves the server Markdown exactly;
+  formatted entries navigate only when their ref, kind, ID, workspace, and
+  canonical server link match. Unrecognized responses retain their source.
+- Copied system index refs become supported canonical links on Context saves
+  and Agent drafts. Unrelated authored links keep their existing rules.
+- Navigation summaries skip image-only paragraphs and store an empty string
+  when no prose exists. Run `dtxwiki reindex` to refresh stored summaries;
+  legacy NULL summaries still derive on read.
+- MCP tool contract revision 25 updates the index input/output contract and
+  selected-folder answer links. Refresh cached tool catalogs and result schemas
+  after upgrading.
+
 ### Transactional Lint fixes for published documents
 
 - Queued Lint runs can repair supported links in published Context documents

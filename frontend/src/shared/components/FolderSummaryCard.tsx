@@ -1,11 +1,11 @@
 import { codePointLength, inputTextError, textInputLimit } from "../lib/inputPolicy";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileText, Folder } from "lucide-react";
 
-import { AdvancedSection } from "./AdvancedSection";
 import { StatusPill } from "./StatusPill";
-import type { TreeNodePayload } from "../api/workspace";
+import { TreeIndexPreview } from "./TreeIndexPreview";
+import type { TreeIndexPreview as TreeIndexPreviewData, TreeNodePayload } from "../api/workspace";
 
 const NAV_SUMMARY_MAX = 160;
 
@@ -31,6 +31,7 @@ export interface FolderChildMeta {
 }
 
 export interface FolderSummaryCardProps {
+  workspaceId?: string;
   node: TreeNodePayload;
   nodes: TreeNodePayload[];
   onSelectNode: (node: TreeNodePayload) => void;
@@ -42,9 +43,8 @@ export interface FolderSummaryCardProps {
   emptyLabel?: string;
   canEdit?: boolean;
   onSaveNavSummary?: (navSummary: string | null) => Promise<void>;
-  /** collapsible index preview: how the folder renders for agents. */
-  loadIndexPreview?: () => Promise<string>;
-  renderMarkdown?: (markdown: string) => React.ReactNode;
+  /** collapsible index preview: the rows agents read, linked for people. */
+  loadIndexPreview?: () => Promise<TreeIndexPreviewData>;
   footer?: React.ReactNode;
   /**
    * Optional totals for a caller that renders only one paginated child slice.
@@ -54,6 +54,7 @@ export interface FolderSummaryCardProps {
 }
 
 export function FolderSummaryCard({
+  workspaceId,
   node,
   nodes,
   onSelectNode,
@@ -64,7 +65,6 @@ export function FolderSummaryCard({
   canEdit = false,
   onSaveNavSummary,
   loadIndexPreview,
-  renderMarkdown,
   footer,
   totalChildCounts,
 }: FolderSummaryCardProps) {
@@ -79,6 +79,9 @@ export function FolderSummaryCard({
   const folderCount = totalChildCounts?.folders ?? renderedFolderCount;
   const pageCount =
     totalChildCounts?.pages ?? children.length - renderedFolderCount;
+  const generatedFallback = Boolean(
+    !node.nav_summary && fallbackSummary && fallbackSummary === node.nav_summary_auto,
+  );
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(node.nav_summary ?? "");
@@ -89,46 +92,6 @@ export function FolderSummaryCard({
     setDraft(node.nav_summary ?? "");
     setSaveError(null);
   }, [node.id, node.nav_summary]);
-
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  // Refs, not state/deps: parent re-renders pass a fresh loadIndexPreview
-  // closure every time — an effect keyed on it would refire in-flight (or
-  // failed) fetches, and a cleanup-based cancel would drop the result of
-  // the request it just started.
-  const previewRequestedRef = useRef(false);
-  const previewNodeRef = useRef(node.id);
-  useEffect(() => {
-    previewNodeRef.current = node.id;
-    previewRequestedRef.current = false;
-    setPreviewOpen(false);
-    setPreview(null);
-    setPreviewError(null);
-  }, [node.id]);
-  useEffect(() => {
-    if (!previewOpen || previewRequestedRef.current || !loadIndexPreview) {
-      return;
-    }
-    previewRequestedRef.current = true;
-    const requestedNode = node.id;
-    loadIndexPreview()
-      .then((markdown) => {
-        if (previewNodeRef.current === requestedNode) {
-          setPreview(markdown);
-          setPreviewError(null);
-        }
-      })
-      .catch(() => {
-        if (previewNodeRef.current === requestedNode) {
-          setPreviewError(
-            t("navSummary.previewError", {
-              defaultValue: "Could not load the index preview.",
-            }),
-          );
-        }
-      });
-  }, [previewOpen, loadIndexPreview, node.id, t]);
 
   const isFolder = node.node_kind === "folder";
   const submit = async () => {
@@ -226,10 +189,14 @@ export function FolderSummaryCard({
             t("folder.empty", { defaultValue: "This folder is empty." }))
           ) : fallbackSummary ? (
             <span className="folder-summary-fallback">
-              {fallbackSummary}{" "}
-              <span className="folder-summary-auto-badge">
-                {t("navSummary.autoBadge", { defaultValue: "auto" })}
-              </span>
+              {generatedFallback
+                ? t("navSummary.previewHint")
+                : fallbackSummary}{" "}
+              {!generatedFallback ? (
+                <span className="folder-summary-auto-badge">
+                  {t("navSummary.autoBadge", { defaultValue: "auto" })}
+                </span>
+              ) : null}
             </span>
           ) : (
             t("folder.description", {
@@ -249,26 +216,13 @@ export function FolderSummaryCard({
         </p>
       )}
 
-      {isFolder && loadIndexPreview ? (
-        <AdvancedSection
-          label={t("navSummary.previewTitle", {
-            defaultValue: "Index preview (how agents see this folder)",
-          })}
-          onOpenChange={setPreviewOpen}
-          open={previewOpen}
-        >
-          {previewError ? (
-            <p className="form-error">{previewError}</p>
-          ) : preview === null ? (
-            <p className="folder-summary-fallback">
-              {t("navSummary.previewLoading", { defaultValue: "Loading…" })}
-            </p>
-          ) : renderMarkdown ? (
-            renderMarkdown(preview)
-          ) : (
-            <pre className="folder-index-preview">{preview}</pre>
-          )}
-        </AdvancedSection>
+      {isFolder && loadIndexPreview && workspaceId ? (
+        <TreeIndexPreview
+          loadIndexPreview={loadIndexPreview}
+          nodeId={node.id}
+          nodes={nodes}
+          workspaceId={workspaceId}
+        />
       ) : null}
 
       <div className="folder-child-list">

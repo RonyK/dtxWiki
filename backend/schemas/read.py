@@ -599,8 +599,24 @@ class TreeNodeResponse(RESTResponseBase):
     model_config = ConfigDict(extra="forbid")
 
 
+class TreeNodeIndexPreviewEntry(BaseModel):
+    # One row of ``markdown``, linked to its browser route (none for title-only
+    # "other" rows). The index ref itself is system-internal and not included.
+    kind: Literal["folder", "context", "library", "agent", "other"]
+    id: UUID
+    title: str
+    href: str | None = None
+    summary: str = ""
+    count: int | None = None
+    draft: bool = False
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class TreeNodeIndexPreviewPayload(BaseModel):
     markdown: str
+    entries: list[TreeNodeIndexPreviewEntry] = Field(default_factory=list)
+    overflow: int = 0
 
     model_config = ConfigDict(extra="forbid")
 

@@ -393,6 +393,11 @@ MCP Context 문서 입력은 문서 UUID 또는 반환된 `stable_url`
 문서 링크에는 반환된 `link_markdown`을 사용하세요. `/library/<id>.md`는
 기존 Library 읽기용 경로로 유지합니다.
 
+`get_index` 항목의 첫 Markdown 링크 목적지는 내부 참조
+`dtxwiki://index/<kind>/<id>`입니다. 목적지를 그대로 복사하여 폴더는
+`get_index.node`, Context/Library는 `read_concept.path`에 같은 명시적
+`workspace_id`와 함께 전달하세요. 사용자 답변에는 반환된 `link_markdown`을 사용합니다.
+
 워크스페이스 콘텐츠의 브라우저 주소는 `/workspaces/<workspace_id>/...`이며,
 Context 문서 링크는 `/p/<workspace_id>/<page_id>`입니다. 대상 없는 진입 화면은
 마지막 워크스페이스로 이동할 수 있지만, `/context?target=<id>`와 `/p/<page_id>`

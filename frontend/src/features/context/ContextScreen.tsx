@@ -1439,9 +1439,7 @@ export function ContextScreen() {
                   saveNavSummary(selectedNode, navSummary)
                 }
                 onSelectNode={selectNode}
-                renderMarkdown={(markdown) => (
-                  <MarkdownView body={markdown} wikilinkMode="plain" />
-                )}
+                workspaceId={state.workspaceId}
               />
             ) : contextRoot ? (
               <>
@@ -1456,9 +1454,7 @@ export function ContextScreen() {
                   node={contextRoot}
                   nodes={state.tree}
                   onSelectNode={selectNode}
-                  renderMarkdown={(markdown) => (
-                    <MarkdownView body={markdown} wikilinkMode="plain" />
-                  )}
+                  workspaceId={state.workspaceId}
                 />
                 <RecentItemsList
                   kind="context"

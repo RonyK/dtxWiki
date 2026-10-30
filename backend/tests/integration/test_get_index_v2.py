@@ -1,5 +1,6 @@
 """get_index v2: auto 2-mode, fanout 50, export contract split (C2-T3)."""
 
+import re
 import sqlite3
 
 import pytest
@@ -12,6 +13,7 @@ from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.schemas.tree import TreeFolderCreateRequest, TreeNodeUpdate
 from backend.scripts.seed_dev import seed_default_workspace
+from backend.services.index_refs import format_index_ref
 from backend.services.okf import build_workspace_index, render_export_manifest
 from backend.services.page_service import sync_page_projections
 from backend.services.tree_service import TreeService, ensure_primary_tree_placement
@@ -173,7 +175,7 @@ def large_workspace_clone(large_workspace_db):
 
 
 def test_small_workspace_stays_flat(session_factory, page_service):
-    page_service.write_page(
+    page = page_service.write_page(
         workspace_slug="default",
         slug="flat-page",
         title="Flat Page",
@@ -186,10 +188,11 @@ def test_small_workspace_stays_flat(session_factory, page_service):
         index = build_workspace_index(
             session, _workspace_id(session), actor=None, workspace_slug="default"
         )
-    # flat mode: full catalog sections, no routing node headers
+    # flat mode: full catalog sections, no routing folder rows
     assert "## Context" in index
-    assert "(node:" not in index
-    assert "/context/flat-page.md" in index
+    assert "dtxwiki://index/folder/" not in index
+    assert f"- [Flat Page]({format_index_ref('context', page.id)})" in index
+    assert "/context/flat-page.md" not in index
 
 
 def test_large_workspace_routes_and_descends(large_workspace):
@@ -199,8 +202,13 @@ def test_large_workspace_routes_and_descends(large_workspace):
         root_index = build_workspace_index(
             session, workspace_id, actor=None, workspace_slug="default"
         )
-        # routing root: folder line with subtree count + node link
-        assert "📁 [Payments/](node:/context/payments) (60)" in root_index
+        # routing root: folder Markdown destination and visible subtree count
+        folder_ref = re.search(
+            r"^- \[Payments\]\((dtxwiki://index/folder/[0-9a-f-]{36})\) \(60\)",
+            root_index,
+            re.MULTILINE,
+        )
+        assert folder_ref is not None
         # fanout: root has 150+ direct pages -> truncated with honest tail
         assert "…and" in root_index and "more — narrow via a child folder" in (
             root_index
@@ -214,14 +222,24 @@ def test_large_workspace_routes_and_descends(large_workspace):
             workspace_id,
             actor=None,
             workspace_slug="default",
-            node="/context/payments",
+            node=folder_ref.group(1),
         )
-        assert "(node: /context/payments)" in node_index
+        assert "knowledge index (Payments/)" in node_index
         # 60 children -> exactly 50 entries + "…and 10 more"
-        assert node_index.count("* [Payment Doc") == 50
+        assert node_index.count("](dtxwiki://index/context/") == 50
         assert "…and 10 more" in node_index
         # entries carry write-time nav descriptions
         assert "body paragraph." in node_index
+        page = session.scalar(
+            select(ContextPage).where(
+                ContextPage.workspace_id == workspace_id,
+                ContextPage.slug == "pay-000",
+            )
+        )
+        assert f"- [Payment Doc 000]({format_index_ref('context', page.id)}) — " in (
+            node_index
+        )
+        assert "/workspaces/" not in node_index
 
 
 def test_stored_nav_summary_beats_heuristic(large_workspace_clone):
@@ -268,16 +286,19 @@ def test_export_manifest_is_never_truncated(large_workspace):
     for i in range(150):
         assert f"/context/gen-{i:03d}.md" in manifest
     assert "…and" not in manifest
+    # File exports keep their own relative concept paths, not MCP web hints.
+    assert "stable_url:" not in manifest
 
 
 def test_unknown_node_raises_not_found(session_factory):
     from backend.services.okf_index import IndexNodeNotFoundError
 
     with session_factory() as session:
+        workspace_id = _workspace_id(session)
         with pytest.raises(IndexNodeNotFoundError):
             build_workspace_index(
                 session,
-                _workspace_id(session),
+                workspace_id,
                 actor=None,
                 workspace_slug="default",
                 node="/context/does-not-exist",

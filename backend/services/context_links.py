@@ -28,6 +28,12 @@ from backend.models.context import (
 )
 from backend.repositories.workspace_scoped import join_in_workspace, select_in_workspace
 from backend.services.context_visibility import visible_context_version_id
+from backend.services.index_refs import (
+    PAGE_INPUT_REF_GUIDANCE,
+    IndexRefInputError,
+    looks_like_index_ref,
+    parse_index_ref,
+)
 
 _UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 MCP_PAGE_INPUT_PATTERN = rf"^(?:{_UUID}|/p/{_UUID}(?:/{_UUID})?(?:#[^\s]*)?)$"
@@ -239,6 +245,8 @@ def classify(href: str, self_origins=()) -> Locator:
 
 
 def parse_page_input(value: str | UUID) -> Locator:
+    if looks_like_index_ref(value):
+        raise IndexRefInputError(PAGE_INPUT_REF_GUIDANCE)
     locator = classify(str(value))
     # Legacy MCP paths historically accepted a title/alias containing spaces.
     # This is input compatibility, never a second body-URL classification rule.
@@ -315,6 +323,7 @@ class LinkResolutionBatch:
             if locator.kind
             not in {"external", "public_reader", "local", "media", "unknown"}
             and locator.workspace_id in {None, ctx.workspace_id}
+            and (locator.kind != "index_ref" or locator.page_id is not None)
         ]
         if not eligible:
             return
@@ -511,6 +520,10 @@ class LinkResolutionBatch:
 
         ids: dict[str, set[UUID]] = {}
         for locator in locators:
+            ref = parse_index_ref(locator.href)
+            if ref is not None and ref.kind != "context":
+                ids.setdefault(ref.kind, set()).add(ref.target_id)
+                continue
             if locator.kind != "unknown":
                 continue
             reference = _parse_workspace_navigation_reference(
@@ -1329,7 +1342,15 @@ def link_decision_batch(
 
     return LinkResolutionBatch(
         [
-            _classify_context_navigation(occurrence.href, ctx.self_origins)
+            (
+                Locator(
+                    "index_ref",
+                    page_id=ref.target_id if ref.kind == "context" else None,
+                    href=occurrence.href,
+                )
+                if (ref := parse_index_ref(occurrence.href)) is not None
+                else _classify_context_navigation(occurrence.href, ctx.self_origins)
+            )
             for occurrence in occurrences
         ],
         ctx,
@@ -1340,8 +1361,23 @@ def link_decision_batch(
 def decide_link(
     href: str, ctx: LinkContext, *, batch: LinkResolutionBatch | None = None
 ) -> tuple[Locator, Resolution | None, LinkDecision]:
-    """One decision for an authored link, shared by lint findings and fixes."""
-    locator = classify(href, ctx.self_origins)
+    """Resolve known index refs inside W; otherwise retain authored-link rules."""
+    ref = parse_index_ref(href)
+    if ref is not None:
+        locator = Locator(
+            "index_ref",
+            page_id=ref.target_id if ref.kind == "context" else None,
+            href=href,
+        )
+        if ref.kind != "context":
+            target = _live_route(ctx, ref.kind, ref.target_id, batch=batch)
+            return locator, None, (
+                LinkDecision("fix", target, "link.internal-noncanonical")
+                if target is not None
+                else LinkDecision("finding", finding="link.unresolved")
+            )
+    else:
+        locator = classify(href, ctx.self_origins)
     try:
         has_query = bool(urlsplit(href).query)
     except ValueError:
@@ -1391,12 +1427,16 @@ def decide_link(
 
 
 def rewrite_links_with_report(
-    body: str, ctx: LinkContext
+    body: str, ctx: LinkContext, *, index_refs_only: bool = False
 ) -> tuple[str, tuple[str, ...], tuple[dict, ...]]:
     """Apply only proved destination edits; all other source bytes are reused."""
     changes = []
     details = []
-    occurrences = extract_links(body)
+    occurrences = tuple(
+        occurrence
+        for occurrence in extract_links(body)
+        if not index_refs_only or parse_index_ref(occurrence.href) is not None
+    )
     batch = link_decision_batch(occurrences, ctx)
     for occurrence in occurrences:
         locator, resolution, decision = decide_link(occurrence.href, ctx, batch=batch)
@@ -1424,9 +1464,12 @@ def rewrite_links_with_report(
             replacement = f"[{escape_link_label(label)}]({decision.href})"
         after_locator = classify(decision.href, ctx.self_origins)
         if resolution is None:
-            continue
-        after = resolve(after_locator, ctx, batch=batch)
-        same_target = after.state == "ok" and after.page_id == resolution.page_id
+            # Non-Context index targets were proved by the workspace-scoped
+            # lifecycle lookup above; their route is not a Context locator.
+            same_target = locator.kind == "index_ref"
+        else:
+            after = resolve(after_locator, ctx, batch=batch)
+            same_target = after.state == "ok" and after.page_id == resolution.page_id
         if same_target:
             changes.append((occurrence.span, replacement))
             details.append(
@@ -1442,6 +1485,7 @@ def rewrite_links_with_report(
                         "stable_short",
                         "canonical_route",
                         "wikilink",
+                        "index_ref",
                     }
                     else "repair",
                 }

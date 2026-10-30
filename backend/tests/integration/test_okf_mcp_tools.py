@@ -8,6 +8,7 @@ from backend.mcp.read_tools import get_index, read_concept
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
+from backend.services.index_refs import format_index_ref
 from backend.services.okf import project_context_frontmatter, render_frontmatter
 from backend.services.page_service import sync_page_projections
 
@@ -89,21 +90,28 @@ def _default_workspace_id(session_factory):
 
 def test_get_index_tool_filters_drafts_by_role(session_factory):
     wsid = _default_workspace_id(session_factory)
+    with session_factory() as session:
+        page_ids = dict(session.execute(select(ContextPage.slug, ContextPage.id)).all())
     payload = {"workspace_id": str(wsid)}
     editor = get_index(payload, _ctx(_actor(wsid, "editor"), session_factory))
     viewer = get_index(payload, _ctx(_actor(wsid, "viewer"), session_factory))
 
     assert editor.envelope.result_status == "succeeded"
-    assert "/context/pub.md" in editor.index
-    assert "/context/wip.md" in editor.index  # editor sees the draft-only concept
-    assert "/context/pub.md" in viewer.index
-    assert "/context/wip.md" not in viewer.index  # viewer does not
+    assert format_index_ref("context", page_ids["pub"]) in editor.index
+    assert format_index_ref("context", page_ids["wip"]) in editor.index
+    assert format_index_ref("context", page_ids["pub"]) in viewer.index
+    assert format_index_ref("context", page_ids["wip"]) not in viewer.index
 
 
 def test_read_concept_tool_returns_frontmatter_and_body(session_factory):
     wsid = _default_workspace_id(session_factory)
+    with session_factory() as session:
+        page_ids = dict(session.execute(select(ContextPage.slug, ContextPage.id)).all())
     ok = read_concept(
-        {"workspace_id": str(wsid), "path": "/context/pub.md"},
+        {
+            "workspace_id": str(wsid),
+            "path": format_index_ref("context", page_ids["pub"]),
+        },
         _ctx(_actor(wsid, "viewer"), session_factory),
     )
     assert ok.envelope.result_status == "succeeded"
@@ -113,7 +121,10 @@ def test_read_concept_tool_returns_frontmatter_and_body(session_factory):
     assert ok.frontmatter["version_status"] == "published_snapshot"
 
     draft = read_concept(
-        {"workspace_id": str(wsid), "path": "/context/wip.md"},
+        {
+            "workspace_id": str(wsid),
+            "path": format_index_ref("context", page_ids["wip"]),
+        },
         _ctx(_actor(wsid, "editor"), session_factory),
     )
     assert draft.envelope.result_status == "succeeded"
@@ -122,7 +133,10 @@ def test_read_concept_tool_returns_frontmatter_and_body(session_factory):
 
     # Draft-only concept is invisible to a viewer.
     nf = read_concept(
-        {"workspace_id": str(wsid), "path": "/context/wip.md"},
+        {
+            "workspace_id": str(wsid),
+            "path": format_index_ref("context", page_ids["wip"]),
+        },
         _ctx(_actor(wsid, "viewer"), session_factory),
     )
     assert nf.envelope.error_code == "not_found"

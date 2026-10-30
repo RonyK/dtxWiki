@@ -209,7 +209,12 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #  24 -- Context write results add lint_report with save-time fixes and
 #        findings for the final stored body, including compact MCP edit
 #        results. Refresh tool and result-schema caches.
-MCP_TOOL_CONTRACT_REVISION = 24
+#  25 -- get_index emits dtxwiki://index/<kind>/<id> Markdown destinations;
+#        folder refs round-trip through get_index.node and Context/Library refs
+#        through read_concept.path. Other page inputs return repair guidance.
+#        Folder index results add stable_url/link_markdown for browser answers.
+#        Refresh cached tool catalogs and result schemas.
+MCP_TOOL_CONTRACT_REVISION = 25
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their
 # declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
 # a field carrying this marker is always sent, so an absent value can never be

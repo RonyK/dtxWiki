@@ -3,7 +3,6 @@ import binascii
 import hashlib
 import hmac
 import json
-import re
 from datetime import datetime
 from uuid import UUID
 
@@ -89,9 +88,11 @@ from backend.services.coverage_service import (
     resolve_coverage_gap,
 )
 from backend.services.grep_wiki import grep_wiki as grep_wiki_service
+from backend.services.index_refs import parse_index_ref
 from backend.services.maintenance_rounds import UNTRUSTED_CONTEXT_NOTICE
 from backend.services.mcp_context_projection import (
     context_record,
+    folder_links,
     guide_payload,
     library_links,
     page_links,
@@ -99,7 +100,7 @@ from backend.services.mcp_context_projection import (
 )
 from backend.services.mcp_read_projection import record_served_read
 from backend.services.okf import (
-    build_workspace_index,
+    build_workspace_index_document,
     parse_concept_path,
     project_context_frontmatter,
     render_context_concept,
@@ -827,7 +828,7 @@ def get_index(payload: dict, ctx: ToolCallContext) -> GetIndexOutput:
                     envelope=ok_envelope(actor),
                     nodes=IndexNodesPayload.model_validate(nodes),
                 )
-            index = build_workspace_index(
+            document = build_workspace_index_document(
                 session,
                 ctx.workspace_id,
                 actor=actor,
@@ -839,7 +840,17 @@ def get_index(payload: dict, ctx: ToolCallContext) -> GetIndexOutput:
             return GetIndexOutput(envelope=error_envelope(actor, "not_found"))
         except IndexCursorError:
             return GetIndexOutput(envelope=error_envelope(actor, "validation_failed"))
-    return GetIndexOutput(envelope=ok_envelope(actor), index=index)
+    return GetIndexOutput(
+        envelope=ok_envelope(actor),
+        index=document.markdown,
+        # Legacy UUID input may select a non-folder node; only a folder has
+        # a folder route to offer as the answer link.
+        **(
+            folder_links(ctx.workspace_id, document.node)
+            if document.node is not None and document.node.node_kind == "folder"
+            else {}
+        ),
+    )
 
 
 def _concept_neighbors(session, ctx, page, actor):
@@ -951,14 +962,24 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
                 actor, exc, allowed_fields=ReadConceptInput.model_fields
             )
         )
-    library_match = request.path.startswith("/library/") and request.path.endswith(
-        ".md"
+    index_ref = parse_index_ref(request.path)
+    page_path = (
+        str(index_ref.target_id)
+        if index_ref is not None and index_ref.kind == "context"
+        else request.path
     )
+    library_match = (
+        index_ref is not None and index_ref.kind == "library"
+    ) or (request.path.startswith("/library/") and request.path.endswith(".md"))
     try:
-        locator = None if library_match else parse_page_input(request.path)
+        locator = None if library_match else parse_page_input(page_path)
     except ValueError:
         locator = None
-    parsed = parse_concept_path(request.path) if library_match else None
+    parsed = (
+        ("library", str(index_ref.target_id))
+        if index_ref is not None and index_ref.kind == "library"
+        else parse_concept_path(request.path) if library_match else None
+    )
     if not library_match and locator is None:
         return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
     if library_match:
@@ -998,7 +1019,7 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
         if locator.kind in {"page_id", "stable_full", "stable_short"}:
             try:
                 page_id = resolve_page_input(
-                    request.path, LinkContext(session, ctx.workspace_id, actor)
+                    page_path, LinkContext(session, ctx.workspace_id, actor)
                 )
             except PageLocatorNotFound:
                 return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
@@ -1053,12 +1074,9 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
             if version is None:
                 return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
         links = page_links(ctx.workspace_id, page.id, page.title)
-        content = render_context_concept(page, version, workspace_slug=workspace_slug)
-        content = re.sub(
-            r"(?m)^resource:.*$",
-            f"resource: {links['stable_url']}",
-            content,
-            count=1,
+        content = render_context_concept(
+            page, version, workspace_slug=workspace_slug,
+            resource_url=links["stable_url"],
         )
         record_served_read("context_page", page.id, version)
         frontmatter = project_context_frontmatter(

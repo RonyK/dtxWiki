@@ -399,6 +399,11 @@ only with an explicit matching `workspace_id`; it is not a browser permalink.
 Use returned `link_markdown` for document links. Library lookup paths such
 as `/library/<id>.md` retain their existing read meaning.
 
+`get_index` entries use internal `dtxwiki://index/<kind>/<id>` refs as their
+first Markdown link destination. Pass that destination unchanged to
+`get_index.node` for folders or `read_concept.path` for Context/Library,
+with the same explicit `workspace_id`. Use returned `link_markdown` in answers.
+
 Browser links to workspace content use `/workspaces/<workspace_id>/...`.
 Context document links use `/p/<workspace_id>/<page_id>`. Target-free entry
 pages can redirect to your last workspace, but old links such as

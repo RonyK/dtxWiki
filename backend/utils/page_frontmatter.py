@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from backend.utils.markdown_fence import fence_opener, is_fence_closer
+from backend.utils.markdown_parser import COMMONMARK
 
 FRONTMATTER_DELIMITERS = {"---", "..."}
 PAGE_METADATA_FIELDS = {"title", "slug", "type", "tags", "aliases"}
@@ -466,9 +467,7 @@ def _quote_yaml_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def derive_nav_description(
-    markdown: str | None, *, max_length: int = 200
-) -> str | None:
+def derive_nav_description(markdown: str | None, *, max_length: int = 200) -> str:
     """First prose paragraph of the frontmatter-stripped body (nav summary).
 
     Frontmatter-aware (unlike a naive ``\n\n`` splitter): an editor-saved
@@ -476,25 +475,32 @@ def derive_nav_description(
     FIRST paragraph, and a single-paragraph page must not come back empty.
     Line-oriented so ``# Heading\nProse`` (no blank line) still yields the
     prose, fenced code never bleeds into the description, and CRLF bodies
-    split like LF ones. Returns None when no prose exists.
+    split like LF ones. A paragraph of only Markdown images (or link
+    definitions) is not prose: index readers get text only. Returns "" when
+    no prose exists, so a stored value is never mistaken for a legacy NULL
+    row that needs re-deriving.
     """
     if not markdown:
-        return None
+        return ""
     body = parse_page_frontmatter(markdown).body
     body = body.replace("\r\n", "\n").replace("\r", "\n")
     prose: list[str] = []
+    env: dict = {}
     in_fence = False
     skipped_paragraph = False
     for line in body.split("\n"):
         stripped = line.strip()
         if stripped.startswith("```") or stripped.startswith("~~~"):
+            if not in_fence and prose and not _has_text(prose, body, env):
+                prose = []  # an image-only paragraph must not join later prose
             in_fence = not in_fence
             continue
         if in_fence:
             continue
         if not stripped:
-            if prose:
+            if prose and _has_text(prose, body, env):
                 break  # first prose paragraph complete
+            prose = []
             skipped_paragraph = False
             continue
         # Lists and metadata blocks describe the document's administration,
@@ -510,19 +516,51 @@ def derive_nav_description(
             re.IGNORECASE,
         )
         if structural or metadata:
-            if prose:
+            if prose and _has_text(prose, body, env):
                 break  # a structural line ends the paragraph
+            prose = []
             skipped_paragraph = bool(metadata)
             continue
         if skipped_paragraph:
             continue
-        prose.append(stripped)
-    if not prose:
-        return None
+        # Keep indentation so the parser still sees an indented code block.
+        prose.append(line)
+    if not prose or not _has_text(prose, body, env):
+        return ""
     collapsed = " ".join(" ".join(prose).split())
     if len(collapsed) > max_length:
         return collapsed[: max_length - 1].rstrip() + "…"
     return collapsed
+
+
+def _has_text(paragraph: list[str], body: str, env: dict) -> bool:
+    """Whether a paragraph has content other than images and definitions."""
+    source = "\n".join(paragraph)
+    if "![" not in source and "]:" not in source:
+        return True
+    content = _content(source, env)
+    if "[" in content and "references" not in env:
+        # Leftover brackets may be a reference image, or a reference link
+        # around an image, defined elsewhere: parse the body once for them.
+        COMMONMARK.parse(body, env)
+        env.setdefault("references", {})
+        content = _content(source, env)
+    return content.strip() != ""
+
+
+def _content(source: str, env: dict) -> str:
+    """Text, code and raw HTML of a paragraph, without images and links."""
+    parts: list[str] = []
+    for token in COMMONMARK.parse(source, dict(env)):
+        if token.type in {"html_block", "code_block"}:
+            parts.append(token.content)
+        elif token.type == "inline":
+            parts.extend(
+                child.content
+                for child in token.children or ()
+                if child.type in {"text", "code_inline", "html_inline"}
+            )
+    return "".join(parts)
 
 
 def frontmatter_body_offset(lines: list[str]) -> int:

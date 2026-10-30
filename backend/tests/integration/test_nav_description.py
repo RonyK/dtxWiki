@@ -1,5 +1,6 @@
 """nav_description write-time derivation (Sprint-3 C1-T2, fixes A-1)."""
 import pytest
+from markdown_it import MarkdownIt
 from sqlalchemy import select
 
 from backend.app.container import DatabaseProvider
@@ -80,8 +81,9 @@ def test_index_reads_stored_column_not_body(page_service: PageService):
             actor=None,
             workspace_slug="default",
         )
-    assert "SENTINEL-COLUMN-VALUE" in index
-    assert "Navigation summary paragraph." not in index
+    rendered = MarkdownIt().render(index)
+    assert "SENTINEL-COLUMN-VALUE" in rendered
+    assert "Navigation summary paragraph." not in rendered
 
 
 def test_reindex_backfills_null_nav_description(page_service: PageService):
@@ -129,7 +131,7 @@ def test_null_column_falls_back_to_read_time_derivation(
             actor=None,
             workspace_slug="default",
         )
-    assert "Navigation summary paragraph." in index
+    assert "Navigation summary paragraph." in MarkdownIt().render(index)
 
 
 def test_insert_version_derives_from_frontmatter_stripped_body(session_factory):

@@ -50,15 +50,22 @@ def _check(session, rule_id, page):
 
 
 def test_unresolved_and_healthy_links(session_factory):
+    from backend.services.context_links import (
+        LinkContext,
+        editor_link_actor,
+        rewrite_links_with_report,
+    )
+    from backend.services.index_refs import format_index_ref
+
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
-        _page(session, workspace_id, "healthy-target", "Target.\n")
+        target, _ = _page(session, workspace_id, "healthy-target", "Target.\n")
         broken, _ = _page(
             session, workspace_id, "broken-source", "[[missing-target]]\n"
         )
-        healthy, _ = _page(
-            session, workspace_id, "healthy-source", "[[healthy-target]]\n"
-        )
+        # Reuse the existing visible-target fixture for copied system refs.
+        body = f"[Target]({format_index_ref('context', target.id)})\n"
+        healthy, _ = _page(session, workspace_id, "healthy-source", body)
 
         unresolved = _check(session, "link.unresolved", broken)
         assert [finding.message_args["written_slug"] for finding in unresolved] == [
@@ -66,7 +73,13 @@ def test_unresolved_and_healthy_links(session_factory):
         ]
         assert _check(session, "link.internal-noncanonical", broken) == []
         assert _check(session, "link.unresolved", healthy) == []
-        assert _check(session, "link.internal-noncanonical", healthy) == []
+        canonical = f"/p/{workspace_id}/{target.id}"
+        [finding] = _check(session, "link.internal-noncanonical", healthy)
+        assert finding.message_args["replacement"] == canonical
+        assert rewrite_links_with_report(
+            body,
+            LinkContext(session, workspace_id, editor_link_actor("human", "test")),
+        )[0] == f"[Target]({canonical})\n"
 
 
 

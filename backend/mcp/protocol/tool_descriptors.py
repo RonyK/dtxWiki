@@ -403,9 +403,13 @@ TOOL_META = {
     ),
     "get_index": (
         "Get knowledge index",
-        "Tier-1 navigational catalog (OKF index.md) of the workspace: a list of "
-        "Context concepts and Library sources the agent can survey before "
-        "reading. Filtered to what the actor may see. Pair with read_concept. "
+        "Tier-1 navigational catalog of the workspace, filtered to what the "
+        "actor may see. Each entry line starts with a Markdown link whose "
+        "destination is the exact system ref (dtxwiki://index/<kind>/<id>); "
+        "later links on the line belong to its summary. Pass that destination "
+        "unchanged to get_index node for a folder or read_concept path for "
+        "Context/Library, with the same workspace_id. The ref is not a "
+        "user-facing link: answer with read results' link_markdown. "
         "format='nodes' returns one tree node and its visible children with "
         "node_id instead: walk from /context to choose a "
         "placement_parent_node_id for create_context_page.",
@@ -413,10 +417,11 @@ TOOL_META = {
     ),
     "read_concept": (
         "Read concept",
-        "Read a Context page by UUID, stable_url, or its existing "
-        "'/context/<slug>.md' index path, or a Library item by "
-        "'/library/<id>.md'. Returns YAML frontmatter and Markdown with "
-        "per-actor visibility, plus link_markdown to use in answers.",
+        "Read a Context page or Library item by a dtxwiki://index/context or "
+        "dtxwiki://index/library ref from get_index (unchanged), a Context page "
+        "UUID or stable_url, or '/library/<id>.md'. Returns YAML frontmatter "
+        "and Markdown with per-actor visibility, plus link_markdown to use in "
+        "answers.",
         True,
     ),
     "read_context_outline": (

@@ -59,6 +59,8 @@ import {
   FolderSummaryCard,
   nodeIdForPage,
 } from "../../shared/components/FolderSummaryCard";
+import { TreeIndexPreview } from "../../shared/components/TreeIndexPreview";
+import { isSemanticSectionRoot } from "../../shared/components/treeSectionRoot";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
 import type {
   TreeNodePayload,
@@ -1012,6 +1014,9 @@ export function AgentScreen() {
     ADVANCED_CATEGORIES.includes(page.category),
   );
   const agentPolicy = state.treePolicies.agent;
+  const agentRoot = treeNodes.find((node) =>
+    node.section === "agent" && isSemanticSectionRoot(node, "Agent"),
+  );
   const itemParent = routeFolderParentId
     ? (treeNodes.find((node) => node.id === routeFolderParentId) ?? null)
     : null;
@@ -1517,12 +1522,21 @@ export function AgentScreen() {
                   saveNavSummary(selectedNode, navSummary)
                 }
                 onSelectNode={selectNode}
-                renderMarkdown={(markdown) => (
-                  <MarkdownView body={markdown} wikilinkMode="plain" />
-                )}
+                workspaceId={state.workspaceId}
               />
             ) : (
               <>
+                {agentRoot ? (
+                  <TreeIndexPreview
+                    key={`${state.workspaceId}:${agentRoot.id}`}
+                    loadIndexPreview={() =>
+                      fetchTreeNodeIndexPreview(state.workspaceId, agentRoot.id)
+                    }
+                    nodeId={agentRoot.id}
+                    nodes={treeNodes}
+                    workspaceId={state.workspaceId}
+                  />
+                ) : null}
                 {state.pages.length > 0 ? <SelectAgentPageHint /> : null}
                 <CategoryGrid
                   title={t("categories.visible", { defaultValue: "Visible" })}
