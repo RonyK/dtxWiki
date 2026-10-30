@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Transactional Lint fixes for published documents
+
+- Queued Lint runs can repair supported links in published Context documents
+  using the existing edit, review, and publication workflow. Live edits, pending
+  reviews, and changed published heads prevent automatic writes.
+- Copy claims, citations, verification metadata, and reference pins into the
+  new version. Review policy, decision-page review requirements, uncertain
+  anchors, and module approval settings continue to control publication.
+- Keep edits, references, review records, audit events, and retry receipts in
+  the caller's transaction. A rollback removes the complete write, and retries
+  do not create duplicate versions or repeat a completed Lint run.
+
 ### Safe Lint fixes on save
 
 - Canonicalize supported links to visible documents in the current workspace
@@ -10,7 +22,7 @@
   setting for link-only fixes; existing review gates still apply.
 - Context write responses include `lint_report` with applied fixes and findings
   for the final stored body. Stored history, restores, and copied edits retain
-  their original text. Existing published documents are unchanged by Lint runs.
+  their original text.
 - MCP tool contract revision 24 adds `lint_report` to Context write result
   schemas, including compact edit results. Clients should refresh their tool
   catalog and result-schema caches when the server version changes.

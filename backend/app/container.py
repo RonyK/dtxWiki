@@ -1005,9 +1005,15 @@ class ServiceRegistry:
 
     @cached_property
     def lint(self):
+        from backend.services.context_links import configured_self_origins
         from backend.services.lint_service import LintService
 
-        return LintService(job_queue=self.job_queue, lint_registry=self.lint_registry)
+        return LintService(
+            job_queue=self.job_queue,
+            lint_registry=self.lint_registry,
+            context_media_repository_factory=self.context_media_repository_factory,
+            self_origins=configured_self_origins(self.settings),
+        )
 
     @cached_property
     def job_queue(self):
