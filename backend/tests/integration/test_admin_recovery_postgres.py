@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.dml import Update
 
 from backend.app.settings import Settings
-from backend.models.base import Base
 from backend.models.password_reset import PasswordResetToken
 from backend.models.server_admin import ServerAdmin
 from backend.models.user import User
@@ -22,7 +21,10 @@ from backend.services.password_recovery_service import (
     PasswordRecoveryService,
 )
 from backend.services.personal_workspace_service import create_personal_workspace
-from backend.tests.utils.postgres import drop_reflected_postgres_metadata
+from backend.tests.utils.postgres import (
+    create_isolated_postgres_metadata,
+    drop_reflected_postgres_metadata,
+)
 
 
 class _NoopMailProvider:
@@ -75,7 +77,7 @@ def test_postgres_admin_demotion_serializes_before_reset_issue():
             return super().scalar(statement, *args, **kwargs)
 
     engine = create_engine(database_url)
-    Base.metadata.create_all(engine)
+    create_isolated_postgres_metadata(engine)
     sessions = sessionmaker(
         bind=engine,
         class_=TrackingSession,
@@ -200,7 +202,7 @@ def test_postgres_consume_claim_holds_user_before_reissue_token_lock(purpose):
             return result
 
     engine = create_engine(database_url)
-    Base.metadata.create_all(engine)
+    create_isolated_postgres_metadata(engine)
     sessions = sessionmaker(
         bind=engine,
         class_=TrackingSession,

@@ -336,7 +336,9 @@ def test_duplicate_citations_aggregate_into_one_weighted_edge(
         assert len(edges) == 1
         assert edges[0].weight == 2.0
         # rebuild stays idempotent with the same aggregation
-        counts = rebuild_edge_projection(session, workspace_id)
+        counts = rebuild_edge_projection(
+            session, workspace_id, usage_signals_enabled=True
+        )
         assert counts["citation_source"] == 1
 
 
@@ -1296,7 +1298,9 @@ def test_ask_section_nodes_do_not_project_tree_edges(session_factory):
             actor_kind="human",
             actor_id="tester",
         )
-        rebuild_edge_projection(session, workspace_id)
+        rebuild_edge_projection(
+            session, workspace_id, usage_signals_enabled=True
+        )
         ask_edges = session.scalars(
             select(EdgeProjection).where(
                 EdgeProjection.edge_kind == "tree",
@@ -1799,7 +1803,9 @@ def test_reindex_tolerates_duplicate_placement_edges(session_factory, page_servi
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         # must not raise IntegrityError on the identity unique
-        counts = rebuild_edge_projection(session, workspace_id)
+        counts = rebuild_edge_projection(
+            session, workspace_id, usage_signals_enabled=True
+        )
         assert counts["tree"] >= 1
 
 

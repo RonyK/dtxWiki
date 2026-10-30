@@ -221,7 +221,10 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        begin/update/submit say so; no input or output schema changed. A
 #        client that compared version_id across a submit and the next begin
 #        must expect them to match.
-MCP_TOOL_CONTRACT_REVISION = 26
+#  27 -- Context write tools and guide gain authored-link guidance; successful
+#        review submissions can return context_page_has_no_graph_visible_links.
+#        Retains stable URLs, scoped index refs, and compact write receipts.
+MCP_TOOL_CONTRACT_REVISION = 27
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their
 # declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
 # a field carrying this marker is always sent, so an absent value can never be
@@ -404,6 +407,7 @@ WARNING_CODES = (
     # cross-workspace admin job listing/summary, so the result is a partial
     # one -- the reachable workspaces' data, not every workspace's.
     "job_fanout_incomplete",
+    "context_page_has_no_graph_visible_links",
 )
 
 # Single source for retrieval capability + search scope (REST, MCP, services).

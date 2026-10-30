@@ -2,6 +2,7 @@ from collections.abc import Callable
 from typing import Literal, TypedDict
 
 from sqlalchemy import Engine, create_engine, event, text
+from sqlalchemy.dialects.sqlite.base import SQLiteCompiler
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.settings import Settings
@@ -9,6 +10,11 @@ from backend.app.settings import Settings
 
 class DatabasePing(TypedDict):
     status: Literal["ok", "not_configured", "error"]
+
+
+class _HintingSQLiteCompiler(SQLiteCompiler):
+    def get_from_hint_text(self, _table, hint_text: str | None) -> str | None:
+        return hint_text
 
 
 def database_ping(session_factory: Callable[[], Session]) -> DatabasePing:
@@ -40,8 +46,10 @@ def make_engine(database_url: str) -> Engine:
         future=True,
         hide_parameters=True,
     )
-    if database_url.startswith("sqlite") and ":memory:" not in database_url:
-        _configure_sqlite_pragmas(engine)
+    if database_url.startswith("sqlite"):
+        engine.dialect.statement_compiler = _HintingSQLiteCompiler
+        if ":memory:" not in database_url:
+            _configure_sqlite_pragmas(engine)
     return engine
 
 

@@ -19,7 +19,7 @@ from sqlalchemy.exc import DBAPIError
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.models import Base
-from backend.models.workspace import Workspace, WorkspaceMembership
+from backend.models.workspace import WorkspaceMembership
 from backend.services.ops.input_maintenance import audit_inputs
 
 PARENT = "5c3395a75eb0"
@@ -111,14 +111,33 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
         command.upgrade(config, PARENT)
         upgraded = True
         users = sa.Table("users", sa.MetaData(), autoload_with=engine)
+        workspaces = sa.Table("workspace", sa.MetaData(), autoload_with=engine)
         with engine.begin() as connection:
             connection.execute(
-                Workspace.__table__.insert(),
+                # Reflect the parent revision: ORM Python defaults include
+                # Graph View columns which are added after this migration.
+                workspaces.insert(),
                 {
-                    "id": workspace_id,
+                    "id": workspace_id.hex if dialect == "sqlite" else workspace_id,
                     "slug": "retained-workspace",
+                    "directory_title_key": "retained workspace",
                     "name": "Retained workspace",
                     "title": "Retained workspace",
+                    "goal": "Preserve external-login migration data",
+                    "default_language": "en",
+                    "context_media_policy": {},
+                    "library_policy": {},
+                    "write_policy": {},
+                    "citation_policy": {},
+                    "agent_injection_policy": {},
+                    "review_policy": {},
+                    "lint_policy": {},
+                    "auto_fix_enabled": False,
+                    "visibility": "private",
+                    "created_by_actor_id": _id(),
+                    "owner_actor_id": _id(),
+                    "created_at": now,
+                    "updated_at": now,
                 },
             )
             connection.execute(
@@ -133,9 +152,7 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
                 },
             )
             connection.execute(
-                Workspace.__table__.update().values(
-                    owner_user_id=UUID(str(existing_id))
-                )
+                workspaces.update().values(owner_user_id=existing_id)
             )
             connection.execute(
                 WorkspaceMembership.__table__.insert(),

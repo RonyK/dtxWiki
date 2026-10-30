@@ -71,7 +71,7 @@ class _OrphanPageRule:
                 self.rule_id,
                 "info",
                 target.id,
-                f"Page '{target.slug}' has no inbound wikilinks (orphan).",
+                f"Page '{target.slug}' has no inbound authored links (orphan).",
                 message_args={"slug": target.slug},
             )
         ]
@@ -124,8 +124,9 @@ class _MissingBacklinkRule:
                     self.rule_id,
                     "warning",
                     target.id,
-                    f"Page '{target.slug}' links to '{other_slug}', but "
-                    f"'{other_slug}' does not link back.",
+                    f"Page '{target.slug}' has an authored link to "
+                    f"'{other_slug}', but '{other_slug}' has no authored "
+                    "link back.",
                     anchor=other_slug,
                     message_args={
                         "source_slug": target.slug,

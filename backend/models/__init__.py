@@ -55,7 +55,11 @@ from backend.models.coverage import KnowledgeCoverageGap
 from backend.models.delegated_task import ClientDelegatedTask
 from backend.models.favorite import UserFavorite
 from backend.models.feedback import FeedbackItem
-from backend.models.graph import KnowledgeNodeStat
+from backend.models.graph import (
+    GraphHistoryCoverage,
+    GraphObservation,
+    KnowledgeNodeStat,
+)
 from backend.models.inbox import (
     AccountInboxEntry,
     WorkspaceInboxEntry,
@@ -172,6 +176,8 @@ __all__ = [
     "ClientDelegatedTask",
     "KnowledgeCoverageGap",
     "KnowledgeNodeStat",
+    "GraphObservation",
+    "GraphHistoryCoverage",
     "ChunkEmbedding",
     "ContentChunk",
     "AskSession",

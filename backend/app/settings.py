@@ -231,6 +231,11 @@ class Settings(BaseSettings):
     metrics_enabled: bool = False
     metrics_bearer_token: str | None = None
     metrics_allowlist: str | None = None
+    # Operator break-glass for the Workspace Knowledge Map. Each workspace
+    # owner switches the map on in Settings; setting this false turns it off
+    # everywhere without touching those choices. It can never turn the map on.
+    # Local (per-document) Graphs are independent of both switches.
+    graph_service_available: bool = True
     force_security_headers: bool = False
     mcp_http_mode: Literal["json_stateless", "streamable", "auto"] = "streamable"
     mcp_preview_2026_07_28: bool = False

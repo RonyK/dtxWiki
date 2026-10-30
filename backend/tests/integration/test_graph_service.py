@@ -24,7 +24,12 @@ from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.services.entity_ref import EntityKind
-from backend.services.graph_service import HYDRATORS, GraphService
+from backend.services.graph_service import (
+    GRAPH_TREE_HYDRATION_ANCESTOR_DEPTH_LIMIT,
+    HYDRATORS,
+    VISIBLE_PROJECTION_PAGE_LIMIT,
+    GraphService,
+)
 from backend.services.indexing.edge_registry import (
     EDGE_EXTRACTORS,
     refresh_tree_edge_projection,
@@ -192,8 +197,8 @@ def test_agent_page_neighbors_are_hydrated_and_owner_gated(session_factory):
                     source_id=seed.id,
                     target_kind="agent_page",
                     target_id=page.id,
-                    edge_kind="co_access",
-                    provenance="usage",
+                    edge_kind="wikilink",
+                    provenance="curated",
                     weight=1.0,
                     source_ref={},
                 )
@@ -221,6 +226,56 @@ def test_agent_page_neighbors_are_hydrated_and_owner_gated(session_factory):
     assert {(item.kind, item.id) for item in owner} == {
         ("agent_page", page.id) for page in agents
     }
+
+
+def test_co_access_reaches_legacy_direct_and_panel_reads(session_factory):
+    """co_access is an ordinary edge kind: no gate of its own.
+
+    It used to be dropped unconditionally for a k-anonymity threshold that a
+    workspace of a handful of named teammates can never satisfy, which only
+    guaranteed the relation stayed empty. What has to hold is access control,
+    and hydration enforces that for every edge kind alike.
+    """
+
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        seed = _seed_context_page(
+            session,
+            workspace_id,
+            slug="legacy-co-access-seed",
+            title="Legacy Co-access Seed",
+        )
+        target = _seed_context_page(
+            session,
+            workspace_id,
+            slug="legacy-co-access-target",
+            title="Legacy Co-access Target",
+        )
+        _edge(session, workspace_id, seed, target, "co_access")
+        seed_id = seed.id
+        target_id = target.id
+
+    with session_factory() as session:
+        graph = GraphService()
+        direct = graph.neighbors(
+            session,
+            workspace_id,
+            kind="context_page",
+            entity_id=seed_id,
+            actor=_actor("owner"),
+            edge_kinds=("co_access",),
+            direction="both",
+        )
+        panel = graph.context_page_neighbors_panel(
+            session,
+            workspace_id,
+            page_id=seed_id,
+            actor=_actor("owner"),
+        )
+
+    assert [edge.id for edge in direct] == [target_id]
+    assert direct[0].edge_kind == "co_access"
+    assert [item.id for item in panel.co_access] == [target_id]
 
 
 def test_publish_refreshes_wikilink_neighbors_without_reindex(
@@ -307,7 +362,7 @@ def test_viewer_never_receives_invisible_targets(
         source_page = session.get(ContextPage, published.id)
         head = session.get(ContextPageVersion, source_page.current_published_version_id)
         refresh_page_links(session, page=source_page, version=head)
-        rebuild_edge_projection(session, workspace_id)
+        rebuild_edge_projection(session, workspace_id, usage_signals_enabled=True)
 
     graph = GraphService()
     with session_factory() as session:
@@ -352,6 +407,13 @@ def test_context_page_neighbors_panel_sections_limits_and_visibility(
             title="Panel Hidden",
             published=False,
         )
+        archived = _seed_context_page(
+            session,
+            workspace_id,
+            slug="panel-archived",
+            title="Panel Archived",
+        )
+        archived.lifecycle_status = "archived"
         for index in range(12):
             inbound = _seed_context_page(
                 session,
@@ -383,8 +445,10 @@ def test_context_page_neighbors_panel_sections_limits_and_visibility(
                 20 - index,
             )
         _edge(session, workspace_id, seed, hidden, "wikilink", 100)
+        _edge(session, workspace_id, seed, archived, "wikilink", 101)
         seed_id = seed.id
         hidden_id = hidden.id
+        archived_id = archived.id
 
     with session_factory() as session:
         graph = GraphService()
@@ -404,12 +468,16 @@ def test_context_page_neighbors_panel_sections_limits_and_visibility(
         assert len(viewer.backlinks) == 10
         assert len(viewer.outbound) == 10
         assert len(viewer.citations) == 5
+        assert viewer.truncated is True
+        assert viewer.warnings == ["graph_projection_source_bounded"]
         assert {item.edge_kind for item in viewer.backlinks} == {"wikilink"}
         assert {item.direction for item in viewer.backlinks} == {"in"}
         assert {item.direction for item in viewer.outbound} == {"out"}
         assert {item.edge_kind for item in viewer.citations} == {"citation_page"}
         assert hidden_id not in {item.id for item in viewer.outbound}
         assert hidden_id in {item.id for item in editor.outbound}
+        assert archived_id not in {item.id for item in viewer.outbound}
+        assert archived_id not in {item.id for item in editor.outbound}
 
         with pytest.raises(ReadNotFoundError):
             graph.context_page_neighbors_panel(
@@ -732,7 +800,86 @@ def test_tree_neighbor_does_not_name_hidden_parent(session_factory, page_service
     assert [parent.title for parent in editor_parents] == ["Secret Parent"]
 
 
-def test_neighbors_refills_after_hidden_high_weight_batch(
+def test_too_deep_tree_neighbor_is_filtered_before_hydration(session_factory):
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        seed = _seed_context_page(
+            session,
+            workspace_id,
+            slug="bounded-tree-ancestor-seed",
+            title="Bounded Tree Ancestor Seed",
+        )
+        parent_id = None
+        leaf_id = None
+        for depth in range(GRAPH_TREE_HYDRATION_ANCESTOR_DEPTH_LIMIT + 2):
+            leaf_id = uuid4()
+            session.add(
+                WorkspaceTreeNode(
+                    id=leaf_id,
+                    workspace_id=workspace_id,
+                    section="context",
+                    node_kind="folder",
+                    parent_id=parent_id,
+                    sort_key=f"{depth:04d}",
+                    title=f"Bounded ancestor {depth}",
+                    slug=f"bounded-ancestor-{depth}",
+                    target_kind=None,
+                    target_id=None,
+                    visibility_status="visible",
+                )
+            )
+            session.flush()
+            parent_id = leaf_id
+        session.add(
+            EdgeProjection(
+                workspace_id=workspace_id,
+                source_kind="context_page",
+                source_id=seed.id,
+                target_kind="workspace_tree_node",
+                target_id=leaf_id,
+                edge_kind="wikilink",
+                provenance="curated",
+                weight=1.0,
+                source_ref={},
+            )
+        )
+        seed_id = seed.id
+
+    statements: list[str] = []
+    with session_factory() as session:
+        engine = session.get_bind()
+
+        def capture(_conn, _cursor, statement, _parameters, _context, _many):
+            statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            panel = GraphService().context_page_neighbors_panel(
+                session,
+                workspace_id,
+                page_id=seed_id,
+                actor=_actor("viewer"),
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+
+    assert panel.outbound == []
+    assert panel.truncated is False
+    assert panel.warnings == []
+    tree_queries = [
+        statement.lower()
+        for statement in statements
+        if statement.lstrip().lower().startswith("select workspace_tree_node.")
+        and "from workspace_tree_node" in statement.lower()
+    ]
+    assert tree_queries == []
+    assert all(
+        "order by workspace_tree_node.section" not in statement
+        for statement in tree_queries
+    )
+
+
+def test_neighbors_sql_prefilter_refills_after_1025_hidden_high_weight_rows(
     session_factory, page_service
 ):
     visible = _publish(
@@ -744,8 +891,9 @@ def test_neighbors_refills_after_hidden_high_weight_batch(
     hub = uuid4()
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
-        for index in range(40):
+        for index in range(1_025):
             page = ContextPage(
+                id=uuid4(),
                 workspace_id=workspace_id,
                 slug=f"hidden-neighbor-{index}",
                 title=f"Hidden Neighbor {index}",
@@ -778,7 +926,7 @@ def test_neighbors_refills_after_hidden_high_weight_batch(
                     target_id=page.id,
                     edge_kind="wikilink",
                     provenance="curated",
-                    weight=float(100 - index),
+                    weight=float(2_000 - index),
                     source_ref={},
                 )
             )
@@ -796,20 +944,211 @@ def test_neighbors_refills_after_hidden_high_weight_batch(
             )
         )
 
+    statements: list[str] = []
     with session_factory() as session:
         workspace_id = _workspace_id(session)
-        neighbors = GraphService().neighbors(
+        engine = session.get_bind()
+
+        def capture(_conn, _cursor, statement, _parameters, _context, _many):
+            statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            neighbors = GraphService().neighbors(
+                session,
+                workspace_id,
+                kind="context_page",
+                entity_id=hub,
+                actor=_actor("viewer"),
+                edge_kinds=("wikilink",),
+                direction="out",
+                limit=1,
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+
+    assert [neighbor.title for neighbor in neighbors] == ["Visible After Hidden"]
+    assert neighbors.scan_capped is False
+    edge_queries = [
+        statement for statement in statements if "FROM edge_projection" in statement
+    ]
+    assert len(edge_queries) == 1
+
+
+def test_neighbors_ignores_nonexistent_tree_rows_before_scan_cap(
+    session_factory,
+):
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        seed = _seed_context_page(
             session,
             workspace_id,
-            kind="context_page",
-            entity_id=hub,
+            slug="bounded-tree-fallback-seed",
+            title="Bounded Tree Fallback Seed",
+        )
+        visible = _seed_context_page(
+            session,
+            workspace_id,
+            slug="bounded-tree-fallback-visible",
+            title="Bounded Tree Fallback Visible",
+        )
+        session.add_all(
+            [
+                EdgeProjection(
+                    workspace_id=workspace_id,
+                    source_kind="context_page",
+                    source_id=seed.id,
+                    target_kind="workspace_tree_node",
+                    target_id=uuid4(),
+                    edge_kind="wikilink",
+                    provenance="curated",
+                    weight=float(2_000 - index),
+                    source_ref={},
+                )
+                for index in range(1_025)
+            ]
+        )
+        _edge(session, workspace_id, seed, visible, "wikilink", 1.0)
+        seed_id = seed.id
+        visible_id = visible.id
+
+    statements: list[str] = []
+    with session_factory() as session:
+        engine = session.get_bind()
+
+        def capture(_conn, _cursor, statement, _parameters, _context, _many):
+            statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            panel = GraphService().context_page_neighbors_panel(
+                session,
+                workspace_id,
+                page_id=seed_id,
+                actor=_actor("viewer"),
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+
+    assert [entry.id for entry in panel.outbound] == [visible_id]
+    assert panel.truncated is False
+    assert panel.warnings == []
+    edge_queries = [
+        statement for statement in statements if "FROM edge_projection" in statement
+    ]
+    # One outbound read plus at most one empty query for each other legacy
+    # panel section. Stale tree ids do not spend the scan cap.
+    assert len(edge_queries) <= VISIBLE_PROJECTION_PAGE_LIMIT + 4
+
+
+def test_batched_graph_context_prefilters_1025_hidden_edges(session_factory):
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        seed = _seed_context_page(
+            session,
+            workspace_id,
+            slug="batch-hidden-seed",
+            title="Batch Hidden Seed",
+        )
+        visible = _seed_context_page(
+            session,
+            workspace_id,
+            slug="batch-visible-after-hidden",
+            title="Batch Visible After Hidden",
+        )
+        for index in range(1_025):
+            hidden = ContextPage(
+                id=uuid4(),
+                workspace_id=workspace_id,
+                slug=f"batch-hidden-target-{index}",
+                title=f"Batch Hidden Target {index}",
+                page_type="concept",
+                lifecycle_status="draft",
+            )
+            session.add(hidden)
+            _edge(
+                session,
+                workspace_id,
+                seed,
+                hidden,
+                "wikilink",
+                float(1_000 - index),
+            )
+        _edge(session, workspace_id, seed, visible, "wikilink", 1.0)
+        seed_id = seed.id
+        visible_id = visible.id
+
+    with session_factory() as session:
+        contexts = GraphService().context_pages_graph_context(
+            session,
+            workspace_id,
+            page_ids=[seed_id],
             actor=_actor("viewer"),
-            edge_kinds=("wikilink",),
-            direction="out",
             limit=1,
         )
 
-    assert [neighbor.title for neighbor in neighbors] == ["Visible After Hidden"]
+    assert [entry.id for entry in contexts[seed_id]] == [visible_id]
+
+
+def test_ppr_hidden_bridge_cannot_change_viewer_topology(session_factory):
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        seed = _seed_context_page(
+            session,
+            workspace_id,
+            slug="visible-ppr-seed",
+            title="Visible PPR Seed",
+        )
+        direct = _seed_context_page(
+            session,
+            workspace_id,
+            slug="visible-ppr-direct",
+            title="Visible PPR Direct",
+        )
+        hidden_bridge = _seed_context_page(
+            session,
+            workspace_id,
+            slug="hidden-ppr-bridge",
+            title="Hidden PPR Bridge",
+            published=False,
+        )
+        bridged = _seed_context_page(
+            session,
+            workspace_id,
+            slug="visible-ppr-bridged",
+            title="Visible PPR Bridged",
+        )
+        _edge(session, workspace_id, seed, direct, "wikilink", 1.0)
+        _edge(session, workspace_id, seed, hidden_bridge, "wikilink", 100.0)
+        _edge(session, workspace_id, hidden_bridge, bridged, "wikilink", 100.0)
+        seed_id = seed.id
+        direct_id = direct.id
+        hidden_id = hidden_bridge.id
+        bridged_id = bridged.id
+
+    with session_factory() as session:
+        graph = GraphService()
+        viewer = graph.ppr(
+            session,
+            workspace_id,
+            seeds=[("context_page", seed_id, 1.0)],
+            actor=_actor("viewer"),
+            top_k=10,
+        )
+        editor = graph.ppr(
+            session,
+            workspace_id,
+            seeds=[("context_page", seed_id, 1.0)],
+            actor=_actor("editor"),
+            top_k=10,
+        )
+
+    viewer_ids = {result.id for result in viewer}
+    editor_ids = {result.id for result in editor}
+    assert direct_id in viewer_ids
+    assert hidden_id not in viewer_ids
+    assert bridged_id not in viewer_ids
+    assert {hidden_id, bridged_id} <= editor_ids
 
 
 @contextmanager
@@ -838,13 +1177,12 @@ def _bound_limit(statement: str, parameters: tuple) -> int | None:
 
 
 def _seed_hub_graph(session_factory):
-    """A 10k-edge graph around a hub whose degree beats every scan budget.
+    """A 10K-edge hub with over 512 visible neighbors in each direction.
 
-    The heaviest hub edges lead to real pages (hidden drafts first, published
-    ones after) and are inserted last, so only an ordered, bounded read keeps
-    them in view. The rest of the hub's edges dangle; the remainder of the 10k
-    belongs to unrelated sources. Returns the hub and, per direction, the
-    published (visible) pages heaviest first as ``(page_id, weight)``.
+    Hidden drafts outrank the published endpoints; dangling endpoints are also
+    present. SQL must exclude both before applying its candidate-window limit.
+    Published rows are inserted last so only an ordered read yields the right
+    window. Returns visible endpoints by direction, heaviest first.
     """
 
     hub = uuid4()
@@ -865,21 +1203,38 @@ def _seed_hub_graph(session_factory):
                 "source_ref": {},
             }
 
-        rows = [edge(uuid4(), uuid4(), float(index % 7 + 1)) for index in range(8_400)]
-        rows += [edge(hub, uuid4(), float(index % 7 + 1)) for index in range(990)]
-        rows += [edge(uuid4(), hub, float(index % 7 + 1)) for index in range(590)]
-        weight = 100.0
+        rows = [edge(uuid4(), uuid4(), float(index % 7 + 1)) for index in range(8_010)]
+        rows += [edge(hub, uuid4(), float(index % 7 + 1)) for index in range(390)]
+        rows += [edge(uuid4(), hub, float(index % 7 + 1)) for index in range(390)]
+        pages, versions = [], []
+        weight = 10_000.0
         for direction in ("out", "in"):
-            for published in (False, True):
-                for index in range(5):
+            for published, count in ((False, 5), (True, 600)):
+                for index in range(count):
                     state = "published" if published else "draft"
-                    page = _seed_context_page(
-                        session,
-                        workspace_id,
-                        slug=f"hub-{direction}-{state}-{index}",
+                    slug = f"hub-{direction}-{state}-{index}"
+                    page = ContextPage(
+                        id=uuid4(),
+                        workspace_id=workspace_id,
+                        slug=slug,
                         title=f"Hub {direction} {state} {index}",
-                        published=published,
+                        page_type="concept",
+                        lifecycle_status=state,
                     )
+                    version = ContextPageVersion(
+                        id=uuid4(),
+                        workspace_id=workspace_id,
+                        page_id=page.id,
+                        version_no=1,
+                        body_md=f"# {page.title}",
+                        content_hash=f"graph-{slug}",
+                        actor_type="human",
+                        created_by_actor_kind="human",
+                        created_by_actor_id="tester",
+                        version_status="published_snapshot" if published else "draft",
+                    )
+                    pages.append(page)
+                    versions.append(version)
                     rows.append(
                         edge(hub, page.id, weight)
                         if direction == "out"
@@ -888,19 +1243,29 @@ def _seed_hub_graph(session_factory):
                     if published:
                         visible[direction].append((page.id, weight))
                     weight -= 1.0
+        session.add_all(pages)
+        session.flush()
+        session.add_all(versions)
+        session.flush()
+        for page, version in zip(pages, versions, strict=True):
+            page.current_version_id = version.id
+            if page.lifecycle_status == "published":
+                page.current_published_version_id = version.id
+            else:
+                page.latest_draft_version_id = version.id
         assert len(rows) == 10_000
         session.execute(insert(EdgeProjection), rows)
     return hub, visible
 
 
-# The scan budget is min(512, max(128, limit * 8)): 400 at the default limit of
-# 50, the 128 floor at limit 1 and the 512 cap at limit 100.
+# neighbors() asks for one extra visible result to prove result_capped, so its
+# raw candidate window is min(512, max(128, (limit + 1) * 8)).
 @pytest.mark.parametrize(
     ("direction", "limit", "budgets"),
     [
-        pytest.param("out", 50, {"out": 400}, id="out"),
-        pytest.param("in", 50, {"in": 400}, id="in"),
-        pytest.param("both", 50, {"out": 400, "in": 400}, id="both"),
+        pytest.param("out", 50, {"out": 408}, id="out"),
+        pytest.param("in", 50, {"in": 408}, id="in"),
+        pytest.param("both", 50, {"out": 408, "in": 408}, id="both"),
         pytest.param("out", 1, {"out": 128}, id="floor"),
         pytest.param("out", 100, {"out": 512}, id="cap"),
     ],
@@ -910,21 +1275,20 @@ def test_neighbors_work_is_bounded_on_a_10k_edge_graph(
 ):
     """19.5.7 budget, asserted as counted work rather than elapsed time.
 
-    A wall-clock gate on a two-statement call measures the scheduler as much as
-    the code (its latency lives in the opt-in benchmark below). What keeps
-    neighbors() cheap on a hostile hub is structural: one ordered edge read per
-    direction, hard-capped at min(512, max(128, limit * 8)) rows, a single
-    batched hydration of at most that many ids, and no result an actor may not
-    see. Each of those is observed on the call itself.
+    Each direction reads one exact candidate window after SQL visibility
+    filtering, then hydrates that window in one batch. The extra result proves
+    the output cap while the 128 floor and 512 cap bound database work. Hidden
+    and dangling endpoints never spend hydration budget. These are counted on
+    the actual call so missing limits or per-edge lookups fail deterministically.
     """
 
     hub, visible = _seed_hub_graph(session_factory)
 
-    hydrated: list[int] = []
+    hydrated: list[tuple] = []
     hydrate_context_pages = HYDRATORS[EntityKind.CONTEXT_PAGE.value]
 
     def spy_hydrate(ctx, ids):
-        hydrated.append(len(ids))
+        hydrated.append(tuple(ids))
         return hydrate_context_pages(ctx, ids)
 
     monkeypatch.setitem(HYDRATORS, EntityKind.CONTEXT_PAGE.value, spy_hydrate)
@@ -951,14 +1315,19 @@ def test_neighbors_work_is_bounded_on_a_10k_edge_graph(
             edge_reads[side] = _bound_limit(statement, parameters)
     # One read per direction, each bound by the hard cap rather than the degree.
     assert edge_reads == budgets, "edge reads must be one per direction, LIMIT-bound"
-    # Hydration is one batch per direction holding exactly the capped window (the
-    # hub's degree exceeds every budget here), never one lookup per edge.
-    assert hydrated == list(budgets.values()), "hydration must be one capped batch"
+    # Each visible degree beats the cap. Match exact ids as well as counts so
+    # hidden/dangling rows cannot consume the SQL window before hydration.
+    expected_hydration = [
+        tuple(page_id for page_id, _weight in visible[side][:budget])
+        for side, budget in budgets.items()
+    ]
+    assert hydrated == expected_hydration, "hydration must be one visible capped batch"
     # Edge read + hydration read per direction, nothing else.
     assert len(statements) == 2 * len(budgets), "unexpected extra statements"
 
-    # The viewer gets the published pages only, heaviest first; the hidden
-    # drafts that outrank them spend scan budget but never reach the result.
+    assert neighbors.result_capped is True
+    assert neighbors.scan_capped is False
+    # The viewer gets the published pages only, heaviest first.
     expected = sorted(
         (
             (page_id, side, weight)

@@ -5,9 +5,11 @@ import binascii
 import difflib
 import hashlib
 import json
+import re
 from collections import Counter, OrderedDict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from threading import RLock
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -122,6 +124,7 @@ from backend.services.mcp_write_idempotency import (
     execute_idempotent_write,
     request_fingerprint,
 )
+from backend.services.page_link_ordering import page_link_snippet_order
 from backend.services.public_page_exposure import (
     clear_public_page_exposure,
     exposure_scope_for_workspace,
@@ -143,6 +146,11 @@ from backend.utils.block_identity import (
     heal_block_map,
 )
 from backend.utils.content_hash import same_authored_markdown
+from backend.utils.markdown_links import (
+    RenderedMarkdownAnalysis,
+    rendered_markdown_links,
+    rendered_wikilinks,
+)
 from backend.utils.markdown_outline import parse_outline
 from backend.utils.page_frontmatter import (
     PAGE_TYPES,
@@ -297,6 +305,26 @@ class PageVersionListResult:
 class PagePublishResult:
     page: PagePayload
     findings: list[DraftReviewReason]
+
+
+@dataclass(frozen=True)
+class PageLinkProjectionDelta:
+    inserted: int = 0
+    updated: int = 0
+    deleted: int = 0
+
+    def plus(
+        self,
+        *,
+        inserted: int = 0,
+        updated: int = 0,
+        deleted: int = 0,
+    ) -> PageLinkProjectionDelta:
+        return PageLinkProjectionDelta(
+            inserted=self.inserted + inserted,
+            updated=self.updated + updated,
+            deleted=self.deleted + deleted,
+        )
 
 
 ANCHOR_RESOLVE_CACHE_SIZE = 1024
@@ -597,7 +625,10 @@ class PageService:
                 updated_at=version.created_at,
                 exposure_scope=exposure_scope,
                 link_targets=context_link_targets(
-                    session, page=page, version=version, public=True,
+                    session,
+                    page=page,
+                    version=version,
+                    public=True,
                     workspace=workspace,
                     self_origins=self.body_preparer.self_origins,
                 ),
@@ -813,7 +844,7 @@ class PageService:
                 workspace_id=target_page.workspace_id,
                 on=ContextPage.id == PageLink.source_page_id,
             )
-            rows = session.execute(
+            ranked_backlinks = (
                 join_in_workspace(
                     source_statement,
                     PageLink,
@@ -824,25 +855,56 @@ class PageService:
                     isouter=True,
                 )
                 .with_only_columns(
-                    ContextPage,
-                    func.sum(PageLink.occurrence_count),
-                    func.min(PageLink.first_snippet),
-                    backlink_modified_at,
+                    ContextPage.id.label("page_id"),
+                    ContextPage.slug.label("slug"),
+                    ContextPage.title.label("title"),
+                    backlink_modified_at.label("modified_at"),
+                    func.sum(PageLink.occurrence_count)
+                    .over(partition_by=PageLink.source_page_id)
+                    .label("occurrence_count"),
+                    PageLink.first_snippet.label("snippet"),
+                    func.row_number()
+                    .over(
+                        partition_by=PageLink.source_page_id,
+                        order_by=page_link_snippet_order(),
+                    )
+                    .label("snippet_rank"),
                 )
-                .group_by(ContextPage.id, backlink_published.created_at)
-                .order_by(backlink_modified_at.desc(), ContextPage.slug.asc())
+                .subquery()
+            )
+            rows = session.execute(
+                select(
+                    ranked_backlinks.c.page_id,
+                    ranked_backlinks.c.slug,
+                    ranked_backlinks.c.title,
+                    ranked_backlinks.c.modified_at,
+                    ranked_backlinks.c.occurrence_count,
+                    ranked_backlinks.c.snippet,
+                )
+                .where(ranked_backlinks.c.snippet_rank == 1)
+                .order_by(
+                    ranked_backlinks.c.modified_at.desc(),
+                    ranked_backlinks.c.slug.asc(),
+                )
                 .limit(limit)
             ).all()
             backlinks = [
                 PageBacklink(
-                    id=page.id,
-                    slug=page.slug,
-                    title=page.title,
-                    updated_at=modified_at or page.updated_at,
-                    occurrence_count=occurrence_count,
+                    id=page_id,
+                    slug=slug,
+                    title=title,
+                    updated_at=modified_at,
+                    occurrence_count=total_occurrence_count,
                     snippet=snippet,
                 )
-                for page, occurrence_count, snippet, modified_at in rows
+                for (
+                    page_id,
+                    slug,
+                    title,
+                    modified_at,
+                    total_occurrence_count,
+                    snippet,
+                ) in rows
             ]
             return backlinks
 
@@ -1789,6 +1851,7 @@ class PageService:
             # "editing", exactly like `begin_editing`'s fresh-session case.
             page.current_version_id = version.id
             page.placement_parent_node_id = placement_parent_node_id
+            sync_page_link_projection(session, page=page, version=version)
             self._ensure_context_tree_placement(
                 session=session,
                 workspace_id=workspace.id,
@@ -1880,6 +1943,11 @@ class PageService:
                     )
                 )
                 if existing is not None:
+                    sync_page_link_projection(
+                        session,
+                        page=page,
+                        version=existing,
+                    )
                     return self._payload_from_page(
                         session,
                         page,
@@ -1976,6 +2044,7 @@ class PageService:
                     version.editing_revision = previous_revision + 1
                     session.add(version)
                     session.flush()
+                sync_page_link_projection(session, page=page, version=version)
                 AuditService().emit(
                     session=session,
                     workspace_id=page.workspace_id,
@@ -2191,9 +2260,13 @@ class PageService:
 
         with self.session_factory.begin() as session:
             return self._submit_context_edit_in_session(
-                session=session, page_id=page_id, version_id=version_id,
-                workspace_id=workspace_id, actor_kind=actor_kind,
-                actor_id=actor_id, actor_provenance=actor_provenance,
+                session=session,
+                page_id=page_id,
+                version_id=version_id,
+                workspace_id=workspace_id,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                actor_provenance=actor_provenance,
                 expected_editing_revision=expected_editing_revision,
                 idempotency_key=idempotency_key, reason=reason,
                 retry_only=retry_only, needs_review=True,
@@ -2437,6 +2510,11 @@ class PageService:
                         or page.current_published_version_id
                     )
                 # Earlier discarded sessions are not history either.
+                _delete_page_links_for_version(
+                    session,
+                    page=page,
+                    version_id=version.id,
+                )
                 has_other_history = (
                     page.current_published_version_id is not None
                     or page.latest_draft_version_id is not None
@@ -5523,7 +5601,8 @@ class PageService:
                 session, page, version, registry=self.lint_registry
             ),
             lint_report=(
-                prepared.lint_report if prepared is not None
+                prepared.lint_report
+                if prepared is not None
                 else {"fixes": [], "findings": []}
             ),
         )
@@ -5949,6 +6028,7 @@ def sync_page_projections(
     *,
     page: ContextPage,
     version: ContextPageVersion | None = None,
+    record_graph_observations: bool = True,
     self_origins: frozenset[str] | None = None,
 ) -> None:
     """Synchronize write-through projections for a Context page.
@@ -5963,11 +6043,12 @@ def sync_page_projections(
         # Re-derive so ``dtxwiki reindex`` doubles as the NULL backfill path
         # for legacy rows (nav_description is rebuildable by contract).
         version.nav_description = derive_nav_description(version.body_md)
-        _sync_page_links_for_version(
+        sync_page_link_projection(
             session, page=page, version=version, self_origins=self_origins
         )
+    else:
+        _delete_stale_page_link_versions(session, page=page)
     _sync_page_doc_source(session, page=page)
-    _delete_stale_page_link_versions(session, page=page)
 
     # G1 write-through: keep the page's curated edge projection (wikilink/
     # citation, published-head grain) fresh with the link projection — the
@@ -5976,7 +6057,13 @@ def sync_page_projections(
         refresh_page_edge_projection,
     )
 
-    refresh_page_edge_projection(session, page.workspace_id, page.id)
+    if version is None or version.id == page.current_published_version_id:
+        refresh_page_edge_projection(
+            session,
+            page.workspace_id,
+            page.id,
+            record_observations=record_graph_observations,
+        )
 
 
 def refresh_page_links(
@@ -5993,17 +6080,48 @@ def refresh_page_links(
     )
 
 
+def sync_page_link_projection(
+    session: Session,
+    *,
+    page: ContextPage,
+    version: ContextPageVersion,
+    observed_at: datetime | None = None,
+    self_origins: frozenset[str] | None = None,
+) -> PageLinkProjectionDelta:
+    """Reconcile one version's authored links without changing graph revisions."""
+
+    delta = _sync_page_links_for_version(
+        session,
+        page=page,
+        version=version,
+        observed_at=observed_at,
+        self_origins=self_origins,
+    )
+    return delta.plus(deleted=prune_stale_page_link_projections(session, page=page))
+
+
+def prune_stale_page_link_projections(
+    session: Session,
+    *,
+    page: ContextPage,
+) -> int:
+    """Remove PageLink rows outside the page's current live-version set."""
+
+    return _delete_stale_page_link_versions(session, page=page)
+
+
 def _sync_page_links_for_version(
     session: Session,
     *,
     page: ContextPage,
     version: ContextPageVersion,
     self_origins: frozenset[str] | None = None,
-) -> None:
+    observed_at: datetime | None = None,
+) -> PageLinkProjectionDelta:
     from backend.services.context_links import (
+        LinkOccurrence,
         classify,
         configured_self_origins,
-        extract_links,
     )
 
     origins = configured_self_origins() if self_origins is None else self_origins
@@ -6032,17 +6150,46 @@ def _sync_page_links_for_version(
     ).all()
     for locator_key, target_page_id, _version_no in pin_rows:
         preserved_pins.setdefault(locator_key, target_page_id)
-    session.execute(
-        delete_in_workspace(
-            PageLink,
-            workspace_id=page.workspace_id,
-            conditions=(
-                PageLink.source_page_id == page.id,
-                PageLink.source_version_id == version.id,
-            ),
-        )
+    # Graph relations follow the page renderer's explicit Markdown and
+    # decoded wikilink tokens. Locator classification and durable pins still
+    # share the workspace link contract used by save-time lint and readers.
+    from backend.context_media.domain.markdown_media import (
+        SourceSpan,
+        _rendered_page_body,
     )
-    occurrences = extract_links(version.body_md)
+
+    body, _ = _rendered_page_body(version.body_md or "")
+    markdown_analysis = RenderedMarkdownAnalysis(body)
+    occurrences = []
+    for link in rendered_markdown_links(body, analysis=markdown_analysis):
+        occurrences.append(
+            LinkOccurrence(
+                href=link.destination,
+                kind="markdown",
+                span=SourceSpan(
+                    link.source_start,
+                    link.source_end,
+                    len(body[: link.source_start].encode("utf-8")),
+                    len(body[: link.source_end].encode("utf-8")),
+                ),
+                snippet=snippet_around_span(body, link.source_start, link.source_end),
+            )
+        )
+    for link in rendered_wikilinks(body, analysis=markdown_analysis):
+        occurrences.append(
+            LinkOccurrence(
+                href=f"[[{link.target}]]",
+                kind="wikilink",
+                span=SourceSpan(
+                    link.source_start,
+                    link.source_end,
+                    len(body[: link.source_start].encode("utf-8")),
+                    len(body[: link.source_end].encode("utf-8")),
+                ),
+                snippet=snippet_around_span(body, link.source_start, link.source_end),
+            )
+        )
+    occurrences.sort(key=lambda occurrence: occurrence.span.char_start)
     locators = [classify(item.href, origins) for item in occurrences]
     eligible = [
         (occurrence, locator)
@@ -6055,14 +6202,10 @@ def _sync_page_links_for_version(
     # a reader-visible version. Read paths reauthorize each pinned target.
     locator_slugs = {locator.slug for _, locator in eligible if locator.slug}
     node_ids = {
-        locator.node_id
-        for _, locator in eligible
-        if locator.node_id is not None
+        locator.node_id for _, locator in eligible if locator.node_id is not None
     }
     locator_page_ids = {
-        locator.page_id
-        for _, locator in eligible
-        if locator.page_id is not None
+        locator.page_id for _, locator in eligible if locator.page_id is not None
     } | node_ids
 
     def chunks(values: list, size: int = 400):
@@ -6136,46 +6279,110 @@ def _sync_page_links_for_version(
             pin = existing_by_slug.get(locator.slug)
         if key not in grouped:
             grouped[key] = {
+                "link_syntax": "wikilink"
+                if locator.kind == "wikilink"
+                else "context_url",
                 "target_slug": locator.slug,
                 "target_page_id": pin,
                 "occurrence_count": 0,
                 "first_snippet": occurrence.snippet,
             }
         grouped[key]["occurrence_count"] += 1
-    session.add_all(
-        PageLink(
-            workspace_id=page.workspace_id,
-            source_page_id=page.id,
-            source_version_id=version.id,
-            locator_key=key,
-            **values,
-        )
-        for key, values in grouped.items()
-    )
-
-
-def _delete_stale_page_link_versions(session: Session, *, page: ContextPage) -> None:
-    live_version_ids = {
-        version_id
-        for version_id in (
-            page.current_published_version_id,
-            page.latest_draft_version_id,
-            page.current_version_id,
-        )
-        if version_id is not None
-    }
-    live_version_ids.update(
+    existing_rows = list(
         session.scalars(
             select_in_workspace(
-                ContextPageVersion,
+                PageLink,
                 workspace_id=page.workspace_id,
                 conditions=(
-                    ContextPageVersion.page_id == page.id,
-                    ContextPageVersion.version_status == "editing",
+                    PageLink.source_page_id == page.id,
+                    PageLink.source_version_id == version.id,
                 ),
-            ).with_only_columns(ContextPageVersion.id)
+            )
+            .order_by(PageLink.id.asc())
+            .with_for_update()
         )
     )
+    existing_by_key = {row.locator_key: row for row in existing_rows}
+    target_ids = {
+        values["target_page_id"]
+        for values in grouped.values()
+        if values["target_page_id"] is not None
+    }
+    target_created_at_by_id = {}
+    for target_chunk in chunks(list(target_ids)):
+        target_created_at_by_id.update(
+            session.execute(
+                select_in_workspace(
+                    ContextPage,
+                    workspace_id=page.workspace_id,
+                    conditions=(ContextPage.id.in_(target_chunk),),
+                ).with_only_columns(ContextPage.id, ContextPage.created_at)
+            ).all()
+        )
+    stale_ids = [row.id for row in existing_rows if row.locator_key not in grouped]
+    if stale_ids:
+        session.execute(
+            delete_in_workspace(
+                PageLink,
+                workspace_id=page.workspace_id,
+                conditions=(PageLink.id.in_(stale_ids),),
+            )
+        )
+        session.flush()
+    inserted = updated = 0
+    for key, values in grouped.items():
+        existing = existing_by_key.get(key)
+        if existing is None:
+            session.add(
+                PageLink(
+                    workspace_id=page.workspace_id,
+                    source_page_id=page.id,
+                    source_version_id=version.id,
+                    locator_key=key,
+                    created_at=_page_link_observed_at(
+                        observed_at=observed_at,
+                        target_page_id=values["target_page_id"],
+                        target_created_at_by_id=target_created_at_by_id,
+                    ),
+                    **values,
+                )
+            )
+            inserted += 1
+            continue
+        if any(getattr(existing, name) != value for name, value in values.items()):
+            updated += 1
+        if existing.target_page_id != values["target_page_id"]:
+            existing.created_at = _page_link_observed_at(
+                observed_at=observed_at,
+                target_page_id=values["target_page_id"],
+                target_created_at_by_id=target_created_at_by_id,
+            )
+        for name, value in values.items():
+            setattr(existing, name, value)
+    return PageLinkProjectionDelta(
+        inserted=inserted,
+        updated=updated,
+        deleted=len(stale_ids),
+    )
+
+
+def _page_link_observed_at(
+    *,
+    observed_at: datetime | None,
+    target_page_id: object,
+    target_created_at_by_id: dict[UUID, datetime],
+) -> datetime:
+    if observed_at is None:
+        return utc_now()
+    if isinstance(target_page_id, UUID):
+        target_created_at = target_created_at_by_id.get(target_page_id)
+        if target_created_at is not None:
+            return max(observed_at, target_created_at)
+    return observed_at
+
+
+def _delete_stale_page_link_versions(session: Session, *, page: ContextPage) -> int:
+    live_version_ids = context_page_repo.live_page_link_version_ids(session, page)
     statement = delete_in_workspace(
         PageLink,
         workspace_id=page.workspace_id,
@@ -6183,7 +6390,23 @@ def _delete_stale_page_link_versions(session: Session, *, page: ContextPage) -> 
     )
     if live_version_ids:
         statement = statement.where(PageLink.source_version_id.notin_(live_version_ids))
-    session.execute(statement)
+    result = session.execute(statement)
+    return max(int(result.rowcount or 0), 0)
+
+
+def _delete_page_links_for_version(
+    session: Session,
+    *,
+    page: ContextPage,
+    version_id: UUID,
+) -> None:
+    session.execute(
+        delete(PageLink).where(
+            PageLink.workspace_id == page.workspace_id,
+            PageLink.source_page_id == page.id,
+            PageLink.source_version_id == version_id,
+        )
+    )
 
 
 def _sync_page_name_index(session: Session, *, page: ContextPage) -> None:
@@ -6509,6 +6732,35 @@ def apply_page_metadata(
             page.aliases = next_aliases
             changed = True
     return changed
+
+
+def snippet_around_span(
+    body_md: str,
+    source_start: int,
+    source_end: int,
+    *,
+    radius: int = 90,
+) -> str:
+    source_start = max(0, min(source_start, len(body_md)))
+    source_end = max(source_start, min(source_end, len(body_md)))
+    content_limit = max(1, radius * 2)
+    matched_length = source_end - source_start
+    if matched_length >= content_limit:
+        start = source_start
+        end = min(len(body_md), start + content_limit)
+    else:
+        remaining = content_limit - matched_length
+        before = min(source_start, remaining // 2)
+        after = min(len(body_md) - source_end, remaining - before)
+        before = min(source_start, remaining - after)
+        start = source_start - before
+        end = source_end + after
+    snippet = re.sub(r"\s+", " ", body_md[start:end]).strip()
+    if start > 0:
+        snippet = f"...{snippet}"
+    if end < len(body_md):
+        snippet = f"{snippet}..."
+    return snippet
 
 
 def select_inline_comment_rows(page_id: UUID, *, limit: int):

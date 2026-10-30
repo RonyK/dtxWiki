@@ -17,6 +17,7 @@ from backend.api.auth_sso import router as auth_sso_router
 from backend.api.auth_verification import router as auth_verification_router
 from backend.api.context_media import router as context_media_router
 from backend.api.context_pages import router as context_pages_router
+from backend.api.graph import router as graph_router
 from backend.api.health import health_root_router
 from backend.api.inbox import router as inbox_router
 from backend.api.library_preview import router as library_preview_router
@@ -42,6 +43,9 @@ from backend.api.middleware.request_log import RequestLogMiddleware
 from backend.api.middleware.security_headers import (
     DEFAULT_HSTS_VALUE,
     SecurityHeadersMiddleware,
+)
+from backend.api.middleware.workspace_graph_compression import (
+    WorkspaceGraphCompressionMiddleware,
 )
 from backend.api.oauth import router as oauth_router
 from backend.api.public import router as public_router
@@ -274,6 +278,10 @@ def create_app(
         RequestBodyLimitMiddleware,
         limits=RequestBodyLimits(resolved_settings, routes=lambda: app.routes),
     )
+    # Keep the actor-visible map JSON contract intact; only negotiate its
+    # successful, non-streaming wire encoding. Auth/errors/Local Graph and
+    # byte-sensitive responses are never compressed by this middleware.
+    app.add_middleware(WorkspaceGraphCompressionMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=resolved_settings.cors_origin_list,
@@ -374,6 +382,7 @@ def create_app(
     app.include_router(library_semantic_router, prefix="/api/v1")
     app.include_router(read_router, prefix="/api/v1")
     app.include_router(mcp_apps_router, prefix="/api/v1")
+    app.include_router(graph_router, prefix="/api/v1")
     app.include_router(mcp_chats_router, prefix="/api/v1")
     app.include_router(oauth_router)
     app.include_router(mcp_http_router)

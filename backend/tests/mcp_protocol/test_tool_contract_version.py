@@ -87,6 +87,7 @@ TOOL_CONTRACT_DIGESTS = {
     24: "d00c78e6908b",
     25: "49af948c21e0",
     26: "6d4118f7809a",
+    27: "9d725068d7ba",
 }
 
 

@@ -11,8 +11,9 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.models.context import ContextPage, ContextPageVersion
-from backend.scripts.seed_dev import seed_default_workspace
-from backend.tests.integration.test_release_schema_migration import _config
+from backend.tests.integration.test_release_schema_migration import (
+    _config,
+)
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 PARENT_REVISION = "175b9664724e"
@@ -62,18 +63,46 @@ def test_context_link_locator_round_trip_preserves_wikilink_pins(
             ), "PostgreSQL migration tests require an empty, dedicated database"
         command.upgrade(config, PARENT_REVISION)
         migrated = True
+        workspace_id = uuid4()
+        with engine.begin() as connection:
+            workspaces = sa.Table("workspace", sa.MetaData(), autoload_with=engine)
+            for name in ("id", "created_by_actor_id", "owner_actor_id"):
+                workspaces.c[name].type = sa.Uuid()
+            actor_id = uuid4()
+            connection.execute(
+                workspaces.insert().values(
+                    id=workspace_id,
+                    slug="locator-migration",
+                    title="Locator migration",
+                    directory_title_key="locator migration",
+                    name="Locator migration",
+                    goal="Verify permanent pins",
+                    default_language="en",
+                    library_policy={},
+                    write_policy={},
+                    citation_policy={},
+                    agent_injection_policy={},
+                    review_policy={},
+                    lint_policy={},
+                    auto_fix_enabled=False,
+                    visibility="private",
+                    created_by_actor_id=actor_id,
+                    owner_actor_id=actor_id,
+                    updated_at=datetime.now(UTC),
+                    created_at=datetime.now(UTC),
+                )
+            )
         with Session(engine) as session, session.begin():
-            workspace = seed_default_workspace(session)
             source = ContextPage(
-                workspace_id=workspace.id, slug="source", title="Source"
+                workspace_id=workspace_id, slug="source", title="Source"
             )
             target = ContextPage(
-                workspace_id=workspace.id, slug="target", title="Target"
+                workspace_id=workspace_id, slug="target", title="Target"
             )
             session.add_all([source, target])
             session.flush()
             version = ContextPageVersion(
-                workspace_id=workspace.id,
+                workspace_id=workspace_id,
                 page_id=source.id,
                 version_no=1,
                 body_md="# Source\n\n[[target]]",
@@ -86,7 +115,7 @@ def test_context_link_locator_round_trip_preserves_wikilink_pins(
             session.add(version)
             session.flush()
             workspace_id, source_id, target_id, version_id = (
-                workspace.id,
+                workspace_id,
                 source.id,
                 target.id,
                 version.id,
@@ -190,6 +219,65 @@ def test_context_link_locator_round_trip_preserves_wikilink_pins(
             assert row["id"] == legacy_id
             assert row["locator_key"] == "wikilink:target"
             assert row["target_page_id"] == target_id
+
+        # The locator-first branch already supports durable permanent URL
+        # pins. Adding/removing Graph must preserve those pins independently
+        # of a target's mutable slug, as well as classifying their syntax.
+        permanent_id = uuid4()
+        with engine.begin() as connection:
+            connection.execute(
+                links.insert().values(
+                    id=permanent_id,
+                    workspace_id=workspace_id,
+                    source_page_id=source_id,
+                    source_version_id=version_id,
+                    target_slug=None,
+                    target_page_id=target_id,
+                    locator_key=f"page_id:{target_id}",
+                    occurrence_count=1,
+                    first_snippet="Permanent URL pin",
+                    created_at=datetime.now(UTC),
+                )
+            )
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            merged = link_table()
+            rows = {
+                row["id"]: row
+                for row in connection.execute(sa.select(merged)).mappings()
+            }
+            assert rows[legacy_id]["locator_key"] == "wikilink:target"
+            assert rows[legacy_id]["link_syntax"] == "wikilink"
+            assert rows[legacy_id]["target_page_id"] == target_id
+            assert rows[permanent_id]["locator_key"] == f"page_id:{target_id}"
+            assert rows[permanent_id]["link_syntax"] == "context_url"
+            assert rows[permanent_id]["target_page_id"] == target_id
+        # Graph is appended after the upstream locator revision, so its
+        # downgrade must preserve all prior pins and locator constraints.
+        command.downgrade(config, LOCATOR_REVISION)
+        with engine.connect() as connection:
+            upstream = link_table()
+            rows = {
+                row["id"]: row
+                for row in connection.execute(sa.select(upstream)).mappings()
+            }
+            assert set(rows) == {legacy_id, permanent_id}
+            assert rows[permanent_id]["locator_key"] == f"page_id:{target_id}"
+            assert rows[permanent_id]["target_page_id"] == target_id
+            assert rows[permanent_id]["first_snippet"] == "Permanent URL pin"
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            merged = link_table()
+            rows = {
+                row["id"]: row
+                for row in connection.execute(sa.select(merged)).mappings()
+            }
+            assert rows[legacy_id]["locator_key"] == "wikilink:target"
+            assert rows[legacy_id]["link_syntax"] == "wikilink"
+            assert rows[legacy_id]["target_page_id"] == target_id
+            assert rows[permanent_id]["locator_key"] == f"page_id:{target_id}"
+            assert rows[permanent_id]["link_syntax"] == "context_url"
+            assert rows[permanent_id]["target_page_id"] == target_id
     finally:
         try:
             if dialect == "postgresql" and migrated:

@@ -42,9 +42,9 @@ _LEGACY_UPLOAD_CANDIDATE = re.compile(
     r"[0-9a-fA-F]{64}\.(?:png|jpg|gif|webp)"
 )
 _GFM_AUTOLINK_LITERAL = re.compile(
-    # GFM's extended `www.` autolink requires a non-word preceding character
-    # (letter, digit, or underscore all disqualify it); the scheme-prefixed
-    # form has no such restriction, so only the `www.` branch excludes them.
+    # GFM's extended `www.` autolink can follow punctuation, including an
+    # underscore, but not a Unicode letter or digit. The scheme-prefixed form
+    # only applies its existing ASCII-letter restriction.
     #
     # `"`/`'` are deliberately NOT excluded here (dtxWiki review, 260827):
     # real GFM only stops an autolink literal at whitespace or `<`, so a mid-
@@ -53,7 +53,7 @@ _GFM_AUTOLINK_LITERAL = re.compile(
     # which already includes both quote characters). Excluding them from the
     # whole body instead truncated the match before a legacy path following a
     # mid-literal quote, missing an occurrence GFM would still render.
-    r"(?i)(?:(?<![A-Za-z])https?://|(?<![A-Za-z0-9_])www\.)[^\s\ufeff<>]+"
+    r"(?i)(?:(?<![A-Za-z])https?://|(?<![^\W_])www\.)[^\s\ufeff<>]+"
 )
 _GFM_AUTOLINK_TRAILING_PUNCTUATION = re.compile(
     r"[!\"&')*,.:;<>?\]_~]+$"

@@ -12,6 +12,8 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    false,
+    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
@@ -188,7 +190,29 @@ class Workspace(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         nullable=False,
         default=False,
     )
+    # Knowledge graph Settings card. The workspace-wide map is an owner
+    # choice and starts off; per-document Local Graphs do not depend on it.
+    workspace_graph_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=false(),
+    )
+    # Whether usage-derived relations (documents read together in MCP
+    # sessions) are projected and shown. A team workspace starts with them on.
+    usage_relation_signals_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=true(),
+    )
     edge_projection_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    graph_observation_sequence: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
         default=0,

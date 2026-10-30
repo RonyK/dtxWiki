@@ -83,6 +83,8 @@ WORKSPACE_PLANE_TABLES: frozenset[str] = frozenset(
         "context_page_version",
         "edge_projection",
         "feedback_item",
+        "graph_history_coverage",
+        "graph_observation",
         "job",
         "knowledge_coverage_gap",
         "knowledge_node_stat",

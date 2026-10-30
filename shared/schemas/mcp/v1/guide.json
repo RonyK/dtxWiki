@@ -81,7 +81,8 @@
               "borrowed_query_rewrite_applied",
               "llm_provider_unavailable",
               "llm_composer_failed",
-              "job_fanout_incomplete"
+              "job_fanout_incomplete",
+              "context_page_has_no_graph_visible_links"
             ],
             "title": "Code",
             "type": "string"
@@ -96,6 +97,68 @@
           "message"
         ],
         "title": "EnvelopeWarning",
+        "type": "object"
+      },
+      "LinkSyntaxGuidance": {
+        "additionalProperties": false,
+        "properties": {
+          "link_syntax": {
+            "enum": [
+              "wikilink",
+              "context_url"
+            ],
+            "title": "Link Syntax",
+            "type": "string"
+          },
+          "target_source": {
+            "title": "Target Source",
+            "type": "string"
+          },
+          "template": {
+            "title": "Template",
+            "type": "string"
+          }
+        },
+        "required": [
+          "link_syntax",
+          "template",
+          "target_source"
+        ],
+        "title": "LinkSyntaxGuidance",
+        "type": "object"
+      },
+      "LinkingGuidance": {
+        "additionalProperties": false,
+        "properties": {
+          "graph_visibility": {
+            "const": "published_head_only",
+            "title": "Graph Visibility",
+            "type": "string"
+          },
+          "missing_links_warning": {
+            "const": "context_page_has_no_graph_visible_links",
+            "title": "Missing Links Warning",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "syntaxes": {
+            "items": {
+              "$ref": "#/$defs/LinkSyntaxGuidance"
+            },
+            "title": "Syntaxes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "syntaxes",
+          "graph_visibility",
+          "note",
+          "missing_links_warning"
+        ],
+        "title": "LinkingGuidance",
         "type": "object"
       },
       "MCPActor": {
@@ -305,6 +368,9 @@
             "default": null,
             "title": "Library Policy Summary"
           },
+          "linking": {
+            "$ref": "#/$defs/LinkingGuidance"
+          },
           "recommended_agent_guidance_flow": {
             "items": {
               "type": "string"
@@ -335,7 +401,8 @@
           "actor_context",
           "citation_policy",
           "workspace_routing",
-          "required_workflow"
+          "required_workflow",
+          "linking"
         ],
         "title": "MCPGuidePayload",
         "type": "object"

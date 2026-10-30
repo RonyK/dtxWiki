@@ -14,6 +14,7 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy.exc import DBAPIError
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
@@ -32,7 +33,9 @@ from backend.services.ops.input_maintenance import (
 )
 
 PRE_INPUT_REVISION = "efcbcf724889"
-CURRENT_HEAD = "6f4a9f50c046"
+CURRENT_HEAD = ScriptDirectory.from_config(
+    Config(str(resolve_alembic_ini()))
+).get_current_head()
 
 
 def _database(tmp_path, revision=PRE_INPUT_REVISION):

@@ -89,6 +89,25 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
         "GET",
         "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/neighbors",
     ): CONTEXT_PAGE_BODY_SCOPES,
+    # Interactive Graph View: a POST that carries a structured read query, not
+    # a mutation. It surfaces the same Context relationships the neighbors
+    # panel does, so it is gated exactly like that panel.
+    (
+        "POST",
+        "/api/v1/workspaces/{workspace_id}/graph/query",
+    ): CONTEXT_PAGE_BODY_SCOPES,
+    # Feature-gated Workspace Knowledge Map: actor-visible published Context,
+    # Library and Agent nodes only (no page bodies).
+    (
+        "POST",
+        "/api/v1/workspaces/{workspace_id}/graph/overview/query",
+    ): ("read",),
+    # Whether that map is switched on here, and whether the caller may switch
+    # it: no workspace content, only the two Settings booleans.
+    (
+        "GET",
+        "/api/v1/workspaces/{workspace_id}/graph/capability",
+    ): ("read",),
     ("POST", "/api/v1/workspaces/{workspace_id}/context/pages"): ("draft-write",),
     (
         "PATCH",

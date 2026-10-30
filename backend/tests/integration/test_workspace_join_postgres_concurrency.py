@@ -18,12 +18,15 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 from backend.app.db import make_session_factory
-from backend.models.base import Base, utc_now
+from backend.models.base import utc_now
 from backend.models.user import User
 from backend.models.workspace import Workspace
 from backend.models.workspace_join import WorkspaceJoinRequest
 from backend.services.workspace_join_service import WorkspaceJoinService
-from backend.tests.utils.postgres import drop_reflected_postgres_metadata
+from backend.tests.utils.postgres import (
+    create_isolated_postgres_metadata,
+    drop_reflected_postgres_metadata,
+)
 
 # Every test here reflects and drops the tables of whatever PostgreSQL database
 # it is pointed at, and CI aims several of these files at one database, so they
@@ -93,7 +96,7 @@ def postgres_join_fixture():
     assert database_url is not None
     engine = create_engine(database_url)
     drop_reflected_postgres_metadata(engine)
-    Base.metadata.create_all(engine)
+    create_isolated_postgres_metadata(engine)
     session_factory = make_session_factory(engine)
     with session_factory.begin() as session:
         workspace = Workspace(

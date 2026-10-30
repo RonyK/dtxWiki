@@ -9,6 +9,12 @@ tools were deleted, so both HTTP modes kept advertising tools that returned
 
 from backend.spi.tool_presentation import MCP_CONTEXT_LINK_GUIDANCE
 
+CONTEXT_LINKING_INSTRUCTION = (
+    "Link related Context pages in the body using a result's link_markdown. "
+    "Authored Context-to-Context link relations in the graph come from links "
+    "in the page body and appear after publication."
+)
+
 MCP_SERVER_INSTRUCTIONS = (
     "Call list_my_workspaces to choose a workspace_id, then guide for that "
     "workspace's workflow and policy context; every other tool is "
@@ -21,7 +27,8 @@ MCP_SERVER_INSTRUCTIONS = (
     "catalog. To create a new Context page, call create_context_page; to edit "
     "an existing one, call begin_context_edit then update_context_edit (whole "
     "body) or patch_context_edit (typed block/section operations addressed by "
-    "read_structure_map ids) followed by submit_context_edit_for_review. Keep "
+    "read_structure_map ids) followed by submit_context_edit_for_review. "
+    f"{CONTEXT_LINKING_INSTRUCTION} Keep "
     "one edit per task: begin once, patch as often as needed, submit once "
     "when done; to change your submission again in the same chat, call "
     "begin_context_edit, which reopens it. Read and discovery tools accept "

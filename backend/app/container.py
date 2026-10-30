@@ -1053,6 +1053,29 @@ class ServiceRegistry:
         return GraphService()
 
     @cached_property
+    def graph_query(self):
+        from backend.services.graph_query_service import GraphQueryService
+
+        return GraphQueryService(graph_service=self.graph_service)
+
+    @cached_property
+    def workspace_graph(self):
+        from backend.services.workspace_graph_service import WorkspaceGraphService
+
+        secret = (
+            self.settings.effective_session_secret
+            if self.settings is not None
+            else "dtxwiki-development-session-secret"
+        )
+        return WorkspaceGraphService(cursor_secret=secret)
+
+    @cached_property
+    def graph_observations(self):
+        from backend.services.graph_observation_service import GraphObservationService
+
+        return GraphObservationService()
+
+    @cached_property
     def keyword_only_search(self):
         # Settings-free keyword-only SearchService: the last-resort fallback
         # for contexts constructed without an injected search service (tests,

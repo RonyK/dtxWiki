@@ -14,7 +14,6 @@ from backend.context_media.domain import (
     ActorIdentity,
     ContextMediaOwnershipError,
 )
-from backend.models.base import Base
 from backend.models.context_media import (
     ContextMediaAsset,
     ContextMediaLogicalCharge,
@@ -27,7 +26,10 @@ from backend.tests.integration.test_context_media_repository import (
     _seed_page,
     _seed_shared_image,
 )
-from backend.tests.utils.postgres import drop_reflected_postgres_metadata
+from backend.tests.utils.postgres import (
+    create_isolated_postgres_metadata,
+    drop_reflected_postgres_metadata,
+)
 
 # Every test here reflects and drops the tables of whatever PostgreSQL database
 # it is pointed at, and CI aims several of these files at one database, so they
@@ -53,7 +55,7 @@ def test_postgres_usage_and_tombstone_serialize_on_page_then_asset_lock(
     database_url = _postgres_url()
     assert database_url is not None
     engine = create_engine(database_url)
-    Base.metadata.create_all(engine)
+    create_isolated_postgres_metadata(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     tombstone_page_locked = threading.Event()
     release_tombstone = threading.Event()

@@ -7,7 +7,7 @@ import sqlalchemy as sa
 from alembic import command
 from sqlalchemy import create_engine, inspect, select, text
 
-from backend.models.workspace import Workspace, WorkspaceMembership
+from backend.models.workspace import WorkspaceMembership
 from backend.tests.integration.test_release_schema_migration import _config
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
@@ -44,25 +44,41 @@ def test_personal_pointer_round_trip_keeps_workspaces_and_defaults(
         migrated = True
 
         with engine.begin() as connection:
-            # Core statements name only the columns this revision has: the
-            # current models map columns introduced after it.
+            # Reflection omits Python defaults for later Graph View columns.
+            workspaces = sa.Table("workspace", sa.MetaData(), autoload_with=connection)
             workspace_id = uuid4()
+            actor_id = uuid4().hex if dialect == "sqlite" else uuid4()
+            stored_workspace_id = (
+                workspace_id.hex if dialect == "sqlite" else workspace_id
+            )
+            now = datetime.now(UTC)
             connection.execute(
-                Workspace.__table__.insert(),
+                workspaces.insert(),
                 {
-                    "id": workspace_id,
+                    "id": stored_workspace_id,
                     "slug": "personal-pointer",
+                    "directory_title_key": "pointer",
                     "title": "Pointer",
                     "name": "Pointer",
+                    "goal": "Preserve personal workspace pointer migration data",
+                    "default_language": "en",
+                    "library_policy": {},
+                    "write_policy": {},
+                    "citation_policy": {},
+                    "agent_injection_policy": {},
+                    "review_policy": {},
+                    "lint_policy": {},
+                    "auto_fix_enabled": False,
+                    "visibility": "private",
+                    "created_by_actor_id": actor_id,
+                    "owner_actor_id": actor_id,
+                    "created_at": now,
+                    "updated_at": now,
                 },
             )
             users = sa.Table("users", sa.MetaData(), autoload_with=connection)
             user_id = uuid4()
             stored_id = user_id.hex if dialect == "sqlite" else user_id
-            stored_workspace_id = (
-                workspace_id.hex if dialect == "sqlite" else workspace_id
-            )
-            now = datetime.now(UTC)
             connection.execute(
                 users.insert().values(
                     id=stored_id,
@@ -78,7 +94,7 @@ def test_personal_pointer_round_trip_keeps_workspaces_and_defaults(
                 )
             )
             connection.execute(
-                Workspace.__table__.update().values(owner_user_id=user_id)
+                workspaces.update().values(owner_user_id=stored_id)
             )
             connection.execute(
                 WorkspaceMembership.__table__.insert(),

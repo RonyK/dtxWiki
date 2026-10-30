@@ -696,7 +696,9 @@ def test_folder_overview_task_reconciles_when_overview_appears(session_factory):
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         folder = _overview_folder(session, workspace_id, "reconciled-overview")
-        first = run_trail_tick(session, workspace_id, now=NOW)
+        first = run_trail_tick(
+            session, workspace_id, now=NOW, usage_signals_enabled=True
+        )
         task = session.scalar(
             select(ClientDelegatedTask).where(
                 ClientDelegatedTask.task_type == "folder_overview_draft",
@@ -731,7 +733,9 @@ def test_folder_overview_task_reconciles_when_overview_appears(session_factory):
             )
         )
         session.flush()
-        second = run_trail_tick(session, workspace_id, now=NOW)
+        second = run_trail_tick(
+            session, workspace_id, now=NOW, usage_signals_enabled=True
+        )
 
     assert second["folder_overview_tasks"] == 0
     assert task.status == "expired"
