@@ -1,12 +1,11 @@
 """Workspace-scoped reads and mutations for workspace-plane models.
 
-These helpers are deliberately narrower than "any model with an ``id`` and a
-``workspace_id`` column". The table must be explicitly classified on the
-workspace plane, its workspace scope must be required, and its exact primary
-key must be the single ``id`` column. Batch mutations also support composite
-primary keys because their required workspace predicate represents the scope
-independently of each row's identity. Control- or mixed-plane tables need
-purpose-specific APIs.
+The table must be explicitly classified on the workspace plane and its
+workspace scope must be required. Identity-based lookups require the exact
+single-column primary key ``id``. Scoped statements and batch mutations also
+support composite primary keys because their required workspace predicate
+represents the scope independently of each row's identity. Control- or
+mixed-plane tables need purpose-specific APIs.
 """
 
 from collections.abc import Collection, Iterable, Mapping
@@ -66,10 +65,11 @@ def select_in_workspace[Model](
     """Build a query whose workspace predicate cannot be omitted by its caller.
 
     Both keyword forms narrow the required scope; even a contradictory
-    workspace criterion cannot widen it. Existing dev callers use conditions
-    and review callers use criteria on this one validated path.
+    workspace criterion cannot widen it. This statement does not select by
+    identity, so composite primary keys are supported. Existing dev callers
+    use conditions and review callers use criteria on this one validated path.
     """
-    _validate_workspace_model(model, operation="select_in_workspace")
+    _validate_workspace_scope(model, operation="select_in_workspace")
     return select(model).where(
         model.workspace_id == workspace_id,  # type: ignore[attr-defined]
         *criteria,

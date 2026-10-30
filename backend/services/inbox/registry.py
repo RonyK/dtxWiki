@@ -62,6 +62,12 @@ class InboxRegistry:
 
         return self._status.get(scope, ())
 
+    def archivable(self, scope: str, name: str) -> bool:
+        """Archive is for messages. A status item is current state and leaves
+        the inbox when it is resolved, so it is only read or unread."""
+
+        return all(kind.name != name for kind in self.status_kinds(scope))
+
     def kind(self, scope: str, name: str) -> InboxKind:
         """The registered kind, or a stand-in for a name this scope does not
         have: rows left behind by a kind whose code was removed still list

@@ -966,11 +966,14 @@ class ServiceRegistry:
 
     @cached_property
     def review(self):
+        from backend.services.inbox.kinds.review import ReviewResultNotifier
         from backend.services.review_service import ReviewService
 
         return ReviewService(
             context_media_repository_factory=self.context_media_repository_factory,
             body_preparer=self.body_preparer,
+            # Resolved on first decision, so review and inbox build in any order.
+            decision_listeners=(ReviewResultNotifier(lambda: self.inbox),),
         )
 
     @cached_property
@@ -991,16 +994,26 @@ class ServiceRegistry:
         return LintRegistry((*BUILTIN_LINT_MODULES, *self.lint_modules))
 
     @cached_property
+    def inbox_config(self):
+        # The one place Inbox settings are resolved. An operator override would
+        # overlay Settings onto these defaults here, once, at first use.
+        from backend.services.inbox import DEFAULT_INBOX_CONFIG
+
+        return DEFAULT_INBOX_CONFIG
+
+    @cached_property
     def inbox(self):
         from backend.services.inbox import (
-            BUILTIN_INBOX_KINDS,
             InboxRegistry,
             InboxService,
+            build_builtin_inbox_kinds,
         )
 
+        config = self.inbox_config
         return InboxService(
-            InboxRegistry((*BUILTIN_INBOX_KINDS, *self.inbox_kinds)),
+            InboxRegistry((*build_builtin_inbox_kinds(config), *self.inbox_kinds)),
             self.inbox_listeners,
+            listing=config.listing,
         )
 
     @cached_property

@@ -32,7 +32,13 @@ from backend.schemas.inbox import (
     InboxPageResponse,
     InboxStateParam,
 )
-from backend.services.inbox import AccountInbox, InboxScope, InboxViewer, WorkspaceInbox
+from backend.services.inbox import (
+    DEFAULT_INBOX_CONFIG,
+    AccountInbox,
+    InboxScope,
+    InboxViewer,
+    WorkspaceInbox,
+)
 from backend.services.read_errors import ReadServiceError
 
 router = APIRouter(tags=["inbox"])
@@ -40,7 +46,10 @@ router = APIRouter(tags=["inbox"])
 REST_ERROR_RESPONSES = {
     status: {"model": RESTErrorBody} for status in (401, 403, 404, 422, 503)
 }
-LimitParam = Annotated[int, Query(ge=1, le=100)]
+# Page size bounds are REST contract, so they come from the defaults at import
+# time rather than from a runtime override.
+_LISTING = DEFAULT_INBOX_CONFIG.listing
+LimitParam = Annotated[int, Query(ge=1, le=_LISTING.page_size_max)]
 
 
 @dataclass(frozen=True)
@@ -92,7 +101,7 @@ def add_inbox_routes(
         services: ServicesDep,
         state: InboxStateParam = "all",
         cursor: str | None = None,
-        limit: LimitParam = 30,
+        limit: LimitParam = _LISTING.page_size_default,
     ):
         try:
             with inbox.session_factory() as session:

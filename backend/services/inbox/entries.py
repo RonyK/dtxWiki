@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import and_, inspect, not_, or_, select
+from sqlalchemy import and_, func, inspect, not_, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -123,6 +123,25 @@ def marks_for(
             )
         )
     }
+
+
+def count_read_marks(
+    session: Session, scope: InboxScope, user_id: UUID, kind: str, *, cap: int
+) -> int:
+    """How many of the viewer's items of a kind carry a read mark, up to cap."""
+
+    model = scope.model
+    marked = (
+        select(model.item_key)
+        .where(
+            *_equal(model, scope.owner(user_id)),
+            model.kind == kind,
+            model.read_revision.is_not(None),
+        )
+        .limit(cap)
+        .subquery()
+    )
+    return session.scalar(select(func.count()).select_from(marked)) or 0
 
 
 def stored_page(

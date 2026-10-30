@@ -21,9 +21,14 @@ from backend.models.auth_verification import (
     EmailConflictRequest,
     EmailReauthenticationChallenge,
 )
+from backend.models.change import ChangeSet
 from backend.models.context import ContextPageVersion
 from backend.models.favorite import UserFavorite
-from backend.models.inbox import AccountInboxEntry, WorkspaceInboxEntry
+from backend.models.inbox import (
+    AccountInboxEntry,
+    WorkspaceInboxEntry,
+    WorkspaceInboxRecipient,
+)
 from backend.models.mail import EmailOutbox
 from backend.models.mcp_chat import McpChatSession
 from backend.models.mcp_trace import MCPWriteIdempotency
@@ -64,7 +69,7 @@ class UserAttribution:
 
     columns: tuple[InstrumentedAttribute, ...]
     # delete | clear | private_versions | author_name | api_tokens |
-    # owner_projection
+    # owner_projection | preserve | retire_inbox_recipient
     cleanup: str
     workspace_scoped: bool
     # (attribute, value) that marks the column as a human user id.
@@ -103,6 +108,14 @@ USER_ATTRIBUTIONS: tuple[UserAttribution, ...] = (
         as_text=True,
         outstanding=_private_version_outstanding,
     ),
+    # Submitted shared changes retain their author UUID. They can produce a
+    # later review result even after every other user footprint is gone.
+    UserAttribution(
+        (ChangeSet.actor_id,),
+        "preserve",
+        workspace_scoped=True,
+        actor_kind=("actor_type", "human"),
+    ),
     UserAttribution(
         (ContextPageVersion.actor_id,),
         "author_name",
@@ -133,7 +146,6 @@ USER_ATTRIBUTIONS: tuple[UserAttribution, ...] = (
         workspace_scoped=True,
     ),
     UserAttribution((UserFavorite.user_id,), "delete", workspace_scoped=True),
-    UserAttribution((WorkspaceInboxEntry.user_id,), "delete", workspace_scoped=True),
     UserAttribution(
         (MCPWriteIdempotency.actor_id,),
         "delete",
@@ -146,6 +158,15 @@ USER_ATTRIBUTIONS: tuple[UserAttribution, ...] = (
         "clear",
         workspace_scoped=True,
     ),
+    # Producers lock source rows before the recipient. Finish source cleanup
+    # first, retire the recipient using that same lock, then remove messages.
+    UserAttribution(
+        (WorkspaceInboxRecipient.user_id,),
+        "retire_inbox_recipient",
+        workspace_scoped=True,
+        outstanding=lambda: (WorkspaceInboxRecipient.deleted_at.is_(None),),
+    ),
+    UserAttribution((WorkspaceInboxEntry.user_id,), "delete", workspace_scoped=True),
     # Identity plane, in foreign-key-safe deletion order. Memberships are
     # workspace rows but leave with the identity, before the owner projection
     # is recomputed from the remaining owners.

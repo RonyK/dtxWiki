@@ -43,6 +43,8 @@ def _launcher(log_directory: Path, root: Path, url: str):
     env.update(
         DTXWIKI_DATA_DIR=str(root),
         DTXWIKI_AUTO_BOOTSTRAP="false",
+        # -P omits cwd; shared editable environments may name another worktree.
+        PYTHONPATH=str(REPO_ROOT),
         PYTHONUNBUFFERED="1",
     )
     port = _port()

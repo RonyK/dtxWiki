@@ -28,9 +28,10 @@ class StoredSource(WritableSource):
     """Items a producer writes in the same transaction as its source change.
 
     The write is a plain upsert: no commit, no lock beyond the rows it writes.
-    The producer holds its own source lock and passes the latest state, which
-    orders concurrent writes. Marks are kept; a new revision is unread because
-    the saved read revision no longer matches.
+    InboxService first locks eligible recipients under the scope's lifecycle
+    rule. The producer holds its own source lock and passes the latest state,
+    which orders concurrent writes. Marks are kept; a new revision is unread
+    because the saved read revision no longer matches.
     """
 
     def write(

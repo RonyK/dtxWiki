@@ -50,6 +50,7 @@ from backend.models import (
     Workspace,
     WorkspaceCredentialGrant,
     WorkspaceInboxEntry,
+    WorkspaceInboxRecipient,
     WorkspaceMediaQuotaUsage,
     WorkspaceMediaWriteIntent,
     WorkspaceMembership,
@@ -67,6 +68,7 @@ from backend.policy.rbac import (
 )
 from backend.repositories.audit_repo import insert_audit_event
 from backend.repositories.workspace_repo import get_workspace_by_slug
+from backend.repositories.workspace_scoped import delete_in_workspace
 from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.read import WorkspaceCreateRequest, WorkspaceSummary
 from backend.scripts.seed_dev import DEFAULT_AGENT_PAGE_SLUG
@@ -597,6 +599,9 @@ class WorkspaceWriteService:
             delete(WorkspaceInboxEntry).where(
                 WorkspaceInboxEntry.workspace_id == workspace_id
             )
+        )
+        session.execute(
+            delete_in_workspace(WorkspaceInboxRecipient, workspace_id=workspace_id)
         )
         session.execute(
             delete(WorkspaceTreeNode).where(

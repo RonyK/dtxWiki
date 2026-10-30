@@ -137,6 +137,7 @@ WORKSPACE_PLANE_TABLES: frozenset[str] = frozenset(
         "upload_asset_binding",
         "workspace_credential_grant",
         "workspace_inbox_entry",
+        "workspace_inbox_recipient",
         "workspace_media_quota_usage",
         "workspace_media_write_intent",
         "workspace_purge_grant",

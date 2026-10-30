@@ -2,6 +2,9 @@ import type { TFunction } from "i18next";
 import type { LucideIcon } from "lucide-react";
 
 import type { InboxItem } from "../../shared/api/inbox";
+import { accessKeyExpiryRenderer } from "./kinds/accessKey";
+import { reviewAttentionRenderer, reviewResultRenderer } from "./kinds/review";
+import { workspaceJoinRenderer } from "./kinds/workspaceJoin";
 
 // How one kind presents its items. Every part is optional: what a kind leaves
 // out falls back to what the server projected for the viewer.
@@ -13,7 +16,12 @@ export type InboxRenderer = {
 
 // The composition point for presentation: a kind defines its renderer in its
 // own module and lists it here; the screen never branches on a kind.
-export const INBOX_RENDERERS: Readonly<Record<string, InboxRenderer>> = {};
+export const INBOX_RENDERERS: Readonly<Record<string, InboxRenderer>> = {
+  review_attention: reviewAttentionRenderer,
+  review_result: reviewResultRenderer,
+  workspace_join: workspaceJoinRenderer,
+  access_key_expiry: accessKeyExpiryRenderer,
+};
 
 export type InboxPresentation = { title: string; summary: string | null; icon: LucideIcon | null };
 

@@ -457,6 +457,7 @@ test.describe("UI surface", () => {
 
     await page.setViewportSize({ width: 1050, height: 900 });
     await gotoWorkspaceDashboard(page);
+    await expect(page.getByRole("heading", { name: "Workspace Operations", exact: true })).toBeVisible();
 
     const search = page.getByRole("combobox", { name: "Search workspace" });
     const actions = page.locator(".topbar-actions");
@@ -475,6 +476,9 @@ test.describe("UI surface", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await gotoWorkspaceDashboard(page);
 
+    // Workspace hydration adds role-gated topbar actions. Measure only once
+    // that data has loaded, so the two rectangles belong to the same layout.
+    await expect(page.getByRole("heading", { name: "Workspace Operations", exact: true })).toBeVisible();
     const switcher = page.getByRole("button", { name: /Switch workspace/ });
     await expect(switcher).toBeVisible();
     const switcherBox = await switcher.boundingBox();

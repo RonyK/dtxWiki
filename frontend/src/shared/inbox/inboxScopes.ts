@@ -1,7 +1,7 @@
 import type { TFunction } from "i18next";
 
-import { ACCOUNT_INBOX_SCOPE, workspaceInboxScope, type InboxScope } from "../../shared/api/inbox";
-import type { WorkspaceSummary } from "../../shared/api/workspace";
+import { ACCOUNT_INBOX_SCOPE, workspaceInboxScope, type InboxScope } from "../api/inbox";
+import type { WorkspaceSummary } from "../api/workspace";
 
 export type InboxScopeOption = { scope: InboxScope; label: string };
 export type InboxScopeContext = { workspace: WorkspaceSummary | null; t: TFunction<"inbox"> };

@@ -160,10 +160,10 @@ EXPECTED_ALL_NULLABLE_EDGES: frozenset[str] = frozenset(
 
 
 def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
-    """Pin the census edge-by-edge: 58 edges, 55 of 85 tables blocked.
+    """Pin the census edge-by-edge: 58 edges, 55 of 86 tables blocked.
 
     Measured here, not copied: ``workspace`` 55 edges / 55 blocked tables,
-    ``users`` 3 edges / 2 blocked tables, 30 of the 85 shard-resident tables
+    ``users`` 3 edges / 2 blocked tables, 31 of the 86 shard-resident tables
     insertable, 4 edges all-nullable. Adding, removing or re-pointing any
     cross-plane FK changes ``labels`` and fails this test, which is the point
     -- the inventory is not allowed to move without a reviewer seeing it.
@@ -193,6 +193,8 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
 
     The per-user Inbox adds ``workspace_inbox_entry`` the same way (bare user
     and workspace UUIDs, no cross-plane FK): 85 = 84 + 1, insertable 30 = 29 + 1.
+    Its recipient lifecycle table also uses bare UUIDs: 86 = 85 + 1 and
+    insertable 31 = 30 + 1, without changing any control-plane FK edge.
     """
 
     edges = workspace_to_control_fk_edges()
@@ -209,7 +211,7 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     ]
 
     resident = WORKSPACE_PLANE_TABLES | MIXED_PLANE_TABLES
-    assert len(resident) == 85
+    assert len(resident) == 86
 
     by_parent = {
         parent: [edge for edge in edges if edge.parent == parent]
@@ -227,7 +229,7 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     blocked = shard_blocked_tables()
     assert set(blocked) <= resident
     assert len(blocked) == 55
-    assert len(resident) - len(blocked) == 30
+    assert len(resident) - len(blocked) == 31
 
     assert (
         frozenset(edge.label for edge in edges if edge.all_columns_nullable)
@@ -256,8 +258,7 @@ def test_the_blocker_summary_counts_the_live_census_rather_than_a_literal():
         parent_edges = [edge for edge in edges if edge.parent == parent]
         children = {edge.child for edge in parent_edges}
         assert (
-            f"  {parent}: {len(parent_edges)} edge(s) blocking "
-            f"{len(children)} table(s)"
+            f"  {parent}: {len(parent_edges)} edge(s) blocking {len(children)} table(s)"
         ) in blockers
 
 
@@ -373,10 +374,7 @@ def physical_split_enable_violations(
     if not reasons:
         return ()
     return (
-        *(
-            f"per-workspace physical database enabled: {signal}"
-            for signal in signals
-        ),
+        *(f"per-workspace physical database enabled: {signal}" for signal in signals),
         *reasons,
     )
 
@@ -521,8 +519,7 @@ def test_the_enable_gate_fails_for_a_provider_that_declares_the_split():
 
     signals = declared_topology_signals(provider)
     assert signals == (
-        f"the provider declares storage_topology="
-        f"{PER_WORKSPACE_DATABASE_TOPOLOGY!r}",
+        f"the provider declares storage_topology={PER_WORKSPACE_DATABASE_TOPOLOGY!r}",
     )
     assert physical_split_enable_violations(signals)
 

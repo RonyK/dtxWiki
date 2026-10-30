@@ -1,11 +1,11 @@
 import base64
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 from sqlalchemy import and_, exists, false, func, or_, select
@@ -129,6 +129,24 @@ RESOLVED_REVIEW_STATUSES = ("approved", "rejected")
 # Soft-claim TTL (D1): a claim older than this is stale and may be taken over
 # by another actor. Mirrors mcp_chat_service.IDLE_CLOSE_MINUTES.
 CLAIM_TTL_MINUTES = 30
+
+
+class ReviewDecisionListener(Protocol):
+    """Hears each approve, reject or request-changes decision as it is made,
+    inside the deciding transaction. Undo and retried requests are not
+    decisions and are not heard."""
+
+    def on_decision(
+        self,
+        session: Session,
+        *,
+        review: ReviewItem,
+        change_set: ChangeSet,
+        decision: ReviewDecision,
+        principal: UUID | None,
+    ) -> None: ...
+
+
 _INDIVIDUAL_AUDIENCE_KINDS = (
     ReviewAudienceKind.REQUESTER.value,
     ReviewAudienceKind.CHAT_OWNER.value,
@@ -240,12 +258,14 @@ class ReviewService:
         context_media_repository_factory: Callable[[Session], ContextMediaRepository]
         | None = None,
         body_preparer: BodyPreparer | None = None,
+        decision_listeners: Iterable[ReviewDecisionListener] = (),
     ) -> None:
         self.audit_service = audit_service or AuditService()
         self.body_preparer = (
             body_preparer if body_preparer is not None else BodyPreparer()
         )
         self.context_media_repository_factory = context_media_repository_factory
+        self.decision_listeners = tuple(decision_listeners)
 
     def list_reviews(
         self,
@@ -809,6 +829,153 @@ class ReviewService:
         if limit is not None:
             statement = statement.limit(max(1, min(limit, BULK_REVIEW_LIMIT)))
         return list(session.scalars(statement).all())
+
+    # ------------------------------------------------------------------
+    # Reviews a principal can act on now, for the Inbox
+    # ------------------------------------------------------------------
+
+    def actionable_reviews(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        *,
+        principal: UUID,
+        principal_role: str | None,
+        limit: int,
+    ) -> tuple[list[tuple[ReviewItem, ReviewDecision | None]], int]:
+        """Reviews the principal can decide now, most recently active first,
+        and how many there are.
+
+        The same gates as ``_action_unavailable_reason`` in SQL: no
+        reconciliation review, pending or routed to the principal, editor
+        role, and no live claim by someone else. A changes_requested review
+        comes with its current request for changes.
+        """
+
+        if not role_allows(principal_role or "none", "editor"):
+            return [], 0
+        cutoff = utc_now() - timedelta(minutes=CLAIM_TTL_MINUTES)
+        statement = select_in_workspace(
+            ReviewItem,
+            workspace_id=workspace_id,
+            conditions=(
+                ReviewItem.review_type != "context_reconciliation",
+                or_(
+                    ReviewItem.status == "pending",
+                    and_(
+                        ReviewItem.status == CHANGES_REQUESTED_STATUS,
+                        self._current_audience_predicate(
+                            principal=principal, principal_role=principal_role
+                        ),
+                    ),
+                ),
+                or_(
+                    ReviewItem.claimed_by.is_(None),
+                    ReviewItem.claimed_at.is_(None),
+                    ReviewItem.claimed_at <= cutoff,
+                    ReviewItem.claimed_by == principal,
+                ),
+            ),
+        )
+        total = session.scalar(select(func.count()).select_from(statement.subquery()))
+        reviews = session.scalars(
+            statement.order_by(
+                ReviewItem.updated_at.desc(), ReviewItem.id.desc()
+            ).limit(limit)
+        ).all()
+        requests = self._latest_requests_for_changes(
+            session,
+            workspace_id,
+            [r.id for r in reviews if r.status == CHANGES_REQUESTED_STATUS],
+        )
+        return [(review, requests.get(review.id)) for review in reviews], int(
+            total or 0
+        )
+
+    def actionable_review(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        review_id: UUID,
+        *,
+        principal: UUID,
+        principal_role: str | None,
+    ) -> tuple[ReviewItem, ReviewDecision | None] | None:
+        """One review the principal can decide now, with its current request
+        for changes when changes are requested; else None."""
+
+        review = get_in_workspace(
+            session, ReviewItem, workspace_id=workspace_id, resource_id=review_id
+        )
+        if review is None or self._action_unavailable_reason(
+            session,
+            review,
+            actor_user_id=principal,
+            actor_role=principal_role,
+            claimant_id=principal,
+        ):
+            return None
+        if review.status != CHANGES_REQUESTED_STATUS:
+            return review, None
+        requests = self._latest_requests_for_changes(session, workspace_id, [review.id])
+        return review, requests.get(review.id)
+
+    def latest_decisions(
+        self, session: Session, workspace_id: UUID, review_ids: Iterable[UUID]
+    ) -> dict[UUID, ReviewDecision]:
+        """Each review's most recent decision, undo records included."""
+
+        return self._latest_decisions_by_review(session, workspace_id, review_ids)
+
+    def _latest_requests_for_changes(
+        self, session: Session, workspace_id: UUID, review_ids: Iterable[UUID]
+    ) -> dict[UUID, ReviewDecision]:
+        return self._latest_decisions_by_review(
+            session,
+            workspace_id,
+            review_ids,
+            (ReviewDecision.decision_type == "request_changes",),
+        )
+
+    @staticmethod
+    def _latest_decisions_by_review(
+        session: Session,
+        workspace_id: UUID,
+        review_ids: Iterable[UUID],
+        conditions: tuple = (),
+    ) -> dict[UUID, ReviewDecision]:
+        ids = set(review_ids)
+        latest: dict[UUID, ReviewDecision] = {}
+        if not ids:
+            return latest
+        statement = select_in_workspace(
+            ReviewDecision,
+            workspace_id=workspace_id,
+            conditions=(ReviewDecision.review_item_id.in_(ids), *conditions),
+        ).order_by(ReviewDecision.created_at.desc(), ReviewDecision.id.desc())
+        for decision in session.scalars(statement):
+            latest.setdefault(decision.review_item_id, decision)
+        return latest
+
+    def review_target_titles(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        reviews: list[ReviewItem],
+        actor: ActorContext,
+    ) -> dict[UUID, str | None]:
+        """Each review's target title as this actor may see it (LEAK-03);
+        None when the actor may not see it or the target is not a page."""
+
+        metadata = _recent_context_target_metadata(
+            session, reviews=reviews, workspace_id=workspace_id, actor=actor
+        )
+        return {
+            review.id: metadata.get(review.change_set_id, _EMPTY_TARGET_METADATA)[
+                "target_title"
+            ]
+            for review in reviews
+        }
 
     def _current_audience_predicate(
         self, *, principal: UUID, principal_role: str | None
@@ -2763,6 +2930,14 @@ class ReviewService:
                 ),
             },
         )
+        for listener in self.decision_listeners:
+            listener.on_decision(
+                session,
+                review=review,
+                change_set=change_set,
+                decision=decision,
+                principal=principal,
+            )
         detail = self._detail(
             session,
             review,
@@ -3786,6 +3961,12 @@ class ReviewService:
         # broadcast, no user snapshot. NULL audience is the default and is
         # treated as kind-3 by the visibility filter (D2).
         return kind, None
+
+    @staticmethod
+    def chat_owner(session: Session, change_set: ChangeSet) -> UUID | None:
+        """The owner of the MCP chat that made the change, if known."""
+
+        return ReviewService._resolve_chat_owner(session, change_set)
 
     @staticmethod
     def _resolve_chat_owner(

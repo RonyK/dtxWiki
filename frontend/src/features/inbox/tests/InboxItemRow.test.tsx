@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
@@ -56,19 +56,21 @@ describe("InboxItemRow", () => {
     vi.restoreAllMocks();
   });
 
-  it("links only what the server resolved, lets a kind's renderer title it, and shows an unknown kind without content", async () => {
+  it("renders resolved and unknown items and marks their read state", async () => {
     await i18n.changeLanguage("en");
     const resolved: InboxItem = {
       ...base,
       kind: "test.note",
       item_key: "note",
+      unread: false,
       display: { title: "Review ready", href: "/workspaces/00000000-0000-4000-8000-000000000008/review", params: {} },
     };
+    const onMark = vi.fn();
     render(
       <MemoryRouter>
         <ul>
-          <InboxItemRow busy={false} item={base} onMark={vi.fn()} />
-          <InboxItemRow busy={false} item={resolved} onMark={vi.fn()} />
+          <InboxItemRow busy={false} item={base} onMark={onMark} />
+          <InboxItemRow busy={false} item={resolved} onMark={onMark} />
         </ul>
       </MemoryRouter>,
     );
@@ -79,6 +81,14 @@ describe("InboxItemRow", () => {
       "href",
       "/workspaces/00000000-0000-4000-8000-000000000008/review",
     );
+    const markRead = screen.getByRole("button", { name: "Mark as read" });
+    const markUnread = screen.getByRole("button", { name: "Mark as unread" });
+    expect(markRead).toHaveAttribute("title", "Mark as read");
+    expect(markUnread).toHaveAttribute("title", "Mark as unread");
+    fireEvent.click(markRead);
+    fireEvent.click(markUnread);
+    expect(onMark).toHaveBeenNthCalledWith(1, base, { read: true });
+    expect(onMark).toHaveBeenNthCalledWith(2, resolved, { read: false });
     const t = i18n.getFixedT("en", "inbox");
     const renderers = {
       "test.note": { title: () => "Rendered by its kind", summary: () => "Its summary" },

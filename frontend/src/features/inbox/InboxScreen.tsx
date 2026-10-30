@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, Circle, CircleDot } from "lucide-react";
+import { Archive, ArchiveRestore, Circle, CircleDot, Mail, MailOpen } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -20,7 +20,8 @@ import { StatusBanner } from "../../shared/components/StatusBanner";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import { parseWorkspaceRoute, workspacePath } from "../../shared/lib/workspaceRoutes";
 import { presentInboxItem } from "./inboxRenderers";
-import { inboxScopeOptions } from "./inboxScopes";
+import { inboxScopeOptions } from "../../shared/inbox/inboxScopes";
+import { notifyInboxChanged } from "../../shared/inbox/useInboxUnread";
 
 function itemKey(item: InboxItem) {
   return `${item.kind}:${item.item_key}`;
@@ -41,10 +42,13 @@ export function InboxItemRow({
   item,
   busy,
   onMark,
+  archivable = true,
 }: {
   item: InboxItem;
   busy: boolean;
   onMark: (item: InboxItem, marks: { read?: boolean; archived?: boolean }) => void;
+  // A status item is current state: it leaves when resolved, so it has no archive.
+  archivable?: boolean;
 }) {
   const { t, i18n } = useTranslation("inbox");
   const { title, summary, icon: Icon } = presentInboxItem(item, t);
@@ -73,23 +77,27 @@ export function InboxItemRow({
       </div>
       <div className="inbox-row-actions">
         <button
-          className="icon-button text-button"
-          disabled={busy}
-          onClick={() => onMark(item, { read: item.unread })}
-          type="button"
-        >
-          {item.unread ? t("actions.markRead") : t("actions.markUnread")}
-        </button>
-        <button
-          aria-label={item.archived ? t("actions.unarchive") : t("actions.archive")}
+          aria-label={item.unread ? t("actions.markRead") : t("actions.markUnread")}
           className="icon-button"
           disabled={busy}
-          onClick={() => onMark(item, { archived: !item.archived })}
-          title={item.archived ? t("actions.unarchive") : t("actions.archive")}
+          onClick={() => onMark(item, { read: item.unread })}
+          title={item.unread ? t("actions.markRead") : t("actions.markUnread")}
           type="button"
         >
-          {item.archived ? <ArchiveRestore size={16} aria-hidden="true" /> : <Archive size={16} aria-hidden="true" />}
+          {item.unread ? <MailOpen size={16} aria-hidden="true" /> : <Mail size={16} aria-hidden="true" />}
         </button>
+        {archivable ? (
+          <button
+            aria-label={item.archived ? t("actions.unarchive") : t("actions.archive")}
+            className="icon-button"
+            disabled={busy}
+            onClick={() => onMark(item, { archived: !item.archived })}
+            title={item.archived ? t("actions.unarchive") : t("actions.archive")}
+            type="button"
+          >
+            {item.archived ? <ArchiveRestore size={16} aria-hidden="true" /> : <Archive size={16} aria-hidden="true" />}
+          </button>
+        ) : null}
       </div>
     </li>
   );
@@ -165,6 +173,7 @@ export function InboxScreen() {
       // The response carries the item's current state, including a newer
       // revision when the mark was not applied, so loaded pages stay in place.
       const result = await markInboxItem(activeScope, item, marks);
+      notifyInboxChanged();
       if (request === requestRef.current) {
         setPage((current) => current && withItem(current, result.item, state));
       }
@@ -175,10 +184,11 @@ export function InboxScreen() {
     }
   }
 
-  const rows = (items: InboxItem[]) => (
+  const rows = (items: InboxItem[], archivable = true) => (
     <ul className="inbox-list">
       {items.map((item) => (
         <InboxItemRow
+          archivable={archivable}
           busy={busyKey === itemKey(item)}
           item={item}
           key={itemKey(item)}
@@ -187,7 +197,8 @@ export function InboxScreen() {
       ))}
     </ul>
   );
-  const empty = page && page.items.length === 0 && page.status_items.length === 0;
+  // Nothing to list can still leave an overflow count or a cursor to follow.
+  const nothingShown = page && page.items.length === 0 && page.status_items.length === 0;
 
   return (
     <div className="workspace-screen single-column">
@@ -227,13 +238,12 @@ export function InboxScreen() {
         {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
         {!page ? (
           error ? null : <RouteLoading label={t("loading")} />
-        ) : empty ? (
-          <p className="empty-state">{t(`empty.${state}`)}</p>
         ) : (
           <>
+            {nothingShown ? <p className="empty-state">{t(`empty.${state}`)}</p> : null}
             {page.status_items.length > 0 || page.status_overflow.length > 0 ? (
               <section className="feature-section inbox-status" aria-label={t("status.label")}>
-                {rows(page.status_items)}
+                {page.status_items.length > 0 ? rows(page.status_items, false) : null}
                 {page.status_overflow.map((overflow) => (
                   <p className="inbox-overflow" key={overflow.kind}>
                     {t("status.overflow", { total: overflow.total })}

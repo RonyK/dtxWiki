@@ -101,15 +101,31 @@
 
 ### Inbox (planned for 0.2.0)
 
-- Add the Inbox foundation. The top bar opens `/inbox`, which lists messages
-  addressed to the signed-in user in the current workspace or on the account,
-  with read, unread and archive marks. No message kinds are registered yet;
-  the changes that add them also define who receives what.
+- Add four built-in Inbox kinds. The top bar opens the workspace Inbox or the
+  account Inbox at `/inbox`, and shows a dot when either has an unread item.
+  - Reviews you can decide now: pending reviews for editors, and requests for
+    changes routed to you. They leave when decided, superseded or claimed by
+    someone else.
+  - Approval or rejection of your change by another person. Automatic and
+    your own decisions are not announced; an undone decision disappears.
+  - Workspace join requests for owners, and the result for the requester for
+    14 days.
+  - Access Keys expiring within 7 days, or expired within the last 7 days.
+- Current-state items are read or unread only; messages can also be archived.
+- Review and membership notices link to their explicit workspace screens;
+  Access Key notices open `/account/integrations`.
 - `GET /api/v1/workspaces/{workspace_id}/inbox` and `GET /api/v1/users/me/inbox`
   list items; `POST …/marks` sets marks. A mark applies only to the revision the
   client saw, so a late request cannot mark newer news as read.
 - New tables `workspace_inbox_entry` (workspace plane) and `account_inbox_entry`
   (control plane) in revision `175b9664724e`. Downgrade drops them and their rows.
+- Revision `6f4a9f50c046` adds workspace-local recipient deletion markers so
+  retained shared reviews cannot recreate Inbox data after account removal.
+  Upgrades also fence already-deleted authors and remove their orphan Inbox
+  entries while preserving shared history. Downgrade drops the markers.
+- Hide rejected join results when their workspace becomes private, stop scoped
+  screens when membership or selection no longer matches their URL, and follow
+  continuation pages when checking for unread messages.
 
 ### Fixes
 
