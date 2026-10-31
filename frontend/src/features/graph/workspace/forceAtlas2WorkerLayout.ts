@@ -1,5 +1,7 @@
 import { MultiGraph } from "graphology";
 import FA2LayoutSupervisor from "graphology-layout-forceatlas2/worker";
+// @ts-expect-error -- pinned upstream 0.10.1 ships its official Worker body without declarations.
+import officialWorkerBody from "graphology-layout-forceatlas2/webworker.js";
 
 import { createWorkspaceForceAtlas2CollisionWorker } from "./forceAtlas2CollisionWorker";
 
@@ -56,8 +58,29 @@ type Supervisor = FA2LayoutSupervisor<NodeAttributes, EdgeAttributes>;
 // declarations. Own message delivery ordering without changing its algorithm.
 type OwnedSupervisor = Supervisor & {
   worker: Worker;
+  running: boolean;
   handleMessage(event: MessageEvent<unknown>): void;
 };
+
+// Upstream spawns each Worker from a Blob URL of this official body and revokes
+// it in the same task. WebKit resolves a Worker's Blob URL only when the script
+// load starts, so that Worker never ran there ("Failed to load resource") and
+// the Map failed as soon as its 2K layout started. One URL per document, never
+// revoked, like a bundled script; upstream's spawn protocol is otherwise kept.
+let officialWorkerUrl: string | undefined;
+
+class RetainedUrlSupervisor extends FA2LayoutSupervisor<NodeAttributes, EdgeAttributes> {
+  spawnWorker() {
+    const owned = this as unknown as OwnedSupervisor;
+    owned.worker?.terminate();
+    officialWorkerUrl ??= URL.createObjectURL(new Blob([`(${officialWorkerBody}).call(this);`],
+      { type: "text/javascript" }));
+    owned.worker = new Worker(officialWorkerUrl);
+    owned.worker.addEventListener("message", owned.handleMessage);
+    if (owned.running) { owned.running = false; owned.start(); }
+  }
+}
+
 type Run = {
   generation: number;
   supervisor: Supervisor;
@@ -214,7 +237,7 @@ export function createWorkspaceForceAtlas2WorkerLayout(
       if (contactUnits) collisionWorker = createWorkspaceForceAtlas2CollisionWorker({
         radii: Float32Array.from(contactUnits.collisionRadiusModel), pins: [...pins],
       });
-      supervisor = new FA2LayoutSupervisor<NodeAttributes, EdgeAttributes>(graph, {
+      supervisor = new RetainedUrlSupervisor(graph, {
         settings: { ...SETTINGS, adjustSizes: progress.phase === "contact" },
         outputReducer(key: string, attributes: NodeAttributes): NodeAttributes {
           updatingGeneration = token;
