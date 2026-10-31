@@ -38,6 +38,7 @@ describe("AuthContext", () => {
 
     expect(await screen.findByTestId("status")).toHaveTextContent("authenticated");
     expect(screen.getByTestId("email")).toHaveTextContent("user@example.com");
+    window.sessionStorage.setItem("dtxwiki:workspace-graph:v2:actor:workspace:latest", "private state");
 
     await user.click(screen.getByRole("button", { name: "refresh" }));
 
@@ -48,9 +49,12 @@ describe("AuthContext", () => {
         "The server could not complete the request. Please try again.",
       );
     });
+    expect(window.sessionStorage.getItem("dtxwiki:workspace-graph:v2:actor:workspace:latest")).toBe("private state");
   });
 
   it("treats 401 refresh as anonymous without sessionError", async () => {
+    window.sessionStorage.setItem("dtxwiki:workspace-graph:workspace-one:latest", "private graph data");
+    window.sessionStorage.setItem("unrelated", "keep");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       jsonResponse(
         {
@@ -73,6 +77,8 @@ describe("AuthContext", () => {
     expect(screen.getByTestId("email")).toHaveTextContent("none");
     expect(screen.getByTestId("session-error")).toHaveTextContent("none");
     expect(screen.getByTestId("session-checked")).toHaveTextContent("checked");
+    expect(window.sessionStorage.getItem("dtxwiki:workspace-graph:workspace-one:latest")).toBeNull();
+    expect(window.sessionStorage.getItem("unrelated")).toBe("keep");
   });
 
   it("can defer the initial session check on public auth routes", async () => {
@@ -441,6 +447,49 @@ describe("AuthContext", () => {
     expect(sessionStorage.getItem(draftKey)).toBeNull();
     expect(sessionStorage.getItem(`${draftKey}.pending`)).toBeNull();
     expect(sessionStorage.getItem("unrelated.session.preference")).toBe("preserve");
+  });
+
+  it("purges only Map session storage when auth expires elsewhere", () => {
+    window.sessionStorage.setItem("dtxwiki:workspace-graph:v2:actor:workspace:latest", "private state");
+    window.sessionStorage.setItem("dtxwiki:workspace-graph:workspace:latest", "legacy private state");
+    window.sessionStorage.setItem("unrelated", "keep");
+    render(<AuthProvider skipInitialSessionCheck><AuthProbe /></AuthProvider>);
+    act(() => window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT)));
+    expect(window.sessionStorage.getItem("dtxwiki:workspace-graph:v2:actor:workspace:latest")).toBeNull();
+    expect(window.sessionStorage.getItem("dtxwiki:workspace-graph:workspace:latest")).toBeNull();
+    expect(window.sessionStorage.getItem("unrelated")).toBe("keep");
+  });
+
+  it("purges Map state when an authenticated session is replaced by another actor", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(jsonResponse({
+      data: { ...userPayload("first@example.com"), user_id: "00000000-0000-0000-0000-000000000011" },
+    }));
+    render(<AuthProvider><AuthProbe /></AuthProvider>);
+    await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent("first@example.com"));
+    const key = "dtxwiki:workspace-graph:v2:actor:workspace:latest";
+    window.sessionStorage.setItem(key, "first actor state");
+    window.sessionStorage.setItem("unrelated", "keep");
+    await userEvent.click(screen.getByRole("button", { name: "authenticate" }));
+    expect(screen.getByTestId("email")).toHaveTextContent("login@example.com");
+    expect(window.sessionStorage.getItem(key)).toBeNull();
+    expect(window.sessionStorage.getItem("unrelated")).toBe("keep");
+  });
+
+  it("purges Map data before a pending sign-out round trip and again after it completes", async () => {
+    const logout = deferred<Response>();
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => logout.promise);
+    render(<AuthProvider skipInitialSessionCheck><AuthProbe /></AuthProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "authenticate" }));
+    const key = "dtxwiki:workspace-graph:v2:actor:workspace:latest";
+    window.sessionStorage.setItem(key, "private state");
+    window.sessionStorage.setItem("unrelated", "keep");
+    await userEvent.click(screen.getByRole("button", { name: "sign out" }));
+    expect(window.sessionStorage.getItem(key)).toBeNull();
+    window.sessionStorage.setItem(key, "late private state");
+    await act(async () => logout.resolve(jsonResponse({ data: {} })));
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
+    expect(window.sessionStorage.getItem(key)).toBeNull();
+    expect(window.sessionStorage.getItem("unrelated")).toBe("keep");
   });
 });
 

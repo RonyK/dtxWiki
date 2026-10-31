@@ -3244,6 +3244,7 @@ button.history-card {
 
   .page-workspace,
   .workspace-screen,
+  .workspace-screen[data-has-left="false"],
   .citation-write-policy-grid,
   .editor-grid,
   .editor-form,

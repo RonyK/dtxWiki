@@ -169,10 +169,10 @@ test("lazily imported route chunks and authenticated API traffic stay on the one
   page,
 }, testInfo) => {
   // The anonymous boot above only ever fetches the entry chunk and the two
-  // unauthenticated auth probes. Every other chunk (SettingsScreen,
-  // markdown-renderer, mermaid, cytoscape — separate manualChunks entries in
-  // frontend/vite.config.ts) is dynamically imported behind RequireAuth, so a
-  // second origin reachable only through `base` or a CDN asset host would not
+  // unauthenticated auth probes. Other route and feature chunks (SettingsScreen,
+  // markdown-renderer, Mermaid, and the graph renderers) load only when their
+  // authenticated surfaces need them, so a second origin reachable only
+  // through `base` or a CDN asset host would not
   // show up there.
   const watch = watchOrigins(page);
 

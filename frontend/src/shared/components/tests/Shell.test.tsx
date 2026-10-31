@@ -897,9 +897,9 @@ describe("Shell", () => {
       expect(screen.getByRole("main")).toHaveTextContent("content"),
     );
     await waitFor(() => expect(workspaceListReads).toBe(2));
-    expect(
+    await waitFor(() => expect(
       window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
-    ).toBe(beta.id);
+    ).toBe(beta.id));
   });
 
   it("rejects a legacy target query before mounting the scoped resource screen", async () => {
@@ -987,19 +987,23 @@ describe("Shell", () => {
       />,
     );
 
+    const switcher = await screen.findByRole("button", { name: /Switch workspace/ });
+    await waitFor(() => expect(
+      window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
+    ).toBe("11111111-1111-4111-8111-111111111111"));
     await screen.findByText("mounted");
-    expect(mountCount).toBe(1);
+    const mountsBeforeSwitch = mountCount;
     const documentElement = document.documentElement;
 
-    await user.click(screen.getByRole("button", { name: /Switch workspace/ }));
+    await user.click(switcher);
     await user.click(screen.getByRole("button", { name: /Second/ }));
 
-    await waitFor(() => expect(mountCount).toBeGreaterThan(1));
+    await waitFor(() => expect(
+      window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
+    ).toBe("22222222-2222-4222-8222-000000000001"));
+    expect(mountCount).toBe(mountsBeforeSwitch + 1);
     expect(document.documentElement).toBe(documentElement);
     expect(screen.getByTestId("location")).toHaveTextContent("/workspaces/22222222-2222-4222-8222-000000000001/context");
-    expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe(
-      "22222222-2222-4222-8222-000000000001",
-    );
   });
 
   it("keeps workspace selection side effects behind a committed dirty-route navigation", async () => {

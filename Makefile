@@ -1,4 +1,4 @@
-.PHONY: install dev-db-up dev-db-down migrate seed backend-dev frontend-dev export-schemas gen-client verify-gen-client verify-generated-schemas bundle-frontend build-wheel docker-image docker-build test-backend test-backend-serial test-backend-benchmarks test-frontend test-e2e test-packaged test-acceptance test-static test-release-gate test lint check-i18n sync-csp
+.PHONY: install dev-db-up dev-db-down migrate seed backend-dev frontend-dev export-schemas gen-client verify-gen-client verify-generated-schemas bundle-frontend build-wheel docker-image docker-build test-backend test-backend-serial test-backend-benchmarks test-graph-view test-frontend test-e2e test-packaged test-acceptance test-static test-release-gate test lint check-i18n sync-csp
 
 PYTHON ?= python3
 VENV ?= .venv
@@ -114,6 +114,13 @@ test-backend-serial:
 # instead and the budgets run here: serially, on request, never in `make test`.
 test-backend-benchmarks:
 	DTXWIKI_TEST_BENCHMARKS=1 $(VENV_PYTHON) -m pytest $(BENCHMARK_TESTS) -q -k benchmark
+
+# Edge cases of the Graph View expansion replay and map screen. Run on
+# request beside graph changes; PR CI never collects tests/graph_view or the
+# frontend tests/extended directory.
+test-graph-view:
+	$(VENV_PYTHON) -m pytest tests/graph_view -q
+	npm --workspace frontend run test:graph-view
 
 test-frontend:
 	npm --workspace frontend run test -- --run

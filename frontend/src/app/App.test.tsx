@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider } from "../shared/auth/AuthContext";
 import { setLocale } from "../shared/i18n";
+import { WorkspaceGraphGate } from "../features/graph/WorkspaceGraphGate";
 import {
   appRoutes,
   isAuthBootstrapPath,
@@ -446,8 +447,25 @@ describe("appRoutes role gating", () => {
     },
   );
 
-  it("does not register the /context-map alias (no map feature exists)", () => {
+  it("does not register the retired /context-map alias", () => {
     expect(findRoute(appRoutes, "/context-map")).toBeNull();
+  });
+
+  it("always registers the Knowledge Map behind sign-in and the capability gate", () => {
+    // Whether the map is on is a per-workspace server answer, so the route
+    // exists in every build and the gate decides what it shows.
+    const route = findRoute(appRoutes, "/workspaces/:workspaceId/graph");
+    expect(route).not.toBeNull();
+    const element = route?.element;
+    if (!isValidElement<{ children?: ReactNode }>(element)) {
+      throw new Error("/graph route has no element");
+    }
+    expect(element.type).toBe(RequireAuth);
+    const gate = element.props.children;
+    if (!isValidElement(gate)) {
+      throw new Error("/graph route has no gate");
+    }
+    expect(gate.type).toBe(WorkspaceGraphGate);
   });
 
   it.each(["/workspaces/11111111-1111-4111-8111-111111111111/ask", "/workspaces/11111111-1111-4111-8111-111111111111/ask/:askSessionId"])(

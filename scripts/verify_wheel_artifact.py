@@ -25,11 +25,29 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import tomllib
 import zipfile
 from collections.abc import Sequence
+from email.parser import Parser
 from pathlib import Path
 
 from deploy_static_bundle import _local_entry_files
+from packaging.utils import (
+    InvalidSdistFilename,
+    InvalidWheelFilename,
+    parse_sdist_filename,
+    parse_wheel_filename,
+)
+from packaging.version import InvalidVersion, Version
+
+# This is Vite's emitted URL literal for our one module collision Worker,
+# not a general JavaScript/import parser. Match its quoted content hash so an
+# unrelated old Worker file cannot stand in for the adapter's required asset.
+_COLLISION_WORKER_URL = re.compile(
+    r'new\s+URL\(\s*(?P<quote>["\'])'
+    r"(?P<path>/assets/forceAtlas2Collision\.worker-[A-Za-z0-9_-]+\.js)"
+    r"(?P=quote)\s*,\s*import\.meta\.url\s*\)"
+)
 
 # Canonical IDs of the historical schema boundaries, base first. Later revisions
 # descend from the core boundary and converge to one head. A merge preserves
@@ -38,6 +56,35 @@ RELEASED_CHAIN_BASE = [
     ["bd62193d5cf6", None],
     ["efcbcf724889", "bd62193d5cf6"],
 ]
+# This feature needs its own revision; an artifact containing only the frozen
+# core chain would still resolve a valid Alembic head but could not run Graph View.
+GRAPH_MIGRATION = Path(
+    "backend/migrations/versions/v0_2/9aeab6944f25_add_graph_view.py"
+)
+GRAPH_RUNTIME_FILES = tuple(
+    Path(path)
+    for path in (
+        "backend/api/graph.py",
+        "backend/api/middleware/workspace_graph_compression.py",
+        "backend/cli/commands/graph.py",
+        "backend/context_media/domain/rendered_markdown.py",
+        "backend/repositories/graph_density_repo.py",
+        "backend/schemas/graph.py",
+        "backend/schemas/workspace_graph.py",
+        "backend/services/context_link_advisory.py",
+        "backend/services/graph_density.py",
+        "backend/services/graph_observation_service.py",
+        "backend/services/graph_query_service.py",
+        "backend/services/graph_rank.py",
+        "backend/services/graph_reprojection.py",
+        "backend/services/graph_semantics.py",
+        "backend/services/indexing/co_read.py",
+        "backend/services/page_link_ordering.py",
+        "backend/services/workspace_graph_capability.py",
+        "backend/services/workspace_graph_service.py",
+        "backend/utils/markdown_links.py",
+    )
+)
 # SHA-256 of released revisions and their implementation modules, relative to
 # backend/migrations. A deliberate second copy of
 # backend/migrations/frozen_revisions.json: editing a released revision and
@@ -214,6 +261,65 @@ def _check_frontend_bundle(root: Path) -> list[str]:
     return failures
 
 
+def _check_graph_release_bundle(root: Path) -> list[str]:
+    """Require the Graph renderer payload when qualifying a release tag.
+
+    Generic artifact checks also support backend-only fixtures. Publishing
+    with --release-version additionally requires the final Graph UI assets.
+    """
+
+    static = root / "backend" / "static"
+    failures: list[str] = []
+    # The module Worker is lazy-loaded from the map adapter, not index.html.
+    # A missing package-data entry used to pass the direct-entry check above
+    # and fail only when the 2K layout reached contact projection. Check both
+    # wheel and sdist here; the upstream ForceAtlas2 Blob Worker is embedded in
+    # the adapter and does not have a separate file to require.
+    if not any(
+        path.is_file() and path.stat().st_size > 0
+        for path in (static / "assets").glob("forceAtlas2Collision.worker-*.js")
+    ):
+        failures.append(
+            "backend/static/assets/forceAtlas2Collision.worker-*.js is missing "
+            "or empty (the 2K layout requires its module collision Worker)"
+        )
+    failures.extend(_check_2k_worker_references(static))
+    return failures
+
+
+def _check_2k_worker_references(static: Path) -> list[str]:
+    """Verify the exact Worker hash the built JavaScript requests."""
+
+    references: set[tuple[Path, Path]] = set()
+    failures: list[str] = []
+    for javascript in sorted((static / "assets").rglob("*.js")):
+        try:
+            source = javascript.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            failures.append(
+                f"backend/static/{javascript.relative_to(static)} "
+                "is not UTF-8 JavaScript"
+            )
+            continue
+        references.update(
+            (javascript.relative_to(static), Path(match["path"].lstrip("/")))
+            for match in _COLLISION_WORKER_URL.finditer(source)
+        )
+    if not references:
+        failures.append(
+            "backend/static/assets JavaScript has no 2K collision Worker URL "
+            "reference (expected Vite's new URL(...,import.meta.url) literal)"
+        )
+    for javascript, reference in sorted(references):
+        worker = static / reference
+        if not worker.is_file() or worker.stat().st_size == 0:
+            failures.append(
+                f"backend/static/{javascript.as_posix()} references "
+                f"backend/static/{reference.as_posix()}, which is missing or empty"
+            )
+    return failures
+
+
 LICENSE_TEXTS = ("LICENSE", "LICENSE-AGPL-3.0", "LICENSE-ELv2", "NOTICE")
 THIRD_PARTY_NOTICES = Path("backend") / "static" / "THIRD_PARTY_NOTICES.txt"
 
@@ -253,6 +359,8 @@ def _check_alembic_payload(root: Path) -> list[str]:
     failures: list[str] = []
     if not (root / "backend" / "alembic.ini").is_file():
         failures.append("backend/alembic.ini is missing")
+    if not (root / GRAPH_MIGRATION).is_file():
+        failures.append(f"{GRAPH_MIGRATION.as_posix()} is missing")
     modules = (
         root
         / "backend"
@@ -295,6 +403,167 @@ def _check_alembic_payload(root: Path) -> list[str]:
             "backend/migrations/release_manifest.json is missing or invalid"
         )
     return failures
+
+
+def _check_release_schema(
+    root: Path, artifact: Path, head: str | None, release_version: str
+) -> list[str]:
+    """Tie a tag to the metadata and schema boundary inside each artifact.
+
+    A patch with no database changes inherits its nearest earlier boundary.
+    A future entry must not make an older package with a new migration pass.
+    This is an explicit publishing check: development artifacts may qualify
+    their runtime before the owner chooses the next release version.
+    """
+
+    try:
+        expected = Version(release_version)
+    except InvalidVersion:
+        return [f"invalid expected release version {release_version!r}"]
+
+    return [
+        *_check_release_identity(root, artifact, release_version, expected),
+        *_check_schema_boundary(root, head, expected),
+    ]
+
+
+def _check_release_identity(
+    root: Path, artifact: Path, release_version: str, expected: Version
+) -> list[str]:
+    """Read built metadata, never the checkout's package version."""
+
+    failures: list[str] = []
+    try:
+        if artifact.suffix == ".whl":
+            name, version, _, _ = parse_wheel_filename(artifact.name)
+        else:
+            name, version = parse_sdist_filename(artifact.name)
+    except (InvalidWheelFilename, InvalidSdistFilename) as error:
+        failures.append(f"invalid release artifact filename: {error}")
+    else:
+        if name != "dtxwiki" or version != expected:
+            failures.append(
+                f"artifact filename identifies {name} version {version}, "
+                f"expected dtxwiki release version {release_version}"
+            )
+
+    if artifact.suffix == ".whl":
+        metadata_dirs = sorted(root.glob("*.dist-info"))
+        expected_directory = f"dtxwiki-{expected}.dist-info"
+        if (
+            len(metadata_dirs) != 1
+            or metadata_dirs[0].name != expected_directory
+            or not metadata_dirs[0].is_dir()
+        ):
+            return [
+                *failures,
+                "wheel release metadata directory must be exactly "
+                f"{expected_directory}",
+            ]
+        metadata_path = metadata_dirs[0] / "METADATA"
+    else:
+        metadata_path = root / "PKG-INFO"
+    if not metadata_path.is_file():
+        failures.append("release metadata is missing or ambiguous")
+    else:
+        try:
+            metadata = Parser().parsestr(
+                metadata_path.read_text(encoding="utf-8"), headersonly=True
+            )
+        except (OSError, UnicodeError):
+            failures.append("release metadata is unreadable")
+        else:
+            if metadata.get_all("Name") != ["dtxwiki"]:
+                failures.append(
+                    "release metadata must identify Name: dtxwiki exactly once"
+                )
+            if metadata.get_all("Version") != [release_version]:
+                failures.append(
+                    f"release metadata must identify Version: {release_version} "
+                    "exactly once"
+                )
+
+    if artifact.suffix != ".whl":
+        try:
+            project = tomllib.loads(
+                (root / "pyproject.toml").read_text(encoding="utf-8")
+            )["project"]
+            valid = (
+                project["name"] == "dtxwiki" and project["version"] == release_version
+            )
+        except (OSError, ValueError, KeyError, TypeError):
+            valid = False
+        if not valid:
+            failures.append(
+                "sdist pyproject metadata name/version does not match "
+                f"dtxwiki release version {release_version}"
+            )
+    return failures
+
+
+def _check_schema_boundary(
+    root: Path, head: str | None, expected: Version
+) -> list[str]:
+    """Require this version's effective packaged schema boundary to be its head."""
+
+    try:
+        manifest = json.loads(
+            (root / "backend/migrations/release_manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        entries = manifest["schema_releases"]
+        if not isinstance(entries, dict) or not entries:
+            raise ValueError("schema_releases must be a nonempty mapping")
+        applicable: list[tuple[Version, str, str]] = []
+        for release, entry in entries.items():
+            boundary = Version(release)
+            if (
+                len(boundary.release) != 3
+                or boundary.epoch
+                or boundary.local
+                or str(boundary) != release
+            ):
+                raise ValueError(f"noncanonical schema release version {release!r}")
+            group = f"v{boundary.major}_{boundary.minor}"
+            revision = entry["head"]
+            if entry["group"] != group or not isinstance(revision, str):
+                raise ValueError(f"invalid schema group/head for {release}")
+            if (
+                not re.fullmatch(r"[A-Za-z0-9_]+", revision)
+                or len(
+                    list(
+                        (root / "backend/migrations/versions" / group).glob(
+                            f"{revision}_*.py"
+                        )
+                    )
+                )
+                != 1
+            ):
+                raise ValueError(f"schema head {revision!r} is not in group {group}")
+            if boundary <= expected:
+                applicable.append((boundary, release, revision))
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return [f"invalid release_manifest schema mapping: {error}"]
+
+    if not applicable:
+        return [f"no schema release boundary applies to version {expected}"]
+    _, boundary_version, mapped_head = max(applicable)
+    if mapped_head != head:
+        return [
+            f"release version {expected} inherits schema boundary "
+            f"{boundary_version} head {mapped_head}, but packaged Alembic "
+            f"head is {head}; record the new schema boundary before release"
+        ]
+    return []
+
+
+def _check_graph_runtime_payload(root: Path) -> list[str]:
+    return [
+        f"{relative.as_posix()} is missing"
+        for relative in GRAPH_RUNTIME_FILES
+        if not (root / relative).is_file()
+    ]
 
 
 def _check_frozen_migrations(root: Path) -> list[str]:
@@ -577,7 +846,9 @@ def _unpack(artifact: Path, extract: Path) -> tuple[Path | None, list[str]]:
     return entries[0], []
 
 
-def verify_artifact(artifact: Path, extract: Path) -> tuple[list[str], str | None]:
+def verify_artifact(
+    artifact: Path, extract: Path, *, release_version: str | None = None
+) -> tuple[list[str], str | None]:
     """Return this artifact's release-blocking problems and its evidence line."""
 
     root, failures = _unpack(artifact, extract)
@@ -590,9 +861,13 @@ def verify_artifact(artifact: Path, extract: Path) -> tuple[list[str], str | Non
         *_check_retired_mcp_transport(root),
         *_check_env_files(root),
         *_check_alembic_payload(root),
+        *_check_graph_runtime_payload(root),
         *_check_frozen_migrations(root),
         *graph_failures,
     ]
+    if release_version is not None:
+        problems.extend(_check_graph_release_bundle(root))
+        problems.extend(_check_release_schema(root, artifact, head, release_version))
     if problems:
         return [f"{artifact.name}: {problem}" for problem in problems], None
     return [], (
@@ -609,6 +884,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument(
         "dist", help="path to the dist/ directory upload-artifact will publish"
+    )
+    parser.add_argument(
+        "--release-version",
+        help=(
+            "require artifact metadata and effective schema boundary to match "
+            "this tag version"
+        ),
     )
     arguments = parser.parse_args(argv)
 
@@ -627,7 +909,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     evidence: list[str] = []
     for artifact in artifacts:
         with tempfile.TemporaryDirectory() as workspace:
-            problems, line = verify_artifact(artifact, Path(workspace) / "artifact")
+            problems, line = verify_artifact(
+                artifact,
+                Path(workspace) / "artifact",
+                release_version=arguments.release_version,
+            )
         failures.extend(problems)
         if line is not None:
             evidence.append(line)

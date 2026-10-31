@@ -353,6 +353,2583 @@ body[data-focus-mode="true"] .main-surface {
   font-weight: 700;
 }
 
+/* Interactive Context graph. The WebGL canvas is intentionally paired
+   with native controls and lists; canvas pixels are never the only operable or
+   readable representation of the scene. */
+.graph-view {
+  container-name: graph-view;
+  container-type: inline-size;
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.graph-view-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.graph-view-header h3,
+.graph-view-header p,
+.graph-timeline h4,
+.graph-timeline p,
+.graph-relationship-list h4,
+.graph-relationship-list p,
+.graph-details h4,
+.graph-details h5 {
+  margin: 0;
+}
+
+.graph-view-header h3 {
+  color: var(--ink);
+  font-size: 18px;
+}
+
+.graph-view-header p,
+.graph-relationship-list > p,
+.graph-details > p,
+.graph-timeline-heading-row p,
+.graph-timeline-motion-note {
+  margin-top: 4px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.graph-view-count {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.graph-local-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-soft);
+}
+
+.graph-local-toolbar-title {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.graph-local-relation-chips {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.graph-local-relation-chip,
+.graph-local-label-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.graph-local-relation-chip[aria-pressed="false"],
+.graph-local-label-toggle[aria-pressed="false"] {
+  color: var(--ink-muted);
+  opacity: 0.65;
+}
+
+.graph-local-relation-chip:disabled { cursor: default; opacity: 0.45; }
+.graph-local-relation-chip:hover:not(:disabled),
+.graph-local-label-toggle:hover { border-color: var(--context); }
+.graph-local-relation-chip:focus-visible,
+.graph-local-label-toggle:focus-visible { outline: 2px solid var(--context); outline-offset: 2px; }
+
+.graph-local-relation-chip-link { --relation-ink: #64748b; }
+.graph-local-relation-chip-citation { --relation-ink: #0f9f8f; }
+.graph-local-relation-chip-coAccess { --relation-ink: #ea580c; }
+.graph-local-relation-chip-membership { --relation-ink: #64748b; }
+.graph-local-relation-chip-action { --relation-ink: #7c3aed; }
+
+.graph-local-relation-line {
+  display: inline-block;
+  width: 18px;
+  border-top: 2px solid var(--relation-ink);
+}
+.graph-local-relation-chip-citation .graph-local-relation-line { border-top-style: dashed; }
+.graph-local-relation-chip-coAccess .graph-local-relation-line { border-top-style: dotted; }
+.graph-local-relation-chip-membership .graph-local-relation-line { border-top-style: dashed; }
+.graph-local-relation-chip-action .graph-local-relation-line {
+  height: 2px;
+  border: 0;
+  background: repeating-linear-gradient(to right, var(--relation-ink) 0 10px, transparent 10px 13px);
+}
+.graph-local-action-legend { display: flex; align-items: center; gap: 6px; }
+.graph-local-action-legend .graph-local-relation-line { flex-shrink: 0; }
+
+.graph-local-relation-count {
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.graph-filter-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.graph-filter-bar > summary {
+  display: list-item;
+  min-height: 32px;
+  align-content: center;
+}
+
+.graph-filter-bar:not([open]) > :not(summary) {
+  display: none;
+}
+
+.graph-filter-options > summary {
+  color: var(--ink-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.graph-filter-options-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+  padding-top: 10px;
+}
+
+.graph-filter-summary {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.graph-filter-summary button,
+.graph-active-filters button {
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+}
+
+.graph-filter-summary button:disabled {
+  opacity: 0.45;
+}
+
+.graph-active-filters {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.graph-active-filters button {
+  min-height: 30px;
+  padding: 3px 9px;
+  border-color: color-mix(in srgb, var(--context) 46%, var(--border));
+  color: var(--context);
+  font-size: 11px;
+}
+
+.graph-filter-group {
+  min-width: 0;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.graph-filter-group legend {
+  padding: 0 4px;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.graph-filter-group > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.graph-filter-group label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  min-width: 0;
+  color: var(--ink-muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.graph-filter-group input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--context);
+}
+
+.graph-legend,
+.graph-static-fallback,
+.graph-relationship-list > details {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.graph-legend > summary,
+.graph-static-fallback > summary,
+.graph-relationship-list > details > summary {
+  min-height: 38px;
+  padding: 9px 12px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.graph-legend-groups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0 12px 12px;
+}
+
+.graph-legend-groups ul {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 7px 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.graph-legend-groups li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.graph-local-node-cue {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
+
+.graph-edge-swatch {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 0;
+  border-top: 2px solid var(--ink-muted);
+}
+
+.graph-edge-swatch-evidence,
+.graph-edge-swatch-action { border-top-style: dashed; }
+.graph-edge-swatch-activity { border-top-style: dotted; }
+.graph-edge-swatch-action { border-top-width: 3px; }
+
+.graph-kind-cue,
+.graph-action-cue {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  min-width: 24px;
+  height: 18px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.graph-action-cue { border-style: dashed; }
+.graph-action-cue-authoring { border-style: dashed; }
+.graph-action-cue-governance { border-radius: 50%; border-style: solid; }
+.graph-action-cue-retrieval { border-style: dotted; }
+.graph-action-cue-tool { border-style: double; }
+
+.graph-canvas-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: -8px;
+}
+
+.graph-local-depth-control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.graph-local-depth-note {
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.graph-local-depth-control button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.graph-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.graph-icon-button:hover:not(:disabled),
+.graph-filter-summary button:hover:not(:disabled),
+.graph-active-filters button:hover,
+.graph-list-actions button:hover:not(:disabled) {
+  border-color: var(--context);
+  color: var(--context);
+}
+
+.graph-canvas-frame {
+  position: relative;
+  min-width: 0;
+  min-height: clamp(300px, 52cqi, 520px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background:
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 0) 0 0 / 18px 18px,
+    var(--surface);
+}
+
+.graph-canvas {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  min-height: 300px;
+}
+
+/* The WebGL renderer reads optional --graph-* tokens with literal fallbacks.
+   Match the existing document theme as well as an isolated graph theme. */
+:root[data-theme="dark"] .graph-canvas,
+.graph-canvas[data-graph-theme="dark"] {
+  color: #e5e7eb;
+  --graph-surface: #0f172a;
+  --graph-node-context: #8b5cf6;
+  --graph-node-library: #0d9488;
+  --graph-node-folder: #94a3b8;
+  --graph-edge-link: #64748b;
+  --graph-edge-citation: #0d9488;
+  --graph-edge-membership: #64748b;
+  --graph-edge-action: #a78bfa;
+}
+
+.graph-canvas-status {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  z-index: 1;
+  max-width: min(420px, calc(100% - 28px));
+  margin: 0;
+  padding: 8px 12px;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.graph-canvas-error { color: var(--danger); }
+
+/* Semantic CPU layout progress, not a blocking renderer-loading overlay. */
+.workspace-map-layout-status {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  z-index: 2;
+  max-width: min(420px, calc(100% - 24px));
+  margin: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+.graph-local-stage {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  min-width: 0;
+}
+
+.graph-local-stage .graph-canvas-frame {
+  min-height: clamp(360px, 52cqi, 540px);
+  background: #f3f4f9;
+}
+.graph-local-stage .graph-canvas { --graph-surface: #f3f4f9; }
+:root[data-theme="dark"] .graph-local-stage .graph-canvas-frame { background: #111827; }
+:root[data-theme="dark"] .graph-local-stage .graph-canvas { --graph-surface: #111827; }
+.graph-local-stage .graph-details {
+  position: absolute;
+  inset-block: 12px auto;
+  inset-inline: auto 12px;
+  z-index: 2;
+  width: min(300px, calc(100% - 24px));
+  min-height: 0;
+  max-height: calc(100% - 24px);
+  overflow: auto;
+}
+
+.graph-local-stage .graph-details[hidden] { display: none; }
+
+.graph-details-control-region {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.graph-details-clear-selection .graph-details-clear-icon { display: none; }
+
+.graph-details-actions,
+.graph-details-context-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.graph-details-actions a,
+.graph-details-actions button,
+.graph-details-context-actions a,
+.graph-details-context-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-soft);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.graph-details-actions a:hover,
+.graph-details-actions button:hover,
+.graph-details-context-actions a:hover,
+.graph-details-context-actions button:hover { border-color: var(--context); color: var(--context); }
+
+.graph-empty-state {
+  min-height: 180px;
+  margin: 0;
+  padding: 60px 20px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-card);
+  color: var(--ink-muted);
+  text-align: center;
+}
+
+.graph-timeline {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-soft);
+}
+
+.graph-timeline-heading-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.graph-timeline h4,
+.graph-relationship-list h4,
+.graph-details h4 {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.graph-history-mode,
+.graph-timeline-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.graph-history-mode select,
+.graph-timeline-speed select {
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background-color: var(--surface);
+  color: var(--ink);
+}
+
+.graph-timeline-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.graph-timeline-controls input[type="range"] {
+  flex: 1 1 180px;
+  min-width: 90px;
+  accent-color: var(--context);
+}
+
+.graph-timeline-position {
+  flex: 0 0 auto;
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.graph-timeline-event {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  min-height: 20px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.graph-timeline-event span { color: var(--ink-muted); }
+
+.graph-timeline-event em {
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.graph-parity-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+.graph-relationship-list,
+.graph-details {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.graph-relationship-list > details > ul {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0 8px 8px;
+  list-style: none;
+}
+
+.graph-relationship-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border-top: 1px solid var(--border);
+}
+
+.graph-list-select {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 6px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.graph-list-select > span:last-child {
+  display: grid;
+  min-width: 0;
+}
+
+.graph-local-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.graph-local-list > li { min-width: 0; }
+.graph-relationship-list .graph-local-list > li { grid-template-columns: minmax(0, 1fr); }
+.graph-local-list > li > .graph-list-select { width: 100%; }
+.graph-scene-navigation { min-width: 0; }
+
+.graph-list-select strong,
+.graph-list-select small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-list-select small {
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.graph-list-select[aria-pressed="true"] {
+  color: var(--context);
+  font-weight: 700;
+}
+
+.graph-scene-navigation > summary {
+  min-height: 44px;
+  padding: 10px 4px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.graph-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.graph-list-actions a,
+.graph-list-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 34px;
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.graph-list-actions button:disabled { opacity: 0.45; }
+
+.graph-action-reason {
+  grid-column: 1 / -1;
+  margin: -3px 4px 7px;
+  color: var(--ink-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.graph-details h5 {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.graph-details dl {
+  display: grid;
+  grid-template-columns: minmax(88px, auto) minmax(0, 1fr);
+  gap: 6px 10px;
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+}
+
+.graph-details dt {
+  color: var(--ink-muted);
+  font-weight: 700;
+}
+
+.graph-details dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+.graph-static-fallback .markdown-view { padding: 0 12px 12px; }
+
+.graph-print-fallback { display: none; }
+
+@container graph-view (max-width: 760px) {
+  .graph-filter-options-grid,
+  .graph-legend-groups {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .graph-local-stage .graph-details {
+    inset-block: auto 0;
+    inset-inline: 0;
+    width: auto;
+    max-height: 45%;
+    gap: 4px;
+    padding: 8px;
+  }
+
+  .graph-details-control-region { gap: 4px; }
+  .graph-details-actions { flex-wrap: nowrap; }
+  .graph-details-actions .graph-details-clear-selection {
+    flex: 0 0 44px;
+    width: 44px;
+    padding: 0;
+  }
+  .graph-details-clear-selection .graph-details-clear-icon { display: block; }
+  .graph-details-clear-selection .graph-details-clear-label { display: none; }
+  .graph-details-context-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+  .graph-details-context-actions > a,
+  .graph-details-context-actions > button {
+    min-width: 44px;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+  .graph-details-context-actions > :only-child {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .graph-view-header,
+  .graph-timeline-heading-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .graph-view-count { align-self: flex-start; }
+
+  .graph-timeline-controls { flex-wrap: wrap; }
+
+  .graph-timeline-controls input[type="range"] {
+    order: 5;
+    flex-basis: calc(100% - 74px);
+  }
+
+  .graph-timeline-position { order: 6; }
+}
+
+@container graph-view (max-width: 440px) {
+  .graph-local-relation-chip,
+  .graph-local-label-toggle,
+  .graph-filter-options > summary,
+  .graph-filter-group label,
+  .graph-icon-button,
+  .graph-filter-summary button,
+  .graph-active-filters button,
+  .graph-history-mode select,
+  .graph-timeline-speed select,
+  .graph-list-actions a,
+  .graph-list-actions button,
+  .graph-legend > summary,
+  .graph-static-fallback > summary,
+  .graph-relationship-list > details > summary {
+    min-height: 44px;
+  }
+
+  .graph-icon-button {
+    width: 44px;
+    min-width: 44px;
+  }
+
+  .graph-relationship-list li { grid-template-columns: minmax(0, 1fr); }
+  .graph-list-actions { padding: 0 4px 7px; }
+  .graph-list-actions a,
+  .graph-list-actions button { flex: 1 1 auto; }
+  .graph-canvas-frame { min-height: 330px; }
+  .graph-details dl { grid-template-columns: minmax(0, 1fr); }
+  .graph-details dd { margin-bottom: 5px; }
+}
+
+@media (forced-colors: active) {
+  .graph-view,
+  .graph-local-toolbar,
+  .graph-canvas-frame,
+  .graph-filter-bar,
+  .graph-filter-group,
+  .graph-legend,
+  .graph-timeline,
+  .graph-relationship-list,
+  .graph-details,
+  .graph-static-fallback {
+    forced-color-adjust: auto;
+    border-color: CanvasText;
+  }
+
+  .graph-canvas-frame { background: Canvas; }
+  .graph-kind-cue,
+  .graph-action-cue,
+  .graph-local-relation-chip,
+  .graph-local-label-toggle { border-color: CanvasText; }
+  /* The SVG already uses the system ink/surface read by GraphView. Automatic
+     recoloring would fill the inner conversation ring with the outer ink. */
+  .graph-local-node-cue { forced-color-adjust: none; }
+  .graph-edge-swatch { border-top-color: CanvasText; }
+  .graph-local-relation-chip-action { --relation-ink: CanvasText; }
+  .graph-local-relation-chip-action .graph-local-relation-line { forced-color-adjust: none; }
+  .graph-list-select[aria-pressed="true"] { outline: 3px solid Highlight; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graph-view *,
+  .graph-view *::before,
+  .graph-view *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+@media print {
+  .graph-filter-bar,
+  .graph-canvas-toolbar,
+  .graph-canvas-frame,
+  .graph-timeline-controls,
+  .graph-parity-grid {
+    display: none !important;
+  }
+
+  .graph-static-fallback { display: none !important; }
+  .graph-print-fallback {
+    display: block !important;
+    break-inside: avoid;
+  }
+}
+
+/* The title has its own panel. Search and filters float inside the map,
+   which fills the remaining viewport alongside the details inspector. */
+.workspace-graph-screen {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-graph-screen > .workspace-screen {
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.workspace-graph-screen .workspace-screen > .feature-main.workspace-graph {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-row: 1;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.feature-main.workspace-graph > .workspace-graph-top-panel {
+  position: relative;
+  z-index: 5;
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  padding: 12px;
+}
+
+.feature-main.workspace-graph > .workspace-graph-body {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+}
+
+.workspace-graph-overlays {
+  position: absolute;
+  inset: 12px 12px auto;
+  z-index: 5;
+  display: grid;
+  /* One canvas-wide column: long chip rows scroll instead of widening it. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  pointer-events: none;
+}
+
+.workspace-graph-overlays > * { pointer-events: auto; }
+
+.workspace-graph-overlays > .workspace-graph-toolbar {
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.workspace-graph-overlays > .workspace-graph-overlay-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.workspace-graph-overlay-actions > * { pointer-events: auto; }
+
+/* One-line notices over the canvas; the full text opens on demand. */
+.workspace-graph-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+
+.workspace-graph-notice.is-warning {
+  border-color: #f5d08a;
+  color: #7c4a03;
+}
+
+.workspace-graph-notice > p {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-graph-notice[data-expanded="true"] > p {
+  white-space: normal;
+}
+
+.workspace-graph-notice strong {
+  color: var(--ink);
+}
+
+.workspace-graph-notice-more,
+.workspace-graph-notice-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.workspace-graph-notice-dismiss {
+  min-width: 26px;
+  padding: 0;
+  color: var(--ink-muted);
+}
+
+.workspace-graph-notice-more:hover,
+.workspace-graph-notice-dismiss:hover {
+  background: var(--surface-hover);
+}
+
+/* Map selection summary in the sheet layout; it sits above the canvas
+   controls and takes over the sheet toggle's corner while shown. */
+.workspace-graph-selection-card {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.workspace-graph-selection-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workspace-graph-selection-card-head > strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+}
+
+.workspace-graph-selection-card > p {
+  margin: 0;
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-graph-selection-card .workspace-graph-detail-actions {
+  margin-top: 6px;
+}
+
+.workspace-graph-selection-card-details {
+  margin-left: auto;
+}
+
+.workspace-graph-screen[data-selection-card="true"] .workspace-mobile-inspector-toggle,
+.workspace-graph-screen[data-selection-card="true"] .workspace-map-layout-status {
+  display: none;
+}
+
+/* Collapsed inspector holding a selection the user has not opened. */
+.workspace-panel-restore[data-attention="true"] {
+  position: relative;
+}
+
+.workspace-panel-restore[data-attention="true"]::after {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  content: "";
+}
+
+.workspace-graph-body > .workspace-graph-stage {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+.workspace-graph-body > .empty-state {
+  align-self: center;
+  min-height: 0;
+  max-height: 100%;
+  overflow: auto;
+  margin: 12px;
+}
+
+.workspace-graph-canvas-slot,
+.workspace-graph-canvas-host {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The fullscreen panel is fixed; its host on <body> must not add page height. */
+.workspace-graph-canvas-host.is-fullscreen {
+  display: contents;
+}
+
+.workspace-graph-screen .inspector-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.workspace-graph-screen .workspace-graph-list,
+.workspace-graph-screen .workspace-graph-details {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.workspace-graph-screen .workspace-graph-metadata dl {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.workspace-graph-screen .graph-legend-groups {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.workspace-graph-screen .workspace-graph-advanced-controls {
+  flex-shrink: 0;
+}
+
+.workspace-graph .workspace-graph-header {
+  align-items: center;
+  margin-bottom: 0;
+  gap: 8px;
+}
+
+.workspace-graph .workspace-graph-header h1 { font-size: 22px; }
+
+.workspace-graph-coverage {
+  /* Shrink and wrap on a row of its own instead of clipping at 320 px. */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--ink-muted);
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.workspace-graph-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-soft);
+  padding: 12px;
+}
+
+.workspace-graph-controls .workspace-graph-control {
+  flex: 0 1 180px;
+}
+
+.workspace-graph-controls .workspace-graph-refine-trigger {
+  flex-wrap: wrap;
+}
+
+/* Keep the first map/list in view; disclosures overlay, never add header rows. */
+.workspace-graph-controls.workspace-graph-toolbar {
+  position: relative;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+}
+
+.workspace-graph-toolbar .workspace-graph-control { flex: 0 1 140px; }
+.workspace-graph-toolbar .workspace-graph-visible-search {
+  display: flex;
+  flex: 1 1 160px;
+  gap: 6px;
+}
+.workspace-graph-toolbar .workspace-graph-visible-search input { width: 100%; }
+.workspace-graph-toolbar > button { flex: 0 0 auto; }
+.workspace-graph-toolbar .workspace-graph-refine-trigger { flex-wrap: nowrap; }
+.workspace-graph-view-options { flex: 0 0 auto; }
+.workspace-graph-view-options > summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 750;
+  list-style: none;
+}
+.workspace-graph-view-options > summary::-webkit-details-marker { display: none; }
+.workspace-graph-view-options > summary:focus-visible {
+  outline: 2px solid var(--context);
+  outline-offset: 2px;
+}
+.workspace-graph-view-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 5;
+  display: grid;
+  gap: 8px;
+  width: min(280px, calc(100vw - 40px));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 4px 24px rgb(0 0 0 / 15%);
+  padding: 12px;
+}
+.workspace-graph-view-panel label { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.workspace-graph-view-panel select { min-height: 44px; min-width: 0; flex: 1; }
+.workspace-graph-view-panel small { color: var(--ink-muted); }
+.workspace-graph-toolbar .workspace-graph-orphan-toggle { font-size: 11px; }
+
+.workspace-graph-refine-state {
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  padding: 3px 7px;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.workspace-graph-refine-state.is-pending {
+  background: var(--context-soft);
+  color: var(--context);
+}
+
+.workspace-graph-advanced-controls {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-soft);
+}
+
+.workspace-graph-advanced-controls > summary {
+  padding: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.workspace-graph-advanced-controls > summary:focus-visible {
+  outline: 2px solid var(--context);
+  outline-offset: 2px;
+}
+
+.workspace-graph-advanced-count {
+  margin-left: 8px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.workspace-graph-advanced-controls:not([open]) > .workspace-graph-advanced-body {
+  display: none;
+}
+
+.workspace-graph-advanced-controls[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+
+/* The details sidebar is narrow: Edit filters takes a row, Folder and Time share the next. */
+.workspace-graph-advanced-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.workspace-graph-advanced-body > button:first-of-type {
+  grid-column: 1 / -1;
+}
+
+.workspace-graph-control,
+.workspace-graph-kind-control,
+.workspace-graph-refine-section label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.workspace-graph-control input,
+.workspace-graph-control select,
+.workspace-graph-controls > button,
+.workspace-graph-advanced-body > button,
+.workspace-graph-refine select,
+.workspace-graph-refine input[type="date"],
+.workspace-graph-refine button {
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--surface);
+  color: var(--ink);
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.workspace-graph-controls > button,
+.workspace-graph-advanced-body > button,
+.workspace-graph-refine button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.workspace-graph-kind-control {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.workspace-graph-kind-control legend {
+  grid-column: 1 / -1;
+  padding: 0;
+}
+
+.workspace-graph-kind-control label,
+.workspace-graph-refine-section > label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 7px 9px;
+}
+
+.workspace-graph-kind-control input,
+.workspace-graph-refine-section input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--context);
+}
+
+.workspace-graph-quick-filters {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.workspace-graph-quick-filters button {
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.workspace-graph-quick-filters button[aria-pressed="true"] {
+  border-color: var(--context);
+  background: var(--context-soft);
+  color: var(--context);
+}
+
+.workspace-graph-apply {
+  border-color: var(--context) !important;
+  background: var(--context) !important;
+  color: white !important;
+}
+
+.workspace-graph-controls button:disabled,
+.workspace-graph-advanced-controls button:disabled,
+.workspace-graph-refine button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.workspace-graph-advanced-body > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.workspace-graph-metadata {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: 12px;
+}
+
+.workspace-graph-metadata dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.workspace-graph-metadata dl > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.workspace-graph-metadata dt {
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.workspace-graph-metadata dd,
+.workspace-graph-metadata p {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.workspace-graph-metadata p {
+  color: var(--ink-muted);
+}
+
+.workspace-graph-visible-search {
+  display: grid;
+  grid-template-columns: auto auto minmax(180px, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workspace-graph-visible-search label {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.workspace-graph-visible-search input {
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 8px 10px;
+}
+
+.workspace-graph-selection-note {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.workspace-graph-selection-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  color: var(--ink);
+  padding: 5px 9px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 750;
+}
+
+.workspace-graph-selection-clear:hover {
+  border-color: var(--context);
+  color: var(--context);
+}
+
+.workspace-graph-node-cue {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  background: var(--graph-node-context, #7c3aed);
+  border-radius: 50%;
+}
+
+.workspace-graph-node-cue.is-library {
+  background: var(--graph-node-library, #0f9f8f);
+  border-radius: 2px;
+}
+
+.workspace-graph-node-cue.is-cluster {
+  width: 20px;
+  height: 20px;
+  background: var(--graph-node-folder, #64748b);
+}
+
+.workspace-graph-stage {
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-graph-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.workspace-graph-orphan-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.workspace-graph-folder-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 10px 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.workspace-graph-folder-controls button,
+.workspace-graph-folder-toggle,
+.workspace-graph-folder-index button,
+.workspace-map-folder-action,
+.workspace-map-folder-details button {
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.workspace-graph-folder-controls button[aria-pressed="true"],
+.workspace-graph-folder-toggle[aria-pressed="true"],
+.workspace-graph-folder-index button[aria-pressed="true"] {
+  border-color: var(--context);
+  background: var(--context-soft);
+}
+
+.workspace-graph-folder-index { grid-area: folders; margin: 0; }
+.workspace-graph-folder-index summary { cursor: pointer; padding: 8px 0; }
+.workspace-graph-folder-index ul {
+  display: flex;
+  flex-wrap: wrap;
+  max-height: 220px;
+  overflow: auto;
+  gap: 6px;
+  list-style: none;
+  padding: 0;
+}
+.workspace-graph-folder-index button { max-width: 100%; overflow-wrap: anywhere; }
+.workspace-map-folder-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.workspace-map-folder-children { display: flex; flex-wrap: wrap; gap: 6px; }
+.workspace-map-folder-children h3 { flex-basis: 100%; }
+.workspace-map-folder-details ul { padding-left: 0; list-style: none; }
+.workspace-map-folder-details li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.workspace-map-folder-details .workspace-graph-list-select { flex: 1; min-width: 0; }
+.workspace-map-folder-details > ul:not(.workspace-map-folder-bundles) {
+  max-height: 448px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.workspace-map-folder-bundles li { flex-wrap: wrap; margin: 6px 0; }
+.workspace-map-folder-bundles small { flex-basis: 100%; }
+.workspace-map-member-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--graph-node-context, #7c3aed);
+}
+.workspace-map-member-dot.is-library {
+  border-radius: 0;
+  background: var(--graph-node-library, #0f9f8f);
+}
+
+.workspace-graph-orphan-summary button {
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--context);
+}
+
+.workspace-graph-list,
+.workspace-graph-details,
+.workspace-graph-canvas-panel {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.workspace-graph-list {
+  grid-area: list;
+  padding: 12px;
+}
+
+.workspace-graph-list h2,
+.workspace-graph-list h3,
+.workspace-graph-list p,
+.workspace-graph-details h2,
+.workspace-graph-details h3,
+.workspace-graph-details p {
+  margin: 0;
+}
+
+.workspace-graph-list h2,
+.workspace-graph-details h2 {
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.workspace-graph-list h3 {
+  margin-top: 14px;
+  color: var(--ink-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.workspace-graph-list > p,
+.workspace-graph-details > p {
+  margin-top: 4px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.workspace-graph-list ul {
+  display: grid;
+  gap: 1px;
+  margin: 7px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+ul.workspace-graph-windowed-list {
+  display: block;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Virtual spacers own scroll position; browser anchoring must not pull a
+     manually scrolled list when its bounded rows are replaced. */
+  overflow-anchor: none;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+p.workspace-graph-list-window-hint {
+  margin-top: 7px;
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.workspace-graph-windowed-list > li.workspace-graph-virtual-row {
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.workspace-graph-windowed-list > li.workspace-graph-list-spacer {
+  display: block;
+  border: 0;
+  padding: 0;
+}
+
+.workspace-graph-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border-top: 1px solid var(--border);
+  padding: 8px;
+}
+
+.workspace-graph-list li:hover,
+.workspace-graph-list li:focus-within {
+  background: var(--surface-hover);
+}
+
+.workspace-graph-list li:has(> button[aria-pressed="true"]) {
+  background: color-mix(in srgb, var(--context) 6%, var(--surface));
+}
+
+.workspace-graph-list li > button {
+  min-width: 0;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  border-radius: 5px;
+  padding: 0;
+}
+
+/* Reused by the document list and folder-member details. */
+.workspace-graph-list-select {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+}
+
+.workspace-graph-list li > button[aria-pressed="true"] {
+  color: var(--context);
+  font-weight: 750;
+}
+
+.workspace-graph-list-select strong,
+.workspace-graph-list-select small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-graph-list-select small {
+  color: var(--ink-muted);
+  font-size: 10px;
+}
+
+.workspace-graph-list .workspace-graph-list-select strong {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.workspace-graph-list .workspace-graph-list-select small {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.workspace-graph-list-actions a,
+.workspace-graph-list-actions button,
+.workspace-graph-detail-actions a,
+.workspace-graph-detail-actions button,
+.workspace-graph-load-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.workspace-graph-list-actions svg,
+.workspace-graph-detail-actions svg {
+  flex: none;
+}
+
+.workspace-graph-list-actions :is(a, button):hover,
+.workspace-graph-detail-actions :is(a, button):hover {
+  background: var(--surface-hover);
+  color: var(--context);
+}
+
+.workspace-graph-detail-actions .workspace-graph-detail-open {
+  border-color: color-mix(in srgb, var(--context) 25%, var(--border));
+  background: color-mix(in srgb, var(--context) 7%, var(--surface));
+  color: var(--context);
+}
+
+.workspace-graph-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.workspace-graph-load-more {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.workspace-graph-canvas-panel {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
+
+.workspace-graph-canvas-panel .graph-canvas-toolbar {
+  margin: 0;
+}
+
+.workspace-graph-canvas-controls {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.workspace-graph-canvas-controls > .workspace-graph-selection-note {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: fit-content;
+  max-width: 100%;
+  z-index: 3;
+  background: var(--surface);
+}
+
+.workspace-graph-canvas-controls .workspace-graph-layout-hint {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+/* Empty overlay space remains draggable/selectable canvas at every width. */
+.workspace-graph-canvas-panel .workspace-graph-canvas-controls {
+  position: absolute;
+  inset: auto 12px 12px;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.workspace-graph-canvas-controls > * { pointer-events: auto; }
+
+.workspace-graph-canvas-controls .graph-canvas-toolbar {
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 4px;
+  box-shadow: var(--shadow-1);
+}
+
+.workspace-graph-canvas-controls .workspace-graph-layout-hint {
+  width: fit-content;
+  background: var(--surface);
+  padding: 4px;
+}
+
+.workspace-graph-canvas-panel .graph-canvas-frame {
+  isolation: isolate;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.workspace-graph-canvas-panel .graph-canvas {
+  min-height: 0;
+}
+
+.workspace-graph-canvas-panel:not(.is-mobile-open) .workspace-map-layout-status {
+  bottom: 72px;
+}
+
+.workspace-graph-canvas-panel > p {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.workspace-graph-details {
+  grid-area: details;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.workspace-graph-details > h2 {
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.workspace-graph-details h3 {
+  overflow-wrap: anywhere;
+  font-size: 16px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.workspace-graph-details dl {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+  gap: 6px 10px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.workspace-graph-details dt {
+  color: var(--ink-muted);
+  font-weight: 750;
+}
+
+.workspace-graph-details dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.workspace-graph-details .workspace-graph-detail-fields {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.workspace-graph-detail-fields > div {
+  display: grid;
+  grid-template-columns: minmax(88px, 0.85fr) minmax(0, 1.15fr);
+  align-items: baseline;
+  gap: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  padding: 8px 0;
+}
+
+.workspace-graph-detail-fields > div:first-child { padding-top: 0; }
+.workspace-graph-detail-fields > div:last-child { border-bottom: 0; padding-bottom: 0; }
+.workspace-graph-detail-fields dt { font-weight: 500; }
+.workspace-graph-detail-fields dd { font-size: 13px; font-weight: 600; line-height: 1.5; }
+
+.workspace-graph-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.workspace-graph-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workspace-graph-mobile-canvas-button,
+.workspace-graph-mobile-canvas-close {
+  display: none;
+}
+
+/* Refine is a modal dialog: it belongs to the shared dialog layer, above the
+   inspector sheet and Shell navigation. */
+.workspace-graph-refine-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  overscroll-behavior: contain;
+  background: rgb(15 23 42 / 42%);
+}
+
+.workspace-graph-refine {
+  position: fixed;
+  z-index: calc(var(--z-dialog) + 1);
+  inset: 0 0 0 auto;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  box-sizing: border-box;
+  width: min(460px, calc(100vw - 40px));
+  max-height: 100vh;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-left: 1px solid var(--border-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  padding: 18px;
+}
+
+.workspace-graph-refine > header,
+.workspace-graph-refine > footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workspace-graph-refine h2,
+.workspace-graph-refine p {
+  margin: 0;
+}
+
+.workspace-graph-refine > p,
+.workspace-graph-refine-section > small {
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workspace-graph-refine > header > button {
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+}
+
+.workspace-graph-refine-search {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-soft);
+  padding: 11px;
+}
+
+.workspace-graph-refine-search label {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.workspace-graph-refine-search input {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.workspace-graph-refine-search small {
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workspace-graph-refine-section {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 11px;
+}
+
+.workspace-graph-refine-section legend {
+  padding: 0 4px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.workspace-graph-folder-filter {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workspace-graph-folder-filter input,
+.workspace-graph-folder-filter select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--surface);
+  color: var(--ink);
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.workspace-graph-folder-filter small {
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workspace-graph-folder-rule-builder {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: end;
+  gap: 8px;
+}
+
+.workspace-graph-folder-rule-commit,
+.workspace-graph-folder-rules button,
+.workspace-graph-folder-rules summary {
+  min-height: 44px;
+  overflow-wrap: anywhere;
+}
+
+.workspace-graph-folder-rules summary {
+  align-content: center;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.workspace-graph-folder-rules ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace-graph-folder-rules li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 6px;
+}
+
+.workspace-graph-refine .workspace-graph-folder-rule-chip {
+  display: grid;
+  min-width: 0;
+  text-align: start;
+  justify-content: stretch;
+  font-weight: 600;
+}
+
+.workspace-graph-folder-rule-remove {
+  width: 44px;
+  padding: 0;
+}
+
+.workspace-graph-folder-notice {
+  color: var(--ink-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.workspace-graph-time-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.workspace-graph-impact {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 10px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.workspace-graph-impact strong {
+  color: var(--ink);
+}
+
+.workspace-graph-refine > footer {
+  justify-content: flex-end;
+  position: sticky;
+  z-index: 2;
+  bottom: 0;
+  margin: 0 -18px -18px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 12px 18px max(18px, env(safe-area-inset-bottom));
+}
+
+.workspace-graph-refine > footer button:last-child {
+  border-color: var(--context);
+  background: var(--context);
+  color: white;
+}
+
+@media (max-width: 1024px) {
+  .workspace-graph-controls.workspace-graph-toolbar { flex-wrap: wrap; }
+  .workspace-graph-list {
+    max-height: none;
+  }
+}
+
+@media screen and (max-width: 1024px) {
+  .workspace-graph-screen > .workspace-screen {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .workspace-graph-screen .workspace-mobile-actions {
+    right: max(12px, env(safe-area-inset-right));
+    bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  .workspace-graph-screen .workspace-graph-canvas-controls {
+    bottom: max(70px, calc(env(safe-area-inset-bottom) + 60px));
+  }
+
+  .workspace-graph-screen[data-selection-card="true"] .workspace-graph-canvas-controls {
+    bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  .workspace-graph-canvas-panel:not(.is-mobile-open) .workspace-map-layout-status {
+    bottom: max(130px, calc(env(safe-area-inset-bottom) + 120px));
+  }
+}
+
+@media screen and (max-width: 640px) {
+  .workspace-graph {
+    gap: 8px;
+  }
+
+  .workspace-graph-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  /* The route grid already separates these blocks; avoid also inheriting
+     the generic header margin or doubling folder-control vertical spacing. */
+  .workspace-graph .workspace-graph-header {
+    margin-bottom: 0;
+  }
+
+  .workspace-graph-folder-controls {
+    margin-block: 0;
+  }
+
+  .workspace-graph-header .eyebrow {
+    display: none;
+  }
+
+  .workspace-graph .workspace-graph-header { flex-direction: row; }
+  .workspace-graph .workspace-graph-header h1 { font-size: 18px; line-height: 1.25; }
+  .workspace-graph .workspace-graph-coverage { padding: 4px 6px; font-size: 11px; }
+
+  .workspace-graph-advanced-body,
+  .workspace-graph-metadata dl,
+  .workspace-graph-time-range {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspace-graph-controls > button,
+  .workspace-graph-advanced-body > button,
+  .workspace-graph-control input,
+  .workspace-graph-control select,
+  .workspace-graph-kind-control label,
+  .workspace-graph-quick-filters button,
+  .workspace-graph-mobile-canvas-button,
+  .workspace-graph-mobile-canvas-close,
+  .workspace-graph-refine input,
+  .workspace-graph-refine select,
+  .workspace-graph-refine button {
+    min-height: 44px;
+  }
+
+  .workspace-graph-visible-search {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .workspace-graph-visible-search input {
+    grid-column: 1 / -1;
+  }
+
+  .workspace-graph-controls.workspace-graph-toolbar { flex-wrap: wrap; gap: 6px; }
+  .workspace-graph-toolbar .workspace-graph-control { flex: 1 1 100px; }
+  .workspace-graph-toolbar .workspace-graph-visible-search { order: 2; flex-basis: 100%; }
+  .workspace-graph-toolbar > button { min-height: 44px; }
+  .workspace-graph-toolbar .workspace-graph-toolbar-text { display: none; }
+  .workspace-graph-toolbar .workspace-graph-orphan-toggle { flex: 0 1 auto; }
+  .workspace-graph-toolbar .workspace-graph-visible-search input { min-height: 44px; }
+
+  .workspace-graph-canvas-panel.is-mobile-open {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    display: block;
+    overflow: hidden;
+    overscroll-behavior: contain;
+    border: 0;
+    border-radius: 0;
+    background: var(--surface);
+    padding: 0;
+  }
+
+  .workspace-graph-canvas-panel.is-mobile-open .graph-canvas-frame {
+    min-height: 0;
+    height: 100%;
+  }
+
+  .workspace-graph-canvas-panel.is-mobile-open .graph-canvas {
+    min-height: 0;
+  }
+
+  .workspace-graph-canvas-panel.is-mobile-open .workspace-graph-canvas-controls {
+    position: absolute;
+    top: max(62px, calc(env(safe-area-inset-top) + 52px));
+    bottom: auto;
+  }
+
+  .workspace-graph-canvas-panel.is-mobile-open .workspace-graph-selection-note {
+    top: calc(100% + 8px);
+    bottom: auto;
+  }
+
+  /* Optional directory metadata overlays the unchanged document viewport;
+     opening its disclosure must not consume another fullscreen grid row. */
+  .workspace-graph-canvas-panel.is-mobile-open .workspace-graph-folder-index {
+    grid-area: auto;
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    z-index: 4;
+    width: min(280px, 100%);
+    margin: 0;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: 0 4px 16px rgb(0 0 0 / 12%);
+  }
+
+  .workspace-graph-canvas-panel.is-mobile-open .workspace-graph-folder-index summary {
+    box-sizing: border-box;
+    min-height: 44px;
+    padding: 12px 8px;
+    list-style-position: inside;
+  }
+
+  .workspace-graph-canvas-panel.is-mobile-open .workspace-graph-folder-index ul {
+    max-height: min(220px, calc(45dvh - 64px));
+    margin: 6px 0 0;
+  }
+
+  .workspace-graph-canvas-panel.is-mobile-open .workspace-map-folder-details {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: max(10px, env(safe-area-inset-bottom));
+    z-index: 4;
+    grid-area: auto;
+    max-height: min(55dvh, 430px);
+    overflow: auto;
+    box-shadow: 0 4px 24px rgb(0 0 0 / 15%);
+  }
+
+  .workspace-map-folder-details > ul:not(.workspace-map-folder-bundles) {
+    max-height: 336px;
+  }
+
+  .workspace-graph-mobile-canvas-button,
+  .workspace-graph-mobile-canvas-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink);
+    padding: 8px 10px;
+    font-weight: 750;
+  }
+
+  .workspace-graph-mobile-canvas-close {
+    position: absolute;
+    top: max(10px, env(safe-area-inset-top));
+    right: max(10px, env(safe-area-inset-right));
+    z-index: 6;
+    justify-self: end;
+  }
+
+  .workspace-graph-overlay-actions > .workspace-graph-mobile-canvas-button {
+    flex: 0 0 44px;
+    height: 44px;
+    margin-left: auto;
+    padding: 0;
+  }
+
+  .workspace-graph-selection-clear {
+    min-height: 44px;
+  }
+
+  .workspace-graph-list .workspace-graph-list-select small {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+  }
+
+  .workspace-graph-list-actions a,
+  .workspace-graph-list-actions button,
+  .workspace-graph-detail-actions a,
+  .workspace-graph-detail-actions button {
+    min-height: 44px;
+  }
+
+  .workspace-graph-details dl,
+  .workspace-graph-folder-facets li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspace-graph-refine {
+    inset: auto 0 0;
+    width: 100%;
+    max-height: min(88vh, 760px);
+    border-top: 1px solid var(--border-strong);
+    border-left: 0;
+    border-radius: 16px 16px 0 0;
+    padding-bottom: max(18px, env(safe-area-inset-bottom));
+  }
+}
+
+@media (forced-colors: active) {
+  .workspace-graph,
+  .workspace-graph-controls,
+  .workspace-graph-advanced-controls,
+  .workspace-graph-metadata,
+  .workspace-graph-list,
+  .workspace-graph-details,
+  .workspace-graph-canvas-panel,
+  .workspace-graph-refine,
+  .workspace-graph-refine-section {
+    forced-color-adjust: auto;
+    border-color: CanvasText;
+  }
+
+  .workspace-graph-quick-filters button[aria-pressed="true"] {
+    outline: 3px solid Highlight;
+  }
+
+  .workspace-map-member-dot,
+  .workspace-map-member-dot.is-library {
+    background: CanvasText;
+    border: 1px solid CanvasText;
+    forced-color-adjust: none;
+  }
+
+  .workspace-graph-folder-controls button[aria-pressed="true"],
+  .workspace-graph-folder-toggle[aria-pressed="true"],
+  .workspace-graph-folder-index button[aria-pressed="true"] {
+    outline: 3px solid Highlight;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-graph *,
+  .workspace-graph *::before,
+  .workspace-graph *::after,
+  .workspace-graph-refine *,
+  .workspace-graph-refine *::before,
+  .workspace-graph-refine *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
+  .workspace-graph-canvas-panel.is-mobile-open *,
+  .workspace-graph-canvas-panel.is-mobile-open *::before,
+  .workspace-graph-canvas-panel.is-mobile-open *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+@media print {
+  .workspace-graph-controls,
+  .workspace-graph-advanced-controls,
+  .workspace-graph-visible-search,
+  .workspace-graph-canvas-panel,
+  .workspace-graph-mobile-canvas-button,
+  .workspace-graph-refine,
+  .workspace-graph-refine-scrim {
+    display: none !important;
+  }
+
+  .workspace-graph-stage {
+    display: block;
+  }
+
+  .workspace-graph-list,
+  .workspace-graph-details {
+    margin-bottom: 12px;
+    max-height: none;
+    overflow: visible;
+  }
+}
+
 .context-backlinks-sections.inspector-stack {
   overflow: hidden;
   gap: 0;
@@ -3830,4 +6407,150 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
    the landing's baseline 13px off the editor on the same route. */
 .reader-panel > .empty-state {
   padding-inline: 0;
+}
+
+/* Informational Local coverage owns one toolbar disclosure, not a second
+   vertical banner. Real warnings retain their existing status-banner styles. */
+.graph-local-coverage-info {
+  position: relative;
+  margin-inline-start: auto;
+  min-width: 0;
+}
+.graph-local-coverage-info > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.graph-local-coverage-info > summary::-webkit-details-marker { display: none; }
+.graph-local-coverage-info > summary:focus-visible {
+  outline: 2px solid var(--context);
+  outline-offset: 2px;
+}
+.graph-local-coverage-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: var(--graph-coverage-right, 0);
+  z-index: 6;
+  display: none;
+  gap: 8px;
+  width: var(--graph-coverage-width, min(360px, calc(100vw - 40px)));
+  max-height: min(360px, var(--graph-coverage-available-height, calc(100dvh - 160px)));
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 4px 24px rgb(0 0 0 / 15%);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.graph-local-coverage-info[open] > .graph-local-coverage-panel { display: grid; }
+.graph-local-coverage-info[data-side="above"] > .graph-local-coverage-panel {
+  top: auto;
+  bottom: calc(100% + 8px);
+}
+.graph-local-coverage-panel p, .graph-local-coverage-panel ul { margin: 0; }
+.graph-local-coverage-panel ul { padding-inline-start: 18px; }
+@media (forced-colors: active) {
+  .graph-local-coverage-info > summary, .graph-local-coverage-panel {
+    forced-color-adjust: auto;
+    border-color: CanvasText;
+  }
+}
+
+/* Expanded groups over the canvas: one scrollable line of pin/collapse chips. */
+.workspace-graph-expanded-groups {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  font-size: 13px;
+}
+
+.workspace-graph-expanded-groups-title {
+  flex: none;
+  color: var(--ink-muted);
+  font-weight: 700;
+}
+
+.workspace-graph-expanded-groups > ul {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  list-style: none;
+}
+
+.workspace-graph-expanded-groups li {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  max-width: 280px;
+  padding: 0 2px 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-subtle);
+}
+
+.workspace-graph-expanded-groups li[data-pinned="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.workspace-graph-expanded-groups li[data-folded="true"] {
+  border-style: dashed;
+  color: var(--ink-muted);
+}
+
+.workspace-graph-expanded-groups li > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-graph-expanded-groups li > small {
+  color: var(--ink-muted);
+}
+
+.workspace-graph-expanded-pin,
+.workspace-graph-expanded-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.workspace-graph-expanded-pin[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.workspace-graph-expanded-pin:hover,
+.workspace-graph-expanded-collapse:hover {
+  background: var(--surface-hover);
 }

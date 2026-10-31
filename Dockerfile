@@ -9,6 +9,18 @@ FROM node:22-slim AS frontend
 WORKDIR /build
 COPY package.json package-lock.json ./
 COPY frontend ./frontend
+# `npm ci` runs the frontend postinstall (the generator below) and the build's
+# pretypecheck runs it again. Copy it and every script it imports, one line
+# each, and nothing else: a scripts/cosmos-*.mjs glob would pull in the
+# *.test.mjs files and still miss write-if-changed.mjs. The packaging test
+# test_frontend_generator_dependencies_are_copied_before_npm_install
+# (tests/packaging/test_docker_artifacts.py) fails when the list drifts.
+COPY scripts/generate-cosmos-rest-log.mjs ./scripts/
+COPY scripts/cosmos-rest-log-patch.mjs ./scripts/
+COPY scripts/cosmos-gpu-simulation-patch.mjs ./scripts/
+COPY scripts/cosmos-collision-radii-patch.mjs ./scripts/
+COPY scripts/cosmos-point-picker-patch.mjs ./scripts/
+COPY scripts/write-if-changed.mjs ./scripts/
 RUN npm ci
 RUN npm --workspace frontend run build
 

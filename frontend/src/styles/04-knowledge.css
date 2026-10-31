@@ -538,6 +538,10 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
+.workspace-screen[data-has-left="false"] {
+  grid-template-columns: minmax(0, 1fr) var(--workspace-right-w);
+}
+
 .workspace-screen.two-column {
   grid-template-columns: var(--workspace-left-w) minmax(0, 1fr);
 }

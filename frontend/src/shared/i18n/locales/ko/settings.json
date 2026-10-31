@@ -631,7 +631,8 @@
     "citation": "답변이 근거 자료를 얼마나 엄격하게 인용해야 하는지입니다.",
     "contextWrite": "지식 페이지를 초안으로 만들고 게시하는 규칙입니다.",
     "agentInjection": "AI에 전달할 에이전트 페이지와 워크스페이스 규칙을 선택합니다.",
-    "review": "리뷰 위험도 산정, 수동 리뷰 기준, 위험도 규칙, 등급별 자동 승인 대기 시간을 제어합니다."
+    "review": "리뷰 위험도 산정, 수동 리뷰 기준, 위험도 규칙, 등급별 자동 승인 대기 시간을 제어합니다.",
+    "graph": "구성원이 워크스페이스 전체의 지식 지도를 열 수 있게 할지 정합니다."
   },
   "policy": {
     "cardTitles": {
@@ -641,7 +642,8 @@
       "context_write": "Context 작성 정책",
       "agent_injection": "Agent 주입 정책",
       "review": "리뷰 위험 정책",
-      "lint": "Lint 규칙"
+      "lint": "Lint 규칙",
+      "graph": "지식 그래프"
     },
     "workspace": {
       "title": {
@@ -1087,6 +1089,16 @@
     "defaultPolicy": {
       "label": "사용자 지정 값 없음",
       "hint": "이 규칙 그룹은 서버 기본값을 그대로 사용하고 있습니다."
+    },
+    "graph": {
+      "workspaceMapEnabled": {
+        "label": "워크스페이스 지식 지도",
+        "hint": "이 워크스페이스의 게시된 Context·Library 문서 지도를 구성원이 열 수 있게 합니다. 문서마다 있는 그래프 탭은 이 설정과 관계없이 계속 쓸 수 있습니다."
+      },
+      "usageRelationSignalsEnabled": {
+        "label": "함께 읽음 관계",
+        "hint": "MCP 대화가 30분 이내 간격으로 이어서 읽은 문서를 그래프 탭에서 ‘함께 읽음’ 관계로 보여 줍니다. 몇 개 대화에서 며칠에 걸쳐 함께 읽었는지도 표시합니다. 끄면 그래프 탭에서는 바로 사라지고, 다른 곳에서는 다음 백그라운드 작업(보통 몇 분 안)에서 지워집니다. 이 관계로 새 린트 링크 제안도 만들지 않습니다. MCP 읽기 기록은 남아 있어 다시 켜면 다시 만들어집니다."
+      }
     }
   },
   "userRecovery": {
@@ -2036,6 +2048,13 @@
   },
   "commandBlock": {
     "copyFallback": "{{label}} 복사"
+  },
+  "graph": {
+    "status": {
+      "enabled": "이 워크스페이스에서 지식 지도가 켜져 있습니다.",
+      "disabled_by_workspace": "이 워크스페이스에서 지식 지도가 꺼져 있습니다.",
+      "service_unavailable": "이 서버에서 지식 지도가 일시적으로 꺼져 있습니다. 이 설정과 관계없이 적용됩니다."
+    }
   },
   "workspacePicker": {
     "selectedCount": "{{count}}개 선택",

@@ -100,6 +100,34 @@ def test_dockerfile_is_multistage_with_frontend():
     assert text.count('--index-url "$PIP_INDEX_URL"') == 2
 
 
+def test_frontend_generator_dependencies_are_copied_before_npm_install():
+    package = json.loads(
+        (REPO / "frontend" / "package.json").read_text(encoding="utf-8")
+    )
+    assert package["scripts"]["postinstall"] == "npm run generate:cosmos"
+    executable, generator_name = package["scripts"]["generate:cosmos"].split()
+    assert executable == "node"
+    generator = (REPO / "frontend" / generator_name).resolve()
+    dependencies = {generator.relative_to(REPO).as_posix()}
+    for name in re.findall(
+        r"from\s+[\"'](\./[^\"']+)[\"']", generator.read_text(encoding="utf-8")
+    ):
+        dependencies.add((generator.parent / name).relative_to(REPO).as_posix())
+
+    frontend_stage = DOCKERFILE.read_text(encoding="utf-8").split("FROM python:", 1)[0]
+    before_install = frontend_stage.split("RUN npm ci", 1)[0]
+    copied_scripts = set()
+    for line in before_install.splitlines():
+        fields = line.split()
+        if fields and fields[0] == "COPY" and fields[-1] == "./scripts/":
+            copied_scripts.update(fields[1:-1])
+
+    assert dependencies <= copied_scripts, (
+        "The frontend postinstall generator and its local imports must be copied "
+        f"before npm ci: {sorted(dependencies - copied_scripts)}"
+    )
+
+
 def test_compose_prod_stack_shape():
     text = COMPOSE.read_text(encoding="utf-8")
     for service in ("init:", "app:", "worker:", "caddy:"):

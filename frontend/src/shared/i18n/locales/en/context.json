@@ -1,5 +1,7 @@
 {
-  "home": { "eyebrow": "Context home" },
+  "home": {
+    "eyebrow": "Context home"
+  },
   "children": {
     "title": "Children",
     "eyebrow": "Direct index",
@@ -312,6 +314,7 @@
     "relationshipList": "Graph relationships",
     "relationshipListDescription": "Use this list to open the same relationships shown in the diagram.",
     "loadError": "Neighbor details could not be loaded. Try again later.",
+    "boundedWarning": "Some relationship results were limited. The lists below may be incomplete.",
     "unavailable": "Neighbor list unavailable.",
     "outbound": "Outbound links"
   },

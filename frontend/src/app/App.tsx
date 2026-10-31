@@ -11,6 +11,7 @@ import {
   useLocation,
 } from "react-router-dom";
 
+import { WorkspaceGraphGate } from "../features/graph/WorkspaceGraphGate";
 import { AuthProvider, useAuth } from "../shared/auth/AuthContext";
 import { Shell } from "../shared/components/Shell";
 import { RouteLoading } from "../shared/components/RouteLoading";
@@ -95,6 +96,9 @@ const IdentityVerificationScreen = lazy(() =>
 const ContextScreen = lazy(() =>
   import("../features/context/ContextScreen").then((module) => ({ default: module.ContextScreen })),
 );
+const WorkspaceGraphScreen = lazy(() =>
+  import("../features/graph/WorkspaceGraphScreen").then((module) => ({ default: module.WorkspaceGraphScreen })),
+);
 const ChatsListScreen = lazy(() =>
   import("../features/mcp-chats/ChatsListScreen").then((module) => ({
     default: module.ChatsListScreen,
@@ -147,7 +151,8 @@ const WorkspaceDirectoryScreen = lazy(() =>
 
 // Exported so route-level tests can mount the REAL config (e.g. assert the
 // public /w/:workspaceSlug/pages/:slug route is NOT under RequireAuth).
-export const appRoutes = createRoutesFromElements(
+export function createAppRoutes() {
+  return createRoutesFromElements(
   <Route errorElement={<RootRouteError />}>
     <Route element={<PublicFrame />}>
       <Route path="/w/:workspaceSlug/pages/:slug" element={<PublishedPageReader />} />
@@ -166,6 +171,7 @@ export const appRoutes = createRoutesFromElements(
       <Route path="/p/:workspaceId/:pageId" element={<RequireAuth><PagePermalinkRedirect /></RequireAuth>} />
       <Route path="/p/:pageId" element={<RequireAuth><NotFoundScreen /></RequireAuth>} />
       <Route path="/workspaces/:workspaceId" element={<RequireAuth><WorkspaceHomeRedirect /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/graph" element={<RequireAuth><WorkspaceGraphGate><WorkspaceGraphScreen /></WorkspaceGraphGate></RequireAuth>} />
       <Route path="/workspaces/:workspaceId/dashboard" element={<RequireAuth><DashboardScreen /></RequireAuth>} />
       <Route path="/workspaces/:workspaceId/context" element={<RequireAuth><ContextScreen /></RequireAuth>} />
       <Route path="/workspaces/:workspaceId/context/folders/new" element={<RequireAuth><RequireEditor><ContextScreen /></RequireEditor></RequireAuth>} />
@@ -202,7 +208,7 @@ export const appRoutes = createRoutesFromElements(
       <Route path="/workspaces/:workspaceId/inbox" element={<RequireAuth><InboxScreen /></RequireAuth>} />
       <Route path="/inbox" element={<RequireAuth><InboxScreen /></RequireAuth>} />
       {[
-        "/", "/dashboard", "/context", "/library", "/agent", "/ask",
+        "/", "/dashboard", "/graph", "/context", "/library", "/agent", "/ask",
         "/chats", "/activity", "/activity/:lane", "/review", "/lint",
         "/search", "/settings", "/settings/integrations", "/setup",
       ].map((path) => (
@@ -212,6 +218,10 @@ export const appRoutes = createRoutesFromElements(
     </Route>
   </Route>,
 );
+
+}
+
+export const appRoutes = createAppRoutes();
 
 function WorkspaceHomeRedirect() {
   const location = useLocation();

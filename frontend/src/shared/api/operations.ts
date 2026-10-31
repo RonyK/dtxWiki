@@ -131,6 +131,7 @@ export type SettingsPolicies = Omit<
   | "agent_injection"
   | "review"
   | "lint"
+  | "graph"
 > & {
   workspace: PolicyCard;
   library: PolicyCard;
@@ -139,6 +140,7 @@ export type SettingsPolicies = Omit<
   agent_injection: PolicyCard;
   review: PolicyCard;
   lint: PolicyCard;
+  graph: PolicyCard;
 };
 
 export type McpClientStatus = "active" | "disabled";
@@ -150,7 +152,8 @@ export type SettingsPolicyGroup =
   | "context_write"
   | "agent_injection"
   | "review"
-  | "lint";
+  | "lint"
+  | "graph";
 
 export type SearchScope =
   | "all"

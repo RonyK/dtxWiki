@@ -10,7 +10,7 @@ compose, 테스트, 그리고 코드를 수정한 뒤 설치된 dtxWiki 실행 �
 
 ## 개발 환경 빠른 시작 (development checkout)
 
-필요한 도구: Linux/WSL2, Git, GNU Make, **Python 3.12**(`.python-version`), **Node.js 22.18 이상**과
+필요한 도구: Linux/WSL2, Git, GNU Make, **Python 3.12**(`.python-version`), **Node.js 22.18.x**과
 npm(`.nvmrc`, `package.json`의 `engines`). CI와 같은 환경은 다음으로 맞춥니다.
 
 ```bash
@@ -43,6 +43,12 @@ Desktop 로컬 엔진도 같은 실행 관리 코드를 사용합니다.
 make backend-dev        # uvicorn --reload (API only, 21080)
 make frontend-dev       # Vite dev server (21173, HMR)
 ```
+
+Workspace Knowledge Map은 workspace마다 기본적으로 꺼져 있습니다. Owner가
+Settings > Workspace의 Knowledge graph 카드에서 켜면 메뉴와 `/graph`가
+활성화되며, 재빌드나 서버 재시작은 필요 없습니다. 운영자는
+`DTXWIKI_GRAPH_SERVICE_AVAILABLE=false`로 모든 workspace의 지도를 일시적으로
+끌 수 있습니다. 문서별 Local Graph는 이 설정과 독립적으로 사용할 수 있습니다.
 
 `make backend-dev`는 API server만 실행합니다. source extraction/feedback/bundle job
 처리가 필요하면 worker를 별도 터미널에서 실행하세요:
@@ -241,6 +247,7 @@ make test                  # 전체 테스트
 make lint                  # ruff(backend, tests, scripts) + frontend ESLint
 make test-backend          # backend pytest (PYTEST_WORKERS 개 프로세스, 기본 4)
 make test-backend-serial   # 같은 backend 스위트를 워커 없이 (parity canary)
+make test-graph-view       # Graph View 확장 검증 (PR CI 밖, 요청 시 실행)
 npm --workspace frontend run test -- --run   # frontend unit (vitest)
 make test-packaged         # frontend bundle + wheel 빌드 후 packaged UI/API smoke
 npm --workspace frontend run build           # frontend production build (tsc + vite)
@@ -268,6 +275,11 @@ npm run lint:md            # markdown lint (markdownlint-cli2)
 우회하지 않습니다. 예외가 필요하면 해당 테스트 주석에 독립된 실패 경로와 기존 테스트
 또는 하위 계층에서 검증할 수 없는 이유를 적습니다. Migration에는 아래의
 [기존 예산](#migration-테스트-수-제한)을 적용합니다.
+
+Graph View 확장 검증(`tests/graph_view/`, `frontend/src/features/graph/tests/extended/`)은
+PR CI가 실행하지 않습니다. 펼친 묶음 재생과 지도 화면 상태처럼 경계 상황이 많은 기능의
+핵심 회귀를 모으는 곳이며, graph 변경과 함께 `make test-graph-view`로 실행합니다. 이곳도
+독립된 실패 경로만 두고, 중요한 이슈의 경계 상황을 한 테스트에 묶습니다.
 
 backend 테스트만 바꾼 경우 변경 파일 실행과 `--collect-only` 전후 비교로 검증합니다.
 공유 fixture·저장소·인증 파이프라인을 바꿨다면 전체 backend를 한 번 실행합니다.
@@ -602,6 +614,10 @@ revision 파일만 둡니다. 릴리스의 DB head 매핑은 `release_manifest.j
 head가 하나여야 하며, 모든 신규 경로가 고정된 core revision
 `efcbcf724889`를 거쳐야 합니다. 패키지 검증기는 이 그래프와 고정 파일의 해시를
 함께 확인합니다.
+
+현재 0.2.0 head는 `1d8f1c08ca36`입니다. `af62c98d0731`에서 갈라진
+Graph revision `9aeab6944f25`와 Inbox 수신자 revision `6f4a9f50c046`을
+병합한 revision이며, 두 기존 revision의 ID와 내용은 유지합니다.
 
 ### Migration 테스트 수 제한
 

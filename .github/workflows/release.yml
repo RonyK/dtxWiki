@@ -32,7 +32,7 @@ jobs:
           fi
       - uses: actions/setup-node@v7
         with:
-          node-version: "22.18"
+          node-version: "22.18.0"
       - run: npm ci
       # bundle-frontend runs $(PYTHON), not $(VENV_PYTHON): the VENV_PYTHON
       # override this step used to pass never reached it, so the bundler ran
@@ -40,15 +40,18 @@ jobs:
       - run: make bundle-frontend PYTHON=.venv/bin/python
       - run: .venv/bin/python -m build
       # This tag can point at a commit ci.yml never built -- it runs only on
-      # pull requests and pushes to main -- so these two steps are the whole
-      # precondition for publishing to PyPI.
+      # pull requests and pushes to main -- so the artifact, contract and
+      # runtime gates below must all pass before publishing to PyPI.
       #
       # The verifier is handed the same `dist` the upload step uploads, not a
       # glob out of it: `pypa/gh-action-pypi-publish` publishes every file in
       # that directory, so verifying only `$(ls dist/dtxwiki-*.whl)` shipped
-      # the sdist unchecked.
+      # the sdist unchecked. Strict release mode also binds both artifacts'
+      # package metadata and effective schema boundary to this exact tag.
       - name: Verify the artifacts that will be published
-        run: .venv/bin/python scripts/verify_wheel_artifact.py dist
+        run: >-
+          .venv/bin/python scripts/verify_wheel_artifact.py dist
+          --release-version "${GITHUB_REF_NAME#v}"
       # The npm launcher runs dtxwiki==<its version> from PyPI. The script
       # refuses a package.json whose version is not pyproject's and a tarball
       # holding anything but the launcher and the license texts. It writes to
@@ -65,6 +68,27 @@ jobs:
         run: >-
           .venv/bin/python -m pytest tests/packaging tests/static -q
           --deselect tests/packaging/test_distribution_includes_infra_prod.py::test_wheel_and_sdist_include_operator_artifacts
+      # Tags can bypass PR/main CI. A valid wheel inventory alone cannot prove
+      # that its graph adapter, module Worker and Blob Worker run under CSP.
+      # Keep these bounded 2K browser gates before any artifact can publish;
+      # the real-API wrapper owns an isolated migrated DB and production SPA.
+      - name: Install the release-gate browser
+        run: npx playwright install --with-deps chromium
+      - name: Verify the 2K CPU Workers under production CSP
+        run: >-
+          npm run test:graph-webgl -- workspace-cpu-layout.spec.ts --reporter=line
+      - name: Verify the real-API 2K graph
+        env:
+          DTXWIKI_E2E_GRAPH_2K: "1"
+        run: >-
+          npm run test:e2e -- tests/e2e/workspace_graph_2k_real.spec.ts
+          tests/e2e/workspace_graph_reading_real.spec.ts
+          tests/e2e/workspace_graph_first_view.spec.ts
+          --project=chromium --workers=1 --retries=0 --reporter=line
+      # The corpus wrapper serves a repo-built SPA. Exercise the wheel itself
+      # as well: an isolated install must supply both backend and graph assets.
+      - name: Verify the installed-wheel Graph runtime
+        run: .venv/bin/python tests/packaging/packaged_browser_smoke.py
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -106,7 +130,7 @@ jobs:
           path: dist-npm
       - uses: actions/setup-node@v7
         with:
-          node-version: "22.18"
+          node-version: "22.18.0"
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
       # Node 22 ships npm 10; trusted publishing needs npm 11.5.1 or newer.

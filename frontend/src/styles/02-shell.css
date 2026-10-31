@@ -711,6 +711,8 @@
 
 .sidebar-nav {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+
   /* Tall drawers keep the groups at their content height. */
   align-content: start;
   gap: 18px;
@@ -757,6 +759,34 @@
   line-height: 1;
   padding: 2px 5px;
   text-transform: uppercase;
+}
+
+/* The full Knowledge Map label plus Preview badge is wider than the 207px
+   inner sidebar. Keep both readable without letting grid's auto min-content
+   column stretch a selected nav item beyond the sidebar border. The mobile
+   drawer has more room and keeps its usual single-line navigation. */
+.sidebar[data-collapsed="false"] .nav-item--graph-preview {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 2px;
+}
+
+.sidebar[data-collapsed="false"] .nav-item--graph-preview > svg {
+  grid-column: 1;
+  grid-row: 1 / 3;
+  align-self: center;
+}
+
+.sidebar[data-collapsed="false"] .nav-item--graph-preview .nav-item-label {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.sidebar[data-collapsed="false"] .nav-item--graph-preview .nav-preview-badge {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: start;
 }
 
 /* UI-04: gate hover-only backgrounds to devices that truly hover (mouse/
