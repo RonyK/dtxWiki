@@ -83,6 +83,36 @@ describe("WorkspaceLayout", () => {
     expect(screen.getByRole("button", { name: "Show Details" })).toBeInTheDocument();
   });
 
+  it("restores a right-only inspector without reserving an explorer rail", async () => {
+    const user = userEvent.setup();
+    const view = render(
+      <WorkspaceLayout
+        inspector={<div>Map details</div>}
+        inspectorLabel="Details"
+        layoutKey="map"
+        main={<main>Map</main>}
+      />,
+    );
+    const layout = view.container.querySelector(".workspace-screen");
+    expect(layout).toHaveAttribute("data-has-left", "false");
+    expect(layout).toHaveStyle({ "--workspace-left-w": "0px" });
+    expect(view.container.querySelector(".workspace-left-panel")).toBeNull();
+    expect(view.container.querySelector(".workspace-panel-restore-left")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Hide Details" }));
+    await user.click(screen.getByRole("button", { name: "Show Details" }));
+    expect(screen.getByText("Map details")).toBeVisible();
+
+    view.unmount();
+    setMobileViewport(true);
+    const mobileView = render(
+      <WorkspaceLayout inspector={<div>Map details</div>} inspectorLabel="Details"
+        layoutKey="map" main={<main>Map</main>} />,
+    );
+    expect(mobileView.container.querySelector(".workspace-mobile-drawer-toggle")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Open Details sheet" }));
+    expect(screen.getByRole("dialog", { name: "Details sheet" })).toBeVisible();
+  });
+
   it("supports screens without a details panel", () => {
     const view = render(
       <WorkspaceLayout

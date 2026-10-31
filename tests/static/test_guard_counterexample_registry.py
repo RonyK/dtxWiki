@@ -61,7 +61,6 @@ COUNTEREXAMPLE_EXEMPT: frozenset[str] = frozenset(
         "tests/static/test_mcp_validation_contract.py",
         "tests/static/test_public_schema_path_leak.py",
         "tests/static/test_release_gate_contract.py",
-        "tests/static/test_release_workflow_contract.py",
         "tests/static/test_schema_drift.py",
         "tests/static/test_tenancy_manifest_contract.py",
         "tests/static/test_workspace_physical_split_census.py",

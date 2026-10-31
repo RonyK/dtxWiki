@@ -26,6 +26,7 @@ import {
 import { clearPersistedWorkspaceId, invalidateWorkspaceListCache } from "../api/workspace";
 import { setTreeFavoriteActor } from "../api/treeFavorites";
 import { isAbortError } from "../lib/abortError";
+import { clearWorkspaceGraphStorage } from "../lib/workspaceGraphStorage";
 import { clearReviewDrafts } from "../lib/reviewDraftStorage";
 
 type AuthStatus = "checking" | "authenticated" | "anonymous" | "transient_error";
@@ -93,6 +94,7 @@ export function AuthProvider({
     // Fence personal reads/writes synchronously, before rendering that actor.
     setTreeFavoriteActor(nextActorId);
     if (previousActorId !== nextActorId) {
+      if (previousActorId !== null) clearWorkspaceGraphStorage();
       if (!workspaceAlreadyCleared) {
         if (previousActorId !== null) clearPersistedWorkspaceId();
         else invalidateWorkspaceListCache();
@@ -147,6 +149,7 @@ export function AuthProvider({
       // log the user out — surface them as sessionError so the UI can show
       // a banner without redirecting to /login (review §6.3 FA-H4).
       if (error instanceof ApiError && error.status === 401) {
+        clearWorkspaceGraphStorage();
         clearReviewDrafts();
         setApiErrorViewerIsServerAdmin(false);
         commitUser(null);
@@ -226,6 +229,7 @@ export function AuthProvider({
 
   useEffect(() => {
     const handleAuthExpired = () => {
+      clearWorkspaceGraphStorage();
       invalidateSessionProbes();
       setApiErrorViewerIsServerAdmin(false);
       // The dispatcher (client.ts handleAuthExpired) already dropped the
@@ -271,6 +275,7 @@ export function AuthProvider({
     // round-trip, and again at the state transition in case another probe was
     // started while logout was in flight.
     invalidateSessionProbes();
+    clearWorkspaceGraphStorage();
     try {
       await logoutRequest();
     } catch {
@@ -279,6 +284,7 @@ export function AuthProvider({
       // protects future requests once the backend is reachable again.
     } finally {
       invalidateSessionProbes();
+      clearWorkspaceGraphStorage();
       setApiErrorViewerIsServerAdmin(false);
       // WS-05: the same localStorage key + in-memory snapshot the 401 path
       // clears in client.ts. Without this, the next user to sign in on this
@@ -338,6 +344,7 @@ export function AuthProvider({
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+/** Optional readers stay usable in public and standalone capability surfaces. */
 export function useOptionalAuth() {
   return useContext(AuthContext);
 }

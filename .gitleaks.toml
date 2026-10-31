@@ -14,3 +14,11 @@ paths = ['''backend/migrations/frozen_revisions\.json$''']
 description = "A retired Alembic revision identifier used as test data"
 targetRules = ["generic-api-key"]
 paths = ['''backend/tests/unit/test_revision_classifier_after_freeze\.py$''']
+
+[[allowlists]]
+description = "Deterministic synthetic graph corpus labels are not API keys"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^tests/e2e/prepare_backend_db\.py$''']
+regexTarget = "secret"
+regexes = ['''^e2e-knowledge-10k(?:-aggregated)?$''']

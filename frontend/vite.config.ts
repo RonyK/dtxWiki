@@ -1,7 +1,14 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { configDefaults } from "vitest/config";
 
 import { thirdPartyNotices } from "./thirdPartyNotices";
+
+/**
+ * Graph View extended checks run on request (`make test-graph-view`), never in
+ * PR CI; `vitest.graph-view.config.ts` runs exactly these.
+ */
+export const GRAPH_VIEW_EXTENDED_TESTS = "src/features/graph/tests/extended/**";
 
 const DEFAULT_FRONTEND_DEV_PORT = 21173;
 const DEFAULT_BACKEND_DEV_PORT = 21080;
@@ -96,11 +103,17 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     pool: "forks",
+    // Each JSDOM suite owns a full React/i18n environment. Host CPU counts
+    // otherwise start dozens of forks and inflate keyboard/DOM work beyond
+    // the unchanged per-test deadline. Bound concurrency, not assertions or
+    // timeouts; the same full suite runs on developer machines and CI.
+    maxWorkers: 2,
     // No global retry: blanket retries dampen detection of
     // probabilistically-failing regressions (races, order-dependent
     // leaks). Genuinely timing-sensitive specs opt in with
     // `test(..., { retry: N })`.
     retry: 0,
     setupFiles: ["./src/tests/setup.ts"],
+    exclude: [...configDefaults.exclude, GRAPH_VIEW_EXTENDED_TESTS],
   },
 });

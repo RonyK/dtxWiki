@@ -32,6 +32,10 @@ node_modules/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/src/features/graph/workspace/generated-cosmos-rest-log/
+frontend/public/third-party/cosmos-rest-log/
+frontend/src/features/graph/workspace/generated-cosmos-native/
+frontend/public/third-party/cosmos-native/
 frontend/storybook-static/
 backend/static/
 desktop/build/

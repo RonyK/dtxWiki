@@ -346,6 +346,37 @@
   icon, and `info` diagrams render instead of failing. Notes stay yellow in
   every diagram type.
 
+### Graph View
+
+- Add Local Graphs for Context pages and a Workspace Knowledge Map for published
+  Context, Library, and Agent documents, with actor visibility checks on every
+  request. Workspace owners enable the map from Settings > Workspace; the
+  operator can disable it everywhere with `DTXWIKI_GRAPH_SERVICE_AVAILABLE=false`.
+- Add relation filters, bounded ranking, focus deep links, history exploration,
+  cluster expansion, search, and graph details. Local Graph relation budgets
+  reserve space for each seed and relation kind.
+- Add a CPU Worker layout for the real API 2K workspace map, readable labels,
+  Pause/Resume controls, WebGL validation, and reproducible graph benchmarks.
+- Project authored Markdown links and `/context?target=<id>` URLs through the
+  shared parser. Read-together relations show supporting session counts and
+  time ranges; owners can disable usage-derived relation signals.
+- Add Context linking guidance and the advisory
+  `context_page_has_no_graph_visible_links` to successful MCP review submissions.
+  Advance the MCP tool contract to revision 27, retaining the latest search and
+  input constraints. Clients should refresh `tools/list` and generated schemas.
+
+### Database upgrade
+
+- Add `9aeab6944f25` after `af62c98d0731` in `versions/v0_2/` for the
+  graph observation ledger, history coverage, workspace settings, link syntax,
+  relation evidence, and query indexes. Released migrations remain frozen.
+- Merge Graph revision `9aeab6944f25` and Inbox recipient revision
+  `6f4a9f50c046` at `1d8f1c08ca36`, the single 0.2.0 head. Both existing
+  revisions retain their IDs and contents.
+- After upgrading, run `dtxwiki graph reproject --all-workspaces` to reconcile
+  existing authored relationships. Take a backup before the upgrade as usual.
+- Source builds and tests use Node.js 22.18.x.
+
 ## 0.1.4 — 2026-10-23
 
 ### Search results

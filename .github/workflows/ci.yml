@@ -47,7 +47,7 @@ jobs:
       # whatever the runner image ships.
       - uses: actions/setup-node@v7
         with:
-          node-version: "22.18"
+          node-version: "22.18.0"
       - name: Install Python dependencies
         run: uv sync --locked --extra dev
       - name: Lint backend and tests
@@ -121,7 +121,7 @@ jobs:
       # coverage check), so pin it rather than inherit the runner's.
       - uses: actions/setup-node@v7
         with:
-          node-version: "22.18"
+          node-version: "22.18.0"
       - name: Install Python dependencies
         run: uv sync --locked --extra dev
       - name: Run packaging and acceptance tests with log capture
@@ -165,7 +165,7 @@ jobs:
           # the only job in which those 21 behavioural cases execute at all
           # (the `backend` job that runs `make test-static` has no
           # node_modules, so both tests/static wrappers skip there).
-          node-version: "22.18"
+          node-version: "22.18.0"
           cache: npm
       - name: Install Python dependencies
         run: uv sync --locked --extra dev
@@ -194,6 +194,65 @@ jobs:
           node tests/e2e/redact-network.test.mjs
           node tests/e2e/page-diagnostics.test.mjs
 
+  # `npm ci` and the SPA build run inside the image, so only a real build sees
+  # a COPY that no longer lists a script the generator imports, a file missing
+  # from the context, a changed base image or a failing install. The packaging
+  # test of the COPY list cannot see those.
+  docker-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the frontend stage of the image
+        run: docker build --target frontend -f Dockerfile .
+
+  graph-10k:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.18.0"
+          cache: npm
+      - name: Install Python dependencies
+        run: uv sync --locked --extra dev
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Verify exact-scale benchmark guards
+        run: node --test scripts/bench/graph/render_contract.test.mjs
+      - name: Verify PC 10K and mobile 2K capacity
+        id: playwright
+        env:
+          DTXWIKI_E2E_GRAPH_10K: "1"
+          DTXWIKI_E2E_GRAPH_10K_DENSE: "1"
+          DTXWIKI_E2E_GRAPH_10K_AGGREGATED: "1"
+        # --forbid-only: a committed test.only would otherwise run alone and
+        # leave the lane green with the other cases never run.
+        run: >-
+          npm run test:e2e -- tests/e2e/workspace_graph_10k_real.spec.ts
+          tests/e2e/workspace_graph_10k_motion.spec.ts
+          tests/e2e/workspace_graph_10k_aggregated.spec.ts
+          --project=chromium --workers=1 --retries=0 --forbid-only
+          --reporter=line,html
+      - name: Redact the 10K report before publishing it
+        if: always()
+        run: |
+          if [ -d playwright-report ]; then
+            bash scripts/redact_evidence.sh --dir playwright-report
+          fi
+      - name: Upload PC 10K functional evidence
+        if: always() && (steps.playwright.outcome == 'success' || hashFiles('playwright-report/index.html') != '')
+        uses: actions/upload-artifact@v4
+        with:
+          name: graph-10k-functional-${{ github.run_id }}
+          path: playwright-report
+          if-no-files-found: error
+          retention-days: 14
+
   e2e:
     name: E2E (${{ matrix.name }})
     runs-on: ubuntu-latest
@@ -216,7 +275,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - uses: actions/setup-node@v7
         with:
-          node-version: "22.18"
+          node-version: "22.18.0"
           cache: npm
       - name: Install Python dependencies
         run: uv sync --locked --extra dev
@@ -224,12 +283,19 @@ jobs:
         run: npm ci
       - name: Install Playwright browsers
         run: npx playwright install --with-deps ${{ matrix.browsers }}
+      - name: Verify Local Graph WebGL shaders
+        if: matrix.name == 'chromium'
+        run: npm run test:graph-webgl
       # Standard profile: every spec on Chromium, @cross-browser specs on all
       # three. Each matrix job owns its database, backend and background worker.
       # The whole suite meets all three engines weekly, in
       # .github/workflows/e2e-browsers.yml.
       - name: Run Playwright e2e
         id: playwright
+        # The isolated wrapper and real-API 2K spec share this switch. Without
+        # it the acceptance silently skips on every PR despite a green suite.
+        env:
+          DTXWIKI_E2E_GRAPH_2K: "1"
         run: npm run test:e2e -- ${{ matrix.projects }}
       # The suite drives `/reset-password?token=<one-time token>`, and the HTML
       # reporter base64-inlines every step title into index.html on EVERY run,

@@ -1,3 +1,4 @@
+import os
 from time import perf_counter
 
 import pytest
@@ -373,8 +374,17 @@ def test_block_batch_uses_gap_hash_fast_path_and_parses_only_bounded_windows(
 def test_one_megabyte_twenty_op_prefix_map_benchmark_beats_full_reparse_by_work(
     monkeypatch,
     record_property,
+    request,
 ):
     """Pin §13.6's two paths to deterministic parser-work measurements."""
+
+    enforce_latency_budget = os.environ.get("DTXWIKI_TEST_BENCHMARKS") == "1"
+    if enforce_latency_budget and hasattr(request.config, "workerinput"):
+        pytest.fail(
+            "DTXWIKI_TEST_BENCHMARKS=1 under pytest-xdist: run wall-clock "
+            "budgets serially with `make test-backend-benchmarks`",
+            pytrace=False,
+        )
 
     blocks = [f"block-{index} " + ("x" * 180) for index in range(5_000)]
     body = "\n\n".join(blocks)
@@ -456,9 +466,13 @@ def test_one_megabyte_twenty_op_prefix_map_benchmark_beats_full_reparse_by_work(
     assert sum(prefix_parser_inputs) < 20_000
     assert authoritative_parser_inputs == [len(applied.body), len(body)]
     assert sum(authoritative_parser_inputs) > 1_900_000
-    assert prefix_elapsed < 3.0
-    assert authoritative_elapsed < 10.0
+    # Ordinary runs prove parser work even when other workers share the CPU.
+    # The same fixture's latency budgets belong to the explicit serial lane.
+    if enforce_latency_budget:
+        assert prefix_elapsed < 3.0
+        assert authoritative_elapsed < 10.0
 
+    record_property("latency_budget_enforced", enforce_latency_budget)
     record_property("fixture_chars", len(body))
     record_property("operation_count", len(operations))
     record_property("prefix_map_analysis_calls", len(prefix_map_inputs))

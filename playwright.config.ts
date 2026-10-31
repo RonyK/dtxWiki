@@ -238,6 +238,8 @@ export default defineConfig({
         // backend/static — present with a stale bundle on a developer machine
         // and absent on a fresh CI checkout, where the SPA silently 404s.
         DTXWIKI_STATIC_ROOT: e2eStaticRoot,
+        // The Knowledge Map is switched on per workspace (Settings column,
+        // seeded by tests/e2e/prepare_backend_db.py), not by a process flag.
       },
       url: `${backendBaseUrl}/health/ready`,
       reuseExistingServer: false,

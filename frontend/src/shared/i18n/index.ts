@@ -7,6 +7,7 @@ import agentEn from "./locales/en/agent.json";
 import activityEn from "./locales/en/activity.json";
 import contextEn from "./locales/en/context.json";
 import dashboardEn from "./locales/en/dashboard.json";
+import graphEn from "./locales/en/graph.json";
 import inboxEn from "./locales/en/inbox.json";
 import libraryEn from "./locales/en/library.json";
 import lintEn from "./locales/en/lint.json";
@@ -22,6 +23,7 @@ import agentKo from "./locales/ko/agent.json";
 import activityKo from "./locales/ko/activity.json";
 import contextKo from "./locales/ko/context.json";
 import dashboardKo from "./locales/ko/dashboard.json";
+import graphKo from "./locales/ko/graph.json";
 import inboxKo from "./locales/ko/inbox.json";
 import libraryKo from "./locales/ko/library.json";
 import lintKo from "./locales/ko/lint.json";
@@ -44,6 +46,7 @@ const resources = {
     auth: authEn,
     context: contextEn,
     dashboard: dashboardEn,
+    graph: graphEn,
     inbox: inboxEn,
     library: libraryEn,
     lint: lintEn,
@@ -61,6 +64,7 @@ const resources = {
     auth: authKo,
     context: contextKo,
     dashboard: dashboardKo,
+    graph: graphKo,
     inbox: inboxKo,
     library: libraryKo,
     lint: lintKo,
@@ -97,7 +101,7 @@ export function initI18n(initialLocale = resolveInitialLocale()) {
     fallbackLng: "en",
     interpolation: { escapeValue: false },
     lng: normalizeLocale(initialLocale),
-    ns: ["activity", "agent", "auth", "chats", "context", "dashboard", "library", "lint", "pages", "review", "search", "settings", "shell", "tree"],
+    ns: ["activity", "agent", "auth", "chats", "context", "dashboard", "graph", "inbox", "library", "lint", "pages", "review", "search", "settings", "shell", "tree"],
     react: { useSuspense: false },
     resources,
   });

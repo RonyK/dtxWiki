@@ -147,13 +147,13 @@
     },
     "kb_orphan_page": {
       "label": "고립된 페이지",
-      "message": "{{slug}}에 들어오는 위키 링크가 없습니다.",
-      "description": "다른 어떤 페이지도 링크하지 않는 페이지를 표시합니다."
+      "message": "{{slug}} 페이지를 가리키도록 본문에 작성된 링크가 없습니다.",
+      "description": "다른 페이지 본문에 작성된 링크가 가리키지 않는 페이지를 표시합니다."
     },
     "kb_missing_backlink": {
       "label": "누락된 백링크",
-      "message": "{{source_slug}}에서 {{target_slug}}로 연결되지만 대상 페이지에는 돌아오는 링크가 없습니다.",
-      "description": "대상 페이지가 되돌아 링크하지 않는 링크를 표시합니다."
+      "message": "{{source_slug}} 본문에는 {{target_slug}}로 향하는 링크가 있지만 대상 페이지 본문에는 돌아오는 링크가 없습니다.",
+      "description": "대상 페이지 본문에 돌아오는 링크가 없는 작성 링크를 표시합니다."
     },
     "kb_duplicate_concept": {
       "label": "중복 개념",

@@ -16,6 +16,8 @@ const REVIEW_LEFT_WIDTHS = [420, 560] as const;
 const COLLAPSED_PANEL_WIDTH = 44;
 const INSPECTOR_WIDTH = 300;
 const SWIPE_DISMISS_THRESHOLD = 64;
+/** Below this width the inspector is a bottom sheet and the left rail a drawer. */
+export const WORKSPACE_SHEET_LAYOUT_QUERY = "(max-width: 1024px)";
 
 type MobileAction = {
   ariaLabel: string;
@@ -31,18 +33,20 @@ type WorkspaceLayoutProps = {
   defaultInspectorOpen?: boolean;
   defaultLeftOpen?: boolean;
   inspector?: ReactNode;
+  /** Marks the collapsed inspector's restore control as holding new content. */
+  inspectorAttention?: string | null;
   inspectorAutoOpenKey?: string | null;
   inspectorHideLabel?: string;
   inspectorLabel?: string;
   inspectorRestoreLabel?: string;
   layoutKey: string;
-  left: (controls: {
+  left?: (controls: {
     expandWidthLabel: string;
     expandWidthAtMax: boolean;
     onClose: () => void;
     onExpandWidth?: () => void;
   }) => ReactNode;
-  leftLabel: string;
+  leftLabel?: string;
   leftRestoreLabel?: string;
   main: ReactNode;
   mobileAction?: MobileAction;
@@ -53,13 +57,14 @@ export function WorkspaceLayout({
   defaultInspectorOpen = true,
   defaultLeftOpen = true,
   inspector,
+  inspectorAttention = null,
   inspectorAutoOpenKey,
   inspectorHideLabel,
   inspectorLabel,
   inspectorRestoreLabel,
   layoutKey,
   left,
-  leftLabel,
+  leftLabel = "",
   leftRestoreLabel,
   main,
   mobileAction,
@@ -68,7 +73,7 @@ export function WorkspaceLayout({
   const { t } = useTranslation("shell");
   const leftPanelId = useId();
   const inspectorPanelId = useId();
-  const mobileLayout = useMediaQuery("(max-width: 1024px)");
+  const mobileLayout = useMediaQuery(WORKSPACE_SHEET_LAYOUT_QUERY);
   const leftPanelRef = useRef<HTMLDivElement | null>(null);
   const inspectorPanelRef = useRef<HTMLElement | null>(null);
   const mobileDrawerToggleRef = useRef<HTMLButtonElement | null>(null);
@@ -85,6 +90,7 @@ export function WorkspaceLayout({
   const [inspectorOpen, setInspectorOpen] = useState(() =>
     readStoredPanelState(`${layoutKey}:inspector`, defaultInspectorOpen),
   );
+  const hasLeft = left !== undefined;
   const hasInspector = inspector !== undefined && inspector !== null;
   const resolvedInspectorLabel =
     inspectorLabel ?? t("panel.detailsFallback", { defaultValue: "Details" });
@@ -99,7 +105,7 @@ export function WorkspaceLayout({
   );
   const normalizedLeftWidthStep = Math.min(leftWidthStep, leftWidths.length - 1);
   const leftWidth = leftWidths[normalizedLeftWidthStep];
-  const effectiveLeftWidth = leftOpen ? leftWidth : COLLAPSED_PANEL_WIDTH;
+  const effectiveLeftWidth = hasLeft ? leftOpen ? leftWidth : COLLAPSED_PANEL_WIDTH : 0;
   const effectiveRightWidth = hasInspector
     ? inspectorOpen
       ? INSPECTOR_WIDTH
@@ -128,6 +134,7 @@ export function WorkspaceLayout({
       defaultValue: `Show ${resolvedInspectorLabel}`,
       label: resolvedInspectorLabel,
     });
+  const restoreInspectorLabel = inspectorAttention ? `${showInspectorLabel} · ${inspectorAttention}` : showInspectorLabel;
   const mobileControlsVisible =
     mobileLayout && !mobileLeftOpen && !mobileInspectorOpen;
   const closeMobileLeft = useCallback(() => setMobileLeftOpen(false), []);
@@ -253,8 +260,9 @@ export function WorkspaceLayout({
   return (
     <div
       className={`workspace-screen${variant === "default" ? "" : ` ${variant}-screen`}`}
+      data-has-left={hasLeft ? "true" : "false"}
       data-inspector-collapsed={hasInspector && inspectorOpen ? "false" : "true"}
-      data-left-collapsed={leftOpen ? "false" : "true"}
+      data-left-collapsed={hasLeft && leftOpen ? "false" : "true"}
       data-mobile-inspector-open={mobileInspectorOpen ? "true" : "false"}
       data-mobile-left-open={mobileLeftOpen ? "true" : "false"}
       data-mobile-action-reserve={hasInspector || mobileAction ? "true" : "false"}
@@ -263,7 +271,7 @@ export function WorkspaceLayout({
         "--workspace-right-w": `${effectiveRightWidth}px`,
       } as CSSProperties}
     >
-      {mobileControlsVisible ? (
+      {hasLeft && mobileControlsVisible ? (
         <button
           aria-controls={leftPanelId}
           aria-expanded={mobileLeftOpen}
@@ -284,7 +292,7 @@ export function WorkspaceLayout({
           <span>{leftLabel}</span>
         </button>
       ) : null}
-      {mobileLayout && mobileLeftOpen ? (
+      {hasLeft && mobileLayout && mobileLeftOpen ? (
         <button
           aria-label={t("panel.closeDrawer", {
             defaultValue: `Close ${leftLabel} drawer`,
@@ -345,7 +353,7 @@ export function WorkspaceLayout({
           type="button"
         />
       ) : null}
-      {leftOpen ? (
+      {left && leftOpen ? (
         <MobileDrawer
           id={leftPanelId}
           label={leftLabel}
@@ -371,7 +379,7 @@ export function WorkspaceLayout({
                 },
           })}
         </MobileDrawer>
-      ) : (
+      ) : hasLeft ? (
         <button
           aria-label={
             leftRestoreLabel
@@ -384,7 +392,7 @@ export function WorkspaceLayout({
           <PanelVisibilityIcon side="left" action="show" size={16} />
           <span>{leftLabel}</span>
         </button>
-      )}
+      ) : null}
       {main}
       {hasInspector && inspectorOpen ? (
         <BottomSheet
@@ -425,13 +433,14 @@ export function WorkspaceLayout({
         </BottomSheet>
       ) : hasInspector ? (
         <button
-          aria-label={showInspectorLabel}
+          aria-label={restoreInspectorLabel}
           className="workspace-panel-restore workspace-panel-restore-right"
+          data-attention={inspectorAttention ? "true" : undefined}
           onClick={() => {
             setInspectorOpen(true);
             setMobileInspectorOpen(mobileLayout);
           }}
-          title={showInspectorLabel}
+          title={restoreInspectorLabel}
           type="button"
         >
           <PanelVisibilityIcon side="right" action="show" size={16} />

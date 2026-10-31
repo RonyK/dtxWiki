@@ -147,13 +147,13 @@
     },
     "kb_orphan_page": {
       "label": "Orphan page",
-      "message": "{{slug}} has no inbound wiki links.",
-      "description": "Flags a page that no other page links to."
+      "message": "{{slug}} has no inbound authored links.",
+      "description": "Flags a page that no other page targets with an authored link."
     },
     "kb_missing_backlink": {
       "label": "Missing backlink",
-      "message": "{{source_slug}} links to {{target_slug}}, but the target does not link back.",
-      "description": "Flags a link that the target page does not link back to."
+      "message": "{{source_slug}} has an authored link to {{target_slug}}, but the target has no authored link back.",
+      "description": "Flags an authored link whose target page has no authored link back."
     },
     "kb_duplicate_concept": {
       "label": "Duplicate concept",

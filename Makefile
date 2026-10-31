@@ -1,4 +1,4 @@
-.PHONY: install dev-db-up dev-db-down migrate seed backend-dev frontend-dev export-schemas gen-client verify-gen-client verify-generated-schemas bundle-frontend build-wheel docker-image docker-build test-backend test-backend-serial test-backend-benchmarks test-frontend test-e2e test-packaged test-acceptance test-static test-release-gate test lint check-i18n sync-csp
+.PHONY: install dev-db-up dev-db-down migrate seed backend-dev frontend-dev export-schemas gen-client verify-gen-client verify-generated-schemas bundle-frontend build-wheel docker-image docker-build test-backend test-backend-serial test-backend-benchmarks test-graph-view test-frontend test-e2e test-packaged test-acceptance test-static test-release-gate test lint check-i18n sync-csp
 
 PYTHON ?= python3
 VENV ?= .venv
@@ -13,11 +13,11 @@ PYTEST_WORKERS ?= 4
 # `make test-backend` invocation runs this SQLite media lane sequentially.
 SQLITE_MEDIA_SERIAL_TESTS := backend/tests/integration/test_media_blob_gc.py backend/tests/integration/test_media_install_workflow.py
 SQLITE_MEDIA_PARALLEL_IGNORES := $(foreach test,$(SQLITE_MEDIA_SERIAL_TESTS),--ignore=$(test))
-# Modules holding wall-clock budgets (design §19.5.7). Each budget is a
-# `*_benchmark_*` test that skips unless DTXWIKI_TEST_BENCHMARKS=1 and refuses
-# to run under xdist; `test-backend-benchmarks` below is the only place that
-# opts in. A new benchmark's module belongs on this list.
-BENCHMARK_TESTS := backend/tests/integration/test_graph_service.py backend/tests/integration/test_graph_analytics_regressions.py backend/tests/unit/test_mcp_chat_service.py
+# Modules holding wall-clock budgets (design §19.5.7). Timing assertions need
+# DTXWIKI_TEST_BENCHMARKS=1 and refuse xdist; combined functional cases still
+# assert counted work in ordinary runs. `test-backend-benchmarks` below opts
+# in serially. A new benchmark's module belongs on this list.
+BENCHMARK_TESTS := backend/tests/integration/test_graph_service.py backend/tests/integration/test_graph_analytics_regressions.py backend/tests/unit/test_mcp_chat_service.py backend/tests/unit/test_block_addressed_operations.py
 VENV_PYTHON := $(VENV)/bin/python
 COMPOSE := docker compose --env-file infra/local/.env.example -f infra/local/docker-compose.yml
 DOCKER ?= docker
@@ -114,6 +114,13 @@ test-backend-serial:
 # instead and the budgets run here: serially, on request, never in `make test`.
 test-backend-benchmarks:
 	DTXWIKI_TEST_BENCHMARKS=1 $(VENV_PYTHON) -m pytest $(BENCHMARK_TESTS) -q -k benchmark
+
+# Edge cases of the Graph View expansion replay and map screen. Run on
+# request beside graph changes; PR CI never collects tests/graph_view or the
+# frontend tests/extended directory.
+test-graph-view:
+	$(VENV_PYTHON) -m pytest tests/graph_view -q
+	npm --workspace frontend run test:graph-view
 
 test-frontend:
 	npm --workspace frontend run test -- --run

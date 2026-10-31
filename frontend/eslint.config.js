@@ -6,7 +6,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["dist/**", "storybook-static/**", "coverage/**"],
+    ignores: ["dist/**", "storybook-static/**", "coverage/**", "src/features/graph/workspace/generated-cosmos-rest-log/**", "src/features/graph/workspace/generated-cosmos-native/**"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

@@ -33,9 +33,7 @@ RELEASE = ROOT / ".github" / "workflows" / "release.yml"
 DESKTOP_RELEASE = ROOT / ".github" / "workflows" / "release-desktop.yml"
 
 OPENAPI = "shared/schemas/rest/v1/openapi.json"
-CLAUDE_PLUGIN = (
-    "integrations/claude-plugin/plugins/dtxwiki/.claude-plugin/plugin.json"
-)
+CLAUDE_PLUGIN = "integrations/claude-plugin/plugins/dtxwiki/.claude-plugin/plugin.json"
 CODEX_PLUGIN = "integrations/codex-plugin/plugins/dtxwiki/.codex-plugin/plugin.json"
 NPM_LAUNCHER = "npm/dtxwiki/package.json"
 
@@ -51,9 +49,7 @@ def _uv_lock_version(root: Path) -> str:
 
 # Every file that ships the release version, and how to read it there.
 VERSION_SITES = {
-    "desktop/package.json": lambda root: _json(root, "desktop/package.json")[
-        "version"
-    ],
+    "desktop/package.json": lambda root: _json(root, "desktop/package.json")["version"],
     "package-lock.json (desktop workspace)": lambda root: _json(
         root, "package-lock.json"
     )["packages"]["desktop"]["version"],
@@ -81,7 +77,7 @@ def version_mismatches(root: Path = ROOT) -> dict[str, str]:
 
 
 def toolchain_pin_problems(root: Path = ROOT) -> list[str]:
-    """.python-version and .nvmrc must match the floors the manifests declare."""
+    """Toolchain pins match declared floors or a matching Node minor range."""
 
     problems = []
     python_pin = (root / ".python-version").read_text(encoding="utf-8").strip()
@@ -100,10 +96,16 @@ def toolchain_pin_problems(root: Path = ROOT) -> list[str]:
     engines = json.loads((root / "package.json").read_text(encoding="utf-8")).get(
         "engines", {}
     )
-    if engines.get("node") != f">={node_pin}":
+    accepted_node_specs = {f">={node_pin}"}
+    node_version = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", node_pin)
+    # A same-minor wildcard includes patch zero. It is consistent only when
+    # the local pin starts at that floor; a later patch must retain its floor.
+    if node_version is not None and node_version.group(3) == "0":
+        accepted_node_specs.add(f"{node_version.group(1)}.{node_version.group(2)}.x")
+    if engines.get("node") not in accepted_node_specs:
         problems.append(
-            f"package.json engines.node {engines.get('node')!r} is not "
-            f"'>={node_pin}' from .nvmrc"
+            f"package.json engines.node {engines.get('node')!r} does not match "
+            f".nvmrc {node_pin!r}; expected one of {sorted(accepted_node_specs)!r}"
         )
     return problems
 
@@ -155,9 +157,10 @@ def github_release_problems(workflow: dict) -> list[str]:
     if workflow.get("permissions") is None:
         problems.append("set workflow permissions so only the release job writes")
     for other_id, other in jobs.items():
-        if other_id != job_id and (other.get("permissions") or {}).get(
-            "contents"
-        ) == "write":
+        if (
+            other_id != job_id
+            and (other.get("permissions") or {}).get("contents") == "write"
+        ):
             problems.append(f"{other_id} can write repository contents too")
 
     command = next(
@@ -360,6 +363,42 @@ def test_toolchain_pin_drift_is_reported(tmp_path):
     assert any("requires-python floor" in problem for problem in problems), problems
     assert any("Python :: 3.14" in problem for problem in problems), problems
     assert any("engines.node" in problem for problem in problems), problems
+
+
+@pytest.mark.parametrize(
+    ("node_pin", "node_engine", "accepted"),
+    [
+        ("22.18.0", ">=22.18.0", True),
+        ("22.18.0", "22.18.x", True),
+        ("22.18.1", ">=22.18.1", True),
+        ("22.18.1", "22.18.x", False),
+        ("22.18.0", "22.17.x", False),
+        ("22.18.0", "22.19.x", False),
+        ("22.18.0", "22.x", False),
+        ("22.18.0", ">=22.17.0", False),
+        ("22.18.0", "^22.18.0", False),
+        ("22.18.0", ">=20", False),
+    ],
+)
+def test_node_engine_accepts_only_the_pinned_floor_or_matching_minor_range(
+    tmp_path, node_pin, node_engine, accepted
+):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "1"\nrequires-python = ">=3.12"\n'
+        'classifiers = ["Programming Language :: Python :: 3.12"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / ".python-version").write_text("3.12\n", encoding="utf-8")
+    (tmp_path / ".nvmrc").write_text(node_pin + "\n", encoding="utf-8")
+    (tmp_path / "package.json").write_text(
+        json.dumps({"engines": {"node": node_engine}}), encoding="utf-8"
+    )
+    problems = toolchain_pin_problems(tmp_path)
+    if accepted:
+        assert problems == []
+    else:
+        assert len(problems) == 1
+        assert "engines.node" in problems[0]
 
 
 @pytest.mark.counterexample(

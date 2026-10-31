@@ -8,6 +8,8 @@ import {
   type Page,
 } from "./fixtures";
 import { randomUUID } from "node:crypto";
+import type { GraphQueryPayload } from "../../frontend/src/shared/api/graph";
+
 import { execFileSync } from "node:child_process";
 
 import {
@@ -46,15 +48,15 @@ type WorkspaceListData = {
   default_workspace_id: string | null;
 };
 
-const REQUIRED_VIEWPORTS = [
+// Business journeys share the desktop breakpoint. The responsive suite owns
+// intermediate/wide widths; retain one short desktop and one mobile journey.
+const JOURNEY_VIEWPORTS = [
   { key: "1280x720", width: 1280, height: 720 },
-  { key: "1440x900", width: 1440, height: 900 },
-  { key: "1920x1080", width: 1920, height: 1080 },
   { key: "390x844", width: 390, height: 844 },
 ] as const;
 
 test.describe("Workspace MVP v3 browser acceptance", () => {
-  for (const viewport of REQUIRED_VIEWPORTS) {
+  for (const viewport of JOURNEY_VIEWPORTS) {
     test.describe(viewport.key, () => {
       test.use({ viewport });
 
@@ -1267,12 +1269,196 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await expect(
             graphPanel.getByRole("heading", { name: "Graph relationships" }),
           ).toBeVisible();
+          const relatedRow = graphPanel
+            .locator(".graph-relationship-list > details > ul > li")
+            .filter({ hasText: relatedTitle })
+            .first();
+          await relatedRow.locator(":scope > .graph-list-select").click();
+          const graphDetails = graphPanel.locator(".graph-details");
+          await expect(graphDetails.locator("h5")).toHaveText(relatedTitle);
           await expect(
-            graphPanel.getByRole("link", { name: relatedTitle, exact: true }),
+            graphDetails.getByRole("link", { name: "Open", exact: true }),
           ).toHaveAttribute(
             "href",
             `/workspaces/${workspace.id}/context/pages/${related.id}`,
           );
+          await expect(
+            graphPanel.getByTestId("graph-canvas").locator(".."),
+          ).toHaveAttribute("data-renderer-status", "ready");
+          await expect(
+            graphPanel.getByTestId("graph-canvas").locator("canvas.sigma-edges"),
+          ).toBeVisible();
+          await expect(
+            graphPanel.getByTestId("graph-canvas").locator("canvas.sigma-nodes"),
+          ).toBeVisible();
+          const webglVersion = await graphPanel.getByTestId("graph-canvas")
+            .locator("canvas.sigma-edges")
+            .evaluate((canvas) => {
+              const context = (canvas as HTMLCanvasElement).getContext("webgl2")
+                ?? (canvas as HTMLCanvasElement).getContext("webgl");
+              return context?.getParameter(context.VERSION) as string | undefined;
+            });
+          expect(webglVersion).toMatch(/^WebGL [12]\.0/);
+          const depthOne = graphPanel.getByRole("button", { name: "Depth 1", exact: true });
+          const depthTwo = graphPanel.getByRole("button", { name: "Depth 2", exact: true });
+          await expect(depthTwo).toHaveAttribute("aria-pressed", "true");
+          for (const [depth, control] of [[1, depthOne], [2, depthTwo]] as const) {
+            const responsePromise = page.waitForResponse((response) =>
+              response.url().endsWith(`/api/v1/workspaces/${workspace.id}/graph/query`)
+              && response.request().method() === "POST"
+              && response.request().postDataJSON().depth === depth
+              && response.request().postDataJSON().time?.mode === "current",
+            );
+            await control.click();
+            const response = await responsePromise;
+            expect(response.ok()).toBeTruthy();
+            expect((await response.json()).data.query).toMatchObject({
+              depth, time: { mode: "current" }, budget: { nodes: 250, edges: 750 },
+            });
+            await expect(control).toHaveAttribute("aria-pressed", "true");
+          }
+          const graphScreenshotPrefix = process.env.DTXWIKI_GRAPH_SCREENSHOT_PREFIX;
+          if (graphScreenshotPrefix) {
+            await graphPanel.getByTestId("graph-canvas").screenshot({
+              path: `${graphScreenshotPrefix}-${viewport.key}-canvas.png`,
+            });
+            await page.screenshot({
+              path: `${graphScreenshotPrefix}-${viewport.key}-page.png`,
+            });
+            await graphPanel.locator(".graph-local-toolbar").scrollIntoViewIfNeeded();
+            await page.screenshot({
+              path: `${graphScreenshotPrefix}-${viewport.key}-toolbar.png`,
+            });
+          }
+
+          await relatedRow.locator(":scope > .graph-list-select").click();
+          await expect(graphDetails.locator("h5")).toHaveText(relatedTitle);
+          await graphDetails.getByRole("button", { name: "Pin", exact: true }).click();
+          await graphPanel.getByText("More filters", { exact: true }).click();
+          const statusFilters = graphPanel.getByRole("group", {
+            name: "Node status",
+          });
+          await statusFilters.getByLabel("No status", { exact: true }).uncheck();
+          await expect(relatedRow).toHaveCount(0);
+          await expect(
+            graphDetails.getByRole("link", { name: "Open", exact: true }),
+          ).toHaveCount(0);
+          await graphPanel.getByRole("button", { name: "Clear all" }).click();
+          await expect(relatedRow).toHaveCount(1);
+          await relatedRow.locator(":scope > .graph-list-select").click();
+          await expect(graphDetails.locator("h5")).toHaveText(relatedTitle);
+          await expect(
+            graphDetails.getByRole("button", { name: "Unpin", exact: true }),
+          ).toBeVisible();
+
+          const expandedResponsePromise = page.waitForResponse((response) =>
+            response.url().endsWith(`/api/v1/workspaces/${workspace.id}/graph/query`)
+            && response.request().method() === "POST"
+            && response.request().postDataJSON().seeds?.length === 2,
+          );
+          await graphDetails.getByRole("button", { name: "Expand", exact: true }).click();
+          const expandedResponse = await expandedResponsePromise;
+          expect(expandedResponse.ok()).toBeTruthy();
+          expect((await expandedResponse.json()).data.query.seeds).toEqual([
+            { kind: "context_page", id: decision.id },
+            { kind: "context_page", id: related.id },
+          ]);
+          await expect(
+            graphDetails.getByRole("button", { name: "Collapse", exact: true }),
+          ).toBeVisible();
+          const collapsedResponsePromise = page.waitForResponse((response) =>
+            response.url().endsWith(`/api/v1/workspaces/${workspace.id}/graph/query`)
+            && response.request().method() === "POST"
+            && response.request().postDataJSON().seeds?.length === 1,
+          );
+          await graphDetails.getByRole("button", { name: "Collapse", exact: true }).click();
+          const collapsedResponse = await collapsedResponsePromise;
+          expect(collapsedResponse.ok()).toBeTruthy();
+          expect((await collapsedResponse.json()).data.query.seeds).toEqual([
+            { kind: "context_page", id: decision.id },
+          ]);
+          await expect(
+            graphDetails.getByRole("button", { name: "Expand", exact: true }),
+          ).toBeVisible();
+
+          // Current is a live projection, not an observed playback frame.
+          // Enter supported history through the UI before testing its controls.
+          const actionsResponsePromise = page.waitForResponse((response) =>
+            response.url().endsWith(`/api/v1/workspaces/${workspace.id}/graph/query`)
+            && response.request().method() === "POST"
+            && response.request().postDataJSON().time?.mode === "action",
+          );
+          await graphPanel.getByLabel("History mode").selectOption("action");
+          const actionsResponse = await actionsResponsePromise;
+          expect(actionsResponse.ok()).toBeTruthy();
+          const actionsPayload = (await actionsResponse.json()).data as GraphQueryPayload;
+          const actionOccurrences = actionsPayload.edges.filter((edge) =>
+            edge.edge_kind === edge.action_kind,
+          );
+          expect(actionOccurrences.length).toBeGreaterThan(0);
+          expect(actionOccurrences.some((edge) => edge.edge_kind === "created")).toBe(true);
+          const actionChip = graphPanel.getByRole("button", {
+            name: `Actions ${actionOccurrences.length}`, exact: true,
+          });
+          await expect(actionChip).toHaveAttribute("aria-pressed", "true");
+          await expect(graphPanel.getByTestId("graph-canvas").locator(".."))
+            .toHaveAttribute("data-renderer-status", "ready");
+          const relationships = graphPanel.locator(".graph-relationship-list > details").nth(1);
+          await relationships.locator("summary").click();
+          const createdRow = relationships.getByRole("button", { name: /^Created / }).first();
+          await createdRow.click();
+          await expect(graphPanel.locator(".graph-details h5")).toHaveText("Created");
+          await graphPanel.locator(".graph-details").getByRole("button", { name: "Center", exact: true }).click();
+          if (graphScreenshotPrefix) {
+            await graphPanel.getByTestId("graph-canvas").screenshot({
+              path: `${graphScreenshotPrefix}-${viewport.key}-actions-canvas.png`,
+            });
+            await page.screenshot({ path: `${graphScreenshotPrefix}-${viewport.key}-actions-page.png` });
+          }
+          await actionChip.click();
+          await expect(relationships.getByRole("button", { name: /^Created / })).toHaveCount(0);
+          await expect(graphPanel.locator(".graph-details h5")).toHaveCount(0);
+          await actionChip.click();
+          await expect(relationships.getByRole("button", { name: /^Created / }).first()).toBeVisible();
+          await expectViewportFits(page);
+          const appearanceResponsePromise = page.waitForResponse((response) =>
+            response.url().endsWith(`/api/v1/workspaces/${workspace.id}/graph/query`)
+            && response.request().method() === "POST"
+            && response.request().postDataJSON().time?.mode === "appearance",
+          );
+          await graphPanel.getByLabel("History mode").selectOption("appearance");
+          const appearanceResponse = await appearanceResponsePromise;
+          expect(appearanceResponse.ok()).toBeTruthy();
+          expect((await appearanceResponse.json()).data.query).toMatchObject({
+            depth: 1, time: { mode: "appearance" }, budget: { nodes: 50, edges: 150 },
+          });
+          await expect(depthTwo).toBeDisabled();
+          const timeline = graphPanel.getByRole("slider", {
+            name: "Timeline position",
+          });
+          await graphPanel.getByRole("button", { name: "Reset timeline" }).click();
+          await expect(timeline).toHaveValue("0");
+          const timelineMax = await timeline.getAttribute("max");
+          expect(Number(timelineMax)).toBeGreaterThan(0);
+          await timeline.press("End");
+          await expect(relatedRow).toHaveCount(1);
+          await relatedRow.locator(":scope > .graph-list-select").click();
+          await expect(graphDetails.locator("h5")).toHaveText(relatedTitle);
+          await expect(
+            graphDetails.getByRole("link", { name: "Open", exact: true }),
+          ).toHaveAttribute("href", `/workspaces/${workspace.id}/context/pages/${related.id}`);
+
+          await graphPanel.getByText("Static graph view", { exact: true }).click();
+          await expect(
+            graphPanel.getByText("Static graph view", { exact: true }).locator(".."),
+          ).toHaveAttribute("open", "");
+
+          const downloadPromise = page.waitForEvent("download");
+          await graphPanel.getByRole("button", {
+            name: "Export filtered graph",
+          }).click();
+          const download = await downloadPromise;
+          expect(download.suggestedFilename()).toMatch(/^dtxwiki-graph-\d+\.mmd$/);
           await expectViewportFits(page);
 
           await readerTabs.getByRole("tab", { name: /^Activity/ }).click();
@@ -1285,6 +1471,11 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await expect(activityFeed).toBeVisible();
           await expect(activityFeed.locator("li").first()).toBeVisible();
           await expectViewportFits(page);
+          await readerTabs.getByRole("tab", { name: /^Graph/ }).click();
+          await expect(graphPanel.getByTestId("graph-canvas").locator(".."))
+            .toHaveAttribute("data-renderer-status", "ready");
+          await expect(graphPanel.getByTestId("graph-canvas").locator("canvas.sigma-edges"))
+            .toBeVisible();
         });
 
         const surfaces = [
