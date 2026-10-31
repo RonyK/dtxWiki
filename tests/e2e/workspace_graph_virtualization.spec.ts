@@ -1,6 +1,7 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
 import { login } from "./auth";
+import { isResizeObserverDeferralReport } from "./fixtures";
 
 const GRAPH_OWNER_EMAIL = "e2e-graph-owner@example.com";
 const NODE_COUNT = 2_000;
@@ -378,7 +379,9 @@ async function expectFilteredScrollContinuity(page: Page, requests: { count: num
 function watchBrowserDiagnostics(page: Page) {
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
-  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("pageerror", (error) => {
+    if (!isResizeObserverDeferralReport(error.message)) pageErrors.push(error.message);
+  });
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });

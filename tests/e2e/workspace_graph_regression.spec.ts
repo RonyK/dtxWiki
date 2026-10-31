@@ -1,6 +1,7 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
 import { currentWorkspace, login, signUp } from "./auth";
+import { isResizeObserverDeferralReport } from "./fixtures";
 
 const GRAPH_OWNER_EMAIL = "e2e-graph-owner@example.com";
 const GRAPH_QUERY_PATH = "/graph/overview/query";
@@ -525,7 +526,9 @@ function watchBrowserDiagnostics(page: Page) {
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
   const wheelSensitivityWarnings: string[] = [];
-  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("pageerror", (error) => {
+    if (!isResizeObserverDeferralReport(error.message)) pageErrors.push(error.message);
+  });
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
     if (

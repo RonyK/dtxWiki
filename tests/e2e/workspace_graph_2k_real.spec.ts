@@ -4,6 +4,7 @@ import { writeFile } from "node:fs/promises";
 import type { GraphNode, GraphQueryPayload } from "../../frontend/src/shared/api/graph";
 import type { WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
 import { backendBaseUrl, currentWorkspace, login } from "./auth";
+import { isResizeObserverDeferralReport } from "./fixtures";
 
 const GRAPH_2K_OWNER_EMAIL = "e2e-graph-2k-owner@example.com";
 const DOCUMENT_COUNT = 2_000;
@@ -1602,7 +1603,9 @@ async function expectBoundedRows(
 function watchBrowserDiagnostics(page: Page) {
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
-  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("pageerror", (error) => {
+    if (!isResizeObserverDeferralReport(error.message)) pageErrors.push(error.message);
+  });
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });

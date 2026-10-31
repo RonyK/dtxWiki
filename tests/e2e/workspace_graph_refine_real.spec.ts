@@ -2,6 +2,7 @@ import { expect, test, type Page, type Response, type TestInfo } from "@playwrig
 
 import type { WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
 import { login } from "./auth";
+import { isResizeObserverDeferralReport } from "./fixtures";
 
 const OWNER_EMAIL = "e2e-graph-refine-owner@example.com";
 const OVERVIEW_PATH = "/graph/overview/query";
@@ -15,7 +16,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     const errors: string[] = [];
     const failedReads: number[] = [];
     const posts: unknown[] = [];
-    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("pageerror", (error) => { if (!isResizeObserverDeferralReport(error.message)) errors.push(error.message); });
     page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
     page.on("response", (response) => {
       if (response.url().includes("/api/v1/workspaces/") && response.status() >= 400) failedReads.push(response.status());

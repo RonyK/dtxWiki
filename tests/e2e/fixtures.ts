@@ -301,6 +301,23 @@ export function isNetworkChangeConsoleEcho(message: string): boolean {
   return message === "Failed to load resource: net::ERR_NETWORK_CHANGED";
 }
 
+/**
+ * The ResizeObserver spec reports an observation it has to defer to the next
+ * frame as this window ErrorEvent. Chromium, Firefox and WebKit all dispatch
+ * it; only WebKit also reports it to the inspector as an uncaught exception,
+ * so only WebKit raises it as `pageerror`. Excusing it gives that gate the same
+ * meaning on every engine, which also means no engine's gate catches a real
+ * resize feedback loop. The Knowledge Map emits it at most once per renderer
+ * start, without layout feedback: @cosmos.gl/graph 3.4.2 observes its canvas
+ * only after luma.gl's own ResizeObserver callback resolves the canvas
+ * context's `initialized` promise, so the new observation is no deeper than
+ * the one being delivered and waits a frame. Matched exactly, so any other
+ * message stays blocking.
+ */
+export function isResizeObserverDeferralReport(message: string): boolean {
+  return message === "ResizeObserver loop completed with undelivered notifications.";
+}
+
 async function recoverFromNetworkChange(page: Page) {
   const recoveryControl = page
     .locator(RECOVERY_TEST_IDS.map((id) => `[data-testid="${id}"]`).join(", "))

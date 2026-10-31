@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { login } from "./auth";
+import { isResizeObserverDeferralReport } from "./fixtures";
 
 test.describe("Knowledge Map compact first viewport with real 2k data", () => {
   test.skip(process.env.DTXWIKI_E2E_GRAPH_2K !== "1", "Requires the isolated 2k seed");
@@ -8,7 +9,7 @@ test.describe("Knowledge Map compact first viewport with real 2k data", () => {
     for (const viewport of [{ width: 1440, height: 900 }, { width: 834, height: 1112 }, { width: 390, height: 844 }]) {
       test(`${language} ${viewport.width} keeps the map or list in the first viewport`, async ({ page }, testInfo) => {
         const errors: string[] = [];
-        page.on("pageerror", (error) => errors.push(error.message));
+        page.on("pageerror", (error) => { if (!isResizeObserverDeferralReport(error.message)) errors.push(error.message); });
         page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
         await page.setViewportSize(viewport);
         await page.emulateMedia({ reducedMotion: "reduce" });
