@@ -69,3 +69,19 @@ def expanded_actor_scopes(actor: ActorContext) -> set[str]:
     if "mcp:agent" in scopes:
         scopes.update({"agent-bundle", "agent-page-draft"})
     return scopes
+
+
+# The shared definition of a "focused read": a tool call whose result is one
+# named artifact the caller asked for by identity. Search and discovery tools
+# (search, grep_wiki, list_pages, get_index) are deliberately absent — they
+# return a ranked candidate list the caller has not committed to reading, so
+# treating their results as reads overstates what happened.
+#
+# Two surfaces depend on this being one definition: MCP-chat session-title
+# evidence (backend.services.mcp_chat_service) and the behavioural read
+# aggregates in backend.services.indexing.edge_registry / trail_analysis. If
+# they drift, a document can be "often read together" on one surface and
+# never read on the other.
+FOCUSED_READ_TOOLS = frozenset(
+    {"fetch", "read", "read_agent_page", "read_concept", "read_page"}
+)

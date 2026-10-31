@@ -7,7 +7,7 @@ REST, MCP tools, Resources, search, bundles, and legacy Pages agree.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 from backend.policy.trust_boundaries import (
@@ -16,20 +16,46 @@ from backend.policy.trust_boundaries import (
     actor_can_read_restricted_library,
     actor_can_read_sensitive_agent_pages,
 )
+from backend.repositories.context_visibility import (
+    PUBLISHED_CONTEXT_VERSION_STATUSES,
+)
 from backend.repositories.workspace_scoped import get_in_workspace
 from backend.schemas.agent import SENSITIVE_AGENT_PAGE_CATEGORIES
 
 if TYPE_CHECKING:
     from backend.models.agent import AgentPage, AgentPageVersion
     from backend.models.context import ContextPage, ContextPageVersion
-    from backend.models.library import LibraryItem, LibraryItemVersion
     from backend.policy.auth import ActorContext
 
 
-PUBLISHED_CONTEXT_VERSION_STATUSES = frozenset(
-    {"published_snapshot", "superseded_snapshot"}
-)
 VISIBLE_AGENT_SENSITIVITIES = frozenset({"public", "workspace"})
+
+
+class LibraryVisibilityItem(Protocol):
+    """Read-only inputs shared by ORM entities and scalar read projections."""
+
+    @property
+    def workspace_id(self) -> UUID: ...
+
+    @property
+    def lifecycle_status(self) -> str: ...
+
+    @property
+    def trust_level(self) -> str: ...
+
+    @property
+    def current_ready_version_id(self) -> UUID | None: ...
+
+    @property
+    def current_version_id(self) -> UUID | None: ...
+
+
+class LibraryVisibilityVersion(Protocol):
+    @property
+    def id(self) -> UUID: ...
+
+    @property
+    def processing_status(self) -> str: ...
 
 
 def context_page_visible(
@@ -103,11 +129,11 @@ def agent_page_visible(
 
 
 def library_item_visible(
-    item: LibraryItem | None,
+    item: LibraryVisibilityItem | None,
     actor: ActorContext | None,
     *,
     workspace_id=None,
-    version: LibraryItemVersion | None = None,
+    version: LibraryVisibilityVersion | None = None,
 ) -> bool:
     """Return whether ``item`` (and optional canonical ``version``) is readable.
 

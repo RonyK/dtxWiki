@@ -5,10 +5,10 @@ import pytest
 from sqlalchemy import create_engine, delete
 from sqlalchemy.orm import sessionmaker
 
-from backend.models.base import Base
 from backend.models.job import Job
 from backend.models.workspace import Workspace
 from backend.services.job_queue import JobQueueService
+from backend.tests.utils.postgres import create_isolated_postgres_metadata
 
 # Every test here reflects and drops the tables of whatever PostgreSQL database
 # it is pointed at, and CI aims several of these files at one database, so they
@@ -37,7 +37,7 @@ def postgres_test_url() -> str | None:
 )
 def test_postgres_conditional_claim_prevents_double_claim():
     engine = create_engine(postgres_test_url())
-    Base.metadata.create_all(engine)
+    create_isolated_postgres_metadata(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     queue = JobQueueService()
     workspace_id = None

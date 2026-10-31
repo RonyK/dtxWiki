@@ -27,6 +27,7 @@ from backend.cli.commands import context as context_commands
 from backend.cli.commands import db as db_commands
 from backend.cli.commands import embedding as embedding_commands
 from backend.cli.commands import eval_cmd as eval_commands
+from backend.cli.commands import graph as graph_commands
 from backend.cli.commands import inputs as input_commands
 from backend.cli.commands import mcp as mcp_commands
 from backend.cli.commands import prod as prod_commands
@@ -471,6 +472,7 @@ app.add_typer(admin_commands.users_app, name="users")
 app.add_typer(admin_commands.workspace_app, name="workspace")
 app.add_typer(admin_commands.server_admin_app, name="admin")
 app.add_typer(context_commands.context_app, name="context")
+app.add_typer(graph_commands.graph_app, name="graph")
 app.add_typer(db_commands.db_app, name="db")
 app.add_typer(input_commands.inputs_app, name="inputs")
 app.add_typer(prod_commands.setup_app, name="setup")

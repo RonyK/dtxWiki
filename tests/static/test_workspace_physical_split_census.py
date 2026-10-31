@@ -12,19 +12,19 @@ Two things live here, and the second is keyed on the first:
 Why the census is keyed on ``workspace`` and not on ``users``
 -------------------------------------------------------------
 An earlier recorded framing of this gap named the three ``-> users`` edges.
-Against the measured census that understates the edges by ~19x (57 against 3)
-and the unwritable tables by 27x (54 against 2). Measured on this tree:
+Against the measured census that understates the edges by 20x (60 against 3)
+and the unwritable tables by more than 28x (57 against 2). Measured on this tree:
 
-- 82 shard-resident tables (81 WORKSPACE_PLANE + 1 MIXED_PLANE), carrying
-  57 FK constraints into control-plane parents. All 57 are single-column.
-- By parent: ``workspace`` 54 edges, ``users`` 3 edges.
-- 54 of those 82 tables are BLOCKED (at least one control-plane FK parent):
-  ``workspace`` blocks 54, ``users`` blocks 2. Only 28 are insertable.
-- 4 of the 57 edges have all-nullable local columns
+- 88 shard-resident tables (87 WORKSPACE_PLANE + 1 MIXED_PLANE), carrying
+  60 FK constraints into control-plane parents. All 60 are single-column.
+- By parent: ``workspace`` 57 edges, ``users`` 3 edges.
+- 57 of those 88 tables are BLOCKED (at least one control-plane FK parent):
+  ``workspace`` blocks 57, ``users`` blocks 2. Only 31 are insertable.
+- 4 of the 60 edges have all-nullable local columns
   (``audit_event.workspace_id``, ``mcp_chat_session.owner_user_id``,
   ``mcp_client.created_by``, ``mcp_client.issued_to_user_id``).
 
-A neighbouring count of 55 for the same schema is not a contradiction: it
+A neighbouring count of 59 for the same schema is not a contradiction: it
 scopes the children to WORKSPACE_PLANE_TABLES only and so omits the MIXED
 child ``audit_event.workspace_id -> workspace``. This census includes it,
 because a manifest-pure shard is expected to carry ``audit_event`` and that
@@ -106,6 +106,8 @@ EXPECTED_WORKSPACE_TO_CONTROL_FK_EDGES: frozenset[str] = frozenset(
         "context_page_version.workspace_id -> workspace",
         "edge_projection.workspace_id -> workspace",
         "feedback_item.workspace_id -> workspace",
+        "graph_history_coverage.workspace_id -> workspace",
+        "graph_observation.workspace_id -> workspace",
         "job.workspace_id -> workspace",
         "knowledge_coverage_gap.workspace_id -> workspace",
         "knowledge_node_stat.workspace_id -> workspace",
@@ -160,10 +162,10 @@ EXPECTED_ALL_NULLABLE_EDGES: frozenset[str] = frozenset(
 
 
 def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
-    """Pin the census edge-by-edge: 58 edges, 55 of 86 tables blocked.
+    """Pin the census edge-by-edge: 60 edges, 57 of 88 tables blocked.
 
-    Measured here, not copied: ``workspace`` 55 edges / 55 blocked tables,
-    ``users`` 3 edges / 2 blocked tables, 31 of the 86 shard-resident tables
+    Measured here, not copied: ``workspace`` 57 edges / 57 blocked tables,
+    ``users`` 3 edges / 2 blocked tables, 31 of the 88 shard-resident tables
     insertable, 4 edges all-nullable. Adding, removing or re-pointing any
     cross-plane FK changes ``labels`` and fails this test, which is the point
     -- the inventory is not allowed to move without a reviewer seeing it.
@@ -185,50 +187,53 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     58 = 57 + 1, and since its parent is ``workspace`` (not ``users``), that
     parent's own edge and blocked-table counts both move too: 55 = 54 + 1.
     The insertable count is unchanged (83 - 55 = 28 = 82 - 54) because the new
-    table is itself blocked, not newly reachable.
+    table is itself blocked, not newly reachable. Graph View then added two
+    workspace-plane ledger tables, ``graph_observation`` and
+    ``graph_history_coverage``, each with a single FK into ``workspace`` and
+    no other cross-plane edge: 85 = 83 + 2, 60 = 58 + 2, and ``workspace``
+    moves to 57 = 55 + 2 edges blocking 57 = 55 + 2 tables. Insertable stays
+    28 (85 - 57) for the same reason as before. TreeRail personal favorites add
+    one workspace-plane table without any cross-plane FK, bringing resident
+    tables to 86 and insertable tables to 29 while blocked tables stay at 57.
 
-    TreeRail personal favorites add one workspace-plane table without any
-    cross-plane FK: 84 = 83 + 1. The blocked inventory stays at 55 tables /
-    58 edges, while insertable tables increase from 28 to 29.
-
-    The per-user Inbox adds ``workspace_inbox_entry`` the same way (bare user
-    and workspace UUIDs, no cross-plane FK): 85 = 84 + 1, insertable 30 = 29 + 1.
-    Its recipient lifecycle table also uses bare UUIDs: 86 = 85 + 1 and
-    insertable 31 = 30 + 1, without changing any control-plane FK edge.
+    The per-user Inbox adds ``workspace_inbox_entry`` with bare user and
+    workspace UUIDs and no cross-plane FK: 87 = 86 + 1, insertable 30 = 29 + 1.
+    Its recipient lifecycle table also uses bare UUIDs: 88 = 87 + 1 and
+    insertable 31 = 30 + 1, without adding a control-plane FK edge.
     """
 
     edges = workspace_to_control_fk_edges()
     labels = frozenset(edge.label for edge in edges)
     assert labels == EXPECTED_WORKSPACE_TO_CONTROL_FK_EDGES
     # One label per constraint: no two constraints may collapse into one entry.
-    assert len(edges) == len(labels) == 58
+    assert len(edges) == len(labels) == 60
     assert all(len(edge.columns) == 1 for edge in edges)
     # Reconciles this census with the workspace-plane-only scoping recorded
-    # elsewhere in the tree as 57: the difference is the one MIXED child.
-    assert len([edge for edge in edges if edge.child in WORKSPACE_PLANE_TABLES]) == 57
+    # elsewhere in the tree as 59: the difference is the one MIXED child.
+    assert len([edge for edge in edges if edge.child in WORKSPACE_PLANE_TABLES]) == 59
     assert [edge.label for edge in edges if edge.child in MIXED_PLANE_TABLES] == [
         "audit_event.workspace_id -> workspace"
     ]
 
     resident = WORKSPACE_PLANE_TABLES | MIXED_PLANE_TABLES
-    assert len(resident) == 86
+    assert len(resident) == 88
 
     by_parent = {
         parent: [edge for edge in edges if edge.parent == parent]
         for parent in {edge.parent for edge in edges}
     }
     assert {parent: len(found) for parent, found in by_parent.items()} == {
-        "workspace": 55,
+        "workspace": 57,
         "users": 3,
     }
     assert {
         parent: len({edge.child for edge in found})
         for parent, found in by_parent.items()
-    } == {"workspace": 55, "users": 2}
+    } == {"workspace": 57, "users": 2}
 
     blocked = shard_blocked_tables()
     assert set(blocked) <= resident
-    assert len(blocked) == 55
+    assert len(blocked) == 57
     assert len(resident) - len(blocked) == 31
 
     assert (

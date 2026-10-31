@@ -8,14 +8,61 @@ represents the scope independently of each row's identity. Control- or
 mixed-plane tables need purpose-specific APIs.
 """
 
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from uuid import UUID
 
 from sqlalchemy import Delete, Select, Update, delete, inspect, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import InstrumentedAttribute, Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from backend.tenancy_manifest import WORKSPACE_PLANE_TABLES
+
+
+def select_projection_in_workspace[Model](
+    model: type[Model],
+    *,
+    workspace_id: UUID,
+    columns: Sequence[InstrumentedAttribute] = (),
+    predicates: Sequence[ColumnElement[bool]] = (),
+) -> Select:
+    """Build a row/column read whose mandatory scope cannot be omitted.
+
+    This is a selection API, not a single-resource identity lookup. Composite
+    primary keys are supported, but control/mixed-plane models and columns
+    from another model are not. Additional predicates only narrow the scope;
+    they cannot replace the required workspace predicate.
+    """
+
+    mapper = inspect(model)
+    table = mapper.local_table
+    if table.name not in WORKSPACE_PLANE_TABLES:
+        raise TypeError(
+            "select_projection_in_workspace requires a table classified in "
+            f"WORKSPACE_PLANE_TABLES; {table.name!r} is not workspace-plane"
+        )
+    if "workspace_id" not in table.c or table.c.workspace_id.nullable:
+        raise TypeError(
+            "select_projection_in_workspace requires a non-null workspace_id column"
+        )
+    if not isinstance(workspace_id, UUID):
+        raise TypeError("select_projection_in_workspace requires a workspace UUID")
+    if any(
+        not isinstance(column, InstrumentedAttribute)
+        or column.class_ is not model
+        or column.key not in mapper.column_attrs
+        or any(
+            getattr(mapped, "table", None) is not table
+            for mapped in column.property.columns
+        )
+        for column in columns
+    ):
+        raise TypeError(
+            "select_projection_in_workspace columns must belong to the scoped model"
+        )
+    return select(*(columns or (model,))).where(
+        model.workspace_id == workspace_id,  # type: ignore[attr-defined]
+        *predicates,
+    )
 
 
 def get_in_workspace[Model](
@@ -156,9 +203,7 @@ def join_in_workspace(
     foreign joined row cannot remove a valid outer-join root. ORM aliases are
     accepted when their underlying model satisfies the workspace contract.
     """
-    statement = where_in_workspace(
-        statement, root_model, workspace_id=workspace_id
-    )
+    statement = where_in_workspace(statement, root_model, workspace_id=workspace_id)
     joined = inspect(joined_model)
     _validate_workspace_model(
         joined.mapper.class_ if joined.is_aliased_class else joined_model,

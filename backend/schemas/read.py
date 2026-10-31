@@ -145,6 +145,23 @@ class HotConceptEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class LinkSyntaxGuidance(BaseModel):
+    link_syntax: Literal["wikilink", "context_url"]
+    template: str
+    target_source: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class LinkingGuidance(BaseModel):
+    syntaxes: list[LinkSyntaxGuidance]
+    graph_visibility: Literal["published_head_only"]
+    note: str
+    missing_links_warning: Literal["context_page_has_no_graph_visible_links"]
+
+    model_config = ConfigDict(extra="forbid")
+
+
 GuideDetailLevel = Literal["brief", "normal", "detailed"]
 
 
@@ -193,6 +210,7 @@ class GuidePayload(BaseModel):
     available_resources: list[str] = Field(default_factory=list)
     hot_concepts: list[HotConceptEntry] = Field(default_factory=list)
     recommended_agent_guidance_flow: list[str] = Field(default_factory=list)
+    linking: LinkingGuidance
     field_explanations: dict[str, str] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
@@ -850,6 +868,8 @@ class GraphNeighborsPayload(BaseModel):
     citations: list[GraphNeighborEntry] = Field(default_factory=list)
     co_access: list[GraphNeighborEntry] = Field(default_factory=list)
     mermaid: str | None = None
+    truncated: bool = False
+    warnings: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 

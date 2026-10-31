@@ -4,11 +4,10 @@ from uuid import uuid4
 
 import pytest
 from alembic import command
-from sqlalchemy import MetaData, Table, create_engine, insert, inspect, select, text
+from sqlalchemy import MetaData, Table, create_engine, inspect, select, text
 from sqlalchemy.orm import Session
 
 from backend.models.change import ChangeOperation, ChangeSet
-from backend.models.workspace import Workspace
 from backend.tests.integration.test_release_schema_migration import _config
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
@@ -60,16 +59,31 @@ def test_change_operation_index_round_trip_preserves_existing_rows(
             index["name"] for index in inspect(engine).get_indexes("change_operation")
         }
         with Session(engine) as session, session.begin():
-            # A Core insert names only the given columns and Python defaults,
-            # so workspace columns added by later revisions stay out of it.
+            # Seed the real parent schema without later ORM-only Graph columns.
             workspace_id = uuid4()
+            workspaces = Table("workspace", MetaData(), autoload_with=engine)
+            sqlite = engine.dialect.name == "sqlite"
             session.execute(
-                insert(Workspace.__table__).values(
-                    id=workspace_id,
+                workspaces.insert().values(
+                    id=workspace_id.hex if sqlite else workspace_id,
                     slug="index-migration",
                     title="Index migration",
                     name="Index migration",
                     directory_title_key="index migration",
+                    goal="Index migration regression",
+                    default_language="en",
+                    library_policy={},
+                    write_policy={},
+                    citation_policy={},
+                    agent_injection_policy={},
+                    review_policy={},
+                    lint_policy={},
+                    auto_fix_enabled=False,
+                    visibility="private",
+                    created_by_actor_id=(uuid4().hex if sqlite else uuid4()),
+                    owner_actor_id=(uuid4().hex if sqlite else uuid4()),
+                    created_at=datetime.now(UTC),
+                    updated_at=datetime.now(UTC),
                 )
             )
             change_set = ChangeSet(

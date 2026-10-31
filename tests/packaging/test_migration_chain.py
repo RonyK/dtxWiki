@@ -29,6 +29,8 @@ RELEASE_GATE = REPO_ROOT / "scripts" / "verify_wheel_artifact.py"
 INITIAL_REVISION = "bd62193d5cf6"
 # Frozen core schema boundary of the 0.1 release group.
 CORE_REVISION = "efcbcf724889"
+GRAPH_REVISION = "9aeab6944f25"
+
 RELEASE_013_REVISION = "19db79d3e622"
 RELEASE_014_REVISION = "ef53a0a7061c"
 PERSONAL_POINTER_REVISION = "5c3395a75eb0"
@@ -36,8 +38,9 @@ EXTERNAL_LOGIN_REVISION = "da94025713de"
 REVIEW_HISTORY_INDEX_REVISION = "333a67e22cd7"
 USER_DELETION_REVISION = "eb86fdacb1bb"
 INBOX_REVISION = "175b9664724e"
-CONTEXT_LINK_LOCATOR_REVISION = "af62c98d0731"
-CURRENT_HEAD = "6f4a9f50c046"
+CONTEXT_LINK_REVISION = "af62c98d0731"
+INBOX_RECIPIENT_REVISION = "6f4a9f50c046"
+CURRENT_HEAD = "1d8f1c08ca36"
 ALEMBIC_REVISION_METADATA = {
     "revision",
     "down_revision",
@@ -95,15 +98,26 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
         CORE_REVISION: INITIAL_REVISION,
         RELEASE_013_REVISION: CORE_REVISION,
         RELEASE_014_REVISION: RELEASE_013_REVISION,
+        GRAPH_REVISION: CONTEXT_LINK_REVISION,
         PERSONAL_POINTER_REVISION: RELEASE_014_REVISION,
         EXTERNAL_LOGIN_REVISION: PERSONAL_POINTER_REVISION,
         REVIEW_HISTORY_INDEX_REVISION: EXTERNAL_LOGIN_REVISION,
         USER_DELETION_REVISION: REVIEW_HISTORY_INDEX_REVISION,
         INBOX_REVISION: USER_DELETION_REVISION,
-        CONTEXT_LINK_LOCATOR_REVISION: INBOX_REVISION,
-        CURRENT_HEAD: CONTEXT_LINK_LOCATOR_REVISION,
+        CONTEXT_LINK_REVISION: INBOX_REVISION,
+        INBOX_RECIPIENT_REVISION: CONTEXT_LINK_REVISION,
+        CURRENT_HEAD: (GRAPH_REVISION, INBOX_RECIPIENT_REVISION),
     }
-    assert Path(script.get_revision(INBOX_REVISION).path).parent.name == "v0_2"
+    assert {
+        Path(script.get_revision(revision).path).parent.name
+        for revision in (
+            GRAPH_REVISION,
+            INBOX_REVISION,
+            CONTEXT_LINK_REVISION,
+            INBOX_RECIPIENT_REVISION,
+            CURRENT_HEAD,
+        )
+    } == {"v0_2"}
 
     manifest = json.loads((MIGRATIONS_DIR.parent / "release_manifest.json").read_text())
     assert manifest["legacy_revision_aliases"] == LEGACY_REVISION_ALIASES

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import LargeBinary, cast, func, select
+from sqlalchemy import LargeBinary, and_, cast, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, aliased
@@ -14,8 +15,12 @@ from backend.context_media.application import SyncVersionUsage
 from backend.context_media.domain import validate_markdown_media_policy
 from backend.context_media.ports import ContextMediaRepository
 from backend.domain.prepared_body import PreparedBody
-from backend.models.context import ContextPage, ContextPageVersion
-from backend.repositories.context_visibility import visible_context_version_expression
+from backend.models.context import ContextPage, ContextPageVersion, PageLink
+from backend.models.tree import WorkspaceTreeNode
+from backend.repositories.context_visibility import (
+    PUBLISHED_CONTEXT_VERSION_STATUSES,
+    visible_context_version_expression,
+)
 from backend.utils.actor_display import resolve_actor_display_name
 from backend.utils.block_identity import (
     BlockOperationProvenance,
@@ -31,6 +36,13 @@ from backend.utils.uuid import parse_uuid_or_none
 
 if TYPE_CHECKING:
     from backend.policy.auth import ActorContext
+
+
+@dataclass(frozen=True, slots=True)
+class ContextLinkAdvisoryRow:
+    source_is_advisory_eligible: bool
+    has_other_graph_visible_context: bool
+    has_graph_visible_outbound_link: bool
 
 
 def current_page_versions_statement(
@@ -242,6 +254,211 @@ def get_page_by_slug_for_update(
     slug: str,
 ) -> ContextPage | None:
     return session.scalar(context_page_by_slug_for_update_statement(workspace_id, slug))
+
+
+def page_slugs_by_ids(
+    session: Session,
+    workspace_id: UUID,
+    page_ids: Collection[UUID],
+) -> dict[UUID, str]:
+    """Return current slugs for Context pages scoped to one workspace."""
+
+    ids = tuple(set(page_ids))
+    if not ids:
+        return {}
+    rows = session.execute(
+        select(ContextPage.id, ContextPage.slug).where(
+            ContextPage.workspace_id == workspace_id,
+            ContextPage.id.in_(ids),
+        )
+    )
+    return {page_id: slug for page_id, slug in rows}
+
+
+def context_page_targets_by_navigation_id(
+    session: Session,
+    workspace_id: UUID,
+    target_ids: Collection[UUID],
+) -> dict[UUID, tuple[UUID, str]]:
+    """Resolve `/context?target=` page or tree-node ids to Context pages.
+
+    The Context screen treats a matching tree-node id before falling back to a
+    page id. Mirror that order so authored links describe the page a reader
+    actually opens. Archived rows remain resolvable because PageLink stores
+    authored history; viewer read boundaries decide whether to expose them.
+    """
+
+    ids = tuple(set(target_ids))
+    if not ids:
+        return {}
+    resolved = {
+        page_id: (page_id, slug)
+        for page_id, slug in page_slugs_by_ids(session, workspace_id, ids).items()
+    }
+    node_rows = session.execute(
+        select(
+            WorkspaceTreeNode.id,
+            WorkspaceTreeNode.target_kind,
+            ContextPage.id,
+            ContextPage.slug,
+        )
+        .outerjoin(
+            ContextPage,
+            and_(
+                ContextPage.workspace_id == WorkspaceTreeNode.workspace_id,
+                ContextPage.id == WorkspaceTreeNode.target_id,
+            ),
+        )
+        .where(
+            WorkspaceTreeNode.workspace_id == workspace_id,
+            WorkspaceTreeNode.id.in_(ids),
+        )
+    )
+    for node_id, target_kind, page_id, slug in node_rows:
+        # ContextScreen resolves any same-workspace node id before attempting a
+        # page-id fallback. A folder or another entity kind therefore blocks a
+        # coincidentally equal ContextPage id instead of opening that page.
+        resolved.pop(node_id, None)
+        if target_kind == "context_page" and page_id is not None and slug is not None:
+            resolved[node_id] = (page_id, slug)
+    return resolved
+
+
+def live_page_link_version_ids(
+    session: Session,
+    page: ContextPage,
+) -> set[UUID]:
+    """Return versions whose authored-link projections remain live."""
+
+    pointer_ids = {
+        version_id
+        for version_id in (
+            page.current_published_version_id,
+            page.latest_draft_version_id,
+            page.current_version_id,
+        )
+        if version_id is not None
+    }
+    live_predicates = [ContextPageVersion.version_status == "editing"]
+    if pointer_ids:
+        live_predicates.append(
+            and_(
+                ContextPageVersion.id.in_(pointer_ids),
+                ContextPageVersion.version_status != "discarded",
+            )
+        )
+    return set(
+        session.scalars(
+            select(ContextPageVersion.id).where(
+                ContextPageVersion.workspace_id == page.workspace_id,
+                ContextPageVersion.page_id == page.id,
+                or_(*live_predicates),
+            )
+        )
+    )
+
+
+def context_link_advisory_row(
+    session: Session,
+    *,
+    workspace_id: UUID,
+    page_id: UUID,
+    version_id: UUID,
+) -> ContextLinkAdvisoryRow:
+    """Load the workspace-scoped authored-link advisory facts in one query."""
+
+    source_page = aliased(ContextPage, name="advisory_source_page")
+    source_version = aliased(ContextPageVersion, name="advisory_source_version")
+    candidate_page = aliased(ContextPage, name="advisory_candidate_page")
+    candidate_head = aliased(ContextPageVersion, name="advisory_candidate_head")
+    linked_page = aliased(ContextPage, name="advisory_linked_page")
+    linked_head = aliased(ContextPageVersion, name="advisory_linked_head")
+
+    source_is_advisory_eligible = exists(
+        select(1)
+        .select_from(source_page)
+        .join(
+            source_version,
+            and_(
+                source_version.id == version_id,
+                source_version.page_id == source_page.id,
+                source_version.workspace_id == source_page.workspace_id,
+            ),
+        )
+        .where(
+            source_page.id == page_id,
+            source_page.workspace_id == workspace_id,
+            source_page.lifecycle_status != "archived",
+            source_version.version_status != "discarded",
+            or_(
+                source_version.version_status == "editing",
+                source_page.current_version_id == version_id,
+                source_page.current_published_version_id == version_id,
+                source_page.latest_draft_version_id == version_id,
+            ),
+        )
+    )
+
+    has_other_graph_visible_context = exists(
+        select(1)
+        .select_from(candidate_page)
+        .join(
+            candidate_head,
+            and_(
+                candidate_head.id == candidate_page.current_published_version_id,
+                candidate_head.page_id == candidate_page.id,
+                candidate_head.workspace_id == candidate_page.workspace_id,
+            ),
+        )
+        .where(
+            candidate_page.workspace_id == workspace_id,
+            candidate_page.id != page_id,
+            candidate_page.lifecycle_status != "archived",
+            candidate_head.version_status.in_(PUBLISHED_CONTEXT_VERSION_STATUSES),
+        )
+    )
+
+    has_graph_visible_outbound_link = exists(
+        select(1)
+        .select_from(PageLink)
+        .join(
+            linked_page,
+            and_(
+                linked_page.id == PageLink.target_page_id,
+                linked_page.workspace_id == PageLink.workspace_id,
+            ),
+        )
+        .join(
+            linked_head,
+            and_(
+                linked_head.id == linked_page.current_published_version_id,
+                linked_head.page_id == linked_page.id,
+                linked_head.workspace_id == linked_page.workspace_id,
+            ),
+        )
+        .where(
+            PageLink.workspace_id == workspace_id,
+            PageLink.source_page_id == page_id,
+            PageLink.source_version_id == version_id,
+            PageLink.target_page_id.is_not(None),
+            PageLink.target_page_id != page_id,
+            linked_page.lifecycle_status != "archived",
+            linked_head.version_status.in_(PUBLISHED_CONTEXT_VERSION_STATUSES),
+        )
+    )
+
+    row = session.execute(
+        select(
+            source_is_advisory_eligible.label("source_is_advisory_eligible"),
+            has_other_graph_visible_context.label("has_other_graph_visible_context"),
+            has_graph_visible_outbound_link.label("has_graph_visible_outbound_link"),
+        )
+    ).one()
+    return ContextLinkAdvisoryRow(
+        source_is_advisory_eligible=bool(row.source_is_advisory_eligible),
+        has_other_graph_visible_context=bool(row.has_other_graph_visible_context),
+        has_graph_visible_outbound_link=bool(row.has_graph_visible_outbound_link),
+    )
 
 
 def context_page_by_id_for_update_statement(page_id: UUID):

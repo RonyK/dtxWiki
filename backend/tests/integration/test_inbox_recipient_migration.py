@@ -6,18 +6,18 @@ budget; additional migration cases are unnecessary for these shared states.
 """
 
 import os
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
 from alembic import command
-from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy import MetaData, Table, create_engine, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.models.change import ChangeSet
 from backend.models.inbox import WorkspaceInboxEntry, WorkspaceInboxRecipient
 from backend.models.user import User
-from backend.models.workspace import Workspace
 from backend.tests.integration.test_release_schema_migration import _config
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
@@ -55,18 +55,45 @@ def test_recipient_fences_round_trip_preserves_history_and_live_inbox(
         assert RECIPIENT_TABLE not in inspect(engine).get_table_names()
 
         author_id, inbox_only_id, system_id = uuid4(), uuid4(), uuid4()
+        workspace_id = uuid4()
+        # The shared parent predates Graph columns on the current ORM model.
+        workspace = Table("workspace", MetaData(), autoload_with=engine)
         with Session(engine) as session, session.begin():
             active = User(
                 email="live@example.test",
                 display_name="Live recipient",
                 password_hash="migration-test-hash",
             )
-            workspace = Workspace(
-                slug="recipient-migration", title="Retained", name="Retained"
-            )
-            session.add_all([active, workspace])
+            session.add(active)
             session.flush()
-            active_id, workspace_id = active.id, workspace.id
+            active_id = active.id
+            session.execute(
+                workspace.insert().values(
+                    id=workspace_id.hex if dialect == "sqlite" else workspace_id,
+                    slug="recipient-migration",
+                    title="Retained",
+                    directory_title_key="retained",
+                    name="Retained",
+                    goal="Retained migration history",
+                    default_language="en",
+                    library_policy={},
+                    write_policy={},
+                    citation_policy={},
+                    agent_injection_policy={},
+                    review_policy={},
+                    lint_policy={},
+                    auto_fix_enabled=False,
+                    visibility="private",
+                    created_by_actor_id=(
+                        active_id.hex if dialect == "sqlite" else active_id
+                    ),
+                    owner_actor_id=(
+                        active_id.hex if dialect == "sqlite" else active_id
+                    ),
+                    created_at=datetime.now(UTC),
+                    updated_at=datetime.now(UTC),
+                )
+            )
             session.add_all(
                 [
                     ChangeSet(

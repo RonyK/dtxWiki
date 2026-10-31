@@ -12,7 +12,7 @@ from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models.api_token import ApiToken, ApiTokenWorkspace
 from backend.models.audit import AuditEvent
-from backend.models.base import Base, utc_now
+from backend.models.base import utc_now
 from backend.models.bundle import AgentInputBundle
 from backend.models.mcp_chat import McpChatSession
 from backend.models.mcp_trace import MCPToolCall
@@ -28,7 +28,10 @@ from backend.services.oauth_service import (
 )
 from backend.services.settings_service import SettingsService
 from backend.tests.conftest import authenticate_test_client_in_workspace
-from backend.tests.utils.postgres import drop_reflected_postgres_metadata
+from backend.tests.utils.postgres import (
+    create_isolated_postgres_metadata,
+    drop_reflected_postgres_metadata,
+)
 
 
 def _client(page_service) -> TestClient:
@@ -1266,7 +1269,7 @@ def test_postgres_mcp_client_listing_facets_split_on_the_pushed_down_keys():
     database_url = _postgres_url()
     assert database_url is not None
     engine = create_engine(database_url)
-    Base.metadata.create_all(engine)
+    create_isolated_postgres_metadata(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     workspace_id = uuid4()
     live_user_id = uuid4()

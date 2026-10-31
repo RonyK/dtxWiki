@@ -23,6 +23,7 @@ from backend.services import credential_hashing
 from backend.services.oauth_service import OAUTH_CSRF_COOKIE_NAME, challenge_s256
 from backend.services.page_service import PageService
 from backend.tests.conftest import _FAST_ARGON2, authenticate_test_client_in_workspace
+from backend.tests.utils.postgres import create_isolated_postgres_metadata
 
 
 @contextmanager
@@ -1423,14 +1424,13 @@ def test_oauth_code_redeem_locks_under_concurrency():
     file-backed coverage for its explicit pre-read write intent.
     """
 
-    from backend.models.base import Base
     from backend.scripts.seed_dev import seed_default_workspace
     from backend.services.page_service import PageService
     from backend.tests.utils.postgres_reset import reset_postgres_test_database
 
     engine = create_engine(_postgres_test_url())
     reset_postgres_test_database(engine)
-    Base.metadata.create_all(engine)
+    create_isolated_postgres_metadata(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     with session_factory.begin() as session:
         seed_default_workspace(session)

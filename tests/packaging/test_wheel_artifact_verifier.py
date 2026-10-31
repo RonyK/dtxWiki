@@ -10,10 +10,16 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VERIFIER = REPO_ROOT / "scripts" / "verify_wheel_artifact.py"
-CURRENT_HEAD = "6f4a9f50c046"
+# Backend migration contracts own this fixture. Resolve the current chain so
+# later frontend-only asset checks need not edit the migration head again.
+CURRENT_HEAD = ScriptDirectory.from_config(
+    Config(str(REPO_ROOT / "backend" / "alembic.ini"))
+).get_current_head()
 REVISION_DIRECTORY = (
     REPO_ROOT
     / "backend"

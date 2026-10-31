@@ -17,6 +17,9 @@ from backend.services.delegated_tasks import produce_folder_summary_tasks
 from backend.services.indexing.edge_registry import rebuild_edge_projection
 from backend.services.page_service import sync_page_projections
 from backend.services.retrieval.protocol import Indexer
+from backend.services.workspace_graph_capability import (
+    usage_relation_signals_enabled,
+)
 
 
 def reindex_workspace(
@@ -25,6 +28,9 @@ def reindex_workspace(
     workspace_id: UUID,
 ) -> dict[str, int]:
     """Rebuild transactional projections, then the configured index planes."""
+    # The owner's usage-signal switch lives on the control plane.
+    with database_provider.control_session_factory()() as control_session:
+        usage_signals = usage_relation_signals_enabled(control_session, workspace_id)
     with database_provider.session_for(workspace_id).begin() as session:
         pages = session.scalars(
             select(ContextPage).where(ContextPage.workspace_id == workspace_id)
@@ -44,6 +50,7 @@ def reindex_workspace(
                     session,
                     page=page,
                     version=None,
+                    record_graph_observations=False,
                     self_origins=configured_self_origins(database_provider.settings),
                 )
             for version in live_versions:
@@ -51,10 +58,13 @@ def reindex_workspace(
                     session,
                     page=page,
                     version=version,
+                    record_graph_observations=False,
                     self_origins=configured_self_origins(database_provider.settings),
                 )
                 synced_versions += 1
-        edge_counts = rebuild_edge_projection(session, workspace_id)
+        edge_counts = rebuild_edge_projection(
+            session, workspace_id, usage_signals_enabled=usage_signals
+        )
         delegated = produce_folder_summary_tasks(session, workspace_id)
         counts = {
             "context_pages": len(page_ids),
@@ -66,9 +76,7 @@ def reindex_workspace(
     index_counts = indexer.rebuild(workspace_id=workspace_id)
     counts["pruned_orphans"] = index_counts.get("pruned_orphans", 0)
     counts["search_documents"] = sum(
-        value
-        for key, value in index_counts.items()
-        if key != "pruned_orphans"
+        value for key, value in index_counts.items() if key != "pruned_orphans"
     )
     return counts
 
@@ -136,9 +144,7 @@ def prune_orphan_chunks(session: Session, workspace_id: UUID) -> int:
         select(ContentChunk).where(ContentChunk.workspace_id == workspace_id)
     ).all():
         live_ids = (
-            live_page_ids
-            if chunk.document_kind == "context_page"
-            else live_item_ids
+            live_page_ids if chunk.document_kind == "context_page" else live_item_ids
         )
         if chunk.document_id not in live_ids:
             session.delete(chunk)

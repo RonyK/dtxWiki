@@ -214,19 +214,33 @@ test.describe("TreeRail document states and personal favorites", () => {
       const workspace = await currentWorkspace(page.request);
       const fixtures: Fixture[] = [];
 
-      // The first two API publications precede the recent publications. Move
-      // only the browser clock to their exact expiry: real server timestamps
-      // then yield old and recent documents together without altering the DB.
-      for (const state of ["normal", "recent", "review"] as const) {
-        for (const favorite of [false, true]) {
-          const title = `Marker ${fixtures.length + 1} ${state} ${favorite ? "favorite" : "plain"} — a deliberately long document title that must retain its available space`;
-          const version = await publishContext(page.request, workspace.id, title);
-          const fixture: Fixture = { id: version.id, title, state, favorite, version };
+      const published: Omit<Fixture, "state" | "favorite">[] = [];
+      for (let index = 0; index < 6; index++) {
+        const title = `Marker ${index + 1} — a deliberately long document title that must retain its available space`;
+        const version = await publishContext(page.request, workspace.id, title);
+        published.push({ id: version.id, title, version });
+      }
+      // Server wall time may move backwards between publications. Assign
+      // states from the observed timestamps, using the outer pairs to leave
+      // the widest gap around the normal/recent boundary.
+      const publishedNodes = new Map((await treeNodes(page.request, workspace.id, "context"))
+        .map((node) => [node.target_id, node]));
+      published.sort((left, right) =>
+        timestamp(publishedNodes.get(left.id)!.content_changed_at) -
+        timestamp(publishedNodes.get(right.id)!.content_changed_at) || left.id.localeCompare(right.id));
+      for (const [state, pair] of [
+        ["normal", published.slice(0, 2)],
+        ["recent", published.slice(4, 6)],
+        ["review", published.slice(2, 4)],
+      ] as const) {
+        for (const [index, document] of pair.entries()) {
+          const favorite = index === 1;
+          const fixture: Fixture = { ...document, state, favorite };
           if (state === "review") {
-            fixture.reviewId = await submitSuccessor(page.request, workspace.id, version);
+            fixture.reviewId = await submitSuccessor(page.request, workspace.id, document.version);
           }
           if (favorite) {
-            await setFavorite(page.request, workspace.id, "context_page", version.id, true);
+            await setFavorite(page.request, workspace.id, "context_page", document.id, true);
           }
           fixtures.push(fixture);
         }

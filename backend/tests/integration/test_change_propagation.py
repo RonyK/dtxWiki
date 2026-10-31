@@ -160,6 +160,65 @@ def test_publish_propagation_marks_only_direct_dependents_and_stages_review(
         assert live_tasks[0].status == "expired"
 
 
+def test_publish_propagation_chooses_deterministic_authored_link_snippet(
+    session_factory,
+):
+    with session_factory.begin() as session:
+        workspace_id = session.scalar(
+            select(Workspace.id).where(Workspace.slug == "default")
+        )
+        source, source_version = _page(session, workspace_id, "snippet-source")
+        dependent, dependent_version = _page(
+            session,
+            workspace_id,
+            "snippet-dependent",
+        )
+        _edge(session, workspace_id, dependent, source)
+        session.add_all(
+            [
+                PageLink(
+                    workspace_id=workspace_id,
+                    source_page_id=dependent.id,
+                    source_version_id=dependent_version.id,
+                    link_syntax="context_url",
+                    target_slug=source.slug,
+                    target_page_id=source.id,
+                    occurrence_count=1,
+                    first_snippet="AAA URL link appears first in storage",
+                ),
+                PageLink(
+                    workspace_id=workspace_id,
+                    source_page_id=dependent.id,
+                    source_version_id=dependent_version.id,
+                    link_syntax="wikilink",
+                    target_slug=source.slug,
+                    target_page_id=source.id,
+                    occurrence_count=1,
+                    first_snippet="Stable wikilink anchor",
+                ),
+            ]
+        )
+
+        created = mark_dependent_pages_stale(
+            session,
+            workspace_id=workspace_id,
+            published_page_id=source.id,
+            published_version_id=source_version.id,
+            reason="source changed",
+        )
+        finding = session.scalar(
+            select(LintFinding).where(
+                LintFinding.rule_id == "kb.dependent_maybe_stale",
+                LintFinding.target_id == dependent.id,
+            )
+        )
+        action = json.loads(finding.suggested_action)
+
+        assert created == 1
+        assert action["anchor"] == "Stable wikilink anchor"
+        assert finding.fingerprint.endswith("|anchor:9513648653a0f89c")
+
+
 def test_direct_publish_paths_share_propagation_and_dependent_publish_resolves(
     page_service, session_factory
 ):

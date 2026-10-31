@@ -72,15 +72,22 @@ test("Context activity shows changes, decisions and exact links @cross-browser",
   await api('patch', `${root}/tree/nodes/${node.id}`, {display_name:'운영 절차 가이드'});
   const folder = await api('post', `${root}/tree/nodes`, {section:'context', title:'서비스 운영'});
   await api('post', `${root}/tree/move`, {node_id:node.id, new_parent_id:folder.id, reason:'운영 문서를 한곳에서 관리'});
-  const actualFeed = await api('get', `${pageRoot}/activity?period=all&limit=50`);
   const history = await api('get', `${root}/changesets?target_type=context_page&target_id=${pid}`);
+  // Assert metadata from the same snapshot that populates the UI. A separate
+  // earlier request can have a different server-clock snapshot boundary.
+  const activityResponse = page.waitForResponse(response =>
+    response.request().method() === 'GET' &&
+    new URL(response.url()).pathname === `${pageRoot}/activity`);
+  await page.goto(`${workspaceUrl(wid, `context/pages/${pid}`)}?tab=activity`);
+  const response = await activityResponse;
+  expect(response.ok()).toBeTruthy();
+  const actualFeed = (await response.json()).data;
   writeFileSync(`${out}/actual-api-evidence.json`, JSON.stringify({
     source: 'Actual isolated backend + current SPA; no intercepted AS-IS API responses',
     wid,pid,creation,firstSubmitted,firstPublished,secondSaved,secondSubmitted,secondPublished,
     oldParentTitle:oldParent?.title,folder,actualFeed,history,reviewDecisions,
   },null,2));
 
-  await page.goto(`${workspaceUrl(wid, `context/pages/${pid}`)}?tab=activity`);
   const panel=page.locator('#context-reader-panel-activity');
   await expect(panel.locator('.context-event-card')).toHaveCount(11);
   await expect(panel.locator('.context-event-chip')).toHaveCount(11);

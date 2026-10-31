@@ -33,6 +33,7 @@ from backend.models.mcp_chat import (
 from backend.models.mcp_trace import MCPToolCall
 from backend.models.workspace import MCPClient
 from backend.policy.auth import ActorContext
+from backend.policy.mcp_scopes import FOCUSED_READ_TOOLS
 from backend.policy.trust_boundaries import (
     actor_can_read_drafts,
     actor_can_read_restricted_library,
@@ -147,9 +148,6 @@ _SEARCH_INPUT_FIELDS = {
     "search": "query",
     "grep_wiki": "pattern",
 }
-_FOCUSED_READ_TOOLS = frozenset(
-    {"fetch", "read", "read_agent_page", "read_concept", "read_page"}
-)
 _BOOTSTRAP_TOOLS = frozenset(
     {
         "get_index",
@@ -1442,7 +1440,7 @@ class McpChatService:
                 McpChatToolCallArtifact.chat_session_id == chat.id,
                 McpChatToolCallArtifact.verb == McpChatArtifactVerb.REFERENCED.value,
                 MCPToolCall.workspace_id == chat.workspace_id,
-                MCPToolCall.tool_name.in_(_FOCUSED_READ_TOOLS),
+                MCPToolCall.tool_name.in_(FOCUSED_READ_TOOLS),
                 MCPToolCall.result_status.in_(PRESENTATION_ELIGIBLE_STATUSES),
             )
             .order_by(

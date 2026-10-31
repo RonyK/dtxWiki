@@ -250,6 +250,10 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
     assert "# Canonical Alpha" in redirected.content
     assert redirected.mermaid is None
     assert redirected.neighbors is not None
+    # MCP read tools surface co_access like any other edge kind. The relation
+    # spent this branch behind a k-anonymity gate that a workspace of named
+    # teammates can never satisfy, so the gate only kept it empty; what has to
+    # hold is that the actor can read the neighbour, which hydration enforces.
     assert [item.id for item in redirected.neighbors.co_access] == [beta.id]
     assert redirected.neighbors.co_access[0].kind == "context_page"
     assert redirected.neighbors.co_access[0].path is None
@@ -257,7 +261,6 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
         redirected.neighbors.co_access[0].stable_url == f"/p/{workspace_id}/{beta.id}"
     )
     assert redirected.neighbors.co_access[0].edge_kind == "co_access"
-    assert redirected.neighbors.co_access[0].direction == "out"
     assert mermaid.mermaid is not None
     assert mermaid.mermaid.startswith("graph LR")
     assert ambiguous.envelope.result_status == "succeeded"

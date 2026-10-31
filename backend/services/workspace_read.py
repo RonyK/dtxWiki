@@ -13,6 +13,8 @@ from backend.policy.trust_boundaries import actor_workspace_filter
 from backend.repositories.context_page_repo import visible_page_body_totals
 from backend.schemas.read import (
     GuidePayload,
+    LinkingGuidance,
+    LinkSyntaxGuidance,
     WorkspaceDetail,
     WorkspaceListData,
     WorkspaceRouting,
@@ -156,8 +158,7 @@ GUIDE_LEVEL_ORDER = ("brief", "normal", "detailed")
 GUIDE_LEVEL_ALIASES = {"full": "detailed"}
 GUIDE_FIELD_EXPLANATIONS = {
     "actor_context.may_write_drafts": (
-        "True when your credential can call create_context_page or "
-        "begin_context_edit."
+        "True when your credential can call create_context_page or begin_context_edit."
     ),
     "actor_context.my_writes_wait_for_human_review": (
         "True when what you write as an AI client waits for a human review "
@@ -399,6 +400,31 @@ class WorkspaceReadService:
             "citation_policy": inputs.workspace.citation_policy,
             "workspace_routing": self._workspace_routing(inputs),
             "required_workflow": REQUIRED_WORKFLOW,
+            "linking": LinkingGuidance(
+                syntaxes=[
+                    LinkSyntaxGuidance(
+                        link_syntax="wikilink",
+                        template="[[slug]]",
+                        target_source=(
+                            "Use a known page slug; prefer the result's link_markdown."
+                        ),
+                    ),
+                    LinkSyntaxGuidance(
+                        link_syntax="context_url",
+                        template="[title](/p/<workspace_id>/<page_id>)",
+                        target_source=(
+                            "Reuse a Context result's link_markdown or "
+                            "stable_url unchanged."
+                        ),
+                    ),
+                ],
+                graph_visibility="published_head_only",
+                note=(
+                    "Links in a draft appear in the graph only after the page "
+                    "is published."
+                ),
+                missing_links_warning="context_page_has_no_graph_visible_links",
+            ),
         }
 
     def _normal_view(self, inputs: _GuideInputs) -> dict[str, Any]:
@@ -493,9 +519,7 @@ class WorkspaceReadService:
             whole_read_budget_bytes=WHOLE_READ_BUDGET_BYTES,
             whole_read="within_budget" if within else "over_budget",
             bundle_resource=(
-                f"dtxwiki://workspaces/{inputs.workspace.id}/bundle"
-                if within
-                else None
+                f"dtxwiki://workspaces/{inputs.workspace.id}/bundle" if within else None
             ),
             guidance=template.format(
                 size=_human_bytes(body_bytes),

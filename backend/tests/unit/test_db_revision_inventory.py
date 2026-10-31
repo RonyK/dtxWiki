@@ -47,6 +47,12 @@ def _marker(state: str = "absent") -> inventory.MarkerSnapshot:
     return inventory.MarkerSnapshot(state="absent", present=(), missing=("x",))
 
 
+def test_released_core_fingerprint_excludes_graph_view_schema() -> None:
+    assert "column:page_links.link_syntax" not in inventory.FINAL_EPIC1_0002_MARKERS
+    assert "table:graph_observation" not in inventory.FINAL_EPIC1_0002_MARKERS
+    assert "table:graph_history_coverage" not in inventory.FINAL_EPIC1_0002_MARKERS
+
+
 def _snapshot(
     *,
     revisions=("bd62193d5cf6",),

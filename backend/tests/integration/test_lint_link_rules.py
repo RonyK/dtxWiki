@@ -212,6 +212,85 @@ def test_renamed_pinned_link_is_broken_slug_not_unresolved(session_factory):
         }
 
 
+def test_renamed_context_url_target_does_not_suggest_wikilink_rewrite(
+    session_factory,
+):
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        target, _ = _page(session, workspace_id, "old-url-target", "Target.\n")
+        source, source_version = _page(
+            session,
+            workspace_id,
+            "url-source",
+            (
+                "[Target]"
+                f"(/p/{workspace_id}/{target.id})\n"
+            ),
+        )
+        url_link = session.scalar(
+            select(PageLink).where(
+                PageLink.source_version_id == source_version.id,
+                PageLink.link_syntax == "context_url",
+            )
+        )
+        assert url_link is not None
+        assert url_link.target_slug is None
+
+        target.slug = "new-url-target"
+        session.flush()
+
+        assert _check(session, "link.unresolved", source) == []
+        assert _check(session, "link.internal-noncanonical", source) == []
+
+
+def test_defensive_unresolved_context_url_row_does_not_create_link_finding(
+    session_factory,
+):
+    """Missing URL locators are retained; unrelated stale rows add no finding."""
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        missing_page_id = uuid4()
+        source, source_version = _page(
+            session,
+            workspace_id,
+            "defensive-url-source",
+            (
+                "[Missing]"
+                f"(/workspaces/{workspace_id}/context/pages/{missing_page_id})\n"
+            ),
+        )
+        assert (
+            session.scalar(
+                select(PageLink).where(
+                    PageLink.source_version_id == source_version.id,
+                    PageLink.link_syntax == "context_url",
+                )
+            )
+            is not None
+        )
+
+        session.add(
+            PageLink(
+                workspace_id=workspace_id,
+                source_page_id=source.id,
+                source_version_id=source_version.id,
+                link_syntax="context_url",
+                target_slug="missing-url-target",
+                target_page_id=None,
+                occurrence_count=1,
+                first_snippet="[Missing](/context?target=missing)",
+            )
+        )
+        session.flush()
+
+        findings = _check(session, "link.unresolved", source)
+        assert len(findings) == 1
+        assert findings[0].message_args["locator"] == (
+            f"/workspaces/{workspace_id}/context/pages/{missing_page_id}"
+        )
+        assert _check(session, "link.internal-noncanonical", source) == []
+
+
 def _stage_draft(session, page, published_version, draft_body):
     """Stage a draft version on top of ``page``'s existing published head and
     sync its links, leaving BOTH the published and draft bodies live."""

@@ -557,6 +557,11 @@ ADVISORY_WARNING_MESSAGES = {
         "One or more workspaces could not be reached, so this result is "
         "missing their jobs and any totals shown may undercount."
     ),
+    "context_page_has_no_graph_visible_links": (
+        "This page has no authored link to another published Context page that "
+        "can appear in the graph. Add [[slug]] or "
+        "[title](/context?target=<id>)."
+    ),
 }
 
 

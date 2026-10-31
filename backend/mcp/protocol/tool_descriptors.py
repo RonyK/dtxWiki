@@ -8,6 +8,7 @@ from functools import lru_cache
 
 from mcp.types import Tool, ToolAnnotations
 
+from backend.mcp.protocol.instructions import CONTEXT_LINKING_INSTRUCTION
 from backend.mcp.protocol.output_validation import WIRE_ENVELOPE_FIELDS
 from backend.mcp.protocol.schema_projection import host_compatible_schema
 from backend.mcp.scopes import TOOL_REQUIRED_ROLES
@@ -212,6 +213,7 @@ TOOL_META = {
         "them over submit_revision_for_review for new integrations. The "
         "response returns the new page's ids and editing_revision, not the "
         "body. "
+        f"{CONTEXT_LINKING_INSTRUCTION} "
         "Requires conversation_token: echo one from an earlier envelope or "
         "pass the literal 'new'.",
         False,
@@ -254,6 +256,7 @@ TOOL_META = {
         "stored, with the changed sections and line/char counts. Prefer "
         "patch_context_edit for local changes: it sends less and cannot "
         "overwrite text you did not mean to change. "
+        f"{CONTEXT_LINKING_INSTRUCTION} "
         "Requires conversation_token: echo one from an earlier envelope or "
         "pass the literal 'new'.",
         False,
@@ -268,6 +271,11 @@ TOOL_META = {
         "replaces its review. An edit you never submit stays private and is "
         "never reviewed. The response returns the version's ids and review "
         "status, not the body; read it by version_id. "
+        f"{CONTEXT_LINKING_INSTRUCTION} If the submitted version has no "
+        "authored link to another published Context page that can appear in "
+        "the graph, the envelope carries warning "
+        "context_page_has_no_graph_visible_links; the submission still "
+        "succeeds and changes require a new begin_context_edit. "
         "Requires conversation_token: echo one from an earlier envelope or "
         "pass the literal 'new'.",
         False,
@@ -318,6 +326,7 @@ TOOL_META = {
         "changed_blocks_omitted_count is above 0. "
         "Never creates a new version or a ReviewItem; use "
         "submit_context_edit_for_review for that. "
+        f"{CONTEXT_LINKING_INSTRUCTION} "
         "Requires conversation_token: echo one from an earlier envelope or "
         "pass the literal 'new'.",
         False,
@@ -467,11 +476,17 @@ _TOOL_META_VALUES = TOOL_META
 TOOL_META = {
     name: ToolMeta(
         values[0],
-        values[1] + (
+        values[1]
+        + (
             " " + MCP_CONTEXT_LINK_GUIDANCE
-            if name in {
-                "create_context_page", "begin_context_edit", "update_context_edit",
-                "patch_context_edit", "submit_context_edit_for_review", "read_concept",
+            if name
+            in {
+                "create_context_page",
+                "begin_context_edit",
+                "update_context_edit",
+                "patch_context_edit",
+                "submit_context_edit_for_review",
+                "read_concept",
             }
             else ""
         ),
