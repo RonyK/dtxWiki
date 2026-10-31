@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import path from "node:path";
 import { createServer, type ViteDevServer } from "vite";
+import { fixtureServerConfig } from "./vite-fixture";
 import type {} from "./aggregated-scene-entry";
 
 // An aggregated scene through the real adapter, native picker and native renderer. Four link clusters of 17,499 / 492 /
@@ -8,7 +9,7 @@ import type {} from "./aggregated-scene-entry";
 // attached), laid out by hand and kept still. Headless SwiftShader: functional only, not GPU latency or a target-device claim.
 let server: ViteDevServer, origin: string;
 test.beforeAll(async () => {
-  server = await createServer({ root: path.resolve("frontend"), configFile: false, logLevel: "error",
+  server = await createServer({ ...fixtureServerConfig,
     server: { host: "127.0.0.1", port: 0, fs: { allow: [path.resolve(".")] } } });
   await server.listen();
   const address = server.httpServer?.address();

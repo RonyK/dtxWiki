@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { createServer, type ViteDevServer } from "vite";
 
 import { evidenceScreenshot } from "../e2e/evidence";
+import { fixtureServerConfig } from "./vite-fixture";
 
 import type {} from "../../frontend/src/features/graph/workspace/tests/browserSmoke";
 
@@ -20,7 +20,7 @@ test.beforeAll(async () => {
   expect(csp).toContain("script-src 'self';");
   expect(csp).not.toContain("unsafe-eval");
   server = await createServer({
-    root: path.resolve("frontend"), configFile: false, logLevel: "error",
+    ...fixtureServerConfig,
     server: { host: "127.0.0.1", port: 0, headers: { "Content-Security-Policy": csp } },
   });
   await server.listen();

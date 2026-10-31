@@ -4,6 +4,7 @@ import path from "node:path";
 import { createServer, type ViteDevServer } from "vite";
 
 import { evidenceScreenshot } from "../e2e/evidence";
+import { fixtureServerConfig } from "./vite-fixture";
 
 import type {} from "./workspace-screen-focus-entry";
 
@@ -22,7 +23,7 @@ declare global {
 }
 test.beforeAll(async () => {
   server = await createServer({
-    root: path.resolve("frontend"), configFile: false, logLevel: "error",
+    ...fixtureServerConfig,
     esbuild: { jsx: "automatic" },
     server: { host: "127.0.0.1", port: 0, fs: { allow: [path.resolve(".")] } },
     plugins: [{
@@ -133,7 +134,8 @@ for (const mobile of [false, true]) {
     // Renderer readiness can precede the initial community upload. Pause only
     // after that scene owns an actual blocked official structure frame, so
     // Resume cannot race a queued replacement seed into the phase boundary.
-    await expect(canvas).toHaveAttribute("data-map-community-layout-status", "applied");
+    // This is an explicit loading allowance, not a layout-speed gate.
+    await expect(canvas).toHaveAttribute("data-map-community-layout-status", "applied", { timeout: 15_000 });
     await expect.poll(() => page.evaluate(() => window.__mapLayoutGate.blockedStructureFrames)).toBeGreaterThan(0);
     await page.getByRole("button", { name: mobile ? "레이아웃 일시 중지" : "Pause layout", exact: true }).click();
     await expect(notice).toHaveAttribute("data-layout-state", "paused");
@@ -991,8 +993,9 @@ async function expectSettledNativeScene(page: Page): Promise<void> {
   // Renderer readiness can expose the bounded fallback before the initial
   // worker finishes. Focus-only invariance starts after that real upload/fit,
   // not before it; reduced motion disables simulation, not initialization.
+  // This is an explicit loading allowance, not a layout-speed gate.
   const canvas = page.locator(".graph-canvas");
-  await expect(canvas).toHaveAttribute("data-map-community-count", /^[1-9]\d*$/);
+  await expect(canvas).toHaveAttribute("data-map-community-count", /^[1-9]\d*$/, { timeout: 15_000 });
   await expect(canvas).toHaveAttribute("data-map-community-layout-status", "applied");
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));

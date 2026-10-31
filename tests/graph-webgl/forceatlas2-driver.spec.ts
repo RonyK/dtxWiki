@@ -3,6 +3,7 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createServer, type ViteDevServer } from "vite";
+import { fixtureServerConfig } from "./vite-fixture";
 import type { ForceAtlas2Fixture } from "./forceatlas2-driver-entry";
 
 type ReferenceSnapshot = { iteration: number; positions: number[]; force: number[]; previousForce: number[]; masses: number[] };
@@ -15,7 +16,7 @@ let server: ViteDevServer, origin: string;
 let evidenceSequence = 0;
 test.beforeAll(async () => {
   referenceModule = await import(pathToFileURL(path.resolve("tests/graph-webgl/forceatlas2-reference.mjs")).href);
-  server = await createServer({ root: path.resolve("frontend"), configFile: false, logLevel: "error",
+  server = await createServer({ ...fixtureServerConfig,
     server: { host: "127.0.0.1", port: 0, fs: { allow: [path.resolve(".")] } } });
   await server.listen();
   const address = server.httpServer?.address();

@@ -5,6 +5,7 @@ import { createServer, type ViteDevServer } from "vite";
 
 import { graphFixture } from "../../frontend/src/features/graph/tests/graphFixture";
 import { evidenceScreenshot } from "../e2e/evidence";
+import { fixtureServerConfig } from "./vite-fixture";
 
 const fixtureWorkspaceId = "00000000-0000-4000-8000-000000000001";
 const fixtureNodes = graphFixture().nodes;
@@ -15,7 +16,7 @@ let server: ViteDevServer;
 let origin: string;
 test.beforeAll(async () => {
   server = await createServer({
-    root: path.resolve("frontend"), configFile: false, logLevel: "error",
+    ...fixtureServerConfig,
     server: { host: "127.0.0.1", port: 0, strictPort: false, fs: { allow: [path.resolve(".")] } },
   });
   await server.listen();

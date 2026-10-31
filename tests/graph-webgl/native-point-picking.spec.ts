@@ -2,11 +2,12 @@ import { expect, test } from "@playwright/test";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createServer, type ViteDevServer } from "vite";
+import { fixtureServerConfig } from "./vite-fixture";
 import type {} from "./native-point-picking-entry";
 
 let server: ViteDevServer, origin: string;
 test.beforeAll(async () => {
-  server = await createServer({ root: path.resolve("frontend"), configFile: false, logLevel: "error",
+  server = await createServer({ ...fixtureServerConfig,
     server: { host: "127.0.0.1", port: 0, fs: { allow: [path.resolve(".")] } } });
   await server.listen();
   const address = server.httpServer?.address();

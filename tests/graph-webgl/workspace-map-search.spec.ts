@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
-import path from "node:path";
 import { createServer, type ViteDevServer } from "vite";
+
+import { fixtureServerConfig } from "./vite-fixture";
 
 import type {} from "../../frontend/src/features/graph/workspace/tests/browserSmoke";
 
@@ -8,7 +9,7 @@ let server: ViteDevServer;
 let origin: string;
 test.beforeAll(async () => {
   server = await createServer({
-    root: path.resolve("frontend"), configFile: false, logLevel: "error",
+    ...fixtureServerConfig,
     server: { host: "127.0.0.1", port: 0, strictPort: false },
   });
   await server.listen();
