@@ -100,9 +100,15 @@ test("cross-site POST restores Lax cookies before SSO reauthentication and linki
       const cookies = async (request: Request) => (await request.allHeaders()).cookie ?? "";
       expect(await cookies(crossSite)).not.toContain("dtxwiki_session=");
       expect((await crossSite.allHeaders()).origin).toBe(`https://localhost:${address.port}`);
-      expect(await cookies(sameSite)).toContain("dtxwiki_session=");
       expect((await sameSite.allHeaders()).origin).toBe(wiki);
       await expect(page).toHaveURL(`${wiki}/fixture/done?flow=${purpose}`);
+      // A redirect answers the continuation, so Playwright cannot report that
+      // request's Cookie header on WebKit: ask the server what it received.
+      const continued = await page.evaluate(async () => (await fetch("/fixture/continuations")).json());
+      expect(continued.at(-1)).toEqual({
+        path: `${callbackPath}/continue`,
+        cookies: expect.arrayContaining(["dtxwiki_session"]),
+      });
     }
     const identities = await page.evaluate(async () => (await fetch("/api/v1/auth/identities")).json());
     expect(identities.data.identities.map((identity: { provider_slug: string }) => identity.provider_slug).sort())

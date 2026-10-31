@@ -103,12 +103,28 @@ def main():
     def done():
         return HTMLResponse("<!doctype html><title>Flow complete</title>Complete")
 
+    # Cookie names the server received on each SSO continuation;
+    # external_login_post_callback.spec.ts reads them.
+    continuations = []
+
+    @fixture_router.get("/fixture/continuations")
+    def received_continuations():
+        return continuations
+
     app = create_app(
         settings=settings,
         page_service=PageService(factory),
         extra_mount=lambda app: app.include_router(fixture_router),
     )
     app.state.auth_providers = providers
+
+    @app.middleware("http")
+    async def record_continuation(request: Request, call_next):
+        if request.url.path.endswith("/callback/continue"):
+            continuations.append(
+                {"path": request.url.path, "cookies": sorted(request.cookies)}
+            )
+        return await call_next(request)
 
     uvicorn.run(
         app,
