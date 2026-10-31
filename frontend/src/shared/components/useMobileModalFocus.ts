@@ -75,6 +75,8 @@ export function useMobileModalFocus({
 }
 
 function focusFirstModalElement(container: HTMLElement) {
+  // A user can enter the sheet before its deferred initial focus runs.
+  if (container.contains(container.ownerDocument.activeElement)) return;
   const focusable = focusableElements(container);
   (focusable[0] ?? container).focus();
 }

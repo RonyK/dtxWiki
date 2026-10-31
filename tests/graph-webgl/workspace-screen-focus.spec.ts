@@ -14,6 +14,10 @@ declare global {
   interface Window {
     __mapLayoutGate: { structure: boolean; contact: boolean; blockedStructureFrames: number;
       pending: Array<() => void>; collisions: number };
+    __screenFocusGate: {
+      hold: boolean;
+      release(): Promise<{ frames: number; timers: number }>;
+    };
   }
 }
 test.beforeAll(async () => {
@@ -266,6 +270,51 @@ for (const scenario of [
     });
     await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
     await page.emulateMedia({ reducedMotion: "reduce" });
+    // Release old-modal restoration and sheet initial focus only after keyboard
+    // navigation claims the new sheet. Neither deferred callback may steal it.
+    if (mobile) await page.addInitScript(() => {
+      const requestFrame = window.requestAnimationFrame.bind(window);
+      const cancelFrame = window.cancelAnimationFrame.bind(window);
+      const setTimer = window.setTimeout.bind(window);
+      const clearTimer = window.clearTimeout.bind(window);
+      const frames = new Map<number, FrameRequestCallback>();
+      const timers = new Map<number, () => void>();
+      window.__screenFocusGate = {
+        hold: false,
+        release() {
+          this.hold = false;
+          return new Promise(resolve => requestFrame(time => {
+            const counts = { frames: frames.size, timers: timers.size };
+            const pendingTimers = [...timers.values()];
+            const pendingFrames = [...frames.values()];
+            timers.clear(); frames.clear();
+            pendingTimers.forEach(callback => callback());
+            pendingFrames.forEach(callback => callback(time));
+            resolve(counts);
+          }));
+        },
+      };
+      window.requestAnimationFrame = callback => {
+        if (!window.__screenFocusGate.hold) return requestFrame(callback);
+        const id = requestFrame(() => undefined);
+        cancelFrame(id); frames.set(id, callback);
+        return id;
+      };
+      window.cancelAnimationFrame = id => { frames.delete(id); cancelFrame(id); };
+      Object.defineProperty(window, "setTimeout", { configurable: true, writable: true,
+        value: (callback: TimerHandler, delay?: number, ...args: unknown[]) => {
+          if (!window.__screenFocusGate.hold || typeof callback !== "function" || (delay ?? 0) !== 0) {
+            return setTimer(callback, delay, ...args);
+          }
+          const id = setTimer(() => undefined, 0);
+          clearTimer(id); timers.set(id, () => callback.apply(window, args));
+          return id;
+        },
+      });
+      Object.defineProperty(window, "clearTimeout", { configurable: true, writable: true,
+        value: (id?: number) => { if (id !== undefined) timers.delete(id); clearTimer(id); },
+      });
+    });
     await page.addInitScript((failureReason) => {
       if (failureReason === "webgl2") {
         const getContext = HTMLCanvasElement.prototype.getContext;
@@ -311,6 +360,9 @@ for (const scenario of [
     expect(noticeBounds!.y + noticeBounds!.height).toBeLessThanOrEqual(mobile ? 844 : 900);
     await evidenceScreenshot(page, testInfo, `unsupported-${language}-${mobile ? "mobile" : "desktop"}-${reason}.png`);
     if (mobile) {
+      // Let keyboard navigation claim the new sheet before deferred focus
+      // from the old fullscreen canvas and sheet activation can run.
+      await page.evaluate(() => { window.__screenFocusGate.hold = true; });
       await page.getByRole("button", { name: language === "en"
         ? "Close canvas" : "캔버스 닫기", exact: true }).click();
       await page.getByRole("button", { name: language === "en"
@@ -323,6 +375,12 @@ for (const scenario of [
     await firstRow.locator("button[data-list-index='0']").focus();
     await page.keyboard.press("Tab");
     await expect(openDocument).toBeFocused();
+    if (mobile) {
+      const deferredFocus = await page.evaluate(() => window.__screenFocusGate.release());
+      expect(deferredFocus.frames).toBeGreaterThan(0);
+      expect(deferredFocus.timers).toBeGreaterThan(0);
+      await expect(openDocument).toBeFocused();
+    }
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("unsupported-document-destination")).toHaveAttribute("data-document-path", "/context/0");
     await expect(page.getByRole("heading", { name: "Opened document", exact: true })).toBeVisible();

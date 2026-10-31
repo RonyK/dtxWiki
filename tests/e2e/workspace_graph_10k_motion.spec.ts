@@ -324,10 +324,17 @@ async function openPc10k(page: Page, email: string, relations: number, before10k
   expect(scene.truncated).toBe(false);
   expect(scene.nodes).toHaveLength(10_000);
   expect(scene.edges).toHaveLength(relations);
+  const canvas = page.getByTestId("graph-canvas");
+  // Receiving the original API body does not settle the native scene. Bind
+  // readiness to its new edge count before another real toolbar click;
+  // unlinked nodes are still hidden until the toggle below.
+  await expect(canvas).toHaveAttribute("data-map-edge-count", String(relations));
+  await expect(canvas).toHaveAttribute("data-map-community-layout-status", "applied", { timeout: 90_000 });
+  await expect(page.locator('.graph-canvas-frame[data-renderer-status="ready"]')).toBeVisible();
+  await expect(view).toHaveAttribute("open", "");
   await view.locator("summary").click();
   const unlinked = page.getByRole("button", { name: /^Unlinked \d+$/ });
   if (await unlinked.count()) await unlinked.click();
-  const canvas = page.getByTestId("graph-canvas");
   await expect(canvas).toHaveAttribute("data-map-node-count", "10000");
   await expect(canvas).toHaveAttribute("data-map-edge-count", String(relations));
   await expect(canvas).toHaveAttribute("data-map-community-layout-status", "applied", { timeout: 90_000 });

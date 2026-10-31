@@ -824,7 +824,14 @@ export function WorkspaceGraphScreen() {
 
       const opener = modalOpenerRef.current;
       modalOpenerRef.current = null;
+      const focusAtClose = panel.ownerDocument.activeElement;
       requestAnimationFrame(() => {
+        const active = panel.ownerDocument.activeElement;
+        // A newly opened sheet or a user action can claim focus before this
+        // old modal's deferred restoration runs. Respect that newer owner.
+        if (active !== focusAtClose && active instanceof HTMLElement && active !== document.body
+          && active !== document.documentElement && !panel.contains(active)
+          && isUsableModalOpener(active)) return;
         if (opener && isUsableModalOpener(opener)) {
           opener.focus({ preventScroll: true });
         } else if (region.isConnected) {
