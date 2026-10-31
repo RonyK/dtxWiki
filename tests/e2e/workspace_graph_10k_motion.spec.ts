@@ -15,7 +15,11 @@ const responseReaders = new WeakMap<Page, OverviewResponseReader>();
 const nativeCostCollectors = new WeakMap<Page, ReturnType<typeof captureNativeLongCalls>>();
 const cpuProfiles = new WeakMap<Page, ReturnType<typeof createDenseCpuProfile>>();
 
-test.use({ viewport: { width: 1440, height: 900 }, trace: "off" });
+// Hosted CI renders these exact 10K scenes through software GL, where toolbar
+// clicks on a live scene have reached the suite's default action timeout.
+// Every action in this lane gets an explicit loading allowance instead; the
+// lane makes no interaction latency claim.
+test.use({ viewport: { width: 1440, height: 900 }, trace: "off", actionTimeout: 60_000 });
 test.afterEach(async ({ page }, info) => {
   const collector = nativeCostCollectors.get(page);
   try {
