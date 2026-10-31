@@ -95,6 +95,7 @@ from backend.services.context_visibility import (
 from backend.services.conversion_failure_policy import (
     is_retryable_conversion_failure,
 )
+from backend.services.db_read_snapshot import acquire_consistent_read_snapshot
 from backend.services.library_canonical import (
     canonical_library_artifact_belongs_to_item,
     canonical_library_artifact_lookup,
@@ -360,6 +361,11 @@ class DomainReadService:
         *,
         actor: ActorContext | None = None,
     ) -> LibraryItemDetail:
+        # Conversion promotes the item's pointer and version together. Keep
+        # fresh read sessions on one snapshot while hydrating both; callers
+        # already inside a transaction retain ownership of that transaction.
+        if not session.in_transaction():
+            acquire_consistent_read_snapshot(session)
         source = self.require_visible_library_item(
             session,
             workspace_id,

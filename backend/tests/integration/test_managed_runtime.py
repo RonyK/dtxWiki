@@ -9,15 +9,29 @@ import socket
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import UUID
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
+from backend.app.db import make_engine, make_session_factory
+from backend.app.main import create_app
+from backend.app.settings import Settings
+from backend.models.library import LibraryItem, LibraryItemVersion
+from backend.scripts.seed_dev import seed_default_workspace
+from backend.services.domain_read import DomainReadService
+from backend.services.page_service import PageService
+from backend.tests.conftest import authenticate_test_client_in_workspace
+from backend.tests.integration.test_library_canonical_read_paths import (
+    _seed_canonical_fixture,
+)
 from backend.tests.utils.bootstrapped_sqlite import copy_migrated_sqlite
 from backend.tests.utils.environment import child_env_without_dtxwiki_config
 
@@ -67,8 +81,16 @@ def _running_cli(
     )
     if not default_credentials:
         env["DTXWIKI_SESSION_SECRET"] = "managed-runtime-acceptance-session-secret"
-    log_path = tmp_path / "runtime.log"
-    with log_path.open("w", encoding="utf-8") as log:
+    # The credential case launches twice; keep each child's startup evidence.
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        prefix="runtime-",
+        suffix=".log",
+        dir=tmp_path,
+        delete=False,
+    ) as log:
+        log_path = Path(log.name)
         process = subprocess.Popen(
             [
                 sys.executable,
@@ -118,19 +140,47 @@ def _running_cli(
                         pass
 
 
+def _owns_http_listener(runtime: _Runtime) -> bool:
+    process_root = Path(f"/proc/{runtime.process.pid}")
+    try:
+        listeners = {
+            f"socket:[{fields[9]}]"
+            for line in (process_root / "net/tcp").read_text().splitlines()[1:]
+            if (fields := line.split())[3] == "0A"
+            and int(fields[1].rsplit(":", 1)[1], 16) == runtime.client.base_url.port
+        }
+        for descriptor in (process_root / "fd").iterdir():
+            try:
+                if str(descriptor.readlink()) in listeners:
+                    return True
+            except FileNotFoundError:
+                # Unrelated descriptors can close while /proc is enumerated.
+                continue
+    except (FileNotFoundError, ProcessLookupError):
+        # The caller's next assert_running reports this child's exit and log.
+        return False
+    return False
+
+
 def _await_api(runtime: _Runtime) -> None:
     deadline = time.monotonic() + _COMPLETION_TIMEOUT
     while time.monotonic() < deadline:
         runtime.assert_running()
-        try:
-            response = runtime.client.get("/api/v1/auth/capabilities")
-        except httpx.ConnectError:
-            # Wait only for the real asynchronous socket bind, without
-            # repeating a failed assertion or restarting either process.
-            time.sleep(0.05)
-            continue
-        assert response.status_code == 200, response.text
-        return
+        # An unreserved fixture port can briefly serve another test's app.
+        # A capability response proves readiness only for this CLI's listener.
+        if _owns_http_listener(runtime):
+            try:
+                response = runtime.client.get("/api/v1/auth/capabilities")
+            except httpx.ConnectError:
+                pass
+            else:
+                runtime.assert_running()
+                assert response.status_code == 200, response.text
+                assert _owns_http_listener(runtime), runtime.logs()
+                return
+        # Wait only for the observed asynchronous bind, without restarting a
+        # child, repeating an assertion, or overlooking a child that exited.
+        time.sleep(0.05)
     pytest.fail(f"CLI did not become ready:\n{runtime.logs()}")
 
 
@@ -266,6 +316,80 @@ def test_one_cli_converts_upload_with_explicit_database_and_cleans_up_on_sigterm
         returncode = runtime.process.wait(timeout=15)
         assert returncode == 0, runtime.logs()
         assert not Path(f"/proc/{worker_pid}").exists(), runtime.logs()
+
+
+def test_library_detail_keeps_worker_promotion_in_one_read_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # This requires two real WAL connections: a worker commits promotion
+    # between the item's pointer read and the version/artifact reads.
+    database_url = copy_migrated_sqlite(tmp_path / "promotion.sqlite")
+    engine = make_engine(database_url)
+    session_factory = make_session_factory(engine)
+    try:
+        with session_factory.begin() as session:
+            seed_default_workspace(session)
+        with TestClient(
+            create_app(
+                settings=Settings(
+                    database_url=database_url,
+                    session_secret="promotion-snapshot-test-secret",
+                ),
+                page_service=PageService(session_factory),
+            )
+        ) as client:
+            workspace_id = UUID(
+                authenticate_test_client_in_workspace(client, session_factory)
+            )
+            with session_factory.begin() as session:
+                seeded = _seed_canonical_fixture(session, workspace_id)
+                item_id, version_id = seeded.item.id, seeded.ready_version.id
+                seeded.item.current_version_id = version_id
+                seeded.item.current_ready_version_id = None
+                seeded.ready_version.processing_status = "queued"
+
+            promoted: list[bool] = []
+            real_require = DomainReadService.require_visible_library_item
+
+            def promote_after_item(self, reader, *args, **kwargs):
+                item = real_require(self, reader, *args, **kwargs)
+                if item.id == item_id and not promoted:
+                    assert item.current_ready_version_id is None
+                    with session_factory.begin() as writer:
+                        assert (
+                            writer.connection().connection
+                            is not reader.connection().connection
+                        )
+                        writer.get(
+                            LibraryItemVersion, version_id
+                        ).processing_status = "ready"
+                        writer.get(
+                            LibraryItem, item_id
+                        ).current_ready_version_id = version_id
+                    promoted.append(True)
+                return item
+
+            monkeypatch.setattr(
+                DomainReadService, "require_visible_library_item", promote_after_item
+            )
+            url = f"/api/v1/workspaces/{workspace_id}/library/items/{item_id}"
+            during = client.get(url)
+            assert during.status_code == 200, during.text
+            assert promoted == [True]
+            detail = during.json()["data"]
+            assert detail["current_version"]["processing_status"] == "queued"
+            assert detail["current_ready_version"] is None
+            assert detail["artifacts"] == []
+
+            after = client.get(url)
+            assert after.status_code == 200, after.text
+            detail = after.json()["data"]
+            assert detail["current_version"]["processing_status"] == "ready"
+            assert detail["current_ready_version"]["id"] == str(version_id)
+            assert detail["current_version"]["selected_conversion_attempt_id"]
+            assert len(detail["artifacts"]) == 1
+    finally:
+        engine.dispose()
 
 
 def test_managed_worker_death_stops_server_with_failure(

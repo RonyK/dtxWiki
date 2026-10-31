@@ -839,10 +839,12 @@ async function signInAccountThroughUi(page: Page, email: string, timeOrigin: num
 async function openAccountWorkspaceMapThroughUi(page: Page, workspace: { id: string; title: string }) {
   await page.locator(".workspace-switcher-button").click();
   const switcher = page.getByRole("dialog", { name: "Workspace switcher", exact: true });
+  // Switching from a Map keeps its section and can finish the original read
+  // before the switcher closes. Subscribe before that navigation starts.
+  const read = waitForOverview(page, DEFAULT_BUDGET, workspace.id);
   await switcher.locator(".workspace-menu-item").filter({ has: page.getByText(workspace.title, { exact: true }) }).click();
   await expect(switcher).not.toBeVisible();
   await expect(page.locator(".workspace-switcher-button")).toHaveAttribute("aria-label", `Switch workspace, current: ${workspace.title}`);
-  const read = waitForOverview(page, DEFAULT_BUDGET);
   await page.locator(`.sidebar-nav a[href="/workspaces/${workspace.id}/graph"]`).click();
   await expect(page).toHaveURL(/\/graph$/);
   return read;
@@ -1120,9 +1122,10 @@ async function downloadVisibleMap(page: Page): Promise<WorkspaceMapExport> {
   return JSON.parse(await readFile(downloadPath, "utf8")) as WorkspaceMapExport;
 }
 
-function waitForOverview(page: Page, budget: { documents: number; relations: number }) {
+function waitForOverview(page: Page, budget: { documents: number; relations: number }, workspaceId?: string) {
   return page.waitForResponse((response) => {
     if (!response.url().includes(OVERVIEW_PATH) || response.request().method() !== "POST") return false;
+    if (workspaceId && new URL(response.url()).pathname !== `/api/v1/workspaces/${workspaceId}${OVERVIEW_PATH}`) return false;
     const request = response.request().postDataJSON() as WorkspaceGraphOverviewRequest;
     return request.lens === "combined" && !request.expansion
       && request.budget.documents === budget.documents && request.budget.relations === budget.relations;
