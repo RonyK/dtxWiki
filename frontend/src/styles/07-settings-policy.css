@@ -87,7 +87,39 @@
 .pending-review-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
+}
+
+.pending-review .pending-review-action {
+  min-height: 32px;
+  padding: 6px 10px;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.pending-review-action svg {
+  flex-shrink: 0;
+}
+
+.pending-review .pending-review-open {
+  border-color: color-mix(in srgb, var(--context) 35%, var(--border));
+  background: var(--context-soft);
+  color: var(--context);
+  font-weight: 600;
+}
+
+.pending-review .pending-review-open:hover {
+  background: color-mix(in srgb, var(--context) 12%, var(--surface));
+}
+
+@media (max-width: 1024px), (pointer: coarse) {
+  .pending-review .pending-review-action {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 10px 12px;
+  }
 }
 
 .pending-review-reason {

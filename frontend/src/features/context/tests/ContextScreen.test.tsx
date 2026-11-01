@@ -5543,7 +5543,7 @@ describe("ContextScreen", () => {
     );
   });
 
-  it("surfaces an inline pending-draft review with reviewer actions (F1)", async () => {
+  it("surfaces pending-draft navigation before reviewer actions (F1)", async () => {
     ctxWorkspace.current = {
       selectedWorkspace: { role: "owner", id: WORKSPACE_ID },
     };
@@ -5565,6 +5565,11 @@ describe("ContextScreen", () => {
     expect(
       screen.getByRole("button", { name: "Request changes" }),
     ).toBeInTheDocument();
+    const banner = screen.getByText(/1 pending review for this page/)
+      .closest('[role="status"]') as HTMLElement;
+    expect(
+      [...banner.querySelectorAll("a, button")].map((action) => action.textContent?.trim()),
+    ).toEqual(["View review", "View changes", "Request changes", "Approve"]);
   });
 
   it("warns about pending reconciliation before publish without blocking approval", async () => {
@@ -5634,6 +5639,9 @@ describe("ContextScreen", () => {
       await screen.findByText(/1 pending review for this page/),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Request changes" })).toBeNull();
+    expect(screen.getByRole("link", { name: "View review" }))
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/review/rev-1`);
   });
 
   it.each([
@@ -5672,14 +5680,14 @@ describe("ContextScreen", () => {
       expect(screen.getByText(impactCopy)).toBeInTheDocument();
       expect(
         screen.getByRole("link", {
-          name: `View all ${earlierCount + 1} pending reviews in the queue`,
+          name: "View review",
         }),
       ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/review/rev-1`);
       expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
     },
   );
 
-  it("shows no extra settlement copy when no earlier review will be settled", async () => {
+  it("links to a single pending review without extra settlement copy", async () => {
     ctxWorkspace.current = {
       selectedWorkspace: { role: "owner", id: WORKSPACE_ID },
     };
@@ -5702,8 +5710,38 @@ describe("ContextScreen", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/earlier pending reviews?/i)).toBeNull();
     expect(
-      screen.queryByRole("link", { name: /pending reviews in the queue/i }),
-    ).toBeNull();
+      screen.getByRole("link", { name: "View review" }),
+    ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/review/rev-1`);
+  });
+
+  it("keeps review navigation available while approval impact is loading and after it fails", async () => {
+    const pendingImpact = deferredValue<{ error: Error }>();
+    const responses: Record<string, MockFetchResponse> = pendingReviewFetch();
+    responses[`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/rev-1`] =
+      () => pendingImpact.promise;
+    mockFetch(responses);
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
+        <ContextScreen />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(
+      await screen.findByRole("treeitem", { name: "Decision Log" }),
+    );
+    expect(await screen.findByText(/Checking pending reviews/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View review" }))
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/review/rev-1`);
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+
+    await act(async () => {
+      pendingImpact.resolve({ error: new Error("Review details unavailable") });
+    });
+
+    expect(await screen.findByText(/Pending review count unavailable/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View review" }))
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/review/rev-1`);
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
   });
 
   it("does not promise publication or settlement for a changes-requested draft", async () => {
@@ -5727,8 +5765,8 @@ describe("ContextScreen", () => {
     expect(screen.queryByText(/Approving will publish/i)).toBeNull();
     expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
     expect(
-      screen.getByRole("link", { name: "Open Review queue" }),
-    ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/review`);
+      screen.getByRole("link", { name: "View review" }),
+    ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/review/rev-1?status=changes_requested`);
   });
 
   describe("P10.1 canonical route", () => {

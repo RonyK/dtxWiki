@@ -1,13 +1,18 @@
 import {
   Copy,
   ArrowRight,
+  Check,
+  ClipboardList,
   Edit,
   FileText,
   Folder,
+  GitCompareArrows,
   GitMerge,
+  MessageSquare,
   MoreHorizontal,
   Plus,
   RotateCcw,
+  Send,
   Share2,
   Trash2,
 } from "lucide-react";
@@ -1788,6 +1793,14 @@ function PendingDraftReview({
     review.status !== "pending" || earlierReviewCount == null
       ? null
       : earlierReviewCount + 1;
+  const reviewPath = workspacePath(
+    workspaceId,
+    `review/${encodeURIComponent(review.review_item_id)}`,
+  );
+  const reviewHref =
+    review.status === "changes_requested"
+      ? `${reviewPath}?status=changes_requested`
+      : reviewPath;
 
   useEffect(() => {
     let active = true;
@@ -1910,56 +1923,55 @@ function PendingDraftReview({
           </p>
         ) : null}
         <div className="pending-review-actions">
+          <Link
+            className="icon-button text-button pending-review-action pending-review-open"
+            to={reviewHref}
+          >
+            <ClipboardList size={16} aria-hidden="true" />
+            <span>
+              {t("pendingReview.viewReview", { defaultValue: "View review" })}
+            </span>
+          </Link>
           <button
             type="button"
-            className="icon-button"
+            className="icon-button pending-review-action"
             disabled={!onViewChanges}
             onClick={onViewChanges ?? undefined}
           >
-            {t("pendingReview.viewChanges", { defaultValue: "View changes" })}
+            <GitCompareArrows size={16} aria-hidden="true" />
+            <span>
+              {t("pendingReview.viewChanges", { defaultValue: "View changes" })}
+            </span>
           </button>
-          {pagePendingReviewCount != null && pagePendingReviewCount > 1 ? (
-            <Link
-              className="icon-button text-button"
-              to={workspacePath(
-                workspaceId,
-                `review/${encodeURIComponent(review.review_item_id)}`,
-              )}
-            >
-              {t("pendingReview.viewPageReviews", {
-                count: pagePendingReviewCount,
-                defaultValue: "View all {{count}} pending reviews in the queue",
-              })}
-            </Link>
-          ) : impactLoadFailed || review.status === "changes_requested" ? (
-            <Link className="icon-button text-button" to={workspacePath(workspaceId, "review")}>
-              {t("pendingReview.openQueue", {
-                defaultValue: "Open Review queue",
-              })}
-            </Link>
-          ) : null}
           {canReview ? (
             <>
               <button
                 type="button"
-                className="icon-button primary"
+                className="icon-button pending-review-action"
+                disabled={busy}
+                aria-expanded={reasonOpen}
+                onClick={() => setReasonOpen((open) => !open)}
+              >
+                <MessageSquare size={16} aria-hidden="true" />
+                <span>
+                  {t("pendingReview.requestChanges", {
+                    defaultValue: "Request changes",
+                  })}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="icon-button primary pending-review-action"
                 disabled={
                   busy ||
                   (review.status === "pending" && earlierReviewCount == null)
                 }
                 onClick={() => decide("approve")}
               >
-                {t("pendingReview.approve", { defaultValue: "Approve" })}
-              </button>
-              <button
-                type="button"
-                className="icon-button"
-                disabled={busy}
-                onClick={() => setReasonOpen((open) => !open)}
-              >
-                {t("pendingReview.requestChanges", {
-                  defaultValue: "Request changes",
-                })}
+                <Check size={16} aria-hidden="true" />
+                <span>
+                  {t("pendingReview.approve", { defaultValue: "Approve" })}
+                </span>
               </button>
             </>
           ) : null}
@@ -1978,13 +1990,16 @@ function PendingDraftReview({
             />
             <button
               type="button"
-              className="icon-button primary"
+              className="icon-button primary pending-review-action"
               disabled={busy || !reason.trim()}
               onClick={() => decide("request_changes")}
             >
-              {t("pendingReview.submitChanges", {
-                defaultValue: "Send request",
-              })}
+              <Send size={16} aria-hidden="true" />
+              <span>
+                {t("pendingReview.submitChanges", {
+                  defaultValue: "Send request",
+                })}
+              </span>
             </button>
           </div>
         ) : null}
@@ -1992,7 +2007,7 @@ function PendingDraftReview({
           <p className="pending-review-error">
             {t("pendingReview.impactLoadError", {
               defaultValue:
-                "Could not load what approval will settle. Open the Review queue to decide safely.",
+                "Could not load what approval will settle. Open the review to decide safely.",
             })}
           </p>
         ) : null}
