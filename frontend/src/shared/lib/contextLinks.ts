@@ -3,10 +3,13 @@ export type ContextLinkKind =
   | "nav_target" | "concept_path" | "slug" | "resource_uri" | "wikilink"
   | "workspace_navigation" | "unknown" | "external" | "public_reader" | "local" | "media";
 
+// The REST projection as served: an omitted href/target_page_id means null.
+// Readers pass response arrays through unchanged, so their identity stays
+// stable across renders and MarkdownView can reuse its rendered tree.
 export type ContextLinkTarget = {
   locator: string;
-  href: string | null;
-  target_page_id: string | null;
+  href?: string | null;
+  target_page_id?: string | null;
   state: "ok" | "unavailable";
 };
 

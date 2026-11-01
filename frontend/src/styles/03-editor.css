@@ -6175,6 +6175,24 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
   vertical-align: baseline;
 }
 
+/* Editor preview: a link waiting for its server check. It reads as a pending
+   link, not as an unavailable one; .spinner-glyph stops under reduced motion. */
+.markdown-body .checking-reference {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  border-bottom: 1px dotted var(--ink-muted);
+  color: var(--ink-muted);
+  cursor: progress;
+}
+
+.markdown-body .checking-reference__icon {
+  width: 10px;
+  height: 10px;
+  border-width: 1.5px;
+  align-self: center;
+}
+
 .markdown-body .unavailable-reference__trigger {
   display: inline-flex;
   align-items: baseline;

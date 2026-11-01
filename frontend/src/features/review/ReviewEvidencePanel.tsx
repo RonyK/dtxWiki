@@ -426,11 +426,7 @@ function ExactContextContent({
             ) : hasBody ? (
               <MarkdownView
                 body={original.data.body_md}
-                linkTargets={(original.data.link_targets ?? []).map((target) => ({
-                  ...target,
-                  href: target.href ?? null,
-                  target_page_id: target.target_page_id ?? null,
-                }))}
+                linkTargets={original.data.link_targets}
                 resolveContextMediaAsset={resolveContextMediaAsset}
                 wikilinkTargets={(original.data.wikilink_targets ?? []).map((target) => ({ ...target, target_page_id: target.target_page_id ?? null, current_slug: target.current_slug ?? null }))}
                 workspaceId={workspaceId}

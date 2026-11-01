@@ -227,11 +227,7 @@ function toContextPageDetail(raw: BackendContextPageDetail): ContextPageDetail {
       target_page_id: target.target_page_id ?? null,
       current_slug: target.current_slug ?? null,
     })),
-    link_targets: (raw.link_targets ?? []).map((target) => ({
-      ...target,
-      href: target.href ?? null,
-      target_page_id: target.target_page_id ?? null,
-    })),
+    link_targets: raw.link_targets ?? [],
     warnings: raw.warnings ?? [],
     pending_draft_version_id: raw.pending_draft_version_id ?? null,
     pending_draft_warnings: raw.pending_draft_warnings ?? [],

@@ -557,6 +557,9 @@
     "opensNamed": "Opens workspace {{title}}; access is checked after navigation.",
     "opensOther": "Opens another workspace; access is checked after navigation."
   },
+  "checkingReference": {
+    "label": "Checking link"
+  },
   "unavailableReference": {
     "explanation": "This item may be missing or unavailable to your current account.",
     "guidance": "Ask the person who shared it to check the link or sharing settings.",

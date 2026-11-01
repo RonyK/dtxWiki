@@ -352,11 +352,7 @@ export function PagePublicShareControl({
                 <MarkdownView
                   allowWorkspaceNavigationLinks
                   body={previewPage.body_md}
-                  linkTargets={previewPage.link_targets?.map((target) => ({
-                    ...target,
-                    href: target.href ?? null,
-                    target_page_id: target.target_page_id ?? null,
-                  }))}
+                  linkTargets={previewPage.link_targets}
                   resolveContextMediaAsset={resolvePreviewMediaAsset}
                   stripLeadingHeading={previewPage.title}
                   wikilinkTargets={previewPage.wikilink_targets?.map((target) => ({

@@ -2604,11 +2604,7 @@ function AgentReader({
           {detail.body_markdown ? (
             <MarkdownView
               body={detail.body_markdown}
-              linkTargets={(detail.link_targets ?? []).map((target) => ({
-                ...target,
-                href: target.href ?? null,
-                target_page_id: target.target_page_id ?? null,
-              }))}
+              linkTargets={detail.link_targets}
               workspaceId={workspaceId}
               allowWorkspaceNavigationLinks
               stripLeadingHeading={detail.title}

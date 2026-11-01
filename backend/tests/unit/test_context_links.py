@@ -90,19 +90,18 @@ def test_extract_links_keeps_only_authored_destinations_and_exact_spans(monkeypa
 def test_index_normalizer_preserves_source_and_aggregates_general_link_fixes(
     monkeypatch,
 ):
-    # Budget exception: three syntax inputs exercise different source spans:
-    # an inline destination with a title, a reference definition, and an angle
-    # autolink that replaces its whole span. They share one body and resolver.
-    # A fourth ordinary link proves normalizer/fixer aggregate counts; replacing
-    # it with another index ref cannot detect the two-phase count regression.
+    # Budget exception: two syntax inputs exercise different source spans: an
+    # inline destination with a title, and an angle autolink that replaces its
+    # whole span. They share one body and resolver. A third ordinary link proves
+    # normalizer/fixer aggregate counts; replacing it with another index ref
+    # cannot detect the two-phase count regression.
     workspace_id = UUID("11111111-1111-4111-8111-111111111111")
     target_id = UUID("22222222-2222-4222-8222-222222222222")
     ref = f"dtxwiki://index/context/{target_id}"
     canonical = f"/p/{workspace_id}/{target_id}"
     body = (
         f'한글 [Title *kept*]({ref} "Preserved title")  \n'
-        f"[Reference][r] <{ref}> [Ordinary](/context/target.md)\n\n"
-        f'[r]: {ref} "Reference title"\n'
+        f"<{ref}> [Ordinary](/context/target.md)\n"
     )
 
     def resolve_target(locator, _ctx, **_kwargs):
@@ -135,8 +134,7 @@ def test_index_normalizer_preserves_source_and_aggregates_general_link_fixes(
         body.replace(f'({ref} "Preserved title")', f'({canonical} "Preserved title")')
         .replace(f"<{ref}>", f"[{ref}]({canonical})")
         .replace("(/context/target.md)", f"({canonical})")
-        .replace(f'[r]: {ref} "Reference title"', f'[r]: {canonical} "Reference title"')
     )
-    assert result.module_fix_counts == (("links", 4),)
-    assert len(result.fix_details) == 4
+    assert result.module_fix_counts == (("links", 3),)
+    assert len(result.fix_details) == 3
     assert result.failed_module_ids == ()

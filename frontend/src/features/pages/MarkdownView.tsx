@@ -90,7 +90,13 @@ type MarkdownViewProps = {
     slug: string;
     title: string;
   }>;
-  linkTargets?: ContextLinkTarget[];
+  linkTargets?: readonly ContextLinkTarget[];
+  // Editor preview: locators whose server check has not answered yet. A link
+  // the browser cannot open on its own shows "checking", not "unavailable".
+  checkingLinkLocators?: ReadonlySet<string>;
+  // Editor preview: receives every internal link locator of the rendered body,
+  // so the caller can check only the links it has not confirmed yet.
+  onInternalLinks?: (locators: string[]) => void;
   wikilinkTargets?: Array<{
     target_slug: string;
     target_page_id: string | null;
@@ -134,6 +140,7 @@ export const MARKDOWN_GEOMETRY_CHANGE_EVENT =
 type MarkdownAnchorProps = ComponentPropsWithoutRef<"a"> & {
   "data-internal"?: string;
   "data-dtx-unavailable-reference"?: string;
+  "data-dtx-checking-reference"?: string;
   node?: unknown;
 };
 
@@ -213,6 +220,8 @@ export function MarkdownView({
   wikilinkPages = [],
   wikilinkTargets = [],
   linkTargets,
+  checkingLinkLocators,
+  onInternalLinks,
   wikilinkMode = "internal",
   sourceLineNumbers = false,
   deletedSources = [],
@@ -222,6 +231,10 @@ export function MarkdownView({
   allowWorkspaceNavigationLinks = false,
 }: MarkdownViewProps) {
   const articleRef = useRef<HTMLElement | null>(null);
+  // Filled by the link resolver while ReactMarkdown renders, then reported
+  // once per rendered tree from an effect (never during render).
+  const internalLinksRef = useRef<string[]>([]);
+  const collectInternalLinks = Boolean(onInternalLinks);
   const inRouter = useInRouterContext();
   const pageSourceLineNumbers = renderPolicy === "page" && sourceLineNumbers;
   const parsedBody = renderPolicy === "page" ? parsePageDocument(body).body : body;
@@ -265,7 +278,19 @@ export function MarkdownView({
     confirmedOnly: renderPolicy === "confirmed-links",
     allowWorkspaceNavigation:
       renderPolicy === "page" && wikilinkMode === "internal" && allowWorkspaceNavigationLinks,
-  }), [linkTargets, workspaceId, wikilinkMode, renderPolicy, allowWorkspaceNavigationLinks]);
+    checking: checkingLinkLocators,
+    reportInternalLinks: collectInternalLinks
+      ? (locators: string[]) => { internalLinksRef.current = locators; }
+      : undefined,
+  }), [
+    linkTargets,
+    workspaceId,
+    wikilinkMode,
+    renderPolicy,
+    allowWorkspaceNavigationLinks,
+    checkingLinkLocators,
+    collectInternalLinks,
+  ]);
   const contextMediaPluginOptions = useMemo(
     () => ({ resolveAssetUrl: resolveContextMediaAsset }),
     [resolveContextMediaAsset],
@@ -377,6 +402,11 @@ export function MarkdownView({
     contextMediaPluginOptions,
     anchorPluginOptions,
   ]);
+  useEffect(() => {
+    // ReactMarkdown processes synchronously while it renders, so the resolver
+    // has collected this tree's locators before any effect runs.
+    onInternalLinks?.(internalLinksRef.current);
+  }, [markdownContent, onInternalLinks]);
 
   return (
     <article className="markdown-body" ref={articleRef}>
@@ -489,11 +519,13 @@ function rehypeRestorePageAnchorHrefs() {
 }
 
 type ContextLinkResolverOptions = {
-  targets?: ContextLinkTarget[];
+  targets?: readonly ContextLinkTarget[];
   workspaceId?: string | null;
   publicReader: boolean;
   confirmedOnly?: boolean;
   allowWorkspaceNavigation?: boolean;
+  checking?: ReadonlySet<string>;
+  reportInternalLinks?: (locators: string[]) => void;
 };
 
 function rehypeWrapRegisteredReferences() {
@@ -558,6 +590,9 @@ function readMarkdownReferenceFromNode(node: unknown): MarkdownAuthoredReference
 
 function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
   const targets = new Map((options.targets ?? []).map((target) => [target.locator, target]));
+  // Markdown-authored internal locators of the current tree, the same strings
+  // the server extracts from a body, so a caller can ask about exactly these.
+  const internalLocators = new Set<string>();
   const withFragmentPrefix = (href: string) => {
     const index = href.indexOf("#");
     if (index < 0 || index === href.length - 1 || href.slice(index + 1).startsWith(CLOBBER_PREFIX)) return href;
@@ -575,13 +610,14 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
       delete props["data-dtx-reference-wikilink"];
       delete props.dataDtxUnavailableReference;
       delete props["data-dtx-unavailable-reference"];
+      delete props.dataDtxCheckingReference;
+      delete props["data-dtx-checking-reference"];
       delete props.ariaDisabled;
       delete props["aria-disabled"];
       const href = typeof props.href === "string" ? props.href : "";
       const locator = reference?.locator ?? href;
       const target = targets.get(locator);
-      const unavailable = (): HastNode[] => {
-        if (!reference) return child.children;
+      const withoutNavigation = () => {
         delete props.href;
         delete props.title;
         delete props.ariaDisabled;
@@ -593,6 +629,10 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
         delete props.dataContextLinkLocator;
         delete props["data-context-link-locator"];
         props.className = [];
+      };
+      const unavailable = (): HastNode[] => {
+        if (!reference) return child.children;
+        withoutNavigation();
         props["data-dtx-unavailable-reference"] = "true";
         child.data = Object.assign({}, child.data, {
           dtxUnavailableReference: reference,
@@ -618,6 +658,7 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
         "nav_target", "concept_path", "slug", "resource_uri", "workspace_navigation",
       ].includes(classification.kind);
       if (!internal) return [child];
+      if (reference) internalLocators.add(locator);
       delete props.dataContextLinkLocator;
       delete props["data-context-link-locator"];
       const legacyPageId = props.dataInternalPageId ?? props["data-internal-page-id"];
@@ -637,6 +678,13 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
           delete props.dataInternalPageId;
           delete props["data-internal-page-id"];
         }
+        return [child];
+      }
+      if (reference && options.checking?.has(locator)) {
+        // Only a link the browser cannot open by itself waits visibly; it is
+        // not called unavailable before the server has answered.
+        withoutNavigation();
+        props["data-dtx-checking-reference"] = "true";
         return [child];
       }
       return unavailable();
@@ -678,7 +726,11 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
       return resolveAnchor(child, null);
     }) as HastParent["children"];
   }
-  return (tree: HastRoot) => resolve(tree);
+  return (tree: HastRoot) => {
+    internalLocators.clear();
+    resolve(tree);
+    options.reportInternalLinks?.([...internalLocators]);
+  };
 }
 
 function constrainPageImageSources(parent: HastParent) {
@@ -1318,12 +1370,23 @@ function MarkdownLink({
   href,
   children,
   "data-dtx-unavailable-reference": unavailableToken,
+  "data-dtx-checking-reference": checkingToken,
   node,
   ...props
 }: MarkdownAnchorProps) {
   const { t } = useTranslation("pages");
   const behavior = useContext(MarkdownLinkBehaviorContext);
   const routeState = useContext(MarkdownRouteStateContext);
+  if (checkingToken === "true") {
+    const label = t("checkingReference.label");
+    return (
+      <span aria-busy="true" className="checking-reference" title={label}>
+        <span className="checking-reference__label">{children}</span>
+        <span aria-hidden="true" className="spinner-glyph checking-reference__icon" />
+        <span className="visually-hidden">{label}</span>
+      </span>
+    );
+  }
   const unavailableReference = unavailableToken === "true"
     ? readMarkdownReferenceFromNode(node)
     : null;
@@ -2782,6 +2845,8 @@ const markdownSanitizeSchema = {
       "data-internal-page-id",
       "data-dtx-unavailable-reference",
       "dataDtxUnavailableReference",
+      "data-dtx-checking-reference",
+      "dataDtxCheckingReference",
       "dataTag",
       "target",
       "rel",
