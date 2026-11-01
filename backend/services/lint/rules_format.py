@@ -364,4 +364,6 @@ MODULE = LintModule(
     ),
     fixer=_FormatFixer(),
     fix_on_save_setting="auto_fix",
+    auto_approve_setting="auto_fix",
+    maintenance_role="companion",
 )

@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from backend.services.lint import (
@@ -7,6 +9,7 @@ from backend.services.lint import (
     LintRegistry,
     LintStage,
 )
+from backend.services.lint.base import FixResult
 
 
 class _Dummy:
@@ -35,6 +38,11 @@ class _Dummy:
                 target_id=None,
             )
         ]
+
+
+class _IdentityFixer:
+    def fix(self, body, ctx):
+        return FixResult(body)
 
 
 def test_enabled_rules_respects_policy_and_defaults():
@@ -104,11 +112,82 @@ def test_registry_rejects_empty_applies_to_and_nonbool_default():
     invalid_scope.version_scoped = "yes"
     with pytest.raises(ValueError, match="invalid version scope"):
         LintRegistry((LintModule("test", 0, (invalid_scope,)),))
+    # One independent assembly input: an invalid rule owner would silently
+    # make B7's persisted-finding lookup schedule the wrong module. Runtime
+    # writer tests cannot observe a module rejected before registry creation.
+    with pytest.raises(ValueError, match="fixable_rule_ids must belong"):
+        LintRegistry(
+            (
+                LintModule(
+                    "repair",
+                    100,
+                    (_Dummy("repair.own_rule"),),
+                    fixer=_IdentityFixer(),
+                    maintenance_role="trigger",
+                    fixable_rule_ids=frozenset({"other.rule"}),
+                ),
+            )
+        )
+
+
+def test_declared_settings_keep_maintenance_and_approval_opt_in():
+    # Two logical policy inputs exercise declared defaults and suggest mode.
+    # This unit-only exception is needed because the built-in integration
+    # lifecycle cannot prove arbitrary module names work without policy
+    # special cases.
+    repair = LintModule(
+        "repair",
+        100,
+        (_Dummy("repair.fixable"),),
+        fixer=_IdentityFixer(),
+        fix_on_save_setting="repair_mode",
+        auto_approve_setting="approve_repair",
+        maintenance_role="trigger",
+        fixable_rule_ids=frozenset({"repair.fixable"}),
+        fix_on_save_default="auto",
+        fix_on_save_enabled_value="auto",
+        auto_approve_default=True,
+    )
+    companion = LintModule(
+        "style",
+        900,
+        (),
+        fixer=_IdentityFixer(),
+        fix_on_save_setting="auto_fix",
+        auto_approve_setting="auto_fix",
+        maintenance_role="companion",
+    )
+    ordinary = LintModule(
+        "save_only",
+        500,
+        (),
+        fixer=_IdentityFixer(),
+        fix_on_save_setting="repair_mode",
+        fix_on_save_default="auto",
+        fix_on_save_enabled_value="auto",
+    )
+    registry = LintRegistry((companion, ordinary, repair))
+    workspace = SimpleNamespace(auto_fix_enabled=True, lint_policy={})
+    defaults = LintPolicy(workspace)
+    assert registry.fixers_for_save(defaults) == [repair, ordinary, companion]
+    assert registry.fixers_for_maintenance(defaults) == [repair, companion]
+    assert defaults.fix_existing(repair)
+    assert not defaults.fix_existing(companion)
+    assert defaults.auto_approve(repair) and defaults.auto_approve(companion)
+    assert not defaults.auto_approve(ordinary)
+    assert defaults.effective_settings(registry.modules) == {
+        "auto_fix": True,
+        "repair_mode": "auto",
+        "approve_repair": True,
+    }
+
+    workspace.lint_policy = {"repair_mode": "suggest", "approve_repair": False}
+    suggest = LintPolicy(workspace)
+    assert registry.fixers_for_maintenance(suggest) == [companion]
+    assert not suggest.fix_existing(repair) and not suggest.auto_approve(repair)
 
 
 def test_builtin_registry_and_container_module_injection_preserve_publication_floor():
-    from types import SimpleNamespace
-
     from backend.app.container import assemble
     from backend.app.settings import Settings
     from backend.app.state import get_page_service_from_app
@@ -188,6 +267,15 @@ def test_builtin_registry_and_container_module_injection_preserve_publication_fl
     assert get_page_service_from_app(request) is pages
     assert extra.rule_id not in builtin.rule_ids()
     policy = LintPolicy(SimpleNamespace(lint_policy={"md.code_fence_balance": False}))
+    assert policy.effective_settings(registry.modules) == {
+        "md.code_fence_balance": False,
+        "auto_fix": False,
+        "link_fix_mode": "auto",
+        "auto_approve_link_fixes": True,
+    }
+    assert [module.module_id for module in registry.fixers_for_maintenance(policy)] == [
+        "links"
+    ]
     assert "md.code_fence_balance" in {
         rule.rule_id for rule in registry.enabled(policy)
     }

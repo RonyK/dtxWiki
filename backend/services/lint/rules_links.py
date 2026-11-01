@@ -138,6 +138,10 @@ MODULE = LintModule(
     ),
     fixer=_LinkFixer(),
     fix_on_save_setting="link_fix_mode",
-    fix_existing_setting="link_fix_mode",
+    fix_on_save_default="auto",
+    fix_on_save_enabled_value="auto",
     auto_approve_setting="auto_approve_link_fixes",
+    auto_approve_default=True,
+    maintenance_role="trigger",
+    fixable_rule_ids=frozenset({"link.internal-noncanonical"}),
 )

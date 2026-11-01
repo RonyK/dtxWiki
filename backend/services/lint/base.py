@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -40,6 +41,8 @@ class LintContext:
     )
     stage: LintStage | None = None
     self_origins: frozenset[str] | None = None
+    source_version: ContextPageVersion | None = None
+    link_source: Literal["draft", "published"] | None = None
 
 
 @dataclass(frozen=True)
@@ -91,8 +94,14 @@ class LintModule:
     rules: tuple[LintRule, ...]
     fixer: LintFixer | None = None
     fix_on_save_setting: str | None = None
-    fix_existing_setting: str | None = None
     auto_approve_setting: str | None = None
+    maintenance_role: Literal["none", "trigger", "companion"] = "none"
+    fixable_rule_ids: frozenset[str] = frozenset()
+    normalizer: LintFixer | None = None
+    fix_on_save_default: bool | str = False
+    fix_on_save_enabled_value: bool | str = True
+    auto_approve_default: bool | str = False
+    auto_approve_enabled_value: bool | str = True
 
 
 class LintPolicy:
@@ -103,7 +112,7 @@ class LintPolicy:
         self._overrides = dict(getattr(workspace, "lint_policy", None) or {})
 
     @classmethod
-    def from_overrides(cls, overrides: dict[str, bool] | None) -> LintPolicy:
+    def from_overrides(cls, overrides: dict[str, bool | str] | None) -> LintPolicy:
         policy = cls(None)
         policy._overrides = dict(overrides or {})
         return policy
@@ -111,22 +120,45 @@ class LintPolicy:
     def rule_enabled(self, rule_id: str, *, default_enabled: bool) -> bool:
         return self._overrides.get(rule_id, default_enabled)
 
+    def setting_value(self, setting: str, *, default: bool | str = False) -> object:
+        """Read one declared setting; only the legacy column needs an alias."""
+        if setting == "auto_fix" and self.workspace is not None:
+            return getattr(self.workspace, "auto_fix_enabled", default)
+        return self._overrides.get(setting, default)
+
+    def effective_settings(self, modules: Iterable[LintModule]) -> dict[str, object]:
+        """Keep stored rule toggles and fill module options from their declarations."""
+        values = dict(self._overrides)
+        for module in modules:
+            for setting, default in (
+                (module.fix_on_save_setting, module.fix_on_save_default),
+                (module.auto_approve_setting, module.auto_approve_default),
+            ):
+                if setting is not None:
+                    values[setting] = self.setting_value(setting, default=default)
+        return values
+
+    def _setting_enabled(
+        self, setting: str | None, default: bool | str, enabled_value: bool | str
+    ) -> bool:
+        if setting is None:
+            return False
+        value = self.setting_value(setting, default=default)
+        return type(value) is type(enabled_value) and value == enabled_value
+
     def fix_on_save(self, module: LintModule) -> bool:
-        if module.fix_on_save_setting == "auto_fix":
-            return bool(getattr(self.workspace, "auto_fix_enabled", False))
-        if module.fix_on_save_setting == "link_fix_mode":
-            return self._overrides.get("link_fix_mode", "auto") == "auto"
-        return bool(self._overrides.get(module.fix_on_save_setting, False))
+        return self._setting_enabled(
+            module.fix_on_save_setting,
+            module.fix_on_save_default,
+            module.fix_on_save_enabled_value,
+        )
 
     def fix_existing(self, module: LintModule) -> bool:
-        return bool(module.fix_existing_setting) and self.fix_on_save(module)
+        return module.maintenance_role == "trigger" and self.fix_on_save(module)
 
     def auto_approve(self, module: LintModule) -> bool:
-        if module.module_id == "format":
-            return self.fix_on_save(module)
-        if module.auto_approve_setting == "auto_approve_link_fixes":
-            return self._overrides.get("auto_approve_link_fixes", True) is True
-        return bool(
-            module.auto_approve_setting
-            and self._overrides.get(module.auto_approve_setting, False)
+        return self._setting_enabled(
+            module.auto_approve_setting,
+            module.auto_approve_default,
+            module.auto_approve_enabled_value,
         )
