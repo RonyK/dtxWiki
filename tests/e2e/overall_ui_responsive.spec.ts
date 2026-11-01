@@ -53,9 +53,15 @@ const VIEWPORTS: ViewportCase[] = [
 ];
 
 // The usability journey branches on width > 1024, width <= 1024 and width ===
-// 390, so the phone and desktop cases reach every branch. The tablet cases
-// take the <= 1024 branch and add only the 641-1024px CSS bands; they run on
-// Chromium here and on every engine in the weekly exhaustive run.
+// 390, so the phone and desktop cases reach every branch. The tablet case
+// takes the <= 1024 branch and adds only the 641-1024px CSS bands; it runs on
+// Chromium here and on every engine in the weekly exhaustive run. 1024x768
+// skips the journey: from 768 to 1024px only the editor's 1023px and the
+// Library panel's 900px rules switch off, and desktop-1280x720 lays that
+// panel out in a narrower settings column. It stays a family-dialog size.
+const USABILITY_VIEWPORTS = VIEWPORTS.filter(
+  (viewport) => viewport.key !== "tablet-landscape-1024x768",
+);
 const CROSS_BROWSER_USABILITY_KEYS = new Set(["phone-390x844", "desktop-1280x720"]);
 
 // The dialog is min(720px, 100vw - 32px) wide and min(88dvh, 820px) tall.
@@ -126,7 +132,7 @@ test.describe("Overall UI responsive acceptance", () => {
     });
   });
 
-  for (const viewport of VIEWPORTS) {
+  for (const viewport of USABILITY_VIEWPORTS) {
     test(`${viewport.key}: Context, Library policy, Lint, Chats, and Activity stay usable${CROSS_BROWSER_USABILITY_KEYS.has(viewport.key) ? " @cross-browser" : ""}`, async ({
       page,
     }, testInfo) => {
@@ -809,7 +815,12 @@ test.describe("Overall UI responsive acceptance", () => {
   // card edge and the email field were clipped with no scrollbar to recover
   // them. Every authenticated surface stayed clean, which is why the account
   // recovery screens were the only place this ever showed.
-  for (const width of [280, 320, 360]) {
+  //
+  // No width rule sits between 280 and 390px (the narrowest is max-width:
+  // 390px), so these widths share one stylesheet. 280px fails first on a
+  // floored track like that one; 360px fails first on a surface capped short
+  // of the viewport. Any width between them fails only where one of them does.
+  for (const width of [280, 360]) {
     test(`signed-out shell fits a ${width}px viewport @cross-browser`, async ({ page }) => {
       test.setTimeout(60_000);
       await page.setViewportSize({ width, height: 844 });

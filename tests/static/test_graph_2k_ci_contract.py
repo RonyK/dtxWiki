@@ -7,7 +7,18 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-CI_E2E_COMMAND = "npm run test:e2e -- ${{ matrix.projects }}"
+CI_2K_COMMAND = (
+    "npm run test:e2e -- tests/e2e/workspace_graph_2k_real.spec.ts "
+    "tests/e2e/workspace_graph_reading_real.spec.ts "
+    "tests/e2e/workspace_graph_first_view.spec.ts "
+    "--project=chromium"
+)
+# Every spec that skips without the 2K corpus must be named by the PR job.
+CI_2K_SPECS = sorted(
+    f"tests/e2e/{path.name}"
+    for path in (ROOT / "tests/e2e").glob("*.spec.ts")
+    if 'process.env.DTXWIKI_E2E_GRAPH_2K !== "1"' in path.read_text()
+)
 RELEASE_2K_COMMAND = (
     "npm run test:e2e -- tests/e2e/workspace_graph_2k_real.spec.ts "
     "tests/e2e/workspace_graph_reading_real.spec.ts "
@@ -23,17 +34,20 @@ RELEASE_INSTALLED_WHEEL_COMMAND = (
 
 
 def assert_real_api_2k_ci_step(steps):
-    runs = [step for step in steps if step.get("run", "").strip() == CI_E2E_COMMAND]
+    runs = [step for step in steps if step.get("run", "").strip() == CI_2K_COMMAND]
     assert len(runs) == 1
     run = runs[0]
     assert run.get("env", {}).get("DTXWIKI_E2E_GRAPH_2K") == "1"
     assert "if" not in run, "The 2K acceptance must not be manual or conditional."
     assert not run.get("continue-on-error", False)
+    named = sorted(t for t in CI_2K_COMMAND.split() if t.endswith(".spec.ts"))
+    assert named == CI_2K_SPECS, f"the 2K job runs {named}, gated: {CI_2K_SPECS}"
 
 
 def test_ci_activates_the_real_api_2k_corpus_and_browser_case_together():
     workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
-    assert_real_api_2k_ci_step(workflow["jobs"]["e2e"]["steps"])
+    assert "if" not in workflow["jobs"]["graph-2k"]
+    assert_real_api_2k_ci_step(workflow["jobs"]["graph-2k"]["steps"])
 
 
 @pytest.mark.counterexample(
@@ -44,9 +58,9 @@ def test_ci_activates_the_real_api_2k_corpus_and_browser_case_together():
 )
 def test_ci_guard_rejects_a_silently_skipped_or_nonblocking_case(violation):
     workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
-    steps = deepcopy(workflow["jobs"]["e2e"]["steps"])
+    steps = deepcopy(workflow["jobs"]["graph-2k"]["steps"])
     step = next(
-        step for step in steps if step.get("run", "").strip() == CI_E2E_COMMAND
+        step for step in steps if step.get("run", "").strip() == CI_2K_COMMAND
     )
     if violation == "missing_flag":
         step.pop("env")

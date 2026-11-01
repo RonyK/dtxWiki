@@ -261,6 +261,10 @@ npm run lint:md            # markdown lint (markdownlint-cli2)
 
 일반 `CI` 워크플로(`.github/workflows/ci.yml`)는 pull request와 `main` push에서
 leak scan, backend·static, frontend·desktop, 기본 E2E 검증을 실행합니다.
+Graph 검증은 별도 `graph-2k` job이 E2E와 병렬로 실행합니다. 이 job은 `@pc10k`를 제외한
+WebGL gate(`npm run test:graph-webgl -- --project=chromium`)와 `DTXWIKI_E2E_GRAPH_2K=1`
+실제 API 2K spec을 돌립니다. WebGL gate의 `@pc10k` 케이스(`--project=chromium-pc10k`)는
+`Release checks`의 `graph-10k`가 담당합니다.
 `graph-10k`, `docker-frontend`, `packaging`, `postgres-migration`은 별도의
 `Release checks` 워크플로(`.github/workflows/release-checks.yml`)에서 실행합니다.
 `packaging` job에는 acceptance·release-gate 검증과 정제된 로그 업로드도 포함됩니다.
@@ -317,6 +321,11 @@ npm run test:e2e
 # PR CI와 같은 project 분할. 아래 두 명령은 순서대로 실행합니다.
 npm run test:e2e -- --project=chromium
 npm run test:e2e -- --project=firefox --project=webkit
+# PR CI graph-2k job과 같은 범위
+npm run test:graph-webgl -- --project=chromium
+DTXWIKI_E2E_GRAPH_2K=1 npm run test:e2e -- tests/e2e/workspace_graph_2k_real.spec.ts \
+  tests/e2e/workspace_graph_reading_real.spec.ts tests/e2e/workspace_graph_first_view.spec.ts \
+  --project=chromium
 # 단일 spec / 패턴 / headed
 npm run test:e2e -- tests/e2e/oauth_integrations.spec.ts
 npm run test:e2e -- --grep "OAuth consent revoke"

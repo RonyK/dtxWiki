@@ -191,7 +191,9 @@ test("real grouped feed, names, review links and filter navigation @cross-browse
   await expect(page.getByRole("main").getByRole("heading", { name: seed.page_title })).toBeVisible();
 });
 
-for (const [language, width] of [["en", 1440], ["ko", 1100], ["en", 320], ["ko", 320]] as const) {
+// No measurement here depends on the locale. 1440px keeps the desktop grid and
+// 320px the narrow (<= 700px) footer, both with the wider English labels.
+for (const [language, width] of [["en", 1440], ["en", 320]] as const) {
   test(`activity proportions and component dark theme (${language}, ${width}) @cross-browser`, async ({ page }, info) => {
     const seed = await setup(page, info);
     await page.addInitScript(locale => localStorage.setItem("dtxwiki.uiLanguage", locale), language);

@@ -43,9 +43,18 @@ def assert_run_hides_no_case(run):
     )
 
 
+PC10K_WEBGL_COMMAND = (
+    "npm run test:graph-webgl -- --project=chromium-pc10k --forbid-only"
+)
+
+
 def assert_pc_10k_job(job):
     assert "if" not in job
     assert not job.get("continue-on-error", False)
+    # PR CI excludes the WebGL gate's @pc10k cases; this lane owns them.
+    webgl = [s for s in job["steps"] if s.get("run", "").strip() == PC10K_WEBGL_COMMAND]
+    assert len(webgl) == 1 and "if" not in webgl[0]
+    assert not webgl[0].get("continue-on-error", False)
     runs = [
         step for step in job["steps"] if "npm run test:e2e --" in step.get("run", "")
     ]

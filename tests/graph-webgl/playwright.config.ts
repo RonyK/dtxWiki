@@ -12,5 +12,12 @@ export default defineConfig({
   workers: 1,
   reporter: "list",
   use: { screenshot: "only-on-failure", trace: "off" },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  // Titles tagged @pc10k drive 10K-node workloads. PR CI (ci.yml `graph-2k`)
+  // runs `--project=chromium`; release-checks.yml `graph-10k` runs
+  // `--project=chromium-pc10k` beside the real-API 10K specs. A local run
+  // without --project runs both.
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] }, grepInvert: /@pc10k/ },
+    { name: "chromium-pc10k", use: { ...devices["Desktop Chrome"] }, grep: /@pc10k/ },
+  ],
 });
