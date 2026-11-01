@@ -1,4 +1,4 @@
-"""A green CI must include actual PC10K and dense capacity browser cases."""
+"""Release checks must include actual PC10K and dense capacity browser cases."""
 
 import re
 import shlex
@@ -84,7 +84,9 @@ def assert_pc_10k_job(job):
 
 
 def graph_10k_job():
-    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/release-checks.yml").read_text()
+    )
     return deepcopy(workflow["jobs"]["graph-10k"])
 
 

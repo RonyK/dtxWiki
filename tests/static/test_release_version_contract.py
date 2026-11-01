@@ -138,7 +138,10 @@ def github_release_problems(workflow: dict) -> list[str]:
     releasing = [
         job_id
         for job_id, job in jobs.items()
-        if any("gh release create" in step.get("run", "") for step in job["steps"])
+        if any(
+            "gh release create" in step.get("run", "")
+            for step in job.get("steps", [])
+        )
     ]
     if len(releasing) != 1:
         return [f"expected one job creating the GitHub Release, found {releasing}"]
@@ -180,7 +183,7 @@ def github_release_problems(workflow: dict) -> list[str]:
     uploads = [
         step.get("with", {}).get("name")
         for build in jobs.values()
-        for step in build["steps"]
+        for step in build.get("steps", [])
         if str(step.get("uses", "")).startswith("actions/upload-artifact")
     ]
     if not downloads or downloads[0] not in uploads:

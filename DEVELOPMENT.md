@@ -259,6 +259,19 @@ make check-i18n            # i18n namespace 커버리지 + en/ko parity (= npm r
 npm run lint:md            # markdown lint (markdownlint-cli2)
 ```
 
+일반 `CI` 워크플로(`.github/workflows/ci.yml`)는 pull request와 `main` push에서
+leak scan, backend·static, frontend·desktop, 기본 E2E 검증을 실행합니다.
+`graph-10k`, `docker-frontend`, `packaging`, `postgres-migration`은 별도의
+`Release checks` 워크플로(`.github/workflows/release-checks.yml`)에서 실행합니다.
+`packaging` job에는 acceptance·release-gate 검증과 정제된 로그 업로드도 포함됩니다.
+
+기본 branch에 워크플로가 반영되면 GitHub Actions의 `Release checks` → `Run workflow`에서
+대상 branch를 선택해 [수동 실행](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)합니다.
+`v*` tag push로 시작하는 `release`
+워크플로는 같은 commit의 `Release checks`를 호출하고, 네 job이 모두 성공한 뒤
+패키지 빌드와 PyPI·npm 게시, GitHub Release 생성을 진행합니다. 수동 `Release checks`
+실행은 검증과 증거 업로드만 수행합니다.
+
 ### 테스트 추가 예산과 실행 범위
 
 예산은 PR 단위로 적용하며, 독립된 실패 경로를 검증하는 케이스만 추가합니다.

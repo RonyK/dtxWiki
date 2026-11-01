@@ -15,6 +15,14 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+RELEASE_CHECKS = ROOT / ".github" / "workflows" / "release-checks.yml"
+CI = ROOT / ".github" / "workflows" / "ci.yml"
+RELEASE_CHECK_JOBS = {
+    "graph-10k",
+    "docker-frontend",
+    "packaging",
+    "postgres-migration",
+}
 
 
 def _workflow():
@@ -66,6 +74,31 @@ def _assert_strict_artifact_gate(workflow):
     )
     assert arguments[3:] == ["--release-version", "${GITHUB_REF_NAME#v}"], (
         "The artifact metadata and effective schema head must match the pushed tag."
+    )
+
+
+def _assert_release_checks_gate(workflow, checks, ci):
+    triggers = checks["on"] if "on" in checks else checks.get(True)
+    assert set(triggers) == {"workflow_dispatch", "workflow_call"}, (
+        "Release checks must run manually or through release.yml, outside routine CI."
+    )
+    assert checks["permissions"] == {"contents": "read"}
+    assert set(checks["jobs"]) == RELEASE_CHECK_JOBS
+    assert RELEASE_CHECK_JOBS.isdisjoint(ci["jobs"]), (
+        "Release checks must stay outside routine CI."
+    )
+    for job in checks["jobs"].values():
+        assert "if" not in job, "Every requested release check must run."
+        assert not job.get("continue-on-error", False)
+
+    gate = workflow["jobs"]["release-checks"]
+    assert gate["uses"] == "./.github/workflows/release-checks.yml"
+    assert "if" not in gate, "Release checks must gate every release."
+    assert not gate.get("continue-on-error", False)
+    needs = workflow["jobs"]["build"].get("needs", [])
+    needs = [needs] if isinstance(needs, str) else needs
+    assert "release-checks" in needs, (
+        "The release build must wait for all release checks before publishing."
     )
 
 
@@ -142,6 +175,11 @@ def test_release_guard_rejects_bypassed_strict_artifact_verification(violation):
 
 
 def test_release_build_runs_packaging_and_static_tests_before_publish():
+    _assert_release_checks_gate(
+        _workflow(),
+        yaml.safe_load(RELEASE_CHECKS.read_text(encoding="utf-8")),
+        yaml.safe_load(CI.read_text(encoding="utf-8")),
+    )
     steps = _build_steps()
     suites = [
         index for index, step in enumerate(steps) if "-m pytest" in step.get("run", "")

@@ -12,7 +12,11 @@ permissions:
   contents: read
 
 jobs:
+  release-checks:
+    uses: ./.github/workflows/release-checks.yml
+
   build:
+    needs: release-checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,8 +66,8 @@ jobs:
       # only here: it shells out to a second `python -m build --wheel --sdist`
       # under build isolation, which on a tag means a second network-dependent
       # build of artifacts nobody publishes. The step above already verified
-      # the real dist/ this job produced, which is the stronger check. ci.yml
-      # still runs it on every pull request.
+      # the real dist/ this job produced, which is the stronger check.
+      # release-checks.yml runs the full packaging suite before this build.
       - name: Run packaging and static contract tests
         run: >-
           .venv/bin/python -m pytest tests/packaging tests/static -q
