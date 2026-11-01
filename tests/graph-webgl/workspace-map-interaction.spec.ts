@@ -22,7 +22,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => { await server?.close(); });
 
 // Native capacity uses the maximum edge budget; the real-API motion case owns 30,895 edges.
-test("native PC 10K preserves 100000 relations, real movement and finite camera ownership", async ({ page }, testInfo) => {
+test("native PC 10K preserves 100000 relations, real movement and finite camera ownership @pc10k", async ({ page }, testInfo) => {
   // Sixteen natural GPU frames draw 100K relations on headless software WebGL.
   // This checks counted GPU work and camera lifecycle, not a device speed SLA.
   test.setTimeout(90_000);
@@ -98,7 +98,7 @@ test("native PC 10K preserves 100000 relations, real movement and finite camera 
   }
 });
 
-test("native PC10K naturally ends after upstream cooling and only explicit Resume wakes it", async ({ page }, testInfo) => {
+test("native PC10K naturally ends after upstream cooling and only explicit Resume wakes it @pc10k", async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(`${origin}/src/features/graph/workspace/tests/browserSmoke.html?geometry=10000&budget=pc10k&relations=30895&theme=light&motion=normal&topology=links&interaction=targets`);
@@ -130,7 +130,7 @@ test("native PC10K naturally ends after upstream cooling and only explicit Resum
 });
 
 for (const action of ["unpin", "reset"] as const) {
-  test(`native PC10K ${action} releases a cooled pin into real GPU motion`, async ({ page }, testInfo) => {
+  test(`native PC10K ${action} releases a cooled pin into real GPU motion @pc10k`, async ({ page }, testInfo) => {
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
     let bodyFailed = false;
@@ -325,11 +325,13 @@ test("native 2k collision basis belongs to the scene, not Fit, zoom, focus, pin 
   }) });
 });
 
-for (const textureLimit of [null, 4096]) {
-test(`native 2k Cosmos pointer drag saves its canonical position through Resume, pause and reduced motion${textureLimit ? " at texture limit 4096" : ""}`, async ({ page }, testInfo) => {
+// Default texture limits give native/canonical scale 1 (every other 2K case);
+// only this reduced space proves the drag pin is saved in canonical units.
+test("native 2k Cosmos pointer drag saves its canonical position through Resume, pause and reduced motion at texture limit 4096", async ({ page }, testInfo) => {
+  const textureLimit = 4096;
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  if (textureLimit) await page.addInitScript((limit) => {
+  await page.addInitScript((limit) => {
     const original = WebGL2RenderingContext.prototype.getParameter;
     WebGL2RenderingContext.prototype.getParameter = function (parameter) {
       return parameter === this.MAX_TEXTURE_SIZE ? limit : original.call(this, parameter);
@@ -392,10 +394,8 @@ test(`native 2k Cosmos pointer drag saves its canonical position through Resume,
   expect(movedScreen[1]).toBeCloseTo(destination[1], 0);
   expect(pinnedPosition).not.toEqual(before.positions.slice(target.index * 2, target.index * 2 + 2));
   expect(dragged.dragPins).toEqual([{ id: target.id, position: dragged.canonicalPositions.slice(target.index * 2, target.index * 2 + 2) }]);
-  if (textureLimit) {
-    expect(dragged.nativeSpaceSize).toBe(textureLimit / 2);
-    expect(dragged.dragPins[0].position).toEqual(pinnedPosition.map(value => value * 4096 / dragged.nativeSpaceSize));
-  }
+  expect(dragged.nativeSpaceSize).toBe(textureLimit / 2);
+  expect(dragged.dragPins[0].position).toEqual(pinnedPosition.map(value => value * 4096 / dragged.nativeSpaceSize));
   expect(dragged.viewport).toEqual(before.viewport);
   expect(dragged.geometryUploads).toBeGreaterThan(before.geometryUploads);
   expect(dragged.topologyUploads).toBe(before.topologyUploads);
@@ -441,7 +441,6 @@ test(`native 2k Cosmos pointer drag saves its canonical position through Resume,
     errors, scope: "Actual native 2K mouse drag with official CPU Worker layout and Cosmos GPU drawing; not target-device performance or real-API acceptance",
   }) });
 });
-}
 
 test("native 2k hover names its direct neighbors without moving the graph", async ({ page }, testInfo) => {
   const errors: string[] = [];
@@ -537,105 +536,106 @@ test("native 2k hover names its direct neighbors without moving the graph", asyn
   expect(errors).toEqual([]);
 });
 
-for (const mobile of [false, true]) {
-  test(`native 2k active full titles do not overprint adjacent selection and focus ${mobile ? "on mobile" : "on desktop"}`, async ({ page }, testInfo) => {
-    await page.setViewportSize(mobile ? { width: 390, height: 600 } : { width: 900, height: 700 });
-    const errors: string[] = [];
-    page.on("pageerror", error => errors.push(error.message));
-    await page.goto(`${origin}/src/features/graph/workspace/tests/browserSmoke.html?geometry=2000&theme=${mobile ? "dark" : "light"}&motion=normal&topology=links&interaction=targets&labels=boundary`);
-    await page.waitForFunction(() => Boolean(window.__workspaceMapInteraction && window.__workspaceMapSmoke?.status === "ready"));
-    await page.waitForFunction(() => document.getElementById("stage")?.dataset.mapCommunityLayoutStatus === "applied");
-    const fit = await page.evaluate(async () => {
-      const fixture = window.__workspaceMapInteraction!;
-      const stage = document.getElementById("stage")!;
-      fixture.stop();
-      const fit = await fixture.fitAndWait();
-      // Deliberate authored pins isolate label placement, not layout quality.
-      // Use the acknowledged Fit's empty padding, not an unchecked dense area.
-      // The same full native point/edge columns and three IDs remain mounted.
-      fixture.pinAtScreen(0, [stage.clientWidth - 16, stage.clientHeight - 54]);
-      fixture.pinAtScreen(1998, [stage.clientWidth - 16, stage.clientHeight - 39]);
-      fixture.pinAtScreen(1999, [stage.clientWidth - 16, stage.clientHeight - 24]);
-      return fit;
-    });
-    expect(fit.completed).toEqual(fit.requested);
-    const viewport = page.viewportSize()!;
-    const expectedCenters = new Map([[0, [viewport.width - 16, viewport.height - 54]],
-      [1998, [viewport.width - 16, viewport.height - 39]], [1999, [viewport.width - 16, viewport.height - 24]]]);
-    const pointerFrames: Awaited<ReturnType<NonNullable<Window["__workspaceMapInteraction"]>["boundaryPointFrame"]>>[] = [];
-    const verifiedPointerFrame = async () => {
-      const frame = await page.evaluate(() => window.__workspaceMapInteraction!.boundaryPointFrame([0, 1998, 1999]));
-      pointerFrames.push(frame);
-      expect(frame.nodeCount).toBe(2_000);
-      expect(frame.targets.map(target => target.index)).toEqual([0, 1998, 1999]);
-      for (const target of frame.targets) {
-        const expected = expectedCenters.get(target.index)!;
-        expect(target.screen.every(Number.isFinite)).toBe(true);
-        expect(Math.abs(target.screen[0] - expected[0])).toBeLessThanOrEqual(.01);
-        expect(Math.abs(target.screen[1] - expected[1])).toBeLessThanOrEqual(.01);
-        expect(target.otherNodeClearance).toBeGreaterThanOrEqual(12);
-      }
-      return frame;
-    };
-    const selectedPoint = (await verifiedPointerFrame()).targets[0].screen;
-    await page.mouse.click(selectedPoint[0], selectedPoint[1]);
-    await expect.poll(() => page.evaluate(() => window.__workspaceMapInteraction!.snapshot().selectedId)).toBe("node-0");
-    await page.evaluate(() => window.__workspaceMapInteraction!.focus("node-1999"));
-    const baseline = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
-    const hoveredPoint = (await verifiedPointerFrame()).targets[1].screen;
-    await page.mouse.move(hoveredPoint[0], hoveredPoint[1]);
-    await expect.poll(() => page.evaluate(() => window.__workspaceMapSmoke?.hoveredId)).toBe("node-1998");
-    const labels = page.locator("[data-workspace-map-labels] span");
-    await expect(labels.first()).toHaveAttribute("data-node-id", "node-1998");
-    for (const id of ["node-1998", "node-1999", "node-0"]) {
-      await expect(labels.locator(`xpath=self::*[@data-node-id='${id}']`)).toBeVisible();
-    }
-    const measured = await labels.evaluateAll(elements => elements.filter(element =>
-      ["node-1998", "node-1999", "node-0"].includes((element as HTMLElement).dataset.nodeId ?? ""))
-      .map(element => {
-        const rectangle = element.getBoundingClientRect();
-        const css = getComputedStyle(element);
-        return { id: (element as HTMLElement).dataset.nodeId, title: element.textContent,
-          full: (element as HTMLElement).dataset.fullTitle, x: rectangle.x, y: rectangle.y,
-          right: rectangle.right, bottom: rectangle.bottom, width: rectangle.width, height: rectangle.height,
-          background: css.backgroundColor, pointerEvents: css.pointerEvents };
-      }));
-    expect(measured).toHaveLength(3);
-    for (let left = 0; left < measured.length; left++) {
-      const label = measured[left];
-      expect(label.full).toBe("true");
-      expect(label.width).toBeGreaterThan(0);
-      expect(label.height).toBeGreaterThan(0);
-      expect(label.background).not.toBe("rgba(0, 0, 0, 0)");
-      expect(label.pointerEvents).toBe("none");
-      expect(label.x).toBeGreaterThanOrEqual(0);
-      expect(label.y).toBeGreaterThanOrEqual(0);
-      expect(label.right).toBeLessThanOrEqual(mobile ? 390 : 900);
-      expect(label.bottom).toBeLessThanOrEqual(mobile ? 600 : 700);
-      for (let right = left + 1; right < measured.length; right++) {
-        const other = measured[right];
-        expect(label.x < other.right && label.right > other.x
-          && label.y < other.bottom && label.bottom > other.y).toBe(false);
-      }
-    }
-    const after = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
-    expect(after.canonicalPositions).toEqual(baseline.canonicalPositions);
-    expect(after.viewport).toEqual(baseline.viewport);
-    expect(after.geometryUploads).toBe(baseline.geometryUploads);
-    expect(after.topologyUploads).toBe(baseline.topologyUploads);
-    expect(after.pinned).toEqual(baseline.pinned);
-    expect(after.forceConfig).toEqual(baseline.forceConfig);
-    expect(after.glError).toBe(0);
-    expect(await labels.count()).toBe(40);
-    expect(errors).toEqual([]);
-    const evidence = JSON.stringify({ measured, fit, pointerFrames, nodeCount: baseline.positions.length / 2,
-      edgeCount: baseline.uploadedRelationCount,
-      scope: "Real native pointer selection/hover with authored adjacent pins; label UX, not solver or real-device performance" }, null, 2);
-    await writeFile(testInfo.outputPath("active-title-rectangles.json"), evidence);
-    await testInfo.attach("active-title-rectangles", { contentType: "application/json", body: evidence });
-    await evidenceScreenshot(page, testInfo, `map-2k-active-titles-${mobile ? "mobile-dark" : "desktop-light"}.png`);
+// One viewport: desktop wraps the same titles to the same line counts at the
+// 420px cap; this stage also reaches the bounds-16 width limit. Theme surface
+// tokens are unit-tested (graphTokens.test.ts).
+test("native 2k active full titles do not overprint adjacent selection and focus on mobile", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 600 });
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto(`${origin}/src/features/graph/workspace/tests/browserSmoke.html?geometry=2000&theme=dark&motion=normal&topology=links&interaction=targets&labels=boundary`);
+  await page.waitForFunction(() => Boolean(window.__workspaceMapInteraction && window.__workspaceMapSmoke?.status === "ready"));
+  await page.waitForFunction(() => document.getElementById("stage")?.dataset.mapCommunityLayoutStatus === "applied");
+  const fit = await page.evaluate(async () => {
+    const fixture = window.__workspaceMapInteraction!;
+    const stage = document.getElementById("stage")!;
+    fixture.stop();
+    const fit = await fixture.fitAndWait();
+    // Deliberate authored pins isolate label placement, not layout quality.
+    // Use the acknowledged Fit's empty padding, not an unchecked dense area.
+    // The same full native point/edge columns and three IDs remain mounted.
+    fixture.pinAtScreen(0, [stage.clientWidth - 16, stage.clientHeight - 54]);
+    fixture.pinAtScreen(1998, [stage.clientWidth - 16, stage.clientHeight - 39]);
+    fixture.pinAtScreen(1999, [stage.clientWidth - 16, stage.clientHeight - 24]);
+    return fit;
   });
-}
+  expect(fit.completed).toEqual(fit.requested);
+  const viewport = page.viewportSize()!;
+  const expectedCenters = new Map([[0, [viewport.width - 16, viewport.height - 54]],
+    [1998, [viewport.width - 16, viewport.height - 39]], [1999, [viewport.width - 16, viewport.height - 24]]]);
+  const pointerFrames: Awaited<ReturnType<NonNullable<Window["__workspaceMapInteraction"]>["boundaryPointFrame"]>>[] = [];
+  const verifiedPointerFrame = async () => {
+    const frame = await page.evaluate(() => window.__workspaceMapInteraction!.boundaryPointFrame([0, 1998, 1999]));
+    pointerFrames.push(frame);
+    expect(frame.nodeCount).toBe(2_000);
+    expect(frame.targets.map(target => target.index)).toEqual([0, 1998, 1999]);
+    for (const target of frame.targets) {
+      const expected = expectedCenters.get(target.index)!;
+      expect(target.screen.every(Number.isFinite)).toBe(true);
+      expect(Math.abs(target.screen[0] - expected[0])).toBeLessThanOrEqual(.01);
+      expect(Math.abs(target.screen[1] - expected[1])).toBeLessThanOrEqual(.01);
+      expect(target.otherNodeClearance).toBeGreaterThanOrEqual(12);
+    }
+    return frame;
+  };
+  const selectedPoint = (await verifiedPointerFrame()).targets[0].screen;
+  await page.mouse.click(selectedPoint[0], selectedPoint[1]);
+  await expect.poll(() => page.evaluate(() => window.__workspaceMapInteraction!.snapshot().selectedId)).toBe("node-0");
+  await page.evaluate(() => window.__workspaceMapInteraction!.focus("node-1999"));
+  const baseline = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
+  const hoveredPoint = (await verifiedPointerFrame()).targets[1].screen;
+  await page.mouse.move(hoveredPoint[0], hoveredPoint[1]);
+  await expect.poll(() => page.evaluate(() => window.__workspaceMapSmoke?.hoveredId)).toBe("node-1998");
+  const labels = page.locator("[data-workspace-map-labels] span");
+  await expect(labels.first()).toHaveAttribute("data-node-id", "node-1998");
+  for (const id of ["node-1998", "node-1999", "node-0"]) {
+    await expect(labels.locator(`xpath=self::*[@data-node-id='${id}']`)).toBeVisible();
+  }
+  const measured = await labels.evaluateAll(elements => elements.filter(element =>
+    ["node-1998", "node-1999", "node-0"].includes((element as HTMLElement).dataset.nodeId ?? ""))
+    .map(element => {
+      const rectangle = element.getBoundingClientRect();
+      const css = getComputedStyle(element);
+      return { id: (element as HTMLElement).dataset.nodeId, title: element.textContent,
+        full: (element as HTMLElement).dataset.fullTitle, x: rectangle.x, y: rectangle.y,
+        right: rectangle.right, bottom: rectangle.bottom, width: rectangle.width, height: rectangle.height,
+        background: css.backgroundColor, pointerEvents: css.pointerEvents };
+    }));
+  expect(measured).toHaveLength(3);
+  for (let left = 0; left < measured.length; left++) {
+    const label = measured[left];
+    expect(label.full).toBe("true");
+    expect(label.width).toBeGreaterThan(0);
+    expect(label.height).toBeGreaterThan(0);
+    expect(label.background).not.toBe("rgba(0, 0, 0, 0)");
+    expect(label.pointerEvents).toBe("none");
+    expect(label.x).toBeGreaterThanOrEqual(0);
+    expect(label.y).toBeGreaterThanOrEqual(0);
+    expect(label.right).toBeLessThanOrEqual(390);
+    expect(label.bottom).toBeLessThanOrEqual(600);
+    for (let right = left + 1; right < measured.length; right++) {
+      const other = measured[right];
+      expect(label.x < other.right && label.right > other.x
+        && label.y < other.bottom && label.bottom > other.y).toBe(false);
+    }
+  }
+  const after = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
+  expect(after.canonicalPositions).toEqual(baseline.canonicalPositions);
+  expect(after.viewport).toEqual(baseline.viewport);
+  expect(after.geometryUploads).toBe(baseline.geometryUploads);
+  expect(after.topologyUploads).toBe(baseline.topologyUploads);
+  expect(after.pinned).toEqual(baseline.pinned);
+  expect(after.forceConfig).toEqual(baseline.forceConfig);
+  expect(after.glError).toBe(0);
+  expect(await labels.count()).toBe(40);
+  expect(errors).toEqual([]);
+  const evidence = JSON.stringify({ measured, fit, pointerFrames, nodeCount: baseline.positions.length / 2,
+    edgeCount: baseline.uploadedRelationCount,
+    scope: "Real native pointer selection/hover with authored adjacent pins; label UX, not solver or real-device performance" }, null, 2);
+  await writeFile(testInfo.outputPath("active-title-rectangles.json"), evidence);
+  await testInfo.attach("active-title-rectangles", { contentType: "application/json", body: evidence });
+  await evidenceScreenshot(page, testInfo, "map-2k-active-titles-mobile-dark.png");
+});
 
 test("native 2k first boundary-label placement contains Korean and newly admitted multiline titles", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 600 });

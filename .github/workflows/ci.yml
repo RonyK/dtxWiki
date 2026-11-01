@@ -130,19 +130,13 @@ jobs:
         run: npm ci
       - name: Install Playwright browsers
         run: npx playwright install --with-deps ${{ matrix.browsers }}
-      - name: Verify Local Graph WebGL shaders
-        if: matrix.name == 'chromium'
-        run: npm run test:graph-webgl
       # Standard profile: every spec on Chromium, @cross-browser specs on all
       # three. Each matrix job owns its database, backend and background worker.
       # The whole suite meets all three engines weekly, in
-      # .github/workflows/e2e-browsers.yml.
+      # .github/workflows/e2e-browsers.yml. The real-API 2K specs skip here
+      # without DTXWIKI_E2E_GRAPH_2K; the `graph-2k` job runs them.
       - name: Run Playwright e2e
         id: playwright
-        # The isolated wrapper and real-API 2K spec share this switch. Without
-        # it the acceptance silently skips on every PR despite a green suite.
-        env:
-          DTXWIKI_E2E_GRAPH_2K: "1"
         run: npm run test:e2e -- ${{ matrix.projects }}
       # The suite drives `/reset-password?token=<one-time token>`, and the HTML
       # reporter base64-inlines every step title into index.html on EVERY run,
@@ -169,6 +163,56 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: e2e-standard-${{ github.run_id }}-${{ matrix.name }}
+          path: playwright-report
+          if-no-files-found: error
+          retention-days: 14
+
+  # Graph runtime at the PR budget, beside the E2E legs so the chromium leg
+  # does not carry it too: the WebGL gate without its @pc10k cases
+  # (release-checks.yml `graph-10k` runs those) and the real-API 2K specs on
+  # their seeded corpus.
+  graph-2k:
+    name: Graph (2K)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.18.0"
+          cache: npm
+      - name: Install Python dependencies
+        run: uv sync --locked --extra dev
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Verify Local Graph WebGL shaders
+        run: npm run test:graph-webgl -- --project=chromium
+      - name: Run the real-API 2K graph e2e
+        id: playwright
+        # The isolated wrapper and the 2K specs share this switch. Without it
+        # the acceptance silently skips on every PR despite a green job.
+        env:
+          DTXWIKI_E2E_GRAPH_2K: "1"
+        run: >-
+          npm run test:e2e -- tests/e2e/workspace_graph_2k_real.spec.ts
+          tests/e2e/workspace_graph_reading_real.spec.ts
+          tests/e2e/workspace_graph_first_view.spec.ts
+          --project=chromium
+      # The HTML report inlines step titles, traces and attachments; scrub it
+      # exactly as the `e2e` job does before it is published.
+      - name: Redact the Playwright report before publishing it
+        if: always()
+        run: |
+          if [ -d playwright-report ]; then
+            bash scripts/redact_evidence.sh --dir playwright-report
+          fi
+      - name: Upload Playwright report
+        if: always() && (steps.playwright.outcome == 'success' || hashFiles('playwright-report/index.html') != '')
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-graph-2k-${{ github.run_id }}
           path: playwright-report
           if-no-files-found: error
           retention-days: 14

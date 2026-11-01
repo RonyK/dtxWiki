@@ -49,7 +49,7 @@ CI = ROOT / ".github/workflows/ci.yml"
 E2E_BROWSERS = ROOT / ".github/workflows/e2e-browsers.yml"
 
 # (workflow file, job id) -- every job that publishes a Playwright report.
-PUBLISHING_JOBS = ((CI, "e2e"), (E2E_BROWSERS, "exhaustive"))
+PUBLISHING_JOBS = ((CI, "e2e"), (CI, "graph-2k"), (E2E_BROWSERS, "exhaustive"))
 
 # Node ships unflagged TypeScript type stripping from v22.18.
 MIN_NODE_FOR_TYPE_STRIPPING = (22, 18)

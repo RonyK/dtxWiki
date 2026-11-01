@@ -133,6 +133,9 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Verify exact-scale benchmark guards
         run: node --test scripts/bench/graph/render_contract.test.mjs
+      # The WebGL gate's @pc10k cases; PR CI runs the rest of the gate.
+      - name: Verify PC 10K native WebGL cases
+        run: npm run test:graph-webgl -- --project=chromium-pc10k --forbid-only
       - name: Verify PC 10K and mobile 2K capacity
         id: playwright
         env:

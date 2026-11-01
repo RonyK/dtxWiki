@@ -282,98 +282,97 @@ for (const locale of ["en", "ko"]) {
   });
 }
 
-for (const locale of ["en", "ko"]) {
-  test(`audio and video presentation fixtures ${locale}`, async ({
-    page,
-  }, testInfo) => {
-    let consoleErrors = 0;
-    page.on("console", (message) => {
-      if (message.type() === "error") consoleErrors += 1;
-    });
-    await signUp(
-      page.request,
-      `attachment-presentation-${randomUUID()}@example.com`,
-    );
-    const workspace = await currentWorkspace(page.request);
-    const base = `${backendBaseUrl}/api/v1/workspaces/${workspace.id}`;
-    const policies = await page.request.get(`${base}/settings/policies`);
-    expect(policies.ok()).toBeTruthy();
-    const policy = (await policies.json()).data.attachments;
-    // Context ingress and the current domain are image-only. These two rows
-    // are explicitly presentation fixtures; the tests above exercise real
-    // uploads, visibility, retention persistence and deletion without mocks.
-    const items = ["audio", "video"].map((kind) => ({
-      asset_id: randomUUID(),
-      workspace_id: workspace.id,
-      page_id: randomUUID(),
-      page_title: "Audio and video presentation fixture",
-      created_for_version_id: randomUUID(),
-      logical_ref: `dtx-media://asset/${randomUUID()}`,
-      original_filename: `${kind}-presentation-fixture.${kind === "audio" ? "wav" : "mp4"}`,
-      kind,
-      media_type: kind === "audio" ? "audio/wav" : "video/mp4",
-      bytes: 204,
-      association_state: "active",
-      usage_state: "unused",
-      latest_draft_reference_count: 0,
-      current_published_reference_count: 0,
-      historical_reference_count: 0,
-      is_orphan: true,
-      is_mine: false,
-      can_delete: false,
-      usage_token: "presentation-only",
-      content_url: null,
-      uploaded_by_display_name: "Fixture uploader",
-      created_by_actor_kind: "human",
-      created_by_actor_id: randomUUID(),
-      created_at: "2026-10-18T00:00:00Z",
-    }));
-    await page.route("**/context/media/attachments?*", (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          data: {
-            items,
-            scope: "workspace",
-            next_cursor: null,
-            retention_policy: { ...policy.policy, revision: policy.revision },
-          },
-        }),
-      }),
-    );
-    await page.addInitScript(
-      (language) => localStorage.setItem("dtxwiki.uiLanguage", language),
-      locale,
-    );
-    await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=attachments`);
-    const section = page.locator(".attachments");
-    for (const item of items)
-      await expect(
-        section.getByText(item.original_filename, { exact: true }),
-      ).toBeVisible();
-    await expect(section.locator(".attachments-card img")).toHaveCount(0);
-    await section.locator(".attachments-card").last().scrollIntoViewIfNeeded();
-    await evidenceScreenshot(
-      page,
-      testInfo,
-      `attachment-format-fixtures-${locale}-desktop`,
-    );
-    await page.setViewportSize({ width: 390, height: 844 });
-    await section.locator(".attachments-card").last().scrollIntoViewIfNeeded();
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= innerWidth,
-      ),
-    ).toBe(true);
-    await evidenceScreenshot(
-      page,
-      testInfo,
-      `attachment-format-fixtures-${locale}-mobile`,
-    );
-    expect(consoleErrors).toBe(0);
+// No assertion here depends on the locale; English carries the wider labels
+// into the 390px overflow check.
+test("audio and video presentation fixtures en", async ({ page }, testInfo) => {
+  const locale = "en";
+  let consoleErrors = 0;
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors += 1;
   });
-}
+  await signUp(
+    page.request,
+    `attachment-presentation-${randomUUID()}@example.com`,
+  );
+  const workspace = await currentWorkspace(page.request);
+  const base = `${backendBaseUrl}/api/v1/workspaces/${workspace.id}`;
+  const policies = await page.request.get(`${base}/settings/policies`);
+  expect(policies.ok()).toBeTruthy();
+  const policy = (await policies.json()).data.attachments;
+  // Context ingress and the current domain are image-only. These two rows
+  // are explicitly presentation fixtures; the tests above exercise real
+  // uploads, visibility, retention persistence and deletion without mocks.
+  const items = ["audio", "video"].map((kind) => ({
+    asset_id: randomUUID(),
+    workspace_id: workspace.id,
+    page_id: randomUUID(),
+    page_title: "Audio and video presentation fixture",
+    created_for_version_id: randomUUID(),
+    logical_ref: `dtx-media://asset/${randomUUID()}`,
+    original_filename: `${kind}-presentation-fixture.${kind === "audio" ? "wav" : "mp4"}`,
+    kind,
+    media_type: kind === "audio" ? "audio/wav" : "video/mp4",
+    bytes: 204,
+    association_state: "active",
+    usage_state: "unused",
+    latest_draft_reference_count: 0,
+    current_published_reference_count: 0,
+    historical_reference_count: 0,
+    is_orphan: true,
+    is_mine: false,
+    can_delete: false,
+    usage_token: "presentation-only",
+    content_url: null,
+    uploaded_by_display_name: "Fixture uploader",
+    created_by_actor_kind: "human",
+    created_by_actor_id: randomUUID(),
+    created_at: "2026-10-18T00:00:00Z",
+  }));
+  await page.route("**/context/media/attachments?*", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: {
+          items,
+          scope: "workspace",
+          next_cursor: null,
+          retention_policy: { ...policy.policy, revision: policy.revision },
+        },
+      }),
+    }),
+  );
+  await page.addInitScript(
+    (language) => localStorage.setItem("dtxwiki.uiLanguage", language),
+    locale,
+  );
+  await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=attachments`);
+  const section = page.locator(".attachments");
+  for (const item of items)
+    await expect(
+      section.getByText(item.original_filename, { exact: true }),
+    ).toBeVisible();
+  await expect(section.locator(".attachments-card img")).toHaveCount(0);
+  await section.locator(".attachments-card").last().scrollIntoViewIfNeeded();
+  await evidenceScreenshot(
+    page,
+    testInfo,
+    `attachment-format-fixtures-${locale}-desktop`,
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await section.locator(".attachments-card").last().scrollIntoViewIfNeeded();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await evidenceScreenshot(
+    page,
+    testInfo,
+    `attachment-format-fixtures-${locale}-mobile`,
+  );
+  expect(consoleErrors).toBe(0);
+});
 
 async function uploadOrphan(request: APIRequestContext, filename: string) {
   const workspace = await currentWorkspace(request);

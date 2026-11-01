@@ -371,7 +371,9 @@ for (const { locale, mode, viewport } of LOCAL_LAYOUT_CASES) {
   });
 }
 
-for (const hostWidth of [344, 784, 785]) {
+// The 760/761 pair owns the container boundary. The narrower 320px sheet in
+// the same wide viewport is reached by the long-title 320px reader case.
+for (const hostWidth of [784, 785]) {
   test(`Local details use the ${hostWidth - 24}px reader boundary inside a wide viewport`, async ({ page }, testInfo) => {
     const errors = await mount(page, "complete", "en", "light", { width: 1440, height: 900 }, hostWidth);
     const graph = page.getByTestId("graph-view");
@@ -387,50 +389,51 @@ for (const hostWidth of [344, 784, 785]) {
   });
 }
 
-for (const locale of ["en", "ko"] as const) {
-  test(`Local ${locale} short-screen details keep actions and full long evidence available`, async ({ page }, testInfo) => {
-    const errors = await mount(page, "details-long", locale, "light", { width: 390, height: 640 });
-    const graph = page.getByTestId("graph-view");
-    const details = graph.locator(".graph-details");
-    const before = await localStageGeometry(graph);
-    const initial = await page.evaluate(() => window.__localCoverageFixture.read());
-    const seed = await page.evaluate(() => window.__localCoverageFixture.point("node:seed"));
-    await page.mouse.click(seed.x, seed.y);
-    await expect(details.locator("h5")).toContainText("full title stays available");
-    await expectLocalDetailsBounds(graph, "sheet");
-    const actionBounds = await details.locator(".graph-details-actions:not(.graph-details-context-actions)").boundingBox();
-    const panelBounds = await details.boundingBox();
-    expect(actionBounds!.y + actionBounds!.height).toBeLessThanOrEqual(panelBounds!.y + panelBounds!.height);
-    await expect(details).toContainText("end of evidence");
-    const dimensions = await details.evaluate((element) => ({ client: element.clientHeight, scroll: element.scrollHeight }));
-    expect(dimensions.scroll).toBeGreaterThan(dimensions.client);
-    await details.focus();
-    const scrollY = await page.evaluate(() => window.scrollY);
-    await page.keyboard.press("End");
-    await expect.poll(() => details.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-    expect(await page.evaluate(() => window.scrollY)).toBe(scrollY);
-    await page.evaluate(() => window.__localCoverageFixture.replacePayload());
-    await expect.poll(() => details.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-    expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(initial);
-    await page.keyboard.press("Escape");
-    await expect(details).toBeHidden();
-    expect(await localStageGeometry(graph)).toEqual(before);
-    const reselection = await page.evaluate(() => window.__localCoverageFixture.point("node:seed"));
-    await page.mouse.click(reselection.x, reselection.y);
-    await expect(details).toBeVisible();
-    expect(await details.evaluate((element) => element.scrollTop)).toBe(0);
-    await details.getByRole("button", { name: locale === "en" ? "Center" : "가운데로", exact: true }).click();
-    await expect.poll(async () => {
-      const point = await page.evaluate(() => window.__localCoverageFixture.point("node:seed"));
-      const frame = await graph.locator(".graph-canvas-frame").boundingBox();
-      return Math.abs(point.y - (frame!.y + frame!.height / 2));
-    }).toBeLessThanOrEqual(1);
-    const centered = await page.evaluate(() => window.__localCoverageFixture.point("node:seed"));
-    expect(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest(".graph-canvas")), centered)).toBe(true);
-    await evidenceScreenshot(page, testInfo, `local-${locale}-details-long-390x640.png`);
-    expect(errors).toEqual([]);
-  });
-}
+// Locale only selects button names here; translated action geometry is owned
+// by the long-title cases, which cover Korean on the same 390x640 screen.
+test("Local en short-screen details keep actions and full long evidence available", async ({ page }, testInfo) => {
+  const locale = "en" as const;
+  const errors = await mount(page, "details-long", locale, "light", { width: 390, height: 640 });
+  const graph = page.getByTestId("graph-view");
+  const details = graph.locator(".graph-details");
+  const before = await localStageGeometry(graph);
+  const initial = await page.evaluate(() => window.__localCoverageFixture.read());
+  const seed = await page.evaluate(() => window.__localCoverageFixture.point("node:seed"));
+  await page.mouse.click(seed.x, seed.y);
+  await expect(details.locator("h5")).toContainText("full title stays available");
+  await expectLocalDetailsBounds(graph, "sheet");
+  const actionBounds = await details.locator(".graph-details-actions:not(.graph-details-context-actions)").boundingBox();
+  const panelBounds = await details.boundingBox();
+  expect(actionBounds!.y + actionBounds!.height).toBeLessThanOrEqual(panelBounds!.y + panelBounds!.height);
+  await expect(details).toContainText("end of evidence");
+  const dimensions = await details.evaluate((element) => ({ client: element.clientHeight, scroll: element.scrollHeight }));
+  expect(dimensions.scroll).toBeGreaterThan(dimensions.client);
+  await details.focus();
+  const scrollY = await page.evaluate(() => window.scrollY);
+  await page.keyboard.press("End");
+  await expect.poll(() => details.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrollY);
+  await page.evaluate(() => window.__localCoverageFixture.replacePayload());
+  await expect.poll(() => details.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(initial);
+  await page.keyboard.press("Escape");
+  await expect(details).toBeHidden();
+  expect(await localStageGeometry(graph)).toEqual(before);
+  const reselection = await page.evaluate(() => window.__localCoverageFixture.point("node:seed"));
+  await page.mouse.click(reselection.x, reselection.y);
+  await expect(details).toBeVisible();
+  expect(await details.evaluate((element) => element.scrollTop)).toBe(0);
+  await details.getByRole("button", { name: "Center", exact: true }).click();
+  await expect.poll(async () => {
+    const point = await page.evaluate(() => window.__localCoverageFixture.point("node:seed"));
+    const frame = await graph.locator(".graph-canvas-frame").boundingBox();
+    return Math.abs(point.y - (frame!.y + frame!.height / 2));
+  }).toBeLessThanOrEqual(1);
+  const centered = await page.evaluate(() => window.__localCoverageFixture.point("node:seed"));
+  expect(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest(".graph-canvas")), centered)).toBe(true);
+  await evidenceScreenshot(page, testInfo, `local-${locale}-details-long-390x640.png`);
+  expect(errors).toEqual([]);
+});
 
 async function localStageGeometry(graph: Locator) {
   return graph.evaluate((element) => {
@@ -1020,104 +1023,106 @@ test("Local disappearing pointer member recovers scoped Escape without a keyboar
   expect(errors).toEqual([]);
 });
 
-for (const locale of ["en", "ko"] as const) {
-  for (const size of [
-    { name: "390px short screen", viewport: { width: 390, height: 640 }, hostWidth: 1100 },
-    { name: "320px reader", viewport: { width: 1440, height: 900 }, hostWidth: 344 },
-  ]) {
-    test(`Local ${locale} ${size.name} exposes all long-title actions before Tab and preserves native aside scrolling`, async ({ page }, testInfo) => {
-      const errors = await mount(page, "details-actions-long", locale, "light", size.viewport, size.hostWidth);
-      const graph = page.getByTestId("graph-view");
-      const details = graph.locator(".graph-details");
-      const nodesDisclosure = graph.locator(".graph-relationship-list > details").first();
-      const nodes = nodesDisclosure.locator(":scope > ul");
-      const native = await graph.locator("canvas.sigma-nodes").elementHandle();
-      const geometry = await localStageGeometry(graph);
-      const initial = await page.evaluate(() => window.__localCoverageFixture.read());
-      const words = { open: locale === "en" ? "Open" : "열기", pin: locale === "en" ? "Pin" : "고정",
-        unpin: locale === "en" ? "Unpin" : "고정 해제", expand: locale === "en" ? "Expand" : "확장",
-        map: locale === "en" ? "Show in Knowledge Map" : "지식 지도에서 보기" };
-      await focusLocalRowWithKeyboard(page, nodesDisclosure, nodes, "node:related");
-      await page.keyboard.press("Enter");
-      await expect(details).toBeFocused();
-      await expect(nodes.locator('button[data-local-graph-id="node:related"]')).toHaveAttribute("aria-pressed", "true");
-      await expect(details.locator("h4")).toBeInViewport({ ratio: 1 });
-      const firstActions = await expectAllLocalDetailsActions(details, "long-title-all-actions-before-next-tab");
-      expect(firstActions.actions).toHaveLength(6);
-      const expand = details.getByRole("button", { name: words.expand, exact: true });
-      await expect(expand).toBeEnabled();
-      await expect(details.getByRole("link", { name: words.map, exact: true }))
-        .toHaveAttribute("href", `/workspaces/${fixtureWorkspaceId}/graph?focused_doc_id=${relatedEntityId}`);
-      expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(initial);
-      expect(await localStageGeometry(graph)).toEqual(geometry);
-      await evidenceScreenshot(page, testInfo, `local-${locale}-${size.hostWidth}-long-title-all-actions-before-tab.png`);
+// Sizes own distinct layouts: a short viewport and a 320px container inside a
+// wide viewport. Translated labels need each size once, not a cross product;
+// the English labels measured wider and wrap the map link, so English takes
+// the narrower 320px reader.
+for (const { locale, size } of [
+  { locale: "en", size: { name: "320px reader", viewport: { width: 1440, height: 900 }, hostWidth: 344 } },
+  { locale: "ko", size: { name: "390px short screen", viewport: { width: 390, height: 640 }, hostWidth: 1100 } },
+] as const) {
+  test(`Local ${locale} ${size.name} exposes all long-title actions before Tab and preserves native aside scrolling`, async ({ page }, testInfo) => {
+    const errors = await mount(page, "details-actions-long", locale, "light", size.viewport, size.hostWidth);
+    const graph = page.getByTestId("graph-view");
+    const details = graph.locator(".graph-details");
+    const nodesDisclosure = graph.locator(".graph-relationship-list > details").first();
+    const nodes = nodesDisclosure.locator(":scope > ul");
+    const native = await graph.locator("canvas.sigma-nodes").elementHandle();
+    const geometry = await localStageGeometry(graph);
+    const initial = await page.evaluate(() => window.__localCoverageFixture.read());
+    const words = { open: locale === "en" ? "Open" : "열기", pin: locale === "en" ? "Pin" : "고정",
+      unpin: locale === "en" ? "Unpin" : "고정 해제", expand: locale === "en" ? "Expand" : "확장",
+      map: locale === "en" ? "Show in Knowledge Map" : "지식 지도에서 보기" };
+    await focusLocalRowWithKeyboard(page, nodesDisclosure, nodes, "node:related");
+    await page.keyboard.press("Enter");
+    await expect(details).toBeFocused();
+    await expect(nodes.locator('button[data-local-graph-id="node:related"]')).toHaveAttribute("aria-pressed", "true");
+    await expect(details.locator("h4")).toBeInViewport({ ratio: 1 });
+    const firstActions = await expectAllLocalDetailsActions(details, "long-title-all-actions-before-next-tab");
+    expect(firstActions.actions).toHaveLength(6);
+    const expand = details.getByRole("button", { name: words.expand, exact: true });
+    await expect(expand).toBeEnabled();
+    await expect(details.getByRole("link", { name: words.map, exact: true }))
+      .toHaveAttribute("href", `/workspaces/${fixtureWorkspaceId}/graph?focused_doc_id=${relatedEntityId}`);
+    expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(initial);
+    expect(await localStageGeometry(graph)).toEqual(geometry);
+    await evidenceScreenshot(page, testInfo, `local-${locale}-${size.hostWidth}-long-title-all-actions-before-tab.png`);
 
-      // Actual next-Tab and pointer actions need no preliminary scroll to
-      // expose the controls. Exactly one explicit Expand callback is allowed.
-      await page.keyboard.press("Tab");
-      await expect(details.getByRole("link", { name: words.open, exact: true })).toBeFocused();
-      await details.getByRole("button", { name: words.pin, exact: true }).click();
-      await expect(details.getByRole("button", { name: words.unpin, exact: true })).toBeVisible();
-      await expectAllLocalDetailsActions(details);
-      await expand.click();
-      await expect.poll(() => page.evaluate(() => window.__localCoverageFixture.read().graphActions)).toBe(initial.graphActions + 1);
-      await expect(expand).toBeEnabled();
-      const expanded = await page.evaluate(() => window.__localCoverageFixture.read());
-      expect(expanded.expandedNodes).toEqual([{ id: "node:related", entityKind: "context_page", entityId: relatedEntityId }]);
-      expect(expanded.instances).toBe(initial.instances);
-      expect(expanded.camera).toEqual(initial.camera);
-      expect(expanded.positions).toEqual(initial.positions);
-      expect(await localStageGeometry(graph)).toEqual(geometry);
+    // Actual next-Tab and pointer actions need no preliminary scroll to
+    // expose the controls. Exactly one explicit Expand callback is allowed.
+    await page.keyboard.press("Tab");
+    await expect(details.getByRole("link", { name: words.open, exact: true })).toBeFocused();
+    await details.getByRole("button", { name: words.pin, exact: true }).click();
+    await expect(details.getByRole("button", { name: words.unpin, exact: true })).toBeVisible();
+    await expectAllLocalDetailsActions(details);
+    await expand.click();
+    await expect.poll(() => page.evaluate(() => window.__localCoverageFixture.read().graphActions)).toBe(initial.graphActions + 1);
+    await expect(expand).toBeEnabled();
+    const expanded = await page.evaluate(() => window.__localCoverageFixture.read());
+    expect(expanded.expandedNodes).toEqual([{ id: "node:related", entityKind: "context_page", entityId: relatedEntityId }]);
+    expect(expanded.instances).toBe(initial.instances);
+    expect(expanded.camera).toEqual(initial.camera);
+    expect(expanded.positions).toEqual(initial.positions);
+    expect(await localStageGeometry(graph)).toEqual(geometry);
 
-      const title = details.locator("h5");
-      const evidence = details.locator("dd").filter({ hasText: "end of evidence" });
-      await expect(title).toContainText("end of full title");
-      await expect(evidence).toContainText("end of evidence");
-      const dimensions = await details.evaluate((element) => ({ client: element.clientHeight, scroll: element.scrollHeight }));
-      expect(dimensions.scroll).toBeGreaterThan(dimensions.client);
-      await details.focus();
-      const outerScroll = await page.evaluate(() => window.scrollY);
-      await page.keyboard.press("End");
-      await expect.poll(() => details.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-      expect(await page.evaluate(() => window.scrollY)).toBe(outerScroll);
-      await expectLocalTextTailReachable(page, evidence, "end of evidence");
-      await evidenceScreenshot(page, testInfo, `local-${locale}-${size.hostWidth}-long-evidence-native-scroll.png`);
-      await expectLocalTextTailReachable(page, title, "end of full title");
-      await evidenceScreenshot(page, testInfo, `local-${locale}-${size.hostWidth}-long-title-native-scroll.png`);
-      const scrolled = await details.evaluate((element) => element.scrollTop);
-      expect(scrolled).toBeGreaterThan(0);
-      await page.evaluate(() => window.__localCoverageFixture.replacePayload());
-      expect(await details.evaluate((element) => element.scrollTop)).toBe(scrolled);
-      expect(await page.evaluate(() => window.scrollY)).toBe(outerScroll);
-      expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(expanded);
-      expect(await localStageGeometry(graph)).toEqual(geometry);
+    const title = details.locator("h5");
+    const evidence = details.locator("dd").filter({ hasText: "end of evidence" });
+    await expect(title).toContainText("end of full title");
+    await expect(evidence).toContainText("end of evidence");
+    const dimensions = await details.evaluate((element) => ({ client: element.clientHeight, scroll: element.scrollHeight }));
+    expect(dimensions.scroll).toBeGreaterThan(dimensions.client);
+    await details.focus();
+    const outerScroll = await page.evaluate(() => window.scrollY);
+    await page.keyboard.press("End");
+    await expect.poll(() => details.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    expect(await page.evaluate(() => window.scrollY)).toBe(outerScroll);
+    await expectLocalTextTailReachable(page, evidence, "end of evidence");
+    await evidenceScreenshot(page, testInfo, `local-${locale}-${size.hostWidth}-long-evidence-native-scroll.png`);
+    await expectLocalTextTailReachable(page, title, "end of full title");
+    await evidenceScreenshot(page, testInfo, `local-${locale}-${size.hostWidth}-long-title-native-scroll.png`);
+    const scrolled = await details.evaluate((element) => element.scrollTop);
+    expect(scrolled).toBeGreaterThan(0);
+    await page.evaluate(() => window.__localCoverageFixture.replacePayload());
+    expect(await details.evaluate((element) => element.scrollTop)).toBe(scrolled);
+    expect(await page.evaluate(() => window.scrollY)).toBe(outerScroll);
+    expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(expanded);
+    expect(await localStageGeometry(graph)).toEqual(geometry);
 
-      await page.keyboard.press("Escape");
-      await expect(details).toBeHidden();
-      await expect(graph).toBeFocused();
-      await focusLocalRowWithKeyboard(page, nodesDisclosure, nodes, "node:related");
-      await page.keyboard.press("Enter");
-      await expect(details).toBeFocused();
-      expect(await details.evaluate((element) => element.scrollTop)).toBe(0);
-      await expect(details.getByRole("button", { name: words.unpin, exact: true })).toBeVisible();
-      await expectAllLocalDetailsActions(details);
-      // SAME-ID activation still hands off, with the original selected node
-      // and retained pin rather than a new selection/query/renderer.
-      await nodes.locator('button[data-local-graph-id="node:related"]').click();
-      await page.keyboard.press("Space");
-      await expect(details).toBeFocused();
-      await expectAllLocalDetailsActions(details);
-      expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(expanded);
-      expect(await localStageGeometry(graph)).toEqual(geometry);
-      expect(await native!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
-      await expectLocalDetailsBounds(graph, "sheet");
-      const invariantPath = testInfo.outputPath("long-title-native-invariants.json");
-      await writeFile(invariantPath, JSON.stringify({ locale, size, firstActions, initial, expanded,
-        geometry, outerScroll, sameIdMetadataScroll: scrolled, reselectionScroll: 0 }, null, 2));
-      await testInfo.attach("long-title-native-invariants.json", { path: invariantPath, contentType: "application/json" });
-      expect(errors).toEqual([]);
-    });
-  }
+    await page.keyboard.press("Escape");
+    await expect(details).toBeHidden();
+    await expect(graph).toBeFocused();
+    await focusLocalRowWithKeyboard(page, nodesDisclosure, nodes, "node:related");
+    await page.keyboard.press("Enter");
+    await expect(details).toBeFocused();
+    expect(await details.evaluate((element) => element.scrollTop)).toBe(0);
+    await expect(details.getByRole("button", { name: words.unpin, exact: true })).toBeVisible();
+    await expectAllLocalDetailsActions(details);
+    // SAME-ID activation still hands off, with the original selected node
+    // and retained pin rather than a new selection/query/renderer.
+    await nodes.locator('button[data-local-graph-id="node:related"]').click();
+    await page.keyboard.press("Space");
+    await expect(details).toBeFocused();
+    await expectAllLocalDetailsActions(details);
+    expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(expanded);
+    expect(await localStageGeometry(graph)).toEqual(geometry);
+    expect(await native!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
+    await expectLocalDetailsBounds(graph, "sheet");
+    const invariantPath = testInfo.outputPath("long-title-native-invariants.json");
+    await writeFile(invariantPath, JSON.stringify({ locale, size, firstActions, initial, expanded,
+      geometry, outerScroll, sameIdMetadataScroll: scrolled, reselectionScroll: 0 }, null, 2));
+    await testInfo.attach("long-title-native-invariants.json", { path: invariantPath, contentType: "application/json" });
+    expect(errors).toEqual([]);
+  });
 }
 
 async function activeLocalGraphId(page: Page) {
@@ -1202,87 +1207,91 @@ const NAVIGATION_COPY = {
     families: { document: "문서", ask: "질문 턴", chat: "대화", structural: "구조" } },
 } as const;
 
-for (const locale of ["en", "ko"] as const) {
-  for (const mode of ["light", "dark", "forced"] as const) {
-    test(`Local ${locale} ${mode} canonical node cues retain visible silhouettes at 390px with actual Sigma`, async ({ page }, testInfo) => {
-      test.setTimeout(60_000);
-      // Synthetic public wire data, actual GraphView/Sigma/styles/translations.
-      // This gate does not claim live API, authentication or visibility proof.
-      const errors = await mount(page, "node-cues", locale, mode);
-      const words = NAVIGATION_COPY[locale];
-      const panel = page.getByTestId("graph-view");
-      const rows = panel.locator(".graph-relationship-list > details").first().locator(":scope > ul > li");
-      const mainButtons = rows.locator(":scope > button.graph-list-select");
-      await expectNodeCueRows(mainButtons, NODE_CUE_ROWS, locale, mode);
-      const members = NODE_CUE_ROWS.filter((node) => node.kind !== "folder");
-      const folderRow = rows.filter({ has: page.locator(":scope > button.graph-list-select strong", { hasText: /^Visible Source Folder$/ }) });
-      const details = panel.locator(".graph-details");
-      await folderRow.locator(":scope > button.graph-list-select").click();
-      await expect(details.locator("h5")).toHaveText("Visible Source Folder");
-      // UX-12 gives actions/membership one selected-Details owner instead of
-      // duplicating interactive member lists in every main node row.
-      await expect(folderRow.locator(":scope > details.graph-scene-navigation")).toHaveCount(0);
-      const memberDisclosure = details.locator("details.graph-scene-navigation")
-        .filter({ has: page.locator("summary", { hasText: words.members }) });
-      await expect(memberDisclosure.locator(":scope > summary")).toHaveText(`${words.members} (7)`);
-      const memberButtons = memberDisclosure.getByRole("list", { name: words.members, exact: true }).locator(":scope > li > button");
-      await expectNodeCueRows(memberButtons, members, locale, mode);
-      const seedRow = rows.filter({ has: page.locator(":scope > button.graph-list-select strong", { hasText: /^Decision Log$/ }) });
-      await seedRow.locator(":scope > button.graph-list-select").click();
-      const neighborButtons = details.getByRole("list", { name: words.neighbors, exact: true }).locator(":scope > li > button");
-      const neighbors = NODE_CUE_ROWS.filter((node) => node.label !== "Decision Log");
-      await expectNodeCueRows(neighborButtons, neighbors, locale, mode);
-      const folderDisclosure = details.locator("details.graph-scene-navigation")
-        .filter({ has: page.locator("summary", { hasText: words.folders }) });
-      await expect(folderDisclosure.locator(":scope > summary")).toHaveText(`${words.folders} (1)`);
-      await folderDisclosure.locator(":scope > summary").click();
-      await expectNodeCueRows(folderDisclosure.getByRole("list", { name: words.folders, exact: true }).locator(":scope > li > button"),
-        NODE_CUE_ROWS.filter((node) => node.kind === "folder"), locale, mode);
+// Palette assertions do not depend on locale and translated family names do
+// not depend on palette: each palette once, with both locales represented.
+for (const { locale, mode } of [
+  { locale: "en", mode: "light" },
+  { locale: "ko", mode: "dark" },
+  { locale: "ko", mode: "forced" },
+] as const) {
+  test(`Local ${locale} ${mode} canonical node cues retain visible silhouettes at 390px with actual Sigma`, async ({ page }, testInfo) => {
+    test.setTimeout(60_000);
+    // Synthetic public wire data, actual GraphView/Sigma/styles/translations.
+    // This gate does not claim live API, authentication or visibility proof.
+    const errors = await mount(page, "node-cues", locale, mode);
+    const words = NAVIGATION_COPY[locale];
+    const panel = page.getByTestId("graph-view");
+    const rows = panel.locator(".graph-relationship-list > details").first().locator(":scope > ul > li");
+    const mainButtons = rows.locator(":scope > button.graph-list-select");
+    await expectNodeCueRows(mainButtons, NODE_CUE_ROWS, locale, mode);
+    const members = NODE_CUE_ROWS.filter((node) => node.kind !== "folder");
+    const folderRow = rows.filter({ has: page.locator(":scope > button.graph-list-select strong", { hasText: /^Visible Source Folder$/ }) });
+    const details = panel.locator(".graph-details");
+    await folderRow.locator(":scope > button.graph-list-select").click();
+    await expect(details.locator("h5")).toHaveText("Visible Source Folder");
+    // UX-12 gives actions/membership one selected-Details owner instead of
+    // duplicating interactive member lists in every main node row.
+    await expect(folderRow.locator(":scope > details.graph-scene-navigation")).toHaveCount(0);
+    const memberDisclosure = details.locator("details.graph-scene-navigation")
+      .filter({ has: page.locator("summary", { hasText: words.members }) });
+    await expect(memberDisclosure.locator(":scope > summary")).toHaveText(`${words.members} (7)`);
+    const memberButtons = memberDisclosure.getByRole("list", { name: words.members, exact: true }).locator(":scope > li > button");
+    await expectNodeCueRows(memberButtons, members, locale, mode);
+    const seedRow = rows.filter({ has: page.locator(":scope > button.graph-list-select strong", { hasText: /^Decision Log$/ }) });
+    await seedRow.locator(":scope > button.graph-list-select").click();
+    const neighborButtons = details.getByRole("list", { name: words.neighbors, exact: true }).locator(":scope > li > button");
+    const neighbors = NODE_CUE_ROWS.filter((node) => node.label !== "Decision Log");
+    await expectNodeCueRows(neighborButtons, neighbors, locale, mode);
+    const folderDisclosure = details.locator("details.graph-scene-navigation")
+      .filter({ has: page.locator("summary", { hasText: words.folders }) });
+    await expect(folderDisclosure.locator(":scope > summary")).toHaveText(`${words.folders} (1)`);
+    await folderDisclosure.locator(":scope > summary").click();
+    await expectNodeCueRows(folderDisclosure.getByRole("list", { name: words.folders, exact: true }).locator(":scope > li > button"),
+      NODE_CUE_ROWS.filter((node) => node.kind === "folder"), locale, mode);
 
-      // Check the composited row SVG screenshots, not only attributes: a square
-      // has filled corners, a folder has a hole, and forced conversation keeps
-      // a gap between its central disc and outer ring.
-      const silhouettes = [];
-      for (const [region, buttons] of [["main", mainButtons], ["neighbors", neighborButtons]] as const) {
-        for (const kind of ["context", "library", "conversation", "folder"] as const) {
-          const cue = buttons.locator(`:scope > svg[data-node-visual-kind="${kind}"]`).first();
-          await cue.scrollIntoViewIfNeeded();
-          const screenshot = await cue.screenshot({ path: testInfo.outputPath(`local-${locale}-${mode}-${region}-${kind}-cue.png`) });
-          const pixels = await inspectCuePixels(page, screenshot);
-          expect(pixels.center, `${region} ${kind} visible center`).toBe(kind !== "folder");
-          if (kind === "library") expect(pixels.corner, `${region} Library must paint square corners`).toBe(true);
-          if (kind === "context" || kind === "conversation") expect(pixels.corner, `${region} ${kind} must remain circular`).toBe(false);
-          if (kind === "folder") expect(pixels.rim, `${region} folder must have a visible rim`).toBe(true);
-          if (kind === "conversation" && mode === "forced") {
-            expect(pixels.gap, `${region} forced conversation must retain its concentric gap`).toBe(false);
-            expect(pixels.outer, `${region} forced conversation must retain its outer ring`).toBe(true);
-          }
-          silhouettes.push({ region, kind, ...pixels });
-          await testInfo.attach(`local-${locale}-${mode}-${region}-${kind}-cue.png`, { body: screenshot, contentType: "image/png" });
+    // Check the composited row SVG screenshots, not only attributes: a square
+    // has filled corners, a folder has a hole, and forced conversation keeps
+    // a gap between its central disc and outer ring.
+    const silhouettes = [];
+    for (const [region, buttons] of [["main", mainButtons], ["neighbors", neighborButtons]] as const) {
+      for (const kind of ["context", "library", "conversation", "folder"] as const) {
+        const cue = buttons.locator(`:scope > svg[data-node-visual-kind="${kind}"]`).first();
+        await cue.scrollIntoViewIfNeeded();
+        const screenshot = await cue.screenshot({ path: testInfo.outputPath(`local-${locale}-${mode}-${region}-${kind}-cue.png`) });
+        const pixels = await inspectCuePixels(page, screenshot);
+        expect(pixels.center, `${region} ${kind} visible center`).toBe(kind !== "folder");
+        if (kind === "library") expect(pixels.corner, `${region} Library must paint square corners`).toBe(true);
+        if (kind === "context" || kind === "conversation") expect(pixels.corner, `${region} ${kind} must remain circular`).toBe(false);
+        if (kind === "folder") expect(pixels.rim, `${region} folder must have a visible rim`).toBe(true);
+        if (kind === "conversation" && mode === "forced") {
+          expect(pixels.gap, `${region} forced conversation must retain its concentric gap`).toBe(false);
+          expect(pixels.outer, `${region} forced conversation must retain its outer ring`).toBe(true);
         }
+        silhouettes.push({ region, kind, ...pixels });
+        await testInfo.attach(`local-${locale}-${mode}-${region}-${kind}-cue.png`, { body: screenshot, contentType: "image/png" });
       }
-      const nativeNodes = panel.locator("canvas.sigma-nodes");
-      await expect(nativeNodes).toBeVisible();
-      const gpu = await nativeNodes.evaluate((element) => {
-        const canvas = element as HTMLCanvasElement;
-        const context = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
-        return { width: canvas.width, height: canvas.height, live: Boolean(context) && !context!.isContextLost(), error: context?.getError() };
-      });
-      expect(gpu.live).toBe(true);
-      expect(gpu.error).toBe(0);
-      expect(gpu.width).toBeGreaterThan(0);
-      expect(gpu.height).toBeGreaterThan(0);
-      if (mode !== "forced") expect(await purpleNodePixels(page)).toBeGreaterThan(5);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-      await panel.locator(".graph-local-stage").scrollIntoViewIfNeeded();
-      await evidenceScreenshot(page, testInfo, `local-${locale}-${mode}-node-cues-390px.png`);
-      await testInfo.attach(`local-${locale}-${mode}-node-cues.json`, {
-        body: JSON.stringify({ fixture: "synthetic wire data, native GraphView/Sigma", locale, mode, renderedNodes: 8, directMembers: 7, directNeighbors: 7, folders: 1, silhouettes, gpu }, null, 2),
-        contentType: "application/json",
-      });
-      expect(errors).toEqual([]);
+    }
+    const nativeNodes = panel.locator("canvas.sigma-nodes");
+    await expect(nativeNodes).toBeVisible();
+    const gpu = await nativeNodes.evaluate((element) => {
+      const canvas = element as HTMLCanvasElement;
+      const context = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
+      return { width: canvas.width, height: canvas.height, live: Boolean(context) && !context!.isContextLost(), error: context?.getError() };
     });
-  }
+    expect(gpu.live).toBe(true);
+    expect(gpu.error).toBe(0);
+    expect(gpu.width).toBeGreaterThan(0);
+    expect(gpu.height).toBeGreaterThan(0);
+    if (mode !== "forced") expect(await purpleNodePixels(page)).toBeGreaterThan(5);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await panel.locator(".graph-local-stage").scrollIntoViewIfNeeded();
+    await evidenceScreenshot(page, testInfo, `local-${locale}-${mode}-node-cues-390px.png`);
+    await testInfo.attach(`local-${locale}-${mode}-node-cues.json`, {
+      body: JSON.stringify({ fixture: "synthetic wire data, native GraphView/Sigma", locale, mode, renderedNodes: 8, directMembers: 7, directNeighbors: 7, folders: 1, silhouettes, gpu }, null, 2),
+      contentType: "application/json",
+    });
+    expect(errors).toEqual([]);
+  });
 }
 
 async function expectNodeCueRows(buttons: Locator, expected: CueRow[], locale: keyof typeof NAVIGATION_COPY, mode: CueMode) {

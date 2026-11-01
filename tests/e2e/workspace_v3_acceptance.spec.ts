@@ -48,10 +48,14 @@ type WorkspaceListData = {
   default_workspace_id: string | null;
 };
 
-// Business journeys share the desktop breakpoint. The responsive suite owns
-// intermediate/wide widths; retain one short desktop and one mobile journey.
+// These journeys assert server state, routing and text, which no viewport
+// changes. Their one geometry check, expectViewportFits, measures the document,
+// and `.app-shell` clips its own overflow, so only content rendered outside the
+// shell, such as a portaled dialog, can fail it -- in practice only at a phone
+// width. Run each journey once, at the phone width that
+// the other specs' default Desktop Chrome viewport never reaches;
+// overall_ui_responsive.spec.ts owns the responsive widths.
 const JOURNEY_VIEWPORTS = [
-  { key: "1280x720", width: 1280, height: 720 },
   { key: "390x844", width: 390, height: 844 },
 ] as const;
 
@@ -634,17 +638,8 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             await expectViewportFits(page);
 
             // The public endpoint intentionally has a tight instance-wide IP
-            // budget. Prove the known/unknown indistinguishability once, then
-            // use the remaining viewport journeys for real form/layout checks
-            // without exhausting capacity or making Playwright retries flaky.
-            if (viewport.key !== "1280x720") {
-              await expect(page.getByLabel("Email")).toBeVisible();
-              await expect(
-                page.getByRole("button", { name: "Send reset instructions" }),
-              ).toBeEnabled();
-              return;
-            }
-
+            // budget. This journey runs once per browser project, so it proves
+            // the known/unknown indistinguishability with exactly two requests.
             const knownResponsePromise = page.waitForResponse(
               passwordResetRequestResponse,
             );

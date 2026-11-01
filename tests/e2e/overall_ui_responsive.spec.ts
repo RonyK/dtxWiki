@@ -53,10 +53,21 @@ const VIEWPORTS: ViewportCase[] = [
 ];
 
 // The usability journey branches on width > 1024, width <= 1024 and width ===
-// 390, so the phone and desktop cases reach every branch. The tablet cases
-// take the <= 1024 branch and add only the 641-1024px CSS bands; they run on
-// Chromium here and on every engine in the weekly exhaustive run.
-const CROSS_BROWSER_USABILITY_KEYS = new Set(["phone-390x844", "desktop-1280x720"]);
+// 390, so the phone and desktop cases reach every branch. The tablet case
+// takes the <= 1024 branch and adds only the 641-1024px CSS bands. 1024x768
+// skips the journey: from 768 to 1024px only the editor's 1023px and the
+// Library panel's 900px rules switch off, and desktop-1280x720 lays that
+// panel out in a narrower settings column. It stays a family-dialog size.
+const USABILITY_VIEWPORTS = VIEWPORTS.filter(
+  (viewport) => viewport.key !== "tablet-landscape-1024x768",
+);
+// Firefox and WebKit run the phone journey alone. The engine behavior it
+// measures -- computed geometry, hover, popover stacking, a row menu escaping
+// the transformed drawer that clips it -- includes everything the desktop case
+// measures; the desktop branch only reads other CSS values from the same
+// mechanisms. The desktop and tablet cases run on Chromium here and on every
+// engine in the weekly exhaustive run.
+const CROSS_BROWSER_USABILITY_KEY = "phone-390x844";
 
 // The dialog is min(720px, 100vw - 32px) wide and min(88dvh, 820px) tall.
 // 1920x1080 reaches the 820px cap; a 1440x900 case would repeat 1280x720,
@@ -70,8 +81,8 @@ const FAMILY_DIALOG_VIEWPORTS: ViewportCase[] = [
 // spacing contract while tolerating that engine-level geometry rounding.
 const CSS_GEOMETRY_EPSILON_PX = 0.001;
 
-// @cross-browser is set per test, so the tablet usability cases can stay on
-// Chromium.
+// @cross-browser is set per test, so the usability journey and the signed-out
+// shell run one viewport each on Firefox and WebKit.
 test.describe("Overall UI responsive acceptance", () => {
   test.describe("foldable viewport", () => {
     test.use({ hasTouch: true });
@@ -126,8 +137,8 @@ test.describe("Overall UI responsive acceptance", () => {
     });
   });
 
-  for (const viewport of VIEWPORTS) {
-    test(`${viewport.key}: Context, Library policy, Lint, Chats, and Activity stay usable${CROSS_BROWSER_USABILITY_KEYS.has(viewport.key) ? " @cross-browser" : ""}`, async ({
+  for (const viewport of USABILITY_VIEWPORTS) {
+    test(`${viewport.key}: Context, Library policy, Lint, Chats, and Activity stay usable${viewport.key === CROSS_BROWSER_USABILITY_KEY ? " @cross-browser" : ""}`, async ({
       page,
     }, testInfo) => {
       test.setTimeout(120_000);
@@ -809,8 +820,15 @@ test.describe("Overall UI responsive acceptance", () => {
   // card edge and the email field were clipped with no scrollbar to recover
   // them. Every authenticated surface stayed clean, which is why the account
   // recovery screens were the only place this ever showed.
-  for (const width of [280, 320, 360]) {
-    test(`signed-out shell fits a ${width}px viewport @cross-browser`, async ({ page }) => {
+  //
+  // No width rule sits between 280 and 390px (the narrowest is max-width:
+  // 390px), so these widths share one stylesheet. 280px fails first on a
+  // floored track like that one; 360px fails first on a surface capped short
+  // of the viewport. Any width between them fails only where one of them does.
+  // Which width fails is decided by that stylesheet, not by the engine, so
+  // Firefox and WebKit run 280px alone and 360px stays on Chromium.
+  for (const width of [280, 360]) {
+    test(`signed-out shell fits a ${width}px viewport${width === 280 ? " @cross-browser" : ""}`, async ({ page }) => {
       test.setTimeout(60_000);
       await page.setViewportSize({ width, height: 844 });
       for (const path of [
@@ -1010,7 +1028,7 @@ test.describe("Overall UI responsive acceptance", () => {
     }
   });
 
-  test("phone-390x844-ko: Library policy stays localized and usable @cross-browser", async ({
+  test("phone-390x844-ko: Library policy stays localized and usable", async ({
     page,
   }, testInfo) => {
     test.setTimeout(60_000);

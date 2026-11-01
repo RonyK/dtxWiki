@@ -237,23 +237,25 @@ for (const mobile of [false, true]) {
         scope: "Actual Screen/native Workers with controlled message delivery, not timing or physical-device performance" }, null, 2) });
     await evidenceScreenshot(page, testInfo, `2k-spacing-live-${language}.png`);
   });
-
-  test(`native 2k reduced motion notice stays truthful in ${language} ${mobile ? "mobile" : "desktop"}`, async ({ page }, testInfo) => {
-    await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.goto(`${origin}/?lang=${language}`);
-    await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2000");
-    if (mobile) await page.getByRole("button", { name: "캔버스 전체 화면으로 열기", exact: true }).click();
-    await expectSettledNativeScene(page);
-    const notice = page.getByTestId("workspace-map-layout-status");
-    await expect(notice).toHaveAttribute("data-layout-state", "motion-off");
-    await expect(notice).toHaveText(mobile ? "동작 줄이기 설정에 따라 배치 움직임이 꺼져 있습니다."
-      : "Layout motion is off for reduced motion.");
-    await expect(page.getByTestId("graph-canvas")).toHaveAttribute("data-map-layout-running", "false");
-    expect((await page.evaluate(() => window.__workspaceScreenFocus.snapshot())).glError).toBe(0);
-    await evidenceScreenshot(page, testInfo, `2k-motion-off-${language}.png`);
-  });
 }
+
+// One case: both locale strings are unit-tested (WorkspaceMapCanvas.test.tsx);
+// mobile fullscreen re-parents the same canvas and adds a resize that must not
+// restart the layout under reduced motion.
+test("native 2k reduced motion notice stays truthful in ko mobile", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto(`${origin}/?lang=ko`);
+  await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2000");
+  await page.getByRole("button", { name: "캔버스 전체 화면으로 열기", exact: true }).click();
+  await expectSettledNativeScene(page);
+  const notice = page.getByTestId("workspace-map-layout-status");
+  await expect(notice).toHaveAttribute("data-layout-state", "motion-off");
+  await expect(notice).toHaveText("동작 줄이기 설정에 따라 배치 움직임이 꺼져 있습니다.");
+  await expect(page.getByTestId("graph-canvas")).toHaveAttribute("data-map-layout-running", "false");
+  expect((await page.evaluate(() => window.__workspaceScreenFocus.snapshot())).glError).toBe(0);
+  await evidenceScreenshot(page, testInfo, "2k-motion-off-ko.png");
+});
 
 for (const scenario of [
   { language: "en", mobile: false, reason: "webgl2" },
@@ -585,7 +587,7 @@ test("observed owner downgrade disposes live CPU layout and Cosmos 2k graph befo
 });
 test.afterAll(async () => { await server?.close(); });
 
-test("PC10K explicit scale reaches native buffers, preserves theme geometry, and virtualizes all folder members", async ({ page }, testInfo) => {
+test("PC10K explicit scale reaches native buffers, preserves theme geometry, and virtualizes all folder members @pc10k", async ({ page }, testInfo) => {
   test.setTimeout(60_000);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -654,7 +656,7 @@ test("PC10K explicit scale reaches native buffers, preserves theme geometry, and
   expect(errors).toEqual([]);
 });
 
-test("PC10K native physics moves, pauses, and resumes without releasing an explicit pin", async ({ page }, testInfo) => {
+test("PC10K native physics moves, pauses, and resumes without releasing an explicit pin @pc10k", async ({ page }, testInfo) => {
   test.setTimeout(60_000);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -839,7 +841,11 @@ for (const mode of ["desktop", "mobile", "mobile-fullscreen"] as const) {
     expect(errors).toEqual([]);
     await evidenceScreenshot(page, testInfo, `folder-${mode}-end.png`);
   });
+}
 
+// The unvirtualized cap is CSS: 448px on desktop, one 336px media rule for
+// every mobile container. Fullscreen also caps its details panel around it.
+for (const mode of ["desktop", "mobile-fullscreen"] as const) {
   test(`folder members remain bounded below the virtualization threshold on ${mode}`, async ({ page }, testInfo) => {
     await page.setViewportSize(mode === "desktop"
       ? { width: 1440, height: 1000 } : { width: 390, height: 844 });
@@ -854,7 +860,6 @@ for (const mode of ["desktop", "mobile", "mobile-fullscreen"] as const) {
     }
     await scope.getByRole("button", { name: "Folder context", exact: true }).click();
     if (mode !== "mobile-fullscreen") await scope.locator(".workspace-graph-view-options summary").click();
-    if (mode === "mobile") await page.getByRole("button", { name: "Open Map details sheet", exact: true }).click();
     const index = scope.locator(".workspace-graph-folder-index");
     await index.locator("summary").click();
     await index.getByRole("button", { name: "Folder documents · 900", exact: true }).click();
@@ -880,112 +885,114 @@ async function openFocusFixture(page: Page): Promise<void> {
   await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2000");
 }
 
-for (const language of ["en", "ko"] as const) {
-  for (const mobile of [false, true]) {
-    test(`native 2k Screen keeps compact controls and initial content visible in ${language} ${mobile ? "mobile" : "desktop"}`, async ({ page }, testInfo) => {
-      const errors: string[] = [];
-      page.on("pageerror", (error) => errors.push(error.message));
-      page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
-      await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
-      await page.emulateMedia({ reducedMotion: "reduce" });
-      await page.goto(`${origin}/?lang=${language}`);
-      await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2000");
-      await expectSettledNativeScene(page);
-      const geometry = await page.evaluate(() => {
-        const rectangle = (selector: string) => {
-          const bounds = document.querySelector(selector)!.getBoundingClientRect();
-          return { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right,
-            width: bounds.width, height: bounds.height };
-        };
-        return {
-          viewport: { width: innerWidth, height: innerHeight }, scrollWidth: document.documentElement.scrollWidth,
-          panel: rectangle(".workspace-graph-top-panel"),
-          header: rectangle(".workspace-graph-header"), toolbar: rectangle(".workspace-graph-toolbar"),
-          search: rectangle("#workspace-graph-visible-search"), stage: rectangle(".workspace-graph-stage"),
-          list: rectangle(".workspace-graph-list"),
-          nodeRow: rectangle("[data-testid='workspace-graph-node-list'] li[data-graph-node-id]"),
-          nodeAction: rectangle("[data-testid='workspace-graph-node-list'] li[data-graph-node-id] .workspace-graph-list-actions a"),
-          canvas: rectangle(".graph-canvas-frame"),
-          inspector: rectangle(".inspector-panel"),
-        };
-      });
-      await testInfo.attach("compact-screen-geometry", { contentType: "application/json", body: JSON.stringify(geometry) });
-      await evidenceScreenshot(page, testInfo, `compact-${language}-${mobile ? "mobile" : "desktop"}.png`);
-      expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.viewport.width);
-      expect(geometry.search.left).toBeGreaterThanOrEqual(geometry.toolbar.left);
-      expect(geometry.search.right).toBeLessThanOrEqual(geometry.toolbar.right);
-      // The row action needs its own inset, including when row virtualization
-      // fixes the height. Selector-button padding cannot protect this link.
-      expect(geometry.nodeRow.right - geometry.nodeAction.right).toBeGreaterThanOrEqual(8);
-      expect(geometry.nodeAction.top - geometry.nodeRow.top).toBeGreaterThanOrEqual(8);
-      expect(geometry.nodeRow.bottom - geometry.nodeAction.bottom).toBeGreaterThanOrEqual(8);
-      expect(geometry.nodeAction.height).toBeGreaterThanOrEqual(mobile ? 44 : 36);
-      // The padded title/coverage card can wrap on a narrow screen.
-      expect(geometry.header.height).toBeLessThanOrEqual(mobile ? 90 : 60);
-      expect(geometry.toolbar.height).toBeLessThanOrEqual(mobile ? 130 : 80);
-      expect(geometry.panel.top).toBe(0);
-      expect(geometry.panel.bottom).toBeGreaterThanOrEqual(geometry.header.bottom);
-      expect(geometry.toolbar.top).toBeGreaterThan(geometry.canvas.top);
-      expect(geometry.toolbar.bottom).toBeLessThan(geometry.canvas.bottom);
-      expect(geometry.canvas.top).toBe(geometry.panel.bottom);
-      expect(geometry.canvas.left).toBe(0);
-      expect(geometry.canvas.bottom).toBe(geometry.viewport.height);
-      expect(geometry.canvas.height).toBe(geometry.viewport.height - geometry.panel.height);
-      expect(geometry.canvas.width).toBe(geometry.viewport.width - (mobile ? 0 : 300));
-      if (!mobile) expect(geometry.canvas.right).toBe(geometry.inspector.left);
-      if (!mobile) {
-        const hits = await page.evaluate(() => {
-          const controls = document.querySelector(".workspace-graph-canvas-controls")!;
-          const toolbar = controls.querySelector(".graph-canvas-toolbar")!;
-          const button = toolbar.querySelector("button")!;
-          const controlBounds = controls.getBoundingClientRect();
-          const toolbarBounds = toolbar.getBoundingClientRect();
-          const buttonBounds = button.getBoundingClientRect();
-          const buttonHit = document.elementFromPoint(buttonBounds.left + buttonBounds.width / 2,
-            buttonBounds.top + buttonBounds.height / 2);
-          const emptyPoint = { x: controlBounds.right - 4, y: toolbarBounds.top + toolbarBounds.height / 2 };
-          const emptyHit = document.elementFromPoint(emptyPoint.x, emptyPoint.y);
-          return { buttonHit: button.contains(buttonHit), emptyPoint,
-            emptySpaceWidth: emptyPoint.x - toolbarBounds.right,
-            emptyHitsCanvas: Boolean(emptyHit?.closest(".graph-canvas-frame")),
-            emptyHitsControls: controls.contains(emptyHit) };
-        });
-        expect(hits.buttonHit).toBe(true);
-        expect(hits.emptySpaceWidth).toBeGreaterThan(0);
-        expect(hits.emptyHitsCanvas).toBe(true);
-        expect(hits.emptyHitsControls).toBe(false);
-        await page.locator(".workspace-graph-canvas-controls .graph-canvas-toolbar button").first().click({ trial: true });
-        await testInfo.attach("canvas-overlay-hit-testing", { contentType: "application/json", body: JSON.stringify(hits) });
-      }
-      if (language === "en" && !mobile) {
-        const canvas = await page.getByTestId("graph-canvas").elementHandle();
-        const lifecycle = await page.evaluate(() => window.__workspaceScreenFocus.simulationLifecycle());
-        await page.getByRole("button", { name: "Hide Map details", exact: true }).click();
-        await page.setViewportSize({ width: 1600, height: 1040 });
-        await expect.poll(() => page.locator(".graph-canvas-frame").evaluate(element => {
-          const bounds = element.getBoundingClientRect();
-          const panel = document.querySelector(".workspace-graph-top-panel")!.getBoundingClientRect();
-          return [bounds.width, bounds.bottom, bounds.top - panel.bottom];
-        })).toEqual([1556, 1040, 0]);
-        await page.getByRole("button", { name: "Show Map details", exact: true }).click();
-        await expect.poll(() => page.locator(".graph-canvas-frame").evaluate(element => element.clientWidth)).toBe(1300);
-        expect(await canvas!.evaluate(element => element.isConnected)).toBe(true);
-        const after = await page.evaluate(() => window.__workspaceScreenFocus.simulationLifecycle());
-        expect(after.map(item => [item.id, item.destroys])).toEqual(lifecycle.map(item => [item.id, item.destroys]));
-        expect(await page.evaluate(() => window.__workspaceScreenFocus.requests.length)).toBe(1);
-      }
-      const view = page.locator(".workspace-graph-view-options");
-      const stageTop = await page.locator(".workspace-graph-stage").evaluate(element => element.getBoundingClientRect().top);
-      await view.locator("summary").click();
-      await expect(view).toHaveAttribute("open", "");
-      await expect.poll(() => page.locator(".workspace-graph-stage").evaluate((element) => element.getBoundingClientRect().top))
-        .toBe(stageTop);
-      await page.keyboard.press("Escape");
-      await expect(view).not.toHaveAttribute("open", "");
-      await expect(view.locator("summary")).toBeFocused();
-      expect(errors).toEqual([]);
+// Locale does not change this geometry (en/ko measured identical per viewport);
+// en desktop owns the inspector toggle, ko mobile the narrow layout.
+for (const { language, mobile } of [
+  { language: "en", mobile: false }, { language: "ko", mobile: true },
+] as const) {
+  test(`native 2k Screen keeps compact controls and initial content visible in ${language} ${mobile ? "mobile" : "desktop"}`, async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+    await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto(`${origin}/?lang=${language}`);
+    await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2000");
+    await expectSettledNativeScene(page);
+    const geometry = await page.evaluate(() => {
+      const rectangle = (selector: string) => {
+        const bounds = document.querySelector(selector)!.getBoundingClientRect();
+        return { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right,
+          width: bounds.width, height: bounds.height };
+      };
+      return {
+        viewport: { width: innerWidth, height: innerHeight }, scrollWidth: document.documentElement.scrollWidth,
+        panel: rectangle(".workspace-graph-top-panel"),
+        header: rectangle(".workspace-graph-header"), toolbar: rectangle(".workspace-graph-toolbar"),
+        search: rectangle("#workspace-graph-visible-search"), stage: rectangle(".workspace-graph-stage"),
+        list: rectangle(".workspace-graph-list"),
+        nodeRow: rectangle("[data-testid='workspace-graph-node-list'] li[data-graph-node-id]"),
+        nodeAction: rectangle("[data-testid='workspace-graph-node-list'] li[data-graph-node-id] .workspace-graph-list-actions a"),
+        canvas: rectangle(".graph-canvas-frame"),
+        inspector: rectangle(".inspector-panel"),
+      };
     });
-  }
+    await testInfo.attach("compact-screen-geometry", { contentType: "application/json", body: JSON.stringify(geometry) });
+    await evidenceScreenshot(page, testInfo, `compact-${language}-${mobile ? "mobile" : "desktop"}.png`);
+    expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.viewport.width);
+    expect(geometry.search.left).toBeGreaterThanOrEqual(geometry.toolbar.left);
+    expect(geometry.search.right).toBeLessThanOrEqual(geometry.toolbar.right);
+    // The row action needs its own inset, including when row virtualization
+    // fixes the height. Selector-button padding cannot protect this link.
+    expect(geometry.nodeRow.right - geometry.nodeAction.right).toBeGreaterThanOrEqual(8);
+    expect(geometry.nodeAction.top - geometry.nodeRow.top).toBeGreaterThanOrEqual(8);
+    expect(geometry.nodeRow.bottom - geometry.nodeAction.bottom).toBeGreaterThanOrEqual(8);
+    expect(geometry.nodeAction.height).toBeGreaterThanOrEqual(mobile ? 44 : 36);
+    // The padded title/coverage card can wrap on a narrow screen.
+    expect(geometry.header.height).toBeLessThanOrEqual(mobile ? 90 : 60);
+    expect(geometry.toolbar.height).toBeLessThanOrEqual(mobile ? 130 : 80);
+    expect(geometry.panel.top).toBe(0);
+    expect(geometry.panel.bottom).toBeGreaterThanOrEqual(geometry.header.bottom);
+    expect(geometry.toolbar.top).toBeGreaterThan(geometry.canvas.top);
+    expect(geometry.toolbar.bottom).toBeLessThan(geometry.canvas.bottom);
+    expect(geometry.canvas.top).toBe(geometry.panel.bottom);
+    expect(geometry.canvas.left).toBe(0);
+    expect(geometry.canvas.bottom).toBe(geometry.viewport.height);
+    expect(geometry.canvas.height).toBe(geometry.viewport.height - geometry.panel.height);
+    expect(geometry.canvas.width).toBe(geometry.viewport.width - (mobile ? 0 : 300));
+    if (!mobile) expect(geometry.canvas.right).toBe(geometry.inspector.left);
+    if (!mobile) {
+      const hits = await page.evaluate(() => {
+        const controls = document.querySelector(".workspace-graph-canvas-controls")!;
+        const toolbar = controls.querySelector(".graph-canvas-toolbar")!;
+        const button = toolbar.querySelector("button")!;
+        const controlBounds = controls.getBoundingClientRect();
+        const toolbarBounds = toolbar.getBoundingClientRect();
+        const buttonBounds = button.getBoundingClientRect();
+        const buttonHit = document.elementFromPoint(buttonBounds.left + buttonBounds.width / 2,
+          buttonBounds.top + buttonBounds.height / 2);
+        const emptyPoint = { x: controlBounds.right - 4, y: toolbarBounds.top + toolbarBounds.height / 2 };
+        const emptyHit = document.elementFromPoint(emptyPoint.x, emptyPoint.y);
+        return { buttonHit: button.contains(buttonHit), emptyPoint,
+          emptySpaceWidth: emptyPoint.x - toolbarBounds.right,
+          emptyHitsCanvas: Boolean(emptyHit?.closest(".graph-canvas-frame")),
+          emptyHitsControls: controls.contains(emptyHit) };
+      });
+      expect(hits.buttonHit).toBe(true);
+      expect(hits.emptySpaceWidth).toBeGreaterThan(0);
+      expect(hits.emptyHitsCanvas).toBe(true);
+      expect(hits.emptyHitsControls).toBe(false);
+      await page.locator(".workspace-graph-canvas-controls .graph-canvas-toolbar button").first().click({ trial: true });
+      await testInfo.attach("canvas-overlay-hit-testing", { contentType: "application/json", body: JSON.stringify(hits) });
+    }
+    if (language === "en" && !mobile) {
+      const canvas = await page.getByTestId("graph-canvas").elementHandle();
+      const lifecycle = await page.evaluate(() => window.__workspaceScreenFocus.simulationLifecycle());
+      await page.getByRole("button", { name: "Hide Map details", exact: true }).click();
+      await page.setViewportSize({ width: 1600, height: 1040 });
+      await expect.poll(() => page.locator(".graph-canvas-frame").evaluate(element => {
+        const bounds = element.getBoundingClientRect();
+        const panel = document.querySelector(".workspace-graph-top-panel")!.getBoundingClientRect();
+        return [bounds.width, bounds.bottom, bounds.top - panel.bottom];
+      })).toEqual([1556, 1040, 0]);
+      await page.getByRole("button", { name: "Show Map details", exact: true }).click();
+      await expect.poll(() => page.locator(".graph-canvas-frame").evaluate(element => element.clientWidth)).toBe(1300);
+      expect(await canvas!.evaluate(element => element.isConnected)).toBe(true);
+      const after = await page.evaluate(() => window.__workspaceScreenFocus.simulationLifecycle());
+      expect(after.map(item => [item.id, item.destroys])).toEqual(lifecycle.map(item => [item.id, item.destroys]));
+      expect(await page.evaluate(() => window.__workspaceScreenFocus.requests.length)).toBe(1);
+    }
+    const view = page.locator(".workspace-graph-view-options");
+    const stageTop = await page.locator(".workspace-graph-stage").evaluate(element => element.getBoundingClientRect().top);
+    await view.locator("summary").click();
+    await expect(view).toHaveAttribute("open", "");
+    await expect.poll(() => page.locator(".workspace-graph-stage").evaluate((element) => element.getBoundingClientRect().top))
+      .toBe(stageTop);
+    await page.keyboard.press("Escape");
+    await expect(view).not.toHaveAttribute("open", "");
+    await expect(view.locator("summary")).toBeFocused();
+    expect(errors).toEqual([]);
+  });
 }
 
 async function expectSettledNativeScene(page: Page): Promise<void> {
@@ -1082,60 +1089,61 @@ test("real 2k Screen edge focus reaches Cosmos endpoints and blur restores indep
   expect(errors).toEqual([]);
 });
 
-for (const theme of ["light", "dark"] as const) {
-  test(`native 2k ${theme} selection emphasizes original incident links without hiding nodes or changing geometry`, async ({ page }, testInfo) => {
-    const errors: string[] = [];
-    page.on("pageerror", (error) => errors.push(error.message));
-    page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
-    await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.goto(`${origin}/?theme=${theme}`);
-    await expectSettledNativeScene(page);
-    const before = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
-    // Native point selection must not navigate; a document-list click explicitly
-    // centers its document and is independently covered by the existing journey.
-    // This fixture invokes the actual Cosmos callback, not a list navigation.
-    await page.evaluate(() => window.__workspaceScreenFocus.pointClick(0));
-    await page.getByRole("searchbox", { name: "Find in visible map" }).focus();
-    await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().selectedPoint)).toBe(0);
-    const selected = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
-    expect(selected.points).toEqual([0, 1]);
-    expect(selected.links).toEqual([0]);
-    expect(selected.positions).toHaveLength(4000);
-    expect(selected.positions).toEqual(before.positions);
-    expect(selected.geometryUploads).toBe(before.geometryUploads);
-    expect(selected.zoom).toBe(before.zoom);
-    expect(selected.center).toEqual(before.center);
-    // Background context stays present; it is dimmed, never assigned opacity0.
-    expect(selected.pointGreyoutOpacity!).toBeGreaterThan(0);
-    expect(selected.pointGreyoutOpacity!).toBeLessThanOrEqual(0.35);
-    expect(selected.linkGreyoutOpacity!).toBeGreaterThan(0);
-    expect(selected.linkGreyoutOpacity!).toBeLessThanOrEqual(0.1);
-    expect(selected.linkAlphas).toHaveLength(1999);
-    expect(selected.linkAlphas[0]).toBeGreaterThanOrEqual(0.85);
-    expect(selected.linkAlphas.slice(1).every((alpha) => alpha > 0 && alpha < selected.linkAlphas[0])).toBe(true);
-    await evidenceScreenshot(page, testInfo, `selection-contrast-${theme}.png`);
-    await page.getByRole("button", { name: "Clear selection", exact: true }).click();
-    // Clear restores keyboard focus to the original row. Blur that independent
-    // emphasis before comparing the unselected/unfocused overview palette.
-    await page.getByRole("searchbox", { name: "Find in visible map" }).focus();
-    await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toBeNull();
-    const cleared = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
-    expect(cleared.points).toBeNull();
-    expect(cleared.selectedPoint).toBeNull();
-    expect(cleared.positions).toEqual(before.positions);
-    expect(cleared.linkAlphas).toEqual(before.linkAlphas);
-    expect(cleared.glError).toBe(0);
-    expect(await page.evaluate(() => window.__workspaceScreenFocus.queries)).toEqual(["combined"]);
-    expect(errors).toEqual([]);
-    await testInfo.attach("native-selection-contrast", { contentType: "application/json", body: JSON.stringify({
-      theme, pointGreyoutOpacity: selected.pointGreyoutOpacity, linkGreyoutOpacity: selected.linkGreyoutOpacity,
-      incidentAlpha: selected.linkAlphas[0], backgroundAlpha: selected.linkAlphas[1],
-      nodes: selected.positions.length / 2, edges: selected.linkAlphas.length, geometryUploads: selected.geometryUploads,
-      scope: "Actual Screen/Cosmos and CSS; synthetic transport and chain fixture, not API/GPU performance acceptance",
-    }) });
-  });
-}
+// Theme changes only RGB: greyout opacities and link alphas are theme-free
+// (cosmosAdapter/cosmosScene) and token tables are unit-tested. Dark also
+// mounts on the non-default theme.
+test("native 2k dark selection emphasizes original incident links without hiding nodes or changing geometry", async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto(`${origin}/?theme=dark`);
+  await expectSettledNativeScene(page);
+  const before = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
+  // Native point selection must not navigate; a document-list click explicitly
+  // centers its document and is independently covered by the existing journey.
+  // This fixture invokes the actual Cosmos callback, not a list navigation.
+  await page.evaluate(() => window.__workspaceScreenFocus.pointClick(0));
+  await page.getByRole("searchbox", { name: "Find in visible map" }).focus();
+  await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().selectedPoint)).toBe(0);
+  const selected = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
+  expect(selected.points).toEqual([0, 1]);
+  expect(selected.links).toEqual([0]);
+  expect(selected.positions).toHaveLength(4000);
+  expect(selected.positions).toEqual(before.positions);
+  expect(selected.geometryUploads).toBe(before.geometryUploads);
+  expect(selected.zoom).toBe(before.zoom);
+  expect(selected.center).toEqual(before.center);
+  // Background context stays present; it is dimmed, never assigned opacity0.
+  expect(selected.pointGreyoutOpacity!).toBeGreaterThan(0);
+  expect(selected.pointGreyoutOpacity!).toBeLessThanOrEqual(0.35);
+  expect(selected.linkGreyoutOpacity!).toBeGreaterThan(0);
+  expect(selected.linkGreyoutOpacity!).toBeLessThanOrEqual(0.1);
+  expect(selected.linkAlphas).toHaveLength(1999);
+  expect(selected.linkAlphas[0]).toBeGreaterThanOrEqual(0.85);
+  expect(selected.linkAlphas.slice(1).every((alpha) => alpha > 0 && alpha < selected.linkAlphas[0])).toBe(true);
+  await evidenceScreenshot(page, testInfo, "selection-contrast-dark.png");
+  await page.getByRole("button", { name: "Clear selection", exact: true }).click();
+  // Clear restores keyboard focus to the original row. Blur that independent
+  // emphasis before comparing the unselected/unfocused overview palette.
+  await page.getByRole("searchbox", { name: "Find in visible map" }).focus();
+  await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toBeNull();
+  const cleared = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
+  expect(cleared.points).toBeNull();
+  expect(cleared.selectedPoint).toBeNull();
+  expect(cleared.positions).toEqual(before.positions);
+  expect(cleared.linkAlphas).toEqual(before.linkAlphas);
+  expect(cleared.glError).toBe(0);
+  expect(await page.evaluate(() => window.__workspaceScreenFocus.queries)).toEqual(["combined"]);
+  expect(errors).toEqual([]);
+  await testInfo.attach("native-selection-contrast", { contentType: "application/json", body: JSON.stringify({
+    theme: "dark", pointGreyoutOpacity: selected.pointGreyoutOpacity, linkGreyoutOpacity: selected.linkGreyoutOpacity,
+    incidentAlpha: selected.linkAlphas[0], backgroundAlpha: selected.linkAlphas[1],
+    nodes: selected.positions.length / 2, edges: selected.linkAlphas.length, geometryUploads: selected.geometryUploads,
+    scope: "Actual Screen/Cosmos and CSS; synthetic transport and chain fixture, not API/GPU performance acceptance",
+  }) });
+});
 
 test("mobile 2k Screen lists keep bounded keyboard navigation and no stale emphasis on opening native canvas", async ({ page }, testInfo) => {
   const errors: string[] = [];
@@ -1211,133 +1219,135 @@ test("new Screen keyboard node and edge focus replaces stationary pointer hover,
   }) });
 });
 
-for (const language of ["en", "ko"] as const) {
-  for (const mobile of [false, true]) {
-    test(`native 2k Refine has one searchable folder builder with 301 facets in ${language} ${mobile ? "mobile" : "desktop"}`, async ({ page }, testInfo) => {
-      const errors: string[] = [];
-      page.on("pageerror", (error) => errors.push(error.message));
-      page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
-      await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
-      await page.emulateMedia({ reducedMotion: "reduce" });
-      await page.goto(`${origin}/?refineFolders=1&lang=${language}`);
-      await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2000");
-      // The inline map remains mounted beneath Refine at every viewport size.
-      await expectSettledNativeScene(page);
-      const before = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
-      const words = language === "en" ? {
-        refine: "Refine", title: "Refine data", find: "Find folder", folder: "Folder", mode: "Folder rule",
-        add: "Add folder rule", update: "Update folder rule", apply: "Apply data filters", cancel: "Cancel",
-        pending: "1 pending filter changes", summary: "Folder rules · 1", neutral: "Data filters",
-      } : {
-        refine: "세부 필터", title: "데이터 세부 필터", find: "폴더 찾기", folder: "폴더", mode: "폴더 규칙",
-        add: "폴더 규칙 추가", update: "폴더 규칙 수정", apply: "데이터 필터 적용", cancel: "취소",
-        pending: "적용 대기 필터 변경 1개", summary: "폴더 규칙 · 1개", neutral: "데이터 필터",
-      };
-      // Cover a nested dialog from the mobile sheet in an existing journey:
-      // it must stay above the sheet and return focus to its own trigger.
-      const fromInspector = mobile && language === "en";
-      if (fromInspector) {
-        await page.getByRole("button", { name: "Open Map details sheet", exact: true }).click();
-        await page.locator(".workspace-graph-advanced-controls > summary").click();
-      }
-      const opener = page.getByRole("button", { name: fromInspector ? "Edit filters" : words.refine, exact: true });
-      await opener.click();
-      const dialog = page.getByRole("dialog", { name: words.title, exact: true });
-      await expect(dialog).toBeVisible();
-      await expect(dialog.locator(".eyebrow")).toHaveText(words.neutral);
-      const folderGroup = dialog.getByRole("group", { name: words.folder, exact: true });
-      const search = folderGroup.getByRole("searchbox", { name: words.find, exact: true });
-      const folder = folderGroup.getByRole("combobox", { name: words.folder, exact: true });
-      const mode = folderGroup.getByRole("combobox", { name: words.mode, exact: true });
-      const apply = dialog.getByRole("button", { name: words.apply, exact: true });
-      await expect(folderGroup.getByRole("combobox")).toHaveCount(2);
-      await expect(folder.locator("option")).toHaveCount(302);
-      await expect(apply).toBeDisabled();
-      await search.fill("Native folder 299");
-      await expect(folder.locator("option")).toHaveCount(2);
-      const folderId = "00000000-0000-4000-8000-000000004299";
-      await folder.selectOption(folderId);
-      await mode.selectOption("only");
-      await expect(apply).toBeDisabled();
-      await folderGroup.getByRole("button", { name: words.add, exact: true }).click();
-      await expect(dialog.locator(".eyebrow")).toHaveText(words.pending);
-      const rules = folderGroup.locator("details");
-      await expect(rules).not.toHaveAttribute("open");
-      await folderGroup.getByText(words.summary, { exact: true }).click();
-      await expect(rules).toHaveAttribute("open");
-      const edit = rules.getByRole("button", { name: language === "en"
-        ? "Edit folder rule: Native folder 299" : "폴더 규칙 편집: Native folder 299", exact: true });
-      await edit.click();
-      await expect(search).toBeFocused();
-      await expect(folder).toHaveValue(folderId);
-      await expect(mode).toHaveValue("only");
-      await mode.selectOption("exclude");
-      await folderGroup.getByRole("button", { name: words.update, exact: true }).click();
-      await expect(dialog.locator(".eyebrow")).toHaveText(words.pending);
-      await rules.getByRole("button", { name: language === "en"
-        ? "Remove folder rule: Native folder 299" : "폴더 규칙 삭제: Native folder 299", exact: true }).click();
-      await expect(search).toBeFocused();
-      await expect(dialog.locator(".eyebrow")).toHaveText(words.neutral);
-      await expect(apply).toBeDisabled();
-      await folderGroup.getByRole("button", { name: words.add, exact: true }).click();
-      await expect(dialog.locator(".eyebrow")).toHaveText(words.pending);
-      expect(await page.evaluate(() => window.__workspaceScreenFocus.requests)).toHaveLength(1);
-      const unchanged = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
-      expect(unchanged.positions).toEqual(before.positions);
-      expect(unchanged.center).toEqual(before.center);
-      expect(unchanged.zoom).toBe(before.zoom);
-      expect(unchanged.geometryUploads).toBe(before.geometryUploads);
-      expect(unchanged.glError).toBe(0);
-      await dialog.screenshot({ path: testInfo.outputPath(`refine-${language}-${mobile ? "mobile" : "desktop"}-staged.png`) });
-      const bounds = await dialog.evaluate((element) => {
-        const rectangle = element.getBoundingClientRect();
-        return { left: rectangle.left, right: rectangle.right, bottom: rectangle.bottom,
-          viewportWidth: innerWidth, viewportHeight: innerHeight, horizontalOverflow: element.scrollWidth > element.clientWidth };
-      });
-      expect(bounds.left).toBeGreaterThanOrEqual(0);
-      expect(bounds.right).toBeLessThanOrEqual(bounds.viewportWidth);
-      expect(bounds.bottom).toBeLessThanOrEqual(bounds.viewportHeight);
-      expect(bounds.horizontalOverflow).toBe(false);
-      await expect(apply).toHaveCount(1);
-      await dialog.getByRole("button", { name: words.cancel, exact: true }).click();
-      await expect(dialog).toBeHidden();
-      await expect(opener).toBeFocused();
-      expect(await page.evaluate(() => window.__workspaceScreenFocus.requests)).toHaveLength(1);
-      await opener.click();
-      await expect(dialog.locator(".eyebrow")).toHaveText(words.neutral);
-      await expect(folderGroup.getByText(language === "en" ? "Folder rules · 0" : "폴더 규칙 · 0개", { exact: true })).toBeVisible();
-      await folder.selectOption("unplaced");
-      await mode.selectOption("only");
-      await folderGroup.getByRole("button", { name: words.add, exact: true }).click();
-      await apply.click();
-      await expect(dialog).toBeHidden();
-      await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.requests.length)).toBe(2);
-      const request = await page.evaluate(() => window.__workspaceScreenFocus.requests[1]);
-      expect(request.folders).toEqual({ include: [], exclude: [], only: ["unplaced"] });
-      expect(request.budget).toEqual({ documents: 2000, relations: 6000 });
-      await opener.click();
-      await expect(dialog.locator(".eyebrow")).toHaveText(words.neutral);
-      await expect(folderGroup.getByText(words.summary, { exact: true })).toBeVisible();
-      await page.keyboard.press("Escape");
-      await expect(dialog).toBeHidden();
-      await expect(opener).toBeFocused();
-      expect(await page.evaluate(() => window.__workspaceScreenFocus.requests.length)).toBe(2);
-      if (mobile) {
-        if (fromInspector) await page.getByRole("button", { name: "Hide Map details", exact: true }).click();
-        await page.getByRole("button", { name: language === "en"
-          ? "Open canvas fullscreen" : "캔버스 전체 화면으로 열기", exact: true }).click();
-        await expectSettledNativeScene(page);
-        const native = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
-        expect(native.positions).toHaveLength(4000);
-        expect(native.glError).toBe(0);
-        expect(await page.evaluate(() => window.__workspaceScreenFocus.requests.length)).toBe(2);
-        await evidenceScreenshot(page, testInfo, `refine-${language}-mobile-2k-fullscreen.png`);
-      }
-      expect(errors).toEqual([]);
-      await testInfo.attach("refine-native-invariants", { contentType: "application/json", body: JSON.stringify({
-        language, mobile, nodes: 2000, facets: 301, folderControls: 2, bounds, request,
-        before, unchanged, errors, scope: "Real Screen; inline native Cosmos on desktop and mobile. Synthetic transport, not API filtering or performance acceptance.",
-      }) });
+// en mobile owns the nested sheet opener and mobile bounds (equal in both
+// locales); ko desktop owns the Korean rule/pending strings.
+for (const { language, mobile } of [
+  { language: "en", mobile: true }, { language: "ko", mobile: false },
+] as const) {
+  test(`native 2k Refine has one searchable folder builder with 301 facets in ${language} ${mobile ? "mobile" : "desktop"}`, async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+    await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto(`${origin}/?refineFolders=1&lang=${language}`);
+    await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2000");
+    // The inline map remains mounted beneath Refine at every viewport size.
+    await expectSettledNativeScene(page);
+    const before = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
+    const words = language === "en" ? {
+      refine: "Refine", title: "Refine data", find: "Find folder", folder: "Folder", mode: "Folder rule",
+      add: "Add folder rule", update: "Update folder rule", apply: "Apply data filters", cancel: "Cancel",
+      pending: "1 pending filter changes", summary: "Folder rules · 1", neutral: "Data filters",
+    } : {
+      refine: "세부 필터", title: "데이터 세부 필터", find: "폴더 찾기", folder: "폴더", mode: "폴더 규칙",
+      add: "폴더 규칙 추가", update: "폴더 규칙 수정", apply: "데이터 필터 적용", cancel: "취소",
+      pending: "적용 대기 필터 변경 1개", summary: "폴더 규칙 · 1개", neutral: "데이터 필터",
+    };
+    // Cover a nested dialog from the mobile sheet in an existing journey:
+    // it must stay above the sheet and return focus to its own trigger.
+    const fromInspector = mobile && language === "en";
+    if (fromInspector) {
+      await page.getByRole("button", { name: "Open Map details sheet", exact: true }).click();
+      await page.locator(".workspace-graph-advanced-controls > summary").click();
+    }
+    const opener = page.getByRole("button", { name: fromInspector ? "Edit filters" : words.refine, exact: true });
+    await opener.click();
+    const dialog = page.getByRole("dialog", { name: words.title, exact: true });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator(".eyebrow")).toHaveText(words.neutral);
+    const folderGroup = dialog.getByRole("group", { name: words.folder, exact: true });
+    const search = folderGroup.getByRole("searchbox", { name: words.find, exact: true });
+    const folder = folderGroup.getByRole("combobox", { name: words.folder, exact: true });
+    const mode = folderGroup.getByRole("combobox", { name: words.mode, exact: true });
+    const apply = dialog.getByRole("button", { name: words.apply, exact: true });
+    await expect(folderGroup.getByRole("combobox")).toHaveCount(2);
+    await expect(folder.locator("option")).toHaveCount(302);
+    await expect(apply).toBeDisabled();
+    await search.fill("Native folder 299");
+    await expect(folder.locator("option")).toHaveCount(2);
+    const folderId = "00000000-0000-4000-8000-000000004299";
+    await folder.selectOption(folderId);
+    await mode.selectOption("only");
+    await expect(apply).toBeDisabled();
+    await folderGroup.getByRole("button", { name: words.add, exact: true }).click();
+    await expect(dialog.locator(".eyebrow")).toHaveText(words.pending);
+    const rules = folderGroup.locator("details");
+    await expect(rules).not.toHaveAttribute("open");
+    await folderGroup.getByText(words.summary, { exact: true }).click();
+    await expect(rules).toHaveAttribute("open");
+    const edit = rules.getByRole("button", { name: language === "en"
+      ? "Edit folder rule: Native folder 299" : "폴더 규칙 편집: Native folder 299", exact: true });
+    await edit.click();
+    await expect(search).toBeFocused();
+    await expect(folder).toHaveValue(folderId);
+    await expect(mode).toHaveValue("only");
+    await mode.selectOption("exclude");
+    await folderGroup.getByRole("button", { name: words.update, exact: true }).click();
+    await expect(dialog.locator(".eyebrow")).toHaveText(words.pending);
+    await rules.getByRole("button", { name: language === "en"
+      ? "Remove folder rule: Native folder 299" : "폴더 규칙 삭제: Native folder 299", exact: true }).click();
+    await expect(search).toBeFocused();
+    await expect(dialog.locator(".eyebrow")).toHaveText(words.neutral);
+    await expect(apply).toBeDisabled();
+    await folderGroup.getByRole("button", { name: words.add, exact: true }).click();
+    await expect(dialog.locator(".eyebrow")).toHaveText(words.pending);
+    expect(await page.evaluate(() => window.__workspaceScreenFocus.requests)).toHaveLength(1);
+    const unchanged = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
+    expect(unchanged.positions).toEqual(before.positions);
+    expect(unchanged.center).toEqual(before.center);
+    expect(unchanged.zoom).toBe(before.zoom);
+    expect(unchanged.geometryUploads).toBe(before.geometryUploads);
+    expect(unchanged.glError).toBe(0);
+    await dialog.screenshot({ path: testInfo.outputPath(`refine-${language}-${mobile ? "mobile" : "desktop"}-staged.png`) });
+    const bounds = await dialog.evaluate((element) => {
+      const rectangle = element.getBoundingClientRect();
+      return { left: rectangle.left, right: rectangle.right, bottom: rectangle.bottom,
+        viewportWidth: innerWidth, viewportHeight: innerHeight, horizontalOverflow: element.scrollWidth > element.clientWidth };
     });
-  }
+    expect(bounds.left).toBeGreaterThanOrEqual(0);
+    expect(bounds.right).toBeLessThanOrEqual(bounds.viewportWidth);
+    expect(bounds.bottom).toBeLessThanOrEqual(bounds.viewportHeight);
+    expect(bounds.horizontalOverflow).toBe(false);
+    await expect(apply).toHaveCount(1);
+    await dialog.getByRole("button", { name: words.cancel, exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(opener).toBeFocused();
+    expect(await page.evaluate(() => window.__workspaceScreenFocus.requests)).toHaveLength(1);
+    await opener.click();
+    await expect(dialog.locator(".eyebrow")).toHaveText(words.neutral);
+    await expect(folderGroup.getByText(language === "en" ? "Folder rules · 0" : "폴더 규칙 · 0개", { exact: true })).toBeVisible();
+    await folder.selectOption("unplaced");
+    await mode.selectOption("only");
+    await folderGroup.getByRole("button", { name: words.add, exact: true }).click();
+    await apply.click();
+    await expect(dialog).toBeHidden();
+    await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.requests.length)).toBe(2);
+    const request = await page.evaluate(() => window.__workspaceScreenFocus.requests[1]);
+    expect(request.folders).toEqual({ include: [], exclude: [], only: ["unplaced"] });
+    expect(request.budget).toEqual({ documents: 2000, relations: 6000 });
+    await opener.click();
+    await expect(dialog.locator(".eyebrow")).toHaveText(words.neutral);
+    await expect(folderGroup.getByText(words.summary, { exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(opener).toBeFocused();
+    expect(await page.evaluate(() => window.__workspaceScreenFocus.requests.length)).toBe(2);
+    if (mobile) {
+      if (fromInspector) await page.getByRole("button", { name: "Hide Map details", exact: true }).click();
+      await page.getByRole("button", { name: language === "en"
+        ? "Open canvas fullscreen" : "캔버스 전체 화면으로 열기", exact: true }).click();
+      await expectSettledNativeScene(page);
+      const native = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
+      expect(native.positions).toHaveLength(4000);
+      expect(native.glError).toBe(0);
+      expect(await page.evaluate(() => window.__workspaceScreenFocus.requests.length)).toBe(2);
+      await evidenceScreenshot(page, testInfo, `refine-${language}-mobile-2k-fullscreen.png`);
+    }
+    expect(errors).toEqual([]);
+    await testInfo.attach("refine-native-invariants", { contentType: "application/json", body: JSON.stringify({
+      language, mobile, nodes: 2000, facets: 301, folderControls: 2, bounds, request,
+      before, unchanged, errors, scope: "Real Screen; inline native Cosmos on desktop and mobile. Synthetic transport, not API filtering or performance acceptance.",
+    }) });
+  });
 }

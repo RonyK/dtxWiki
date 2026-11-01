@@ -49,17 +49,28 @@ const VIEWPORTS = [
   // The drawer leaves no room beside it, so the tooltip opens below or above.
   { key: "mobile-390px", width: 390, height: 844, tooltipBesideRail: false },
 ] as const;
+// The editor's Context rail becomes a modal drawer (focus trap, Escape that
+// closes it) only at the mobile width. The desktop rail runs the same TreeRail
+// keyboard and row-menu code without that layer, so the folder-menu check
+// runs at the mobile width alone.
+const EDITOR_DRAWER_VIEWPORT = VIEWPORTS[1];
 // Firefox DOMRect rounding is below 1/65536 CSS px.
 const GEOMETRY_EPSILON = 0.001;
 
-// Only the viewport tests below carry @cross-browser. The six-combination test
-// preserves shared row geometry and Context marker styling on every engine.
-// Favorite persistence, Library/Agent marker colors, live 72-hour expiry and
-// viewer isolation are checked on Chromium in the standard profile; exhaustive
-// runs retain these checks on every engine.
+// Only the mobile-390px tests carry @cross-browser: the tooltip and
+// six-combination cases of the two-viewport loop, and the editor folder-menu
+// test. The engine behavior in the loop -- hit-testing through the tooltip,
+// native PageDown scrolling, marker paint and clipping -- does not depend on
+// the width, and the mobile drawer adds its own clipping layer, so the
+// desktop-280px-rail cases run on Chromium alone. Favorite persistence,
+// Library/Agent marker colors, live 72-hour expiry and viewer isolation are
+// checked on Chromium in the standard profile; exhaustive runs retain every
+// case here on every engine.
+const crossBrowserTag = (viewport: (typeof VIEWPORTS)[number]) =>
+  viewport === EDITOR_DRAWER_VIEWPORT ? " @cross-browser" : "";
 test.describe("TreeRail document states and personal favorites", () => {
   for (const viewport of VIEWPORTS) {
-    test(`${viewport.key}: status tooltip never takes the pointer, leaves a downward sweep to the next row, dismisses with Escape, and follows native scrolling @cross-browser`, async ({ page }, testInfo) => {
+    test(`${viewport.key}: status tooltip never takes the pointer, leaves a downward sweep to the next row, dismisses with Escape, and follows native scrolling${crossBrowserTag(viewport)}`, async ({ page }, testInfo) => {
       test.setTimeout(90_000);
       await page.setViewportSize(viewport);
       await authenticatePage(page, testInfo, `tree-tooltip-${viewport.key}`);
@@ -175,39 +186,7 @@ test.describe("TreeRail document states and personal favorites", () => {
       await evidenceScreenshot(page, testInfo, `${viewport.key}-tooltip-after-native-scroll-and-resize`, { animations: "disabled" });
     });
 
-    test(`${viewport.key}: favorite-only editor folders keep keyboard focus and never open an empty menu @cross-browser`, async ({ page }, testInfo) => {
-      await page.setViewportSize(viewport);
-      await authenticatePage(page, testInfo, `tree-folder-menu-${viewport.key}`);
-      const workspace = await currentWorkspace(page.request);
-      const folder = await responseData<{ id: string }>(await page.request.post(endpoint(workspace.id, "/tree/nodes"), {
-        data: { node_kind: "folder", parent_id: null, section: "context", slug: `keyboard-folder-${randomUUID()}`, title: "Keyboard folder without actions" },
-      }));
-      const document = await publishContext(page.request, workspace.id, "Editor document with a favorite action");
-      const nodes = await treeNodes(page.request, workspace.id, "context");
-      await page.goto(`/workspaces/${workspace.id}/context/pages/${document.id}/edit`);
-      await expect(page.getByLabel("Title", { exact: true })).toHaveValue("Editor document with a favorite action");
-      const rail = await openRail(page, viewport.width);
-      await expect(treeRow(rail, document.id)).toHaveAttribute("aria-selected", "true");
-      await expandAncestors(rail, nodes, document.id);
-      const folderRow = rail.locator(`.tree-row[data-node-id="${folder.id}"]`);
-      await expect(folderRow).toBeVisible();
-      await expect(folderRow.locator(".tree-row-menu-button")).toHaveCount(0);
-      await folderRow.focus();
-      await page.keyboard.press("Shift+F10");
-      await expect(page.getByRole("menu")).toHaveCount(0);
-      await expect(folderRow).toBeFocused();
-      await evidenceScreenshot(page, testInfo, `${viewport.key}-editor-folder-without-empty-menu`, { animations: "disabled" });
-
-      const documentRow = treeRow(rail, document.id);
-      await documentRow.focus();
-      await page.keyboard.press("Shift+F10");
-      await expect(page.getByRole("menuitem", { name: "Add to my favorites", exact: true })).toBeVisible();
-      await page.keyboard.press("Escape");
-      await expect(page.getByRole("menu")).toHaveCount(0);
-      await expect(documentRow).toBeFocused();
-    });
-
-    test(`${viewport.key}: six real Context state/favorite combinations preserve title space @cross-browser`, async ({ page }, testInfo) => {
+    test(`${viewport.key}: six real Context state/favorite combinations preserve title space${crossBrowserTag(viewport)}`, async ({ page }, testInfo) => {
       test.setTimeout(90_000);
       await page.setViewportSize(viewport);
       await authenticatePage(page, testInfo, `tree-markers-${viewport.key}`);
@@ -379,6 +358,39 @@ test.describe("TreeRail document states and personal favorites", () => {
       await attachJson(testInfo, `${viewport.key}-marker-geometry`, { normalExpiry, viewport, metrics, beforeToggle, afterToggle: await rowGeometry(focusedRow) });
     });
   }
+
+  test(`${EDITOR_DRAWER_VIEWPORT.key}: favorite-only editor folders keep keyboard focus and never open an empty menu @cross-browser`, async ({ page }, testInfo) => {
+    const viewport = EDITOR_DRAWER_VIEWPORT;
+    await page.setViewportSize(viewport);
+    await authenticatePage(page, testInfo, `tree-folder-menu-${viewport.key}`);
+    const workspace = await currentWorkspace(page.request);
+    const folder = await responseData<{ id: string }>(await page.request.post(endpoint(workspace.id, "/tree/nodes"), {
+      data: { node_kind: "folder", parent_id: null, section: "context", slug: `keyboard-folder-${randomUUID()}`, title: "Keyboard folder without actions" },
+    }));
+    const document = await publishContext(page.request, workspace.id, "Editor document with a favorite action");
+    const nodes = await treeNodes(page.request, workspace.id, "context");
+    await page.goto(`/workspaces/${workspace.id}/context/pages/${document.id}/edit`);
+    await expect(page.getByLabel("Title", { exact: true })).toHaveValue("Editor document with a favorite action");
+    const rail = await openRail(page, viewport.width);
+    await expect(treeRow(rail, document.id)).toHaveAttribute("aria-selected", "true");
+    await expandAncestors(rail, nodes, document.id);
+    const folderRow = rail.locator(`.tree-row[data-node-id="${folder.id}"]`);
+    await expect(folderRow).toBeVisible();
+    await expect(folderRow.locator(".tree-row-menu-button")).toHaveCount(0);
+    await folderRow.focus();
+    await page.keyboard.press("Shift+F10");
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(folderRow).toBeFocused();
+    await evidenceScreenshot(page, testInfo, `${viewport.key}-editor-folder-without-empty-menu`, { animations: "disabled" });
+
+    const documentRow = treeRow(rail, document.id);
+    await documentRow.focus();
+    await page.keyboard.press("Shift+F10");
+    await expect(page.getByRole("menuitem", { name: "Add to my favorites", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(documentRow).toBeFocused();
+  });
 
   test("Context, Library, and Agent menu favorites persist independently through a reload", async ({ page }, testInfo) => {
     test.setTimeout(90_000);
