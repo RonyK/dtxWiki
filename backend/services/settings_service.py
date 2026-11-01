@@ -956,10 +956,7 @@ class SettingsService:
                 "ask_retrieval_mode": workspace.ask_retrieval_mode,
             }
         if group == "lint":
-            return {
-                **dict(workspace.lint_policy or {}),
-                "auto_fix": workspace.auto_fix_enabled,
-            }
+            return LintPolicy(workspace).effective_settings(self.lint_registry.modules)
         if group == "context_write":
             return {}
         if group == "graph":

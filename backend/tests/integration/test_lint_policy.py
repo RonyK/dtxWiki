@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from backend.models.context import ContextPage
 from backend.models.lint import LintFinding
 from backend.models.workspace import Workspace
+from backend.policy.auth import ActorContext
 from backend.schemas.lint import LintRunCreateRequest
 from backend.services.lint import LintModule, LintRegistry, LintStage
 from backend.services.lint.base import LintFindingDraft
@@ -59,6 +60,37 @@ def test_get_policies_includes_lint_card_default_empty(session_factory):
         "link_fix_mode": "auto",
         "auto_approve_link_fixes": True,
     }
+
+
+def test_lint_card_revision_and_batch_save_use_effective_defaults(session_factory):
+    # One DB scenario: a card rendered with absent JSON defaults must be
+    # accepted by the PATCH revision guard and return those same defaults.
+    svc = SettingsService()
+    with session_factory.begin() as session:
+        workspace_id = _ws(session).id
+        card = svc.get_policies(
+            control_session=session,
+            workspace_session=session,
+            workspace_id=workspace_id,
+        ).lint
+        saved = svc.update_policy_batch(
+            control_session=session,
+            workspace_session=session,
+            workspace_id=workspace_id,
+            actor=ActorContext(actor_kind="human", actor_id="settings-owner"),
+            group="lint",
+            changes={"auto_fix": True},
+            expected_revision=card.revision,
+        ).lint
+        assert saved.policy == {**card.policy, "auto_fix": True}
+        assert saved.revision != card.revision
+    with session_factory() as session:
+        reloaded = svc.get_policies(
+            control_session=session,
+            workspace_session=session,
+            workspace_id=workspace_id,
+        ).lint
+        assert reloaded == saved
 
 
 def test_auto_fix_toggle_via_lint_settings(session_factory):

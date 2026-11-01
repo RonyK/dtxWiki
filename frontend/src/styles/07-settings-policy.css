@@ -2685,7 +2685,7 @@ button.history-card {
   margin-top: 0.85rem;
 }
 
-.lint-rules-card .lint-rule-group h3 {
+.lint-rules-card .lint-rule-group h4 {
   margin: 0 0 0.45rem;
   font-size: 12px;
   font-weight: 700;
@@ -2767,7 +2767,7 @@ button.history-card {
 }
 
 .lint-rules-card .lint-rules-header .metric-card-title,
-.lint-rules-card .lint-rule-group-header h3 {
+.lint-rules-card .lint-rule-group-header h4 {
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -4320,4 +4320,86 @@ button.history-card {
   display: inline-flex;
   align-items: center;
   min-height: 24px;
+}
+
+/* Lint options describe save/review policy; checks remain a separate disclosure. */
+.lint-settings-group,
+.lint-current-effect {
+  padding: 1rem 0;
+  border-top: 1px solid var(--border-strong);
+}
+
+.lint-settings-group h3,
+.lint-current-effect h3 {
+  margin: 0 0 0.75rem;
+  font-size: 14px;
+}
+
+.lint-settings-group .lint-autofix {
+  border: 0;
+  padding-bottom: 0;
+}
+
+.lint-link-fix-policy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.lint-link-fix-policy .lint-rule-copy {
+  flex: 1 1 240px;
+}
+
+.lint-link-fix-policy select {
+  max-width: 100%;
+  min-height: 44px;
+}
+
+.lint-current-effect p,
+.lint-fixed-guidance,
+.lint-checks > p {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.lint-checks summary {
+  cursor: pointer;
+  min-height: 44px;
+  align-content: center;
+  font-weight: 600;
+}
+
+.lint-rule-search {
+  display: grid;
+  gap: 6px;
+  margin: 0.75rem 0;
+}
+
+.lint-rule-search input {
+  min-width: 0;
+  width: 100%;
+  min-height: 44px;
+}
+
+.lint-rules-card .lint-rules-header,
+.lint-rules-card .lint-rule-group-header {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1024px), (any-pointer: coarse) {
+  .lint-rules-card .lint-rule-label label,
+  .lint-rules-card label.lint-rule-copy,
+  .lint-rules-card .lint-layer-toggle {
+    min-height: 44px;
+    align-content: center;
+  }
+}
+
+.lint-checks summary h3 {
+  display: inline;
+  margin: 0;
+  font-size: 14px;
 }

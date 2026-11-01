@@ -34,13 +34,23 @@ function isEditable(rule: LintRuleInfo): boolean {
 // (GET /lint/rules) carries every rule's effective enabled state; flipping a
 // toggle writes the `lint` policy ({rule_id: bool}) via updateSettingsPolicy.
 export function LintRulesSection({ readOnly, workspaceId: routeWorkspaceId }: { readOnly: boolean; workspaceId: string }) {
+  return <WorkspaceLintRules key={routeWorkspaceId} readOnly={readOnly} workspaceId={routeWorkspaceId} />;
+}
+
+function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; workspaceId: string }) {
   const { t } = useTranslation("settings");
   const { t: lintT } = useTranslation("lint");
   const [rules, setRules] = useState<LintRuleInfo[] | null>(null);
   const [autoFix, setAutoFix] = useState(false);
   const [linkFixMode, setLinkFixMode] = useState<"auto" | "suggest">("auto");
   const [autoApproveLinkFixes, setAutoApproveLinkFixes] = useState(true);
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [policyReady, setPolicyReady] = useState(false);
+  const [policyError, setPolicyError] = useState(false);
+  const [rulesError, setRulesError] = useState(false);
+  const [policyAttempt, setPolicyAttempt] = useState(0);
+  const [rulesAttempt, setRulesAttempt] = useState(0);
+  const [query, setQuery] = useState("");
+  const active = useRef(true);
   // Per-rule, so saving one rule no longer freezes every other checkbox on the
   // page. `auto_fix` shares the set under its own key.
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
@@ -48,50 +58,39 @@ export function LintRulesSection({ readOnly, workspaceId: routeWorkspaceId }: { 
   const [savedNotice, setSavedNotice] = useState("");
 
   useEffect(() => {
-    // Load once on mount. Depending on `t` (whose identity changes when the
-    // user switches language) would refetch and clobber state on every language
-    // toggle; labels read `t` at render time instead. (M10/I1)
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
-    setWorkspaceId(routeWorkspaceId);
-    setRules(null);
-    setAutoFix(false);
-    setLinkFixMode("auto");
-    setAutoApproveLinkFixes(true);
-    setError(null);
-    (async () => {
-      try {
-        const wid = routeWorkspaceId;
-        const data = await getLintRules(wid);
-        if (!cancelled) {
-          setWorkspaceId(wid);
-          setRules(data.rules);
-          setError(null);
-        }
-        // I10: auto-fix is a secondary concern — a policies-fetch failure must
-        // NOT hide the rules list. Load it independently and degrade to "off".
-        try {
-          const policies = await getSettingsPolicies(wid);
-          if (!cancelled) {
-            setAutoFix(Boolean(policies.lint?.policy?.auto_fix));
-            setLinkFixMode(policies.lint?.policy?.link_fix_mode === "suggest" ? "suggest" : "auto");
-            setAutoApproveLinkFixes(policies.lint?.policy?.auto_approve_link_fixes !== false);
-          }
-        } catch {
-          if (!cancelled) {
-            setAutoFix(false);
-          }
-        }
-      } catch {
-        if (!cancelled) {
-          setError(t("lint.loadError", { defaultValue: "Failed to load lint rules." }));
-        }
+    setRulesError(false);
+    void getLintRules(workspaceId).then((data) => {
+      if (!cancelled) setRules(data.rules);
+    }).catch(() => { if (!cancelled) setRulesError(true); });
+    return () => { cancelled = true; };
+  }, [workspaceId, rulesAttempt]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPolicyReady(false);
+    setPolicyError(false);
+    void getSettingsPolicies(workspaceId).then((policies) => {
+      const policy = policies.lint?.policy;
+      // Effective defaults belong to the server. A partial response is also
+      // unknown policy, never permission to write guessed values.
+      if (!policy || typeof policy.auto_fix !== "boolean" ||
+          (policy.link_fix_mode !== "auto" && policy.link_fix_mode !== "suggest") ||
+          typeof policy.auto_approve_link_fixes !== "boolean") throw new Error("Incomplete lint policy");
+      if (!cancelled) {
+        setAutoFix(policy.auto_fix);
+        setLinkFixMode(policy.link_fix_mode);
+        setAutoApproveLinkFixes(policy.auto_approve_link_fixes);
+        setPolicyReady(true);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeWorkspaceId]);
+    }).catch(() => { if (!cancelled) setPolicyError(true); });
+    return () => { cancelled = true; };
+  }, [workspaceId, policyAttempt]);
 
   function markBusy(keys: string[], value: boolean) {
     setBusy((current) => {
@@ -126,7 +125,7 @@ export function LintRulesSection({ readOnly, workspaceId: routeWorkspaceId }: { 
   // a rule must stay locked for as long as any write covering it is in flight,
   // which a per-write flag cannot express once one write spans several rules.
   async function writeRule(ruleId: string, enabled: boolean, previous: boolean) {
-    if (!workspaceId) {
+    if (!active.current) {
       return false;
     }
     setRuleEnabled(ruleId, enabled);
@@ -144,7 +143,7 @@ export function LintRulesSection({ readOnly, workspaceId: routeWorkspaceId }: { 
   }
 
   async function toggle(rule: LintRuleInfo) {
-    if (busy.has(rule.rule_id)) {
+    if (readOnly || !isEditable(rule) || busy.has(rule.rule_id)) {
       return;
     }
     setError(null);
@@ -162,6 +161,7 @@ export function LintRulesSection({ readOnly, workspaceId: routeWorkspaceId }: { 
   }
 
   async function toggleLayer(layerRules: LintRuleInfo[], enabled: boolean) {
+    if (readOnly) return;
     const targets = layerRules.filter(
       (rule) => isEditable(rule) && rule.enabled !== enabled,
     );
@@ -194,7 +194,7 @@ export function LintRulesSection({ readOnly, workspaceId: routeWorkspaceId }: { 
   }
 
   async function toggleAutoFix() {
-    if (!workspaceId) {
+    if (readOnly || !policyReady || busy.has("auto_fix")) {
       return;
     }
     markBusy(["auto_fix"], true);
@@ -216,7 +216,7 @@ export function LintRulesSection({ readOnly, workspaceId: routeWorkspaceId }: { 
   }
 
   async function saveLinkPolicy(key: "link_fix_mode" | "auto_approve_link_fixes", value: string | boolean) {
-    if (!workspaceId || busy.has(key)) return;
+    if (readOnly || !policyReady || busy.has(key)) return;
     markBusy([key], true);
     setError(null);
     setSavedNotice("");
@@ -232,6 +232,12 @@ export function LintRulesSection({ readOnly, workspaceId: routeWorkspaceId }: { 
     }
   }
 
+  function matchesSearch(rule: LintRuleInfo) {
+    const needle = query.trim().toLocaleLowerCase();
+    return [rule.rule_id, lintRuleLabel(lintT, rule.rule_id), lintRuleDescription(lintT, rule.rule_id)]
+      .some((value) => value.toLocaleLowerCase().includes(needle));
+  }
+
   return (
     <section className="feature-section">
       {/* F-7: match the other settings sections — a policy-card with an
@@ -240,10 +246,6 @@ export function LintRulesSection({ readOnly, workspaceId: routeWorkspaceId }: { 
         <div className="lint-rules-header">
           {/* Same header contract as PolicyGroupView: title + state chip on
               the left, the card-level action pinned right. */}
-          {/* An h2, not a div: the layer groups below are h3, so with a
-              non-heading here the pane jumped h1 -> h3. Measured on the
-              running app before this: a worst heading skip of 2, the only
-              destination still doing it after Deployment was fixed. */}
           <h2 className="metric-card-title policy-card-heading">
             <Settings2 size={16} aria-hidden="true" />
             <span>{t("lint.eyebrow", { defaultValue: "Lint rules" })}</span>
@@ -259,203 +261,219 @@ export function LintRulesSection({ readOnly, workspaceId: routeWorkspaceId }: { 
           <span aria-live="polite" className="policy-card-saved">
             {savedNotice}
           </span>
-          <Link className="icon-button text-button" to={workspacePath(routeWorkspaceId, "lint")}>
+          <Link className="icon-button text-button" to={workspacePath(workspaceId, "lint")}>
             {t("lint.openQueue", { defaultValue: "Open lint queue" })}
           </Link>
         </div>
-        <p>
-          {t("lint.description", {
-            defaultValue:
-              "Choose deterministic checks for this workspace. Externally "
-              + "supplied maintenance findings are read-only and marked as "
-              + "External source.",
-          })}
-        </p>
+        <p>{t("lint.description")}</p>
         {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
-        {rules === null && !error ? (
-          <SettingsLoadingRow>
-            {t("lint.loading", { defaultValue: "Loading lint rules…" })}
-          </SettingsLoadingRow>
-        ) : null}
-        <div className="lint-autofix lint-rule-row">
-          <input
-            id="lint-auto-fix"
-            type="checkbox"
-            checked={autoFix}
-            disabled={readOnly || busy.has("auto_fix")}
-            onChange={toggleAutoFix}
-          />
-          <div className="lint-rule-copy">
-            <span className="lint-rule-label">
-              <label htmlFor="lint-auto-fix">
-                {t("lint.autoFix", {
-                  defaultValue: "Auto-fix safe formatting on save",
-                })}
-              </label>
-            </span>
-            <span className="lint-rule-description">
-              {t("lint.autoFixHint", {
-                defaultValue:
-                  "When a page is saved, deterministic formatting cleanups are "
-                  + "applied — heading and list-marker spacing, trailing "
-                  + "whitespace, extra blank lines, and table alignment. Code "
-                  + "blocks, wording, and content are never changed.",
-              })}
-            </span>
+        {policyError ? (
+          <StatusBanner tone="warning">
+            <span>{t("lint.policyLoadError")}</span>{" "}
+            <button className="text-button" type="button" onClick={() => setPolicyAttempt((value) => value + 1)}>
+              {t("lint.retryPolicies")}
+            </button>
+          </StatusBanner>
+        ) : !policyReady ? <SettingsLoadingRow>{t("lint.policyLoading")}</SettingsLoadingRow> : null}
+        <div className="lint-settings-group" role="group" aria-labelledby="lint-save-heading">
+          <h3 id="lint-save-heading">{t("lint.saveGroup")}</h3>
+          <div className="lint-autofix lint-rule-row">
+            <input
+              id="lint-auto-fix"
+              type="checkbox"
+              checked={autoFix}
+              disabled={readOnly || !policyReady || busy.has("auto_fix")}
+              onChange={toggleAutoFix}
+            />
+            <div className="lint-rule-copy">
+              <span className="lint-rule-label">
+                <label htmlFor="lint-auto-fix">
+                  {t("lint.autoFix", {
+                    defaultValue: "Auto-fix safe formatting on save",
+                  })}
+                </label>
+              </span>
+              <span className="lint-rule-description">
+                {t("lint.autoFixHint")}
+              </span>
+            </div>
+          </div>
+          <div className="lint-autofix lint-link-fix-policy">
+            <label className="lint-rule-copy" htmlFor="lint-link-fix-mode">
+              <span className="lint-rule-label">{t("lint.linkFixMode")}</span>
+              <span className="lint-rule-description">{t("lint.linkFixModeHint")}</span>
+            </label>
+            <select
+              id="lint-link-fix-mode"
+              value={linkFixMode}
+              disabled={readOnly || !policyReady || busy.has("link_fix_mode")}
+              onChange={(event) => void saveLinkPolicy("link_fix_mode", event.target.value)}
+            >
+              <option value="auto">{t("lint.linkFixAuto")}</option>
+              <option value="suggest">{t("lint.linkFixSuggest")}</option>
+            </select>
           </div>
         </div>
-        <div className="lint-autofix lint-link-fix-policy">
-          <label className="lint-rule-copy" htmlFor="lint-link-fix-mode">
-            <span className="lint-rule-label">{t("lint.linkFixMode")}</span>
-            <span className="lint-rule-description">{t("lint.linkFixModeHint")}</span>
-          </label>
-          <select
-            id="lint-link-fix-mode"
-            value={linkFixMode}
-            disabled={readOnly || !workspaceId || busy.has("link_fix_mode")}
-            onChange={(event) => void saveLinkPolicy("link_fix_mode", event.target.value)}
-          >
-            <option value="auto">{t("lint.linkFixAuto")}</option>
-            <option value="suggest">{t("lint.linkFixSuggest")}</option>
-          </select>
+        <div className="lint-settings-group" role="group" aria-labelledby="lint-review-heading">
+          <h3 id="lint-review-heading">{t("lint.reviewGroup")}</h3>
+          <div className="lint-autofix lint-rule-row">
+            <input
+              id="lint-auto-approve-link-fixes"
+              type="checkbox"
+              checked={autoApproveLinkFixes}
+              disabled={readOnly || !policyReady || busy.has("auto_approve_link_fixes")}
+              onChange={() => void saveLinkPolicy("auto_approve_link_fixes", !autoApproveLinkFixes)}
+            />
+            <label className="lint-rule-copy" htmlFor="lint-auto-approve-link-fixes">
+              <span className="lint-rule-label">{t("lint.autoApproveLinkFixes")}</span>
+              <span className="lint-rule-description">{t("lint.autoApproveLinkFixesHint")}</span>
+            </label>
+          </div>
         </div>
-        <div className="lint-autofix lint-rule-row">
-          <input
-            id="lint-auto-approve-link-fixes"
-            type="checkbox"
-            checked={autoApproveLinkFixes}
-            disabled={readOnly || !workspaceId || busy.has("auto_approve_link_fixes")}
-            onChange={() => void saveLinkPolicy("auto_approve_link_fixes", !autoApproveLinkFixes)}
-          />
-          <label className="lint-rule-copy" htmlFor="lint-auto-approve-link-fixes">
-            <span className="lint-rule-label">{t("lint.autoApproveLinkFixes")}</span>
-            <span className="lint-rule-description">{t("lint.autoApproveLinkFixesHint")}</span>
-          </label>
-        </div>
-        {/* Lint had no empty state at all: a server that reports no rules
-            rendered the auto-fix toggle above and then simply stopped, with
-            nothing saying whether the list was empty or still arriving. */}
-        {rules !== null && rules.length === 0 ? (
-          <SettingsEmptyState
-            description={t("lint.emptyHint", {
-              defaultValue:
-                "This server reports no lint rules, so nothing runs when a page is saved.",
-            })}
-            title={t("lint.empty", { defaultValue: "No lint rules" })}
-          />
+        {policyReady ? (
+          <div className="lint-current-effect" role="status">
+            <h3>{t("lint.currentEffect")}</h3>
+            <p>{t(linkFixMode === "auto" ? "lint.effectLinksAuto" : "lint.effectLinksSuggest")}</p>
+            <p>{t(autoFix ? "lint.effectFormatOn" : "lint.effectFormatOff")}</p>
+            <p>{t(autoApproveLinkFixes ? "lint.effectApprovalOn" : "lint.effectApprovalOff")}</p>
+          </div>
         ) : null}
-        {LAYER_ORDER.map((layer) => {
-          const layerRules = (rules ?? []).filter((rule) => rule.layer === layer);
-          if (!layerRules.length) {
-            return null;
-          }
-          // Toggleable rules first: a checkbox column that starts with
-          // read-only rows reads as a list of broken checkboxes.
-          const ordered = [
-            ...layerRules.filter(isEditable),
-            ...layerRules.filter((rule) => !isEditable(rule)),
-          ];
-          const toggleable = layerRules.filter(isEditable);
-          const enabledCount = toggleable.filter((rule) => rule.enabled).length;
-          return (
-            <div key={layer} className="lint-rule-group">
-              <div className="lint-rule-group-header">
-                <h3>{t(`lint.layer.${layer}`, { defaultValue: layer })}</h3>
-                {toggleable.length > 0 ? (
-                  <div className="lint-rule-group-toggle">
-                    <span className="lint-rule-group-count">
-                      {/* Says what the denominator is: it counts the rules this
-                          toggle can reach, which in a mixed group is fewer than
-                          the rows below it. */}
-                      {t("lint.enabledOfTotal", {
-                        defaultValue: "{{enabled}} of {{total}} toggleable on",
-                        enabled: enabledCount,
-                        total: toggleable.length,
-                      })}
-                    </span>
-                    <LayerToggle
-                      ariaLabel={t("lint.toggleLayerAria", {
-                        defaultValue: "Toggle every {{layer}} rule",
-                        layer: t(`lint.layer.${layer}`, { defaultValue: layer }),
-                      })}
-                      disabled={readOnly || toggleable.some((rule) => busy.has(rule.rule_id))}
-                      enabledCount={enabledCount}
-                      total={toggleable.length}
-                      onToggle={(next) => void toggleLayer(toggleable, next)}
-                    />
-                  </div>
-                ) : null}
-              </div>
-              <ul className="lint-rule-list">
-                {ordered.map((rule) => {
-                  const inputId = `lint-rule-${rule.rule_id.replaceAll(".", "-")}`;
-                  const label = lintRuleLabel(lintT, rule.rule_id);
-                  const description = lintRuleDescription(lintT, rule.rule_id);
-                  return (
-                    // The rule id is diagnostic detail, not the rule's name:
-                    // it stays reachable on hover instead of on screen.
-                    <li
-                      className={`lint-rule-row ${
-                        busy.has(rule.rule_id) ? "lint-rule-row--busy" : ""
-                      }`}
-                      key={rule.rule_id}
-                    >
-                      {isEditable(rule) ? (
-                        <input
-                          id={inputId}
-                          type="checkbox"
-                          checked={rule.enabled}
-                          disabled={readOnly || busy.has(rule.rule_id)}
-                          onChange={() => void toggle(rule)}
-                        />
-                      ) : (
-                        <Lock
-                          aria-hidden="true"
-                          className="lint-rule-lock"
-                          size={14}
-                        />
-                      )}
-                      <div className="lint-rule-copy">
-                        <span className="lint-rule-label">
-                          {/* The rule id rides the label, which is focusable
-                              through its checkbox, rather than the row. */}
-                          {isEditable(rule) ? (
-                            <label htmlFor={inputId} title={rule.rule_id}>
-                              {label}
-                            </label>
-                          ) : (
-                            <span title={rule.rule_id}>{label}</span>
-                          )}
-                          {rule.policy_locked ? (
-                            <StatusPill
-                              status="policy_locked"
-                              label={t("lint.requiredSafeguard", {
-                                defaultValue: "Required safeguard",
-                              })}
-                              tone="info"
-                              compact
-                            />
+        <p className="lint-fixed-guidance">{t("lint.indexRefHint")}</p>
+        <details className="lint-checks">
+          <summary><h3>{t("lint.checks")}</h3></summary>
+          <p>{t("lint.checksHint")}</p>
+          <label className="lint-rule-search">
+            <span>{t("lint.searchRules")}</span>
+            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} />
+          </label>
+          {rulesError ? (
+            <StatusBanner tone="warning">
+              <span>{t("lint.loadError")}</span>{" "}
+              <button className="text-button" type="button" onClick={() => setRulesAttempt((value) => value + 1)}>
+                {t("lint.retryRules")}
+              </button>
+            </StatusBanner>
+          ) : rules === null ? <SettingsLoadingRow>{t("lint.loading")}</SettingsLoadingRow> : null}
+          {rules !== null && rules.length === 0 ? (
+            <SettingsEmptyState
+              description={t("lint.emptyHint")}
+              title={t("lint.empty", { defaultValue: "No lint rules" })}
+            />
+          ) : null}
+          {rules && rules.length > 0 && !rules.some(matchesSearch) ? <p>{t("lint.noMatches")}</p> : null}
+          {LAYER_ORDER.map((layer) => {
+            const layerRules = (rules ?? []).filter((rule) => rule.layer === layer && matchesSearch(rule));
+            if (!layerRules.length) {
+              return null;
+            }
+            // Toggleable rules first: a checkbox column that starts with
+            // read-only rows reads as a list of broken checkboxes.
+            const ordered = [
+              ...layerRules.filter(isEditable),
+              ...layerRules.filter((rule) => !isEditable(rule)),
+            ];
+            const toggleable = layerRules.filter(isEditable);
+            const enabledCount = toggleable.filter((rule) => rule.enabled).length;
+            return (
+              <div key={layer} className="lint-rule-group">
+                <div className="lint-rule-group-header">
+                  <h4>{t(`lint.layer.${layer}`, { defaultValue: layer })}</h4>
+                  {toggleable.length > 0 ? (
+                    <div className="lint-rule-group-toggle">
+                      <span className="lint-rule-group-count">
+                        {/* Says what the denominator is: it counts the rules this
+                            toggle can reach, which in a mixed group is fewer than
+                            the rows below it. */}
+                        {t("lint.enabledOfTotal", {
+                          defaultValue: "{{enabled}} of {{total}} toggleable on",
+                          enabled: enabledCount,
+                          total: toggleable.length,
+                        })}
+                      </span>
+                      <LayerToggle
+                        ariaLabel={t("lint.toggleLayerAria", {
+                          defaultValue: "Toggle every {{layer}} rule",
+                          layer: t(`lint.layer.${layer}`, { defaultValue: layer }),
+                        })}
+                        disabled={readOnly || toggleable.some((rule) => busy.has(rule.rule_id))}
+                        enabledCount={enabledCount}
+                        total={toggleable.length}
+                        onToggle={(next) => void toggleLayer(toggleable, next)}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+                <ul className="lint-rule-list">
+                  {ordered.map((rule) => {
+                    const inputId = `lint-rule-${rule.rule_id.replaceAll(".", "-")}`;
+                    const label = lintRuleLabel(lintT, rule.rule_id);
+                    const description = lintRuleDescription(lintT, rule.rule_id);
+                    return (
+                      // The rule id is diagnostic detail, not the rule's name:
+                      // it stays reachable on hover instead of on screen.
+                      <li
+                        className={`lint-rule-row ${
+                          busy.has(rule.rule_id) ? "lint-rule-row--busy" : ""
+                        }`}
+                        key={rule.rule_id}
+                      >
+                        {isEditable(rule) ? (
+                          <input
+                            id={inputId}
+                            type="checkbox"
+                            checked={rule.enabled}
+                            disabled={readOnly || busy.has(rule.rule_id)}
+                            onChange={() => void toggle(rule)}
+                          />
+                        ) : (
+                          <Lock
+                            aria-hidden="true"
+                            className="lint-rule-lock"
+                            size={14}
+                          />
+                        )}
+                        <div className="lint-rule-copy">
+                          <span className="lint-rule-label">
+                            {/* The rule id rides the label, which is focusable
+                                through its checkbox, rather than the row. */}
+                            {isEditable(rule) ? (
+                              <label htmlFor={inputId} title={rule.rule_id}>
+                                {label}
+                              </label>
+                            ) : (
+                              <span title={rule.rule_id}>{label}</span>
+                            )}
+                            {rule.policy_locked ? (
+                              <StatusPill
+                                status="policy_locked"
+                                label={t("lint.requiredSafeguard", {
+                                  defaultValue: "Required safeguard",
+                                })}
+                                tone="info"
+                                compact
+                              />
+                            ) : null}
+                            {rule.runtime_checkable || rule.policy_locked ? null : (
+                              <StatusPill
+                                status="external_source"
+                                label={t("lint.externalSource")}
+                                tone="info"
+                                compact
+                              />
+                            )}
+                          </span>
+                          {description ? (
+                            <span className="lint-rule-description">{description}</span>
                           ) : null}
-                          {rule.runtime_checkable || rule.policy_locked ? null : (
-                            <StatusPill
-                              status="external_source"
-                              label={t("lint.externalSource")}
-                              tone="info"
-                              compact
-                            />
-                          )}
-                        </span>
-                        {description ? (
-                          <span className="lint-rule-description">{description}</span>
-                        ) : null}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          );
-        })}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            );
+          })}
+        </details>
       </div>
     </section>
   );

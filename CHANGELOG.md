@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Lint settings
+
+- Disable unconfirmed save and approval options while loading or after a
+  failed policy read, with independent retries that preserve the checks list.
+- Group the existing formatting, link fixing, and approval options by save
+  and review behavior. Show their current effects and keep searchable checks
+  collapsed by default, distinguishing required safeguards and external results.
+- Use the same effective policy defaults for reads and settings revision checks,
+  so a newly loaded Lint card can be saved without a false revision conflict.
+
 ### Index navigation and formatted previews
 
 - MCP indexes use exact `dtxwiki://index/<kind>/<id>` Markdown destinations
