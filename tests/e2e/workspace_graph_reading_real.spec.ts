@@ -141,7 +141,7 @@ test.describe("real API 2K Knowledge Map reading", () => {
 
   test("runs the official CPU Worker on the original API corpus and preserves Pause/Resume", async ({ page, browserName }, testInfo) => {
     test.skip(browserName !== "chromium", "Native WebGL reading acceptance targets Chromium");
-    test.setTimeout(90_000);
+    test.setTimeout(240_000);
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await login(page.request, "e2e-graph-2k-owner@example.com");
     const errors: string[] = [];
@@ -218,6 +218,15 @@ test.describe("real API 2K Knowledge Map reading", () => {
       expect(resumedState.pinnedPositions).toEqual(pausedState.pinnedPositions);
 
       await page.getByRole("button", { name: "Resume layout", exact: true }).click();
+      // Structure can require 256 complete all-pairs updates on the 2K corpus.
+      // Budget that work separately from starting the contact/collision Workers;
+      // this functional journey does not require a particular CPU throughput.
+      await expect.poll(async () => {
+        const status = await readLayoutDiagnostic(canvas);
+        diagnostics.waitingForContactHandoff = status;
+        return status.phase;
+      }, { timeout: 150_000, message: "The real Worker must finish its bounded structural phase" }).toBe("contact");
+      await saveCheckpoint("contactHandoffStatus", await readLayoutDiagnostic(canvas));
       // Handoff still contains structural rows. Require the first corrected
       // contact publication, without imposing another movement/settling SLA.
       await expect.poll(async () => {
@@ -227,7 +236,7 @@ test.describe("real API 2K Knowledge Map reading", () => {
           && status.structureIterations > 0 && status.iterations !== null
           && status.iterations > status.structureIterations && status.contactReferenceZoom !== null
           && status.contactReferenceZoom > 0;
-      }, { timeout: 45_000 }).toBe(true);
+      }, { timeout: 30_000, message: "The contact Worker must publish collision-corrected positions" }).toBe(true);
       await expect(page.getByTestId("workspace-map-layout-status")).toHaveCount(0);
       await expect(canvas).toHaveAttribute("data-map-layout-running", "true");
       const contactStatus = await readLayoutDiagnostic(canvas);
