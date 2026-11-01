@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 
 import backend.cli.main as cli_main
 from backend.cli import prod_setup
+from backend.tests.utils.bootstrapped_sqlite import copy_migrated_sqlite
 
 runner = CliRunner()
 
@@ -353,6 +354,10 @@ def test_setup_tls_none_completion_uses_http_scheme(tmp_path: Path):
     must point the operator at http://, not a dead https:// link."""
     paths = _common_paths(tmp_path)
     db_url = _tmp_db_url(tmp_path)
+    # The completion message is under test, not the migration: start from an
+    # already bootstrapped database so the bootstrap step only verifies it.
+    # test_setup_fresh_writes_env_key_and_admin keeps the real fresh migration.
+    copy_migrated_sqlite(tmp_path / "db.sqlite")
     result = runner.invoke(
         cli_main.app,
         [

@@ -31,6 +31,7 @@ from backend.services.ops.input_maintenance import (
     audit_inputs,
     repair_input,
 )
+from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 PRE_INPUT_REVISION = "efcbcf724889"
 CURRENT_HEAD = ScriptDirectory.from_config(
@@ -38,12 +39,18 @@ CURRENT_HEAD = ScriptDirectory.from_config(
 ).get_current_head()
 
 
-def _database(tmp_path, revision=PRE_INPUT_REVISION):
-    url = f"sqlite:///{tmp_path / 'inputs.db'}"
+@pytest.fixture(scope="session")
+def sqlite_templates(tmp_path_factory):
+    return shared_templates(tmp_path_factory)
+
+
+def _database(tmp_path, templates, template="rev_efcbcf724889"):
+    """A private copy of a migrated starting state (``base_0001`` or the
+    released ``rev_efcbcf724889``); any upgrade under test still runs on it."""
+    url = templates.clone(template, tmp_path / "inputs.db")
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", url)
-    command.upgrade(config, revision)
     return url, config
 
 
@@ -102,7 +109,7 @@ def _workspace(connection, identity, *, slug="nullable", title="Nullable"):
 
 
 def test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, sqlite_templates
 ):
     # Separate from the successful policy round trip: dirty data must refuse
     # upgrade without advancing the stamp, then remain repairable. The oldest
@@ -117,7 +124,7 @@ def test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade(
         return connection
 
     monkeypatch.setattr(sqlite3.dbapi2, "connect", connect_with_foreign_keys_enabled)
-    url, config = _database(tmp_path, "bd62193d5cf6")
+    url, config = _database(tmp_path, sqlite_templates, "base_0001")
     engine = sa.create_engine(url)
     with engine.begin() as connection:
         identity = _user(connection, name="x" * 33)
@@ -187,8 +194,10 @@ def test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade(
     engine.dispose()
 
 
-def test_email_repair_atomically_revokes_recovery_and_pending_mail(tmp_path):
-    url, _config = _database(tmp_path)
+def test_email_repair_atomically_revokes_recovery_and_pending_mail(
+    tmp_path, sqlite_templates
+):
+    url, _config = _database(tmp_path, sqlite_templates)
     engine = sa.create_engine(url)
     now = datetime.now(UTC)
     with engine.begin() as connection:
@@ -313,7 +322,9 @@ def test_metadata_refuses_utf16_sqlite_before_creating_tables(tmp_path):
     engine.dispose()
 
 
-def test_optional_title_repairs_preserve_null_and_automatic_chat_semantics(tmp_path):
+def test_optional_title_repairs_preserve_null_and_automatic_chat_semantics(
+    tmp_path, sqlite_templates
+):
     from backend.models import (
         LibraryItem,
         McpChatSession,
@@ -321,7 +332,7 @@ def test_optional_title_repairs_preserve_null_and_automatic_chat_semantics(tmp_p
         WorkspaceTreeNode,
     )
 
-    url, _config = _database(tmp_path)
+    url, _config = _database(tmp_path, sqlite_templates)
     engine = sa.create_engine(url)
     workspace, client, item, chat, node = (uuid4() for _ in range(5))
     with engine.begin() as connection:
@@ -389,7 +400,9 @@ def test_optional_title_repairs_preserve_null_and_automatic_chat_semantics(tmp_p
     engine.dispose()
 
 
-def test_context_title_repair_keeps_staged_name_and_historical_body(tmp_path):
+def test_context_title_repair_keeps_staged_name_and_historical_body(
+    tmp_path, sqlite_templates
+):
     import json
 
     from backend.models import (
@@ -401,7 +414,7 @@ def test_context_title_repair_keeps_staged_name_and_historical_body(tmp_path):
     )
 
     # Seed the released schema directly: current services query 0.1.3 columns.
-    url, _config = _database(tmp_path)
+    url, _config = _database(tmp_path, sqlite_templates)
     engine = sa.create_engine(url)
     workspace, page, version_id = (uuid4() for _ in range(3))
     body = "# Old title\nOriginal body"
@@ -517,13 +530,15 @@ def test_context_title_repair_keeps_staged_name_and_historical_body(tmp_path):
     engine.dispose()
 
 
-def test_cli_repairs_do_not_bootstrap_and_reject_unknown_fields(tmp_path, monkeypatch):
+def test_cli_repairs_do_not_bootstrap_and_reject_unknown_fields(
+    tmp_path, monkeypatch, sqlite_templates
+):
     from typer.testing import CliRunner
 
     from backend.cli.commands import admin
     from backend.cli.main import app
 
-    url, _config = _database(tmp_path)
+    url, _config = _database(tmp_path, sqlite_templates)
     engine = sa.create_engine(url)
     with engine.begin() as connection:
         identity = _user(connection, name="x" * 33)

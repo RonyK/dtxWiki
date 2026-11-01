@@ -29,7 +29,7 @@ def _config(tmp_path, templates):
     return config, database_url
 
 
-def _seed_workspace(connection):
+def _seed_workspace(connection, *, slug="g0-ws"):
     # Uuid columns store 32-char hex on SQLite; JSON payloads written by the
     # ORM hold dashed str(UUID) values — mirror both storage formats.
     workspace_id = uuid4().hex
@@ -40,11 +40,11 @@ def _seed_workspace(connection):
             " citation_policy, agent_injection_policy, review_policy,"
             " lint_policy, auto_fix_enabled, visibility, created_by_actor_id,"
             " owner_actor_id)"
-            " VALUES (:id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'g0-ws',"
+            " VALUES (:id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, :slug,"
             " 'G0', 'G0', 'test', 'en', '{}', '{}', '{}', '{}', '{}', '{}',"
             " 0, 'private', :actor, :actor)"
         ),
-        {"id": workspace_id, "actor": uuid4().hex},
+        {"id": workspace_id, "slug": slug, "actor": uuid4().hex},
     )
     return workspace_id
 
@@ -84,8 +84,10 @@ def _seed_library_item(connection, workspace_id, item_id, *, suffix):
     )
 
 
-def _seed_workspace_session_turn(connection, *, cited_pages, cited_artifacts):
-    workspace_id = _seed_workspace(connection)
+def _seed_workspace_session_turn(
+    connection, *, cited_pages, cited_artifacts, slug="g0-ws"
+):
+    workspace_id = _seed_workspace(connection, slug=slug)
     node_id = _seed_folder_node(connection, workspace_id)
     session_id = uuid4().hex
     turn_id = uuid4().hex
@@ -115,7 +117,7 @@ def _seed_workspace_session_turn(connection, *, cited_pages, cited_artifacts):
             "artifacts": cited_artifacts,
         },
     )
-    return turn_id
+    return workspace_id, turn_id
 
 
 def _seed_proposal(connection, *, workspace_id, turn_id, source_kind, item_ids):
@@ -157,75 +159,47 @@ def _seed_proposal(connection, *, workspace_id, turn_id, source_kind, item_ids):
     return proposal_id
 
 
-def test_backfills_and_drops_citation_arrays(tmp_path, sqlite_templates):
+def test_backfills_legacy_relation_arrays_and_downgrade_restores_them(
+    tmp_path, sqlite_templates
+):
+    # One 0001 -> head -> 0001 traversal seeds all four legacy JSON shapes the
+    # released core revision (efcbcf724889) normalizes, each in its own
+    # workspace: ask_turn citation arrays, proposal source arrays (including
+    # the ask_turn misuse), context_page provenance arrays and sync-run
+    # version lineage. Every shape has its own backfill and its own downgrade
+    # encoder inside that one revision, so a single traversal exercises each
+    # of them; a broken pairing aborts the upgrade and stays separate below.
     config, database_url = _config(tmp_path, sqlite_templates)
+    engine = create_engine(database_url)
 
     page_a, page_b, artifact = str(uuid4()), str(uuid4()), str(uuid4())
-    engine = create_engine(database_url)
+    item_a, item_b = str(uuid4()), str(uuid4())
+    turn_a, turn_b = str(uuid4()), str(uuid4())
+    page_id = uuid4().hex
+    item_id, version_id, run_id = uuid4().hex, uuid4().hex, uuid4().hex
     with engine.begin() as connection:
-        # Duplicate page_a inside the array: backfill must collapse it while
-        # preserving first-occurrence rank order.
-        turn_id = _seed_workspace_session_turn(
+        # Citations. Duplicate page_a inside the array: backfill must collapse
+        # it while preserving first-occurrence rank order.
+        _, cited_turn_id = _seed_workspace_session_turn(
             connection,
+            slug="g0-citations",
             cited_pages=f'["{page_a}", "{page_b}", "{page_a}"]',
             cited_artifacts=f'["{artifact}"]',
         )
 
-    command.upgrade(config, "head")
-
-    with engine.connect() as connection:
-        rows = connection.execute(
-            text(
-                "SELECT target_kind, target_id, rank FROM ask_turn_citation"
-                " WHERE ask_turn_id = :tid ORDER BY target_kind, rank"
-            ),
-            {"tid": UUID(turn_id).hex},
-        ).all()
-        turn_columns = {
-            column["name"] for column in inspect(engine).get_columns("ask_turn")
-        }
-
-    assert [(kind, UUID(tid), rank) for kind, tid, rank in rows] == [
-        ("context_page", UUID(page_a), 0),
-        ("context_page", UUID(page_b), 1),
-        ("library_artifact", UUID(artifact), 0),
-    ]
-    assert "cited_context_page_ids" not in turn_columns
-    assert "cited_library_artifact_ids" not in turn_columns
-
-    # Downgrade restores the JSON encoding from the join rows.
-    command.downgrade(config, BASELINE)
-    with engine.connect() as connection:
-        restored = connection.execute(
-            text(
-                "SELECT cited_context_page_ids, cited_library_artifact_ids"
-                " FROM ask_turn WHERE id = :tid"
-            ),
-            {"tid": turn_id},
-        ).one()
-    assert page_a.lower() in restored[0].lower()
-    assert artifact.lower() in restored[1].lower()
-
-
-def test_backfills_proposal_sources(tmp_path, sqlite_templates):
-    config, database_url = _config(tmp_path, sqlite_templates)
-
-    engine = create_engine(database_url)
-    item_a, item_b = str(uuid4()), str(uuid4())
-    with engine.begin() as connection:
-        turn_id = _seed_workspace_session_turn(
-            connection, cited_pages="[]", cited_artifacts="[]"
+        # Proposal sources.
+        ws, source_turn_id = _seed_workspace_session_turn(
+            connection, slug="g0-proposals", cited_pages="[]", cited_artifacts="[]"
         )
-        ws = connection.execute(text("SELECT id FROM workspace")).scalar_one()
         _seed_library_item(connection, ws, item_a, suffix="item-a")
         _seed_library_item(connection, ws, item_b, suffix="item-b")
         # Legacy ask_turn misuse: library_item_ids holds the source turn id.
         ask_proposal = _seed_proposal(
             connection,
             workspace_id=ws,
-            turn_id=turn_id,
+            turn_id=source_turn_id,
             source_kind="ask_turn",
-            item_ids=f'["{UUID(turn_id)}"]',
+            item_ids=f'["{UUID(source_turn_id)}"]',
         )
         library_proposal = _seed_proposal(
             connection,
@@ -235,66 +209,9 @@ def test_backfills_proposal_sources(tmp_path, sqlite_templates):
             item_ids=f'["{item_a}", "{item_b}", "{item_a}"]',
         )
 
-    command.upgrade(config, "head")
-
-    with engine.connect() as connection:
-        source_turn = connection.execute(
-            text(
-                "SELECT source_ask_turn_id FROM context_ingress_proposal"
-                " WHERE id = :pid"
-            ),
-            {"pid": ask_proposal},
-        ).scalar_one()
-        items = connection.execute(
-            text(
-                "SELECT library_item_id, rank FROM proposal_source_item"
-                " WHERE proposal_id = :pid ORDER BY rank"
-            ),
-            {"pid": library_proposal},
-        ).all()
-        proposal_columns = {
-            column["name"]
-            for column in inspect(engine).get_columns("context_ingress_proposal")
-        }
-        turn_columns = {
-            column["name"] for column in inspect(engine).get_columns("ask_turn")
-        }
-
-    assert UUID(source_turn) == UUID(turn_id)
-    assert [(UUID(item), rank) for item, rank in items] == [
-        (UUID(item_a), 0),
-        (UUID(item_b), 1),
-    ]
-    assert "library_item_ids" not in proposal_columns
-    assert "context_ingress_proposal_ids" not in turn_columns
-
-    # Downgrade restores both legacy JSON encodings.
-    command.downgrade(config, BASELINE)
-    with engine.connect() as connection:
-        restored_items = connection.execute(
-            text(
-                "SELECT library_item_ids FROM context_ingress_proposal WHERE id = :pid"
-            ),
-            {"pid": library_proposal},
-        ).scalar_one()
-        restored_turn = connection.execute(
-            text("SELECT context_ingress_proposal_ids FROM ask_turn WHERE id = :tid"),
-            {"tid": turn_id},
-        ).scalar_one()
-    assert item_a.lower() in restored_items.lower()
-    assert item_b.lower() in restored_items.lower()
-    assert str(UUID(ask_proposal)) in restored_turn.lower()
-
-
-def test_backfills_page_provenance(tmp_path, sqlite_templates):
-    config, database_url = _config(tmp_path, sqlite_templates)
-
-    engine = create_engine(database_url)
-    turn_a, turn_b = str(uuid4()), str(uuid4())
-    page_id = uuid4().hex
-    with engine.begin() as connection:
-        ws = _seed_workspace(connection)
-        # Duplicate turn_a: backfill must dedup while keeping both sources.
+        # Page provenance. Duplicate turn_a: backfill must dedup while keeping
+        # both sources.
+        ws = _seed_workspace(connection, slug="g0-provenance")
         connection.execute(
             text(
                 "INSERT INTO context_page (id, created_at, updated_at,"
@@ -311,44 +228,8 @@ def test_backfills_page_provenance(tmp_path, sqlite_templates):
             },
         )
 
-    command.upgrade(config, "head")
-
-    with engine.connect() as connection:
-        rows = connection.execute(
-            text(
-                "SELECT source_kind, source_id FROM page_provenance"
-                " WHERE page_id = :pid ORDER BY source_id"
-            ),
-            {"pid": page_id},
-        ).all()
-        page_columns = {
-            column["name"] for column in inspect(engine).get_columns("context_page")
-        }
-
-    assert sorted(UUID(source_id) for _, source_id in rows) == sorted(
-        [UUID(turn_a), UUID(turn_b)]
-    )
-    assert all(kind == "ask_turn" for kind, _ in rows)
-    assert "created_from_ask_turn_ids" not in page_columns
-
-    # Downgrade restores the JSON encoding from the join rows.
-    command.downgrade(config, BASELINE)
-    with engine.connect() as connection:
-        restored = connection.execute(
-            text("SELECT created_from_ask_turn_ids FROM context_page WHERE id = :pid"),
-            {"pid": page_id},
-        ).scalar_one()
-    assert turn_a.lower() in restored.lower()
-    assert turn_b.lower() in restored.lower()
-
-
-def test_backfills_sync_run_lineage(tmp_path, sqlite_templates):
-    config, database_url = _config(tmp_path, sqlite_templates)
-
-    engine = create_engine(database_url)
-    item_id, version_id, run_id = uuid4().hex, uuid4().hex, uuid4().hex
-    with engine.begin() as connection:
-        ws = _seed_workspace(connection)
+        # Sync-run lineage.
+        ws = _seed_workspace(connection, slug="g0-lineage")
         connection.execute(
             text(
                 "INSERT INTO library_item (id, created_at, updated_at,"
@@ -390,28 +271,113 @@ def test_backfills_sync_run_lineage(tmp_path, sqlite_templates):
     command.upgrade(config, "head")
 
     with engine.connect() as connection:
+        citations = connection.execute(
+            text(
+                "SELECT target_kind, target_id, rank FROM ask_turn_citation"
+                " WHERE ask_turn_id = :tid ORDER BY target_kind, rank"
+            ),
+            {"tid": UUID(cited_turn_id).hex},
+        ).all()
+        source_turn = connection.execute(
+            text(
+                "SELECT source_ask_turn_id FROM context_ingress_proposal"
+                " WHERE id = :pid"
+            ),
+            {"pid": ask_proposal},
+        ).scalar_one()
+        items = connection.execute(
+            text(
+                "SELECT library_item_id, rank FROM proposal_source_item"
+                " WHERE proposal_id = :pid ORDER BY rank"
+            ),
+            {"pid": library_proposal},
+        ).all()
+        provenance = connection.execute(
+            text(
+                "SELECT source_kind, source_id FROM page_provenance"
+                " WHERE page_id = :pid ORDER BY source_id"
+            ),
+            {"pid": page_id},
+        ).all()
         linked_run = connection.execute(
             text("SELECT sync_run_id FROM library_item_version WHERE id = :vid"),
             {"vid": version_id},
         ).scalar_one()
-        run_columns = {
-            column["name"] for column in inspect(engine).get_columns("library_sync_run")
-        }
+    inspector = inspect(engine)
+    turn_columns = {column["name"] for column in inspector.get_columns("ask_turn")}
+    proposal_columns = {
+        column["name"] for column in inspector.get_columns("context_ingress_proposal")
+    }
+    page_columns = {column["name"] for column in inspector.get_columns("context_page")}
+    run_columns = {
+        column["name"] for column in inspector.get_columns("library_sync_run")
+    }
+
+    assert [(kind, UUID(tid), rank) for kind, tid, rank in citations] == [
+        ("context_page", UUID(page_a), 0),
+        ("context_page", UUID(page_b), 1),
+        ("library_artifact", UUID(artifact), 0),
+    ]
+    assert "cited_context_page_ids" not in turn_columns
+    assert "cited_library_artifact_ids" not in turn_columns
+
+    assert UUID(source_turn) == UUID(source_turn_id)
+    assert [(UUID(item), rank) for item, rank in items] == [
+        (UUID(item_a), 0),
+        (UUID(item_b), 1),
+    ]
+    assert "library_item_ids" not in proposal_columns
+    assert "context_ingress_proposal_ids" not in turn_columns
+
+    assert sorted(UUID(source_id) for _, source_id in provenance) == sorted(
+        [UUID(turn_a), UUID(turn_b)]
+    )
+    assert all(kind == "ask_turn" for kind, _ in provenance)
+    assert "created_from_ask_turn_ids" not in page_columns
 
     assert UUID(linked_run) == UUID(run_id)
     assert "created_library_item_version_ids" not in run_columns
 
-    # Downgrade restores the JSON encoding from the FK.
+    # Downgrade restores every legacy JSON encoding from the join rows / FK.
     command.downgrade(config, BASELINE)
     with engine.connect() as connection:
-        restored = connection.execute(
+        restored_citations = connection.execute(
+            text(
+                "SELECT cited_context_page_ids, cited_library_artifact_ids"
+                " FROM ask_turn WHERE id = :tid"
+            ),
+            {"tid": cited_turn_id},
+        ).one()
+        restored_items = connection.execute(
+            text(
+                "SELECT library_item_ids FROM context_ingress_proposal WHERE id = :pid"
+            ),
+            {"pid": library_proposal},
+        ).scalar_one()
+        restored_turn = connection.execute(
+            text("SELECT context_ingress_proposal_ids FROM ask_turn WHERE id = :tid"),
+            {"tid": source_turn_id},
+        ).scalar_one()
+        restored_provenance = connection.execute(
+            text("SELECT created_from_ask_turn_ids FROM context_page WHERE id = :pid"),
+            {"pid": page_id},
+        ).scalar_one()
+        restored_lineage = connection.execute(
             text(
                 "SELECT created_library_item_version_ids FROM library_sync_run"
                 " WHERE id = :rid"
             ),
             {"rid": run_id},
         ).scalar_one()
-    assert version_id.lower() in restored.lower().replace("-", "")
+    assert page_a.lower() in restored_citations[0].lower()
+    assert artifact.lower() in restored_citations[1].lower()
+    assert item_a.lower() in restored_items.lower()
+    assert item_b.lower() in restored_items.lower()
+    assert str(UUID(ask_proposal)) in restored_turn.lower()
+    assert turn_a.lower() in restored_provenance.lower()
+    assert turn_b.lower() in restored_provenance.lower()
+    assert version_id.lower() in restored_lineage.lower().replace("-", "")
+    engine.dispose()
 
 
 def test_raises_on_broken_pairing(tmp_path, sqlite_templates):
@@ -419,10 +385,9 @@ def test_raises_on_broken_pairing(tmp_path, sqlite_templates):
 
     engine = create_engine(database_url)
     with engine.begin() as connection:
-        turn_id = _seed_workspace_session_turn(
+        ws, turn_id = _seed_workspace_session_turn(
             connection, cited_pages="[]", cited_artifacts="[]"
         )
-        ws = connection.execute(text("SELECT id FROM workspace")).scalar_one()
         _seed_proposal(
             connection,
             workspace_id=ws,

@@ -37,13 +37,13 @@ def _config(database_url: str) -> Config:
     return config
 
 
-def _database_url(tmp_path, filename: str) -> str:
-    return f"sqlite:///{tmp_path / filename}"
+def _head_copy(templates, tmp_path, filename: str):
+    """A private copy of the ``alembic upgrade head`` template.
 
-
-def _upgrade_head(tmp_path, filename: str):
-    config = _config(_database_url(tmp_path, filename))
-    command.upgrade(config, "head")
+    For tests whose stimulus starts at head (a downgrade, triggers, purge
+    order); they need the migrated schema, not another run of the chain.
+    """
+    config = _config(templates.clone("head", tmp_path / filename))
     return config, create_engine(config.get_main_option("sqlalchemy.url"))
 
 
@@ -769,8 +769,12 @@ def test_core_revision_round_trips_from_initial_release(tmp_path, sqlite_templat
         engine.dispose()
 
 
-def test_page_link_syntax_downgrade_preserves_wikilink_projection(tmp_path):
-    config, engine = _upgrade_head(tmp_path, "page-link-syntax-downgrade.db")
+def test_page_link_syntax_downgrade_preserves_wikilink_projection(
+    tmp_path, sqlite_templates
+):
+    config, engine = _head_copy(
+        sqlite_templates, tmp_path, "page-link-syntax-downgrade.db"
+    )
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     try:
         with session_factory.begin() as session:
@@ -873,10 +877,13 @@ def test_page_link_syntax_downgrade_preserves_wikilink_projection(tmp_path):
         engine.dispose()
 
 
-def test_page_link_syntax_upgrade_backfills_and_enforces_server_contract(tmp_path):
-    database_url = _database_url(tmp_path, "page-link-syntax-upgrade.db")
+def test_page_link_syntax_upgrade_backfills_and_enforces_server_contract(
+    tmp_path, sqlite_templates
+):
+    database_url = sqlite_templates.clone(
+        "base_0001", tmp_path / "page-link-syntax-upgrade.db"
+    )
     config = _config(database_url)
-    command.upgrade(config, INITIAL_REVISION)
 
     workspace_id = uuid4()
     source_page_id = uuid4()
@@ -1165,9 +1172,9 @@ def _ledger_rows(session, workspace_id) -> int:
 
 
 def test_graph_observation_migration_enforces_append_only_at_database_boundary(
-    tmp_path,
+    tmp_path, sqlite_templates
 ):
-    _, engine = _upgrade_head(tmp_path, "graph-observation-guards.db")
+    _, engine = _head_copy(sqlite_templates, tmp_path, "graph-observation-guards.db")
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     try:
         with session_factory.begin() as session:
@@ -1197,8 +1204,10 @@ def test_graph_observation_migration_enforces_append_only_at_database_boundary(
         engine.dispose()
 
 
-def test_graph_observation_guard_allows_workspace_cascade_delete(tmp_path):
-    _, engine = _upgrade_head(tmp_path, "graph-observation-cascade.db")
+def test_graph_observation_guard_allows_workspace_cascade_delete(
+    tmp_path, sqlite_templates
+):
+    _, engine = _head_copy(sqlite_templates, tmp_path, "graph-observation-cascade.db")
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     try:
         with engine.begin() as connection:
@@ -1226,7 +1235,9 @@ def test_graph_observation_guard_allows_workspace_cascade_delete(tmp_path):
         engine.dispose()
 
 
-def test_workspace_purge_then_teardown_clears_graph_ledger_tables(tmp_path):
+def test_workspace_purge_then_teardown_clears_graph_ledger_tables(
+    tmp_path, sqlite_templates
+):
     """The production delete order against the migrated schema and triggers.
 
     ``purge_workspace_data`` must not touch ``graph_observation`` (the trigger
@@ -1235,7 +1246,7 @@ def test_workspace_purge_then_teardown_clears_graph_ledger_tables(tmp_path):
     terminal teardown then empties the ledger.
     """
 
-    _, engine = _upgrade_head(tmp_path, "graph-purge-order.db")
+    _, engine = _head_copy(sqlite_templates, tmp_path, "graph-purge-order.db")
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     try:
         with session_factory.begin() as session:
