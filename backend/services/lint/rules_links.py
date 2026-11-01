@@ -33,14 +33,20 @@ def link_context(ctx: LintContext) -> LinkContext | None:
             workspace_id=ctx.workspace_id,
             actor_context=getattr(actor, "actor", None),
         )
+    source = ctx.source_version if ctx.source_version is not None else ctx.version
+    source_is_published = (
+        ctx.link_source == "published"
+        if ctx.link_source is not None
+        else ctx.version is not None
+        and ctx.version.id == getattr(ctx.page, "current_published_version_id", None)
+    )
     return LinkContext(
         ctx.session,
         ctx.workspace_id,
         actor,
         getattr(ctx.page, "id", None),
-        getattr(ctx.version, "id", None),
-        ctx.version is not None
-        and ctx.version.id == getattr(ctx.page, "current_published_version_id", None),
+        getattr(source, "id", None),
+        source_is_published,
         ctx.self_origins if ctx.self_origins is not None else configured_self_origins(),
     )
 
@@ -51,6 +57,8 @@ def _decisions(body: str, ctx: LintContext):
         body,
         getattr(ctx.page, "id", None),
         getattr(ctx.version, "id", None),
+        getattr(ctx.source_version, "id", None),
+        ctx.link_source,
     )
     if key not in ctx.body_analysis:
         context = link_context(ctx)

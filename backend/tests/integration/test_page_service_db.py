@@ -648,6 +648,52 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
     assert [entry.id for entry in backlinks] == [linked.id]
     assert backlinks[0].occurrence_count == 6
 
+    # Budget exception: one additional logical DB input covers source-bound
+    # authored preparation. The earlier rename/restore checks have one pin per
+    # locator; only a competing version's real pin exposes an ingress that
+    # ignores its validated base and consults the newest pin across versions.
+    with service.session_factory.begin() as session:
+        base = session.get(ContextPageVersion, restored.version_id)
+        competing = ContextPageVersion(
+            workspace_id=target.workspace_id,
+            page_id=linked.id,
+            version_no=base.version_no + 1,
+            body_md=base.body_md,
+            content_hash=base.content_hash,
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id="dev-local-user",
+            version_status="editing",
+            parent_version_id=base.id,
+        )
+        session.add(competing)
+        session.flush()
+        session.add(
+            PageLink(
+                workspace_id=target.workspace_id,
+                source_page_id=linked.id,
+                source_version_id=competing.id,
+                link_syntax="context_url",
+                locator_key="concept_path:한글-문서",
+                target_slug="한글-문서",
+                target_page_id=replacement.id,
+            )
+        )
+        workspace = session.get(Workspace, target.workspace_id)
+        workspace.lint_policy = {"link_fix_mode": "auto"}
+    updated = service.update_page(
+        page_id=linked.id,
+        title="Link Source",
+        body_md=linked_body,
+        actor_kind="human",
+        actor_id="dev-local-user",
+        actor_provenance="browser_session",
+        base_version_id=restored.version_id,
+        base_content_hash=restored.content_hash,
+    )
+    assert f"[Legacy](/p/{target.workspace_id}/{target.id})" in updated.body_md
+    assert f"/p/{target.workspace_id}/{replacement.id}" not in updated.body_md
+
 
 def test_context_read_includes_unresolved_wikilink_target():
     service = make_service()

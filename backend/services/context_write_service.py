@@ -702,6 +702,8 @@ class ContextWriteService:
                     actor_provenance=actor_provenance,
                     page=page,
                     version=version,
+                    source_version=version,
+                    link_source="draft",
                     session=session,
                 ),
             )
@@ -727,6 +729,7 @@ class ContextWriteService:
                 actor_kind=actor_kind,
                 actor_id=actor_id,
                 actor_provenance=actor_provenance,
+                link_source="draft",
                 session=session,
             ),
         )
@@ -753,6 +756,8 @@ class ContextWriteService:
                     session=session,
                     page=page,
                     version=base_version,
+                    source_version=base_version,
+                    link_source="published",
                     actor_kind=actor_kind,
                     actor_id=actor_id,
                     actor_provenance=actor_provenance,

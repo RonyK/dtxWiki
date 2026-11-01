@@ -17,6 +17,7 @@ from backend.models.lint import LintFinding
 from backend.models.mcp_trace import MCPWriteIdempotency
 from backend.models.review import ReviewItem
 from backend.models.workspace import Workspace
+from backend.services.index_refs import format_index_ref
 from backend.services.lint import LintRegistry
 from backend.services.lint_fix_writer import LintFixWriter
 from backend.services.lint_service import LintService
@@ -29,6 +30,9 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
     # One page lifecycle covers distinct failures: pipeline+reference copying,
     # duplicate retries, a live edit, a changed head, outer rollback, and an
     # explicit auto-approval veto. These cannot be proved by mocked sessions.
+    # PR1 adds one logical DB path within this lifecycle: mixed published
+    # and draft-only links. This needs a real lifecycle as explained below;
+    # it is a budget exception, not zero cases because this function exists.
     registry = LintRegistry.builtin()
     writer = LintFixWriter(lint_registry=registry)
     target = page_service.write_page(
@@ -41,6 +45,23 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
         actor_provenance="browser_session",
     )
     workspace_id = target.workspace_id
+    # One additional DB input covers B3: the same published source contains
+    # one safely fixable link and visible draft-only destinations. A pure
+    # resolver test cannot expose the begin/save/submit context transition.
+    draft_target = page_service.write_page(
+        workspace_slug="default",
+        slug="lint-draft-target",
+        title="Lint Draft Target",
+        body_md="# Lint Draft Target\n",
+        actor_kind="human",
+        actor_id="author",
+        actor_provenance="browser_session",
+        as_draft=True,
+    )
+    draft_links = (
+        "[Draft](/context/lint-draft-target.md)\n"
+        f"[Draft ref]({format_index_ref('context', draft_target.id)})\n"
+    )
     missing_id = uuid4()
 
     def legacy_source(base=None, *, suffix=""):
@@ -54,7 +75,10 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
             title="Lint Source",
             body_md=(
                 "# Lint Source\n\n[Target](/context/lint-target.md)\n \n"
-                f"[Missing](/p/{workspace_id}/{missing_id})\n" + suffix
+                + draft_links
+                + f"[Missing](/p/{workspace_id}/{missing_id})\n"
+                + "\nEvidence line  \ncontinues here.\n"
+                + suffix
             ),
             actor_kind="human",
             actor_id="author",
@@ -102,7 +126,12 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
         fixed_id = page.current_published_version_id
         assert fixed_id != source.version_id
         fixed = session.get(ContextPageVersion, fixed_id)
-        assert f"](/p/{workspace_id}/{target.id})" in fixed.body_md
+        assert fixed.body_md == (
+            source.body_md.replace(
+                "/context/lint-target.md", f"/p/{workspace_id}/{target.id}"
+            ).replace("\n \n", "\n\n")
+        )
+        assert draft_links in fixed.body_md
         assert page.latest_draft_version_id is None
         copied_claim = session.scalar(
             select(ContextClaim).where(ContextClaim.page_version_id == fixed_id)
@@ -124,7 +153,7 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
             )
         )
         assert audit.payload["source"] == "lint.autofix"
-        assert audit.payload["module_fix_counts"]["links"] >= 1
+        assert audit.payload["module_fix_counts"]["links"] == 1
         assert audit.payload["module_fix_counts"]["format"] >= 1
         # Reconciliation uses actual current findings: a repaired locator
         # resolves immediately, while another unavailable destination remains.
@@ -233,8 +262,14 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
                 .where(model.workspace_id == workspace_id)
             )
             for model in (
-                ContextPageVersion, ContextClaim, ContextCitation, ChangeSet,
-                ChangeOperation, ReviewItem, AuditEvent, MCPWriteIdempotency,
+                ContextPageVersion,
+                ContextClaim,
+                ContextCitation,
+                ChangeSet,
+                ChangeOperation,
+                ReviewItem,
+                AuditEvent,
+                MCPWriteIdempotency,
             )
         }
 
@@ -269,6 +304,7 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
             session.get(ContextPage, source.id).current_published_version_id
             == changed.version_id
         )
+
     rollback_run_id = uuid4()
     with pytest.raises(RuntimeError, match="rollback caller"):
         with page_service.session_factory.begin() as session:
