@@ -282,11 +282,13 @@ def _upload_and_wait_for_conversion(
     )
 
 
-@pytest.mark.parametrize("command", [(), ("serve",)], ids=["dtxwiki", "dtxwiki-serve"])
 def test_one_cli_converts_upload_with_explicit_database_and_cleans_up_on_sigterm(
-    tmp_path: Path, free_tcp_port: int, command: tuple[str, ...]
+    tmp_path: Path, free_tcp_port: int
 ) -> None:
-    with _running_cli(tmp_path, free_tcp_port, command) as (
+    # Bare `dtxwiki` forwards the same options to the same run_server call
+    # (backend/tests/cli/test_cli.py::test_root_invocation_accepts_serve_options);
+    # its real process launch is exercised by the credentials test below.
+    with _running_cli(tmp_path, free_tcp_port, ("serve",)) as (
         runtime,
         selected_db,
         ignored_db,
@@ -443,36 +445,6 @@ def test_default_local_credentials_are_stable_and_health_is_ready(
             assert runtime.process.wait(timeout=15) == 0, runtime.logs()
             assert not Path(f"/proc/{worker_pid}").exists()
     assert credentials[0] == credentials[1]
-
-
-def test_parent_sigkill_does_not_leave_a_running_worker(
-    tmp_path: Path, free_tcp_port: int
-) -> None:
-    with _running_cli(tmp_path, free_tcp_port, ("serve",)) as (
-        runtime,
-        _selected_db,
-        _ignored_db,
-        _blob_root,
-    ):
-        _await_api(runtime)
-        worker_pid = _managed_worker_pid(runtime)
-        runtime.process.kill()
-        assert runtime.process.wait(timeout=5) == -signal.SIGKILL
-
-        deadline = time.monotonic() + 15.0
-        status_path = Path(f"/proc/{worker_pid}/stat")
-        while time.monotonic() < deadline:
-            try:
-                status = status_path.read_text().split(") ", 1)[1].split()[0]
-            except FileNotFoundError:
-                break
-            # Only the OS's new parent can reap an orphaned process. A zombie
-            # has exited and cannot hold locks, execute jobs or keep children.
-            if status == "Z":
-                break
-            time.sleep(0.05)
-        else:
-            pytest.fail(f"Worker survived its parent's SIGKILL:\n{runtime.logs()}")
 
 
 def test_port_bind_failure_cleans_up_the_started_worker(

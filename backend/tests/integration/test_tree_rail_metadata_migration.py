@@ -322,6 +322,11 @@ def _seed_unchanged_chain(connection, pages, versions, audits, count):
     return page_id, workspace_id, version_ids
 
 
+# Release lane: a 256-vs-1024 chain work-growth guard. The PR lane keeps the
+# backfill's behavior (index use and removal, proven/unproven chains) through
+# test_upgrade_from_previous_head_backfills_only_proven_content_events and the
+# two-version chain tests below.
+@pytest.mark.release_scale
 def test_upgrade_publication_chain_work_grows_linearly():
     measurements = []
     for count in (256, 1024):

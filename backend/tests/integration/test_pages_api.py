@@ -33,28 +33,13 @@ from backend.tests.utils.prepared_body import prepare_context_body
 from backend.utils.content_hash import content_hash as calculate_content_hash
 from backend.utils.page_frontmatter import upsert_page_frontmatter
 
+# One representative per REST write path: every unsafe kind is classified by
+# the shared body preparer, whose per-kind matrix lives in
+# test_context_write_service.py (write_draft) and the domain unit tests.
 UNSAFE_MEDIA_MARKDOWN = (
     pytest.param(
         "![inline](data:image/png;base64,aGVsbG8=)",
         id="data-uri",
-    ),
-    pytest.param(
-        '<video src="blob:https://example.test/temporary-video"></video>',
-        id="blob-uri",
-    ),
-    pytest.param(
-        "![temporary](/api/v1/media-sessions/"
-        "00000000-0000-4000-8000-000000000001/assets/"
-        "00000000-0000-4000-8000-000000000002/content)",
-        id="temporary-media-url",
-    ),
-    pytest.param(
-        "![Uploading pixel.png...](\u200b00000000-0000-4000-8000-000000000003)",
-        id="zero-width-upload-marker",
-    ),
-    pytest.param(
-        "<!-- upload cancelled 00000000-0000-4000-8000-000000000004: pixel.png -->",
-        id="operational-cancel-comment",
     ),
 )
 
@@ -1585,6 +1570,8 @@ def test_editing_autosave_does_not_leak_into_the_page_name_index(page_service):
     P8.1's fix (autosave no longer eagerly promotes "editing" -> "draft")
     is what makes this observable/testable again."""
 
+    from backend.services.indexing.doc_source import compose_context_page_doc_sources
+
     client = make_client(page_service)
     created = client.post(
         pages_url(page_service),
@@ -1615,6 +1602,16 @@ def test_editing_autosave_does_not_leak_into_the_page_name_index(page_service):
     assert rows == [], (
         "a still-private 'editing' autosave must not appear in the name "
         f"index under any scope, found: {[(r.name, r.visibility_scope) for r in rows]}"
+    )
+    # Same id-only "draft" classification bug in doc_source.py's
+    # `_context_live_versions`: the FTS producer must not manufacture a
+    # "draft"-scoped document from the private editing row's body either.
+    with page_service.session_factory() as session:
+        page = session.get(ContextPage, page_id)
+        documents = compose_context_page_doc_sources(session, page)
+    assert documents == [], (
+        "a still-private 'editing' row must not produce any FTS doc source "
+        f"under any scope, found: {[(d.visibility_scope, d.body) for d in documents]}"
     )
 
     # The other side of the same fix: once the SAME row is legitimately
@@ -1723,52 +1720,6 @@ def test_second_editing_session_does_not_contaminate_an_already_submitted_draft(
     assert not any(
         row.name == "Confidential Second Session Title" for row in index_rows
     ), [(r.name, r.visibility_scope) for r in index_rows]
-
-
-def test_editing_row_is_excluded_from_fts_doc_sources(page_service):
-    """Same bug shape as `_name_index_live_versions`, found by the same
-    Codex review while checking neighboring producers: doc_source.py's
-    `_context_live_versions` fed FTS5 search documents (full body/claim
-    text, not just names) using the same id-comparison-only "draft"
-    classification, with no `version_status` check. Its one current
-    consumer (retrieval/keyword.py's `_hydrate_context_pages`) happens to
-    re-verify every hit against the live, per-actor
-    `visible_search_version_ids` before surfacing it, so this was not shown
-    to be an actual reachable disclosure -- but the producer itself must
-    still not manufacture a "draft"-scoped document out of a private
-    "editing" row's body, independent of whether today's one reader
-    happens to catch it."""
-
-    from backend.services.indexing.doc_source import compose_context_page_doc_sources
-
-    client = make_client(page_service)
-    created = client.post(
-        pages_url(page_service),
-        json={},
-    ).json()["data"]
-    page_id = UUID(created["id"])
-    version_id = created["version_id"]
-
-    saved = client.post(
-        f"{pages_url(page_service)}/{page_id}/autosave",
-        json={
-            "idempotency_key": "t-41",
-            "body_md": "# Confidential FTS Body\n\nPrivate content not shared yet.",
-            "base_version_id": version_id,
-            "base_content_hash": created["content_hash"],
-            "expected_editing_revision": created["editing_revision"],
-        },
-    )
-    assert saved.status_code == 200, saved.text
-
-    with page_service.session_factory() as session:
-        page = session.get(ContextPage, page_id)
-        documents = compose_context_page_doc_sources(session, page)
-
-    assert documents == [], (
-        "a still-private 'editing' row must not produce any FTS doc source "
-        f"under any scope, found: {[(d.visibility_scope, d.body) for d in documents]}"
-    )
 
 
 def test_pages_api_create_list_read_update(page_service):
@@ -2212,33 +2163,19 @@ def test_pages_api_rejects_tree_cycle_destinations(page_service):
         assert update_response.json()["error_code"] == "validation_failed"
         assert "tree cycle detected" in update_response.json()["message"]
 
-
-def test_pages_api_rejects_unknown_destination_nodes(page_service):
-    client = make_client(page_service)
-    created_response = client.post(
-        pages_url(page_service),
-        json={
-            "title": "Unknown Destination",
-            "body_md": "# Unknown Destination",
-        },
-    )
-    assert created_response.status_code == 201
-    created = created_response.json()["data"]
-
-    update_response = client.patch(
+    unknown_response = client.patch(
         f"{pages_url(page_service)}/{created['id']}",
         json={
-            "title": "Unknown Destination v2",
-            "body_md": "# Unknown Destination v2",
+            "title": "Cycle Guard v2",
+            "body_md": "# Cycle Guard v2",
             "base_version_id": created["version_id"],
             "base_content_hash": created["content_hash"],
             "destination_node_id": str(uuid4()),
         },
     )
-
-    assert update_response.status_code == 422
-    assert update_response.json()["error_code"] == "validation_failed"
-    assert "tree node not found" in update_response.json()["message"]
+    assert unknown_response.status_code == 422
+    assert unknown_response.json()["error_code"] == "validation_failed"
+    assert "tree node not found" in unknown_response.json()["message"]
 
 
 def test_pages_api_returns_401_404_and_409(page_service):
@@ -3638,7 +3575,9 @@ def test_pages_api_rejects_oversized_version_diff(page_service):
     )
 
 
-def test_pages_api_creates_and_lists_inline_comments(page_service):
+def test_pages_api_creates_and_lists_inline_comments(page_service, monkeypatch):
+    from backend.services import page_service as page_service_module
+
     client = make_client(page_service)
     created = client.post(
         pages_url(page_service),
@@ -3679,6 +3618,22 @@ def test_pages_api_creates_and_lists_inline_comments(page_service):
     assert comment["review_item_id"] == comment["id"]
     assert comment["change_set_id"]
     assert comment["change_operation_id"]
+
+    def fail_resolve_anchor(*args, **kwargs):
+        raise AssertionError("same-version comments should use the fast path")
+
+    def fail_cached_resolve_anchor(*args, **kwargs):
+        raise AssertionError("same-version comments should bypass the resolver cache")
+
+    monkeypatch.setattr(
+        "backend.services.page_service.resolve_anchor",
+        fail_resolve_anchor,
+    )
+    monkeypatch.setattr(
+        page_service_module,
+        "_cached_resolve_anchor",
+        fail_cached_resolve_anchor,
+    )
 
     listed = client.get(f"{pages_url(page_service)}/{created['id']}/comments")
     assert listed.status_code == 200
@@ -3733,107 +3688,6 @@ def test_pages_api_caps_inline_comment_list_by_limit(page_service):
     assert rejected.status_code == 422
 
 
-def test_pages_api_lists_same_version_inline_comments_without_resolver(
-    page_service,
-    monkeypatch,
-):
-    from backend.services import page_service as page_service_module
-
-    client = make_client(page_service)
-    created = client.post(
-        pages_url(page_service),
-        json={
-            "title": "Same Version Comment Page",
-            "body_md": "Intro\n\nClaim.\n\nOutro",
-        },
-    ).json()["data"]
-    comment = client.post(
-        f"{pages_url(page_service)}/{created['id']}/comments",
-        json={
-            "note": "Please cite this claim.",
-            "anchor": {
-                "anchor_text": "Claim.",
-                "context_before": "Intro\n\n",
-                "context_after": "\n\nOutro",
-                "version_id": created["version_id"],
-                "char_offset_hint": 7,
-            },
-        },
-    ).json()["data"]
-
-    def fail_resolve_anchor(*args, **kwargs):
-        raise AssertionError("same-version comments should use the fast path")
-
-    def fail_cached_resolve_anchor(*args, **kwargs):
-        raise AssertionError("same-version comments should bypass the resolver cache")
-
-    monkeypatch.setattr(
-        "backend.services.page_service.resolve_anchor",
-        fail_resolve_anchor,
-    )
-    monkeypatch.setattr(
-        page_service_module,
-        "_cached_resolve_anchor",
-        fail_cached_resolve_anchor,
-    )
-
-    listed = client.get(f"{pages_url(page_service)}/{created['id']}/comments")
-
-    assert listed.status_code == 200
-    listed_comment = listed.json()["data"][0]
-    assert listed_comment["id"] == comment["id"]
-    assert listed_comment["resolved"] == {
-        "char_offset": 7,
-        "end_offset": 13,
-        "status": "exact",
-        "resolved_text": "Claim.",
-    }
-
-
-def test_pages_api_resolves_stale_inline_comment_anchor(page_service):
-    client = make_client(page_service)
-    created = client.post(
-        pages_url(page_service),
-        json={
-            "title": "Stale Comment Page",
-            "body_md": "Intro\n\nNeeds a source.\n\nOutro",
-        },
-    ).json()["data"]
-    comment = client.post(
-        f"{pages_url(page_service)}/{created['id']}/comments",
-        json={
-            "note": "Please cite this claim.",
-            "anchor": {
-                "anchor_text": "Needs a source.",
-                "context_before": "Intro\n\n",
-                "context_after": "\n\nOutro",
-                "version_id": created["version_id"],
-                "char_offset_hint": 7,
-            },
-        },
-    ).json()["data"]
-
-    updated = client.patch(
-        f"{pages_url(page_service)}/{created['id']}",
-        json={
-            "title": "Stale Comment Page",
-            "body_md": "Intro\n\nNeeds one source.\n\nOutro",
-            "base_version_id": created["version_id"],
-            "base_content_hash": created["content_hash"],
-        },
-    )
-    assert updated.status_code == 200
-
-    listed = client.get(f"{pages_url(page_service)}/{created['id']}/comments")
-
-    assert listed.status_code == 200
-    resolved = listed.json()["data"][0]["resolved"]
-    assert listed.json()["data"][0]["id"] == comment["id"]
-    assert resolved["status"] == "fuzzy"
-    assert resolved["char_offset"] == 7
-    assert resolved["resolved_text"] == "Needs one source."
-
-
 def test_pages_api_caches_stale_inline_comment_resolution(page_service, monkeypatch):
     from backend.services import page_service as page_service_module
 
@@ -3845,7 +3699,7 @@ def test_pages_api_caches_stale_inline_comment_resolution(page_service, monkeypa
             "body_md": "Intro\n\nNeeds a source.\n\nOutro",
         },
     ).json()["data"]
-    client.post(
+    comment = client.post(
         f"{pages_url(page_service)}/{created['id']}/comments",
         json={
             "note": "Please cite this claim.",
@@ -3857,7 +3711,7 @@ def test_pages_api_caches_stale_inline_comment_resolution(page_service, monkeypa
                 "char_offset_hint": 7,
             },
         },
-    )
+    ).json()["data"]
     updated = client.patch(
         f"{pages_url(page_service)}/{created['id']}",
         json={
@@ -3890,6 +3744,7 @@ def test_pages_api_caches_stale_inline_comment_resolution(page_service, monkeypa
     assert first.status_code == 200
     assert second.status_code == 200
     assert calls == 1
+    assert first.json()["data"][0]["id"] == comment["id"]
     resolved = first.json()["data"][0]["resolved"]
     assert resolved == {
         "char_offset": 7,
@@ -3899,67 +3754,12 @@ def test_pages_api_caches_stale_inline_comment_resolution(page_service, monkeypa
     }
     assert resolved == second.json()["data"][0]["resolved"]
 
-
-def test_pages_api_invalidates_stale_comment_cache_when_body_changes(
-    page_service,
-    monkeypatch,
-):
-    from backend.services import page_service as page_service_module
-
-    client = make_client(page_service)
-    created = client.post(
-        pages_url(page_service),
-        json={
-            "title": "Cache Invalidates Comment Page",
-            "body_md": "Intro\n\nNeeds a source.\n\nOutro",
-        },
-    ).json()["data"]
-    client.post(
-        f"{pages_url(page_service)}/{created['id']}/comments",
-        json={
-            "note": "Please cite this claim.",
-            "anchor": {
-                "anchor_text": "Needs a source.",
-                "context_before": "Intro\n\n",
-                "context_after": "\n\nOutro",
-                "version_id": created["version_id"],
-                "char_offset_hint": 7,
-            },
-        },
-    )
-    updated = client.patch(
-        f"{pages_url(page_service)}/{created['id']}",
-        json={
-            "title": "Cache Invalidates Comment Page",
-            "body_md": "Intro\n\nNeeds one source.\n\nOutro",
-            "base_version_id": created["version_id"],
-            "base_content_hash": created["content_hash"],
-        },
-    ).json()["data"]
-
-    calls = 0
-    original_resolve_anchor = page_service_module.resolve_anchor
-
-    def counting_resolve_anchor(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        return original_resolve_anchor(*args, **kwargs)
-
-    monkeypatch.setattr(
-        page_service_module,
-        "resolve_anchor",
-        counting_resolve_anchor,
-    )
-
-    first = client.get(f"{pages_url(page_service)}/{created['id']}/comments")
-    assert first.status_code == 200
-    assert first.json()["data"][0]["resolved"]["resolved_text"] == "Needs one source."
-    assert calls == 1
-
+    # A body change invalidates the cached resolution.
+    updated = updated.json()["data"]
     changed = client.patch(
         f"{pages_url(page_service)}/{created['id']}",
         json={
-            "title": "Cache Invalidates Comment Page",
+            "title": "Cached Stale Comment Page",
             "body_md": "Intro\n\nNeeds one source!\n\nOutro",
             "base_version_id": updated["version_id"],
             "base_content_hash": updated["content_hash"],
@@ -3967,11 +3767,11 @@ def test_pages_api_invalidates_stale_comment_cache_when_body_changes(
     )
     assert changed.status_code == 200
 
-    second = client.get(f"{pages_url(page_service)}/{created['id']}/comments")
+    third = client.get(f"{pages_url(page_service)}/{created['id']}/comments")
 
-    assert second.status_code == 200
+    assert third.status_code == 200
     assert calls == 2
-    assert second.json()["data"][0]["resolved"]["resolved_text"] == "Needs one source"
+    assert third.json()["data"][0]["resolved"]["resolved_text"] == "Needs one source"
 
 
 def test_pages_api_rejects_cross_page_comment_anchor(page_service):
@@ -4056,32 +3856,20 @@ def test_post_pages_with_invalid_title_returns_validation_envelope(page_service)
     assert body["warnings"] == []
     assert "detail" not in body
 
+    # A path-parameter validation failure uses the same envelope.
+    path_response = client.get(f"{pages_url(page_service)}/not-a-uuid")
 
-def test_get_pages_invalid_uuid_path_returns_validation_envelope(page_service):
+    path_body = path_response.json()
+    assert path_response.status_code == 422
+    assert path_body["error_code"] == "validation_failed"
+    assert path_body["request_id"]
+    assert "detail" not in path_body
+
+
+def test_list_pages_returns_next_cursor_only_when_more_pages_exist(page_service):
     client = make_client(page_service)
-
-    response = client.get(f"{pages_url(page_service)}/not-a-uuid")
-
-    body = response.json()
-    assert response.status_code == 422
-    assert body["error_code"] == "validation_failed"
-    assert body["request_id"]
-    assert "detail" not in body
-
-
-def test_list_pages_rejects_invalid_limit_but_tolerates_a_garbled_cursor(
-    page_service,
-):
-    # P9.1: the canonical list route's `cursor` is an opaque keyset token
-    # (see `_decode_keyset_cursor`) with no FastAPI-level shape validation --
-    # a garbled value just decodes to "no cursor" rather than 422ing (see
-    # `test_read_api_context_pages_tolerate_garbled_cursor`'s sibling
-    # coverage for the same shared `DomainReadService.list_context_pages`).
-    # The old numeric-offset cursor's strict pattern/range validation
-    # (`PAGE_LIST_CURSOR_MAX_OFFSET` et al.) no longer applies here; only
-    # `limit`'s FastAPI-level range check still 422s.
-    client = make_client(page_service)
-
+    # The cursor is an opaque keyset token: a garbled value decodes to "no
+    # cursor" instead of a 422; only `limit`'s range check still rejects.
     for path in (
         f"{pages_url(page_service)}?limit=0",
         f"{pages_url(page_service)}?limit=101",
@@ -4093,9 +3881,6 @@ def test_list_pages_rejects_invalid_limit_but_tolerates_a_garbled_cursor(
     garbled = client.get(f"{pages_url(page_service)}?cursor=not-a-real-cursor")
     assert garbled.status_code == 200, garbled.text
 
-
-def test_list_pages_returns_next_cursor_only_when_more_pages_exist(page_service):
-    client = make_client(page_service)
     for index in range(2):
         response = client.post(
             pages_url(page_service),
@@ -4144,24 +3929,7 @@ def _issue_pat(client: TestClient, scopes: list[str]) -> str:
     return token
 
 
-def test_rest_rejects_read_only_pat_for_create(page_service):
-    client = make_client(page_service)
-    token = _issue_pat(client, ["mcp:read"])
-
-    response = client.post(
-        pages_url(page_service),
-        headers={"Authorization": f"Bearer {token}"},
-        json={
-            "title": "Scope Write",
-            "body_md": "# nope",
-        },
-    )
-
-    assert response.status_code == 403
-    assert response.json()["error_code"] == "scope_denied"
-
-
-def test_rest_rejects_read_only_pat_for_update(page_service):
+def test_rest_read_only_pat_passes_read_routes_and_is_denied_writes(page_service):
     client = make_client(page_service)
     created = client.post(
         pages_url(page_service),
@@ -4171,10 +3939,31 @@ def test_rest_rejects_read_only_pat_for_update(page_service):
         },
     ).json()["data"]
     token = _issue_pat(client, ["mcp:read"])
+    authorization = {"Authorization": f"Bearer {token}"}
 
-    response = client.patch(
+    listed = client.get(pages_url(page_service), headers=authorization)
+    assert listed.status_code == 200
+    # The detail route is registered for `read`: it passes scope, then 404s.
+    missing = client.get(
+        f"{pages_url(page_service)}/00000000-0000-0000-0000-000000000999",
+        headers=authorization,
+    )
+    assert missing.status_code == 404
+
+    create = client.post(
+        pages_url(page_service),
+        headers=authorization,
+        json={
+            "title": "Scope Write",
+            "body_md": "# nope",
+        },
+    )
+    assert create.status_code == 403
+    assert create.json()["error_code"] == "scope_denied"
+
+    update = client.patch(
         f"{pages_url(page_service)}/{created['id']}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=authorization,
         json={
             "title": "Patched",
             "body_md": "# patched",
@@ -4182,64 +3971,27 @@ def test_rest_rejects_read_only_pat_for_update(page_service):
             "base_content_hash": created["content_hash"],
         },
     )
+    assert update.status_code == 403
+    assert update.json()["error_code"] == "scope_denied"
 
-    assert response.status_code == 403
-    assert response.json()["error_code"] == "scope_denied"
 
-
-def test_rest_accepts_write_pat_for_create(page_service):
+def test_rest_write_pat_creates_and_reads(page_service):
     client = make_client(page_service)
     token = _issue_pat(client, ["mcp:write"])
+    authorization = {"Authorization": f"Bearer {token}"}
 
     response = client.post(
         pages_url(page_service),
-        headers={"Authorization": f"Bearer {token}"},
+        headers=authorization,
         json={
             "title": "Write via PAT",
             "body_md": "# ok",
         },
     )
-
     assert response.status_code == 201
 
-
-def test_rest_accepts_write_pat_for_read(page_service):
-    client = make_client(page_service)
-    token = _issue_pat(client, ["mcp:write"])
-
-    response = client.get(
-        pages_url(page_service),
-        headers={"Authorization": f"Bearer {token}"},
-    )
-
-    assert response.status_code == 200
-
-
-def test_rest_accepts_read_pat_for_list(page_service):
-    client = make_client(page_service)
-    token = _issue_pat(client, ["mcp:read"])
-
-    response = client.get(
-        pages_url(page_service),
-        headers={"Authorization": f"Bearer {token}"},
-    )
-
-    assert response.status_code == 200
-
-
-def test_rest_accepts_session_for_create_without_scope(page_service):
-    """Session cookie actors bypass scope enforcement (full-privilege)."""
-    client = make_client(page_service)
-
-    response = client.post(
-        pages_url(page_service),
-        json={
-            "title": "Session",
-            "body_md": "# ok",
-        },
-    )
-
-    assert response.status_code == 201
+    listed = client.get(pages_url(page_service), headers=authorization)
+    assert listed.status_code == 200
 
 
 def test_rest_prioritizes_bearer_scope_when_session_cookie_is_present(page_service):
@@ -4291,20 +4043,6 @@ def test_rest_rejects_agent_pat_for_general_page_create(page_service):
 
     assert response.status_code == 403
     assert response.json()["error_code"] == "scope_denied"
-
-
-def test_rest_rejects_unregistered_route_for_bearer(page_service):
-    """Routes missing from the registry default-deny bearer access."""
-    client = make_client(page_service)
-    token = _issue_pat(client, ["mcp:read"])
-
-    response = client.get(
-        f"{pages_url(page_service)}/00000000-0000-0000-0000-000000000999",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-
-    # Route is registered for `read`, so it must pass scope and then 404.
-    assert response.status_code == 404
 
 
 def test_percent_encoded_korean_slug_path_is_decoded_once(page_service):

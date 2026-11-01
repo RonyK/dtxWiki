@@ -1,4 +1,4 @@
-.PHONY: install dev-db-up dev-db-down migrate seed backend-dev frontend-dev export-schemas gen-client verify-gen-client verify-generated-schemas bundle-frontend build-wheel docker-image docker-build test-backend test-backend-serial test-backend-benchmarks test-graph-view test-frontend test-e2e test-packaged test-acceptance test-static test-release-gate test lint check-i18n sync-csp
+.PHONY: install dev-db-up dev-db-down migrate seed backend-dev frontend-dev export-schemas gen-client verify-gen-client verify-generated-schemas bundle-frontend build-wheel docker-image docker-build test-backend test-backend-scale test-backend-serial test-backend-benchmarks test-graph-view test-frontend test-e2e test-packaged test-acceptance test-static test-release-gate test lint check-i18n sync-csp
 
 PYTHON ?= python3
 VENV ?= .venv
@@ -97,8 +97,10 @@ docker-image:
 docker-build:
 	$(DOCKER) build -f $(DOCKERFILE) -t $(DOCKER_IMAGE) .
 
+# Capacity guards on production-scale input (`release_scale`) run in Release
+# checks (`make test-backend-scale`), not on every pull request.
 test-backend:
-	$(VENV_PYTHON) -m pytest backend/tests -q -n $(PYTEST_WORKERS) --dist loadgroup $(SQLITE_MEDIA_PARALLEL_IGNORES)
+	$(VENV_PYTHON) -m pytest backend/tests -q -n $(PYTEST_WORKERS) --dist loadgroup -m "not release_scale" $(SQLITE_MEDIA_PARALLEL_IGNORES)
 	$(VENV_PYTHON) -m pytest $(SQLITE_MEDIA_SERIAL_TESTS) -q
 
 # Parity canary. `--dist loadgroup` keeps the PostgreSQL suites -- which reset
@@ -108,6 +110,9 @@ test-backend:
 # wall-clock budgets are `test-backend-benchmarks`, kept apart on purpose.
 test-backend-serial:
 	$(VENV_PYTHON) -m pytest backend/tests -q
+
+test-backend-scale:
+	$(VENV_PYTHON) -m pytest backend/tests -q -n $(PYTEST_WORKERS) --dist loadgroup -m release_scale
 
 # A latency measured on a shared runner, or beside xdist workers, cannot tell a
 # slow host from a slow change, so the functional lanes assert counted work

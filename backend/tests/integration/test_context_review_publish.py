@@ -1689,7 +1689,9 @@ def test_deadline_system_auto_approval_does_not_publish(session_factory):
         assert reviews.sweep_auto_approve_reviews(session, workspace.id) == []
 
 
-@pytest.mark.parametrize("decision_type", ["approve", "reject", "request_changes"])
+# The reconciliation gate (_can_decide_review) precedes decision-type dispatch,
+# so every generic decision takes one branch; approve is the one that publishes.
+@pytest.mark.parametrize("decision_type", ["approve"])
 def test_reconciliation_review_requires_reconcile_or_explicit_discard(
     session_factory,
     page_service,

@@ -85,8 +85,12 @@ def _review_for_context_version(session, version_id: UUID) -> ReviewItem:
     return review
 
 
-@pytest.mark.parametrize("token_kind", ["oauth", "pat"])
-@pytest.mark.parametrize("same_author", [True, False])
+# Each token kind maps to its own AI provenance, so both stay. Authorship of
+# the published session version does not change the branch (it is neither an
+# editing nor a draft row), so one author state per token kind is enough.
+@pytest.mark.parametrize(
+    ("token_kind", "same_author"), [("oauth", True), ("pat", False)]
+)
 def test_bearer_autosave_with_session_version_stages_reviewed_draft(
     page_service,
     token_kind,
@@ -144,7 +148,9 @@ def test_bearer_autosave_with_session_version_stages_reviewed_draft(
         assert review.risk_signals["human_review_required"] is False
 
 
-@pytest.mark.parametrize("same_author", [True, False])
+# A published session version is neither an editing nor a draft row, so its
+# author never selects a different branch; keep the other-author state.
+@pytest.mark.parametrize("same_author", [False])
 def test_browser_session_autosave_with_session_version_stages_draft(
     page_service,
     same_author,
@@ -536,17 +542,15 @@ def _perform_agent_write(
     return response.json()["data"]
 
 
-# Pairwise cover of operation x category x token kind: every operation meets
-# both categories and both token kinds, and every category meets both token
-# kinds. All three operations share one provenance write path.
+# Each operation is its own endpoint, each token kind its own provenance
+# mapping, and the category decides human_review_required; every value appears
+# once. All three operations share one provenance write path, so their
+# combinations with category and token kind take no further branch.
 @pytest.mark.parametrize(
     ("operation", "category", "token_kind"),
     [
         ("create", "persona", "pat"),
-        ("create", "memory", "oauth"),
-        ("update", "persona", "oauth"),
-        ("update", "memory", "pat"),
-        ("restore", "persona", "oauth"),
+        ("update", "memory", "oauth"),
         ("restore", "memory", "pat"),
     ],
 )

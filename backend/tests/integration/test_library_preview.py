@@ -163,30 +163,31 @@ def _preview_source_url(api: _PreviewApi, item_id: str, version_id: str) -> str:
     return _preview_url(api, item_id, version_id) + "/source"
 
 
-def test_pdf_source_manifest_uses_dedicated_transport_and_explicit_fallback(
+def test_pdf_manifest_and_source_transport_support_get_head_etag_and_range(
     preview_api: _PreviewApi,
 ) -> None:
+    source = _valid_pdf()
     uploaded = _upload(
         preview_api,
-        filename="source.pdf",
-        content=_valid_pdf(),
+        filename="report (final).pdf",
+        content=source,
         media_type="application/pdf",
     )
     assert uploaded.status_code == 201, uploaded.text
     item = uploaded.json()["data"]
     version = item["current_version"]
+    source_url = _preview_source_url(preview_api, item["id"], version["id"])
 
+    # The manifest names a dedicated range transport and explicit fallbacks.
     response = preview_api.client.get(
         _preview_url(preview_api, item["id"], version["id"])
     )
-
     assert response.status_code == 200, response.text
     manifest = response.json()["data"]
     assert manifest["status"] == "ready"
     assert manifest["selected_preview_attempt_id"] is None
     assert manifest["fallbacks"] == ["metadata", "download"]
     assert manifest["download_url"] == version["original_url"]
-    source_url = _preview_source_url(preview_api, item["id"], version["id"])
     assert manifest["variants"] == [
         {
             "id": None,
@@ -196,7 +197,7 @@ def test_pdf_source_manifest_uses_dedicated_transport_and_explicit_fallback(
             "content_url": source_url,
             "renderer_contract": "core.pdf.v1",
             "rank": 200,
-            "byte_size": len(_valid_pdf()),
+            "byte_size": len(source),
             "width": None,
             "height": None,
             "duration_ms": None,
@@ -212,28 +213,12 @@ def test_pdf_source_manifest_uses_dedicated_transport_and_explicit_fallback(
         for forbidden in ("storage_key", "blob_id", "sha256", "token=")
     )
     assert manifest["variants"][0]["content_url"] != manifest["download_url"]
-    unchanged = preview_api.client.get(
+    unchanged_manifest = preview_api.client.get(
         _preview_url(preview_api, item["id"], version["id"]),
         headers={"If-None-Match": response.headers["etag"]},
     )
-    assert unchanged.status_code == 304
-    assert unchanged.headers["cache-control"] == "private, no-store"
-
-
-def test_preview_source_transport_supports_get_head_etag_and_bounded_range(
-    preview_api: _PreviewApi,
-) -> None:
-    source = _valid_pdf()
-    uploaded = _upload(
-        preview_api,
-        filename="report (final).pdf",
-        content=source,
-        media_type="application/pdf",
-    )
-    assert uploaded.status_code == 201, uploaded.text
-    item = uploaded.json()["data"]
-    version = item["current_version"]
-    source_url = _preview_source_url(preview_api, item["id"], version["id"])
+    assert unchanged_manifest.status_code == 304
+    assert unchanged_manifest.headers["cache-control"] == "private, no-store"
 
     full = preview_api.client.get(source_url)
     assert full.status_code == 200, full.text

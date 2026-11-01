@@ -1326,33 +1326,6 @@ def _llms_app(page_service, **settings_overrides):
     )
 
 
-def test_llms_txt_prefers_configured_public_base_url(page_service, session_factory):
-    payload = page_service.write_page(
-        workspace_slug="default",
-        slug="llms-base",
-        title="LLMS Base",
-        body_md="# LB\n\nBody.",
-        actor_kind="human",
-        actor_id="tester",
-        actor_provenance="browser_session",
-    )
-    with session_factory.begin() as session:
-        session.scalar(
-            select(Workspace).where(Workspace.slug == "default")
-        ).visibility = "public"
-        page = session.get(ContextPage, payload.id)
-        grant_public_page_exposure(
-            page,
-            scope="indexed_web",
-            version_id=page.current_published_version_id,
-        )
-    client = _llms_app(page_service, public_base_url="https://wiki.example.com")
-    body = client.get("/llms.txt").text
-    # the publicly-cacheable response must not bake the transport host in
-    assert "https://wiki.example.com/api/v1/public/w/default/pages/llms-base" in body
-    assert "http://testserver" not in body
-
-
 def test_llms_txt_excludes_draft_only_and_archived_public_pages(
     page_service, session_factory
 ):
@@ -1411,42 +1384,18 @@ def test_llms_txt_excludes_draft_only_and_archived_public_pages(
             actor_kind="human",
             actor_id="tester",
         )
-    body = _llms_app(page_service).get("/llms.txt").text
+    client = _llms_app(page_service, public_base_url="https://wiki.example.com")
+    body = client.get("/llms.txt").text
+    # The label is the published heading ("# LL"), never the mutable title.
     assert "[LL]" in body
+    assert "LLMS Live" not in body
+    # the publicly-cacheable response must not bake the transport host in
+    assert "https://wiki.example.com/api/v1/public/w/default/pages/llms-live" in body
+    assert "http://testserver" not in body
     # is_public alone is not enough: draft-only and archived pages would
     # 404 on the public read path and must never be linked
     assert "LLMS Draft Only" not in body
     assert "llms-archived" not in body
-
-
-def test_llms_txt_uses_published_heading_not_mutable_draft_title(
-    page_service, session_factory
-):
-    published = page_service.write_page(
-        workspace_slug="default",
-        slug="llms-published-title",
-        title="Published title",
-        body_md="# Published heading\n\nBody.",
-        actor_kind="human",
-        actor_id="tester",
-        actor_provenance="browser_session",
-    )
-    with session_factory.begin() as session:
-        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
-        page = session.get(ContextPage, published.id)
-        assert workspace is not None and page is not None
-        workspace.visibility = "public"
-        grant_public_page_exposure(
-            page,
-            scope="indexed_web",
-            version_id=page.current_published_version_id,
-        )
-        page.title = "Private draft rename"
-
-    body = _llms_app(page_service).get("/llms.txt").text
-
-    assert "Published heading" in body
-    assert "Private draft rename" not in body
 
 
 # --- C3 M-2: index preview works for agent-section folders ---------------------

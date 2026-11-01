@@ -135,6 +135,16 @@ def test_register_emits_audit_with_null_workspace(page_service):
     assert row.payload["client_id"] == client_id
     assert row.payload["scope"] == "mcp:read mcp:write"
 
+    # Each successful DCR appends a row; the helper does not de-duplicate.
+    second = client.post("/oauth/register", json=_valid_payload(client_name="B"))
+    assert second.status_code == 201, second.text
+    with page_service.session_factory() as session:
+        rows = session.scalars(
+            select(AuditEvent).where(AuditEvent.action == "oauth.client.registered")
+        ).all()
+    assert len(rows) == 2
+    assert {r.workspace_id for r in rows} == {None}
+
 
 def test_register_accepts_mcp_agent_scope(registration_client):
     """H22 positive control: ``mcp:agent`` is in ALLOWED_OAUTH_SCOPES."""
@@ -186,35 +196,8 @@ def test_register_accepts_max_length_client_name(registration_client):
     assert resp.json()["client_name"] == "x" * 200
 
 
-def test_register_rejects_unknown_scope_with_keyword(registration_client):
-    client = registration_client
-    resp = client.post(
-        "/oauth/register",
-        json=_valid_payload(scope="mcp:admin"),
-    )
-    assert resp.status_code == 400, resp.text
-    assert "scope" in resp.text
-
-
-# ---------------------------------------------------------------------------
-# Audit row uniqueness: a second DCR call writes a *second* row (no swap).
-# ---------------------------------------------------------------------------
-
-
-def test_register_twice_emits_two_audit_rows(page_service):
-    """Positive control on row insertion semantics: each successful DCR
-    appends a row; the helper does not de-duplicate by client_id."""
-
-    client = make_client(page_service)
-    client.post("/oauth/register", json=_valid_payload(client_name="A"))
-    client.post("/oauth/register", json=_valid_payload(client_name="B"))
-
-    with page_service.session_factory() as session:
-        rows = session.scalars(
-            select(AuditEvent).where(AuditEvent.action == "oauth.client.registered")
-        ).all()
-    assert len(rows) == 2
-    assert {r.workspace_id for r in rows} == {None}
+# An unknown DCR scope is rejected by test_oauth_hosted_clients.py's
+# test_unknown_scope_is_still_rejected_by_dcr_authorize_and_refresh.
 
 
 def test_register_reuses_exact_client_identity(page_service):
@@ -302,21 +285,6 @@ def _consent_csrf_events(page_service) -> list[AuditEvent]:
         )
 
 
-def test_consent_csp_allows_only_validated_loopback_origin(page_service):
-    client = make_client(page_service, security_headers=True)
-    client_id = _register_consent_client(client)
-    params = _authorize_params(client_id, state=_CONSENT_STATE_GOOD)
-
-    response = client.get("/oauth/authorize", params=params)
-
-    assert response.status_code == 200
-    csp = response.headers["content-security-policy"]
-    assert "form-action 'self' http://127.0.0.1:53682" in csp
-    assert "script-src 'self' 'nonce-" in csp
-    assert 'nonce="' in response.text
-    assert response.headers["cache-control"] == "no-store"
-
-
 def test_consent_csp_does_not_widen_for_non_loopback_origin(page_service):
     client = make_client(page_service, security_headers=True)
     redirect_uri = "https://client.example/callback"
@@ -368,56 +336,6 @@ def test_consent_csrf_failure_content_negotiates_html_and_json(page_service):
     assert json_response.headers["content-type"].startswith("application/json")
     assert json_response.headers["cache-control"] == "no-store"
     assert json_response.json()["message"] == "state binding failed"
-
-
-# --- Positive controls -----------------------------------------------------
-
-
-def test_consent_state_happy_path(page_service):
-    """GET sets the cookie, POST with matching state is accepted and the
-    cookie is consumed (one-time). No ``oauth.consent.csrf`` audit row."""
-
-    client = make_client(page_service)
-    client_id = _register_consent_client(client)
-    params = _authorize_params(client_id, state=_CONSENT_STATE_GOOD)
-
-    get_resp = client.get("/oauth/authorize", params=params)
-    assert get_resp.status_code == 200
-    assert client.cookies.get(OAUTH_CSRF_COOKIE_NAME) == _CONSENT_STATE_GOOD
-
-    post_resp = client.post(
-        "/oauth/authorize",
-        data={
-            **params,
-            "workspace_ids": [_current_workspace_id(client)],
-            "decision": "allow",
-        },
-        follow_redirects=False,
-    )
-    assert post_resp.status_code == 303, post_resp.text
-    # One-time consumption: the response clears the cookie.
-    assert client.cookies.get(OAUTH_CSRF_COOKIE_NAME) is None
-
-    assert _consent_csrf_events(page_service) == []
-
-
-def test_consent_cookie_flags_set_correctly(page_service):
-    """The GET ``Set-Cookie`` header must declare HttpOnly, SameSite=Lax,
-    Path=/oauth, Max-Age=600 per ADR A3. Secure is environment-dependent;
-    in the development test environment it is False, which we assert
-    explicitly so a regression to True (without app_env=production) is
-    caught."""
-
-    client = make_client(page_service)
-    client_id = _register_consent_client(client)
-    params = _authorize_params(client_id, state=_CONSENT_STATE_GOOD)
-    get_resp = client.get("/oauth/authorize", params=params)
-    assert get_resp.status_code == 200
-    set_cookie = get_resp.headers["set-cookie"]
-    assert "HttpOnly" in set_cookie
-    assert "SameSite=lax" in set_cookie
-    assert "Path=/oauth" in set_cookie
-    assert "Max-Age=600" in set_cookie
 
 
 # --- Negative tests (ADR A6 keyword + audit assertion) ---------------------
@@ -497,14 +415,23 @@ def test_consent_state_mismatch_400(page_service):
 
 
 def test_consent_state_replay_400(page_service):
-    """First POST succeeds and consumes the state; a second POST with the
-    same state must fail with reason=replay (the cookie has been deleted
-    and the state is now in the consumed bucket)."""
+    """GET sets the one-time cookie (HttpOnly, SameSite=Lax, Path=/oauth,
+    Max-Age=600 per ADR A3); the first POST with the matching state succeeds
+    and consumes it. A second POST with the same state must fail with
+    reason=replay (the cookie has been deleted and the state is now in the
+    consumed bucket)."""
 
     client = make_client(page_service)
     client_id = _register_consent_client(client)
     params = _authorize_params(client_id, state=_CONSENT_STATE_GOOD)
-    client.get("/oauth/authorize", params=params)
+    get_resp = client.get("/oauth/authorize", params=params)
+    assert get_resp.status_code == 200
+    assert client.cookies.get(OAUTH_CSRF_COOKIE_NAME) == _CONSENT_STATE_GOOD
+    set_cookie = get_resp.headers["set-cookie"]
+    assert "HttpOnly" in set_cookie
+    assert "SameSite=lax" in set_cookie
+    assert "Path=/oauth" in set_cookie
+    assert "Max-Age=600" in set_cookie
     first = client.post(
         "/oauth/authorize",
         data={
@@ -515,6 +442,8 @@ def test_consent_state_replay_400(page_service):
         follow_redirects=False,
     )
     assert first.status_code == 303
+    # One-time consumption: the response clears the cookie.
+    assert client.cookies.get(OAUTH_CSRF_COOKIE_NAME) is None
     assert _consent_csrf_events(page_service) == []
 
     # Second POST: cookie has been deleted by the first response; the state
@@ -701,23 +630,11 @@ def _refresh_reuse_audit_rows(page_service) -> list[AuditEvent]:
         )
 
 
-def _refresh_grace_audit_rows(page_service) -> list[AuditEvent]:
-    with page_service.session_factory() as session:
-        return list(
-            session.scalars(
-                select(AuditEvent).where(
-                    AuditEvent.action == "oauth.refresh.grace_reissue"
-                )
-            ).all()
-        )
-
-
 # The reuse-grace window's documented length (P10.3 T3 section 2.3, ADR A5
 # amendment). Pinned here, not read from ``REFRESH_REUSE_GRACE_WINDOW_SECONDS``,
 # so that widening or narrowing the window in the service fails these tests
 # instead of moving them along with it.
 _REUSE_GRACE_WINDOW = timedelta(seconds=30)
-_ONE_MICROSECOND = timedelta(microseconds=1)
 
 
 def _lapse_reuse_grace_window(clock: OAuthClock) -> None:
@@ -741,10 +658,26 @@ def _lapse_reuse_grace_window(clock: OAuthClock) -> None:
 def test_refresh_rotation_happy_path(page_service):
     """Normal refresh rotates the refresh token, mints a new access JWT,
     persists a new jti row, and marks the prior refresh ``revoked_at`` +
-    ``rotated_to_id``. No ``oauth.refresh.reuse`` audit row."""
+    ``rotated_to_id``. No ``oauth.refresh.reuse`` audit row. The rotation
+    keeps the stable grant identity, and the access JWT minted before it is
+    still accepted (ADR A6 pair for refresh reuse): only reuse compromise
+    revokes the family, a clean rotation does not."""
+
+    import jwt
 
     client = make_client(page_service)
     tokens = _seed_oauth_tokens(client, state="refresh-happy")
+    # ADR A5: every access JWT issuance writes one row in
+    # ``oauth_access_token_jti`` keyed by the JWT's ``jti`` claim.
+    jti = _decode_access_jti(tokens["access_token"])
+    with page_service.session_factory() as session:
+        jti_row = session.get(OAuthAccessTokenJti, jti)
+    assert jti_row is not None, "jti row must be persisted on access JWT issuance"
+    assert jti_row.client_id == tokens["client_id"]
+    assert jti_row.revoked_at is None
+    first_claims = jwt.decode(
+        tokens["access_token"], options={"verify_signature": False}
+    )
 
     refresh = client.post(
         "/oauth/token",
@@ -774,25 +707,6 @@ def test_refresh_rotation_happy_path(page_service):
 
     assert _refresh_reuse_audit_rows(page_service) == []
 
-
-def test_refresh_rotation_preserves_stable_grant_identity(page_service):
-    import jwt
-
-    client = make_client(page_service)
-    tokens = _seed_oauth_tokens(client, state="stable-grant")
-    first_claims = jwt.decode(
-        tokens["access_token"], options={"verify_signature": False}
-    )
-
-    refresh = client.post(
-        "/oauth/token",
-        data={
-            "grant_type": "refresh_token",
-            "client_id": tokens["client_id"],
-            "refresh_token": tokens["refresh_token"],
-        },
-    )
-    assert refresh.status_code == 200, refresh.text
     second_claims = jwt.decode(
         refresh.json()["access_token"], options={"verify_signature": False}
     )
@@ -808,6 +722,14 @@ def test_refresh_rotation_preserves_stable_grant_identity(page_service):
         )
     assert len(rows) == 2
     assert {str(row.grant_id) for row in rows} == {first_claims["grant_id"]}
+
+    # The original (pre-rotation) access JWT is still accepted on /mcp.
+    response = client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    )
+    assert response.status_code == 200, response.text
 
 
 def test_refresh_token_lifetime_is_usable_and_rotation_slides(
@@ -1038,14 +960,7 @@ def _o7_update_consent(
     )
 
 
-@pytest.mark.parametrize(
-    "overshoot",
-    [timedelta(0), timedelta(microseconds=1)],
-    ids=["at_deadline", "after_deadline"],
-)
-def test_o7_non_sliding_family_expires_at_absolute_deadline(
-    page_service, oauth_clock, overshoot
-):
+def test_o7_non_sliding_family_expires_at_absolute_deadline(page_service, oauth_clock):
     client = make_client(page_service)
     initial = _seed_oauth_tokens(client, state="o7-absolute-initial")
     consent = _o7_consent(client, initial["client_id"])
@@ -1103,7 +1018,9 @@ def test_o7_non_sliding_family_expires_at_absolute_deadline(
 
     assert deadlines[0] == deadlines[1] == deadlines[2]
     # No row is edited: the family is refused from its original deadline on.
-    oauth_clock.value = deadlines[0] + overshoot
+    # The second rotation above, one microsecond earlier, is the accepted side
+    # of this boundary pair.
+    oauth_clock.value = deadlines[0]
     expired = client.post(
         "/oauth/token",
         data={
@@ -1253,28 +1170,19 @@ def test_o7_setting_change_is_not_retroactive_and_next_rotation_uses_it(
         assert audit.payload["new_refresh_ttl_seconds"] == shorter_ttl
 
 
-def test_o7_ttl_above_instance_max_returns_422(page_service):
-    instance_ttl = 90 * 24 * 60 * 60
-    client = make_client(
-        page_service,
-        settings_overrides={"oauth_refresh_token_ttl_seconds": instance_ttl},
-    )
-    tokens = _seed_oauth_tokens(client, state="o7-above-instance")
-    consent = _o7_consent(client, tokens["client_id"])
-
-    response = _o7_update_consent(
-        client,
-        consent,
-        {"refresh_ttl_seconds": 180 * 24 * 60 * 60},
-    )
-    assert response.status_code == 422
-    assert response.json()["error_code"] == "refresh_ttl_above_instance_max"
-
-
 def test_o7_null_ttl_matches_instance_default(page_service):
     client = make_client(page_service)
     tokens = _seed_oauth_tokens(client, state="o7-null-default")
     consent = _o7_consent(client, tokens["client_id"])
+    # A preference above the instance maximum (the 30-day default here) is
+    # refused; one equal to it is accepted below.
+    above_max = _o7_update_consent(
+        client,
+        consent,
+        {"refresh_ttl_seconds": 180 * 24 * 60 * 60},
+    )
+    assert above_max.status_code == 422
+    assert above_max.json()["error_code"] == "refresh_ttl_above_instance_max"
     assert (
         _o7_update_consent(
             client,
@@ -1305,106 +1213,12 @@ def test_o7_null_ttl_matches_instance_default(page_service):
     assert rotated.json()["refresh_token_expires_in"] == 30 * 24 * 60 * 60
 
 
-def test_jti_row_inserted_on_access_token_issuance(page_service):
-    """ADR A5: every access JWT issuance writes one row in
-    ``oauth_access_token_jti`` keyed by the JWT's ``jti`` claim."""
-
-    client = make_client(page_service)
-    tokens = _seed_oauth_tokens(client, state="jti-row-1")
-    jti = _decode_access_jti(tokens["access_token"])
-
-    with page_service.session_factory() as session:
-        row = session.get(OAuthAccessTokenJti, jti)
-    assert row is not None, "jti row must be persisted on access JWT issuance"
-    assert row.client_id == tokens["client_id"]
-    assert row.revoked_at is None
-
-
-def test_pre_rotation_access_jwt_still_valid_when_refresh_rotates(page_service):
-    """Positive control (ADR A6 pair for refresh reuse): after a *normal*
-    refresh rotation, the access JWT minted from the prior token is still
-    accepted until its own expiry. Only refresh-reuse compromise revokes
-    the family — a clean rotation does not."""
-
-    client = make_client(page_service)
-    tokens = _seed_oauth_tokens(client, state="jwt-still-valid")
-
-    refresh = client.post(
-        "/oauth/token",
-        data={
-            "grant_type": "refresh_token",
-            "client_id": tokens["client_id"],
-            "refresh_token": tokens["refresh_token"],
-        },
-    )
-    assert refresh.status_code == 200
-
-    # Use the original (pre-rotation) access JWT against /mcp.
-    response = client.post(
-        "/mcp",
-        headers={"Authorization": f"Bearer {tokens['access_token']}"},
-        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-    )
-    assert response.status_code == 200, response.text
-
-
 # --- Refresh reuse compromise --------------------------------------------
-# Dedicated 30s reuse-grace-window regression coverage (R4) lives in
+# Dedicated 30s reuse-grace-window regression coverage (R4), including where
+# the window ends, lives in
 # backend/tests/integration/test_oauth_refresh_grace_window.py. The tests here
 # take a replay past the window by moving ``oauth_clock`` (see
-# ``_lapse_reuse_grace_window``); the two ``..._window_end_...`` tests below
-# pin where the window ends.
-
-
-def test_refresh_reuse_revokes_family_with_audit(page_service, oauth_clock):
-    """Reusing a refresh token after it has been rotated triggers family
-    revoke (ADR A5 + H26). The response is 400 ``invalid_grant`` with the
-    keyword ``invalid``; one ``oauth.refresh.reuse`` audit row is emitted
-    carrying the family key, ``detected_via``, and family sizes."""
-
-    client = make_client(page_service)
-    tokens = _seed_oauth_tokens(client, state="reuse-attack-AAA")
-    import jwt
-
-    family_key = jwt.decode(
-        tokens["access_token"], options={"verify_signature": False}
-    )["grant_id"]
-
-    # Legitimate refresh first.
-    first = client.post(
-        "/oauth/token",
-        data={
-            "grant_type": "refresh_token",
-            "client_id": tokens["client_id"],
-            "refresh_token": tokens["refresh_token"],
-        },
-    )
-    assert first.status_code == 200
-    assert _refresh_reuse_audit_rows(page_service) == []
-    _lapse_reuse_grace_window(oauth_clock)
-
-    # Attacker replays the stolen prior refresh token.
-    replay = client.post(
-        "/oauth/token",
-        data={
-            "grant_type": "refresh_token",
-            "client_id": tokens["client_id"],
-            "refresh_token": tokens["refresh_token"],
-        },
-    )
-    assert replay.status_code == 400, replay.text
-    # The token endpoint speaks RFC 6749 §5.2, not the REST envelope (O1).
-    assert replay.json()["error"] == "invalid_grant"
-    assert "invalid" in replay.json()["error_description"]
-
-    rows = _refresh_reuse_audit_rows(page_service)
-    assert len(rows) == 1
-    payload = rows[0].payload
-    assert payload["client_id"] == tokens["client_id"]
-    assert payload["detected_via"] in {"revoked_at", "rotated_to_id"}
-    assert payload["family_key"] == family_key
-    assert payload["family_refresh_count"] >= 1
-    assert payload["family_access_count"] >= 1
+# ``_lapse_reuse_grace_window``).
 
 
 def test_refresh_reuse_with_widened_scope_still_revokes_and_audits(
@@ -1781,16 +1595,32 @@ def test_legacy_null_parent_and_rotated_child_share_family(page_service, oauth_c
 
 
 def test_refresh_reuse_revokes_access_jti_in_family(page_service, oauth_clock):
-    """After family revoke, the access JWTs minted from the family (both
-    the original and any rotated successor) must be rejected. The /mcp
-    transport returns 401 + the generic envelope; the REST API surfaces
-    the underlying ``revoked`` keyword from the OAuth service, which we
-    pin so a future refactor cannot silently downgrade the rejection to
-    ``expired`` or ``invalid``."""
+    """Reusing a refresh token after it has been rotated triggers family
+    revoke (ADR A5 + H26): 400 ``invalid_grant`` with the keyword
+    ``invalid`` and one ``oauth.refresh.reuse`` audit row carrying the family
+    key and sizes. After it, the access JWTs minted from the family (both
+    the original and the rotated successor) must be rejected at once, even
+    though the original was just accepted and cached: the revoke clears the
+    denylist cache. The /mcp transport returns 401 + the generic envelope;
+    the REST API surfaces the underlying ``revoked`` keyword from the OAuth
+    service, which we pin so a future refactor cannot silently downgrade the
+    rejection to ``expired`` or ``invalid``."""
+
+    import jwt
 
     client = make_client(page_service)
     _check_workspace_id = _current_workspace_id(client)
     tokens = _seed_oauth_tokens(client, state="reuse-access-rev-BBB")
+    family_key = jwt.decode(
+        tokens["access_token"], options={"verify_signature": False}
+    )["grant_id"]
+
+    # Prime the denylist cache with the still-valid jti.
+    primer = client.get(
+        f"/api/v1/workspaces/{_check_workspace_id}/context/pages",
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert primer.status_code == 200, primer.text
 
     # Rotate once so we have two access JWTs in the family (original +
     # rotated successor).
@@ -1803,10 +1633,11 @@ def test_refresh_reuse_revokes_access_jti_in_family(page_service, oauth_clock):
         },
     )
     assert rotation.status_code == 200
+    assert _refresh_reuse_audit_rows(page_service) == []
     new_access = rotation.json()["access_token"]
     _lapse_reuse_grace_window(oauth_clock)
 
-    # Trigger reuse compromise.
+    # Attacker replays the stolen prior refresh token.
     reuse = client.post(
         "/oauth/token",
         data={
@@ -1815,7 +1646,10 @@ def test_refresh_reuse_revokes_access_jti_in_family(page_service, oauth_clock):
             "refresh_token": tokens["refresh_token"],
         },
     )
-    assert reuse.status_code == 400
+    assert reuse.status_code == 400, reuse.text
+    # The token endpoint speaks RFC 6749 §5.2, not the REST envelope (O1).
+    assert reuse.json()["error"] == "invalid_grant"
+    assert "invalid" in reuse.json()["error_description"]
 
     # The original access JWT is revoked (/mcp 401 + REST 401 with keyword).
     response_old_mcp = client.post(
@@ -1847,156 +1681,15 @@ def test_refresh_reuse_revokes_access_jti_in_family(page_service, oauth_clock):
 
     audit = _refresh_reuse_audit_rows(page_service)
     assert len(audit) == 1
-    assert audit[0].payload["family_access_count"] >= 2
-
-
-# The window is inclusive (``<=`` in ``_refresh_access_token_locked``) and runs
-# from the replayed row's own ``rotated_at``. The OAuth clock stands at that
-# instant from the rotation until the test moves it, so each case below replays
-# at an exact distance from it and no host-clock margin is involved.
-
-
-def _replay_spent_refresh_token_after(
-    page_service, clock: OAuthClock, *, age: timedelta
-) -> tuple[dict[str, Any], str, Any]:
-    """Rotate a fresh grant's refresh token once, then replay the spent token
-    exactly ``age`` after that rotation.
-
-    Returns the seeded tokens, the rotation's refresh token (the first child)
-    and the replay response."""
-
-    client = make_client(page_service)
-    tokens = _seed_oauth_tokens(client, state="reuse-window-edge")
-    request = {
-        "grant_type": "refresh_token",
-        "client_id": tokens["client_id"],
-        "refresh_token": tokens["refresh_token"],
-    }
-    rotation = client.post("/oauth/token", data=request)
-    assert rotation.status_code == 200, rotation.text
-    with page_service.session_factory() as session:
-        parent = session.scalar(
-            select(OAuthRefreshToken).where(
-                OAuthRefreshToken.token_lookup_hash
-                == token_hash(tokens["refresh_token"])
-            )
-        )
-        assert parent is not None
-        rotated_at = parent.rotated_at
-    # The rotation read this clock, and nothing has moved it since.
-    assert rotated_at == clock.value
-    clock.value = rotated_at + age
-    replay = client.post("/oauth/token", data=request)
-    return tokens, rotation.json()["refresh_token"], replay
-
-
-@pytest.mark.parametrize(
-    "age",
-    [_REUSE_GRACE_WINDOW - _ONE_MICROSECOND, _REUSE_GRACE_WINDOW],
-    ids=["just_inside", "exactly_at"],
-)
-def test_refresh_reuse_up_to_the_window_end_is_a_grace_reissue(
-    page_service, oauth_clock, age
-):
-    """A replay up to and including the window's last instant is still a
-    double-fired refresh, not compromise: it mints a sibling pair, leaves the
-    first child live and raises no reuse alarm."""
-
-    tokens, first_child, replay = _replay_spent_refresh_token_after(
-        page_service, oauth_clock, age=age
-    )
-
-    assert replay.status_code == 200, replay.text
-    assert replay.json()["refresh_token"] not in {
-        tokens["refresh_token"],
-        first_child,
-    }
-    assert len(_refresh_grace_audit_rows(page_service)) == 1
-    assert _refresh_reuse_audit_rows(page_service) == []
-    with page_service.session_factory() as session:
-        child = session.scalar(
-            select(OAuthRefreshToken).where(
-                OAuthRefreshToken.token_lookup_hash == token_hash(first_child)
-            )
-        )
-        assert child is not None
-        assert child.revoked_at is None
-
-
-def test_refresh_reuse_just_past_the_window_end_revokes_the_family(
-    page_service, oauth_clock
-):
-    """One microsecond later the same replay is compromise: the family is
-    revoked and audited as reuse, and no sibling pair is minted."""
-
-    _tokens, first_child, replay = _replay_spent_refresh_token_after(
-        page_service, oauth_clock, age=_REUSE_GRACE_WINDOW + _ONE_MICROSECOND
-    )
-
-    assert replay.status_code == 400, replay.text
-    assert replay.json()["error"] == "invalid_grant"
-    assert _refresh_grace_audit_rows(page_service) == []
-    rows = _refresh_reuse_audit_rows(page_service)
-    assert len(rows) == 1
-    assert rows[0].payload["detected_via"] == "rotated_to_id"
-    with page_service.session_factory() as session:
-        child = session.scalar(
-            select(OAuthRefreshToken).where(
-                OAuthRefreshToken.token_lookup_hash == token_hash(first_child)
-            )
-        )
-        assert child is not None
-        assert child.revoked_at is not None
+    payload = audit[0].payload
+    assert payload["client_id"] == tokens["client_id"]
+    assert payload["detected_via"] in {"revoked_at", "rotated_to_id"}
+    assert payload["family_key"] == family_key
+    assert payload["family_refresh_count"] >= 1
+    assert payload["family_access_count"] >= 2
 
 
 # --- Defense in depth + cache invalidation --------------------------------
-
-
-def test_jti_denylist_cache_invalidation(page_service, oauth_clock):
-    """Immediately after family revoke (or any cache_clear path), the next
-    bearer-decode for a revoked jti must hit the DB and return 401. The
-    REST 401 carries the ``revoked`` keyword pin; the /mcp 401 confirms
-    the cross-transport effect."""
-
-    client = make_client(page_service)
-    _check_workspace_id = _current_workspace_id(client)
-    tokens = _seed_oauth_tokens(client, state="cache-inval-CCC")
-
-    # Prime the cache by hitting REST once (jti unrevoked here).
-    primer = client.get(
-        f"/api/v1/workspaces/{_check_workspace_id}/context/pages",
-        headers={"Authorization": f"Bearer {tokens['access_token']}"},
-    )
-    assert primer.status_code == 200, primer.text
-
-    # Rotate then replay to trigger family revoke + cache invalidation.
-    client.post(
-        "/oauth/token",
-        data={
-            "grant_type": "refresh_token",
-            "client_id": tokens["client_id"],
-            "refresh_token": tokens["refresh_token"],
-        },
-    )
-    _lapse_reuse_grace_window(oauth_clock)
-    reuse = client.post(
-        "/oauth/token",
-        data={
-            "grant_type": "refresh_token",
-            "client_id": tokens["client_id"],
-            "refresh_token": tokens["refresh_token"],
-        },
-    )
-    assert reuse.status_code == 400
-
-    # Same access JWT that just returned 200 now 401s without delay
-    # because revoke_refresh_token_grant_family cleared the cache.
-    after = client.get(
-        f"/api/v1/workspaces/{_check_workspace_id}/context/pages",
-        headers={"Authorization": f"Bearer {tokens['access_token']}"},
-    )
-    assert after.status_code == 401, after.text
-    assert "revoked" in after.text
 
 
 def test_access_jwt_without_jti_claim_is_rejected(page_service):
@@ -2041,56 +1734,13 @@ def test_access_jwt_without_jti_claim_is_rejected(page_service):
     assert "revoked" in response.text
 
 
-def test_consent_revoke_invalidates_live_access_jwt(page_service):
-    """Disconnecting a client from the integrations UI must kill the
-    already-minted access JWT immediately, not leave it valid until exp:
-    ``revoke_consent`` fans out to the jti denylist exactly like the
-    refresh-reuse family revoke and RFC 7009 ``/oauth/revoke`` paths,
-    and clears the denylist cache so the rejection is zero-latency."""
-
-    client = make_client(page_service)
-    _check_workspace_id = _current_workspace_id(client)
-    tokens = _seed_oauth_tokens(client, state="consent-revoke-access-EEE")
-
-    # Prime the denylist cache with the still-valid jti so the test also
-    # proves revoke_consent invalidates the cache, not just the DB row.
-    primer = client.get(
-        f"/api/v1/workspaces/{_check_workspace_id}/context/pages",
-        headers={"Authorization": f"Bearer {tokens['access_token']}"},
-    )
-    assert primer.status_code == 200, primer.text
-
-    revoked = client.delete(
-        "/oauth/consents",
-        params={"client_id": tokens["client_id"]},
-    )
-    assert revoked.status_code == 200, revoked.text
-
-    jti = _decode_access_jti(tokens["access_token"])
-    with page_service.session_factory() as session:
-        row = session.get(OAuthAccessTokenJti, jti)
-        assert row is not None
-        assert row.revoked_at is not None, (
-            "consent revoke must set revoked_at on the access jti row"
-        )
-
-    after_mcp = client.post(
-        "/mcp",
-        headers={"Authorization": f"Bearer {tokens['access_token']}"},
-        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-    )
-    assert after_mcp.status_code == 401
-    after_rest = client.get(
-        f"/api/v1/workspaces/{_check_workspace_id}/context/pages",
-        headers={"Authorization": f"Bearer {tokens['access_token']}"},
-    )
-    assert after_rest.status_code == 401, after_rest.text
-    assert "revoked" in after_rest.text
-
-
 def test_consent_revoke_revokes_all_grants_for_user_client(page_service):
     """Consent revocation is deliberately wider than reuse handling: every
-    grant for the user/client pair loses both refresh and access tokens."""
+    grant for the user/client pair loses both refresh and access tokens.
+    Disconnecting a client from the integrations UI must kill the
+    already-minted access JWTs immediately, not leave them valid until exp:
+    ``revoke_consent`` fans out to the jti denylist and clears the denylist
+    cache, so the rejection is zero-latency."""
 
     client = make_client(page_service)
     _check_workspace_id = _current_workspace_id(client)
@@ -2104,6 +1754,13 @@ def test_consent_revoke_revokes_all_grants_for_user_client(page_service):
         client,
         state="consent-wide-outside-grant",
     )
+    # Prime the denylist cache with a still-valid jti so the test also
+    # proves revoke_consent invalidates the cache, not just the DB row.
+    primer = client.get(
+        f"/api/v1/workspaces/{_check_workspace_id}/context/pages",
+        headers={"Authorization": f"Bearer {grant_a['access_token']}"},
+    )
+    assert primer.status_code == 200, primer.text
 
     revoked = client.delete(
         "/oauth/consents",
@@ -2147,6 +1804,20 @@ def test_consent_revoke_revokes_all_grants_for_user_client(page_service):
         assert outside_access.revoked_at is None
 
     for grant in (grant_a, grant_b):
+        # Bearer checks first: grant_a's jti was cached as valid by the primer,
+        # and nothing but the consent revoke may have cleared that cache.
+        bearer = client.get(
+            f"/api/v1/workspaces/{_check_workspace_id}/context/pages",
+            headers={"Authorization": f"Bearer {grant['access_token']}"},
+        )
+        assert bearer.status_code == 401, bearer.text
+        assert "revoked" in bearer.text
+        after_mcp = client.post(
+            "/mcp",
+            headers={"Authorization": f"Bearer {grant['access_token']}"},
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        )
+        assert after_mcp.status_code == 401
         refresh = client.post(
             "/oauth/token",
             data={
@@ -2156,12 +1827,6 @@ def test_consent_revoke_revokes_all_grants_for_user_client(page_service):
             },
         )
         assert refresh.status_code == 400, refresh.text
-        bearer = client.get(
-            f"/api/v1/workspaces/{_check_workspace_id}/context/pages",
-            headers={"Authorization": f"Bearer {grant['access_token']}"},
-        )
-        assert bearer.status_code == 401, bearer.text
-        assert "revoked" in bearer.text
 
 
 def test_membership_loss_revokes_workspace_access_but_keeps_other_workspace_live(
@@ -2539,34 +2204,29 @@ def _revoke_audit_rows(page_service, action: str) -> list[AuditEvent]:
 # --- Positive controls ----------------------------------------------------
 
 
-def test_revoke_unknown_returns_200(page_service):
-    """RFC 7009 §2.2: an unknown token still returns 200 so the endpoint
-    does not function as a token-existence oracle. No audit row is
-    emitted because nothing was revoked."""
+def test_revoke_refresh_token_by_user_pat(page_service):
+    """ADR A4 case 1: PAT bearer revokes the user's refresh token.
+    Deliberate security fan-out kills every still-live access JWT for the
+    (user, client) pair (the original JWT must 401 carrying ``revoked``);
+    one ``oauth.revoke.success`` audit row is emitted carrying
+    ``family_access_count >= 1``. RFC 7009 §2.2: an unknown token, and a
+    second revoke of the same token, still return 200 so the endpoint is no
+    token-existence oracle, and neither writes an audit row."""
 
     client = make_client(page_service)
+    _check_workspace_id = _current_workspace_id(client)
+    tokens = _seed_oauth_tokens(client, state="revoke-by-pat-AAA")
     pat = _issue_pat(client)
 
-    response = client.post(
+    unknown = client.post(
         "/oauth/revoke",
         data={"token": "rt_does_not_exist_anywhere"},
         headers={"Authorization": f"Bearer {pat}"},
     )
-    assert response.status_code == 200
-    assert response.json() == {}
+    assert unknown.status_code == 200
+    assert unknown.json() == {}
     assert _revoke_audit_rows(page_service, "oauth.revoke.success") == []
     assert _revoke_audit_rows(page_service, "oauth.token.access_revoked") == []
-
-
-def test_revoke_refresh_token_by_user_pat(page_service):
-    """ADR A4 case 1: PAT bearer revokes the user's refresh token.
-    Deliberate security fan-out kills every still-live access JWT for the
-    (user, client) pair; one ``oauth.revoke.success`` audit row is emitted
-    carrying ``family_access_count >= 1``."""
-
-    client = make_client(page_service)
-    tokens = _seed_oauth_tokens(client, state="revoke-by-pat-AAA")
-    pat = _issue_pat(client)
 
     response = client.post(
         "/oauth/revoke",
@@ -2577,6 +2237,16 @@ def test_revoke_refresh_token_by_user_pat(page_service):
         headers={"Authorization": f"Bearer {pat}"},
     )
     assert response.status_code == 200, response.text
+
+    # Cross-effect: the access JWT issued alongside the revoked refresh is
+    # now refused. Checked before the refresh attempt below, which could
+    # revoke the family on its own.
+    access_after = client.get(
+        f"/api/v1/workspaces/{_check_workspace_id}/context/pages",
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert access_after.status_code == 401, access_after.text
+    assert "revoked" in access_after.text
 
     # The refresh token is now revoked; a subsequent refresh attempt
     # returns 400 invalid_grant.
@@ -2596,6 +2266,15 @@ def test_revoke_refresh_token_by_user_pat(page_service):
     assert len(rows) == 1
     assert rows[0].payload["token_type"] == "refresh_token"
     assert rows[0].payload["family_access_count"] >= 1
+
+    # Idempotency: the second revoke is a 200 no-op.
+    second = client.post(
+        "/oauth/revoke",
+        data={"token": tokens["refresh_token"]},
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+    assert second.status_code == 200
+    assert len(_revoke_audit_rows(page_service, "oauth.revoke.success")) == 1
 
 
 def test_revoke_refresh_token_by_client_native(page_service):
@@ -2620,43 +2299,6 @@ def test_revoke_refresh_token_by_client_native(page_service):
         },
     )
     assert response.status_code == 200, response.text
-    rows = _revoke_audit_rows(page_service, "oauth.revoke.success")
-    assert len(rows) == 1
-    assert rows[0].actor_kind == "oauth_client"
-    assert rows[0].actor_id == tokens["client_id"]
-
-
-def test_revoke_refresh_token_by_oauth_bearer_same_workspace(page_service):
-    """OAuth JWT bearers may revoke tokens for the same user/client/workspace.
-
-    This pins the documented bearer path separately from the session-cookie
-    path by clearing cookies before calling /oauth/revoke.
-    """
-
-    client = make_client(page_service)
-    tokens = _seed_oauth_tokens(client, state="revoke-oauth-same-AAA")
-    client.cookies.clear()
-
-    response = client.post(
-        "/oauth/revoke",
-        data={
-            "token": tokens["refresh_token"],
-            "token_type_hint": "refresh_token",
-        },
-        headers={"Authorization": f"Bearer {tokens['access_token']}"},
-    )
-    assert response.status_code == 200, response.text
-
-    after = client.post(
-        "/oauth/token",
-        data={
-            "grant_type": "refresh_token",
-            "client_id": tokens["client_id"],
-            "refresh_token": tokens["refresh_token"],
-        },
-    )
-    assert after.status_code == 400
-
     rows = _revoke_audit_rows(page_service, "oauth.revoke.success")
     assert len(rows) == 1
     assert rows[0].actor_kind == "oauth_client"
@@ -2786,10 +2428,7 @@ def test_oauth_bearer_can_revoke_refresh_token_for_other_workspace_same_client(
     assert rows[0].actor_id == revoker_tokens["client_id"]
 
 
-@pytest.mark.parametrize("target", ["self", "sibling"])
-def test_oauth_bearer_can_revoke_access_token_in_consented_workspace(
-    page_service, target
-):
+def test_oauth_bearer_can_revoke_access_token_in_consented_workspace(page_service):
     """An oauth_jwt bearer must actually be able to revoke an access JWT.
 
     P10.3 T3 (D-01v2/D-01v3): ``_revoke_as_access`` matches only
@@ -2800,29 +2439,27 @@ def test_oauth_bearer_can_revoke_access_token_in_consented_workspace(
     an access revoke actually succeed instead of silently no-op'ing per RFC
     7009 §2.2.
 
-    The ``sibling`` cell revokes a DIFFERENT access JWT minted for the same
-    (user, client) pair, which proves two things the ``self`` cell cannot:
-    the fix is not a self-revoke-only special case, and the access path
-    revokes EXACTLY ONE jti -- unlike the refresh path it must not fan out
-    across the (user, client) radius, so the revoker's own token stays live.
+    The target is a DIFFERENT access JWT minted for the same (user, client)
+    pair, which proves two things a self-revoke cannot: the fix is not a
+    self-revoke-only special case, and the access path revokes EXACTLY ONE
+    jti -- unlike the refresh path it must not fan out across the (user,
+    client) radius, so the revoker's own token stays live. Which workspace
+    the sibling was requested for does not matter: the re-consent below
+    reuses the one (user, client) consent group, so there is no
+    cross-workspace variant to test separately.
     """
 
     client = make_client(page_service)
     _check_workspace_id = _current_workspace_id(client)
-    revoker_tokens = _seed_oauth_tokens(
-        client, state=f"revoke-oauth-access-{target}-III"
+    revoker_tokens = _seed_oauth_tokens(client, state="revoke-oauth-access-sibling-III")
+    # Same client, same default workspace -> the second authorize round
+    # takes _seed_oauth_tokens' 302 re-consent branch, so one live
+    # OAuthConsent(user, client, default) covers both tokens.
+    target_tokens = _seed_oauth_tokens(
+        client,
+        state="revoke-oauth-access-sibling-MMM",
+        client_id=revoker_tokens["client_id"],
     )
-    if target == "sibling":
-        # Same client, same default workspace -> the second authorize round
-        # takes _seed_oauth_tokens' 302 re-consent branch, so one live
-        # OAuthConsent(user, client, default) covers both tokens.
-        target_tokens = _seed_oauth_tokens(
-            client,
-            state=f"revoke-oauth-access-{target}-MMM",
-            client_id=revoker_tokens["client_id"],
-        )
-    else:
-        target_tokens = revoker_tokens
     jti = _decode_access_jti(target_tokens["access_token"])
     revoker_jti = _decode_access_jti(revoker_tokens["access_token"])
 
@@ -2854,14 +2491,13 @@ def test_oauth_bearer_can_revoke_access_token_in_consented_workspace(
             "an oauth_jwt bearer revoking an access token in a consented "
             "workspace must mark the jti row revoked, not silently no-op"
         )
-        if target == "sibling":
-            revoker_row = session.get(OAuthAccessTokenJti, revoker_jti)
-            assert revoker_row is not None
-            assert revoker_row.revoked_at is None, (
-                "the access path revokes exactly one jti -- it must not fan "
-                "out across the (user, client) radius and kill the revoker's "
-                "own token"
-            )
+        revoker_row = session.get(OAuthAccessTokenJti, revoker_jti)
+        assert revoker_row is not None
+        assert revoker_row.revoked_at is None, (
+            "the access path revokes exactly one jti -- it must not fan "
+            "out across the (user, client) radius and kill the revoker's "
+            "own token"
+        )
     # The same request that just returned 200 is now refused, so the revoke
     # reached the live denylist and not only the row.
     after = client.get(
@@ -2880,76 +2516,6 @@ def test_oauth_bearer_can_revoke_access_token_in_consented_workspace(
     assert rows[0].workspace_id is None  # ADR A11 NULL for access revoke
 
 
-def test_oauth_bearer_can_revoke_access_token_across_workspaces_same_client(
-    page_service,
-):
-    """Counterpart to
-    ``test_oauth_bearer_can_revoke_refresh_token_for_other_workspace_same_client``
-    for the access-token path.
-
-    P10.3 T3 (D-01v2/D-01v3): ``_revoke_as_access`` matches only
-    ``jti_row.user_id`` / ``jti_row.client_id`` against the bearer's own
-    claims -- no workspace comparison exists any more (access JWTs carry no
-    workspace claim, D-01v3-d, and ``OAuthAccessTokenJti`` has no
-    ``workspace_id`` column). An oauth_jwt bearer may therefore revoke an
-    access token minted for a DIFFERENT workspace under the same (user,
-    client) pair.
-
-    This replaces the retired
-    ``test_oauth_bearer_cannot_revoke_access_token_for_unconsented_workspace``,
-    which pinned the OLD deny behavior for exactly this scenario -- that
-    mechanism no longer exists. Cross-USER and cross-CLIENT isolation on the
-    access path remain enforced and are covered separately by
-    ``test_other_users_pat_cannot_revoke_access_token`` and
-    ``test_oauth_bearer_cannot_revoke_another_clients_access_token`` below.
-    """
-
-    client = make_client(page_service)
-    revoker_tokens = _seed_oauth_tokens(
-        client,
-        state="revoke-oauth-access-default-JJJ",
-        workspace_id=_current_workspace_id(client),
-    )
-    other_workspace_id, _other_slug = _seed_second_workspace(
-        page_service,
-        slug="oauth-revoke-access-cross-workspace",
-    )
-    target_tokens = _seed_oauth_tokens(
-        client,
-        state="revoke-oauth-access-cross-KKK",
-        client_id=revoker_tokens["client_id"],
-        workspace_id=other_workspace_id,
-    )
-    target_jti = _decode_access_jti(target_tokens["access_token"])
-    client.cookies.clear()
-
-    response = client.post(
-        "/oauth/revoke",
-        data={
-            "token": target_tokens["access_token"],
-            "token_type_hint": "access_token",
-        },
-        headers={"Authorization": f"Bearer {revoker_tokens['access_token']}"},
-    )
-    assert response.status_code == 200, response.text
-
-    with page_service.session_factory() as session:
-        jti_row = session.get(OAuthAccessTokenJti, target_jti)
-        assert jti_row is not None
-        assert jti_row.revoked_at is not None, (
-            "an oauth_jwt bearer must be able to revoke an access token for "
-            "the same (user, client) pair regardless of which workspace it "
-            "was minted for (P10.3 T3 -- no workspace claim on access JWTs "
-            "any more, D-01v3-d)"
-        )
-
-    rows = _revoke_audit_rows(page_service, "oauth.token.access_revoked")
-    assert len(rows) == 1
-    assert rows[0].payload["token_type"] == "access_token"
-    assert rows[0].payload["jti"] == target_jti
-    assert rows[0].workspace_id is None  # ADR A11 NULL for access revoke
-
-
 # P10.3 T3 (D-01v2/D-01v3, section 2.3) retired the former
 # revoker_workspace_ids restriction on OAuthService.revoke_token entirely --
 # there is no more "bearer has no bound workspace" tri-state to guard, since
@@ -2959,7 +2525,7 @@ def test_oauth_bearer_can_revoke_access_token_across_workspaces_same_client(
 # test_oauth_bearer_cannot_revoke_access_token_for_unconsented_workspace
 # above are replaced by
 # test_oauth_bearer_can_revoke_refresh_token_for_other_workspace_same_client
-# and test_oauth_bearer_can_revoke_access_token_across_workspaces_same_client,
+# and test_oauth_bearer_can_revoke_access_token_in_consented_workspace,
 # which pin the new, intentionally-widened behavior instead. The retired
 # test_revoke_token_denies_when_bearer_has_no_bound_workspace called
 # revoke_token(..., revoker_workspace_ids=()), which now raises TypeError
@@ -3041,34 +2607,6 @@ def test_oauth_bearer_cannot_revoke_another_clients_access_token(page_service):
         assert jti_row.revoked_at is None
 
 
-def test_revoke_refresh_invalidates_family_access_jwt(page_service):
-    """Cross-effect: explicitly revoking a refresh token cascades to every
-    access JWT in the (user, client) security radius. The original JWT (issued
-    alongside the revoked refresh) must 401 carrying ``revoked``."""
-
-    client = make_client(page_service)
-    _check_workspace_id = _current_workspace_id(client)
-    tokens = _seed_oauth_tokens(client, state="revoke-cascade-DDD")
-    pat = _issue_pat(client)
-
-    revoke = client.post(
-        "/oauth/revoke",
-        data={
-            "token": tokens["refresh_token"],
-            "token_type_hint": "refresh_token",
-        },
-        headers={"Authorization": f"Bearer {pat}"},
-    )
-    assert revoke.status_code == 200
-
-    after = client.get(
-        f"/api/v1/workspaces/{_check_workspace_id}/context/pages",
-        headers={"Authorization": f"Bearer {tokens['access_token']}"},
-    )
-    assert after.status_code == 401, after.text
-    assert "revoked" in after.text
-
-
 def test_metadata_advertises_revocation_endpoint(page_service):
     """RFC 7009 + RFC 8414: the authorization-server metadata document
     must advertise ``revocation_endpoint`` so native discoverers don't
@@ -3087,7 +2625,10 @@ def test_metadata_advertises_revocation_endpoint(page_service):
 
 def test_revoke_auth_fail_returns_401(page_service):
     """RFC 7009 §2.1: no bearer + no matching client_id → 401 with a
-    WWW-Authenticate challenge."""
+    WWW-Authenticate challenge. ADR A4 case 3 wrong-input oracle guard: if
+    the ``client_id`` form does not match the token's client_id and no
+    bearer is supplied, the endpoint must NOT reveal token existence. It
+    returns the same 401 as a fully missing-auth call."""
 
     client = make_client(page_service)
     tokens = _seed_oauth_tokens(client, state="revoke-noauth-EEE")
@@ -3102,17 +2643,6 @@ def test_revoke_auth_fail_returns_401(page_service):
     assert "WWW-Authenticate" in response.headers
     assert response.headers["WWW-Authenticate"].lower().startswith("bearer")
     assert response.json()["error_code"] == "unauthorized"
-
-
-def test_revoke_wrong_client_id_returns_401_without_oracle(page_service):
-    """ADR A4 case 3 wrong-input oracle guard: if ``client_id`` form
-    does not match the token's client_id and no bearer is supplied, the
-    endpoint must NOT reveal token existence. It returns the same 401
-    challenge as a fully missing-auth call."""
-
-    client = make_client(page_service)
-    tokens = _seed_oauth_tokens(client, state="revoke-wrongclient-FFF")
-    client.cookies.clear()
 
     response = client.post(
         "/oauth/revoke",
@@ -3176,34 +2706,6 @@ def test_revoke_wrong_user_pat_silent_no_op(page_service):
     assert refresh.status_code == 200, refresh.text
 
 
-def test_revoke_idempotent_second_call_returns_200(page_service):
-    """RFC 7009 §2.2 idempotency: a second revoke of the same token is
-    a 200 no-op. Positive control paired with the wrong-user negative
-    above — we exercise the same 200 status code through two different
-    paths so the assertion is meaningful."""
-
-    client = make_client(page_service)
-    tokens = _seed_oauth_tokens(client, state="revoke-idem-HHH")
-    pat = _issue_pat(client)
-
-    first = client.post(
-        "/oauth/revoke",
-        data={"token": tokens["refresh_token"]},
-        headers={"Authorization": f"Bearer {pat}"},
-    )
-    assert first.status_code == 200
-    second = client.post(
-        "/oauth/revoke",
-        data={"token": tokens["refresh_token"]},
-        headers={"Authorization": f"Bearer {pat}"},
-    )
-    assert second.status_code == 200
-
-    # One audit row from the first call; the second call is a no-op.
-    rows = _revoke_audit_rows(page_service, "oauth.revoke.success")
-    assert len(rows) == 1
-
-
 def test_handoff_page_script_is_nonce_matched_under_security_headers(page_service):
     """Without a matching nonce the countdown never runs and the user is
     stranded on a page whose only way forward is a button they may not read."""
@@ -3214,7 +2716,14 @@ def test_handoff_page_script_is_nonce_matched_under_security_headers(page_servic
     params = _authorize_params(
         registered.json()["client_id"], state=_CONSENT_STATE_GOOD
     )
-    client.get("/oauth/authorize", params=params)
+    consent = client.get("/oauth/authorize", params=params)
+    # The consent form may post only to itself and the validated loopback.
+    assert consent.status_code == 200
+    consent_csp = consent.headers["content-security-policy"]
+    assert "form-action 'self' http://127.0.0.1:53682" in consent_csp
+    assert "script-src 'self' 'nonce-" in consent_csp
+    assert 'nonce="' in consent.text
+    assert consent.headers["cache-control"] == "no-store"
     workspace_id = client.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
     ]

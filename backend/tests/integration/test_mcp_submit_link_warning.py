@@ -158,21 +158,6 @@ def _replay_submit(page_service, actor, submitted, *, idempotency_key: str):
     )
 
 
-def test_submit_without_links_warns_when_another_published_page_exists(
-    page_service, actor
-):
-    _publish_target(page_service, slug="published-neighbor")
-
-    submitted = _create_and_submit(
-        page_service,
-        actor,
-        body="# Source\n\nNo authored links.",
-    )
-
-    assert _warning_codes(submitted) == [WARNING_CODE]
-    assert submitted.envelope.warnings[0].message == WARNING_MESSAGE
-
-
 @pytest.mark.parametrize("link_syntax", ["context_url", "wikilink"])
 def test_submit_with_graph_visible_link_has_no_warning(
     page_service, actor, link_syntax
@@ -342,6 +327,7 @@ def test_successful_submit_runs_advisory_lookup_once(
     )
 
     assert _warning_codes(submitted) == [WARNING_CODE]
+    assert submitted.envelope.warnings[0].message == WARNING_MESSAGE
     assert len(calls) == 1
 
 

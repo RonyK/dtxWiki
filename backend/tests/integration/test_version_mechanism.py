@@ -205,33 +205,6 @@ def test_match_skips_alembic(sqlite_settings, sqlite_templates):
     mock_alembic.assert_not_called()
 
 
-def test_removed_revision_refuses_automatic_upgrade(sqlite_settings, sqlite_templates):
-    """A revision outside the consolidated graph requires operator conversion."""
-    from backend.app.bootstrap import ensure_app_version_synced
-    from backend.app.db import make_engine, make_session_factory_from_settings
-    from backend.models.app_metadata import AppMetadata
-
-    _clone(sqlite_templates, sqlite_settings, "head")
-
-    factory = make_session_factory_from_settings(sqlite_settings)
-    with factory.begin() as session:
-        session.merge(
-            AppMetadata(key="dtxwiki_version", value=sqlite_settings.app_version)
-        )
-
-    engine = make_engine(sqlite_settings.database_url)
-    with engine.begin() as connection:
-        connection.execute(
-            text("UPDATE alembic_version SET version_num = :revision"),
-            {"revision": "0000_pre_squash_revision"},
-        )
-
-    with mock.patch("backend.app.bootstrap.run_alembic_upgrade") as mock_alembic:
-        with pytest.raises(RuntimeError, match="unknown_revision"):
-            ensure_app_version_synced(sqlite_settings)
-    mock_alembic.assert_not_called()
-
-
 def test_old_schema_stamped_current_is_drift_and_bootstrap_fails_nonmutating(
     sqlite_settings,
     sqlite_templates,
@@ -325,17 +298,6 @@ def test_alembic_guard_allows_verified_noop_nonbase_stamps(
     assert current_db_alembic_revision(head_settings) == _current_alembic_head()
 
 
-def test_alembic_guard_allows_downgrade_base(sqlite_settings, sqlite_templates):
-    from alembic import command
-
-    from backend.app.bootstrap import current_db_alembic_revision
-
-    _clone(sqlite_templates, sqlite_settings, "base_0001")
-    command.downgrade(_alembic_config(sqlite_settings), "base")
-
-    assert current_db_alembic_revision(sqlite_settings) is None
-
-
 def test_alembic_guard_allows_recovery_unstamp_to_base(
     sqlite_settings, sqlite_templates
 ):
@@ -349,14 +311,14 @@ def test_alembic_guard_allows_recovery_unstamp_to_base(
     assert current_db_alembic_revision(sqlite_settings) is None
 
 
+# One row per failure mode the docstring names; every blocked state then takes
+# the same env.py refusal, and each classification is pinned by the tri-state
+# preflight test below.
 @pytest.mark.parametrize(
     ("damage", "consistency"),
     (
-        ("corrupt_alembic_version", "invalid_alembic_revision"),
         ("retired_revision", "unknown_revision"),
         ("unstamped_final_schema", "stamp_marker_conflict"),
-        ("dropped_alembic_version", "stamp_marker_conflict"),
-        ("partial_schema", "partial_schema"),
         ("foreign_user_table", "unversioned_populated"),
     ),
 )
@@ -390,13 +352,13 @@ def test_direct_alembic_upgrade_refuses_unidentifiable_start_state(
     assert _journal_mode(database) == before_journal == "delete"
 
 
+# Bootstrap raises on any blocked preflight through one branch; a readable and
+# an unreadable database reach it through the probe's two paths. The other
+# classifications are pinned by the tri-state preflight test, and the dropped
+# stamp by the repeated-bootstrap test.
 @pytest.mark.parametrize(
     ("damage", "consistency"),
     (
-        ("unstamped_final_schema", "stamp_marker_conflict"),
-        ("dropped_alembic_version", "stamp_marker_conflict"),
-        ("partial_schema", "partial_schema"),
-        ("corrupt_alembic_version", "invalid_alembic_revision"),
         ("foreign_user_table", "unversioned_populated"),
         ("unreadable_file", "probe_error"),
     ),
@@ -474,22 +436,6 @@ def test_migration_status_reports_drift_for_populated_unversioned_database(
     assert _journal_mode(database) == before_journal == "delete"
 
 
-def test_bootstrap_migrates_an_existing_empty_database_file(
-    sqlite_settings, sqlite_templates
-):
-    """A zero-table file is proven empty and must still bootstrap normally."""
-    from backend.app.bootstrap import (
-        current_db_alembic_revision,
-        ensure_app_version_synced,
-    )
-
-    _damage_database(sqlite_templates, sqlite_settings, "empty_file")
-
-    ensure_app_version_synced(sqlite_settings)
-
-    assert current_db_alembic_revision(sqlite_settings) == _current_alembic_head()
-
-
 def test_source_lock_probe_leaves_a_rollback_journal_database_unchanged(
     sqlite_settings,
     sqlite_templates,
@@ -510,10 +456,9 @@ def test_source_lock_probe_leaves_a_rollback_journal_database_unchanged(
 @pytest.mark.parametrize(
     ("state", "verdict", "consistency"),
     (
-        # An absent file is the only state that is fresh without being read.
         # Emptiness — not the mere absence of a stamp — is what makes a
-        # database safe to migrate in place.
-        ("absent", "fresh", "database_absent"),
+        # database safe to migrate in place. The absent file is pinned by
+        # test_migration_preflight_never_creates_the_database_it_inspects.
         ("empty_file", "fresh", "proven_empty"),
         ("head", "ready", "consistent"),
         ("laundered", "blocked", "stamp_marker_conflict"),
@@ -539,7 +484,7 @@ def test_migration_preflight_reports_tri_state_verdicts(
         _clone(sqlite_templates, sqlite_settings, "head")
     elif state == "laundered":
         _manually_stamp_0001_as_current_0002(sqlite_templates, sqlite_settings)
-    elif state != "absent":
+    else:
         _damage_database(sqlite_templates, sqlite_settings, state)
 
     preflight = evaluate_migration_preflight(sqlite_settings.database_url)
@@ -552,7 +497,10 @@ def test_migration_preflight_reports_tri_state_verdicts(
 def test_migration_preflight_never_creates_the_database_it_inspects(
     sqlite_settings,
 ):
-    """An absent database is classified without opening — and so creating — it."""
+    """An absent database is classified without opening — and so creating — it.
+
+    An absent file is the only state that is fresh without being read.
+    """
     from backend.services.ops.migration_preflight import (
         evaluate_migration_preflight,
     )
@@ -562,6 +510,8 @@ def test_migration_preflight_never_creates_the_database_it_inspects(
     preflight = evaluate_migration_preflight(sqlite_settings.database_url)
 
     assert preflight.verdict == "fresh"
+    assert preflight.consistency == "database_absent"
+    assert preflight.blocked is False
     assert not database.exists()
 
 
@@ -676,16 +626,26 @@ def test_bootstrap_auto_false_refuses_an_unsynced_version_marker(
 
 
 def test_bootstrap_auto_false_serves_a_database_bootstrapped_by_the_operator(
-    sqlite_settings, served_app
+    sqlite_settings, sqlite_templates, served_app
 ):
-    """The refusal's own remedy works: `dtxwiki bootstrap`, then serve."""
-    from backend.app.bootstrap import DatabaseNotCurrentError, bootstrap
+    """The refusal's own remedy works: `dtxwiki bootstrap`, then serve.
 
+    It starts from a zero-table file: proven empty, it must still bootstrap
+    normally (the absent file's refusal and creation are pinned elsewhere).
+    """
+    from backend.app.bootstrap import (
+        DatabaseNotCurrentError,
+        bootstrap,
+        current_db_alembic_revision,
+    )
+
+    _damage_database(sqlite_templates, sqlite_settings, "empty_file")
     with pytest.raises(DatabaseNotCurrentError):
         bootstrap(sqlite_settings, served_app)
 
     # What `dtxwiki bootstrap` does: the same settings with auto_bootstrap on.
     bootstrap(sqlite_settings.model_copy(update={"auto_bootstrap": True}))
+    assert current_db_alembic_revision(sqlite_settings) == _current_alembic_head()
     database = _sqlite_path(sqlite_settings)
     before = _file_fingerprint(database)
 

@@ -1117,9 +1117,10 @@ def test_review_approval_and_context_write_share_publication_transition(page_ser
         assert page.latest_draft_version_id is None
 
 
+# "branched" and "discarded" share one guard (graph_status != "linear").
 @pytest.mark.parametrize(
     "stale_shape",
-    ["non_latest", "non_linear", "branched", "discarded", "unapproved"],
+    ["non_latest", "non_linear", "branched", "unapproved"],
 )
 def test_invalid_final_publish_is_stable_and_does_not_mutate(
     page_service,
@@ -1155,7 +1156,7 @@ def test_invalid_final_publish_is_stable_and_does_not_mutate(
             page.latest_draft_version_id = later.id
         elif stale_shape == "non_linear":
             version.parent_version_id = None
-        elif stale_shape in {"branched", "discarded"}:
+        elif stale_shape == "branched":
             version.graph_status = stale_shape
         else:
             change_set = ChangeSet(

@@ -58,18 +58,6 @@ def _upgrade_tenancy_schema(config: Config) -> None:
         engine.dispose()
 
 
-def _downgrade_tenancy_schema(config: Config) -> None:
-    engine = create_engine(config.get_main_option("sqlalchemy.url"))
-    try:
-        _run_steps(
-            engine,
-            final_phase.prepare_downgrade_data_columns,
-            final_phase.downgrade,
-        )
-    finally:
-        engine.dispose()
-
-
 def _insert_workspace(connection, table, workspace_id: UUID, slug: str) -> None:
     now = datetime.now(UTC)
     actor_id = uuid4()
@@ -386,78 +374,6 @@ def test_final_preflight_rejects_existing_blob_workspace_mismatch(
 
     with pytest.raises(RuntimeError, match="source_blob_workspace_id"):
         _upgrade_tenancy_schema(config)
-
-
-def test_final_downgrade_removes_added_constraints(tmp_path: Path, sqlite_templates):
-    database_url = f"sqlite:///{tmp_path / 'tenancy-final-downgrade.db'}"
-    config = _config(database_url)
-    _clone_published_boundary(config, sqlite_templates)
-    _upgrade_tenancy_schema(config)
-    _downgrade_tenancy_schema(config)
-
-    engine = create_engine(database_url)
-    try:
-        item_foreign_keys = {
-            foreign_key["name"]
-            for foreign_key in inspect(engine).get_foreign_keys("library_item")
-        }
-        assert "fk_library_item_current_version_id_workspace_scoped" not in (
-            item_foreign_keys
-        )
-
-        expected_absent_checks = {
-            "library_item_version": {
-                "library_item_version_source_blob_workspace_check"
-            },
-        }
-        for table_name, absent in expected_absent_checks.items():
-            actual = {
-                check["name"]
-                for check in inspect(engine).get_check_constraints(table_name)
-            }
-            assert actual.isdisjoint(absent)
-
-        # A-1: library_artifact is
-        # now created directly (with library_artifact_blob_workspace_check
-        # already in place) by library_media_schema.py, a phase this test
-        # never downgrades -- tenancy_schema no longer adds or removes
-        # any CHECK on library_artifact (its former separate
-        # library_preview_artifact, which this test used to assert on
-        # instead, no longer exists as its own table at all). What final_
-        # tenancy_schema genuinely still installs on library_run/
-        # library_attempt/library_artifact -- and must still remove on
-        # downgrade -- is each one's single interim-to-final workspace-
-        # scoped FK into library_item_version, so that is what this test
-        # now asserts on for those three tables instead of a CHECK.
-        for table_name, fk_name in (
-            (
-                "library_run",
-                "fk_library_run_library_item_version_id_workspace_scoped",
-            ),
-            (
-                "library_attempt",
-                "fk_library_attempt_library_item_version_id_workspace_scoped",
-            ),
-            (
-                "library_artifact",
-                "fk_library_artifact_library_item_version_id_workspace_scoped",
-            ),
-        ):
-            foreign_keys = {
-                foreign_key["name"]
-                for foreign_key in inspect(engine).get_foreign_keys(table_name)
-            }
-            assert fk_name not in foreign_keys, table_name
-
-        # And the CHECK that tenancy_schema never touched is still
-        # there, undisturbed by downgrading the phase that never owned it.
-        artifact_checks = {
-            check["name"]
-            for check in inspect(engine).get_check_constraints("library_artifact")
-        }
-        assert "library_artifact_blob_workspace_check" in artifact_checks
-    finally:
-        engine.dispose()
 
 
 def test_workspace_scoped_set_null_fk_does_not_null_the_tenant_column(

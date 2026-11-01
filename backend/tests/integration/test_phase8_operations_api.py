@@ -2,7 +2,6 @@ import base64
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -594,10 +593,7 @@ def test_activity_lane_pagination_cursor_tolerance_and_kind_validation(page_serv
     assert resp.status_code == 422
 
 
-@pytest.mark.parametrize("personal_offset", [0, -1], ids=["tie", "reversed"])
-def test_settings_policy_patch_updates_workspace_and_literal_values(
-    page_service, personal_offset
-):
+def test_settings_policy_patch_updates_workspace_and_literal_values(page_service):
     client = make_client(page_service)
     workspace_id = client.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
@@ -605,8 +601,10 @@ def test_settings_policy_patch_updates_workspace_and_literal_values(
     # GET /workspaces orders by created_at, then slug. The seeded workspace
     # selected above and the Personal one signup created are stamped a fraction
     # of a second apart, so their order is whatever the wall clock did between
-    # the two inserts (a backward step lists Personal first). Pin a tie and a
-    # reversal so the rename check below cannot lean on list position.
+    # the two inserts (a backward step lists Personal first). Pin a reversal so
+    # the rename check below cannot lean on list position (a tie orders by slug
+    # and lists Personal first too, so it takes the same path).
+    personal_offset = -1
     with page_service.session_factory.begin() as session:
         target = session.get(Workspace, UUID(workspace_id))
         user = session.scalar(select(User).where(User.email == "test@example.com"))

@@ -19,7 +19,6 @@ from backend.services.auth.provider_registry import ProviderRegistry
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.password_recovery_service import (
     PasswordRecoveryAuthorizationError,
-    PasswordRecoveryRecentReauthenticationRequiredError,
     PasswordRecoveryService,
 )
 from backend.services.session_service import RecentReauthenticationCodec
@@ -483,35 +482,6 @@ def test_admin_reset_issue_transaction_rejects_stale_grant(page_service):
         assert session.scalar(select(func.count()).select_from(PasswordResetToken)) == 0
 
 
-def test_admin_reset_issue_transaction_rejects_stale_reauthentication_generation(
-    page_service,
-):
-    _client, admin, target = admin_client(page_service)
-    recovery = PasswordRecoveryService(
-        session_factory=page_service.session_factory,
-        credential_hasher=CredentialHasher(),
-        public_base_url="https://wiki.example.com",
-    )
-    with page_service.session_factory.begin() as session:
-        admin_model = session.get(User, admin.user_id)
-        assert admin_model is not None
-        stale_generation = admin_model.session_generation
-        admin_model.session_generation += 1
-
-    with pytest.raises(PasswordRecoveryRecentReauthenticationRequiredError):
-        recovery.issue_password_reset_for_user(
-            target_user_id=target.user_id,
-            delivery="link",
-            requested_by_user_id=admin.user_id,
-            requested_by_session_generation=stale_generation,
-            actor_kind="human",
-            actor_id=str(admin.user_id),
-        )
-
-    with page_service.session_factory() as session:
-        assert session.scalar(select(func.count()).select_from(PasswordResetToken)) == 0
-
-
 def test_admin_reset_generation_change_at_write_boundary_returns_exact_401(
     page_service,
     monkeypatch,
@@ -547,6 +517,8 @@ def test_admin_reset_generation_change_at_write_boundary_returns_exact_401(
         verify_then_revoke,
     )
 
+    # The proof verified against the old generation, so only the issue
+    # transaction's own generation recheck stands between it and a token.
     response = client.post(
         f"/api/v1/admin/users/{target.user_id}/password-reset",
         json={

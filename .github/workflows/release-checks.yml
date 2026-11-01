@@ -63,6 +63,13 @@ jobs:
         run: >-
           .venv/bin/python -m pytest backend/tests -q -n 4 --dist loadgroup
           -m xdist_group --tb=short
+      # PR CI deselects the capacity guards (`make test-backend` runs
+      # -m "not release_scale"). The step above already runs those that are
+      # also PostgreSQL suites, on both dialects; this one runs the rest.
+      - name: Execute the release-scale backend guards
+        run: >-
+          .venv/bin/python -m pytest backend/tests -q -n 4 --dist loadgroup
+          -m "release_scale and not xdist_group" --tb=short
 
   packaging:
     runs-on: ubuntu-latest

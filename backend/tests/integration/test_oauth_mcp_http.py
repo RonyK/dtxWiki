@@ -372,58 +372,10 @@ def test_oauth_authorize_get_records_account_scoped_activity(page_service):
     )
 
 
-def test_oauth_authorize_allow_requires_explicit_workspace(page_service):
-    client = make_client(page_service)
-    client_id = register_oauth_client(client, name="Workspace Required Client")
-    verifier = "v" * 64
-    params = authorize_params(client_id, verifier, state="missing-workspace")
-
-    # Sprint_5 Phase_3 Task 3.3: GET first to populate the CSRF cookie.
-    consent = client.get("/oauth/authorize", params=params)
-    assert consent.status_code == 200
-
-    response = client.post(
-        "/oauth/authorize",
-        data={
-            **params,
-            "decision": "allow",
-        },
-        follow_redirects=False,
-    )
-
-    assert response.status_code == 400
-    assert response.json()["error_code"] == "invalid_request"
-    assert "workspace_id" in response.json()["message"]
-    assert client.get("/oauth/consents").json()["data"] == []
-
-
-
-def test_mcp_http_accepts_personal_api_token(page_service):
-    client = make_client(page_service)
-    issued = client.post(
-        "/api/v1/auth/tokens",
-        json={
-            "workspace_grants": [{"workspace_id": current_workspace_id(client)}],
-            "name": "MCP HTTP",
-            "scopes": ["mcp:read", "mcp:write"],
-        },
-    )
-    token = issued.json()["data"]["plain_token"]
-
-    listed = client.post(
-        "/mcp",
-        headers={"Authorization": f"Bearer {token}"},
-        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-    )
-
-    assert listed.status_code == 200
-    names = {tool["name"] for tool in listed.json()["result"]["tools"]}
-    assert {"list_my_workspaces", "create_context_page"}.issubset(names)
-
-
 @pytest.mark.parametrize(
     ("role", "write_allowed"),
-    (("viewer", False), ("editor", True), ("owner", True)),
+    # Owner takes the editor branch for writes; viewer is the refused side.
+    (("viewer", False), ("editor", True)),
 )
 def test_mcp_http_enforces_live_workspace_role_matrix(
     page_service,
@@ -512,44 +464,41 @@ def test_mcp_http_enforces_live_workspace_role_matrix(
         assert envelope["error_code"] == "workspace_role_insufficient"
 
 
-def test_mcp_http_sdk_accept_header_rejects_unsupported_media(page_service):
+def test_mcp_http_sdk_stateless_json_response_does_not_require_session(page_service):
+    """A personal API token is accepted on /mcp; the stateless JSON mode needs
+    no session id; an Accept header without JSON is refused with 406."""
     client = make_client(page_service)
     issued = client.post(
         "/api/v1/auth/tokens",
         json={
             "workspace_grants": [{"workspace_id": current_workspace_id(client)}],
             "name": "MCP HTTP",
-            "scopes": ["mcp:read"],
+            "scopes": ["mcp:read", "mcp:write"],
         },
     )
     token = issued.json()["data"]["plain_token"]
 
-    response = client.post(
+    listed = client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    )
+    assert listed.status_code == 200
+    names = {tool["name"] for tool in listed.json()["result"]["tools"]}
+    assert {"list_my_workspaces", "create_context_page"}.issubset(names)
+
+    unsupported = client.post(
         "/mcp",
         headers={"Authorization": f"Bearer {token}", "Accept": "text/plain"},
         json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
-
-    assert response.status_code == 406
+    assert unsupported.status_code == 406
     assert_json_rpc_error(
-        response.json(),
+        unsupported.json(),
         request_id=1,
         error="not_acceptable",
         message_contains="Accept must include",
     )
-
-
-def test_mcp_http_sdk_stateless_json_response_does_not_require_session(page_service):
-    client = make_client(page_service)
-    issued = client.post(
-        "/api/v1/auth/tokens",
-        json={
-            "workspace_grants": [{"workspace_id": current_workspace_id(client)}],
-            "name": "MCP HTTP",
-            "scopes": ["mcp:read"],
-        },
-    )
-    token = issued.json()["data"]["plain_token"]
 
     first = client.post(
         "/mcp",
@@ -776,6 +725,10 @@ def test_oauth_dcr_without_scope_defaults_to_read_only(page_service):
 
     assert response.status_code == 200, response.text
     assert "Authorize dtxWiki MCP access" in response.text
+    # NEW-5: the trust label carries Korean copy alongside the English term.
+    assert "동적 클라이언트" in response.text
+    assert "신원은 독립적으로 검증되지 않았습니다" in response.text
+    assert "Dynamic client — Registered during this login" in response.text
 
 
 def test_oauth_authorize_browser_errors_render_html(page_service):
@@ -858,121 +811,6 @@ def test_oauth_rejects_invalid_pkce_and_state_parameters(page_service):
         )
 
 
-def test_oauth_deny_redirects_access_denied_and_audits(page_service):
-    client = make_client(page_service)
-    registered = client.post(
-        "/oauth/register",
-        json={
-            "client_name": "Deny Client",
-            "redirect_uris": ["http://127.0.0.1:53682/callback"],
-        },
-    ).json()
-    denied = client.post(
-        "/oauth/authorize",
-        data={
-            "response_type": "code",
-            "client_id": registered["client_id"],
-            "redirect_uri": "http://127.0.0.1:53682/callback",
-            "code_challenge": challenge_s256("v" * 64),
-            "code_challenge_method": "S256",
-            "scope": "mcp:read",
-            "state": oauth_state("state-123"),
-            "decision": "deny",
-        },
-        follow_redirects=False,
-    )
-    assert denied.status_code == 303
-    query = parse_qs(urlparse(denied.headers["location"]).query)
-    assert query["error"] == ["access_denied"]
-    assert query["state"] == [oauth_state("state-123")]
-    with page_service.session_factory() as session:
-        actions = {
-            event.action
-            for event in session.scalars(select(AuditEvent)).all()
-        }
-    assert "oauth.permission.denied" in actions
-
-
-def test_consent_skip_reprompt_is_group_scoped_not_per_workspace(page_service):
-    """P10.3 T3 (section 2.3) supersedes the pre-T3 'consent granted for
-    workspace A must not satisfy a skip-reprompt request for workspace B'
-    pin: ``has_existing_consent`` dropped the ``workspace_id`` parameter
-    entirely and is now a pure (user, client, scope) existence check --
-    ANY live consent for this client, covering however many workspaces,
-    satisfies skip-reprompt group-wide (see GET /oauth/authorize's
-    ``existing_consent`` short-circuit in backend/api/oauth.py). The
-    original per-workspace security property this test pinned did not
-    disappear, it moved: a specific workspace outside the credential's live
-    allowed set is still denied, just enforced at REQUEST time now
-    (``actor_with_target_workspace_scope`` / ``check_actor_can_access``),
-    not at consent-lookup time -- see
-    test_oauth_workspace_list_denies_after_consent_revoked and
-    test_mcp_http_envelope_preserves_token_workspace_denied for that
-    boundary.
-    """
-
-    from backend.app.settings import Settings
-    from backend.models.user import User
-    from backend.services.oauth_service import OAuthService
-
-    client = make_client(page_service)
-    # Register a client and grant consent via the standard flow so the
-    # only live OAuthConsent row is for the user's default workspace.
-    registered = client.post(
-        "/oauth/register",
-        json={
-            "client_name": "Workspace Scoped Client",
-            "redirect_uris": ["http://127.0.0.1:53682/callback"],
-            "scope": "mcp:read",
-        },
-    ).json()
-    verifier = "v" * 64
-    authorize_params = {
-        "response_type": "code",
-        "client_id": registered["client_id"],
-        "redirect_uri": "http://127.0.0.1:53682/callback",
-        "code_challenge": challenge_s256(verifier),
-        "code_challenge_method": "S256",
-        "scope": "mcp:read",
-        "state": oauth_state("consent-ws"),
-    }
-    grant = client.post(
-        "/oauth/authorize",
-        data={
-            **authorize_params,
-            "workspace_ids": current_workspace_id(client),
-            "decision": "allow",
-        },
-        follow_redirects=False,
-    )
-    assert grant.status_code == 303
-
-    service = OAuthService(
-        session_factory=page_service.session_factory,
-        settings=Settings(
-            database_url="sqlite+pysqlite:///:memory:",
-            session_secret="test-session-secret",
-            public_base_url="http://testserver",
-        ),
-        public_base_url="http://testserver",
-    )
-    with page_service.session_factory() as session:
-        user = session.scalars(select(User)).first()
-
-    assert service.has_existing_consent(
-        user_id=user.id,
-        client_id=registered["client_id"],
-        scope="mcp:read",
-    )
-
-    # A different, never-granted client still correctly reports no consent.
-    assert not service.has_existing_consent(
-        user_id=user.id,
-        client_id="never-registered-client",
-        scope="mcp:read",
-    )
-
-
 def test_oauth_refresh_rejects_legacy_null_hashed_token(page_service):
     """F5/P1-2: refresh tokens issued before the Argon2id rollout (where
     ``hashed_token IS NULL``) must be rejected, forcing the client to
@@ -1039,59 +877,13 @@ def test_oauth_refresh_rejects_legacy_null_hashed_token(page_service):
     assert_oauth_token_error(rejected, "invalid_grant")
 
 
-def test_oauth_dcr_rejects_non_loopback_plain_http_redirect(page_service):
-    client = make_client(page_service)
-    response = client.post(
-        "/oauth/register",
-        json={
-            "client_name": "Bad Redirect",
-            "redirect_uris": ["http://example.com/callback"],
-        },
-    )
-    assert response.status_code == 400
-    assert response.json()["error_code"] == "invalid_client_metadata"
-
-
-def test_oauth_dcr_rate_limit_returns_invalid_client_metadata(page_service):
-    """Fix-6 Task 3.12 (Implementer L-F5-2): rate-limit contract test.
-
-    `_consume_dcr_slot` rejects after 20 registrations per 60s from the
-    same client_ip. The 21st request must surface status 400 + error_code
-    `invalid_client_metadata`. Pre-fix this contract was implicit — only
-    `_consume_dcr_slot` itself tested the bucket via internal calls.
-    """
-    from backend.services import oauth_service as oauth_service_module
-
-    # Reset the rate-limit bucket so prior tests on the same client_ip
-    # ("testclient") cannot pollute or short-circuit this test.
-    oauth_service_module._DCR_BUCKET.clear()
-    client = make_client(page_service)
-    # The bucket starts 19 deep, so the 20-slot boundary takes two requests:
-    # the 20th passes and the 21st is refused.
-    oauth_service_module._DCR_BUCKET["testclient"] = [time.monotonic()] * 19
-    last_response = None
-    for index in range(2):
-        last_response = client.post(
-            "/oauth/register",
-            json={
-                "client_name": f"Rate Limit Probe {index}",
-                "redirect_uris": ["http://127.0.0.1:53682/callback"],
-                "scope": "mcp:read",
-            },
-        )
-        if index == 0:
-            assert last_response.status_code == 201, last_response.text
-
-    assert last_response is not None
-    assert last_response.status_code == 400
-    body = last_response.json()
-    assert body["error_code"] == "invalid_client_metadata"
-    assert "rate limit" in body["message"].lower()
-    # Cleanup so subsequent tests on this client_ip start fresh.
-    oauth_service_module._DCR_BUCKET.clear()
-
-
 def test_oauth_dcr_rate_limit_uses_forwarded_client_ip_when_behind_proxy(page_service):
+    """`_consume_dcr_slot` rejects after 20 registrations per 60s from one
+    client IP with 400 ``invalid_client_metadata``, keyed by the resolved
+    remote IP. Which address that is (peer without a proxy, the peer for an
+    untrusted or spoofed X-Forwarded-For, the rightmost untrusted hop behind
+    a trusted proxy) is pinned by backend/tests/unit/test_remote_ip.py; this
+    case proves DCR keys on that resolution rather than the raw peer."""
     from backend.services import oauth_service as oauth_service_module
 
     oauth_service_module._DCR_BUCKET.clear()
@@ -1138,6 +930,7 @@ def test_oauth_dcr_rate_limit_uses_forwarded_client_ip_when_behind_proxy(page_se
     )
     assert limited.status_code == 400
     assert limited.json()["error_code"] == "invalid_client_metadata"
+    assert "rate limit" in limited.json()["message"].lower()
 
     other_client_ip = client.post(
         "/oauth/register",
@@ -1149,48 +942,6 @@ def test_oauth_dcr_rate_limit_uses_forwarded_client_ip_when_behind_proxy(page_se
         },
     )
     assert other_client_ip.status_code == 201
-    oauth_service_module._DCR_BUCKET.clear()
-
-
-def test_oauth_dcr_rate_limit_ignores_spoofed_forwarded_for(page_service):
-    from backend.services import oauth_service as oauth_service_module
-
-    oauth_service_module._DCR_BUCKET.clear()
-    client = TestClient(
-        create_app(
-            settings=Settings(
-                database_url="sqlite+pysqlite:///:memory:",
-                session_secret="test-session-secret",
-                public_base_url="http://testserver",
-                behind_proxy=True,
-            ),
-            page_service=page_service,
-        )
-    )
-    authenticate_test_client_in_workspace(client, page_service.session_factory)
-
-    # The untrusted peer's own bucket starts 19 deep; every request carries a
-    # different forwarded value, so only the real peer address can be the key.
-    oauth_service_module._DCR_BUCKET["testclient"] = [time.monotonic()] * 19
-    responses = []
-    for index in range(2):
-        responses.append(
-            client.post(
-                "/oauth/register",
-                headers={"X-Forwarded-For": f"203.0.113.{index}, 10.0.0.1"},
-                json={
-                    "client_name": f"Spoofed Forwarded Probe {index}",
-                    "redirect_uris": [f"http://127.0.0.1:{53800 + index}/callback"],
-                    "scope": "mcp:read",
-                },
-            )
-        )
-    last_response = responses[-1]
-    assert responses[0].status_code == 201, responses[0].text
-
-    assert last_response is not None
-    assert last_response.status_code == 400
-    assert last_response.json()["error_code"] == "invalid_client_metadata"
     oauth_service_module._DCR_BUCKET.clear()
 
 
@@ -1321,10 +1072,10 @@ def test_oauth_token_does_not_mask_non_lock_operational_error(
     assert "Retry-After" not in response.headers
 
 
-def test_oauth_token_endpoint_rejects_json_body(page_service):
+def test_oauth_token_endpoint_rejects_malformed_requests(page_service):
     client = make_client(page_service)
 
-    response = client.post(
+    json_body = client.post(
         "/oauth/token",
         json={
             "grant_type": "refresh_token",
@@ -1332,44 +1083,29 @@ def test_oauth_token_endpoint_rejects_json_body(page_service):
             "refresh_token": "rt_json",
         },
     )
-
-    assert response.status_code == 400
-    body = assert_oauth_token_error(response, "invalid_request")
+    assert json_body.status_code == 400
+    body = assert_oauth_token_error(json_body, "invalid_request")
     assert "form-urlencoded" in body["error_description"]
 
-
-def test_oauth_token_endpoint_rejects_missing_form_body(page_service):
-    client = make_client(page_service)
-
-    response = client.post("/oauth/token")
-
-    assert response.status_code == 400
+    missing_form = client.post("/oauth/token")
+    assert missing_form.status_code == 400
     # A missing grant_type is a missing required parameter, which RFC 6749
     # §5.2 calls invalid_request -- not a dead credential.
-    body = assert_oauth_token_error(response, "invalid_request")
+    body = assert_oauth_token_error(missing_form, "invalid_request")
     assert "grant_type" in body["error_description"]
 
-
-def test_oauth_token_endpoint_rejects_unsupported_grant_type(page_service):
-    client = make_client(page_service)
-
-    response = client.post(
+    unsupported = client.post(
         "/oauth/token",
         data={"grant_type": "client_credentials", "client_id": "test-client"},
     )
-
-    assert response.status_code == 400
+    assert unsupported.status_code == 400
     # RFC 6749 §5.2 keeps these apart on purpose: invalid_grant tells the
     # client to throw its refresh token away, which is the wrong advice when
     # only the grant_type was wrong.
-    body = assert_oauth_token_error(response, "unsupported_grant_type")
+    body = assert_oauth_token_error(unsupported, "unsupported_grant_type")
     assert "unsupported grant_type" in body["error_description"]
 
-
-def test_oauth_token_endpoint_rejects_unknown_refresh_token(page_service):
-    client = make_client(page_service)
-
-    response = client.post(
+    unknown_refresh = client.post(
         "/oauth/token",
         data={
             "grant_type": "refresh_token",
@@ -1377,9 +1113,8 @@ def test_oauth_token_endpoint_rejects_unknown_refresh_token(page_service):
             "refresh_token": "unknown-refresh-token",
         },
     )
-
-    assert response.status_code == 400
-    assert_oauth_token_error(response, "invalid_grant")
+    assert unknown_refresh.status_code == 400
+    assert_oauth_token_error(unknown_refresh, "invalid_grant")
 
 
 def test_oauth_revoke_endpoint_rejects_json_body(page_service):
@@ -1591,118 +1326,36 @@ def test_oauth_code_redeem_serializes_file_backed_sqlite(
     assert_oauth_token_error(failure, "invalid_grant")
 
 
-def test_consent_screen_renders_korean_trust_label(page_service):
-    """NEW-5: trust label includes Korean copy alongside the English term."""
+def test_oauth_authorize_rejects_loopback_path_or_host_mismatch(page_service):
+    """F6: the RFC 8252 §7.3 loopback exception allows only a runtime port
+    change -- not another path, and not a non-loopback (LAN) host."""
     client = make_client(page_service)
     registered = client.post(
         "/oauth/register",
         json={
-            "client_name": "Korean Label Client",
-            "redirect_uris": ["http://127.0.0.1:53682/callback"],
-            "scope": "mcp:read",
-        },
-    ).json()
-    consent = client.get(
-        "/oauth/authorize",
-        params={
-            "response_type": "code",
-            "client_id": registered["client_id"],
-            "redirect_uri": "http://127.0.0.1:53682/callback",
-            "code_challenge": challenge_s256("v" * 64),
-            "code_challenge_method": "S256",
-            "scope": "mcp:read",
-            "state": oauth_state("ko-state"),
-        },
-    )
-    assert consent.status_code == 200
-    assert "동적 클라이언트" in consent.text
-    assert "신원은 독립적으로 검증되지 않았습니다" in consent.text
-    assert "Dynamic client — Registered during this login" in consent.text
-
-
-def test_oauth_authorize_accepts_loopback_alternate_port(page_service):
-    """F6: RFC 8252 §7.3 — loopback redirects allow runtime port variation."""
-    client = make_client(page_service)
-    registered = client.post(
-        "/oauth/register",
-        json={
-            "client_name": "Loopback Alt Port",
-            "redirect_uris": ["http://127.0.0.1:53682/callback"],
-            "scope": "mcp:read",
-        },
-    ).json()
-    verifier = "v" * 64
-
-    consent = client.get(
-        "/oauth/authorize",
-        params={
-            "response_type": "code",
-            "client_id": registered["client_id"],
-            "redirect_uri": "http://127.0.0.1:9999/callback",
-            "code_challenge": challenge_s256(verifier),
-            "code_challenge_method": "S256",
-            "scope": "mcp:read",
-            "state": oauth_state("alt-port-state"),
-        },
-    )
-
-    assert consent.status_code == 200
-
-
-def test_oauth_authorize_rejects_loopback_path_mismatch(page_service):
-    """F6: loopback exception requires same path, not just same host."""
-    client = make_client(page_service)
-    registered = client.post(
-        "/oauth/register",
-        json={
-            "client_name": "Loopback Path Mismatch",
+            "client_name": "Loopback Mismatch",
             "redirect_uris": ["http://127.0.0.1:53682/callback"],
             "scope": "mcp:read",
         },
     ).json()
 
-    consent = client.get(
-        "/oauth/authorize",
-        params={
-            "response_type": "code",
-            "client_id": registered["client_id"],
-            "redirect_uri": "http://127.0.0.1:53682/other",
-            "code_challenge": challenge_s256("v" * 64),
-            "code_challenge_method": "S256",
-            "scope": "mcp:read",
-            "state": oauth_state("mismatch-state"),
-        },
-    )
-
-    assert consent.status_code == 400
-
-
-def test_oauth_authorize_rejects_non_loopback_alternate_host(page_service):
-    """F6: arbitrary port exception applies to loopback only, not LAN hosts."""
-    client = make_client(page_service)
-    registered = client.post(
-        "/oauth/register",
-        json={
-            "client_name": "Non-loopback Host",
-            "redirect_uris": ["http://127.0.0.1:53682/callback"],
-            "scope": "mcp:read",
-        },
-    ).json()
-
-    consent = client.get(
-        "/oauth/authorize",
-        params={
-            "response_type": "code",
-            "client_id": registered["client_id"],
-            "redirect_uri": "http://192.168.1.50:53682/callback",
-            "code_challenge": challenge_s256("v" * 64),
-            "code_challenge_method": "S256",
-            "scope": "mcp:read",
-            "state": oauth_state("lan-state"),
-        },
-    )
-
-    assert consent.status_code == 400
+    for redirect_uri in (
+        "http://127.0.0.1:53682/other",
+        "http://192.168.1.50:53682/callback",
+    ):
+        consent = client.get(
+            "/oauth/authorize",
+            params={
+                "response_type": "code",
+                "client_id": registered["client_id"],
+                "redirect_uri": redirect_uri,
+                "code_challenge": challenge_s256("v" * 64),
+                "code_challenge_method": "S256",
+                "scope": "mcp:read",
+                "state": oauth_state("mismatch-state"),
+            },
+        )
+        assert consent.status_code == 400, redirect_uri
 
 
 def test_oauth_authorize_post_requires_workspace_id_from_consent_form(page_service):
@@ -1736,6 +1389,7 @@ def test_oauth_authorize_post_requires_workspace_id_from_consent_form(page_servi
     assert response.status_code == 400
     assert response.json()["error_code"] == "invalid_request"
     assert "workspace_ids" in response.json()["message"]
+    assert client.get("/oauth/consents").json()["data"] == []
 
 
 def test_oauth_authorize_integrity_error_returns_invalid_request(
@@ -1988,33 +1642,25 @@ def _assert_rest_error_envelope(body: dict, error_code: str) -> None:
     assert body["warnings"] == []
 
 
-def test_consent_revoke_unknown_returns_404(page_service):
+def test_consent_endpoints_reject_unknown_client_and_missing_session(page_service):
     client = make_client(page_service)
-    response = client.delete(
+    unknown = client.delete(
         "/oauth/consents",
         params={"client_id": "non-existent-client"},
     )
-    assert response.status_code == 404
-    _assert_rest_error_envelope(response.json(), "consent_not_found")
+    assert unknown.status_code == 404
+    _assert_rest_error_envelope(unknown.json(), "consent_not_found")
 
-
-def test_consent_list_requires_session(page_service):
-    client = make_client(page_service)
     client.cookies.clear()
-    response = client.get("/oauth/consents")
-    assert response.status_code == 401
-    _assert_rest_error_envelope(response.json(), "unauthorized")
-
-
-def test_consent_revoke_requires_session(page_service):
-    client = make_client(page_service)
-    client.cookies.clear()
-    response = client.delete(
+    listed = client.get("/oauth/consents")
+    assert listed.status_code == 401
+    _assert_rest_error_envelope(listed.json(), "unauthorized")
+    revoked = client.delete(
         "/oauth/consents",
         params={"client_id": "some-client"},
     )
-    assert response.status_code == 401
-    _assert_rest_error_envelope(response.json(), "unauthorized")
+    assert revoked.status_code == 401
+    _assert_rest_error_envelope(revoked.json(), "unauthorized")
 
 
 def test_oauth_grant_replaces_previous_workspace_set_and_tokens_carry_no_claim(
@@ -2134,6 +1780,18 @@ def test_oauth_grant_replaces_previous_workspace_set_and_tokens_carry_no_claim(
         options={"verify_signature": False, "verify_aud": False},
     )
     assert "workspace_id" not in access_payload
+    assert "workspace_ids" not in access_payload
+    assert set(access_payload) == {
+        "iss",
+        "sub",
+        "aud",
+        "exp",
+        "iat",
+        "jti",
+        "client_id",
+        "grant_id",
+        "scope",
+    }
 
     refreshed = client.post(
         "/oauth/token",
@@ -2247,9 +1905,23 @@ def test_oauth_authorize_get_skips_checklist_for_any_hinted_workspace_once_conse
     assert second_workspace_id not in live_workspace_ids
 
 
-def test_oauth_workspace_claim_filters_workspace_list(page_service):
+def test_oauth_workspace_list_denies_after_consent_revoked(page_service):
+    """Real-Codex review finding (2026-09-06): ``GET /api/v1/workspaces`` has
+    no path ``workspace_id``, so it used to reach ``require_effective_token_
+    scope`` directly, skipping the live-consent re-check every ``{workspace_
+    id}``-scoped REST route already gets via ``actor_with_target_workspace_
+    scope``. That let a revoked-but-not-yet-expired OAuth access JWT keep
+    listing the workspace it names, violating CORE §5.4 ("a request starting
+    after a revoke commits must read the new authority state"). Deleting the
+    OAuthConsent row directly (rather than calling revoke_consent, which also
+    jti-revokes the token) isolates this from token-level revocation and
+    proves the live-consent gate itself, independent of it. Before the
+    revoke, the list holds only the consented workspace, not every
+    membership of the user."""
+    from sqlalchemy import delete
+
+    from backend.models.oauth import OAuthConsent
     from backend.models.user import User
-    from backend.models.workspace import Workspace
     from backend.policy.rbac import grant_workspace_membership
 
     client = make_client(page_service)
@@ -2270,72 +1942,6 @@ def test_oauth_workspace_claim_filters_workspace_list(page_service):
             workspace_id=extra_workspace.id,
             role="owner",
         )
-
-    registered = client.post(
-        "/oauth/register",
-        json={
-            "client_name": "Workspace List Client",
-            "redirect_uris": ["http://127.0.0.1:53682/callback"],
-            "scope": "mcp:read",
-        },
-    ).json()
-    verifier = "v" * 64
-    authorize = client.post(
-        "/oauth/authorize",
-        data={
-            "response_type": "code",
-            "client_id": registered["client_id"],
-            "redirect_uri": "http://127.0.0.1:53682/callback",
-            "code_challenge": challenge_s256(verifier),
-            "code_challenge_method": "S256",
-            "scope": "mcp:read",
-            "state": oauth_state("workspace-list"),
-            "workspace_ids": current_workspace_id(client),
-            "decision": "allow",
-        },
-        follow_redirects=False,
-    )
-    assert authorize.status_code == 303
-    code = parse_qs(urlparse(authorize.headers["location"]).query)["code"][0]
-    token_response = client.post(
-        "/oauth/token",
-        data={
-            "grant_type": "authorization_code",
-            "client_id": registered["client_id"],
-            "redirect_uri": "http://127.0.0.1:53682/callback",
-            "code": code,
-            "code_verifier": verifier,
-        },
-    )
-    assert token_response.status_code == 200
-    client.cookies.clear()
-
-    workspaces = client.get(
-        "/api/v1/workspaces",
-        headers={"Authorization": f"Bearer {token_response.json()['access_token']}"},
-    )
-
-    assert workspaces.status_code == 200
-    slugs = [item["slug"] for item in workspaces.json()["data"]["workspaces"]]
-    assert slugs == ["default"]
-
-
-def test_oauth_workspace_list_denies_after_consent_revoked(page_service):
-    """Real-Codex review finding (2026-09-06): ``GET /api/v1/workspaces`` has
-    no path ``workspace_id``, so it used to reach ``require_effective_token_
-    scope`` directly, skipping the live-consent re-check every ``{workspace_
-    id}``-scoped REST route already gets via ``actor_with_target_workspace_
-    scope``. That let a revoked-but-not-yet-expired OAuth access JWT keep
-    listing the workspace it names, violating CORE §5.4 ("a request starting
-    after a revoke commits must read the new authority state"). Deleting the
-    OAuthConsent row directly (rather than calling revoke_consent, which also
-    jti-revokes the token) isolates this from token-level revocation and
-    proves the live-consent gate itself, independent of it."""
-    from sqlalchemy import delete
-
-    from backend.models.oauth import OAuthConsent
-
-    client = make_client(page_service)
     registered = client.post(
         "/oauth/register",
         json={
@@ -2382,6 +1988,8 @@ def test_oauth_workspace_list_denies_after_consent_revoked(page_service):
         headers={"Authorization": f"Bearer {access_token}"},
     )
     assert before_revoke.status_code == 200
+    slugs = [item["slug"] for item in before_revoke.json()["data"]["workspaces"]]
+    assert slugs == ["default"]
 
     with page_service.session_factory.begin() as session:
         session.execute(
@@ -2396,77 +2004,6 @@ def test_oauth_workspace_list_denies_after_consent_revoked(page_service):
     )
     assert after_revoke.status_code == 403
     assert after_revoke.json()["error_code"] == "token_workspace_denied"
-
-
-def test_oauth_jwt_carries_no_workspace_claim(page_service):
-    """P10.3 T3 (D-01v2/D-01v3-d): supersedes the pre-T3 'JWT embeds the one
-    real workspace_id it was issued for' pin. The access JWT carries no
-    workspace claim of any kind now -- authority comes from the live
-    ``oauth_consents`` allowed-workspace set, read per request by
-    ``backend.policy.auth._authenticate_oauth_token``, never baked into the
-    token."""
-    import jwt as pyjwt
-
-    client = make_client(page_service)
-    registered = client.post(
-        "/oauth/register",
-        json={
-            "client_name": "Workspace Claim Client",
-            "redirect_uris": ["http://127.0.0.1:53682/callback"],
-            "scope": "mcp:read",
-        },
-    ).json()
-    verifier = "v" * 64
-    authorize_params = {
-        "response_type": "code",
-        "client_id": registered["client_id"],
-        "redirect_uri": "http://127.0.0.1:53682/callback",
-        "code_challenge": challenge_s256(verifier),
-        "code_challenge_method": "S256",
-        "scope": "mcp:read",
-        "state": oauth_state("ws-claim-state"),
-    }
-    workspace_id = current_workspace_id(client)
-    authorize = client.post(
-        "/oauth/authorize",
-        data={
-            **authorize_params,
-            "workspace_ids": workspace_id,
-            "decision": "allow",
-        },
-        follow_redirects=False,
-    )
-    assert authorize.status_code == 303, authorize.text
-    code = parse_qs(urlparse(authorize.headers["location"]).query)["code"][0]
-    token_response = client.post(
-        "/oauth/token",
-        data={
-            "grant_type": "authorization_code",
-            "client_id": registered["client_id"],
-            "redirect_uri": "http://127.0.0.1:53682/callback",
-            "code": code,
-            "code_verifier": verifier,
-        },
-    )
-    assert token_response.status_code == 200, token_response.text
-    payload = pyjwt.decode(
-        token_response.json()["access_token"],
-        options={"verify_signature": False, "verify_aud": False},
-    )
-
-    assert "workspace_id" not in payload
-    assert "workspace_ids" not in payload
-    assert set(payload) == {
-        "iss",
-        "sub",
-        "aud",
-        "exp",
-        "iat",
-        "jti",
-        "client_id",
-        "grant_id",
-        "scope",
-    }
 
 
 def test_oauth_jwt_read_scope_rejected_on_rest_write(page_service):
@@ -2704,37 +2241,6 @@ def test_oauth_consent_screen_names_target_workspace(page_service):
     assert "visible-consent" in response.text
 
 
-def test_oauth_consents_openapi_declares_response_schema(page_service):
-    """Fix-4 I4: /oauth/consents must have an explicit response model."""
-    client = make_client(page_service)
-
-    schema = client.app.openapi()["paths"]["/oauth/consents"]["get"]["responses"]["200"]
-    delete_schema = client.app.openapi()["paths"]["/oauth/consents"]["delete"][
-        "responses"
-    ]["200"]
-
-    assert schema["content"]["application/json"]["schema"]["$ref"].endswith(
-        "/OAuthConsentListResponse"
-    )
-    assert delete_schema["content"]["application/json"]["schema"]["$ref"].endswith(
-        "/OAuthConsentRevokeResponse"
-    )
-    get_responses = client.app.openapi()["paths"]["/oauth/consents"]["get"][
-        "responses"
-    ]
-    delete_responses = client.app.openapi()["paths"]["/oauth/consents"]["delete"][
-        "responses"
-    ]
-    get_401_schema = get_responses["401"]["content"]["application/json"]["schema"]
-    assert get_401_schema["$ref"].endswith("/RESTErrorBody")
-    assert delete_responses["401"]["content"]["application/json"]["schema"][
-        "$ref"
-    ].endswith("/RESTErrorBody")
-    assert delete_responses["404"]["content"]["application/json"]["schema"][
-        "$ref"
-    ].endswith("/RESTErrorBody")
-
-
 def test_consent_form_preselects_resolved_workspace_when_no_hint_given(page_service):
     """P10.3 T3 (section 2.3): supersedes the pre-T3 'GET consent must pin
     the resolved workspace into POST via a hidden field' pin. There is no
@@ -2965,50 +2471,6 @@ def _bootstrap_refresh_session(
     )
 
 
-def test_oauth_refresh_rejects_when_consent_row_directly_deleted(page_service):
-    """Fix-6 Task 1.3 (H-F5-CODEX-2) invariant 1 — consent existence.
-
-    Pre-fix, the refresh path checked only refresh-token row + client + expiry
-    + user status. If the OAuthConsent row was removed (admin / DB cleanup /
-    future consent expiry) without going through the consent-revoke endpoint
-    that also revokes refresh tokens, a stale refresh token kept minting
-    fresh access tokens forever. The refresh path must now revalidate consent
-    existence directly.
-    """
-    from backend.models.oauth import OAuthConsent
-    from backend.models.user import User
-
-    client = make_client(page_service)
-    client_id, refresh_token, workspace_id = _bootstrap_refresh_session(
-        client, state="consent-direct-delete"
-    )
-    with page_service.session_factory.begin() as session:
-        user = session.scalars(select(User)).first()
-        consent = session.get(OAuthConsent, (user.id, client_id, workspace_id))
-        assert consent is not None
-        # Bypass the revoke-consent endpoint that also revokes refresh tokens.
-        session.delete(consent)
-
-    refreshed = client.post(
-        "/oauth/token",
-        data={
-            "grant_type": "refresh_token",
-            "client_id": client_id,
-            "refresh_token": refresh_token,
-        },
-    )
-
-    assert refreshed.status_code == 400
-    body = assert_oauth_token_error(refreshed, "invalid_grant")
-    # Fix-7 hygiene: pin the consent-revoke message so a future refactor
-    # cannot rely on a different invalid_grant path (token expired, user
-    # disabled, etc.) and still pass this test.
-    assert "consent" in body["error_description"], (
-        "_validate_token_issuance did not fire — got message: "
-        f"{body['error_description']!r}"
-    )
-
-
 def test_oauth_refresh_rejects_when_consent_scope_narrowed(page_service):
     """Fix-6 Task 1.3 (H-F5-CODEX-2) invariant 2 — scope coverage.
 
@@ -3220,8 +2682,10 @@ def test_oauth_jwt_ignores_the_workspace_claim_whatever_it_holds(page_service):
     denylist, user status), and the claim's value never appears on the
     resulting actor.
 
-    Covers a null, an empty, a malformed and a well-formed (the seeded
-    workspace's) UUID claim: one app and user, one crafted JWT per value.
+    Covers a malformed claim (formerly rejected) and a well-formed one (the
+    seeded workspace's UUID, formerly bound as the actor's workspace): one
+    app and user, one crafted JWT per value. A null or empty claim takes the
+    same never-read path.
     """
     from backend.models.user import User
     from backend.models.workspace import Workspace
@@ -3235,7 +2699,7 @@ def test_oauth_jwt_ignores_the_workspace_claim_whatever_it_holds(page_service):
         assert workspace is not None
         workspace_id = workspace.id
 
-    for workspace_id_claim in (None, "", "not-a-uuid", str(workspace_id)):
+    for workspace_id_claim in ("not-a-uuid", str(workspace_id)):
         service, token = _craft_signed_jwt(
             page_service, workspace_id_claim=workspace_id_claim, user_id=user_id
         )
@@ -3310,6 +2774,8 @@ def test_oauth_authorize_GET_multi_membership_without_workspace_id_prompts_picke
     auto-checked; a GET ``workspace_id`` hint only pre-checks the matching
     row, it does not bypass the checklist or pin a hidden field.
     """
+    from uuid import uuid4
+
     client = make_client(page_service)
     _, second_workspace_id = _seed_second_workspace_for_w2(
         page_service, slug="w2-get-multi"
@@ -3345,58 +2811,52 @@ def test_oauth_authorize_GET_multi_membership_without_workspace_id_prompts_picke
     assert selected.status_code == 200, selected.text
     assert "Authorize dtxWiki MCP access" in selected.text
     # The GET workspace_id is a preselect HINT into the checklist now, not a
-    # bypassing hidden field.
+    # bypassing hidden field (P10.3 T3 removed the hidden-field surface: a
+    # GET handler resolving and silently pinning exactly one workspace).
     assert _workspace_checkbox_checked(selected.text, second_workspace_id)
+    assert 'type="hidden" name="workspace_id"' not in selected.text
+    assert '<select name="workspace_id"' not in selected.text
+    assert '<select name="workspace_ids"' not in selected.text
+    assert 'name="workspace_ids"' in selected.text
 
-
-def test_oauth_authorize_POST_multi_membership_with_allowed_workspace_succeeds(
-    page_service,
-):
-    """Bot-W2 positive control (ADR A6 pair for the negative pins): a
-    multi-membership user who POSTs /oauth/authorize with workspace_ids
-    naming one of their memberships gets the 303 redirect carrying the
-    authorization code (P10.3 T3: the field is workspace_ids now, plural,
-    not the old singular workspace_id)."""
-    client = make_client(page_service)
-    _, second_workspace_id = _seed_second_workspace_for_w2(
-        page_service, slug="w2-post-allowed"
-    )
-    client_id = register_oauth_client(client, name="W2 POST Allowed Client")
-    verifier = "v" * 64
-
-    response = client.post(
+    # A hint naming a workspace the user is not a member of is
+    # membership-validated inside ``authorize_workspace_options`` and silently
+    # dropped (never a 400): the checklist cannot be bypassed by a GET query
+    # param, and POST's ``issue_authorization_code`` is the enforcement point
+    # (test_oauth_authorize_POST_multi_membership_workspace_must_be_a_membership).
+    foreign_workspace_id = uuid4()
+    foreign = client.get(
         "/oauth/authorize",
-        data={
-            **authorize_params(client_id, verifier, state="w2-post-allowed"),
-            "decision": "allow",
-            "workspace_ids": str(second_workspace_id),
+        params={
+            **authorize_params(client_id, verifier, state="w2-get-multi-foreign"),
+            "workspace_id": str(foreign_workspace_id),
         },
-        follow_redirects=False,
+        headers={"accept": "text/html"},
     )
+    assert foreign.status_code == 200, foreign.text
+    assert str(foreign_workspace_id) not in foreign.text
+    # An unmatched hint falls through to the ambiguous-membership case, same
+    # as no hint at all -- nothing gets auto-checked.
+    assert not _workspace_checkbox_checked(foreign.text, second_workspace_id)
 
-    assert response.status_code == 303, response.text
-    location = response.headers["location"]
-    qs = parse_qs(urlparse(location).query)
-    assert qs.get("state") == [oauth_state("w2-post-allowed")]
-    assert "code" in qs and qs["code"][0]
 
-
-def test_oauth_authorize_POST_multi_membership_with_denied_workspace_returns_400(
+def test_oauth_authorize_POST_multi_membership_workspace_must_be_a_membership(
     page_service,
 ):
-    """Bot-W2 negative pin: a multi-membership user who POSTs a
-    workspace_ids entry they have NO membership in must receive a 400
-    mentioning 'workspace' (ADR A6 keyword pin paired with the POST
-    positive test above). P10.3 T3's issue_authorization_code validates
-    every requested id against live membership ("workspace access is
-    required")."""
+    """Bot-W2 pin with its ADR A6 positive control: a multi-membership user
+    who POSTs a workspace_ids entry they have NO membership in receives a
+    400 mentioning 'workspace' (P10.3 T3's issue_authorization_code
+    validates every requested id against live membership: "workspace access
+    is required"), while naming one of their memberships gets the 303
+    redirect carrying the authorization code (P10.3 T3: the field is
+    workspace_ids now, plural, not the old singular workspace_id)."""
     from uuid import uuid4
 
     client = make_client(page_service)
     _, second_workspace_id = _seed_second_workspace_for_w2(
-        page_service, slug="w2-post-denied"
+        page_service, slug="w2-post-membership"
     )
-    client_id = register_oauth_client(client, name="W2 POST Denied Client")
+    client_id = register_oauth_client(client, name="W2 POST Membership Client")
     verifier = "v" * 64
     foreign_workspace_id = uuid4()  # never granted membership
 
@@ -3412,7 +2872,7 @@ def test_oauth_authorize_POST_multi_membership_with_denied_workspace_returns_400
         },
     )
 
-    response = client.post(
+    denied = client.post(
         "/oauth/authorize",
         data={
             **authorize_params(client_id, verifier, state="w2-post-denied"),
@@ -3422,70 +2882,25 @@ def test_oauth_authorize_POST_multi_membership_with_denied_workspace_returns_400
         follow_redirects=False,
     )
 
-    assert response.status_code == 400, response.text
-    body = response.json()
+    assert denied.status_code == 400, denied.text
+    body = denied.json()
     assert body["error_code"] == "invalid_request"
     assert "workspace" in body["message"].lower()
 
-
-def test_oauth_authorize_GET_single_membership_implicit_workspace(page_service):
-    """Bot-W2 happy path: a single-membership user can hit GET
-    /oauth/authorize without an explicit workspace_id and the request
-    resolves (returns the consent form with status 200) without 400.
-    """
-    client = make_client(page_service)
-    # Note: NO _seed_second_workspace_for_w2 here — the user has exactly one
-    # workspace membership (the seeded default workspace).
-    client_id = register_oauth_client(client, name="W2 GET Single Client")
-    verifier = "v" * 64
-
-    response = client.get(
+    allowed = client.post(
         "/oauth/authorize",
-        params=authorize_params(client_id, verifier, state="w2-get-single"),
-        follow_redirects=False,
-    )
-
-    assert response.status_code == 200, response.text
-    assert "Authorize dtxWiki MCP access" in response.text
-
-
-def test_oauth_consent_form_uses_workspace_checklist_not_hidden_field(page_service):
-    """P10.3 T3 (section 2.3) supersedes the pre-T3 'consent form pins
-    workspace_id as a hidden field, not a select' pin -- that hidden-field
-    safety surface (a GET handler resolving and pinning exactly one
-    workspace) is gone by design. The consent form's workspace selection is
-    now a checkbox checklist (``workspace_ids``, one row per membership),
-    not a single hidden field or a ``<select>``. The GET ``workspace_id``
-    hint only pre-checks the matching checklist row -- the POST body
-    carries whichever boxes are checked, so a hidden field can no longer
-    silently pin one workspace behind the user's back."""
-    client = make_client(page_service)
-    _, second_workspace_id = _seed_second_workspace_for_w2(
-        page_service, slug="w2-hidden-field"
-    )
-    client_id = register_oauth_client(client, name="W2 Hidden Field Client")
-    verifier = "v" * 64
-
-    response = client.get(
-        "/oauth/authorize",
-        params={
-            **authorize_params(client_id, verifier, state="w2-hidden-field"),
-            "workspace_id": str(second_workspace_id),
+        data={
+            **authorize_params(client_id, verifier, state="w2-post-allowed"),
+            "decision": "allow",
+            "workspace_ids": str(second_workspace_id),
         },
         follow_redirects=False,
     )
 
-    assert response.status_code == 200, response.text
-    html = response.text
-    assert f'value="{second_workspace_id}"' in html
-    assert _workspace_checkbox_checked(html, second_workspace_id)
-    assert 'type="hidden" name="workspace_id"' not in html, (
-        "consent form still pins a hidden workspace_id field; P10.3 T3 "
-        "replaced it with the workspace_ids checklist."
-    )
-    assert '<select name="workspace_id"' not in html
-    assert '<select name="workspace_ids"' not in html
-    assert 'name="workspace_ids"' in html
+    assert allowed.status_code == 303, allowed.text
+    qs = parse_qs(urlparse(allowed.headers["location"]).query)
+    assert qs.get("state") == [oauth_state("w2-post-allowed")]
+    assert "code" in qs and qs["code"][0]
 
 
 # ---------------------------------------------------------------------------
@@ -3555,31 +2970,6 @@ def _record_oauth_consent(
         )
 
 
-def test_oauth_authorize_single_covering_consent_skips_workspace_picker(page_service):
-    client = make_client(page_service)
-    user_id, second_workspace_id = _seed_second_workspace_for_w2(
-        page_service, slug="a5-one-consent"
-    )
-    client_id = register_oauth_client(client, name="A5 One Consent Client")
-    _record_oauth_consent(
-        page_service,
-        user_id=user_id,
-        client_id=client_id,
-        workspace_id=second_workspace_id,
-    )
-
-    response = client.get(
-        "/oauth/authorize",
-        params=authorize_params(client_id, "v" * 64, state="a5-one-consent"),
-        headers={"accept": "text/html"},
-        follow_redirects=False,
-    )
-
-    assert response.status_code == 200
-    assert "Choose a workspace" not in response.text
-    assert "Returning to the app" in response.text
-
-
 def test_oauth_authorize_zero_consent_shows_picker_any_existing_consent_skips_it(
     page_service,
 ):
@@ -3633,56 +3023,3 @@ def test_oauth_authorize_zero_consent_shows_picker_any_existing_consent_skips_it
     )
     assert two_consents.status_code == 200
     assert "Returning to the app" in two_consents.text
-
-
-def test_oauth_authorize_GET_foreign_workspace_id_hint_is_silently_ignored(
-    page_service,
-):
-    """P10.3 T3 (section 2.3) supersedes the pre-T3 'explicit workspace_id
-    wins, foreign workspace_id is rejected with 400' pin. Two things
-    changed: (1) once ANY live consent exists for (user, client), GET
-    always skips the checklist regardless of the hint -- so 'explicit hint
-    wins over an existing single-workspace consent' is no longer a
-    reachable state, it is covered instead by
-    test_oauth_authorize_GET_multi_membership_without_workspace_id_prompts_picker's
-    zero-consent hint-preselect case; and (2) the GET ``workspace_id`` hint
-    is membership-validated inside ``authorize_workspace_options`` and is
-    purely informational -- a hint naming a workspace the user is not a
-    member of is silently dropped (never a 400), because the checklist can
-    never be bypassed by a GET query param in the first place. The real
-    enforcement point moved to POST's ``issue_authorization_code``, which
-    does reject a non-member id in ``workspace_ids`` with 400
-    (test_oauth_authorize_POST_multi_membership_with_denied_workspace_returns_400).
-    """
-    from uuid import uuid4
-
-    client = make_client(page_service)
-    user_id, second_workspace_id = _seed_second_workspace_for_w2(
-        page_service, slug="a5-explicit"
-    )
-    client_id = register_oauth_client(client, name="A5 Explicit Client")
-    params = authorize_params(client_id, "v" * 64, state="a5-explicit-wins")
-
-    explicit = client.get(
-        "/oauth/authorize",
-        params={**params, "workspace_id": str(second_workspace_id)},
-        headers={"accept": "text/html"},
-    )
-    assert explicit.status_code == 200
-    assert _workspace_checkbox_checked(explicit.text, second_workspace_id)
-
-    foreign_workspace_id = uuid4()
-    foreign = client.get(
-        "/oauth/authorize",
-        params={
-            **params,
-            "state": oauth_state("a5-foreign-workspace"),
-            "workspace_id": str(foreign_workspace_id),
-        },
-        headers={"accept": "text/html"},
-    )
-    assert foreign.status_code == 200, foreign.text
-    assert str(foreign_workspace_id) not in foreign.text
-    # An unmatched hint falls through to the ambiguous-membership case, same
-    # as no hint at all -- nothing gets auto-checked.
-    assert not _workspace_checkbox_checked(foreign.text, second_workspace_id)

@@ -7,19 +7,6 @@ from backend.app.main import create_app
 from backend.app.settings import Settings
 
 
-def test_api_routes_still_work_with_spa_mount(tmp_path):
-    app = _app_with_spa_bundle(tmp_path)
-    app.state.app_version_synced = True
-    app.state.mcp_session_manager = object()
-    client = TestClient(app)
-
-    response = client.get("/health/ready")
-
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("application/json")
-    assert response.json()["status"] == "ready"
-
-
 def test_bundled_spa_served_when_static_assets_exist(tmp_path):
     client = TestClient(_app_with_spa_bundle(tmp_path))
 
@@ -48,6 +35,7 @@ def test_spa_history_route_falls_back_to_index(tmp_path):
     response = client.get("/pages/new")
 
     assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
     assert response.headers["cache-control"] == "no-store"
     assert "<div id=\"root\">" in response.text
 
@@ -79,6 +67,9 @@ def test_spa_cache_policy_does_not_override_api_or_oauth(tmp_path, session_facto
     # not invent a no-store either -- whatever each endpoint decides for
     # itself is what should arrive.
     assert api_response.status_code == 200
+    # API routes still answer as JSON with the SPA mounted.
+    assert api_response.headers["content-type"].startswith("application/json")
+    assert api_response.json()["status"] == "ready"
     assert "cache-control" not in api_response.headers
     assert oauth_response.status_code == 302
     assert "immutable" not in oauth_response.headers.get("cache-control", "")
@@ -133,16 +124,6 @@ def _settings(tmp_path) -> Settings:
         database_url=f"sqlite+pysqlite:///{tmp_path / 'ready.sqlite'}",
         oauth_jwt_private_key_pem=_private_key_pem(),
     )
-
-
-def test_unknown_frontend_route_still_returns_spa_index(tmp_path):
-    client = TestClient(_app_with_spa_bundle(tmp_path))
-
-    response = client.get("/pages/some/client/route")
-
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/html")
-    assert "<div id=\"root\">" in response.text
 
 
 def test_create_app_accepts_container_and_extra_mount(tmp_path):

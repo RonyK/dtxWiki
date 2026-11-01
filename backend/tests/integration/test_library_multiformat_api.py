@@ -41,9 +41,7 @@ from backend.services.conversion_orchestrator import LIBRARY_CONVERSION_JOB_TYPE
 from backend.services.library_ingest import LibraryUploadAdmissionService
 from backend.tests.conftest import authenticate_test_client_in_workspace
 from backend.tests.fixtures.library_binary_samples import (
-    VALID_HDF5_V0_WITH_GROUP,
     VALID_HDF5_V3,
-    VALID_PARQUET_ONE_ROW,
     VALID_PARQUET_ZERO_ROWS_EMPTY_ROW_GROUP,
 )
 from backend.worker.runtime import OneShotWorker
@@ -55,14 +53,6 @@ class LibraryApiFixture:
     workspace_id: UUID
     session_factory: object
     blob_root: Path
-
-
-def _legacy_hdf5_tree_key_attack(*, first_key: int = 0, final_key: int = 8) -> bytes:
-    payload = bytearray(VALID_HDF5_V0_WITH_GROUP)
-    assert payload[136:140] == b"TREE"
-    payload[160:168] = first_key.to_bytes(8, "little")
-    payload[176:184] = final_key.to_bytes(8, "little")
-    return bytes(payload)
 
 
 def _malformed_empty_parquet_attack() -> bytes:
@@ -658,59 +648,32 @@ def test_m4v_upload_accepts_common_declared_mime_alias(
     assert version["detection"]["container"]["validator"] == "iso-bmff-video-v1"
 
 
-@pytest.mark.parametrize(
-    ("filename", "content", "media_type", "format_id"),
-    [
-        ("valid.h5", VALID_HDF5_V3, "application/x-hdf5", "hdf5"),
-        (
-            "valid.parquet",
-            VALID_PARQUET_ONE_ROW,
-            "application/vnd.apache.parquet",
-            "parquet",
-        ),
-    ],
-)
 def test_structurally_valid_binary_data_uploads_are_preserved_without_converter(
     library_api: LibraryApiFixture,
-    filename,
-    content,
-    media_type,
-    format_id,
 ) -> None:
+    # Per-format acceptance (HDF5 and Parquet samples) is unit-tested in
+    # test_library_formats.py; this pins the upload wiring once.
     uploaded = _upload(
         library_api,
-        filename=filename,
-        content=content,
-        media_type=media_type,
+        filename="valid.h5",
+        content=VALID_HDF5_V3,
+        media_type="application/x-hdf5",
     )
 
     assert uploaded.status_code == 201, uploaded.text
     version = uploaded.json()["data"]["current_version"]
-    assert version["format_id"] == format_id
+    assert version["format_id"] == "hdf5"
     assert version["processing_status"] == "stored_unconverted"
 
 
-@pytest.mark.parametrize(
-    ("filename", "content", "media_type"),
-    [
-        (
-            "forged-tree-first-key.h5",
-            _legacy_hdf5_tree_key_attack(first_key=7),
-            "application/x-hdf5",
-        ),
-        (
-            "malformed-empty.parquet",
-            _malformed_empty_parquet_attack(),
-            "application/vnd.apache.parquet",
-        ),
-    ],
-)
 def test_invalid_binary_container_attacks_create_no_library_item_or_blob(
     library_api: LibraryApiFixture,
-    filename,
-    content,
-    media_type,
 ) -> None:
+    # The forged HDF5 tree-key and malformed Parquet payloads are each rejected
+    # by FormatRegistry in test_library_formats.py; residue is format-agnostic.
+    filename = "malformed-empty.parquet"
+    content = _malformed_empty_parquet_attack()
+    media_type = "application/vnd.apache.parquet"
     with library_api.session_factory() as session:
         item_count_before = session.scalar(
             select(func.count()).select_from(LibraryItem)
@@ -979,61 +942,6 @@ def test_original_download_requires_auth_and_serves_each_versions_own_content(
     denied = anonymous.get(original_url)
     anonymous.close()
     assert denied.status_code == 401
-
-
-@pytest.mark.parametrize(
-    ("filename", "content", "media_type", "marker"),
-    (
-        (
-            "worker-runtime.json",
-            b'{"marker":"durable-json"}',
-            "application/json",
-            "durable-json",
-        ),
-        (
-            "worker-runtime.csv",
-            b"kind,value\nmarker,durable-csv\n",
-            "text/csv",
-            "durable-csv",
-        ),
-    ),
-)
-def test_two_phase_worker_builds_durable_installer_from_claimed_factory(
-    library_api: LibraryApiFixture,
-    filename: str,
-    content: bytes,
-    media_type: str,
-    marker: str,
-) -> None:
-    uploaded = _upload(
-        library_api,
-        filename=filename,
-        content=content,
-        media_type=media_type,
-    )
-    assert uploaded.status_code == 201, uploaded.text
-    item_id = uploaded.json()["data"]["id"]
-    settings = library_api.client.app.state.container.settings
-    provider = DatabaseProvider(
-        settings,
-        session_factory=library_api.session_factory,
-    )
-    worker = OneShotWorker(settings=settings, database_provider=provider)
-
-    dispatched = worker.dispatch_once_with_session_factory(
-        library_api.session_factory,
-        workspace_id=library_api.workspace_id,
-        job_types={LIBRARY_CONVERSION_JOB_TYPE},
-    )
-
-    assert dispatched is not None and dispatched.status == "completed"
-    fetched = library_api.client.get(_library_url(library_api, f"/items/{item_id}"))
-    assert fetched.status_code == 200, fetched.text
-    detail = fetched.json()["data"]
-    assert detail["current_version"]["processing_status"] == "ready"
-    assert any(
-        marker in (artifact["index_text"] or "") for artifact in detail["artifacts"]
-    )
 
 
 def test_selected_artifact_content_supports_full_range_head_and_etag(

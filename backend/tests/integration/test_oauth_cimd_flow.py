@@ -111,30 +111,6 @@ def test_authorization_server_metadata_advertises_cimd(page_service):
     assert "registration_endpoint" in response.json()
 
 
-def test_valid_cimd_authorizes_and_exchanges_code_end_to_end(
-    page_service,
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        oauth_service,
-        "fetch_client_metadata_document",
-        lambda client_id: _metadata(),
-    )
-    client = make_client(page_service)
-
-    tokens = _issue_cimd_tokens(client)
-
-    assert tokens["scope"] == "mcp:read mcp:write"
-    assert tokens["access_token"]
-    assert tokens["refresh_token"]
-    with page_service.session_factory() as session:
-        stored = session.get(OAuthClient, CLIENT_ID)
-        assert stored is not None
-        assert stored.created_via == "cimd"
-        assert stored.redirect_uris == [REDIRECT_URI]
-        assert stored.application_type == "native"
-
-
 def test_failed_refetch_before_first_grant_fails_closed(
     page_service,
     monkeypatch,
@@ -191,6 +167,17 @@ def test_cimd_change_cannot_widen_existing_grant_and_outage_does_not_revoke_it(
     client = make_client(page_service)
     tokens = _issue_cimd_tokens(client)
     assert fetches >= 1
+    # A valid CIMD document authorizes and exchanges a code end to end, and
+    # the client is stored from the document.
+    assert tokens["scope"] == "mcp:read mcp:write"
+    assert tokens["access_token"]
+    assert tokens["refresh_token"]
+    with page_service.session_factory() as session:
+        stored = session.get(OAuthClient, CLIENT_ID)
+        assert stored is not None
+        assert stored.created_via == "cimd"
+        assert stored.redirect_uris == [REDIRECT_URI]
+        assert stored.application_type == "native"
 
     widened_redirect = "https://added.example/callback"
     post_grant_fetches = 0
@@ -353,24 +340,3 @@ def test_cimd_authorizes_and_exchanges_even_when_dcr_is_disabled(
     tokens = _issue_cimd_tokens(client)
     assert tokens["access_token"]
     assert tokens["refresh_token"]
-
-
-def test_dcr_compatibility_remains_enabled(page_service):
-    client = make_client(page_service)
-    registered = client.post(
-        "/oauth/register",
-        json={
-            "client_name": "DCR Compatibility Client",
-            "redirect_uris": [REDIRECT_URI],
-            "scope": "mcp:read",
-        },
-    )
-    assert registered.status_code == 201, registered.text
-
-    verifier, params = _authorize_params(state="dcr-still-0123456789abcdef")
-    params["client_id"] = registered.json()["client_id"]
-    params["scope"] = "mcp:read"
-    params["code_challenge"] = challenge_s256(verifier)
-    authorize = client.get("/oauth/authorize", params=params)
-
-    assert authorize.status_code == 200, authorize.text

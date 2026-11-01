@@ -176,11 +176,13 @@ def listed_tool_names(client: TestClient, access_token: str) -> set[str]:
     return {tool["name"] for tool in response.json()["result"]["tools"]}
 
 
+# The hosted Claude and ChatGPT redirects take the exact-match branch; their
+# DCR + authorize + code exchange runs in
+# test_token_endpoint_accepts_form_for_code_and_refresh_and_rejects_json and
+# test_refresh_token_is_issued_without_offline_access_while_scope_is_advertised.
 @pytest.mark.parametrize(
     ("registered_redirect", "runtime_redirect"),
     [
-        pytest.param(CLAUDE_REDIRECT, CLAUDE_REDIRECT, id="claude-hosted"),
-        pytest.param(CHATGPT_REDIRECT, CHATGPT_REDIRECT, id="chatgpt-hosted"),
         pytest.param(
             "http://127.0.0.1:49152/callback",
             "http://127.0.0.1:61234/callback",
@@ -326,33 +328,17 @@ def test_runtime_https_redirect_port_must_match_exactly(shared_client):
     assert response.json()["error_code"] == "invalid_request"
 
 
-@pytest.mark.parametrize(
-    ("public_base_url", "expected_resource"),
-    [
-        pytest.param(
-            "https://wiki.example.test",
-            "https://wiki.example.test/mcp",
-            id="bare-host",
-        ),
-        pytest.param(
-            "https://proxy.example.test/dtxwiki",
-            "https://proxy.example.test/dtxwiki/mcp",
-            id="reverse-proxy-path-prefix",
-        ),
-    ],
-)
-def test_protected_resource_metadata_preserves_public_base_url_path(
-    page_service,
-    public_base_url: str,
-    expected_resource: str,
-):
-    # The metadata route is unauthenticated: no sign-in needed.
-    client = make_app_client(page_service, public_base_url=public_base_url)
+def test_protected_resource_metadata_preserves_public_base_url_path(page_service):
+    # The metadata route is unauthenticated: no sign-in needed. A bare-host
+    # base URL is the default every other metadata check here uses.
+    client = make_app_client(
+        page_service, public_base_url="https://proxy.example.test/dtxwiki"
+    )
 
     response = client.get("/.well-known/oauth-protected-resource")
 
     assert response.status_code == 200, response.text
-    assert response.json()["resource"] == expected_resource
+    assert response.json()["resource"] == "https://proxy.example.test/dtxwiki/mcp"
 
 
 def test_token_endpoint_accepts_form_for_code_and_refresh_and_rejects_json(
@@ -411,29 +397,6 @@ def test_token_endpoint_accepts_form_for_code_and_refresh_and_rejects_json(
     assert "form-urlencoded" in json_request.json()["error_description"]
 
 
-def test_discovery_documents_use_the_protected_resource_authorization_server(
-    page_service,
-):
-    client = make_client(page_service)
-
-    protected_resource = client.get(
-        "/.well-known/oauth-protected-resource"
-    )
-    authorization_server = client.get(
-        "/.well-known/oauth-authorization-server"
-    )
-
-    assert protected_resource.status_code == 200, protected_resource.text
-    assert authorization_server.status_code == 200, authorization_server.text
-    assert protected_resource.json()["authorization_servers"][0] == ISSUER
-    assert authorization_server.json()["issuer"] == ISSUER
-    assert (
-        authorization_server.json()["authorization_endpoint"]
-        == f"{ISSUER}/oauth/authorize"
-    )
-    assert authorization_server.json()["token_endpoint"] == f"{ISSUER}/oauth/token"
-
-
 def test_authorization_responses_include_rfc9207_issuer(page_service):
     client = make_client(page_service)
     registration = register_client(client, CLAUDE_REDIRECT)
@@ -452,6 +415,13 @@ def test_authorization_responses_include_rfc9207_issuer(page_service):
         assert query["state"] == [params["state"]]
         if decision == "deny":
             assert query["error"] == ["access_denied"]
+            with page_service.session_factory() as session:
+                denied = session.scalars(
+                    select(AuditEvent).where(
+                        AuditEvent.action == "oauth.permission.denied"
+                    )
+                ).all()
+            assert len(denied) == 1
         else:
             assert query["code"]
 
@@ -502,6 +472,12 @@ def test_refresh_token_is_issued_without_offline_access_while_scope_is_advertise
     assert tokens["refresh_token"]
     assert "offline_access" in protected_resource["scopes_supported"]
     assert "offline_access" in authorization_server["scopes_supported"]
+    # The discovery documents point at this issuer and its endpoints.
+    assert protected_resource["authorization_servers"][0] == ISSUER
+    assert protected_resource["resource"] == f"{ISSUER}/mcp"
+    assert authorization_server["issuer"] == ISSUER
+    assert authorization_server["authorization_endpoint"] == f"{ISSUER}/oauth/authorize"
+    assert authorization_server["token_endpoint"] == f"{ISSUER}/oauth/token"
 
     refreshed = client.post(
         "/oauth/token",

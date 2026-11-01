@@ -323,6 +323,20 @@ def test_users_add_and_reset_password(tmp_path, monkeypatch):
     payload = json.loads(created.stdout)
     assert payload["email"] == "user@example.com"
     assert "role" not in payload
+    duplicate = runner.invoke(
+        cli_main.app,
+        [
+            "users",
+            "add",
+            "user@example.com",
+            "--password",
+            "correct-password",
+            "--db",
+            database_url,
+        ],
+    )
+    assert duplicate.exit_code == 2
+    assert "user add failed" in duplicate.stderr
 
     session_service = make_session_service(database_url)
     assert (
@@ -386,26 +400,6 @@ def test_users_add_and_reset_password(tmp_path, monkeypatch):
             "sessions_revoked": True,
             "api_tokens_revoked": False,
         }
-
-
-def test_users_add_reports_duplicate_email(tmp_path):
-    database_url = copy_migrated_sqlite(tmp_path / "users.db")
-    runner = CliRunner()
-    args = [
-        "users",
-        "add",
-        "dup@example.com",
-        "--password",
-        "correct-password",
-        "--db",
-        database_url,
-    ]
-
-    assert runner.invoke(cli_main.app, args).exit_code == 0
-    duplicate = runner.invoke(cli_main.app, args)
-
-    assert duplicate.exit_code == 2
-    assert "user add failed" in duplicate.stderr
 
 
 @pytest.mark.parametrize(

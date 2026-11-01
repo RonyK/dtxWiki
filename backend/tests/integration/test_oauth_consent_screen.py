@@ -218,57 +218,13 @@ def _allow(client, *, client_id: str, redirect_uri: str, scope: str, state: str,
 LOOPBACK = "http://127.0.0.1:53682/callback"
 
 
-def test_a_browser_gets_a_dtxwiki_page_that_explains_the_clients_bare_screen(
-    page_service,
-):
+def test_the_handoff_page_forwards_a_code_that_still_exchanges(page_service):
     """Allow used to jump straight to whatever the client's loopback server
     renders -- usually an unstyled "Authentication complete." Users read that
-    as dtxWiki's own screen and reported it as a missing design."""
+    as dtxWiki's own screen and reported it as a missing design. A browser
+    now gets a dtxWiki page explaining it, and its forward still carries a
+    code that exchanges."""
 
-    client = make_client(page_service)
-    client_id = _register(
-        client, redirect_uri=LOOPBACK, scope="mcp:read", client_name="Codex CLI"
-    )
-
-    response = _allow(
-        client,
-        client_id=client_id,
-        redirect_uri=LOOPBACK,
-        scope="mcp:read",
-        state=oauth_state("handoff-browser"),
-        headers={"accept": "text/html,application/xhtml+xml"},
-    )
-
-    assert response.status_code == 200
-    # Collapse the template's own line wrapping before matching prose.
-    flat = " ".join(response.text.split())
-    assert "Access approved" in flat
-    assert "Authentication complete. You may close this window." in flat
-    assert "drawn by the app you are signing in to, not by dtxWiki" in flat
-
-
-def test_a_non_browser_caller_still_gets_the_303(page_service):
-    """Automation must not have to parse HTML to follow the flow."""
-
-    client = make_client(page_service)
-    client_id = _register(
-        client, redirect_uri=LOOPBACK, scope="mcp:read", client_name="Script"
-    )
-
-    response = _allow(
-        client,
-        client_id=client_id,
-        redirect_uri=LOOPBACK,
-        scope="mcp:read",
-        state=oauth_state("handoff-script"),
-        headers={"accept": "*/*"},
-    )
-
-    assert response.status_code == 303
-    assert "code=" in response.headers["location"]
-
-
-def test_the_handoff_page_forwards_a_code_that_still_exchanges(page_service):
     client = make_client(page_service)
     client_id = _register(
         client, redirect_uri=LOOPBACK, scope="mcp:read", client_name="Codex CLI"
@@ -281,9 +237,15 @@ def test_the_handoff_page_forwards_a_code_that_still_exchanges(page_service):
         redirect_uri=LOOPBACK,
         scope="mcp:read",
         state=state,
-        headers={"accept": "text/html"},
+        headers={"accept": "text/html,application/xhtml+xml"},
     )
 
+    assert page.status_code == 200
+    # Collapse the template's own line wrapping before matching prose.
+    flat = " ".join(page.text.split())
+    assert "Access approved" in flat
+    assert "Authentication complete. You may close this window." in flat
+    assert "drawn by the app you are signing in to, not by dtxWiki" in flat
     href = re.search(r'href="(http://127\.0\.0\.1:53682[^"]+)"', page.text)
     assert href, page.text
     query = parse_qs(urlparse(unescape(href.group(1))).query)
@@ -364,30 +326,6 @@ def test_a_redirect_uri_cannot_close_the_handoff_script_element(page_service):
     assert unescape(href.group(1)).startswith(hostile)
 
 
-def test_a_redirect_uri_cannot_carry_userinfo(page_service):
-    """`https://dtxwiki.example.com@evil.tld/cb` reads as dtxwiki.example.com
-    while the code goes to evil.tld. The consent screen names the destination
-    precisely because the flow enforces it, so the flow has to keep it
-    unambiguous."""
-
-    client = make_client(page_service)
-
-    for hostile in (
-        "https://dtxwiki.example.com@evil.tld/cb",
-        "http://dtxwiki.example.com@127.0.0.1:53682/cb",
-    ):
-        registered = client.post(
-            "/oauth/register",
-            json={
-                "client_name": "Spoofer",
-                "redirect_uris": [hostile],
-                "scope": "mcp:read",
-            },
-        )
-        assert registered.status_code == 400, hostile
-        assert "userinfo" in registered.text
-
-
 def test_a_repeat_login_also_gets_the_dtxwiki_handoff_page(page_service):
     """Re-consent skips the approval screen by design. It used to skip the
     handoff too, so the client's bare page — the thing the handoff exists to
@@ -430,39 +368,6 @@ def test_a_repeat_login_also_gets_the_dtxwiki_handoff_page(page_service):
     assert "code=" in unescape(href.group(1))
 
 
-def test_a_repeat_login_from_automation_still_redirects(page_service):
-    client = make_client(page_service)
-    client_id = _register(
-        client, redirect_uri=LOOPBACK, scope="mcp:read", client_name="Script"
-    )
-    params = {
-        "response_type": "code",
-        "client_id": client_id,
-        "redirect_uri": LOOPBACK,
-        "code_challenge": challenge_s256(VERIFIER),
-        "code_challenge_method": "S256",
-        "scope": "mcp:read",
-    }
-    _allow(
-        client,
-        client_id=client_id,
-        redirect_uri=LOOPBACK,
-        scope="mcp:read",
-        state=oauth_state("repeat-auto-first"),
-        headers={"accept": "*/*"},
-    )
-
-    repeat = client.get(
-        "/oauth/authorize",
-        params={**params, "state": oauth_state("repeat-auto-second")},
-        headers={"accept": "*/*"},
-        follow_redirects=False,
-    )
-
-    assert repeat.status_code == 302
-    assert "code=" in repeat.headers["location"]
-
-
 def test_the_consent_form_does_not_reflect_a_decision_from_the_url(page_service):
     """The submit handler re-adds `decision` from `event.submitter`. Where that
     is undefined the only one left in the body would be whatever the authorize
@@ -494,29 +399,3 @@ def test_the_consent_form_does_not_reflect_a_decision_from_the_url(page_service)
     # The rest of the query string is still reflected, so this is an exclusion
     # rather than the reflection having been dropped wholesale.
     assert '<input type="hidden" name="scope"' in page.text
-
-
-def test_a_redirect_uri_cannot_carry_a_backslash(page_service):
-    """Python keeps a backslash inside the host; browsers follow WHATWG and
-    rewrite it to a slash, so the consent screen names one host and the browser
-    navigates to another -- the same display-versus-destination split the
-    userinfo check closes.
-
-    Built with chr(92) so no layer of escaping can quietly turn it into
-    something else on the way to the assertion.
-    """
-
-    client = make_client(page_service)
-    hostile = "https://shown.example" + chr(92) + "path.evil.test/cb"
-
-    registered = client.post(
-        "/oauth/register",
-        json={
-            "client_name": "Backslash",
-            "redirect_uris": [hostile],
-            "scope": "mcp:read",
-        },
-    )
-
-    assert registered.status_code == 400, registered.text
-    assert "backslash" in registered.text

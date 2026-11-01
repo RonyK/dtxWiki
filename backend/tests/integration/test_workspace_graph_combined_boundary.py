@@ -16,6 +16,10 @@ from backend.tests.utils.workspace_graph_corpora import (
 pytestmark = pytest.mark.integration
 
 
+# Capacity guard, run by Release checks. The PR lane keeps cursor feasibility
+# without expansion builds (unit test_workspace_graph_expansion_partition.py)
+# and the cursor round trip (test_workspace_graph_service.py).
+@pytest.mark.release_scale
 @pytest.mark.parametrize("document_count", [2_000, 2_001])
 def test_combined_boundary_cursor_checks_do_not_build_expansion_pages(
     session_factory, monkeypatch, document_count

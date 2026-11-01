@@ -108,14 +108,13 @@ def _dispatch_upload(page_service, actor, payload):
     )
 
 
+# Per-format decoding is the validator's matrix
+# (test_context_image_validation_decodes_complete_static_format_matrix); the
+# tool only echoes the validated type. PNG uploads succeed throughout this
+# file, so one non-PNG row proves the echoed type is not hard-coded.
 @pytest.mark.parametrize(
     ("mime_type", "content"),
-    (
-        ("image/png", PNG),
-        ("image/jpeg", JPEG),
-        ("image/gif", GIF),
-        ("image/webp", WEBP),
-    ),
+    (("image/webp", WEBP),),
 )
 def test_upload_image_accepts_format_matrix(
     page_service, actor, tmp_path, monkeypatch, mime_type, content

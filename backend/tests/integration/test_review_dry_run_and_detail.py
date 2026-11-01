@@ -185,16 +185,8 @@ def test_get_review_returns_detail(page_service):
     )
     assert version.status_code == 200, version.text
 
-
-def test_get_review_unknown_id_returns_404(page_service):
-    client = _make_client(page_service)
-    workspace_id = _current_workspace_id(client)
-
-    response = client.get(
-        f"/api/v1/workspaces/{workspace_id}/reviews/{uuid4()}"
-    )
-
-    assert response.status_code == 404
+    unknown = client.get(f"/api/v1/workspaces/{workspace_id}/reviews/{uuid4()}")
+    assert unknown.status_code == 404
 
 
 @pytest.mark.parametrize(
@@ -287,13 +279,14 @@ def test_ingress_placement_evidence_requires_visible_same_change_exact_candidate
         assert evidence["reason"] is None
 
 
-def test_dry_run_preview_marks_eligible_without_mutating(page_service):
+def test_dry_run_preview_is_side_effect_free_and_skips_resolved(page_service):
     client = _make_client(page_service)
     workspace_id = _current_workspace_id(client)
     review_id = _seed_pending_review(page_service, workspace_id)
+    bulk_url = f"/api/v1/workspaces/{workspace_id}/reviews/decide-bulk"
 
     response = client.post(
-        f"/api/v1/workspaces/{workspace_id}/reviews/decide-bulk",
+        bulk_url,
         json={
             "review_item_ids": [review_id],
             "decision_type": "approve",
@@ -314,14 +307,8 @@ def test_dry_run_preview_marks_eligible_without_mutating(page_service):
     assert after.json()["data"]["status"] == "pending"
     assert after.json()["data"]["can_decide"] is True
 
-
-def test_dry_run_preview_skips_already_resolved(page_service):
-    client = _make_client(page_service)
-    workspace_id = _current_workspace_id(client)
-    review_id = _seed_pending_review(page_service, workspace_id)
-
     approved = client.post(
-        f"/api/v1/workspaces/{workspace_id}/reviews/decide-bulk",
+        bulk_url,
         json={
             "review_item_ids": [review_id],
             "decision_type": "approve",
@@ -331,9 +318,27 @@ def test_dry_run_preview_skips_already_resolved(page_service):
     assert approved.status_code == 200
     assert review_id in approved.json()["data"]["approved"]
 
+    recent = client.get(
+        f"/api/v1/workspaces/{workspace_id}/reviews/decisions/recent?limit=5"
+    )
+    assert recent.status_code == 200
+    decisions = recent.json()["data"]
+    # RD-1: a real decision row (not the resolved review item).
+    assert len(decisions) >= 1
+    top = decisions[0]
+    assert top["review_item_id"] == review_id
+    assert top["decision_type"] == "approve"
+    assert top["resulting_review_status"] is not None
+    assert top["target_title"] == "Dry-run target"
+    assert top["review_target_title"] == top["target_title"]
+    assert top["target_slug"] == "dry-run-target"
+    assert top["target_version_no"] == 1
+    assert top["decision_summary"] == "context draft requires review"
+    assert top["decision_summary_code"] == "context_draft_requires_review"
+
     # A resolved item is no longer decidable, so a subsequent preview skips it.
     preview = client.post(
-        f"/api/v1/workspaces/{workspace_id}/reviews/decide-bulk",
+        bulk_url,
         json={
             "review_item_ids": [review_id],
             "decision_type": "approve",
@@ -366,41 +371,6 @@ def test_counts_payload_includes_status_by_risk(page_service):
     # the per-risk pending counts sum to the pending total
     assert sum(pending_breakdown.values()) == data["pending"]
     assert data["pending"] >= 1
-
-
-def test_recent_decisions_returns_real_decision(page_service):
-    client = _make_client(page_service)
-    workspace_id = _current_workspace_id(client)
-    review_id = _seed_pending_review(page_service, workspace_id)
-
-    approve = client.post(
-        f"/api/v1/workspaces/{workspace_id}/reviews/decide-bulk",
-        json={
-            "review_item_ids": [review_id],
-            "decision_type": "approve",
-            "dry_run": False,
-        },
-    )
-    assert approve.status_code == 200
-
-    response = client.get(
-        f"/api/v1/workspaces/{workspace_id}/reviews/decisions/recent?limit=5"
-    )
-
-    assert response.status_code == 200
-    decisions = response.json()["data"]
-    # RD-1: a real decision row (not the resolved review item).
-    assert len(decisions) >= 1
-    top = decisions[0]
-    assert top["review_item_id"] == review_id
-    assert top["decision_type"] == "approve"
-    assert top["resulting_review_status"] is not None
-    assert top["target_title"] == "Dry-run target"
-    assert top["review_target_title"] == top["target_title"]
-    assert top["target_slug"] == "dry-run-target"
-    assert top["target_version_no"] == 1
-    assert top["decision_summary"] == "context draft requires review"
-    assert top["decision_summary_code"] == "context_draft_requires_review"
 
 
 def test_group_selection_includes_unloaded_reviews_and_settles_exact_candidate(

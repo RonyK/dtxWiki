@@ -87,14 +87,14 @@ def test_list_workspace_jobs_returns_jobs_and_hides_non_terminal_internal_types(
         trigger_type="manual",
         idempotency_key="visible-1",
     )
-    _enqueue(
+    embed = _enqueue(
         page_service,
         workspace_id,
         job_type="embed",
         trigger_type="content_version",
         idempotency_key="hidden-embed-1",
     )
-    _enqueue(
+    email = _enqueue(
         page_service,
         workspace_id,
         job_type="email_delivery",
@@ -116,38 +116,18 @@ def test_list_workspace_jobs_returns_jobs_and_hides_non_terminal_internal_types(
     assert listed["lease_expired"] is False
     assert listed["workspace_slug"] is None
 
-
-def test_list_workspace_jobs_surfaces_a_failed_embed_job(page_service):
-    """embed is hidden while non-terminal (previous test) but must appear
-    once it reaches status="failed" -- unlike email_delivery, which stays
-    hidden even then (job_queue.NOISY_UNTIL_FAILED_JOB_TYPES vs
-    ALWAYS_HIDDEN_JOB_TYPES)."""
-    client = make_client(page_service)
-    workspace_id = _workspace_id(client)
-    failed_embed = _enqueue(
-        page_service,
-        workspace_id,
-        job_type="embed",
-        trigger_type="content_version",
-        idempotency_key="failed-embed-1",
-    )
-    _fail_terminally(page_service, failed_embed.id)
-    failed_email = _enqueue(
-        page_service,
-        workspace_id,
-        job_type="email_delivery",
-        trigger_type="password_reset",
-        idempotency_key="failed-email-1",
-    )
-    _fail_terminally(page_service, failed_email.id)
+    # embed is hidden while non-terminal but must appear once it reaches
+    # status="failed" -- unlike email_delivery, which stays hidden even then
+    # (job_queue.NOISY_UNTIL_FAILED_JOB_TYPES vs ALWAYS_HIDDEN_JOB_TYPES).
+    _fail_terminally(page_service, embed.id)
+    _fail_terminally(page_service, email.id)
 
     response = client.get(f"/api/v1/workspaces/{workspace_id}/jobs")
 
     assert response.status_code == 200
-    items = response.json()["data"]["items"]
-    ids = {item["id"] for item in items}
-    assert str(failed_embed.id) in ids
-    assert str(failed_email.id) not in ids
+    ids = {item["id"] for item in response.json()["data"]["items"]}
+    assert str(embed.id) in ids
+    assert str(email.id) not in ids
 
 
 def test_list_workspace_jobs_status_filter_and_problems_only(page_service):
@@ -300,48 +280,6 @@ def test_job_failure_code_replaces_last_error_on_both_job_surfaces(page_service)
         assert internal_error not in problems_response.text
 
 
-def test_workspace_jobs_and_activity_expose_the_same_stable_failure_code(page_service):
-    """The two readers of Job.last_error must be one decision, so /jobs and
-    /activity are asserted together here: a divergence between them is what
-    let the Activity feed keep its own unredacted copy of the column."""
-    client = make_client(page_service, email="jobs-shared-code@example.com")
-    workspace_id = _workspace_id(client)
-    failed = _enqueue(
-        page_service,
-        workspace_id,
-        job_type="library_discovery",
-        trigger_type="manual",
-        idempotency_key="shared-failure-code",
-    )
-    internal_error = "/srv/dtxwiki/private/discovery.log token=sk-live-shared-sentinel"
-    _fail_terminally(page_service, failed.id, error=internal_error)
-
-    jobs = client.get(
-        f"/api/v1/workspaces/{workspace_id}/jobs", params={"problems_only": True}
-    )
-    activity = client.get(
-        f"/api/v1/workspaces/{workspace_id}/activity",
-        params={"period": "all", "sub_tab": "live"},
-    )
-
-    assert jobs.status_code == 200
-    assert activity.status_code == 200
-    jobs_item = next(
-        item for item in jobs.json()["data"]["items"] if item["id"] == str(failed.id)
-    )
-    activity_item = next(
-        item
-        for item in activity.json()["data"]["items"]
-        if item["id"] == str(failed.id)
-    )
-    assert jobs_item.get("error_code") == "job_failed"
-    assert "last_error" not in jobs_item
-    assert "error_code=job_failed" in activity_item["body"]
-    for response in (jobs, activity):
-        assert "sk-live-shared-sentinel" not in response.text
-        assert "/srv/dtxwiki/private" not in response.text
-
-
 def test_list_workspace_jobs_rejects_invalid_status(page_service):
     client = make_client(page_service)
     workspace_id = _workspace_id(client)
@@ -353,40 +291,13 @@ def test_list_workspace_jobs_rejects_invalid_status(page_service):
     assert response.status_code == 422
 
 
-def test_workspace_job_list_cursor_stops_at_the_offset_cap(page_service, monkeypatch):
-    """A capped workspace offset cursor must terminate rather than repeat a page.
-
-    The server-admin listing uses a seek cursor, so this cap does not apply.
-    """
-    monkeypatch.setattr(job_read_service_module, "_MAX_JOB_OFFSET", 1)
-    client = make_server_admin_client(page_service)
-    workspace_id = _workspace_id(client)
-    for index in range(3):
-        _enqueue(
-            page_service,
-            workspace_id,
-            job_type="library_discovery",
-            trigger_type="manual",
-            idempotency_key=f"cursor-cap-{index}",
-        )
-
-    workspace_first = client.get(
-        f"/api/v1/workspaces/{workspace_id}/jobs", params={"limit": 1}
-    ).json()["data"]
-    assert workspace_first["next_cursor"] is not None
-    workspace_last = client.get(
-        f"/api/v1/workspaces/{workspace_id}/jobs",
-        params={"limit": 1, "cursor": workspace_first["next_cursor"]},
-    ).json()["data"]
-    assert workspace_last["next_cursor"] is None
-
-
-def test_admin_job_list_seek_cursor_pages_through_every_job_with_no_cap(
+def test_workspace_offset_cursor_stops_at_cap_but_admin_seek_cursor_does_not(
     page_service, monkeypatch
 ):
-    """Admin seek pagination returns every shard's job without an offset cap.
+    """A capped workspace offset cursor must terminate rather than repeat a page.
 
-    With limit=1 and three jobs, the third page has no next cursor.
+    Admin seek pagination returns every shard's job without an offset cap:
+    with limit=1 and three jobs, the third page has no next cursor.
     """
     monkeypatch.setattr(job_read_service_module, "_MAX_JOB_OFFSET", 1)
     client = make_server_admin_client(page_service)
@@ -398,11 +309,21 @@ def test_admin_job_list_seek_cursor_pages_through_every_job_with_no_cap(
                 workspace_id,
                 job_type="library_discovery",
                 trigger_type="manual",
-                idempotency_key=f"seek-cap-{index}",
+                idempotency_key=f"cursor-cap-{index}",
             ).id
         )
         for index in range(3)
     }
+
+    workspace_first = client.get(
+        f"/api/v1/workspaces/{workspace_id}/jobs", params={"limit": 1}
+    ).json()["data"]
+    assert workspace_first["next_cursor"] is not None
+    workspace_last = client.get(
+        f"/api/v1/workspaces/{workspace_id}/jobs",
+        params={"limit": 1, "cursor": workspace_first["next_cursor"]},
+    ).json()["data"]
+    assert workspace_last["next_cursor"] is None
 
     seen_ids: list[str] = []
     cursor = None
@@ -421,40 +342,21 @@ def test_admin_job_list_seek_cursor_pages_through_every_job_with_no_cap(
     assert len(seen_ids) == len(set(seen_ids))
 
 
-def test_admin_job_list_tolerates_a_pre_phase_6a_cursor(page_service):
+def test_admin_job_list_restarts_on_pre_phase_6a_or_foreign_prefix_cursor(
+    page_service,
+):
     """A cursor issued by the old offset-based admin listing (or any garbled
     value) decodes to no seek bound, restarting the listing from the top --
     same tolerant-cursor behavior _decode_job_cursor already had, carried
     over to _decode_fanout_cursor rather than 500ing or misreading an offset
-    as a seek key."""
-    client = make_server_admin_client(page_service)
-    workspace_id = _workspace_id(client)
-    _enqueue(
-        page_service,
-        workspace_id,
-        job_type="library_discovery",
-        trigger_type="manual",
-        idempotency_key="pre-phase-6a-cursor",
-    )
+    as a seek key.
 
-    stale_offset_cursor = base64.urlsafe_b64encode(b"job-offset:0").decode()
-    response = client.get(
-        "/api/v1/admin/jobs", params={"cursor": stale_offset_cursor}
-    )
-
-    assert response.status_code == 200, response.text
-    assert len(response.json()["data"]["items"]) == 1
-
-
-def test_admin_job_list_rejects_a_cursor_whose_prefix_is_not_its_own(page_service):
-    """Isolate the seek cursor's prefix guard.
-
-    The pre-Phase-6a test above cannot do this: "job-offset:0" carries no
-    "|", so it is rejected by the separator check whether or not the prefix
-    guard exists, and deleting the guard leaves that test green. This cursor
-    is built to fail ONLY on the prefix -- same length as "job-seek:" so the
-    body still slices at the right offset, and a body that parses cleanly
-    into a (created_at, id) seek key.
+    The second cursor isolates the seek cursor's prefix guard. The
+    pre-Phase-6a cursor cannot do this: "job-offset:0" carries no "|", so it
+    is rejected by the separator check whether or not the prefix guard
+    exists. The foreign cursor is built to fail ONLY on the prefix -- same
+    length as "job-seek:" so the body still slices at the right offset, and a
+    body that parses cleanly into a (created_at, id) seek key.
 
     Without the guard the bogus key would be accepted as a real seek bound.
     Dated far in the past, that silently drops every job from a listing that
@@ -468,8 +370,16 @@ def test_admin_job_list_rejects_a_cursor_whose_prefix_is_not_its_own(page_servic
         workspace_id,
         job_type="library_discovery",
         trigger_type="manual",
-        idempotency_key="foreign-prefix-cursor",
+        idempotency_key="tolerant-cursor",
     )
+
+    stale_offset_cursor = base64.urlsafe_b64encode(b"job-offset:0").decode()
+    response = client.get(
+        "/api/v1/admin/jobs", params={"cursor": stale_offset_cursor}
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(response.json()["data"]["items"]) == 1
 
     foreign = f"job-peek:2000-01-01T00:00:00+00:00|{uuid4()}".encode()
     response = client.get(
@@ -634,40 +544,32 @@ def test_admin_retry_job_with_a_workspace_id_that_does_not_own_it_is_not_found(
         assert stored.status == "failed"
         assert stored.retry_count == 1
 
-
-def test_admin_retry_wrong_workspace_does_not_leak_an_unretryable_job_type(
-    page_service,
-):
-    """The workspace guard has to stop the read, not just the write.
-
-    manual_retry's UPDATE already carries `Job.workspace_id == workspace_id`,
-    so a wrong workspace can never actually requeue a row -- which means the
-    sibling test above passes with the READ-side comparison deleted, and does
-    not isolate it. What the read-side guard alone protects is the branch
-    between the two: a job type in JOB_TYPES_WITH_DOMAIN_FAILURE_STATE raises
-    before the UPDATE is ever reached. Without the comparison, naming someone
-    else's workspace turns that into a 422 that names the job's type, so a
-    caller learns both that the id exists and what kind of work it is -- from
-    an endpoint whose answer for an unknown id is a bare 404.
-
-    This is single-DB on purpose: with a real shard behind each workspace the
-    row would be unreachable anyway, and the guard would look redundant.
-    """
-    client = make_server_admin_client(page_service)
-    workspace_id = _workspace_id(client)
+    # The workspace guard has to stop the read, not just the write.
+    #
+    # manual_retry's UPDATE already carries `Job.workspace_id == workspace_id`,
+    # so a wrong workspace can never actually requeue a row -- which means the
+    # check above passes with the READ-side comparison deleted, and does not
+    # isolate it. What the read-side guard alone protects is the branch between
+    # the two: a job type in JOB_TYPES_WITH_DOMAIN_FAILURE_STATE raises before
+    # the UPDATE is ever reached. Without the comparison, naming someone else's
+    # workspace turns that into a 422 that names the job's type, so a caller
+    # learns both that the id exists and what kind of work it is -- from an
+    # endpoint whose answer for an unknown id is a bare 404.
+    #
+    # This is single-DB on purpose: with a real shard behind each workspace the
+    # row would be unreachable anyway, and the guard would look redundant.
     unretryable_type = sorted(JOB_TYPES_WITH_DOMAIN_FAILURE_STATE)[0]
-    job = _enqueue(
+    unretryable = _enqueue(
         page_service,
         workspace_id,
         job_type=unretryable_type,
         trigger_type="manual",
         idempotency_key="admin-retry-wrong-workspace-leak",
     )
-    _fail_terminally(page_service, job.id)
-    other_workspace_id = uuid4()
+    _fail_terminally(page_service, unretryable.id)
 
     response = client.post(
-        f"/api/v1/admin/jobs/{job.id}/retry",
+        f"/api/v1/admin/jobs/{unretryable.id}/retry",
         params={"workspace_id": str(other_workspace_id)},
     )
 

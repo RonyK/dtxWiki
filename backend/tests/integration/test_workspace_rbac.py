@@ -794,30 +794,22 @@ def _mcp_client_actor(workspace_id: UUID | None) -> ActorContext:
     )
 
 
-@pytest.mark.parametrize("claimed_workspace", ("target", "foreign", None))
-def test_direct_mcp_client_credentials_are_rejected(
-    session_factory, claimed_workspace
-):
-    """The retired direct-client identity cannot authorize workspace access."""
+def test_direct_mcp_client_credentials_are_rejected(session_factory):
+    """The retired direct-client identity cannot authorize workspace access.
+
+    The rejection keys on ``actor_kind`` before any workspace comparison, so
+    the actor claims the target itself -- the most permissive claim; a
+    foreign or missing claim takes the same branch.
+    """
     with session_factory.begin() as session:
         target = insert_workspace(
             session,
-            slug=f"retired-mcp-target-{str(claimed_workspace).lower()}",
+            slug="retired-mcp-target",
             title="Target",
         )
-        foreign = insert_workspace(
-            session,
-            slug=f"retired-mcp-foreign-{str(claimed_workspace).lower()}",
-            title="Foreign",
-        )
         target_id = target.id
-        claimed_workspace_id = {
-            "target": target.id,
-            "foreign": foreign.id,
-            None: None,
-        }[claimed_workspace]
 
-    actor = _mcp_client_actor(workspace_id=claimed_workspace_id)
+    actor = _mcp_client_actor(workspace_id=target_id)
     with session_factory() as session:
         with pytest.raises(RejectedByPolicyError) as excinfo:
             require_workspace_role(
