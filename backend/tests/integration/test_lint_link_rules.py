@@ -132,6 +132,11 @@ def test_unresolved_and_healthy_links(session_factory):
             token_workspace_ids=(workspace_id,), scopes=("mcp:write",),
         )
         preparer = BodyPreparer()
+        # Reuse the same existing reader-capability inputs in suggest mode.
+        # Only exact refs normalize; format and optional general fixes stay off.
+        workspace = session.get(Workspace, workspace_id)
+        workspace.lint_policy = {"link_fix_mode": "suggest"}
+        workspace.auto_fix_enabled = False
 
         def prepare_for(actor):
             return preparer.prepare(
@@ -164,6 +169,31 @@ def test_unresolved_and_healthy_links(session_factory):
             )
         )
         assert prepare_for(owner).body == allowed_body
+        # Budget exception: READ adds two logical folder/actor inputs. A hidden
+        # Agent ancestor must hide its folder ref; save-only checks cannot
+        # expose a reader bypass. Other target kinds reuse the shared resolver.
+        from backend.services.context_link_targets import markdown_link_targets
+
+        folder_body = f"[Folder]({folder_ref})\n"
+        denied_targets = {
+            entry.locator: entry for entry in markdown_link_targets(
+                session, body=folder_body, workspace_id=workspace_id, actor=editor,
+            )
+        }
+        assert {entry.locator for entry in denied_targets.values()
+                if entry.state == "unavailable"} == {
+            folder_ref,
+        }
+        assert all(entry.href is None and entry.target_page_id is None
+                   for entry in denied_targets.values())
+        allowed_targets = {
+            entry.locator: entry for entry in markdown_link_targets(
+                session, body=folder_body, workspace_id=workspace_id, actor=owner,
+            )
+        }
+        assert allowed_targets[folder_ref].href == (
+            f"/workspaces/{workspace_id}/agent/folders/{folder.id}"
+        )
         limited = ActorContext(
             actor_kind="human", actor_id="test", workspace_id=workspace_id,
             workspace_role="owner", role="owner", token_kind="api_token",

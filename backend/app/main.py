@@ -22,6 +22,7 @@ from backend.api.health import health_root_router
 from backend.api.inbox import router as inbox_router
 from backend.api.library_preview import router as library_preview_router
 from backend.api.library_semantic import router as library_semantic_router
+from backend.api.link_preview import router as link_preview_router
 from backend.api.llms_txt import router as llms_txt_router
 from backend.api.mcp_apps import router as mcp_apps_router
 from backend.api.mcp_chats import router as mcp_chats_router
@@ -383,6 +384,7 @@ def create_app(
     app.include_router(read_router, prefix="/api/v1")
     app.include_router(mcp_apps_router, prefix="/api/v1")
     app.include_router(graph_router, prefix="/api/v1")
+    app.include_router(link_preview_router, prefix="/api/v1")
     app.include_router(mcp_chats_router, prefix="/api/v1")
     app.include_router(oauth_router)
     app.include_router(mcp_http_router)

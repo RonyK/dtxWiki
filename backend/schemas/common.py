@@ -224,7 +224,10 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #  27 -- Context write tools and guide gain authored-link guidance; successful
 #        review submissions can return context_page_has_no_graph_visible_links.
 #        Retains stable URLs, scoped index refs, and compact write receipts.
-MCP_TOOL_CONTRACT_REVISION = 27
+#  28 -- Authored Context and Agent saves normalize visible exact index refs
+#        independently of optional link fixing. Agent draft results add a
+#        normalization_report; Agent read schema and payload remain unchanged.
+MCP_TOOL_CONTRACT_REVISION = 28
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their
 # declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
 # a field carrying this marker is always sent, so an absent value can never be

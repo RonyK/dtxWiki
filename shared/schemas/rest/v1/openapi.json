@@ -2240,160 +2240,11 @@
         "title": "AgentPageBundleSummaryEntry",
         "type": "object"
       },
-      "AgentPageDetail": {
-        "additionalProperties": false,
-        "properties": {
-          "body_markdown": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Body Markdown"
-          },
-          "category": {
-            "title": "Category",
-            "type": "string"
-          },
-          "children_count": {
-            "default": 0,
-            "title": "Children Count",
-            "type": "integer"
-          },
-          "current_active_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Current Active Version Id"
-          },
-          "frontmatter": {
-            "additionalProperties": true,
-            "title": "Frontmatter",
-            "type": "object"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "injection_policy": {
-            "title": "Injection Policy",
-            "type": "string"
-          },
-          "latest_draft_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Latest Draft Version Id"
-          },
-          "lifecycle_status": {
-            "title": "Lifecycle Status",
-            "type": "string"
-          },
-          "metadata_provenance": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metadata Provenance"
-          },
-          "parent_node_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent Node Id"
-          },
-          "priority": {
-            "title": "Priority",
-            "type": "integer"
-          },
-          "sensitivity": {
-            "title": "Sensitivity",
-            "type": "string"
-          },
-          "slug": {
-            "title": "Slug",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          },
-          "tree_path": {
-            "items": {
-              "$ref": "#/components/schemas/TreePathEntry"
-            },
-            "title": "Tree Path",
-            "type": "array"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "title": "Updated At",
-            "type": "string"
-          },
-          "version_info": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/VersionInfo"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "warnings": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Warnings",
-            "type": "array"
-          }
-        },
-        "required": [
-          "id",
-          "category",
-          "title",
-          "slug",
-          "lifecycle_status",
-          "injection_policy",
-          "priority",
-          "sensitivity",
-          "updated_at"
-        ],
-        "title": "AgentPageDetail",
-        "type": "object"
-      },
       "AgentPageDetailResponse": {
         "additionalProperties": false,
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/AgentPageDetail"
+            "$ref": "#/components/schemas/AgentPageRestDetail"
           },
           "envelope": {
             "$ref": "#/components/schemas/RESTResultEnvelope"
@@ -2517,6 +2368,9 @@
             "title": "Next Action",
             "type": "string"
           },
+          "normalization_report": {
+            "$ref": "#/components/schemas/IndexRefNormalizationReport"
+          },
           "review_item_id": {
             "anyOf": [
               {
@@ -2594,6 +2448,163 @@
           "data"
         ],
         "title": "AgentPageListResponse",
+        "type": "object"
+      },
+      "AgentPageRestDetail": {
+        "additionalProperties": false,
+        "description": "Browser-only destinations; MCP keeps the base Agent detail contract.",
+        "properties": {
+          "body_markdown": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Markdown"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "children_count": {
+            "default": 0,
+            "title": "Children Count",
+            "type": "integer"
+          },
+          "current_active_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Active Version Id"
+          },
+          "frontmatter": {
+            "additionalProperties": true,
+            "title": "Frontmatter",
+            "type": "object"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "injection_policy": {
+            "title": "Injection Policy",
+            "type": "string"
+          },
+          "latest_draft_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Draft Version Id"
+          },
+          "lifecycle_status": {
+            "title": "Lifecycle Status",
+            "type": "string"
+          },
+          "link_targets": {
+            "items": {
+              "$ref": "#/components/schemas/ContextLinkTarget"
+            },
+            "title": "Link Targets",
+            "type": "array"
+          },
+          "metadata_provenance": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata Provenance"
+          },
+          "parent_node_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Node Id"
+          },
+          "priority": {
+            "title": "Priority",
+            "type": "integer"
+          },
+          "sensitivity": {
+            "title": "Sensitivity",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "tree_path": {
+            "items": {
+              "$ref": "#/components/schemas/TreePathEntry"
+            },
+            "title": "Tree Path",
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version_info": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VersionInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "category",
+          "title",
+          "slug",
+          "lifecycle_status",
+          "injection_policy",
+          "priority",
+          "sensitivity",
+          "updated_at"
+        ],
+        "title": "AgentPageRestDetail",
         "type": "object"
       },
       "AgentPageRestoreRequest": {
@@ -10064,6 +10075,66 @@
         "title": "InboxPageResponse",
         "type": "object"
       },
+      "IndexRefNormalizationApplied": {
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "title": "After",
+            "type": "string"
+          },
+          "before": {
+            "title": "Before",
+            "type": "string"
+          }
+        },
+        "required": [
+          "before",
+          "after"
+        ],
+        "title": "IndexRefNormalizationApplied",
+        "type": "object"
+      },
+      "IndexRefNormalizationReport": {
+        "additionalProperties": false,
+        "properties": {
+          "applied": {
+            "items": {
+              "$ref": "#/components/schemas/IndexRefNormalizationApplied"
+            },
+            "title": "Applied",
+            "type": "array"
+          },
+          "unresolved": {
+            "items": {
+              "$ref": "#/components/schemas/IndexRefNormalizationUnavailable"
+            },
+            "title": "Unresolved",
+            "type": "array"
+          }
+        },
+        "title": "IndexRefNormalizationReport",
+        "type": "object"
+      },
+      "IndexRefNormalizationUnavailable": {
+        "additionalProperties": false,
+        "properties": {
+          "locator": {
+            "title": "Locator",
+            "type": "string"
+          },
+          "reason": {
+            "const": "unavailable",
+            "default": "unavailable",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "locator"
+        ],
+        "title": "IndexRefNormalizationUnavailable",
+        "type": "object"
+      },
       "InstructionArtifact": {
         "additionalProperties": false,
         "properties": {
@@ -12062,6 +12133,121 @@
           "expected_base_content_sha256"
         ],
         "title": "LibrarySemanticMarkdownUpdateRequest",
+        "type": "object"
+      },
+      "LinkPreviewPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "link_targets": {
+            "items": {
+              "$ref": "#/components/schemas/ContextLinkTarget"
+            },
+            "title": "Link Targets",
+            "type": "array"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "source_page_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Page Id"
+          },
+          "source_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Version Id"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "source_page_id",
+          "source_version_id",
+          "request_id"
+        ],
+        "title": "LinkPreviewPayload",
+        "type": "object"
+      },
+      "LinkPreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "body_md": {
+            "maxLength": 1000000,
+            "title": "Body Md",
+            "type": "string"
+          },
+          "request_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          },
+          "source_page_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Page Id"
+          },
+          "source_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Version Id"
+          }
+        },
+        "required": [
+          "body_md",
+          "request_id"
+        ],
+        "title": "LinkPreviewRequest",
+        "type": "object"
+      },
+      "LinkPreviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/LinkPreviewPayload"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "LinkPreviewResponse",
         "type": "object"
       },
       "LintFindingBatchDecisionData": {
@@ -42230,6 +42416,107 @@
         "summary": "Update Library Semantic Markdown",
         "tags": [
           "library-semantic"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/link-targets/preview": {
+      "post": {
+        "operationId": "preview_markdown_links_api_v1_workspaces__workspace_id__link_targets_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview Markdown Links",
+        "tags": [
+          "read"
         ]
       }
     },

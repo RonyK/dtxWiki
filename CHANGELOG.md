@@ -13,18 +13,29 @@
   formatted entries navigate only when their ref, kind, ID, workspace, and
   canonical server link match. Unrecognized responses retain their source.
 - Copied system index refs become supported canonical links on Agent drafts
-  and on Context saves with save-time link fixes (`link_fix_mode=auto`, the
-  default), when the caller can read the target. Unresolved refs stay in the
-  source and readers show them as unavailable references. Context saves in
-  suggest mode retain the refs with Lint findings. Unrelated authored links
-  keep their existing rules. Agent restores preserve historical Markdown
-  without normalizing saved index refs.
+  and all authored Context saves when the caller can read the target, including
+  suggest mode and disabled formatting. Missing and hidden refs retain their
+  source with nonblocking diagnostics. Agent draft results include
+  `normalization_report` with applied links and unavailable refs.
+- Historical and restored refs resolve for the current reader in Context,
+  Agent, Ask, Review, and editor previews without changing stored Markdown.
+  Editor previews discard stale results and preserve the unsaved buffer.
+  Anonymous readers receive only exposed published Context destinations;
+  Library file previews retain their untrusted-content policy. Agent reader
+  targets are REST-only; MCP Agent read schemas and payloads stay unchanged.
+- Restores, copied edits, submit, and publish retain their historical bytes.
+  Published maintenance normalizes refs only when link fixing is enabled and
+  continues to preserve draft-only Context destinations. Other authored links
+  keep their existing optional fixing policy.
 - Navigation summaries skip image-only paragraphs and store an empty string
   when no prose exists. Run `dtxwiki reindex` to refresh stored summaries;
   legacy NULL summaries still derive on read.
 - MCP tool contract revision 25 updates the index input/output contract and
   selected-folder answer links. Refresh cached tool catalogs and result schemas
   after upgrading.
+- MCP tool contract revision 28 adds the Agent write normalization report and
+  clarifies authored index-ref normalization. Refresh tool catalogs and result
+  schemas after upgrading.
 
 ### Transactional Lint fixes for published documents
 

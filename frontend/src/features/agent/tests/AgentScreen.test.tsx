@@ -150,7 +150,15 @@ describe("AgentScreen", () => {
         data: folderNode("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4", "Advanced", "advanced", null, [], false, 1),
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1?version=active`]: {
-        data: agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona", "# Persona"),
+        data: {
+          ...agentDetail("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "persona", "Default Persona",
+            "# Persona\n\n[Copied reference](dtxwiki://index/context/cccccccc-cccc-4ccc-8ccc-cccccccccccc)"),
+          link_targets: [{
+            locator: "dtxwiki://index/context/cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            href: `/p/${WORKSPACE_ID}/cccccccc-cccc-4ccc-8ccc-cccccccccccc`,
+            target_page_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", state: "ok",
+          }],
+        },
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1`]: {
         data: {
@@ -277,6 +285,9 @@ describe("AgentScreen", () => {
     expect(
       await screen.findByRole("heading", { name: "Persona" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Copied reference" })).toHaveAttribute(
+      "href", `/p/${WORKSPACE_ID}/cccccccc-cccc-4ccc-8ccc-cccccccccccc`,
+    );
     expect(screen.getByRole("tab", { name: "Bundle" })).toBeEnabled();
     await userEvent.click(screen.getByRole("tab", { name: "Bundle" }));
     expect(

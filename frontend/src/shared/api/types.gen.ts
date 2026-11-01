@@ -2501,6 +2501,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/link-targets/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Markdown Links */
+        post: operations["preview_markdown_links_api_v1_workspaces__workspace_id__link_targets_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/lint/findings": {
         parameters: {
             query?: never;
@@ -4219,62 +4236,9 @@ export interface components {
              */
             valid_until: string;
         };
-        /** AgentPageDetail */
-        AgentPageDetail: {
-            /** Body Markdown */
-            body_markdown?: string | null;
-            /** Category */
-            category: string;
-            /**
-             * Children Count
-             * @default 0
-             */
-            children_count: number;
-            /** Current Active Version Id */
-            current_active_version_id?: string | null;
-            /** Frontmatter */
-            frontmatter?: {
-                [key: string]: unknown;
-            };
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Injection Policy */
-            injection_policy: string;
-            /** Latest Draft Version Id */
-            latest_draft_version_id?: string | null;
-            /** Lifecycle Status */
-            lifecycle_status: string;
-            /** Metadata Provenance */
-            metadata_provenance?: {
-                [key: string]: unknown;
-            } | null;
-            /** Parent Node Id */
-            parent_node_id?: string | null;
-            /** Priority */
-            priority: number;
-            /** Sensitivity */
-            sensitivity: string;
-            /** Slug */
-            slug: string;
-            /** Title */
-            title: string;
-            /** Tree Path */
-            tree_path?: components["schemas"]["TreePathEntry"][];
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            version_info?: components["schemas"]["VersionInfo"] | null;
-            /** Warnings */
-            warnings?: string[];
-        };
         /** AgentPageDetailResponse */
         AgentPageDetailResponse: {
-            data: components["schemas"]["AgentPageDetail"];
+            data: components["schemas"]["AgentPageRestDetail"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** AgentPageDraftRequest */
@@ -4335,6 +4299,7 @@ export interface components {
              * @enum {string}
              */
             next_action: "owner_activation_required" | "review_required";
+            normalization_report?: components["schemas"]["IndexRefNormalizationReport"];
             /** Review Item Id */
             review_item_id?: string | null;
         };
@@ -4360,6 +4325,64 @@ export interface components {
              * @default 0
              */
             total: number;
+        };
+        /**
+         * AgentPageRestDetail
+         * @description Browser-only destinations; MCP keeps the base Agent detail contract.
+         */
+        AgentPageRestDetail: {
+            /** Body Markdown */
+            body_markdown?: string | null;
+            /** Category */
+            category: string;
+            /**
+             * Children Count
+             * @default 0
+             */
+            children_count: number;
+            /** Current Active Version Id */
+            current_active_version_id?: string | null;
+            /** Frontmatter */
+            frontmatter?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Injection Policy */
+            injection_policy: string;
+            /** Latest Draft Version Id */
+            latest_draft_version_id?: string | null;
+            /** Lifecycle Status */
+            lifecycle_status: string;
+            /** Link Targets */
+            link_targets?: components["schemas"]["ContextLinkTarget"][];
+            /** Metadata Provenance */
+            metadata_provenance?: {
+                [key: string]: unknown;
+            } | null;
+            /** Parent Node Id */
+            parent_node_id?: string | null;
+            /** Priority */
+            priority: number;
+            /** Sensitivity */
+            sensitivity: string;
+            /** Slug */
+            slug: string;
+            /** Title */
+            title: string;
+            /** Tree Path */
+            tree_path?: components["schemas"]["TreePathEntry"][];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            version_info?: components["schemas"]["VersionInfo"] | null;
+            /** Warnings */
+            warnings?: string[];
         };
         /** AgentPageRestoreRequest */
         AgentPageRestoreRequest: {
@@ -7118,6 +7141,31 @@ export interface components {
             data: components["schemas"]["InboxPagePayload"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
+        /** IndexRefNormalizationApplied */
+        IndexRefNormalizationApplied: {
+            /** After */
+            after: string;
+            /** Before */
+            before: string;
+        };
+        /** IndexRefNormalizationReport */
+        IndexRefNormalizationReport: {
+            /** Applied */
+            applied?: components["schemas"]["IndexRefNormalizationApplied"][];
+            /** Unresolved */
+            unresolved?: components["schemas"]["IndexRefNormalizationUnavailable"][];
+        };
+        /** IndexRefNormalizationUnavailable */
+        IndexRefNormalizationUnavailable: {
+            /** Locator */
+            locator: string;
+            /**
+             * Reason
+             * @default unavailable
+             * @constant
+             */
+            reason: "unavailable";
+        };
         /** InstructionArtifact */
         InstructionArtifact: {
             body: components["schemas"]["LocalizedText"];
@@ -7818,6 +7866,38 @@ export interface components {
             expected_base_content_sha256: string;
             /** Expected Revision */
             expected_revision: number;
+        };
+        /** LinkPreviewPayload */
+        LinkPreviewPayload: {
+            /** Link Targets */
+            link_targets?: components["schemas"]["ContextLinkTarget"][];
+            /** Request Id */
+            request_id: string;
+            /** Source Page Id */
+            source_page_id: string | null;
+            /** Source Version Id */
+            source_version_id: string | null;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /** LinkPreviewRequest */
+        LinkPreviewRequest: {
+            /** Body Md */
+            body_md: string;
+            /** Request Id */
+            request_id: string;
+            /** Source Page Id */
+            source_page_id?: string | null;
+            /** Source Version Id */
+            source_version_id?: string | null;
+        };
+        /** LinkPreviewResponse */
+        LinkPreviewResponse: {
+            data: components["schemas"]["LinkPreviewPayload"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** LintFindingBatchDecisionData */
         LintFindingBatchDecisionData: {
@@ -23440,6 +23520,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LibrarySemanticMarkdownResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    preview_markdown_links_api_v1_workspaces__workspace_id__link_targets_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkPreviewResponse"];
                 };
             };
             /** @description Unauthorized */

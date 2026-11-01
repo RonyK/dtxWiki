@@ -12,7 +12,9 @@ from backend.spi.tool_presentation import MCP_CONTEXT_LINK_GUIDANCE
 CONTEXT_LINKING_INSTRUCTION = (
     "Link related Context pages in the body using a result's link_markdown. "
     "Authored Context-to-Context link relations in the graph come from links "
-    "in the page body and appear after publication."
+    "in the page body and appear after publication. Visible exact system index "
+    "refs copied into authored bodies normalize to browser links on save, "
+    "including suggest mode; unavailable refs retain their source."
 )
 
 MCP_SERVER_INSTRUCTIONS = (

@@ -40,12 +40,36 @@ class AgentPageDraftRequest(InputRequest):
     model_config = ConfigDict(extra="forbid")
 
 
+class IndexRefNormalizationApplied(BaseModel):
+    before: str
+    after: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class IndexRefNormalizationUnavailable(BaseModel):
+    locator: str
+    reason: Literal["unavailable"] = "unavailable"
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class IndexRefNormalizationReport(BaseModel):
+    applied: list[IndexRefNormalizationApplied] = Field(default_factory=list)
+    unresolved: list[IndexRefNormalizationUnavailable] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class AgentPageDraftResult(BaseModel):
     agent_page_id: UUID
     draft_version_id: UUID
     change_set_id: UUID
     review_item_id: UUID | None = None
     next_action: Literal["owner_activation_required", "review_required"]
+    normalization_report: IndexRefNormalizationReport = Field(
+        default_factory=IndexRefNormalizationReport
+    )
 
     model_config = ConfigDict(extra="forbid")
 

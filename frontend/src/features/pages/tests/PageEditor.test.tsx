@@ -4606,6 +4606,36 @@ describe("PageEditor", () => {
     expect(helloBodies[0]).toMatchObject({ title: "Hello pending" });
   });
 
+  it("projects internal links in split preview without saving or replacing the editor buffer", async () => {
+    const locator = "dtxwiki://index/context/cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const raw = `# Hello\n\n[Preview reference](${locator})  \nNext line`;
+    const fetchMock = mockEditorPage(raw);
+    const fetchPage = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).endsWith("/link-targets/preview")) {
+        const request = JSON.parse(String(init?.body));
+        expect(request.body_md).toBe(raw);
+        expect(request.source_page_id).toBe(page.id);
+        expect(request.source_version_id).toBe(page.version_id);
+        return jsonResponse({ data: {
+          ...request,
+          workspace_id: page.workspace_id,
+          link_targets: [{ locator, href: `/p/${page.workspace_id}/cccccccc-cccc-4ccc-8ccc-cccccccccccc`, state: "ok" }],
+        } });
+      }
+      return fetchPage(input, init);
+    });
+    renderWithRouter("/pages/hello/edit", <></>);
+    await screen.findByLabelText("Markdown body");
+    await typist().click(screen.getByRole("tab", { name: "Split" }));
+    expect(await screen.findByRole("link", { name: "Preview reference" })).toHaveAttribute(
+      "href", `/p/${page.workspace_id}/cccccccc-cccc-4ccc-8ccc-cccccccccccc`,
+    );
+    const source = document.querySelector<HTMLElement>(".cm-editor")!;
+    expect(EditorView.findFromDOM(source)?.state.doc.toString()).toBe(raw);
+    expect(autosaveCalls(fetchMock)).toHaveLength(0);
+  });
+
   it("switches to split mode with a resizable separator", async () => {
     await renderEditorOnHello();
     expect(screen.getByRole("navigation", { name: "Page location" })).toBeInTheDocument();

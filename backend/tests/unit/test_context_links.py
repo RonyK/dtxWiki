@@ -1,7 +1,9 @@
 """Source-boundary checks for authored Context links."""
 
+from types import SimpleNamespace
 from uuid import UUID
 
+from backend.services.body_preparer import BodyInput, BodyPreparer, WriteContext
 from backend.services.context_links import (
     LinkContext,
     Resolution,
@@ -83,3 +85,58 @@ def test_extract_links_keeps_only_authored_destinations_and_exact_spans(monkeypa
     assert details[0]["before"] == "/context/normal.md#part"
     assert details[0]["after"] == canonical + "#part"
     assert rewrite_links_with_report(rewritten, ctx) == (rewritten, (), ())
+
+
+def test_index_normalizer_preserves_source_and_aggregates_general_link_fixes(
+    monkeypatch,
+):
+    # Budget exception: three syntax inputs exercise different source spans:
+    # an inline destination with a title, a reference definition, and an angle
+    # autolink that replaces its whole span. They share one body and resolver.
+    # A fourth ordinary link proves normalizer/fixer aggregate counts; replacing
+    # it with another index ref cannot detect the two-phase count regression.
+    workspace_id = UUID("11111111-1111-4111-8111-111111111111")
+    target_id = UUID("22222222-2222-4222-8222-222222222222")
+    ref = f"dtxwiki://index/context/{target_id}"
+    canonical = f"/p/{workspace_id}/{target_id}"
+    body = (
+        f'한글 [Title *kept*]({ref} "Preserved title")  \n'
+        f"[Reference][r] <{ref}> [Ordinary](/context/target.md)\n\n"
+        f'[r]: {ref} "Reference title"\n'
+    )
+
+    def resolve_target(locator, _ctx, **_kwargs):
+        if locator.kind == "unknown":
+            return Resolution("ignored")
+        return Resolution(
+            "ok", page_id=target_id, href=canonical,
+            target_slug="target", published=True,
+        )
+
+    # Construct before patching: the builtin module imports the shared batch
+    # function, so importing it under a patched module would leak that binding.
+    preparer = BodyPreparer()
+    monkeypatch.setattr("backend.services.context_links.resolve", resolve_target)
+    monkeypatch.setattr(
+        "backend.services.context_links.link_decision_batch", lambda *_args: object()
+    )
+    monkeypatch.setattr(
+        "backend.services.lint.rules_links.link_decision_batch", lambda *_args: object()
+    )
+    workspace = SimpleNamespace(id=workspace_id, auto_fix_enabled=False, lint_policy={})
+    result = preparer.prepare(
+        BodyInput(body),
+        WriteContext(
+            workspace=workspace, session=object(), actor_kind="human",
+            actor_id="author", actor_provenance="browser_session",
+        ),
+    )
+    assert result.body == (
+        body.replace(f'({ref} "Preserved title")', f'({canonical} "Preserved title")')
+        .replace(f"<{ref}>", f"[{ref}]({canonical})")
+        .replace("(/context/target.md)", f"({canonical})")
+        .replace(f'[r]: {ref} "Reference title"', f'[r]: {canonical} "Reference title"')
+    )
+    assert result.module_fix_counts == (("links", 4),)
+    assert len(result.fix_details) == 4
+    assert result.failed_module_ids == ()
