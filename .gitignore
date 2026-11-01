@@ -98,7 +98,7 @@ Thumbs.db
 
 # doc/ is entirely temporary working scratch (planning, reviews, drafts).
 # Operator artifacts go to internal/audit/; test fixtures go to tests/fixtures/.
-# CI captures pytest logs as artifacts (.github/workflows/ci.yml packaging job).
+# Release checks capture pytest logs (.github/workflows/release-checks.yml packaging job).
 doc/
 
 # docs/ holds detailed design and plan documents; review/ holds adversarial

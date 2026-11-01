@@ -229,8 +229,8 @@ print(json.dumps({"heads": heads, "chain": chain, "foreign": foreign}))
 def _check_frontend_bundle(root: Path) -> list[str]:
     """Check the bundle no pytest suite can see.
 
-    `backend/static/` is gitignored and ci.yml's packaging job never runs
-    `make bundle-frontend`, so a wheel built without a bundle -- or one whose
+    `backend/static/` is gitignored and the packaging job in release-checks.yml
+    never runs `make bundle-frontend`, so a wheel built without a bundle -- or one whose
     index survives a `--fresh` deploy that pruned the assets it names -- can
     only be caught here, after the release job has built it.
     """

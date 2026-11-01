@@ -364,7 +364,10 @@ def npm_publish_problems(workflow: dict) -> list[str]:
     releasing = [
         job
         for job in jobs.values()
-        if any("gh release create" in step.get("run", "") for step in job["steps"])
+        if any(
+            "gh release create" in step.get("run", "")
+            for step in job.get("steps", [])
+        )
     ]
     for release in releasing:
         release_needs = release.get("needs") or []

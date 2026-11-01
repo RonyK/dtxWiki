@@ -472,7 +472,7 @@ def test_every_job_that_runs_node_sets_it_up_first():
     # including the two whose node is only implicit.
     assert {
         "ci.yml:backend",
-        "ci.yml:packaging",
+        "release-checks.yml:packaging",
         "ci.yml:frontend",
         "release.yml:build",
     } <= jobs_running_node(workflows)

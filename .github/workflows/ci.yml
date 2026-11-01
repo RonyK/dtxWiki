@@ -57,100 +57,6 @@ jobs:
           VENV=.venv make test-backend
           VENV=.venv make test-static
 
-  postgres-migration:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: dtxwiki_migration
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d dtxwiki_migration"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-    env:
-      DTXWIKI_POSTGRES_MIGRATION_TEST_DATABASE_URL: >-
-        postgresql+pg8000://postgres:postgres@127.0.0.1:5432/dtxwiki_migration
-      DTXWIKI_POSTGRES_TEST_DATABASE_URL: >-
-        postgresql+pg8000://postgres:postgres@127.0.0.1:5432/dtxwiki_test
-      # The join concurrency suite creates and drops its own tables, so it gets
-      # a separate database: the migration suite asserts its database starts
-      # empty, and sharing one would couple the two by execution order.
-      DTXWIKI_POSTGRES_CONCURRENCY_TEST_DATABASE_URL: >-
-        postgresql+pg8000://postgres:postgres@127.0.0.1:5432/dtxwiki_concurrency
-      DTXWIKI_REQUIRE_POSTGRES_CONCURRENCY: "1"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-      - name: Install Python dependencies
-        run: uv sync --locked --extra dev
-      - name: Create isolated PostgreSQL test databases
-        run: |
-          .venv/bin/python - <<'PY'
-          from sqlalchemy import create_engine, text
-
-          engine = create_engine(
-              "postgresql+pg8000://postgres:postgres@127.0.0.1:5432/postgres"
-          )
-          with engine.connect().execution_options(
-              isolation_level="AUTOCOMMIT"
-          ) as connection:
-              for database in ("dtxwiki_test", "dtxwiki_concurrency"):
-                  connection.execute(text(f"DROP DATABASE IF EXISTS {database}"))
-                  connection.execute(text(f"CREATE DATABASE {database}"))
-          PY
-      - name: Execute all PostgreSQL suites through xdist loadgroup
-        # Selection by marker covers every shared-database case and proves the
-        # postgres group stays on one worker. Configured URLs turn missing or
-        # unreachable databases into failures instead of collection skips.
-        run: >-
-          .venv/bin/python -m pytest backend/tests -q -n 4 --dist loadgroup
-          -m xdist_group --tb=short
-
-  packaging:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-      # The release-gate validator tests start node (the gate script's i18n
-      # coverage check), so pin it rather than inherit the runner's.
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22.18.0"
-      - name: Install Python dependencies
-        run: uv sync --locked --extra dev
-      - name: Run packaging and acceptance tests with log capture
-        run: |
-          mkdir -p .ci-evidence
-          set +e
-          .venv/bin/python -m pytest tests/packaging -v --tb=short \
-            2>&1 | tee .ci-evidence/packaging.log
-          packaging_rc=${PIPESTATUS[0]}
-          .venv/bin/python -m pytest tests/acceptance -v --tb=short \
-            2>&1 | tee .ci-evidence/acceptance.log
-          acceptance_rc=${PIPESTATUS[0]}
-          exit $((packaging_rc | acceptance_rc))
-      - name: Run release-gate validator tests
-        run: VENV=.venv make test-release-gate
-      - name: Redact captured logs
-        if: always()
-        run: |
-          for f in .ci-evidence/*.log; do
-            bash scripts/redact_evidence.sh < "$f" > "${f%.log}.redacted.log" || true
-          done
-      - name: Upload evidence artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: evidence-${{ github.run_id }}
-          path: .ci-evidence/*.redacted.log
-          retention-days: 90
-
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -193,65 +99,6 @@ jobs:
           node tests/e2e/network_retry.test.mjs
           node tests/e2e/redact-network.test.mjs
           node tests/e2e/page-diagnostics.test.mjs
-
-  # `npm ci` and the SPA build run inside the image, so only a real build sees
-  # a COPY that no longer lists a script the generator imports, a file missing
-  # from the context, a changed base image or a failing install. The packaging
-  # test of the COPY list cannot see those.
-  docker-frontend:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build the frontend stage of the image
-        run: docker build --target frontend -f Dockerfile .
-
-  graph-10k:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22.18.0"
-          cache: npm
-      - name: Install Python dependencies
-        run: uv sync --locked --extra dev
-      - name: Install frontend dependencies
-        run: npm ci
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-      - name: Verify exact-scale benchmark guards
-        run: node --test scripts/bench/graph/render_contract.test.mjs
-      - name: Verify PC 10K and mobile 2K capacity
-        id: playwright
-        env:
-          DTXWIKI_E2E_GRAPH_10K: "1"
-          DTXWIKI_E2E_GRAPH_10K_DENSE: "1"
-          DTXWIKI_E2E_GRAPH_10K_AGGREGATED: "1"
-        # --forbid-only: a committed test.only would otherwise run alone and
-        # leave the lane green with the other cases never run.
-        run: >-
-          npm run test:e2e -- tests/e2e/workspace_graph_10k_real.spec.ts
-          tests/e2e/workspace_graph_10k_motion.spec.ts
-          tests/e2e/workspace_graph_10k_aggregated.spec.ts
-          --project=chromium --workers=1 --retries=0 --forbid-only
-          --reporter=line,html
-      - name: Redact the 10K report before publishing it
-        if: always()
-        run: |
-          if [ -d playwright-report ]; then
-            bash scripts/redact_evidence.sh --dir playwright-report
-          fi
-      - name: Upload PC 10K functional evidence
-        if: always() && (steps.playwright.outcome == 'success' || hashFiles('playwright-report/index.html') != '')
-        uses: actions/upload-artifact@v4
-        with:
-          name: graph-10k-functional-${{ github.run_id }}
-          path: playwright-report
-          if-no-files-found: error
-          retention-days: 14
 
   e2e:
     name: E2E (${{ matrix.name }})
@@ -305,7 +152,7 @@ jobs:
       # redacts them in place. It cannot reach a screenshot; it names what it
       # skipped in the job log.
       #
-      # Deliberately NOT `|| true` (unlike the `packaging` job's per-file
+      # Deliberately NOT `|| true` (unlike release-checks.yml's `packaging` per-file
       # pipe): the only non-zero exit is the break-glass hard-fail on a
       # production secret env name or a PEM private key, and by then the bytes
       # have already been scrubbed in place. Existing reports still upload

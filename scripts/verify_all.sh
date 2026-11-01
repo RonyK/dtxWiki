@@ -7,8 +7,8 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-# Pytest log directory — auto-captured by CI (.github/workflows/ci.yml
-# packaging job) or by manual local runs that tee output here.
+# Pytest log directory — captured by the packaging job in
+# .github/workflows/release-checks.yml or by manual local runs that tee output here.
 # Operator audit artifacts (vm-smoke.md) live in internal/audit/.
 EVIDENCE_DIR="${EVIDENCE_DIR:-$ROOT_DIR/.ci-evidence}"
 OPERATOR_AUDIT_DIR="${OPERATOR_AUDIT_DIR:-$ROOT_DIR/internal/audit}"

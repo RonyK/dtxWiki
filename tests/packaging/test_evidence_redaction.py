@@ -14,7 +14,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 # Operator audit artifacts (manual, hand-written sprint closure evidence).
-# Test-produced logs live in CI artifacts (see .github/workflows/ci.yml).
+# Test-produced logs live in release-checks.yml workflow artifacts.
 EVIDENCE_DIR = ROOT / "internal/audit"
 REDACTOR_SH = ROOT / "scripts/redact_evidence.sh"
 REDACTOR_PS1 = ROOT / "scripts/redact_evidence.ps1"
