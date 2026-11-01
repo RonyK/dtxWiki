@@ -48,6 +48,10 @@ class LintFixResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class _NoLintChanges(Exception):
+    """Roll back a no-op claim without leaving a durable skip receipt."""
+
+
 class _SessionBoundFactory:
     """The writer owns no commit, rollback or close of the caller's session."""
 
@@ -209,7 +213,7 @@ class LintFixWriter:
                 if module.fixer is not None and policy.fix_existing(module)
             }
             if not fix_existing:
-                return LintFixResult(state="skipped")
+                raise _NoLintChanges
             context = WriteContext(
                 workspace=workspace,
                 session=session,
@@ -222,7 +226,7 @@ class LintFixWriter:
             prepared = preparer.prepare_maintenance(BodyInput(base.body_md), context)
             counts = dict(prepared.module_fix_counts)
             if prepared.body == base.body_md or not fix_existing.intersection(counts):
-                return LintFixResult(state="skipped")
+                raise _NoLintChanges
             opened = service.begin_context_edit(
                 page_id=page_id,
                 workspace_id=workspace_id,
@@ -347,6 +351,10 @@ class LintFixWriter:
                 result_model=LintFixResult,
                 execute=execute,
             )
+        except _NoLintChanges:
+            # The idempotency savepoint removed its claim; there was no write
+            # to replay. Conflicts retain the ordinary skipped-result policy.
+            return LintFixResult(state="skipped")
         except (
             PageServiceError,
             ReadServiceError,

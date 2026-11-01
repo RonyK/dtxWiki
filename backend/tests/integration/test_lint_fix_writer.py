@@ -30,9 +30,10 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
     # One page lifecycle covers distinct failures: pipeline+reference copying,
     # duplicate retries, a live edit, a changed head, outer rollback, and an
     # explicit auto-approval veto. These cannot be proved by mocked sessions.
-    # PR1 adds one logical DB path within this lifecycle: mixed published
-    # and draft-only links. This needs a real lifecycle as explained below;
-    # it is a budget exception, not zero cases because this function exists.
+    # PR1 adds two logical DB paths within this lifecycle: mixed published
+    # and draft-only links, and a fresh no-op claim. These need real lifecycle
+    # and durable receipt checks as explained below; they are budget
+    # exceptions, not zero cases because this function exists.
     registry = LintRegistry.builtin()
     writer = LintFixWriter(lint_registry=registry)
     target = page_service.write_page(
@@ -191,6 +192,28 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
             base_content_hash=source.content_hash,
         )
         assert replay.state == "fixed" and replay.version_id == fixed_id
+        # The repaired state of this same DB lifecycle has no trigger change.
+        # Check a fresh request as well as the completed receipt above: mocked
+        # planning cannot prove that its durable idempotency claim is absent.
+        no_change_run_id = uuid4()
+        no_change = writer.fix_page(
+            session,
+            workspace_id=workspace_id,
+            run_id=no_change_run_id,
+            page_id=source.id,
+            base_version_id=fixed_id,
+            base_content_hash=fixed.content_hash,
+        )
+        assert no_change.state == "skipped"
+        assert (
+            session.scalar(
+                select(MCPWriteIdempotency.id).where(
+                    MCPWriteIdempotency.idempotency_key
+                    == f"lint-fix:{no_change_run_id}:{source.id}:{fixed_id}"
+                )
+            )
+            is None
+        )
         LintService(lint_registry=registry).execute_queued_run(
             session, workspace_id=workspace_id, run_id=run_id, trigger_type="manual"
         )
