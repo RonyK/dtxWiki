@@ -56,7 +56,7 @@ from backend.services.library_policy import (
     LibraryFamilyPolicyService,
     get_default_library_family_policy_service,
 )
-from backend.services.lint import LintRegistry
+from backend.services.lint import LintPolicy, LintRegistry
 from backend.services.mcp_credential_health import binding_key_for_client
 from backend.services.oauth_service import (
     WorkspaceOAuthHealth,
@@ -696,16 +696,9 @@ class SettingsService:
                 title="Lint rules",
                 # Rule toggles ({rule_id: bool}) plus the auto-fix mode flag (F2),
                 # so the Settings lint section can render both from one card.
-                policy={
-                    **dict(workspace.lint_policy or {}),
-                    "auto_fix": workspace.auto_fix_enabled,
-                    "link_fix_mode": (workspace.lint_policy or {}).get(
-                        "link_fix_mode", "auto"
-                    ),
-                    "auto_approve_link_fixes": (workspace.lint_policy or {}).get(
-                        "auto_approve_link_fixes", True
-                    ),
-                },
+                policy=LintPolicy(workspace).effective_settings(
+                    self.lint_registry.modules
+                ),
             ),
             mcp_clients=mcp_payload,
             mcp_clients_next_cursor=mcp_next_cursor,

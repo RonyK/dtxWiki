@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Literal
 
 from backend.context_media.domain import validate_markdown_media_policy
 from backend.domain.input_policy import validate_body, validate_labels, validate_title
@@ -58,6 +58,8 @@ class WriteContext:
     version: ContextPageVersion | None = None
     session: Session | None = None
     actor: ActorContext | None = None
+    source_version: ContextPageVersion | None = None
+    link_source: Literal["draft", "published"] | None = None
 
 
 class BodyPreparer:
@@ -83,6 +85,20 @@ class BodyPreparer:
     ) -> PreparedBody:
         return self._prepare(input, ctx)
 
+    def prepare_maintenance(self, input: BodyInput, ctx: WriteContext) -> PreparedBody:
+        """Prepare a published source without synchronizing authored metadata."""
+        if input.metadata is not None:
+            raise ValueError("Maintenance preparation cannot change page metadata")
+        return self._prepare(
+            input,
+            replace(
+                ctx,
+                source_version=ctx.source_version or ctx.version,
+                link_source="published",
+            ),
+            maintenance=True,
+        )
+
     def preview(self, markdown: str, ctx: WriteContext) -> PreparedBody:
         # "Format now" is an explicit request even when save-time fixing is off.
         return self._prepare(BodyInput(markdown), ctx, preview=True)
@@ -91,8 +107,14 @@ class BodyPreparer:
         """Report stored-body findings without validating or transforming bytes."""
         policy = self.policy_factory(ctx.workspace)
         lint_ctx = LintContext(
-            session=ctx.session, workspace_id=ctx.workspace.id, actor=ctx,
-            page=ctx.page, version=ctx.version, self_origins=self.self_origins,
+            session=ctx.session,
+            workspace_id=ctx.workspace.id,
+            actor=ctx,
+            page=ctx.page,
+            version=ctx.version,
+            self_origins=self.self_origins,
+            source_version=ctx.source_version,
+            link_source=ctx.link_source,
         )
         findings = tuple(
             finding
@@ -106,13 +128,25 @@ class BodyPreparer:
     def auto_approval_matches(
         self, base_body: str, new_body: str, ctx: WriteContext
     ) -> bool:
-        prepared = self.prepare(BodyInput(base_body), ctx)
+        prepared = self.prepare(
+            BodyInput(base_body),
+            replace(
+                ctx,
+                source_version=ctx.source_version or ctx.version,
+                link_source="published",
+            ),
+        )
+        return prepared.body == new_body and self.auto_approval_allowed(prepared, ctx)
+
+    def auto_approval_allowed(self, prepared: PreparedBody, ctx: WriteContext) -> bool:
+        """Judge the actual prepared changes; never rerun a transformation."""
         policy = self.policy_factory(ctx.workspace)
-        changed = dict(prepared.module_fix_counts)
-        return prepared.body == new_body and all(
-            policy.auto_approve(module)
-            for module in self.registry.modules
-            if module.module_id in changed
+        changed = {module_id for module_id, _count in prepared.module_fix_counts}
+        modules = {module.module_id: module for module in self.registry.modules}
+        return (
+            not prepared.failed_module_ids
+            and changed <= modules.keys()
+            and all(policy.auto_approve(modules[module_id]) for module_id in changed)
         )
 
     def _prepare(
@@ -121,6 +155,7 @@ class BodyPreparer:
         ctx: WriteContext,
         *,
         preview: bool = False,
+        maintenance: bool = False,
     ) -> PreparedBody:
         body = input.body_md
         if input.metadata is not None:
@@ -144,14 +179,35 @@ class BodyPreparer:
             actor=ctx,
             page=ctx.page,
             version=ctx.version,
+            source_version=ctx.source_version or ctx.version,
+            link_source=ctx.link_source or "draft",
             self_origins=self.self_origins,
         )
         fixes: list[str] = []
-        module_fix_counts: list[tuple[str, int]] = []
+        module_fix_counts: dict[str, int] = {}
         fix_details: list[dict] = []
-        for module in self.registry.fixers_for_save(policy, preview=preview):
+        failed_module_ids: list[str] = []
+        participants = (
+            self.registry.fixers_for_maintenance(policy) if maintenance else None
+        )
+        normalizer_modules = (
+            participants
+            if participants is not None
+            else sorted(self.registry.modules, key=lambda module: module.order)
+        )
+        fixer_modules = (
+            participants
+            if participants is not None
+            else self.registry.fixers_for_save(policy, preview=preview)
+        )
+        transforms = [
+            (module, module.normalizer)
+            for module in normalizer_modules
+            if module.normalizer is not None
+        ] + [(module, module.fixer) for module in fixer_modules]
+        for module, transform in transforms:
             try:
-                result = module.fixer.fix(body, lint_ctx)
+                result = transform.fix(body, lint_ctx)
                 next_body = result.body
                 next_fixes = tuple(result.fixes)
                 if not isinstance(next_body, str) or not all(
@@ -162,9 +218,13 @@ class BodyPreparer:
                 logger.exception(
                     "Lint fixer %s failed; retaining the prior body", module.module_id
                 )
+                failed_module_ids.append(module.module_id)
                 continue
             if next_body != body:
-                module_fix_counts.append((module.module_id, max(1, len(next_fixes))))
+                count = max(1, len(next_fixes))
+                module_fix_counts[module.module_id] = (
+                    module_fix_counts.get(module.module_id, 0) + count
+                )
                 details = getattr(result, "details", ())
                 if details:
                     fix_details.extend(details)
@@ -201,8 +261,9 @@ class BodyPreparer:
             metadata,
             tuple(fixes),
             findings,
-            tuple(module_fix_counts),
+            tuple(module_fix_counts.items()),
             tuple(fix_details),
+            tuple(dict.fromkeys(failed_module_ids)),
         )
 
     @staticmethod

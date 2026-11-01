@@ -100,8 +100,15 @@ def test_body_preparer_is_idempotent_and_honors_injected_modules_and_policy():
 
     class CanonicalizeLink:
         def fix(self, body, _ctx):
-            fixed = body.replace("draft-link", "canonical-link")
+            fixed = body.replace("normalized-link", "canonical-link")
             return FixResult(fixed, ("link.canonicalized",) if fixed != body else ())
+
+    # Budget exception: this changed module input adds a normalizer before its
+    # fixer. A one-stage module cannot expose duplicate-key count loss.
+    class NormalizeInput:
+        def fix(self, body, _ctx):
+            fixed = body.replace("draft-link", "normalized-link")
+            return FixResult(fixed, ("input.link",) if fixed != body else ())
 
     class FormatList:
         def fix(self, body, _ctx):
@@ -116,19 +123,30 @@ def test_body_preparer_is_idempotent_and_honors_injected_modules_and_policy():
     # produce the expected body after the earlier link module has run.
     registry = LintRegistry(
         (
-            LintModule("format", 900, (FinalBodyRule(),), fixer=FormatList()),
+            LintModule(
+                "format", 900, (), fixer=FormatList(), maintenance_role="companion"
+            ),
             LintModule("broken", 500, (), fixer=BrokenFixer()),
-            LintModule("links", 100, (), fixer=CanonicalizeLink()),
+            LintModule(
+                "links",
+                100,
+                (FinalBodyRule(),),
+                fixer=CanonicalizeLink(),
+                maintenance_role="trigger",
+                fixable_rule_ids=frozenset({"test.final_body"}),
+                normalizer=NormalizeInput(),
+            ),
         )
     )
     injected = BodyPreparer(registry=registry, policy_factory=EnabledPolicy)
     result = injected.prepare(BodyInput("# Body\n\n* draft-link\n"), ctx)
     assert result.body == "# Body\n\n- canonical-link\n"
-    assert result.fixes == ("link.canonicalized", "format.list_marker")
+    assert result.fixes == ("input.link", "link.canonicalized", "format.list_marker")
     assert [finding.rule_id for finding in result.findings] == ["test.final_body"]
     assert result.findings[0].target_id == page.id
-    assert result.module_fix_counts == (("links", 1), ("format", 1))
+    assert result.module_fix_counts == (("links", 2), ("format", 1))
     assert result.lint_report["fixes"] == [
+        {"module_id": "links", "count": 1},
         {"module_id": "links", "count": 1},
         {"module_id": "format", "count": 1},
     ]
@@ -149,3 +167,14 @@ def test_body_preparer_is_idempotent_and_honors_injected_modules_and_policy():
     inspected = injected.inspect("# Body\n\n* draft-link\n", ctx)
     assert inspected.body == "# Body\n\n* draft-link\n"
     assert inspected.lint_report["fixes"] == []
+    # Budget exception: independent maintenance selection uses this same input:
+    # a save-only failing fixer must not participate, and both links stages
+    # must remain one aggregate. A registry-only assertion cannot observe
+    # which transforms actually execute or what reaches approval evidence.
+    maintenance = injected.prepare_maintenance(
+        BodyInput("# Body\n\n* draft-link\n"), ctx
+    )
+    assert maintenance.body == result.body
+    assert maintenance.module_fix_counts == (("links", 2), ("format", 1))
+    assert maintenance.failed_module_ids == ()
+    assert result.failed_module_ids == ("broken",)

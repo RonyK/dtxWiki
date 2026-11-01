@@ -21,6 +21,7 @@ class PreparedBody:
     findings: tuple[LintFindingDraft, ...] = ()
     module_fix_counts: tuple[tuple[str, int], ...] = ()
     fix_details: tuple[dict, ...] = ()
+    failed_module_ids: tuple[str, ...] = ()
 
     @property
     def lint_report(self) -> dict:
