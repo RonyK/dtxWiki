@@ -9,6 +9,7 @@ from backend.services.context_links import (
     editor_link_actor,
     extract_links,
     link_decision_batch,
+    normalize_index_refs_with_report,
     rewrite_links_with_report,
 )
 from backend.services.lint.base import (
@@ -132,6 +133,15 @@ class _LinkFixer:
         return FixResult(rewritten, fixes, details)
 
 
+class _IndexRefNormalizer:
+    def fix(self, body: str, ctx: LintContext) -> FixResult:
+        context = link_context(ctx)
+        if context is None:
+            return FixResult(body)
+        rewritten, fixes, details, _ = normalize_index_refs_with_report(body, context)
+        return FixResult(rewritten, fixes, details)
+
+
 MODULE = LintModule(
     "links",
     100,
@@ -152,4 +162,5 @@ MODULE = LintModule(
     auto_approve_default=True,
     maintenance_role="trigger",
     fixable_rule_ids=frozenset({"link.internal-noncanonical"}),
+    normalizer=_IndexRefNormalizer(),
 )

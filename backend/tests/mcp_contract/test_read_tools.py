@@ -11,6 +11,7 @@ from backend.models.user import User
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.policy.rbac import grant_workspace_membership
+from backend.schemas.mcp.read_tools import ReadAgentPageOutput
 from backend.schemas.read import SEARCH_QUERY_MAX_LENGTH
 from backend.scripts.seed_dev import DEFAULT_AGENT_PAGE_SLUG
 from backend.services.extraction_service import ExtractionService
@@ -108,6 +109,10 @@ def test_mcp_guide_and_agent_read_tools(page_service, actor, mcp_default_actor):
     assert categories.data[0].category == "agent_guide"
     assert agent_page.data.body_markdown.startswith("# Default System Prompt")
     assert agent_page.data.tree_path[-1].title == "Default System Prompt"
+    # REST reader enrichment must not become part of the shared MCP detail.
+    assert "link_targets" not in agent_page.data.model_dump(mode="json")
+    detail_schema = ReadAgentPageOutput.model_json_schema()["$defs"]["AgentPageDetail"]
+    assert "link_targets" not in detail_schema["properties"]
 
 
 def test_mcp_search_read_and_list_changes_tools(page_service, actor):

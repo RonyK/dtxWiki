@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.converters.external_protocol import ExternalProcessConverter
-from backend.models.agent import AgentPage
+from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.audit import AuditEvent
 from backend.models.bundle import AgentInputBundle, AgentInputBundleItem
 from backend.models.context import ContextPage
@@ -188,6 +188,7 @@ def test_read_api_exposes_workspace_tree_and_agent_reads(page_service):
     assert agent_page.json()["data"]["body_markdown"].startswith(
         "# Default System Prompt"
     )
+    assert agent_page.json()["data"]["link_targets"] == []
 
 
 def test_agent_reader_bundle_inventory_exposes_state_and_expiry(page_service):
@@ -335,6 +336,24 @@ def test_read_api_diffs_and_restores_agent_versions(page_service):
     assert "-Original" in diff_data["lines"]
     assert "+Current" in diff_data["lines"]
 
+    # Budget exception: restoring a historical exact ref is a distinct input
+    # from an authored save, which would normalize it before the reader sees
+    # it. Reuse this lifecycle to verify REST enrichment preserves stored bytes.
+    from backend.services.index_refs import format_index_ref
+
+    with page_service.session_factory.begin() as session:
+        folder_id = session.scalar(
+            select(WorkspaceTreeNode.id).where(
+                WorkspaceTreeNode.workspace_id == UUID(workspace_id),
+                WorkspaceTreeNode.section == "context",
+                WorkspaceTreeNode.parent_id.is_(None),
+            )
+        )
+        historical_ref = format_index_ref("folder", folder_id)
+        historical_body = (
+            f"# Research Persona\n\nOriginal\n[Historical]({historical_ref})\n"
+        )
+        session.get(AgentPageVersion, UUID(v1)).body_markdown = historical_body
     restored = client.post(
         f"/api/v1/workspaces/{workspace_id}/agent/pages/{page_id}/restore",
         json={"version_id": v1},
@@ -348,7 +367,15 @@ def test_read_api_diffs_and_restores_agent_versions(page_service):
     )
     assert draft.status_code == 200
     draft_data = draft.json()["data"]
-    assert draft_data["body_markdown"] == "# Research Persona\n\nOriginal"
+    assert draft_data["body_markdown"] == historical_body
+    assert draft_data["link_targets"] == [
+        {
+            "locator": historical_ref,
+            "href": f"/workspaces/{workspace_id}/context/folders/{folder_id}",
+            "state": "ok",
+            "target_page_id": None,
+        }
+    ]
     assert draft_data["version_info"]["version_no"] == 3
     assert draft_data["version_info"]["version_status"] == "draft"
 

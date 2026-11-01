@@ -19,6 +19,7 @@ from backend.schemas.agent import (
     AgentPageActivateResult,
     AgentPageDraftRequest,
     AgentPageDraftResult,
+    IndexRefNormalizationReport,
 )
 from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.page import PageVersionDiff
@@ -27,7 +28,7 @@ from backend.services.audit_service import AuditService
 from backend.services.context_links import (
     LinkContext,
     editor_link_actor,
-    rewrite_links_with_report,
+    normalize_index_refs_with_report,
 )
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.read_errors import (
@@ -171,8 +172,9 @@ class AgentPageService:
         # Index refs are system-internal; an Agent draft stores their
         # canonical links like a Context body does.
         body_markdown = request.body_markdown
+        normalization_report = IndexRefNormalizationReport()
         if normalize_index_refs:
-            body_markdown, _, _ = rewrite_links_with_report(
+            body_markdown, _, details, unavailable = normalize_index_refs_with_report(
                 request.body_markdown,
                 LinkContext(
                     session,
@@ -184,7 +186,13 @@ class AgentPageService:
                         actor_context=actor,
                     ),
                 ),
-                index_refs_only=True,
+            )
+            normalization_report = IndexRefNormalizationReport(
+                applied=[
+                    {"before": detail["before"], "after": detail["after"]}
+                    for detail in details
+                ],
+                unresolved=[{"locator": locator} for locator in unavailable],
             )
         # Canonical folder URLs can be longer than their authored index refs.
         validate_agent_markdown_input(body_markdown)
@@ -298,6 +306,7 @@ class AgentPageService:
                 if risk_resolution.review_required
                 else "owner_activation_required"
             ),
+            normalization_report=normalization_report,
         )
 
     def activate(

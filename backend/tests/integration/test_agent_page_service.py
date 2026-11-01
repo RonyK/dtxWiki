@@ -95,6 +95,9 @@ def test_agent_body_heading_is_independent_and_invalid_legacy_activation_is_atom
         )
         restored_version = session.get(AgentPageVersion, restored.draft_version_id)
         assert restored_version.body_markdown == historical_body
+        assert restored.normalization_report.model_dump() == {
+            "applied": [], "unresolved": [],
+        }
 
         # Historical bodies have no new CHECK. Restore must report a policy
         # error before constructing a Pydantic request or a new change set.
@@ -216,6 +219,19 @@ def test_agent_page_draft_service_creates_non_sensitive_draft(session_factory):
     assert audit.target_id == page.id
     assert result.review_item_id is None
     assert result.next_action == "owner_activation_required"
+    assert result.normalization_report.model_dump() == {
+        "applied": [
+            {
+                "before": format_index_ref("folder", root_id),
+                "after": f"/workspaces/{workspace_id}/context/folders/{root_id}",
+            },
+            {
+                "before": format_index_ref("agent", guide_id),
+                "after": f"/workspaces/{workspace_id}/agent/pages/{guide_id}",
+            },
+        ],
+        "unresolved": [{"locator": missing_ref, "reason": "unavailable"}],
+    }
 
 
 def test_sensitive_agent_page_draft_creates_pending_review(session_factory):

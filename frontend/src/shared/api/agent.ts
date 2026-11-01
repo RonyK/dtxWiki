@@ -1,5 +1,6 @@
 import { apiRequest } from "./client";
 import type { PageVersionDiff } from "./pages";
+import type { components } from "./types.gen";
 
 export type AgentCategoryEntry = {
   category: string;
@@ -22,6 +23,7 @@ export type AgentPageSummary = {
 };
 
 export type AgentPageDetail = AgentPageSummary & {
+  link_targets?: components["schemas"]["AgentPageRestDetail"]["link_targets"];
   body_markdown: string | null;
   frontmatter: Record<string, unknown>;
   version_info: {
@@ -88,6 +90,7 @@ export type AgentPageDraftResult = {
   draft_version_id: string;
   next_action: "owner_activation_required" | "review_required";
   review_item_id: string | null;
+  normalization_report?: components["schemas"]["AgentPageDraftResult"]["normalization_report"];
 };
 
 export async function listAgentCategories(workspaceId: string) {

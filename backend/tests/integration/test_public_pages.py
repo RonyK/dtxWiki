@@ -12,6 +12,7 @@ from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
+from backend.services.index_refs import format_index_ref
 from backend.services.page_service import PagePublicExposureForbiddenError
 from backend.services.public_page_exposure import (
     clear_public_page_exposure,
@@ -153,6 +154,27 @@ def test_public_read_returns_published_head_without_auth(page_service):
         base_version_id=created.version_id,
         base_content_hash=created.content_hash,
     )
+    # Budget exception: exact refs in historical bodies bypass authored-save
+    # normalization. These three logical inputs independently prove public
+    # exposure, private-Context denial, and non-Context denial; the existing
+    # canonical-URL inputs cannot detect an index-only projection bypass.
+    public_ref = format_index_ref("context", public_target.id)
+    private_ref = format_index_ref("context", private_target.id)
+    with page_service.session_factory.begin() as session:
+        folder_id = session.scalar(
+            select(WorkspaceTreeNode.id).where(
+                WorkspaceTreeNode.workspace_id == created.workspace_id,
+                WorkspaceTreeNode.section == "context",
+                WorkspaceTreeNode.parent_id.is_(None),
+            )
+        )
+        folder_ref = format_index_ref("folder", folder_id)
+        stored = session.get(ContextPageVersion, created.version_id)
+        stored.body_md += (
+            f"\n[Public ref]({public_ref}) [Private ref]({private_ref}) "
+            f"[Folder ref]({folder_ref})\n"
+        )
+        original_body, original_hash = stored.body_md, stored.content_hash
     anon = _anon_client(page_service)
 
     resp = anon.get("/api/v1/public/w/default/pages/public-intro")
@@ -187,6 +209,23 @@ def test_public_read_returns_published_head_without_auth(page_service):
         "state": "unavailable",
         "target_page_id": None,
     }
+    assert targets[public_ref]["href"] == "/w/default/pages/public-link-target"
+    assert targets[public_ref]["target_page_id"] is None
+    assert targets[private_ref] == {
+        "locator": private_ref,
+        "href": None,
+        "state": "unavailable",
+        "target_page_id": None,
+    }
+    assert targets[folder_ref] == {
+        "locator": folder_ref,
+        "href": None,
+        "state": "unavailable",
+        "target_page_id": None,
+    }
+    with page_service.session_factory() as session:
+        stored = session.get(ContextPageVersion, created.version_id)
+        assert (stored.body_md, stored.content_hash) == (original_body, original_hash)
     # Revocation is checked live, even though the source's pin remains valid.
     with page_service.session_factory.begin() as session:
         clear_public_page_exposure(session.get(ContextPage, public_target.id))

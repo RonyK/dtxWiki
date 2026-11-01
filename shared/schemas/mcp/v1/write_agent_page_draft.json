@@ -152,6 +152,9 @@
             "title": "Next Action",
             "type": "string"
           },
+          "normalization_report": {
+            "$ref": "#/$defs/IndexRefNormalizationReport"
+          },
           "review_item_id": {
             "anyOf": [
               {
@@ -229,6 +232,66 @@
           "message"
         ],
         "title": "EnvelopeWarning",
+        "type": "object"
+      },
+      "IndexRefNormalizationApplied": {
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "title": "After",
+            "type": "string"
+          },
+          "before": {
+            "title": "Before",
+            "type": "string"
+          }
+        },
+        "required": [
+          "before",
+          "after"
+        ],
+        "title": "IndexRefNormalizationApplied",
+        "type": "object"
+      },
+      "IndexRefNormalizationReport": {
+        "additionalProperties": false,
+        "properties": {
+          "applied": {
+            "items": {
+              "$ref": "#/$defs/IndexRefNormalizationApplied"
+            },
+            "title": "Applied",
+            "type": "array"
+          },
+          "unresolved": {
+            "items": {
+              "$ref": "#/$defs/IndexRefNormalizationUnavailable"
+            },
+            "title": "Unresolved",
+            "type": "array"
+          }
+        },
+        "title": "IndexRefNormalizationReport",
+        "type": "object"
+      },
+      "IndexRefNormalizationUnavailable": {
+        "additionalProperties": false,
+        "properties": {
+          "locator": {
+            "title": "Locator",
+            "type": "string"
+          },
+          "reason": {
+            "const": "unavailable",
+            "default": "unavailable",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "locator"
+        ],
+        "title": "IndexRefNormalizationUnavailable",
         "type": "object"
       },
       "MCPActor": {

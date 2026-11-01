@@ -426,6 +426,12 @@ class ContextLinkTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class AgentPageRestDetail(AgentPageDetail):
+    """Browser-only destinations; MCP keeps the base Agent detail contract."""
+
+    link_targets: list[ContextLinkTarget] = Field(default_factory=list)
+
+
 class ContextPageDetail(ContextPageSummary):
     body_markdown: str | None = None
     version_info: VersionInfo | None = None
@@ -831,7 +837,7 @@ class AgentPageListResponse(RESTResponseBase):
 
 
 class AgentPageDetailResponse(RESTResponseBase):
-    data: AgentPageDetail
+    data: AgentPageRestDetail
 
     model_config = ConfigDict(extra="forbid")
 

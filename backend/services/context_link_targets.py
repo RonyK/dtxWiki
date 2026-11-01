@@ -24,11 +24,14 @@ from backend.services.actor_visible_read import agent_page_visible, library_item
 from backend.services.context_links import (
     LinkContext,
     LinkResolutionBatch,
+    Locator,
+    _visible_index_route,
     classify,
     configured_self_origins,
     extract_links,
     resolve,
 )
+from backend.services.index_refs import parse_index_ref
 from backend.services.library_canonical import (
     canonical_library_artifact_lookup,
     canonical_library_artifact_lookup_many,
@@ -104,24 +107,59 @@ def context_link_targets(
     workspace: Workspace | None = None,
     self_origins: frozenset[str] | None = None,
 ) -> list[ContextLinkTarget]:
-    context = LinkContext(
-        session=session,
+    return markdown_link_targets(
+        session,
+        body=version.body_md,
         workspace_id=page.workspace_id,
-        actor=None if public else actor,
+        actor=actor,
         source_page_id=page.id,
         source_version_id=version.id,
         source_is_published=version.id == page.current_published_version_id,
+        public=public,
+        workspace=workspace,
+        self_origins=self_origins,
+    )
+
+
+def markdown_link_targets(
+    session: Session,
+    *,
+    body: str,
+    workspace_id: UUID,
+    actor: ActorContext | None = None,
+    source_page_id: UUID | None = None,
+    source_version_id: UUID | None = None,
+    source_is_published: bool = False,
+    allow_pin_fallback: bool = True,
+    public: bool = False,
+    workspace: Workspace | None = None,
+    self_origins: frozenset[str] | None = None,
+) -> list[ContextLinkTarget]:
+    """Project readable destinations without modifying the supplied body.
+
+    Callers establish source authority before supplying its pin identity. The
+    same reader projection serves stored Context/Agent bodies and editor text.
+    Write-time repair policy never decides whether a reader can open a target.
+    """
+    context = LinkContext(
+        session=session,
+        workspace_id=workspace_id,
+        actor=None if public else actor,
+        source_page_id=source_page_id,
+        source_version_id=source_version_id,
+        source_is_published=source_is_published,
+        allow_pin_fallback=allow_pin_fallback,
         self_origins=(
             configured_self_origins() if self_origins is None else self_origins
         ),
     )
     targets: list[ContextLinkTarget] = []
     seen: set[str] = set()
-    occurrences = extract_links(version.body_md)
+    occurrences = extract_links(body)
     visible_node_ids = _visible_tree_node_ids_for_links(
         session,
         [occurrence.href for occurrence in occurrences],
-        workspace_id=page.workspace_id,
+        workspace_id=workspace_id,
         actor=None if public else actor,
         self_origins=context.self_origins,
     )
@@ -133,7 +171,7 @@ def context_link_targets(
     navigation_batch = _navigation_batch(
         session,
         [occurrence.href for occurrence in occurrences],
-        workspace_id=page.workspace_id,
+        workspace_id=workspace_id,
         actor=None if public else actor,
         public=public,
         self_origins=context.self_origins,
@@ -144,10 +182,27 @@ def context_link_targets(
             continue
         seen.add(occurrence.href)
         locator = locators[occurrence.href]
+        ref = parse_index_ref(occurrence.href)
+        if ref is not None and ref.kind != "context":
+            href = (
+                _visible_index_route(
+                    context, ref.kind, ref.target_id, batch=resolution_batch
+                )
+                if not public
+                else None
+            )
+            targets.append(
+                ContextLinkTarget(
+                    locator=occurrence.href,
+                    href=href,
+                    state="ok" if href is not None else "unavailable",
+                )
+            )
+            continue
         handled, href = _server_navigation_target(
             session,
             occurrence.href,
-            workspace_id=page.workspace_id,
+            workspace_id=workspace_id,
             actor=None if public else actor,
             public=public,
             self_origins=context.self_origins,
@@ -205,7 +260,7 @@ def context_link_targets(
             and not public
             and _actor_can_edit_workspace(actor)
         ):
-            href = f"{workspace_path(page.workspace_id)}/context/pages/{target_id}/edit"
+            href = f"{workspace_path(workspace_id)}/context/pages/{target_id}/edit"
         href = _preserve_workspace_view_query(
             href, occurrence.href, preserve_fragment=False
         )
@@ -216,7 +271,7 @@ def context_link_targets(
                 else get_in_workspace(
                     session,
                     ContextPage,
-                    workspace_id=page.workspace_id,
+                    workspace_id=workspace_id,
                     resource_id=target_id,
                 )
             )
@@ -232,7 +287,7 @@ def context_link_targets(
                     else session.scalar(
                         select_in_workspace(
                             ContextPageVersion,
-                            workspace_id=page.workspace_id,
+                            workspace_id=workspace_id,
                             conditions=(
                                 ContextPageVersion.page_id == target_id,
                                 ContextPageVersion.id == exposed_id,
@@ -245,13 +300,10 @@ def context_link_targets(
                 if exposed_id is not None
                 else None
             )
-            if (
-                exposed is not None
-                and (
-                    exposed.workspace_id != page.workspace_id
-                    or exposed.page_id != target_id
-                    or exposed.version_status != "published_snapshot"
-                )
+            if exposed is not None and (
+                exposed.workspace_id != workspace_id
+                or exposed.page_id != target_id
+                or exposed.version_status != "published_snapshot"
             ):
                 exposed = None
             href = (
@@ -321,12 +373,26 @@ def ask_context_link_targets(
         "slug",
         "wikilink",
         "resource_uri",
+        "index_ref",
     }
     for occurrence in occurrences:
         if occurrence.href in seen:
             continue
         seen.add(occurrence.href)
         locator = locators[occurrence.href]
+        ref = parse_index_ref(occurrence.href)
+        if ref is not None and ref.kind != "context":
+            href = _visible_index_route(
+                context, ref.kind, ref.target_id, batch=resolution_batch
+            )
+            targets.append(
+                ContextLinkTarget(
+                    locator=occurrence.href,
+                    href=href,
+                    state="ok" if href is not None else "unavailable",
+                )
+            )
+            continue
         handled, href = _server_navigation_target(
             session,
             occurrence.href,
@@ -1124,6 +1190,13 @@ def _safe_workspace_query(query: str, path: str = "") -> bool:
 
 def _classify_context_navigation(href: str, self_origins: frozenset[str]):
     """Classify typed Context links after validating harmless UI query state."""
+    ref = parse_index_ref(href)
+    if ref is not None:
+        return Locator(
+            "index_ref",
+            href=href,
+            page_id=ref.target_id if ref.kind == "context" else None,
+        )
     try:
         parts = urlsplit(href)
         if not parts.query or not parts.path.startswith(("/p/", "/workspaces/")):
@@ -1211,7 +1284,14 @@ def legacy_wikilink_targets(
 def _resolution_batch(
     session: Session, locators: list, context: LinkContext
 ) -> LinkResolutionBatch | None:
-    return LinkResolutionBatch(locators, context)
+    return LinkResolutionBatch(
+        locators,
+        context,
+        include_navigation=any(
+            (ref := parse_index_ref(locator.href)) is not None and ref.kind != "context"
+            for locator in locators
+        ),
+    )
 
 
 def _resolve_context_locator(

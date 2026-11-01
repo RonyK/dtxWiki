@@ -270,6 +270,9 @@ class LinkContext:
     source_version_id: UUID | None = None
     source_is_published: bool = False
     self_origins: frozenset[str] = frozenset()
+    # Authored copies can inherit older pins before their own projection is
+    # built. Arbitrary reader buffers must stay within the authorized version.
+    allow_pin_fallback: bool = True
 
 
 @dataclass(frozen=True)
@@ -358,7 +361,7 @@ class LinkResolutionBatch:
                 )
                 for key, target_id, _created_at in rows:
                     self.pins.setdefault(key, target_id)
-            if ctx.source_version_id is not None:
+            if ctx.source_version_id is not None and ctx.allow_pin_fallback:
                 # The scalar fallback chooses the newest pin across the
                 # locator's legacy aliases, not a fixed key priority. Keep
                 # that ordering for nav_target/page_id dual-key migrations.
@@ -672,7 +675,11 @@ def resolve(
             PageLink, workspace_id=ctx.workspace_id, conditions=conditions
         ).with_only_columns(PageLink.target_page_id)
         pinned = session.scalar(statement.order_by(PageLink.created_at.desc()).limit(1))
-        if pinned is None and ctx.source_version_id is not None:
+        if (
+            pinned is None
+            and ctx.source_version_id is not None
+            and ctx.allow_pin_fallback
+        ):
             # A newly opened copy has no projection yet. Live source pins
             # still own its locators before the save-time fixer runs.
             keys = [locator.key]
@@ -1512,12 +1519,13 @@ def decide_link(
     )
 
 
-def rewrite_links_with_report(
+def _rewrite_links_with_report(
     body: str, ctx: LinkContext, *, index_refs_only: bool = False
-) -> tuple[str, tuple[str, ...], tuple[dict, ...]]:
+) -> tuple[str, tuple[str, ...], tuple[dict, ...], tuple[str, ...]]:
     """Apply only proved destination edits; all other source bytes are reused."""
     changes = []
     details = []
+    unavailable: dict[str, None] = {}
     occurrences = tuple(
         occurrence
         for occurrence in extract_links(body)
@@ -1526,6 +1534,11 @@ def rewrite_links_with_report(
     batch = link_decision_batch(occurrences, ctx)
     for occurrence in occurrences:
         locator, resolution, decision = decide_link(occurrence.href, ctx, batch=batch)
+        if (
+            decision.finding == "link.unresolved"
+            and parse_index_ref(occurrence.href) is not None
+        ):
+            unavailable.setdefault(occurrence.href, None)
         if decision.action != "fix" or not decision.href:
             continue
         # A draft-only destination cannot be newly disclosed by a published
@@ -1589,7 +1602,7 @@ def rewrite_links_with_report(
     cursor = 0
     for span, replacement in changes:
         if span.char_start < cursor:
-            return body, (), ()
+            return body, (), (), tuple(unavailable)
         parts.extend((body[cursor : span.char_start], replacement))
         cursor = span.char_end
     parts.append(body[cursor:])
@@ -1597,7 +1610,29 @@ def rewrite_links_with_report(
         "".join(parts),
         tuple("link.internal-noncanonical" for _ in changes),
         tuple(details),
+        tuple(unavailable),
     )
+
+
+def rewrite_links_with_report(
+    body: str, ctx: LinkContext, *, index_refs_only: bool = False
+) -> tuple[str, tuple[str, ...], tuple[dict, ...]]:
+    rewritten, fixes, details, _ = _rewrite_links_with_report(
+        body, ctx, index_refs_only=index_refs_only
+    )
+    return rewritten, fixes, details
+
+
+def normalize_index_refs_with_report(
+    body: str, ctx: LinkContext
+) -> tuple[str, tuple[str, ...], tuple[dict, ...], tuple[str, ...]]:
+    """Normalize exact system refs using the caller's workspace and authority.
+
+    This authored-input step is independent of optional general link fixes.
+    Unavailable refs retain their source and expose only the authored locator;
+    hidden and missing targets have the same diagnostic.
+    """
+    return _rewrite_links_with_report(body, ctx, index_refs_only=True)
 
 
 def rewrite_links(body: str, ctx: LinkContext) -> tuple[str, tuple[str, ...]]:

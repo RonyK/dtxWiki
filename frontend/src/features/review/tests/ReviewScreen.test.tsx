@@ -3166,9 +3166,21 @@ describe("ReviewScreen", () => {
     expect(await screen.findByText(i18n.t("review:content.originalUnavailable"))).toBeVisible();
     expect(approve).toBeDisabled();
     await user.click(screen.getByRole("tab", { name: "Review version content" }));
+    vi.mocked(pagesApi.readPage).mockResolvedValueOnce({
+      ...exactPage(WORKSPACE_ID, "exact-page", "version-3"),
+      body_md: "Exact candidate body\n\n[Review reference](dtxwiki://index/context/cccccccc-cccc-4ccc-8ccc-cccccccccccc)",
+      link_targets: [{
+        locator: "dtxwiki://index/context/cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        href: `/p/${WORKSPACE_ID}/cccccccc-cccc-4ccc-8ccc-cccccccccccc`,
+        target_page_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", state: "ok",
+      }],
+    });
     await user.click(screen.getByRole("button", { name: "Reload content" }));
     await waitFor(() => expect(approve).toBeEnabled());
     expect(await screen.findByText("Exact candidate body")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Review reference" })).toHaveAttribute(
+      "href", `/p/${WORKSPACE_ID}/cccccccc-cccc-4ccc-8ccc-cccccccccccc`,
+    );
     expect(pagesApi.readPage).toHaveBeenCalledTimes(2); // failed exact read plus explicit retry
     await user.click(approve);
     expect(await screen.findByText(i18n.t("shell:apiErrors.legacy_media_cutover_conflict"))).toBeVisible();

@@ -17,10 +17,14 @@ from backend.models.lint import LintFinding
 from backend.models.mcp_trace import MCPWriteIdempotency
 from backend.models.review import ReviewItem
 from backend.models.workspace import Workspace
+from backend.services.context_link_targets import markdown_link_targets
+from backend.services.context_links import editor_link_actor
 from backend.services.index_refs import format_index_ref
 from backend.services.lint import LintRegistry
 from backend.services.lint_fix_writer import LintFixWriter
 from backend.services.lint_service import LintService
+from backend.services.page_service import refresh_page_links
+from backend.utils.content_hash import content_hash
 
 
 def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_service):
@@ -88,6 +92,20 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
             base_content_hash=base.content_hash if base else None,
         )
         with page_service.session_factory.begin() as session:
+            # Seed the existing historical-byte fixture directly. Authored
+            # saves now normalize exact refs even in suggest mode, while this
+            # lifecycle must exercise a pre-normalization published snapshot.
+            stored_page = session.get(ContextPage, page.id)
+            stored = session.get(ContextPageVersion, page.version_id)
+            stored.body_md = stored.body_md.replace(
+                f"/p/{workspace_id}/{draft_target.id}",
+                format_index_ref("context", draft_target.id),
+            )
+            stored.content_hash = content_hash(stored.body_md)
+            refresh_page_links(session, page=stored_page, version=stored)
+            page = page.model_copy(update={
+                "body_md": stored.body_md, "content_hash": stored.content_hash,
+            })
             workspace = session.get(Workspace, workspace_id)
             workspace.lint_policy = {"link_fix_mode": "auto"}
             workspace.auto_fix_enabled = True
@@ -131,6 +149,22 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
             source.body_md.replace(
                 "/context/lint-target.md", f"/p/{workspace_id}/{target.id}"
             ).replace("\n \n", "\n\n")
+        )
+        assert draft_links in fixed.body_md
+        # Budget exception: one READ input reuses this published source and
+        # draft target. Its author can open the retained ref, while maintenance
+        # must preserve it. Writer-only checks cannot detect a READ/fix gate.
+        draft_ref = format_index_ref("context", draft_target.id)
+        reader_targets = {
+            entry.locator: entry for entry in markdown_link_targets(
+                session, body=f"[Draft]({draft_ref})\n",
+                workspace_id=workspace_id, source_page_id=page.id,
+                source_version_id=fixed.id, source_is_published=True,
+                actor=editor_link_actor("human", "author", workspace_id=workspace_id),
+            )
+        }
+        assert reader_targets[draft_ref].href == (
+            f"/p/{workspace_id}/{draft_target.id}"
         )
         assert draft_links in fixed.body_md
         assert page.latest_draft_version_id is None

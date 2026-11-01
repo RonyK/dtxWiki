@@ -96,6 +96,10 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
         "POST",
         "/api/v1/workspaces/{workspace_id}/graph/query",
     ): CONTEXT_PAGE_BODY_SCOPES,
+    (
+        "POST",
+        "/api/v1/workspaces/{workspace_id}/link-targets/preview",
+    ): CONTEXT_PAGE_BODY_SCOPES,
     # Feature-gated Workspace Knowledge Map: actor-visible published Context,
     # Library and Agent nodes only (no page bodies).
     (

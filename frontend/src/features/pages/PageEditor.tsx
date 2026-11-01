@@ -189,6 +189,7 @@ import {
   findUnclosedCodeFence,
 } from "./codeFenceBalance";
 import { PagePublicShareControl } from "./PagePublicShareControl";
+import { useLinkTargetPreview } from "./useLinkTargetPreview";
 import {
   cancelAllImageUploads,
   canRetryImageUpload,
@@ -1187,6 +1188,14 @@ export function PageEditor({
     if (aliasValidationMessage) setShowAdvancedProperties(true);
   }, [aliasValidationMessage]);
   const showPreviewPane = activeEditorMode !== "source";
+  const previewLinkTargets = useLinkTargetPreview({
+    actorId,
+    body,
+    enabled: showPreviewPane && isEditorReady,
+    sourcePageId: page?.id ?? null,
+    sourceVersionId: page?.version_id ?? null,
+    workspaceId,
+  });
   const editorLayout = activeEditorMode;
   const blockMenuOpen = blockMenuTrigger !== null;
   const filteredBlockEntries = useMemo(
@@ -5391,6 +5400,7 @@ export function PageEditor({
             >
               <MarkdownView
                 body={body}
+                linkTargets={previewLinkTargets}
                 resolveContextMediaAsset={resolveContextMediaAsset}
                 sourceLineNumbers
                 stripLeadingHeading={title}

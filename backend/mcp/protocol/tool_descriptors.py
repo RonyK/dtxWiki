@@ -375,7 +375,10 @@ TOOL_META = {
     ),
     "write_agent_page_draft": (
         "Write agent page draft",
-        "Create or update an AgentPage draft. This never activates the page."
+        "Create or update an AgentPage draft. This never activates the page. "
+        "Visible exact system index refs normalize to canonical browser links; "
+        "normalization_report lists applied destinations and unavailable refs "
+        "whose original text is retained. "
         "Requires conversation_token: echo one from an earlier envelope or "
         "pass the literal 'new'.",
         False,
