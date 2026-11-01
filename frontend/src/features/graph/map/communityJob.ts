@@ -5,6 +5,11 @@ import type {
 } from "./communityWorker";
 
 export const WORKSPACE_MAP_COMMUNITY_TIMEOUT_MS = 10_000;
+// The budget is charged per tick this thread actually runs, not by wall clock.
+// A long synchronous task here (a dense 10K scene upload through software GL)
+// delays both the Worker's start and the delivery of its reply; charging that
+// time to the Worker discarded results it had computed in under a second.
+const WORKSPACE_MAP_COMMUNITY_BUDGET_TICK_MS = 250;
 
 export type WorkspaceMapCommunityOutcome =
   | {
@@ -31,7 +36,7 @@ type ActiveJob = {
   worker: CommunityWorker;
   requestId: number;
   identityKey: string;
-  timeout: ReturnType<typeof setTimeout>;
+  budget: ReturnType<typeof setInterval>;
   resolve: (outcome: WorkspaceMapCommunityOutcome) => void;
 };
 
@@ -77,7 +82,7 @@ export function createWorkspaceMapCommunityJob(
   function finish(job: ActiveJob, outcome: WorkspaceMapCommunityOutcome): void {
     if (active !== job) return;
     active = null;
-    clearTimeout(job.timeout);
+    clearInterval(job.budget);
     job.worker.onmessage = null;
     job.worker.onerror = null;
     job.worker.terminate();
@@ -103,11 +108,15 @@ export function createWorkspaceMapCommunityJob(
     }
     const requestId = ++nextRequestId;
     return new Promise<WorkspaceMapCommunityOutcome>((resolve) => {
+      let charged = 0;
       const job: ActiveJob = {
         worker,
         requestId,
         identityKey,
-        timeout: setTimeout(() => finish(job, { kind: "timeout", identityKey }), timeoutMs),
+        budget: setInterval(() => {
+          charged += WORKSPACE_MAP_COMMUNITY_BUDGET_TICK_MS;
+          if (charged >= timeoutMs) finish(job, { kind: "timeout", identityKey });
+        }, WORKSPACE_MAP_COMMUNITY_BUDGET_TICK_MS),
         resolve,
       };
       active = job;
