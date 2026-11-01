@@ -230,6 +230,11 @@ def test_insert_row_via_patch_draft_lands_a_new_table_row(page_service, actor):
     assert after_table.rows[0].id == row.id
 
 
+# Capacity guard on a ~1 MB body; Release checks run it. The PR lane keeps the
+# bounded-window parse on the same 20-op batch
+# (test_block_batch_uses_gap_hash_fast_path_and_parses_only_bounded_windows)
+# and the persisted block-map commits above.
+@pytest.mark.release_scale
 def test_one_megabyte_twenty_op_commit_uses_only_bounded_map_parses(
     page_service,
     actor,

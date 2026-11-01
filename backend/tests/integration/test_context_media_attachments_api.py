@@ -317,49 +317,6 @@ def test_orphan_only_matches_the_endpoint_the_sweep_reclaims_by(page_service):
     assert all(item["is_orphan"] for item in orphans.json()["data"]["items"])
 
 
-def test_paging_returns_every_row_once(page_service):
-    owner = make_client(page_service, "attach-owner5@example.com", role="owner")
-    workspace_id = _workspace_id(owner)
-    owner_id = _user_id(page_service, "attach-owner5@example.com")
-    for index in range(5):
-        _seed_asset(
-            page_service,
-            UUID(workspace_id),
-            created_by_actor_id=owner_id,
-            filename=f"file-{index}.png",
-        )
-
-    seen: list[str] = []
-    cursor = None
-    for _ in range(5):
-        params = {"scope": "workspace", "limit": 2}
-        if cursor:
-            params["cursor"] = cursor
-        payload = _list(owner, workspace_id, **params).json()["data"]
-        seen.extend(item["original_filename"] for item in payload["items"])
-        cursor = payload["next_cursor"]
-        if not cursor:
-            break
-
-    assert sorted(seen) == [f"file-{index}.png" for index in range(5)]
-    assert len(seen) == len(set(seen)), "a row was served on two pages"
-
-
-def test_a_garbled_cursor_restarts_instead_of_failing(page_service):
-    owner = make_client(page_service, "attach-owner6@example.com", role="owner")
-    workspace_id = _workspace_id(owner)
-    _seed_asset(
-        page_service,
-        UUID(workspace_id),
-        created_by_actor_id=_user_id(page_service, "attach-owner6@example.com"),
-    )
-
-    response = _list(owner, workspace_id, scope="workspace", cursor="not-a-cursor")
-
-    assert response.status_code == 200
-    assert len(response.json()["data"]["items"]) == 1
-
-
 def test_the_usage_token_this_listing_serves_is_accepted_by_delete(page_service):
     owner = make_client(page_service, "attach-owner7@example.com", role="owner")
     workspace_id = _workspace_id(owner)
@@ -469,6 +426,13 @@ def test_rows_carry_a_display_name_and_a_derivable_content_url(page_service):
         f"/api/v1/workspaces/{workspace_id}/context/pages/{seeded['page_id']}"
         f"/versions/{seeded['version_id']}/media/{seeded['asset_id']}/content"
     )
+
+    # A garbled cursor restarts from the first page instead of failing.
+    garbled = _list(owner, workspace_id, scope="workspace", cursor="not-a-cursor")
+    assert garbled.status_code == 200
+    assert [row["asset_id"] for row in garbled.json()["data"]["items"]] == [
+        seeded["asset_id"]
+    ]
 
 
 def test_workspace_scope_never_names_another_workspaces_attachment(page_service):

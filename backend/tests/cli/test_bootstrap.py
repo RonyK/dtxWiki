@@ -20,8 +20,31 @@ def test_bootstrap_creates_sqlite_db_without_a_global_workspace(tmp_path, monkey
         with factory.begin() as session:
             return session.scalars(select(Workspace)).all()
 
+    # ensure_app_version_synced / _read_db_version must not
+    # rely on GC for connection cleanup: every engine they build gets an
+    # explicit dispose() (same pattern as current_db_alembic_revision).
+    created = []
+    disposed = []
+    real_make_engine = bootstrap_module.make_engine
+
+    def tracking_make_engine(url):
+        engine = real_make_engine(url)
+        original_dispose = engine.dispose
+
+        def dispose(*args, **kwargs):
+            disposed.append(engine)
+            return original_dispose(*args, **kwargs)
+
+        engine.dispose = dispose
+        created.append(engine)
+        return engine
+
+    monkeypatch.setattr(bootstrap_module, "make_engine", tracking_make_engine)
+
     bootstrap(settings)
     assert database.is_file()
+    assert created
+    assert disposed == created
     assert workspaces() == []
 
     # A second bootstrap on the migrated database is a no-op.
@@ -42,51 +65,6 @@ def test_bootstrap_core_disabled_verifies_instead_of_creating_anything(
         bootstrap_module.bootstrap_core(settings)
 
     assert not (tmp_path / "dtxwiki").exists()
-
-
-def test_bootstrap_disabled_accepts_a_database_the_operator_bootstrapped(
-    tmp_path, monkeypatch
-):
-    monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path / "dtxwiki"))
-    copy_migrated_sqlite(tmp_path / "dtxwiki" / "data" / "dtxwiki.sqlite")
-    calls = []
-    monkeypatch.setattr(
-        bootstrap_module, "run_alembic_upgrade", lambda url: calls.append(url)
-    )
-
-    bootstrap(Settings(auto_bootstrap=False))
-
-    assert calls == []
-
-
-def test_bootstrap_disposes_every_engine_it_creates(tmp_path, monkeypatch):
-    # ensure_app_version_synced / _read_db_version must not
-    # rely on GC for connection cleanup: every engine they build gets an
-    # explicit dispose() (same pattern as current_db_alembic_revision).
-    monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path / "dtxwiki"))
-    settings = Settings()
-    created = []
-    disposed = []
-    real_make_engine = bootstrap_module.make_engine
-
-    def tracking_make_engine(url):
-        engine = real_make_engine(url)
-        original_dispose = engine.dispose
-
-        def dispose(*args, **kwargs):
-            disposed.append(engine)
-            return original_dispose(*args, **kwargs)
-
-        engine.dispose = dispose
-        created.append(engine)
-        return engine
-
-    monkeypatch.setattr(bootstrap_module, "make_engine", tracking_make_engine)
-
-    bootstrap(settings)
-
-    assert created
-    assert disposed == created
 
 
 def test_bootstrap_refuses_default_session_secret_outside_solo_local(

@@ -194,6 +194,11 @@ def test_restricted_library_visibility_forms_exact_role_and_scope_cohorts(
 )
 # Both projections use the same visibility admission. The small aggregated
 # compare case is also covered by test_workspace_graph_service.py.
+# Capacity-boundary twin, run by Release checks. The PR lane keeps restricted
+# Library exclusion from exact scenes and counts in the role-cohort test above
+# and the aggregated twin in test_workspace_graph_service.py
+# (test_hidden_restricted_library_changes_do_not_affect_aggregated_viewer_map).
+@pytest.mark.release_scale
 def test_ui2k_restricted_library_insertions_leave_full_viewer_wire_exact(
     session_factory, documents, representation, relations, lens
 ):

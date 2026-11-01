@@ -336,6 +336,21 @@ def test_read_api_diffs_and_restores_agent_versions(page_service):
     assert "-Original" in diff_data["lines"]
     assert "+Current" in diff_data["lines"]
 
+    # B-P1-1: a missing from_version_id surfaces as 404 not_found.
+    missing = client.get(
+        f"/api/v1/workspaces/{workspace_id}/agent/pages/{page_id}/diff"
+        f"?from_version_id=00000000-0000-0000-0000-0000000ffff1&to_version_id={v2}",
+    )
+    assert missing.status_code == 404
+    assert missing.json()["error_code"] == "not_found"
+
+    # The restore must replace the existing latest draft.
+    current_draft = client.get(
+        f"/api/v1/workspaces/{workspace_id}/agent/pages/{page_id}?version=draft",
+    )
+    assert current_draft.status_code == 200
+    assert current_draft.json()["data"]["version_info"]["version_id"] == v2
+
     # Budget exception: restoring a historical exact ref is a distinct input
     # from an authored save, which would normalize it before the reader sees
     # it. Reuse this lifecycle to verify REST enrichment preserves stored bytes.
@@ -376,6 +391,7 @@ def test_read_api_diffs_and_restores_agent_versions(page_service):
             "target_page_id": None,
         }
     ]
+    assert draft_data["version_info"]["version_id"] == v3
     assert draft_data["version_info"]["version_no"] == 3
     assert draft_data["version_info"]["version_status"] == "draft"
 
@@ -462,40 +478,6 @@ def test_restore_agent_version_rejects_null_body_markdown(page_service, monkeypa
         assert "no content" in str(exc_info.value)
 
 
-def test_diff_agent_versions_404_when_from_version_missing(page_service):
-    """B-P1-1 Sprint_6 Fix_4: diff endpoint must surface 404 when the
-    from_version_id refers to a non-existent AgentPageVersion. The service
-    raises ReadNotFoundError via _require_version, which the API maps to
-    HTTP 404 with error_code ``not_found``.
-    """
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-    created = client.post(
-        f"/api/v1/workspaces/{workspace_id}/agent/pages",
-        json={
-            "category": "persona",
-            "title": "Diff 404 Persona",
-            "slug": "diff-404-persona",
-            "body_markdown": "# Diff 404\n\nseed",
-            "reason": "create persona for 404 diff test",
-        },
-    )
-    assert created.status_code == 201
-    created_data = created.json()["data"]
-    page_id = created_data["agent_page_id"]
-    real_version_id = created_data["draft_version_id"]
-    bogus_version_id = "00000000-0000-0000-0000-0000000ffff1"
-
-    diff = client.get(
-        f"/api/v1/workspaces/{workspace_id}/agent/pages/{page_id}/diff"
-        f"?from_version_id={bogus_version_id}&to_version_id={real_version_id}",
-    )
-    assert diff.status_code == 404
-    assert diff.json()["error_code"] == "not_found"
-
-
 def test_diff_agent_versions_422_when_bodies_exceed_size_limit(page_service):
     """B-P1-1 Sprint_6 Fix_4: diff endpoint must return 422 when the combined
     body_markdown length of the two versions exceeds
@@ -544,72 +526,6 @@ def test_diff_agent_versions_422_when_bodies_exceed_size_limit(page_service):
     assert diff.status_code == 422
     assert diff.json()["error_code"] == "validation_failed"
     assert "too large" in diff.json()["message"]
-
-
-def test_restore_agent_version_with_existing_draft_supersedes_it(page_service):
-    """B-P1-1 Sprint_6 Fix_4: when restore_version is invoked while the
-    AgentPage already has a latest_draft_version_id, the new draft created
-    by restore_version must REPLACE the existing draft pointer — not leave
-    the previous draft as the page's latest_draft_version_id.
-    """
-    from uuid import UUID as _UUID
-
-    from backend.models.agent import AgentPage
-
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-    created = client.post(
-        f"/api/v1/workspaces/{workspace_id}/agent/pages",
-        json={
-            "category": "persona",
-            "title": "Restore Supersede",
-            "slug": "restore-supersede",
-            "body_markdown": "# Restore Supersede\n\nv1 body",
-            "reason": "create v1",
-        },
-    )
-    assert created.status_code == 201
-    created_data = created.json()["data"]
-    page_id = created_data["agent_page_id"]
-    v1 = created_data["draft_version_id"]
-
-    second = client.post(
-        f"/api/v1/workspaces/{workspace_id}/agent/pages/{page_id}/draft",
-        json={
-            "base_version_id": v1,
-            "category": "persona",
-            "title": "Restore Supersede",
-            "slug": "restore-supersede",
-            "body_markdown": "# Restore Supersede\n\nv2 body",
-            "reason": "create v2 draft",
-        },
-    )
-    assert second.status_code == 200
-    v2_draft = second.json()["data"]["draft_version_id"]
-
-    # Confirm page now points at v2_draft as the latest draft.
-    with page_service.session_factory() as session:
-        page_row = session.get(AgentPage, _UUID(page_id))
-        assert page_row is not None
-        assert str(page_row.latest_draft_version_id) == v2_draft
-
-    restored = client.post(
-        f"/api/v1/workspaces/{workspace_id}/agent/pages/{page_id}/restore",
-        json={"version_id": v1},
-    )
-    assert restored.status_code == 200
-    v3_draft = restored.json()["data"]["draft_version_id"]
-    assert v3_draft not in {v1, v2_draft}
-
-    # The new draft must REPLACE the old one — page.latest_draft_version_id
-    # is v3_draft, not v2_draft.
-    with page_service.session_factory() as session:
-        page_row = session.get(AgentPage, _UUID(page_id))
-        assert page_row is not None
-        assert str(page_row.latest_draft_version_id) == v3_draft
-        assert str(page_row.latest_draft_version_id) != v2_draft
 
 
 def test_diff_versions_eager_loads_body_markdown(page_service):
@@ -704,46 +620,36 @@ def test_diff_versions_eager_loads_body_markdown(page_service):
     )
 
 
-@pytest.mark.parametrize(
-    ("mode", "field"),
-    [("action", "from"), ("action", "to"), ("as_of", "as_of")],
-)
-def test_graph_query_rejects_timezone_naive_time_values(page_service, mode, field):
+def test_graph_query_time_values_require_timezone_and_seed_title_is_bounded(
+    page_service,
+):
     client = make_client(page_service)
     workspace_id = client.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
     ]
+    long_title = "Long graph seed " + ("x" * 220)
     created = _create_published_page(
         client,
         workspace_id,
-        title=f"Naive graph time {field}",
-        body_md="# Naive graph time",
-    )
-
-    response = client.post(
-        f"/api/v1/workspaces/{workspace_id}/graph/query",
-        json={
-            "seeds": [{"kind": "context_page", "id": created["id"]}],
-            "time": {"mode": mode, field: "2026-08-04T00:00:00"},
-        },
-    )
-
-    assert response.status_code == 422, response.text
-
-
-def test_graph_query_accepts_timezone_aware_time_values(page_service):
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-    created = _create_published_page(
-        client,
-        workspace_id,
-        title="Aware graph time",
-        body_md="# Aware graph time",
+        title=long_title,
+        body_md="# Long graph seed title",
     )
     endpoint = f"/api/v1/workspaces/{workspace_id}/graph/query"
     seed = [{"kind": "context_page", "id": created["id"]}]
+
+    plain = client.post(endpoint, json={"seeds": seed})
+    assert plain.status_code == 200, plain.text
+    seed_node = next(node for node in plain.json()["data"]["nodes"] if node["is_seed"])
+    assert seed_node["label"] == long_title[:200]
+
+    # Each time field is declared timezone-aware on its own.
+    for mode, field in (("action", "from"), ("action", "to"), ("as_of", "as_of")):
+        naive = client.post(
+            endpoint,
+            json={"seeds": seed, "time": {"mode": mode, field: "2026-08-04T00:00:00"}},
+        )
+        assert naive.status_code == 422, (field, naive.text)
+
     with page_service.session_factory.begin() as session:
         GraphObservationService().record(
             session,
@@ -780,29 +686,6 @@ def test_graph_query_accepts_timezone_aware_time_values(page_service):
         event["action_kind"] == "edited" for event in action.json()["data"]["timeline"]
     )
     assert as_of.status_code == 200, as_of.text
-
-
-def test_graph_query_normalizes_long_seed_title(page_service):
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-    long_title = "Long graph seed " + ("x" * 220)
-    created = _create_published_page(
-        client,
-        workspace_id,
-        title=long_title,
-        body_md="# Long graph seed title",
-    )
-
-    response = client.post(
-        f"/api/v1/workspaces/{workspace_id}/graph/query",
-        json={"seeds": [{"kind": "context_page", "id": created["id"]}]},
-    )
-
-    assert response.status_code == 200, response.text
-    seed = next(node for node in response.json()["data"]["nodes"] if node["is_seed"])
-    assert seed["label"] == long_title[:200]
 
 
 def test_read_api_exposes_context_changes_and_search(page_service):
@@ -1022,6 +905,8 @@ def test_read_api_exposes_sources_versions_and_artifacts(
 
 
 def test_read_api_creates_tree_folder(page_service):
+    from backend.scripts.seed_dev import seed_default_workspace
+
     client = make_client(page_service)
     workspace_id = client.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
@@ -1058,37 +943,17 @@ def test_read_api_creates_tree_folder(page_service):
     assert tree.status_code == 200
     assert any(node["id"] == folder["id"] for node in tree.json()["data"]["nodes"])
 
-
-def test_read_api_allows_library_tree_folder_creation(page_service):
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-
-    created = client.post(
+    library_folder = client.post(
         f"/api/v1/workspaces/{workspace_id}/tree/nodes",
         json={
             "section": "library",
             "title": "Library Drafts",
         },
     )
+    assert library_folder.status_code == 201, library_folder.text
+    assert library_folder.json()["data"]["section"] == "library"
+    assert library_folder.json()["data"]["node_kind"] == "folder"
 
-    assert created.status_code == 201, created.text
-    folder = created.json()["data"]
-    assert folder["section"] == "library"
-    assert folder["node_kind"] == "folder"
-
-
-def test_read_api_rejects_cross_workspace_tree_parent(page_service):
-    from sqlalchemy import select
-
-    from backend.models.tree import WorkspaceTreeNode
-    from backend.scripts.seed_dev import seed_default_workspace
-
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
     with page_service.session_factory.begin() as session:
         foreign_workspace = seed_default_workspace(
             session,
@@ -1104,7 +969,7 @@ def test_read_api_rejects_cross_workspace_tree_parent(page_service):
         assert foreign_context_root is not None
         foreign_parent_id = str(foreign_context_root.id)
 
-    created = client.post(
+    foreign_parent = client.post(
         f"/api/v1/workspaces/{workspace_id}/tree/nodes",
         json={
             "parent_id": foreign_parent_id,
@@ -1112,9 +977,8 @@ def test_read_api_rejects_cross_workspace_tree_parent(page_service):
             "title": "Foreign Parent Child",
         },
     )
-
-    assert created.status_code == 404
-    assert created.json()["error_code"] == "not_found"
+    assert foreign_parent.status_code == 404
+    assert foreign_parent.json()["error_code"] == "not_found"
 
 
 def test_read_api_deletes_tree_node_as_archived(page_service):
@@ -1153,23 +1017,14 @@ def test_read_api_deletes_tree_node_as_archived(page_service):
     assert parent["id"] not in node_ids
     assert child["id"] not in node_ids
 
-
-def test_read_api_rejects_deleting_system_tree_node(page_service):
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-    tree = client.get(f"/api/v1/workspaces/{workspace_id}/tree?section=context")
     context_root = next(
         node for node in tree.json()["data"]["nodes"] if node["slug"] == "context"
     )
-
-    deleted = client.delete(
+    system = client.delete(
         f"/api/v1/workspaces/{workspace_id}/tree/nodes/{context_root['id']}",
     )
-
-    assert deleted.status_code == 403
-    assert deleted.json()["error_code"] == "system_tree_node_protected"
+    assert system.status_code == 403
+    assert system.json()["error_code"] == "system_tree_node_protected"
 
 
 def test_read_api_rejects_tree_mutations_for_workspace_viewer(page_service):
@@ -1237,9 +1092,9 @@ def test_read_api_rejects_tree_mutations_for_workspace_viewer(page_service):
     assert deleted.json()["error_code"] == "workspace_role_insufficient"
 
 
-def test_context_neighbors_hide_draft_only_seed_from_viewer(page_service):
-    from sqlalchemy import select
-
+def test_draft_only_context_page_is_hidden_from_viewer(page_service):
+    """Neighbors, graph, the has_draft filter and page activity each gate a
+    draft-only page on draft-read capability; one shared draft covers all."""
     from backend.models.user import User
     from backend.policy.rbac import grant_workspace_membership
 
@@ -1305,108 +1160,40 @@ def test_context_neighbors_hide_draft_only_seed_from_viewer(page_service):
     assert viewer_graph.status_code == 404
     assert viewer_graph.json()["error_code"] == "not_found"
 
-
-def test_context_page_draft_filter_requires_draft_read_capability(page_service):
-    from backend.models.user import User
-    from backend.policy.rbac import grant_workspace_membership
-
-    owner = make_client(page_service)
-    viewer = make_client(page_service, email="draft-filter-viewer@example.com")
-    workspace_id = owner.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-    with page_service.session_factory.begin() as session:
-        viewer_user = session.scalar(
-            select(User).where(User.email == "draft-filter-viewer@example.com")
-        )
-        assert viewer_user is not None
-        grant_workspace_membership(
-            session=session,
-            user_id=viewer_user.id,
-            workspace_id=UUID(workspace_id),
-            role="viewer",
-        )
-
-    draft = owner.post(
-        f"/api/v1/workspaces/{workspace_id}/context/pages",
-        json={
-            "title": "Draft Filter Page",
-            "page_type": "concept",
-            "body_md": "# Draft Filter Page\n\nPrivate draft.",
-        },
-    )
-    assert draft.status_code == 201
-
-    owner_result = owner.get(
+    owner_drafts = owner.get(
         f"/api/v1/workspaces/{workspace_id}/context/pages?has_draft=true"
     )
-    assert owner_result.status_code == 200
-    assert [item["title"] for item in owner_result.json()["data"]] == [
-        "Draft Filter Page"
+    assert owner_drafts.status_code == 200
+    assert [item["title"] for item in owner_drafts.json()["data"]] == [
+        "Neighbors Draft Only"
     ]
-    assert owner_result.json()["total"] == 1
-
-    viewer_result = viewer.get(
+    assert owner_drafts.json()["total"] == 1
+    viewer_drafts = viewer.get(
         f"/api/v1/workspaces/{workspace_id}/context/pages?has_draft=true"
     )
-    assert viewer_result.status_code == 403
-    assert viewer_result.json()["error_code"] == "scope_denied"
-
+    assert viewer_drafts.status_code == 403
+    assert viewer_drafts.json()["error_code"] == "scope_denied"
     invalid = owner.get(
         f"/api/v1/workspaces/{workspace_id}/context/pages?has_draft=maybe"
     )
     assert invalid.status_code == 422
 
-
-def test_context_activity_hides_draft_only_page_from_viewer(page_service):
-    from backend.models.user import User
-    from backend.policy.rbac import grant_workspace_membership
-
-    owner = make_client(page_service)
-    viewer = make_client(page_service, email="activity-viewer@example.com")
-    workspace_id = owner.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-    with page_service.session_factory.begin() as session:
-        viewer_user = session.scalar(
-            select(User).where(User.email == "activity-viewer@example.com")
-        )
-        assert viewer_user is not None
-        grant_workspace_membership(
-            session=session,
-            user_id=viewer_user.id,
-            workspace_id=UUID(workspace_id),
-            role="viewer",
-        )
-
-    draft = owner.post(
-        f"/api/v1/workspaces/{workspace_id}/context/pages",
-        json={
-            "title": "Activity Draft Only",
-            "page_type": "concept",
-            "body_md": "# Activity Draft Only\n\nPrivate draft.",
-        },
-    )
-    assert draft.status_code == 201
-    page_id = draft.json()["data"]["id"]
-
-    owner_result = owner.get(
+    owner_activity = owner.get(
         f"/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/activity"
     )
-    viewer_result = viewer.get(
+    viewer_activity = viewer.get(
         f"/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/activity"
     )
-
-    assert owner_result.status_code == 200
-    owner_items = owner_result.json()["data"]["items"]
+    assert owner_activity.status_code == 200
+    owner_items = owner_activity.json()["data"]["items"]
     assert owner_items
     actors = [item["actor"] for item in owner_items if item["actor"] is not None]
     assert actors
     assert all(actor["actor_id"] is None for actor in actors)
     assert all(actor["display_name"].strip() for actor in actors)
     assert any(actor["is_current_user"] is True for actor in actors)
-    assert viewer_result.status_code == 404
-    assert viewer_result.json()["error_code"] == "not_found"
+    assert viewer_activity.status_code == 404
+    assert viewer_activity.json()["error_code"] == "not_found"
 
 
 def test_read_api_reorders_tree_siblings(page_service):
@@ -1462,65 +1249,36 @@ def test_read_api_reorders_tree_siblings(page_service):
     assert blocked.status_code == 403
     assert blocked.json()["error_code"] == "system_tree_node_protected"
 
+    # A system node itself is never reordered.
+    agent_nodes = client.get(
+        f"/api/v1/workspaces/{workspace_id}/tree?section=agent"
+    ).json()["data"]["nodes"]
+    system_node = next(
+        node
+        for node in agent_nodes
+        if node["is_system_node"] and node["parent_id"] is not None
+    )
+    system = client.post(
+        f"/api/v1/workspaces/{workspace_id}/tree/reorder",
+        json={"node_id": system_node["id"], "direction": "up"},
+    )
+    assert system.status_code == 403
+    assert system.json()["error_code"] == "system_tree_node_protected"
 
-def test_read_api_reorders_tree_siblings_by_anchor(page_service):
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-
-    def create(title: str, slug: str, **extra) -> dict:
-        response = client.post(
-            f"/api/v1/workspaces/{workspace_id}/tree/nodes",
-            json={
-                "section": "context",
-                "title": title,
-                "slug": slug,
-                **extra,
-            },
-        )
-        assert response.status_code == 201, response.text
-        return response.json()["data"]
-
-    alpha = create("Anchor Alpha", "anchor-alpha")
-    bravo = create("Anchor Bravo", "anchor-bravo")
-    charlie = create("Anchor Charlie", "anchor-charlie")
-
-    def relative_order() -> list[str]:
-        nodes = client.get(
-            f"/api/v1/workspaces/{workspace_id}/tree?section=context"
-        ).json()["data"]["nodes"]
-        ordered = sorted(
-            (
-                node
-                for node in nodes
-                if node["id"] in {alpha["id"], bravo["id"], charlie["id"]}
-            ),
-            key=lambda node: (node["sort_key"], node["title"], node["id"]),
-        )
-        return [node["id"] for node in ordered]
-
+    # The anchor form places a node directly before or after a sibling.
     before = client.post(
         f"/api/v1/workspaces/{workspace_id}/tree/reorder",
-        json={
-            "node_id": charlie["id"],
-            "anchor_node_id": alpha["id"],
-            "placement": "before",
-        },
+        json={"node_id": charlie, "anchor_node_id": alpha, "placement": "before"},
     )
     assert before.status_code == 200, before.text
-    assert relative_order() == [charlie["id"], alpha["id"], bravo["id"]]
+    assert relative_order() == [charlie, alpha, bravo]
 
     after = client.post(
         f"/api/v1/workspaces/{workspace_id}/tree/reorder",
-        json={
-            "node_id": charlie["id"],
-            "anchor_node_id": bravo["id"],
-            "placement": "after",
-        },
+        json={"node_id": charlie, "anchor_node_id": bravo, "placement": "after"},
     )
     assert after.status_code == 200, after.text
-    assert relative_order() == [alpha["id"], bravo["id"], charlie["id"]]
+    assert relative_order() == [alpha, bravo, charlie]
 
 
 def test_read_api_anchor_under_another_parent_moves_to_that_position(page_service):
@@ -1598,8 +1356,8 @@ def test_read_api_anchor_under_another_parent_moves_to_that_position(page_servic
 
 def test_read_api_anchor_reorder_cannot_cross_system_node(page_service):
     # LEAK-04: the direction form refuses to move a node past a system folder
-    # (test_read_api_rejects_reordering_system_tree_node and the "Alpha is
-    # pinned below Inbox" case above), but the anchor form only validated the
+    # (the system-node and "Alpha is pinned below Inbox" cases in
+    # test_read_api_reorders_tree_siblings), but the anchor form only validated the
     # ANCHOR itself, not whether the moved node crossed a system sibling that
     # was neither the anchor nor the moved node. Build siblings in the order
     # [Alpha, Inbox(system), Bravo, Charlie] -- Inbox is created lazily
@@ -1870,29 +1628,6 @@ def test_read_api_anchor_reorder_noop_and_single_audit(page_service):
         f"{position:04d}" for position in range(1, len(siblings) + 1)
     ]
     assert audits_after == audits_before + 1
-
-
-def test_read_api_rejects_reordering_system_tree_node(page_service):
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-    nodes = client.get(f"/api/v1/workspaces/{workspace_id}/tree?section=agent").json()[
-        "data"
-    ]["nodes"]
-    system_node = next(
-        node
-        for node in nodes
-        if node["is_system_node"] and node["parent_id"] is not None
-    )
-
-    res = client.post(
-        f"/api/v1/workspaces/{workspace_id}/tree/reorder",
-        json={"node_id": system_node["id"], "direction": "up"},
-    )
-
-    assert res.status_code == 403
-    assert res.json()["error_code"] == "system_tree_node_protected"
 
 
 @pytest.mark.usefixtures("cached_converter_health")
@@ -2230,36 +1965,26 @@ def test_read_api_uploads_library_item(page_service):
         != source["current_version"]["id"]
     )
 
-
-@pytest.mark.usefixtures("cached_converter_health")
-def test_read_api_upload_places_item_under_parent(page_service):
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-
     folder = client.post(
         f"/api/v1/workspaces/{workspace_id}/tree/nodes",
         json={"section": "library", "title": "Sources", "node_kind": "folder"},
     )
     assert folder.status_code in (200, 201), folder.text
     folder_id = folder.json()["data"]["id"]
-
-    uploaded = client.post(
+    placed = client.post(
         f"/api/v1/workspaces/{workspace_id}/library/items",
         files={"file": ("placed.md", b"# Placed\n\nBody", "text/markdown")},
         data={"parent_node_id": folder_id},
     )
-    assert uploaded.status_code == 201, uploaded.text
-    source_id = uploaded.json()["data"]["id"]
-
+    assert placed.status_code == 201, placed.text
+    placed_id = placed.json()["data"]["id"]
     nodes = client.get(
         f"/api/v1/workspaces/{workspace_id}/tree?section=library"
     ).json()["data"]["nodes"]
     item_node = next(
         node
         for node in nodes
-        if node["target_kind"] == "library_item" and node["target_id"] == source_id
+        if node["target_kind"] == "library_item" and node["target_id"] == placed_id
     )
     assert item_node["parent_id"] == folder_id
 
@@ -2445,37 +2170,7 @@ def _register_restricted_library_item(
         )
 
 
-def test_read_api_allows_restricted_library_reads_for_workspace_owner(
-    page_service, media_installer_factory
-):
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-    item_id, version_id, artifact_id = _register_restricted_library_item(
-        page_service, UUID(workspace_id), media_installer_factory
-    )
-
-    listing = client.get(f"/api/v1/workspaces/{workspace_id}/library/items")
-    assert listing.status_code == 200
-    assert any(item["id"] == item_id for item in listing.json()["data"])
-
-    detail = client.get(f"/api/v1/workspaces/{workspace_id}/library/items/{item_id}")
-    assert detail.status_code == 200, detail.text
-    assert detail.json()["data"]["trust_level"] == "restricted"
-
-    version = client.get(
-        f"/api/v1/workspaces/{workspace_id}/library/versions/{version_id}"
-    )
-    assert version.status_code == 200, version.text
-
-    artifact = client.get(
-        f"/api/v1/workspaces/{workspace_id}/library/artifacts/{artifact_id}"
-    )
-    assert artifact.status_code == 200, artifact.text
-
-
-def test_read_api_blocks_restricted_library_reads_for_workspace_viewer(
+def test_read_api_restricted_library_reads_need_owner_role(
     page_service, media_installer_factory
 ):
     from sqlalchemy import select
@@ -2490,6 +2185,17 @@ def test_read_api_blocks_restricted_library_reads_for_workspace_viewer(
     item_id, version_id, artifact_id = _register_restricted_library_item(
         page_service, UUID(workspace_id), media_installer_factory
     )
+
+    # The owner role (session or owner PAT -- one predicate) reads it all.
+    listing = owner.get(f"/api/v1/workspaces/{workspace_id}/library/items")
+    assert listing.status_code == 200
+    assert any(item["id"] == item_id for item in listing.json()["data"])
+    detail = owner.get(f"/api/v1/workspaces/{workspace_id}/library/items/{item_id}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["data"]["trust_level"] == "restricted"
+    for path in (f"versions/{version_id}", f"artifacts/{artifact_id}"):
+        owner_read = owner.get(f"/api/v1/workspaces/{workspace_id}/library/{path}")
+        assert owner_read.status_code == 200, owner_read.text
 
     viewer = make_client(page_service, email="restricted-viewer@example.com")
     with page_service.session_factory.begin() as session:
@@ -2535,48 +2241,6 @@ def test_read_api_blocks_restricted_library_reads_for_workspace_viewer(
     )
     assert artifact.status_code == 403, artifact.text
     assert artifact.json()["error_code"] == "restricted_library_denied"
-
-
-def test_read_api_allows_restricted_library_reads_for_owner_pat(
-    page_service,
-    media_installer_factory,
-    mcp_default_actor,
-):
-    from backend.policy.rest_scopes import require_token_scope
-
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-    item_id, version_id, artifact_id = _register_restricted_library_item(
-        page_service, UUID(workspace_id), media_installer_factory
-    )
-    owner_pat = mcp_default_actor(
-        actor_id="restricted-library-owner-pat",
-        scopes=("mcp:read",),
-    )
-    client.app.dependency_overrides[require_token_scope] = lambda: owner_pat
-    try:
-        listing = client.get(f"/api/v1/workspaces/{workspace_id}/library/items")
-        assert listing.status_code == 200
-        assert any(item["id"] == item_id for item in listing.json()["data"])
-
-        detail = client.get(
-            f"/api/v1/workspaces/{workspace_id}/library/items/{item_id}"
-        )
-        assert detail.status_code == 200, detail.text
-
-        version = client.get(
-            f"/api/v1/workspaces/{workspace_id}/library/versions/{version_id}"
-        )
-        assert version.status_code == 200, version.text
-
-        artifact = client.get(
-            f"/api/v1/workspaces/{workspace_id}/library/artifacts/{artifact_id}"
-        )
-        assert artifact.status_code == 200, artifact.text
-    finally:
-        client.app.dependency_overrides.clear()
 
 
 def _seed_api_context_pages(page_service, workspace_id: UUID, count: int) -> None:
@@ -2653,24 +2317,13 @@ def test_read_api_context_pages_paginate_with_cursor(page_service):
     assert third_body["has_more"] is False
     assert third_body["next_cursor"] is None
 
-
-def test_read_api_context_pages_tolerate_garbled_cursor(page_service):
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-    _seed_api_context_pages(page_service, UUID(workspace_id), 12)
-
-    first = client.get(
-        f"/api/v1/workspaces/{workspace_id}/context/pages?limit=10"
-    ).json()
     garbled = client.get(
         f"/api/v1/workspaces/{workspace_id}/context/pages"
         "?limit=10&cursor=not-a-real-cursor"
     )
     assert garbled.status_code == 200
     assert [item["id"] for item in garbled.json()["data"]] == [
-        item["id"] for item in first["data"]
+        item["id"] for item in first_body["data"]
     ]
 
 
@@ -2708,7 +2361,9 @@ def test_read_api_agent_pages_recency_order_and_envelope(page_service):
 
 
 @pytest.mark.usefixtures("cached_converter_health")
-def test_read_api_rejects_malformed_pdf_and_docx_library_uploads(page_service):
+def test_read_api_rejects_malformed_unsupported_and_dotfile_library_uploads(
+    page_service,
+):
     client = make_client(page_service)
     workspace_id = client.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
@@ -2736,14 +2391,6 @@ def test_read_api_rejects_malformed_pdf_and_docx_library_uploads(page_service):
     )
     assert accepted.status_code == 201, accepted.text
     assert accepted.json()["data"]["format_hint"] == "text"
-
-
-@pytest.mark.usefixtures("cached_converter_health")
-def test_read_api_rejects_extensionless_and_dotfile_library_uploads(page_service):
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
 
     for filename, content_type in (
         ("binaryblob", "application/octet-stream"),

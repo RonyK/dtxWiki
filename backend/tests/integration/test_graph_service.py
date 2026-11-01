@@ -1262,8 +1262,9 @@ def _seed_hub_graph(session_factory):
 # raw candidate window is min(512, max(128, (limit + 1) * 8)).
 @pytest.mark.parametrize(
     ("direction", "limit", "budgets"),
+    # A separate out/50 row would repeat "both" (the 408 window) and the
+    # out-only floor/cap rows (one LIMIT-bound read of one side).
     [
-        pytest.param("out", 50, {"out": 408}, id="out"),
         pytest.param("in", 50, {"in": 408}, id="in"),
         pytest.param("both", 50, {"out": 408, "in": 408}, id="both"),
         pytest.param("out", 1, {"out": 128}, id="floor"),

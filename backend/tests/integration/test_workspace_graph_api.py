@@ -319,7 +319,10 @@ def test_map_api_search_respects_visible_titles_and_primary_paths_not_navigation
         )
 
 
-@pytest.mark.parametrize("mode", ["include", "exclude", "only"])
+# The next test sends "unplaced" through REST in include and only modes; each
+# mode's semantics are in test_unplaced_filter_matches_root_missing_and_hidden_
+# primary_folders (test_workspace_graph_service.py).
+@pytest.mark.parametrize("mode", ["exclude"])
 def test_map_api_applies_its_unplaced_facet_without_422(page_service, mode):
     from backend.tests.integration import test_workspace_graph_service as helpers
 

@@ -794,8 +794,10 @@ def test_overview_reserves_visible_review_and_unread_is_raw_attention_not_entry_
     assert "secret-sentinel" not in str(jobs)
 
 
-@pytest.mark.parametrize("audit_scopes", [["mcp:write"], ["mcp:read", "mcp:write"]])
-def test_bearer_activity_feed_and_group_require_audit_read(page_service, audit_scopes):
+def test_bearer_activity_feed_and_group_require_audit_read(page_service):
+    # mcp:read alone is denied below, so the grant must come from mcp:write;
+    # scope expansion is additive, so mcp:write alone takes the same branch.
+    audit_scopes = ["mcp:read", "mcp:write"]
     client = TestClient(
         create_app(
             settings=Settings(

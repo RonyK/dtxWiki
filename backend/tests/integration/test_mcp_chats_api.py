@@ -179,32 +179,6 @@ def test_mcp_chats_api_minimizes_list_and_provenance_client_identity(page_servic
         assert secret not in detail_client["name"]
 
 
-def test_mcp_chats_api_archive_then_unarchive_clears_archived_at(page_service):
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-    chat_id, _page_id = _seed_chat(page_service, UUID(workspace_id))
-
-    archived = client.delete(f"/api/v1/workspaces/{workspace_id}/mcp-chats/{chat_id}")
-    assert archived.status_code == 200
-    assert archived.json()["data"]["archived_at"] is not None
-
-    unarchived = client.post(
-        f"/api/v1/workspaces/{workspace_id}/mcp-chats/{chat_id}/unarchive"
-    )
-    assert unarchived.status_code == 200
-    body = unarchived.json()["data"]
-    assert body["chat_session_id"] == str(chat_id)
-    # Unarchive clears the timestamp so the session leaves the Archived filter.
-    assert body["archived_at"] is None
-    assert body["audit_event_id"] is not None
-
-    # The chat is back in the default (non-archived) listing.
-    listing = client.get(f"/api/v1/workspaces/{workspace_id}/mcp-chats")
-    assert [item["id"] for item in listing.json()["data"]["items"]] == [str(chat_id)]
-
-
 def test_mcp_chats_api_unarchive_rejects_viewer_and_allows_editor(page_service):
     owner = make_client(page_service)
     member = make_client(page_service, "mcp-chats-unarchive@example.com")
@@ -212,7 +186,9 @@ def test_mcp_chats_api_unarchive_rejects_viewer_and_allows_editor(page_service):
         "current_workspace_id"
     ]
     chat_id, _page_id = _seed_chat(page_service, UUID(workspace_id))
-    owner.delete(f"/api/v1/workspaces/{workspace_id}/mcp-chats/{chat_id}")
+    archived = owner.delete(f"/api/v1/workspaces/{workspace_id}/mcp-chats/{chat_id}")
+    assert archived.status_code == 200
+    assert archived.json()["data"]["archived_at"] is not None
     path = f"/api/v1/workspaces/{workspace_id}/mcp-chats/{chat_id}/unarchive"
 
     set_role(page_service, "mcp-chats-unarchive@example.com", workspace_id, "viewer")
@@ -223,7 +199,15 @@ def test_mcp_chats_api_unarchive_rejects_viewer_and_allows_editor(page_service):
     set_role(page_service, "mcp-chats-unarchive@example.com", workspace_id, "editor")
     allowed = member.post(path)
     assert allowed.status_code == 200
-    assert allowed.json()["data"]["archived_at"] is None
+    body = allowed.json()["data"]
+    assert body["chat_session_id"] == str(chat_id)
+    # Unarchive clears the timestamp so the session leaves the Archived filter.
+    assert body["archived_at"] is None
+    assert body["audit_event_id"] is not None
+
+    # The chat is back in the default (non-archived) listing.
+    listing = owner.get(f"/api/v1/workspaces/{workspace_id}/mcp-chats")
+    assert [item["id"] for item in listing.json()["data"]["items"]] == [str(chat_id)]
 
 
 def test_mcp_chats_api_read_endpoints_reject_viewer_and_allow_editor(page_service):

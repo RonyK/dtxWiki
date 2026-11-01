@@ -218,7 +218,9 @@ def test_write_draft_rejects_unsafe_media_before_page_or_version_rows(
         )
 
 
-@pytest.mark.parametrize("unsafe_body", UNSAFE_MEDIA_MARKDOWN)
+# The per-kind matrix runs once, on write_draft above: both writers classify
+# through the same body preparer, so the update path needs one representative.
+@pytest.mark.parametrize("unsafe_body", UNSAFE_MEDIA_MARKDOWN[:1])
 def test_update_draft_rejects_unsafe_media_without_new_version_or_body_mutation(
     session_factory,
     unsafe_body,

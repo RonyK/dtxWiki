@@ -586,6 +586,9 @@ def test_unpublish_revokes_public_access(page_service):
         json={"is_public": False},
     )
     assert unpublish.status_code == 200
+    # is_public is on the authenticated payload so the publish UI can
+    # reconcile its toggle without probing the anonymous URL.
+    assert unpublish.json()["data"]["is_public"] is False
     with page_service.session_factory() as session:
         page = session.get(ContextPage, created.id)
         assert page.is_public is False
@@ -750,36 +753,6 @@ def test_public_read_title_from_published_body_not_draft_page_row(page_service):
     assert "Secret Draft Title" not in resp.text
 
 
-def test_authenticated_page_payload_exposes_is_public(page_service):
-    # P2: is_public is on the authenticated payload so the publish UI can
-    # reconcile its toggle without probing the anonymous URL.
-    client = _authed_client(page_service)
-    created = _make_page(page_service, "flag-page", published=True, public=False)
-
-    published = client.post(
-        f"/api/v1/workspaces/{created.workspace_id}/context/pages"
-        f"/{created.id}/publish",
-        json={"is_public": True},
-    )
-    assert published.status_code == 200
-    assert published.json()["data"]["is_public"] is True
-
-    unpublished = client.post(
-        f"/api/v1/workspaces/{created.workspace_id}/context/pages"
-        f"/{created.id}/publish",
-        json={"is_public": False},
-    )
-    assert unpublished.json()["data"]["is_public"] is False
-
-
-def test_public_read_rejects_overlong_slug(page_service):
-    # The unauthenticated route bounds path length (max_length=64) like the
-    # authenticated sibling, so a huge slug is rejected before any DB lookup.
-    anon = _anon_client(page_service)
-    resp = anon.get("/api/v1/public/w/default/pages/" + ("a" * 100))
-    assert resp.status_code == 422
-
-
 def test_public_spa_share_route_error_fails_closed(page_service, tmp_path):
     # One SPA shell serves indexed and unlisted pages. The static fallback cannot
     # truthfully choose a crawler policy before the client resolves page scope,
@@ -801,3 +774,7 @@ def test_public_validation_error_carries_noindex_nostore(page_service):
     assert resp.status_code == 422
     assert resp.headers["X-Robots-Tag"] == "noindex, nofollow"
     assert resp.headers["Cache-Control"] == "no-store"
+    # The unauthenticated route bounds path length (max_length=64) like the
+    # authenticated sibling, so a huge slug is rejected before any DB lookup.
+    overlong = anon.get("/api/v1/public/w/default/pages/" + ("a" * 100))
+    assert overlong.status_code == 422

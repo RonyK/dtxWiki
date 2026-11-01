@@ -3,7 +3,6 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
@@ -247,6 +246,11 @@ def test_public_request_ignores_host_header_when_rendering_reset_link(
         )
         assert outbox is not None
         outbox_id = outbox.id
+        raw_token = delivery.cipher.decrypt(
+            outbox_id=outbox.id,
+            message_kind=outbox.message_kind,
+            envelope=outbox.encrypted_token,
+        )
     # deliver() owns its own transactions now (MAIL-01): the provider send
     # must not happen inside one.
     delivery.deliver(
@@ -258,6 +262,16 @@ def test_public_request_ignores_host_header_when_rendering_reset_link(
     assert "https://wiki.example.com/reset-password#token=dtxr_" in body
     assert "?token=" not in body
     assert "attacker.example" not in body
+    # The link carries the token only in the fragment (M-2).
+    links = [word for word in body.split() if word.startswith("https://")]
+    assert len(links) == 1
+    parts = urlsplit(links[0])
+    assert (parts.netloc, parts.path, parts.query) == (
+        "wiki.example.com",
+        "/reset-password",
+        "",
+    )
+    assert parse_qs(parts.fragment, strict_parsing=True) == {"token": [raw_token]}
 
 
 def test_email_verification_request_and_single_use_confirm(page_service):
@@ -424,57 +438,6 @@ def test_unregistered_address_spray_never_touches_global_backstop(page_service):
     assert global_rows == 0
 
 
-def test_password_reset_confirm_distinguishes_expired_and_used_links(page_service):
-    client, _, _ = recovery_client(page_service)
-    signup(client, "reset-state@example.com")
-    # The expired link is backdated one second before this "now" and judged
-    # against the same "now"; the same pin keeps the 30-minute link issued for
-    # the "used" half live until its first use.
-    now = datetime.now(UTC)
-    service = pin_recovery_clock(client, now)
-
-    expired_issue = service.issue_password_reset(email="reset-state@example.com")
-    expired_token = link_token(expired_issue.reset_url)
-    with page_service.session_factory.begin() as session:
-        token_row = session.get(PasswordResetToken, expired_issue.token_id)
-        assert token_row is not None
-        token_row.expires_at = now - timedelta(seconds=1)
-
-    expired = client.post(
-        "/api/v1/auth/password-reset/confirm",
-        json={
-            "token": expired_token,
-            "new_password": "replacement-password",
-        },
-    )
-
-    assert expired.status_code == 400
-    assert expired.json()["error_code"] == "password_reset_token_expired"
-    assert expired.headers["cache-control"] == "no-store"
-
-    used_issue = service.issue_password_reset(email="reset-state@example.com")
-    used_token = link_token(used_issue.reset_url)
-    first_use = client.post(
-        "/api/v1/auth/password-reset/confirm",
-        json={
-            "token": used_token,
-            "new_password": "replacement-password",
-        },
-    )
-    replay = client.post(
-        "/api/v1/auth/password-reset/confirm",
-        json={
-            "token": used_token,
-            "new_password": "another-password",
-        },
-    )
-
-    assert first_use.status_code == 200
-    assert replay.status_code == 400
-    assert replay.json()["error_code"] == "password_reset_token_used"
-    assert replay.headers["cache-control"] == "no-store"
-
-
 def test_password_reset_status_distinguishes_valid_expired_used_and_malformed(
     page_service,
 ):
@@ -513,6 +476,13 @@ def test_password_reset_status_distinguishes_valid_expired_used_and_malformed(
     assert expired.status_code == 400
     assert expired.json()["error_code"] == "password_reset_token_expired"
     assert expired.headers["cache-control"] == "no-store"
+    expired_confirm = client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={"token": expired_token, "new_password": "replacement-password"},
+    )
+    assert expired_confirm.status_code == 400
+    assert expired_confirm.json()["error_code"] == "password_reset_token_expired"
+    assert expired_confirm.headers["cache-control"] == "no-store"
 
     used_issue = service.issue_password_reset(email="reset-status@example.com")
     used_token = link_token(used_issue.reset_url)
@@ -645,30 +615,19 @@ def test_recovery_submissions_refuse_a_token_in_the_query_string(page_service):
     ).status_code == 200
 
 
-@pytest.mark.parametrize("message_kind", ["password_reset", "email_verification"])
-def test_emailed_recovery_links_carry_the_token_only_in_the_fragment(
+def test_emailed_verification_link_carries_the_token_only_in_the_fragment(
     page_service,
-    message_kind,
 ):
+    """The password-reset mail's link is pinned the same way in
+    test_public_request_ignores_host_header_when_rendering_reset_link."""
+
     client, delivery, provider = recovery_client(page_service)
-    email = f"emailed-{message_kind}@example.com"
-    signup(client, email)
-    if message_kind == "password_reset":
-        with page_service.session_factory.begin() as session:
-            user = session.scalar(select(User).where(User.email == email))
-            assert user is not None
-            user.email_verified_at = datetime.now(UTC)
-        requested = client.post(
-            "/api/v1/auth/password-reset/request", json={"email": email}
-        )
-        path = "/reset-password"
-    else:
-        requested = client.post("/api/v1/auth/email-verification/request")
-        path = "/verify-email"
+    signup(client, "emailed-email_verification@example.com")
+    requested = client.post("/api/v1/auth/email-verification/request")
     assert requested.status_code == 202
     with page_service.session_factory() as session:
         outbox = session.scalar(
-            select(EmailOutbox).where(EmailOutbox.message_kind == message_kind)
+            select(EmailOutbox).where(EmailOutbox.message_kind == "email_verification")
         )
         assert outbox is not None
         outbox_id = outbox.id
@@ -688,7 +647,11 @@ def test_emailed_recovery_links_carry_the_token_only_in_the_fragment(
     ]
     assert len(links) == 1
     parts = urlsplit(links[0])
-    assert (parts.netloc, parts.path, parts.query) == ("wiki.example.com", path, "")
+    assert (parts.netloc, parts.path, parts.query) == (
+        "wiki.example.com",
+        "/verify-email",
+        "",
+    )
     assert parse_qs(parts.fragment, strict_parsing=True) == {"token": [raw_token]}
 
 

@@ -212,6 +212,10 @@ def _assert_capacity_boundaries(session_factory):
         assert mobile.counts.rendered_documents > 100
 
 
+# Capacity guard, run by Release checks. The PR lane keeps both overflow
+# boundaries in unit/test_workspace_graph_aggregation_boundaries.py and the
+# hidden-row twin (1,025 invisible documents) in test_workspace_graph_service.py.
+@pytest.mark.release_scale
 def test_real_db_10k_and_100k_boundaries_preserve_identity_privacy_and_mobile_budget(
     session_factory,
 ):

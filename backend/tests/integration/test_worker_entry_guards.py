@@ -395,56 +395,6 @@ def test_sigint_while_idle_stops_the_loop(
     }
 
 
-def test_worker_process_exits_cleanly_on_sigterm(tmp_path, data_dir):
-    """The real process boundary: what systemd and `docker stop` send."""
-
-    database_url = _migrated_database_url(tmp_path)
-    environment = {
-        **os.environ,
-        "DTXWIKI_DATA_DIR": str(data_dir),
-        "PYTHONPATH": str(REPO_ROOT),
-    }
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "backend.worker.entry",
-            "run",
-            "--db",
-            database_url,
-            "--skip-bootstrap",
-            "--poll-interval-seconds",
-            "0.2",
-        ],
-        cwd=REPO_ROOT,
-        env=environment,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        assert process.stdout is not None
-        deadline = time.monotonic() + 60
-        while time.monotonic() < deadline:
-            line = process.stdout.readline()
-            if not line:
-                break
-            if '"status": "idle"' in line:
-                break
-        else:
-            pytest.fail("worker never reported idle")
-        process.send_signal(signal.SIGTERM)
-        stdout, stderr = process.communicate(timeout=30)
-    finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait()
-
-    assert process.returncode == 0, stderr
-    assert '"status": "stopped"' in stdout
-    runtime_lock.acquire_exclusive(data_dir).release()
-
-
 def test_initial_roster_failure_never_reports_ready(tmp_path, data_dir, monkeypatch):
     settings = Settings(database_url=_migrated_database_url(tmp_path))
     events = []
@@ -619,15 +569,18 @@ def test_external_workers_share_one_consumer_across_url_alias_and_data_roots(
         assert second.returncode == worker_entry.RUNTIME_LOCKED_EXIT_CODE
         assert "dtxwiki-consumer.lock" in second.stderr
     finally:
+        # The real process boundary: what systemd and `docker stop` send.
         if first.poll() is None:
             first.send_signal(signal.SIGTERM)
         try:
-            _, stderr = first.communicate(timeout=15)
+            stdout, stderr = first.communicate(timeout=15)
         except subprocess.TimeoutExpired:
             first.kill()
             first.communicate()
             raise
     assert first.returncode == 0, stderr
+    assert '"status": "stopped"' in stdout
+    runtime_lock.acquire_exclusive(data_dir).release()
 
 
 def test_worker_migration_refuses_live_api_before_bootstrap(

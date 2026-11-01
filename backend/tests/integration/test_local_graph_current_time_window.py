@@ -446,6 +446,9 @@ def test_current_raw_scan_cap_cannot_drop_a_latest_removal_and_claim_completenes
     assert "graph_observation.occurred_at <=" not in observation_sql[0]
 
 
+# Capacity guard, run by Release checks. The PR lane keeps the same truthful
+# bounded-sample replay at small caps in the two tests above.
+@pytest.mark.release_scale
 def test_current_max_budget_replay_is_still_bounded_to_the_latest_1000_observations(
     page_service, graph_client
 ):
@@ -689,8 +692,9 @@ def test_current_period_keeps_authored_relations_at_the_second_frontier(
     )
 
 
-@pytest.mark.parametrize("direction", ["out", "in", "both"])
-@pytest.mark.parametrize("depth", [1, 2])
+# Each direction branch of the induced-edge filter once, and each depth once;
+# depth 2 also carries the H1-H1 relation, so the full product adds nothing.
+@pytest.mark.parametrize("direction,depth", [("out", 1), ("in", 2), ("both", 2)])
 def test_current_period_preserves_induced_h1_and_h2_relations(
     page_service, graph_client, direction, depth, monkeypatch
 ):

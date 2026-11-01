@@ -22,7 +22,6 @@ from __future__ import annotations
 from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -143,13 +142,8 @@ def _refresh(client: TestClient, *, refresh_token: str, client_id: str):
     )
 
 
-@pytest.mark.parametrize(
-    "reuse_age",
-    [timedelta(0), _GRACE_WINDOW - _ONE_MICROSECOND, _GRACE_WINDOW],
-    ids=["at-rotation", "just-inside", "at-window"],
-)
 def test_reuse_within_grace_window_mints_new_pair_without_revoking_family(
-    page_service, oauth_clock, reuse_age
+    page_service, oauth_clock
 ):
     client = _client(page_service)
     issued = _issue_token_pair(client, state="grace-single-reuse")
@@ -162,11 +156,14 @@ def test_reuse_within_grace_window_mints_new_pair_without_revoking_family(
     assert rotate.status_code == 200, rotate.text
     first_child_refresh = rotate.json()["refresh_token"]
 
-    # Reuse the ORIGINAL (already-rotated) refresh token ``reuse_age`` after
-    # its rotation -- from that very instant to the window's last, which is
-    # inclusive -- and expect a NEW pair, not invalid_grant. The OAuth clock
-    # has not moved since the rotation, so it still stands at that instant.
-    oauth_clock.value += reuse_age
+    # Reuse the ORIGINAL (already-rotated) refresh token on the window's last
+    # instant, which is inclusive, and expect a NEW pair, not invalid_grant.
+    # The OAuth clock has not moved since the rotation, so it still stands at
+    # that instant. One microsecond later is the refused side of this boundary
+    # (test_reuse_after_grace_window_expires_revokes_the_whole_family); every
+    # earlier age takes the same branch as this one (see also
+    # test_two_reuses_within_grace_window_both_succeed).
+    oauth_clock.value += _GRACE_WINDOW
     reuse = _refresh(
         client,
         refresh_token=issued["refresh_token"],
@@ -219,6 +216,13 @@ def test_reuse_within_grace_window_mints_new_pair_without_revoking_family(
         assert grace_event is not None
         assert grace_event.payload["parent_refresh_id"] == str(parent.id)
         assert grace_event.payload["first_child_refresh_id"] == str(first_child_row.id)
+        # A double-fired refresh is not compromise: no reuse alarm is raised.
+        assert (
+            session.scalar(
+                select(AuditEvent).where(AuditEvent.action == "oauth.refresh.reuse")
+            )
+            is None
+        )
 
 
 def test_two_reuses_within_grace_window_both_succeed(page_service, oauth_clock):

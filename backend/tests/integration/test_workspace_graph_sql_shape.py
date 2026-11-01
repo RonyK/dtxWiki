@@ -122,6 +122,10 @@ def _assert_query_parameter_count_is_constant_at_scale(session_factory) -> None:
     assert len(set(statement_counts)) == 1
 
 
+# Capacity guard, run by Release checks. The PR lane keeps the <= 32 bind
+# parameter bound on every relation branch and the body-free projection in
+# the knowledge-40 shape tests below.
+@pytest.mark.release_scale
 def test_workspace_graph_query_parameter_count_is_constant_at_scale(
     session_factory,
 ) -> None:

@@ -262,13 +262,8 @@ def test_golden_pages_reachable_within_three_hops(
             page_ref = format_index_ref("context", page_id)
             assert f"- [{title_text(title)}]({page_ref}) — " in leaf_render
 
-
-def test_fanout_truncation_is_honest(session_factory_module, scale_workspace):
-    session_factory = session_factory_module
-    with session_factory() as session:
-        workspace_id = scale_workspace["workspace_id"]
-        # root of context: 5 folders + inbox etc. -> no truncation
-        # leaf area: 42 pages -> under fanout, no truncation
+        # §13-③ fanout truncation is honest: a 42-page leaf addressed by path
+        # is under the fanout limit, so every page is listed and none elided.
         leaf = build_workspace_index(
             session,
             workspace_id,

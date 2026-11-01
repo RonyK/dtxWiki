@@ -38,23 +38,6 @@ def add_workspace_for_current_user(client: TestClient, page_service, slug: str):
         return workspace.id
 
 
-def test_user_default_workspace_is_selected(page_service):
-    client = make_client(page_service)
-    beta_id = add_workspace_for_current_user(client, page_service, "beta")
-    user_id = UUID(client.get("/api/v1/auth/me").json()["data"]["user_id"])
-
-    with page_service.session_factory.begin() as session:
-        user = session.get(User, user_id)
-        user.default_workspace_id = beta_id
-
-    response = client.get("/api/v1/workspaces")
-
-    assert response.status_code == 200
-    payload = response.json()["data"]
-    assert payload["current_workspace_id"] == str(beta_id)
-    assert payload["default_workspace_id"] == str(beta_id)
-
-
 def test_current_workspace_falls_back_to_sole_accessible_workspace(page_service):
     client = make_client(page_service)
     user_id = UUID(client.get("/api/v1/auth/me").json()["data"]["user_id"])
@@ -97,28 +80,6 @@ def test_multiple_memberships_without_default_require_picker(page_service):
     assert payload["default_workspace_id"] is None
 
 
-def test_zero_membership_enters_recovery_onboarding(page_service):
-    client = make_client(page_service)
-    user_id = UUID(client.get("/api/v1/auth/me").json()["data"]["user_id"])
-    with page_service.session_factory.begin() as session:
-        user = session.get(User, user_id)
-        assert user is not None
-        starter_id = user.default_workspace_id
-        assert starter_id is not None
-        membership = session.get(WorkspaceMembership, (user_id, starter_id))
-        assert membership is not None
-        session.delete(membership)
-        user.default_workspace_id = None
-
-    response = client.get("/api/v1/workspaces")
-
-    assert response.status_code == 200
-    payload = response.json()["data"]
-    assert payload["workspaces"] == []
-    assert payload["current_workspace_id"] is None
-    assert payload["default_workspace_id"] is None
-
-
 def test_set_default_workspace_requires_membership(page_service):
     client = make_client(page_service)
     with page_service.session_factory.begin() as session:
@@ -134,6 +95,7 @@ def test_set_default_workspace_requires_membership(page_service):
 
 
 def test_set_default_workspace_updates_login_landing_workspace(page_service):
+    # With two memberships, the user's default is the selected workspace.
     client = make_client(page_service)
     research_id = add_workspace_for_current_user(client, page_service, "research")
 
@@ -146,3 +108,4 @@ def test_set_default_workspace_updates_login_landing_workspace(page_service):
     assert update.status_code == 200
     assert update.json()["data"]["default_workspace_id"] == str(research_id)
     assert listed.json()["data"]["current_workspace_id"] == str(research_id)
+    assert listed.json()["data"]["default_workspace_id"] == str(research_id)

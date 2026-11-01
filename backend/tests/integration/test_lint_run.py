@@ -1391,52 +1391,36 @@ def test_lint_rules_api_smoke(page_service):
     rules = resp.json()["data"]["rules"]
     assert any(r["rule_id"] == "md.code_fence_balance" for r in rules)
 
+    # Missing and private non-member workspaces share the uniform not-found
+    # response so the authorization boundary cannot enumerate workspace ids.
+    missing = "00000000-0000-0000-0000-0000000000aa"
+    resp = client.get(f"/api/v1/workspaces/{missing}/lint/rules")
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["error_code"] == "not_found"
 
-def test_lint_format_endpoint_normalizes(page_service):
-    # F2d: on-demand format returns the normalized Markdown (stateless).
+
+def test_lint_format_endpoint_normalizes_caps_and_fails_closed(page_service):
+    from backend.schemas.page import BODY_MD_MAX_LENGTH
+
     client = _api_client(page_service)
     wsid = client.get("/api/v1/workspaces").json()["data"]["current_workspace_id"]
+    format_url = f"/api/v1/workspaces/{wsid}/lint/format"
+    # F2d: on-demand format returns the normalized Markdown (stateless).
     resp = client.post(
-        f"/api/v1/workspaces/{wsid}/lint/format",
+        format_url,
         json={"markdown": "# Title  \n\n* item\n\n\n\nend   \n"},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["data"]["markdown"] == "# Title\n\n- item\n\nend\n"
 
-
-def test_lint_format_rejects_oversized_body(page_service):
     # I9: the formatter caps input at BODY_MD_MAX_LENGTH like the write APIs.
-    from backend.schemas.page import BODY_MD_MAX_LENGTH
-
-    client = _api_client(page_service)
-    wsid = client.get("/api/v1/workspaces").json()["data"]["current_workspace_id"]
-    resp = client.post(
-        f"/api/v1/workspaces/{wsid}/lint/format",
-        json={"markdown": "a" * (BODY_MD_MAX_LENGTH + 1)},
-    )
+    resp = client.post(format_url, json={"markdown": "a" * (BODY_MD_MAX_LENGTH + 1)})
     assert resp.status_code == 422, resp.text
 
-
-def test_lint_format_failclosed_on_pathological_table(page_service):
     # I1: a ragged/escaped-pipe table never 500s — it returns the body unchanged.
-    client = _api_client(page_service)
-    wsid = client.get("/api/v1/workspaces").json()["data"]["current_workspace_id"]
     body = "| a | b | c |\n| --- | --- |\n| x | y | z |\n"
-    resp = client.post(
-        f"/api/v1/workspaces/{wsid}/lint/format",
-        json={"markdown": body},
-    )
+    resp = client.post(format_url, json={"markdown": body})
     assert resp.status_code == 200, resp.text
-
-
-def test_lint_rules_unknown_workspace_is_authz_rejected(page_service):
-    # Missing and private non-member workspaces share the uniform not-found
-    # response so the authorization boundary cannot enumerate workspace ids.
-    client = _api_client(page_service)
-    missing = "00000000-0000-0000-0000-0000000000aa"
-    resp = client.get(f"/api/v1/workspaces/{missing}/lint/rules")
-    assert resp.status_code == 404, resp.text
-    assert resp.json()["error_code"] == "not_found"
 
 
 def test_batch_decide_findings_comprehensive(session_factory):

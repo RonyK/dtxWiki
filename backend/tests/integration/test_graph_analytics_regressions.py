@@ -818,8 +818,8 @@ def test_co_access_canonicalizes_pairs_across_reversed_session_rankings(
 
 @pytest.mark.parametrize(
     ("verbs", "expected_edges"),
+    # One unconsumed side already rejects the pair; two add no branch.
     [
-        (("search_match", "search_match"), 0),
         (("referenced", "referenced"), 1),
         (("referenced", "search_match"), 0),
     ],
@@ -1954,6 +1954,10 @@ def _metered_edges(rows, *, probe_budget):
     return Edges(), meter
 
 
+# Capacity guard, run by Release checks. The PR lane keeps the per-edge
+# transition meter (test_authority_builds_at_most_two_transitions_per_edge)
+# and authority projection (test_ppr_visibility_and_authority_projection).
+@pytest.mark.release_scale
 def test_authority_work_is_bounded_at_100k_edges(session_factory):
     # The 5s budget (§19.5.7) rests on the calculation doing a bounded amount of
     # work per edge. That is counted on every run instead of timed (the wall

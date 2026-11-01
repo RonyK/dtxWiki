@@ -18,6 +18,11 @@ from backend.tests.utils.workspace_graph_corpora import (
 pytestmark = pytest.mark.integration
 
 
+# Capacity guard on the 2,001-document corpus; Release checks run it. The PR
+# lane keeps the unlinked slot fill at the same boundary
+# (test_workspace_graph_unlinked_aggregation.py) and focus pinning in
+# aggregated scenes (test_workspace_graph_service.py).
+@pytest.mark.release_scale
 @pytest.mark.parametrize("focus", [None, "linked", "unlinked"])
 def test_combined_2001_keeps_unlinked_exact_and_preserves_focus_and_relation_totals(
     session_factory, focus

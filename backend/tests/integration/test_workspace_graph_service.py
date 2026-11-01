@@ -1780,7 +1780,8 @@ def test_capped_map_api_serializes_a_meaningful_scene_and_legacy_title(page_serv
     assert long_node["label"] == "긴" * 200
 
 
-@pytest.mark.parametrize("search", ["target", "context", "library", "on", "text"])
+# Substrings of a route word ("on", "text" in "context") take the same branch.
+@pytest.mark.parametrize("search", ["target", "context", "library"])
 def test_map_search_does_not_match_navigation_route_words(session_factory, search):
     service = WorkspaceGraphService(cursor_secret="search-route-secret")
     with session_factory.begin() as session:

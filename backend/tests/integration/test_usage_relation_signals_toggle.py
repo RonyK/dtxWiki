@@ -27,7 +27,6 @@ from backend.schemas.graph import GraphBudget, GraphQueryRequest, GraphSeed
 from backend.services import trail_analysis
 from backend.services.graph_query_service import GraphQueryService
 from backend.services.indexing.edge_registry import rebuild_edge_projection
-from backend.services.job_queue import JobQueueService
 from backend.services.trail_analysis import run_trail_tick
 from backend.tests.conftest import (
     authenticate_test_client_in_workspace,
@@ -214,41 +213,6 @@ def test_a_rebuild_keeps_co_access_off_while_the_switch_is_off(
         )
         assert counts["co_access"] == 1
         assert _co_access_count(session, workspace_id) == 1
-
-
-def test_the_worker_tick_reads_the_owner_switch(session_factory, page_service):
-    now = datetime.now(UTC).replace(microsecond=0)
-    workspace_id, _left_id, _right_id = _seed_read_together(
-        session_factory, page_service, now
-    )
-    queue = JobQueueService()
-    worker = OneShotWorker(job_queue=queue, settings=Settings())
-
-    def tick(key: str) -> None:
-        with session_factory.begin() as session:
-            queue.enqueue(
-                session=session,
-                workspace_id=workspace_id,
-                job_type="trail_tick",
-                trigger_type="scheduled",
-                idempotency_key=key,
-                target_ref={"scheduled_for": now.isoformat()},
-            )
-        with session_factory.begin() as session:
-            result = worker.dispatch_once(
-                session, workspace_id=workspace_id, job_types={"trail_tick"}
-            )
-        assert result is not None and result.status == "completed", result
-
-    tick("signals-on")
-    with session_factory() as session:
-        assert _co_access_count(session, workspace_id) == 1
-
-    with session_factory.begin() as session:
-        session.get(Workspace, workspace_id).usage_relation_signals_enabled = False
-    tick("signals-off")
-    with session_factory() as session:
-        assert _co_access_count(session, workspace_id) == 0
 
 
 def _rest_client(page_service, *, role="owner", raise_server_exceptions=True):
@@ -441,11 +405,13 @@ def test_policy_opt_out_queues_after_commit_and_clears_rest_and_mcp_neighbors(
         )
 
 
-@pytest.mark.parametrize("route", ["single", "batch"])
 def test_each_policy_toggle_can_queue_again_after_an_equal_revision_completed(
-    session_factory, page_service, route
+    session_factory, page_service
 ):
     """A content revision repeats on off/on/off; it is not a change identity."""
+    # Both routes queue through the same helper and idempotency key; the worker
+    # reading the switch on each tick is covered here as well.
+    route = "batch"
     now = datetime.now(UTC).replace(microsecond=0)
     workspace_id, _left_id, _right_id = _seed_read_together(
         session_factory, page_service, now
@@ -473,10 +439,11 @@ def test_each_policy_toggle_can_queue_again_after_an_equal_revision_completed(
     assert len(set(job_ids)) == 3
 
 
-@pytest.mark.parametrize("route", ["single", "batch"])
 def test_policy_transaction_failure_never_queues_a_tick(
-    session_factory, page_service, monkeypatch, route
+    session_factory, page_service, monkeypatch
 ):
+    # Per-route enqueue-after-commit ordering is pinned by the opt-out test.
+    route = "single"
     client, workspace_id = _rest_client(page_service, raise_server_exceptions=False)
     services = client.app.state.container.services
     method = "update_policy" if route == "single" else "update_policy_batch"
@@ -505,12 +472,12 @@ def test_policy_transaction_failure_never_queues_a_tick(
 
 
 @pytest.mark.parametrize("route", ["single", "batch"])
-@pytest.mark.parametrize("bad_value", [None, "false", 0])
 def test_rejected_policy_value_never_queues_a_tick(
-    session_factory, page_service, route, bad_value
+    session_factory, page_service, route
 ):
+    # Every non-bool value meets the same isinstance(value, bool) guard.
     client, workspace_id = _rest_client(page_service)
-    response = _save_switch(client, workspace_id, route=route, value=bad_value)
+    response = _save_switch(client, workspace_id, route=route, value="false")
     assert response.status_code == 422, response.text
     with session_factory() as session:
         assert (
@@ -533,8 +500,12 @@ def test_non_owner_policy_opt_out_never_changes_signal_or_queues_a_tick(
     assert _trail_jobs(session_factory, workspace_id) == []
 
 
-@pytest.mark.parametrize("route", ["single", "batch"])
-@pytest.mark.parametrize("access", ["unauthenticated", "other_workspace"])
+# Both routes share the actor and owner-access dependencies (the per-route
+# owner guard is pinned by the non-owner test), so each guard is hit once.
+@pytest.mark.parametrize(
+    ("route", "access"),
+    [("single", "unauthenticated"), ("batch", "other_workspace")],
+)
 def test_unauthorized_policy_opt_out_never_queues_a_tick(
     session_factory, page_service, route, access
 ):
@@ -597,6 +568,18 @@ def test_single_map_and_other_policy_keys_do_not_queue_a_tick(
             policies_url, json={"group": group, "key": key, "value": value}
         )
         assert response.status_code == 200, response.text
+    # The batch route keys on the changed set, not the group: map alone does
+    # not queue either.
+    revision = client.get(policies_url).json()["data"]["graph"]["revision"]
+    map_only = client.patch(
+        f"{policies_url}/batch",
+        json={
+            "group": "graph",
+            "expected_revision": revision,
+            "changes": {"workspace_map_enabled": False},
+        },
+    )
+    assert map_only.status_code == 200, map_only.text
     assert _trail_jobs(session_factory, workspace_id) == []
 
 
@@ -639,10 +622,11 @@ def test_stale_or_partially_invalid_batch_never_queues_a_tick(
     assert _trail_jobs(session_factory, workspace_id) == []
 
 
-@pytest.mark.parametrize("route", ["single", "batch"])
 def test_enqueue_failure_does_not_undo_committed_policy(
-    session_factory, page_service, monkeypatch, route
+    session_factory, page_service, monkeypatch
 ):
+    # Both routes call the same best-effort _request_trail_tick after commit.
+    route = "batch"
     client, workspace_id = _rest_client(page_service)
     queue = client.app.state.container.services.job_queue
     original_enqueue = queue.enqueue
@@ -691,52 +675,3 @@ def test_the_local_graph_route_reads_the_owner_switch(session_factory, page_serv
     assert off.status_code == 200, off.text
     assert off.json()["data"]["edges"] == []
     assert WARNING in off.json()["data"]["warnings"]
-
-
-def test_saving_the_switch_asks_for_a_prompt_trail_tick(page_service):
-    """The change reaches every reader of the projection without a day's wait."""
-
-    client, workspace_id = _rest_client(page_service)
-    policies = client.get(f"/api/v1/workspaces/{workspace_id}/settings/policies")
-    assert policies.status_code == 200, policies.text
-    revision = policies.json()["data"]["graph"]["revision"]
-
-    saved = client.patch(
-        f"/api/v1/workspaces/{workspace_id}/settings/policies/batch",
-        json={
-            "group": "graph",
-            "expected_revision": revision,
-            "changes": {"usage_relation_signals_enabled": False},
-        },
-    )
-    assert saved.status_code == 200, saved.text
-
-    with page_service.session_factory() as session:
-        jobs = session.scalars(
-            select(Job).where(
-                Job.workspace_id == workspace_id,
-                Job.job_type == "trail_tick",
-                Job.status == "queued",
-            )
-        ).all()
-    assert [job.trigger_type for job in jobs] == ["settings"]
-
-    # Saving the map switch alone does not.
-    revision = saved.json()["data"]["graph"]["revision"]
-    client.patch(
-        f"/api/v1/workspaces/{workspace_id}/settings/policies/batch",
-        json={
-            "group": "graph",
-            "expected_revision": revision,
-            "changes": {"workspace_map_enabled": True},
-        },
-    )
-    with page_service.session_factory() as session:
-        assert (
-            session.scalar(
-                select(func.count(Job.id)).where(
-                    Job.workspace_id == workspace_id, Job.job_type == "trail_tick"
-                )
-            )
-            == 1
-        )

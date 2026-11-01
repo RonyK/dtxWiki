@@ -299,46 +299,6 @@ def test_autosave_stages_and_only_explicit_publish_moves_pointer(page_service):
         assert page.latest_draft_version_id is None
 
 
-def test_human_autosave_cannot_publish_a_malformed_body(page_service):
-    client = make_client(page_service)
-    created = _create(client, "human-malformed-autosave")
-    draft = _autosave(client, created, BROKEN, session_version_id=None)
-
-    with page_service.session_factory() as session:
-        page = session.get(ContextPage, UUID(created["id"]))
-        version = session.get(ContextPageVersion, UUID(draft["version_id"]))
-        assert page is not None and version is not None
-        assert version.version_status == "draft"
-        assert page.current_published_version_id == UUID(created["version_id"])
-        assert page.current_published_version_id != version.id
-
-
-def test_ai_autosave_cannot_publish_a_malformed_body(page_service):
-    client = make_client(page_service)
-    created = _create(client, "ai-malformed-autosave")
-    workspace_id = UUID(
-        client.get("/api/v1/workspaces").json()["data"]["current_workspace_id"]
-    )
-    token = issue_personal_api_token(client, scopes=["mcp:write"])
-    client.cookies.clear()
-    draft = _autosave(
-        client,
-        created,
-        BROKEN,
-        headers={"Authorization": f"Bearer {token}"},
-    )
-
-    with page_service.session_factory() as session:
-        page = session.get(ContextPage, UUID(created["id"]))
-        version = session.get(ContextPageVersion, UUID(draft["version_id"]))
-        review = session.get(ReviewItem, UUID(draft["review_item_id"]))
-        assert page is not None and version is not None and review is not None
-        assert page.workspace_id == workspace_id
-        assert version.version_status == "draft"
-        assert page.current_published_version_id == UUID(created["version_id"])
-        assert review.status == "pending"
-
-
 def test_review_approval_cannot_publish_a_malformed_body(page_service):
     client = make_client(page_service)
     created = _create(client, "review-malformed-autosave")
@@ -353,6 +313,16 @@ def test_review_approval_cannot_publish_a_malformed_body(page_service):
         BROKEN,
         headers={"Authorization": f"Bearer {token}"},
     )
+    # An AI autosave of a malformed body stages a draft behind a pending review.
+    with page_service.session_factory() as session:
+        page = session.get(ContextPage, UUID(created["id"]))
+        version = session.get(ContextPageVersion, UUID(draft["version_id"]))
+        review = session.get(ReviewItem, UUID(draft["review_item_id"]))
+        assert page is not None and version is not None and review is not None
+        assert page.workspace_id == workspace_id
+        assert version.version_status == "draft"
+        assert page.current_published_version_id == UUID(created["version_id"])
+        assert review.status == "pending"
 
     with pytest.raises(RejectedByPolicyError, match="format error") as refused:
         with page_service.session_factory.begin() as session:
@@ -383,6 +353,10 @@ def test_explicit_publish_refuses_findings_without_override(page_service):
     client = make_client(page_service)
     created = _create(client, "publish-refuses-findings")
     draft = _autosave(client, created, BROKEN, session_version_id=None)
+    # A human autosave of a malformed body only stages a draft.
+    with page_service.session_factory() as session:
+        version = session.get(ContextPageVersion, UUID(draft["version_id"]))
+        assert version is not None and version.version_status == "draft"
 
     response = client.post(
         f"{_workspace_pages_url(client)}/{created['id']}/versions/{draft['version_id']}/publish",
@@ -407,78 +381,6 @@ def test_explicit_publish_refuses_findings_without_override(page_service):
         assert page.current_published_version_id == UUID(created["version_id"])
 
 
-def test_workspace_publish_route_cannot_waive_the_floor(page_service):
-    """The retired intermediate publish route cannot resurface as a smuggling path.
-
-    This test originally exercised `POST /{workspace_id}/context-pages/{id}
-    /publish` (`backend/api/read.py`, deleted by P9.1), which called
-    `ContextWriteService.publish_draft` -- a schema deliberately without a
-    `publish_despite_findings` field, unlike the browser publish surface
-    (`PageService.publish_draft`). P9.1 unified every REST publish caller
-    onto the single `PageService.publish_draft` route
-    (`context/pages/{page_id}/versions/{version_id}/publish`), which DOES
-    carry that field for every caller now (see `test_publish_overrides_
-    findings` for the browser-session positive path) -- there is no longer
-    a second, waiver-blind schema to smuggle a bearer waiver through.
-    `ContextWriteService.publish_draft` itself is consequently unreachable
-    from any REST route or MCP tool as of this cutover (confirmed by
-    `grep -rn "publish_draft" backend/api backend/mcp` -- zero call sites)
-    -- flagged as a real question for the route's owner (dead code to
-    delete, or a gap to re-wire), not something this test can resolve.
-    The still-live security property this test cared about -- a
-    non-interactive bearer caller cannot waive the floor -- is fully
-    covered on the canonical route by `test_floor_waiver_requires_an_
-    interactive_session` above; this test now only pins that the deleted
-    route stays deleted rather than duplicating that assertion.
-    """
-
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-    created = _create(client, "workspace-publish-cannot-waive")
-
-    retired_route = client.post(
-        f"/api/v1/workspaces/{workspace_id}/context-pages/{created['id']}/publish",
-        json={
-            "version_id": created["version_id"],
-            "reason": "smuggled override",
-            "publish_despite_findings": True,
-        },
-    )
-    assert retired_route.status_code == 404, retired_route.text
-
-    with page_service.session_factory() as session:
-        page = session.get(ContextPage, UUID(created["id"]))
-        assert page is not None
-        assert page.current_published_version_id == UUID(created["version_id"])
-
-
-def test_explicit_publish_override_reports_editor_coordinate_findings(page_service):
-    client = make_client(page_service)
-    created = _create(client, "publish-overrides-findings")
-    draft = _autosave(client, created, BROKEN, session_version_id=None)
-
-    response = client.post(
-        f"{_workspace_pages_url(client)}/{created['id']}/versions/{draft['version_id']}/publish",
-        json={
-            "reason": "owner override",
-            "publish_despite_findings": True,
-            "expected_content_hash": draft["content_hash"],
-        },
-    )
-    assert response.status_code == 200, response.text
-    payload = response.json()
-    assert payload["envelope"]["result_status"] == "partial"
-    [warning] = payload["envelope"]["warnings"]
-    assert warning["code"] == "published_with_findings"
-    assert "line 3" in warning["message"]
-    with page_service.session_factory() as session:
-        page = session.get(ContextPage, UUID(created["id"]))
-        assert page is not None
-        assert page.current_published_version_id == UUID(draft["version_id"])
-
-
 def test_override_published_malformed_body_stays_open_after_clean_draft_lint(
     page_service,
 ):
@@ -494,6 +396,15 @@ def test_override_published_malformed_body_stays_open_after_clean_draft_lint(
         },
     )
     assert published.status_code == 200, published.text
+    payload = published.json()
+    assert payload["envelope"]["result_status"] == "partial"
+    [warning] = payload["envelope"]["warnings"]
+    assert warning["code"] == "published_with_findings"
+    assert "line 3" in warning["message"]
+    with page_service.session_factory() as session:
+        page = session.get(ContextPage, UUID(created["id"]))
+        assert page is not None
+        assert page.current_published_version_id == UUID(malformed["version_id"])
 
     lint = LintService()
     with page_service.session_factory.begin() as session:
@@ -666,8 +577,24 @@ def test_floor_waiver_requires_an_interactive_session(page_service):
     """
 
     client = make_client(page_service)
+    workspace_id = client.get("/api/v1/workspaces").json()["data"][
+        "current_workspace_id"
+    ]
     created = _create(client, "waiver-needs-a-person")
     draft = _autosave(client, created, BROKEN, session_version_id=None)
+
+    # P9.1 retired the waiver-blind intermediate publish route; it must stay
+    # deleted rather than resurface as a smuggling path for a bearer waiver.
+    retired_route = client.post(
+        f"/api/v1/workspaces/{workspace_id}/context-pages/{created['id']}/publish",
+        json={
+            "version_id": draft["version_id"],
+            "reason": "smuggled override",
+            "publish_despite_findings": True,
+        },
+    )
+    assert retired_route.status_code == 404, retired_route.text
+
     token = issue_personal_api_token(client, scopes=["mcp:write"])
     auth_header = {"Authorization": f"Bearer {token}"}
     pages_url = _workspace_pages_url(client)
@@ -720,6 +647,15 @@ def test_publish_refuses_a_draft_another_session_rewrote(page_service):
     )
     assert other_tab["version_id"] == mine["version_id"]
 
+    # PUB-05: the hash is required at the route boundary; omitting it must
+    # 422 instead of publishing whatever bytes the mutable row holds now.
+    omitted = client.post(
+        f"{_workspace_pages_url(client)}/{created['id']}/versions/{mine['version_id']}/publish",
+        json={"reason": "editor Save", "publish_despite_findings": False},
+    )
+    assert omitted.status_code == 422, omitted.text
+    assert "expected_content_hash" in omitted.text
+
     response = client.post(
         f"{_workspace_pages_url(client)}/{created['id']}/versions/{mine['version_id']}/publish",
         json={
@@ -731,33 +667,6 @@ def test_publish_refuses_a_draft_another_session_rewrote(page_service):
     assert response.status_code == 409, response.text
     assert response.json()["server_content_hash"] == other_tab["content_hash"]
     assert response.json()["server_content_hash"] != mine["content_hash"]
-
-    with page_service.session_factory() as session:
-        page = session.get(ContextPage, UUID(created["id"]))
-        assert page is not None
-        assert page.current_published_version_id == UUID(created["version_id"])
-
-
-def test_publish_page_version_route_requires_expected_content_hash(page_service):
-    # PUB-05: expected_content_hash used to default to None and be checked
-    # only when present, so a caller could omit it and publish whatever bytes
-    # happened to be in the mutable draft row at that instant. The field is
-    # now required at the route boundary -- an omitted hash must 422, not
-    # silently publish. In-process callers (PageService.publish_draft's own
-    # Python signature) are unaffected; only the externally bound REST body
-    # changed.
-    client = make_client(page_service)
-    created = _create(client, "publish-requires-hash")
-
-    # _create publishes immediately (as_draft not passed), so the page
-    # already has a published head; the point is that the 422 never even
-    # reaches PageService, so that head is untouched by this attempt.
-    omitted = client.post(
-        f"{_workspace_pages_url(client)}/{created['id']}/versions/{created['version_id']}/publish",
-        json={"reason": "editor Save", "publish_despite_findings": False},
-    )
-    assert omitted.status_code == 422, omitted.text
-    assert "expected_content_hash" in omitted.text
 
     with page_service.session_factory() as session:
         page = session.get(ContextPage, UUID(created["id"]))

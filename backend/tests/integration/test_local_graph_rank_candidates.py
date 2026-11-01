@@ -879,7 +879,6 @@ def test_windowed_hydration_selects_what_full_hydration_selects(
 @pytest.mark.parametrize(
     ("backlinks", "completeness", "warnings"),
     [
-        (300, "capped", ["graph_budget_applied"]),
         (1_024, "capped", ["graph_budget_applied"]),
         (
             1_025,

@@ -109,17 +109,14 @@ def test_aliases_roots_and_independent_storage_use_real_process_admission(tmp_pa
         primary_worker = _managed_worker_pid(primary)
         # Different driver spelling and harmless connect options identify the
         # same physical database, even when its configured data root differs.
-        aliases = (
-            f"sqlite+pysqlite:///{database}",
-            f"sqlite:///{database}?timeout=600",
-            f"sqlite+pysqlite:///{database}?timeout=12",
-        )
-        for index, alias in enumerate(aliases):
-            root = tmp_path / f"alias-root-{index}"
-            with _launcher(tmp_path / f"alias-{index}", root, alias) as rejected:
-                _assert_rejected_before_init(rejected, root=root)
-            assert _managed_worker_pid(primary) == primary_worker
-            primary.assert_running()
+        # Spelling equivalence is unit-tested in test_runtime_resources.py; one
+        # real launch proves process admission uses that identity.
+        alias = f"sqlite+pysqlite:///{database}?timeout=12"
+        root = tmp_path / "alias-root"
+        with _launcher(tmp_path / "alias", root, alias) as rejected:
+            _assert_rejected_before_init(rejected, root=root)
+        assert _managed_worker_pid(primary) == primary_worker
+        primary.assert_running()
 
         # The root's library/credentials also form one independently owned
         # resource: choosing another database must not bypass that owner.

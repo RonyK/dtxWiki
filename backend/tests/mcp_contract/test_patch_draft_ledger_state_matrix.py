@@ -199,6 +199,8 @@ class _BlockCase:
     distinct_key_outcome: Literal["rebased", "diverged"]
 
 
+# One case per operation kind: the ledger's replay/rebase/diverge transition
+# depends on the operation, not on which block kind a replace_block targets.
 _BLOCK_CASES = (
     _BlockCase(
         "paragraph-replace",
@@ -210,24 +212,6 @@ _BLOCK_CASES = (
         "diverged",
     ),
     _BlockCase(
-        "list-replace",
-        "# Title\n\n- first item\n- second item\n",
-        "list",
-        "replace_block",
-        "- first item changed\n- second item",
-        "first item changed",
-        "diverged",
-    ),
-    _BlockCase(
-        "heading-replace",
-        "# Title\n\n## Heading target\n\nbody under heading\n",
-        "h2",
-        "replace_block",
-        "## Heading replacement marker",
-        "Heading replacement marker",
-        "diverged",
-    ),
-    _BlockCase(
         "table-insert-row",
         "# Title\n\n| a | b |\n|---|---|\n| 1 | 2 |\n",
         "table",
@@ -235,15 +219,6 @@ _BLOCK_CASES = (
         "| 3 | table-row-marker |",
         "table-row-marker",
         "rebased",
-    ),
-    _BlockCase(
-        "fence-replace",
-        "# Title\n\n```python\nprint('old')\n```\n",
-        "code",
-        "replace_block",
-        "```python\nprint('fence replacement marker')\n```",
-        "fence replacement marker",
-        "diverged",
     ),
     _BlockCase(
         "blockquote-delete",

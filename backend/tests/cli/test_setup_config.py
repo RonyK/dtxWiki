@@ -509,14 +509,15 @@ def test_setup_reconfigure_preserves_custom_data_dir(tmp_path: Path):
     )
 
 
+# default_signup_enabled is `app_mode == "solo_local"`: one remote mode and
+# solo_local cover the derived branch; one explicit value that contradicts the
+# derived default covers the preserved branch.
 @pytest.mark.parametrize(
     ("app_mode", "existing_signup", "expected"),
     [
         ("team", None, "false"),
-        ("solo_remote", None, "false"),
         ("solo_local", None, "true"),
         ("team", "true", "true"),
-        ("solo_local", "false", "false"),
     ],
 )
 def test_setup_reconfigure_derives_or_preserves_signup_setting(

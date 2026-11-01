@@ -105,17 +105,11 @@ def _create_published(client, *, title: str, body_md: str) -> dict:
             None,
             "draft.ingress_accept",
         ),
+        # One row for the agent lane: its create/update/autosave reasons are a
+        # single set-membership branch in _draft_origin_reason.
         (
             "agent_authenticated_write",
             "page.update",
-            "linear",
-            False,
-            "pending",
-            "draft.ai_staged",
-        ),
-        (
-            "agent_authenticated_write",
-            "page.autosave.draft",
             "linear",
             False,
             "pending",

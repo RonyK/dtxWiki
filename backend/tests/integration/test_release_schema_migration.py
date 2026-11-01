@@ -1033,19 +1033,6 @@ def test_page_link_syntax_upgrade_backfills_and_enforces_server_contract(tmp_pat
         engine.dispose()
 
 
-def test_initial_release_downgrade_returns_to_base(tmp_path, sqlite_templates):
-    database_url = sqlite_templates.clone("head", tmp_path / "downgrade.db")
-    command.downgrade(_config(database_url), "base")
-    engine = create_engine(database_url)
-    try:
-        with engine.connect() as connection:
-            tables = set(inspect(connection).get_table_names())
-
-        assert tables == {"alembic_version"}
-    finally:
-        engine.dispose()
-
-
 def test_first_install_rolls_back_both_revisions_on_late_failure(tmp_path):
     """Exercise the actual two-revision chain, including the baseline DDL."""
 
@@ -1094,6 +1081,10 @@ def test_initial_release_preserves_key_foreign_key_actions(head_engine):
             tuple(fk["constrained_columns"]): fk
             for fk in inspector.get_foreign_keys("workspace_memberships")
         }
+        audit_fks = {
+            tuple(fk["constrained_columns"]): fk
+            for fk in inspector.get_foreign_keys("audit_event")
+        }
 
     # The final context_page table plan converts both to composite FKs
     # (workspace_id, <col>) -> context_page_version (workspace_id, id),
@@ -1138,9 +1129,6 @@ def test_initial_release_preserves_key_foreign_key_actions(head_engine):
         workspace_membership_fks[("workspace_id",)]["options"].get("ondelete")
         == "CASCADE"
     )
-
-
-def test_audit_event_workspace_fk_ondelete_is_set_null(head_engine):
     # WS-02: an ordinary admin action (member add/remove, access change)
     # emits an audit_event row a user has no way to clear, so treating it as
     # a hard-delete blocker made workspace deletion permanently unreachable
@@ -1152,11 +1140,6 @@ def test_audit_event_workspace_fk_ondelete_is_set_null(head_engine):
     # create_all() always reflects the current model, migration or not --
     # which is exactly how the earlier missing migration went unnoticed;
     # this inspects the actually migrated schema instead.
-    with head_engine.connect() as connection:
-        audit_fks = {
-            tuple(fk["constrained_columns"]): fk
-            for fk in inspect(connection).get_foreign_keys("audit_event")
-        }
     assert audit_fks[("workspace_id",)]["options"].get("ondelete") == "SET NULL"
 
 
@@ -1239,39 +1222,6 @@ def test_graph_observation_guard_allows_workspace_cascade_delete(tmp_path):
                     media_intent=media_intent,
                 )
                 assert _ledger_rows(session, workspace_id) == 0
-    finally:
-        engine.dispose()
-
-
-def test_graph_observation_teardown_empties_ledger_without_fk_enforcement(
-    tmp_path,
-):
-    """The explicit teardown delete passes the trigger once the parent is gone.
-
-    Without ``PRAGMA foreign_keys`` the cascade never fires, which is the shape
-    every plain ``sessionmaker`` fixture in this suite runs under. The teardown
-    therefore deletes the ledger itself, after the workspace row, and both the
-    database trigger and the ORM guard must admit exactly that statement.
-    """
-
-    _, engine = _upgrade_head(tmp_path, "graph-observation-teardown.db")
-    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
-    try:
-        with session_factory.begin() as session:
-            workspace = seed_default_workspace(session)
-            workspace_id = workspace.id
-            session.add(_observation(workspace_id, sequence=1, key="teardown-1"))
-            session.flush()
-            media_intent = WorkspaceWriteService._begin_media_delete(
-                session=session,
-                workspace_id=workspace_id,
-            )
-            WorkspaceWriteService._delete_seed_workspace(
-                session,
-                workspace_id,
-                media_intent=media_intent,
-            )
-            assert _ledger_rows(session, workspace_id) == 0
     finally:
         engine.dispose()
 

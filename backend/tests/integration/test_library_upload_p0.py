@@ -677,39 +677,6 @@ def test_item_conversion_retry_requeues_same_generation_lineage_and_job(
         }
 
 
-def test_item_conversion_retry_hydrates_detail_only_after_mutation(
-    upload_api: UploadApi,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    item_id, version_id, _, _, _, _, _ = _terminal_conversion_for_retry(
-        upload_api,
-        filename="retry-single-detail-projection.md",
-        job_status="failed",
-    )
-    services = upload_api.client.app.state.container.get_services()
-    original_get = services.domain_read.get_library_item
-    detail_projection_calls = 0
-
-    def count_detail_projection(*args, **kwargs):
-        nonlocal detail_projection_calls
-        detail_projection_calls += 1
-        return original_get(*args, **kwargs)
-
-    monkeypatch.setattr(
-        services.domain_read,
-        "get_library_item",
-        count_detail_projection,
-    )
-
-    response = upload_api.client.post(
-        f"/api/v1/workspaces/{upload_api.workspace_id}/library/versions/{version_id}/"
-        f"conversion/retry"
-    )
-
-    assert response.status_code == 200, response.text
-    assert detail_projection_calls == 1
-
-
 def test_item_conversion_retry_refuses_nonretryable_failure_without_mutation(
     upload_api: UploadApi,
 ) -> None:
@@ -801,7 +768,17 @@ def test_input_limit_failure_is_not_retryable_in_read_or_mutation(
 
 def test_item_conversion_retry_is_single_generation_for_duplicate_requests(
     upload_api: UploadApi,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # A bystander item's failed conversion must not move when another
+    # version is retried: retry is scoped to the targeted version.
+    _, _, _, bystander_attempt_id, bystander_job_id, _, _ = (
+        _terminal_conversion_for_retry(
+            upload_api,
+            filename="retry-bystander-item.md",
+            job_status="failed",
+        )
+    )
     item_id, version_id, _, attempt_id, job_id, _, _ = _terminal_conversion_for_retry(
         upload_api,
         filename="retry-twice.md",
@@ -811,11 +788,27 @@ def test_item_conversion_retry_is_single_generation_for_duplicate_requests(
         f"/api/v1/workspaces/{upload_api.workspace_id}/library/versions/{version_id}/"
         f"conversion/retry"
     )
+    services = upload_api.client.app.state.container.get_services()
+    original_get = services.domain_read.get_library_item
+    detail_projection_calls = 0
+
+    def count_detail_projection(*args, **kwargs):
+        nonlocal detail_projection_calls
+        detail_projection_calls += 1
+        return original_get(*args, **kwargs)
+
+    monkeypatch.setattr(
+        services.domain_read,
+        "get_library_item",
+        count_detail_projection,
+    )
 
     first = upload_api.client.post(path)
+    assert first.status_code == 200, first.text
+    # The detail projection is hydrated once, only after the mutation.
+    assert detail_projection_calls == 1
     second = upload_api.client.post(path)
 
-    assert first.status_code == 200, first.text
     assert second.status_code == 409, second.text
     assert second.json()["error_code"] == "library_conversion_retry_not_available"
     with upload_api.session_factory() as session:
@@ -824,6 +817,13 @@ def test_item_conversion_retry_is_single_generation_for_duplicate_requests(
         assert attempt is not None and attempt.execution_generation == 2
         assert attempt.transport_retry_count == 0
         assert job is not None and job.target_ref["execution_generation"] == 2
+        bystander_attempt = session.get(LibraryAttempt, bystander_attempt_id)
+        bystander_job = session.get(Job, bystander_job_id)
+        assert (
+            bystander_attempt is not None
+            and bystander_attempt.execution_generation == 1
+        )
+        assert bystander_job is not None and bystander_job.status == "failed"
 
 
 def test_item_conversion_retry_rejects_stale_historical_version_without_mutation(
@@ -859,41 +859,6 @@ def test_item_conversion_retry_rejects_stale_historical_version_without_mutation
         assert attempt.transport_retry_count == 0
         assert job is not None and job.status == "completed"
         assert job.target_ref["execution_generation"] == 1
-
-
-def test_item_conversion_retry_operates_only_on_the_targeted_version(
-    upload_api: UploadApi,
-) -> None:
-    # P9.2: conversion/retry is flat (versions/{version_id}/conversion/retry,
-    # no item in the URL), so a second item's own version is simply its own
-    # legitimate retry target -- what must stay true is that retrying it
-    # never mutates an unrelated item's own attempt/Job.
-    first_item_id, _, _, first_attempt_id, first_job_id, _, _ = (
-        _terminal_conversion_for_retry(
-            upload_api,
-            filename="retry-first-item.md",
-            job_status="failed",
-        )
-    )
-    _, second_version_id, _, second_attempt_id, second_job_id, _, _ = (
-        _terminal_conversion_for_retry(
-            upload_api,
-            filename="retry-second-item.md",
-            job_status="failed",
-        )
-    )
-
-    response = upload_api.client.post(
-        f"/api/v1/workspaces/{upload_api.workspace_id}/library/versions/{second_version_id}/"
-        f"conversion/retry"
-    )
-
-    assert response.status_code == 200, response.text
-    with upload_api.session_factory() as session:
-        first_attempt = session.get(LibraryAttempt, first_attempt_id)
-        first_job = session.get(Job, first_job_id)
-        assert first_attempt is not None and first_attempt.execution_generation == 1
-        assert first_job is not None and first_job.status == "failed"
 
 
 def test_item_conversion_retry_hides_cross_workspace_item_without_mutation(
@@ -938,21 +903,20 @@ def test_item_conversion_retry_hides_cross_workspace_item_without_mutation(
         assert job is not None and job.status == "failed"
 
 
-@pytest.mark.parametrize("lifecycle_status", ("archived", "hidden"))
 def test_item_conversion_retry_hides_excluded_item_before_state_conflict(
     upload_api: UploadApi,
-    lifecycle_status: str,
 ) -> None:
+    # archived and hidden share one EXCLUDED_LIBRARY_LIFECYCLE_STATUSES branch.
     item_id, version_id, _, attempt_id, job_id, _, _ = _terminal_conversion_for_retry(
         upload_api,
-        filename=f"retry-{lifecycle_status}.md",
+        filename="retry-archived.md",
         job_status="failed",
         safe_error_code="active_content_denied",
     )
     with upload_api.session_factory.begin() as session:
         item = session.get(LibraryItem, item_id)
         assert item is not None
-        item.lifecycle_status = lifecycle_status
+        item.lifecycle_status = "archived"
 
     response = upload_api.client.post(
         f"/api/v1/workspaces/{upload_api.workspace_id}/library/versions/{version_id}/"

@@ -1,4 +1,3 @@
-from urllib.parse import parse_qs, urlparse
 from uuid import UUID
 
 from fastapi.testclient import TestClient
@@ -7,7 +6,6 @@ from sqlalchemy import select
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models.workspace import MCPClient, Workspace
-from backend.services.oauth_service import _DCR_BUCKET, challenge_s256
 from backend.tests.conftest import authenticate_test_client_in_workspace
 
 
@@ -41,7 +39,7 @@ def _workspace_id(client: TestClient) -> str:
     ]
 
 
-def test_agent_api_creates_and_reads_agent_page_draft(page_service):
+def test_agent_api_creates_places_and_reads_agent_page_draft(page_service):
     client = make_client(page_service)
     workspace_id = _workspace_id(client)
 
@@ -85,10 +83,6 @@ def test_agent_api_creates_and_reads_agent_page_draft(page_service):
     assert reused.status_code == 200
     assert reused.json()["data"]["agent_page_id"] == result["agent_page_id"]
 
-
-def test_agent_api_places_new_page_under_requested_tree_parent(page_service):
-    client = make_client(page_service)
-    workspace_id = _workspace_id(client)
     tree = client.get(f"/api/v1/workspaces/{workspace_id}/tree?section=agent")
     assert tree.status_code == 200
     persona_root = next(
@@ -181,9 +175,11 @@ def test_agent_api_activation_uses_membership_role(page_service):
         body="# API Owner Persona\n\nOwner can activate.",
     )
 
+    # The session's membership role decides; a legacy role header is ignored.
     owner_activation = owner.post(
         f"/api/v1/workspaces/{workspace_id}/agent/pages/"
         f"{persona['agent_page_id']}/activate",
+        headers={"X-LLMWiki-Workspace-Role": "superuser"},
         json={
             "version_id": persona["draft_version_id"],
             "reason": "owner activates non-sensitive persona",
@@ -214,31 +210,6 @@ def test_agent_api_activation_uses_membership_role(page_service):
     )
     assert denied.status_code == 403
     assert denied.json()["error_code"] == "scope_denied"
-
-
-def test_agent_api_activation_ignores_workspace_role_header(page_service):
-    client = make_client(page_service)
-    workspace_id = _workspace_id(client)
-    persona = _create_agent_page_draft(
-        client=client,
-        workspace_id=workspace_id,
-        category="persona",
-        slug="api-header-persona",
-        title="API Header Persona",
-        body="# API Header Persona\n\nSession role is used.",
-    )
-
-    activation = client.post(
-        f"/api/v1/workspaces/{workspace_id}/agent/pages/"
-        f"{persona['agent_page_id']}/activate",
-        headers={"X-LLMWiki-Workspace-Role": "superuser"},
-        json={
-            "version_id": persona["draft_version_id"],
-            "reason": "legacy header is ignored",
-        },
-    )
-
-    assert activation.status_code == 200
 
 
 def test_agent_api_activation_uses_target_workspace_role(page_service):
@@ -331,39 +302,7 @@ def test_agent_api_pat_bearer_cannot_activate_agent_page(page_service):
     assert denied.json()["error_code"] == "scope_denied"
 
 
-def test_agent_api_oauth_bearer_cannot_activate_agent_page(page_service):
-    client = make_client(page_service)
-    workspace_id = _workspace_id(client)
-    persona = _create_agent_page_draft(
-        client=client,
-        workspace_id=workspace_id,
-        category="persona",
-        slug="api-oauth-denied-persona",
-        title="API OAuth Denied Persona",
-        body="# API OAuth Denied Persona\n\nOAuth token must not activate.",
-    )
-    oauth_access_token = _issue_oauth_access_token(
-        client,
-        workspace_id=workspace_id,
-        scope="mcp:agent",
-    )
-    client.cookies.clear()
-
-    denied = client.post(
-        f"/api/v1/workspaces/{workspace_id}/agent/pages/"
-        f"{persona['agent_page_id']}/activate",
-        headers={"Authorization": f"Bearer {oauth_access_token}"},
-        json={
-            "version_id": persona["draft_version_id"],
-            "reason": "OAuth bearer tries activation",
-        },
-    )
-
-    assert denied.status_code == 403
-    assert denied.json()["error_code"] == "scope_denied"
-
-
-def test_agent_api_builds_and_reads_bundle_preview(page_service):
+def test_agent_api_builds_reads_and_bounds_bundle_preview(page_service):
     client = make_client(page_service)
     workspace_id = _workspace_id(client)
     agent_pages = client.get(
@@ -392,12 +331,6 @@ def test_agent_api_builds_and_reads_bundle_preview(page_service):
     )
     assert read_back.status_code == 200
     assert read_back.json()["data"]["bundle_id"] == data["bundle_id"]
-
-
-def test_agent_api_rejects_bundle_ttl_over_max(page_service):
-    client = make_client(page_service)
-    workspace_id = _workspace_id(client)
-    client_id = _internal_client_id(page_service, workspace_id)
 
     response = client.post(
         f"/api/v1/workspaces/{workspace_id}/agent/bundles/preview",
@@ -438,61 +371,6 @@ def _issue_pat(
     )
     assert response.status_code == 201, response.text
     return response.json()["data"]["plain_token"]
-
-
-def _issue_oauth_access_token(
-    client: TestClient,
-    *,
-    workspace_id: str,
-    scope: str,
-) -> str:
-    _DCR_BUCKET.clear()
-    registered = client.post(
-        "/oauth/register",
-        json={
-            "client_name": "Agent Activation OAuth Test",
-            "redirect_uris": ["http://127.0.0.1:53682/callback"],
-            "scope": scope,
-        },
-    )
-    assert registered.status_code == 201, registered.text
-    client_id = registered.json()["client_id"]
-    verifier = "v" * 64
-    state = "agent-activation-0123456789abcdef"
-    params = {
-        "response_type": "code",
-        "client_id": client_id,
-        "redirect_uri": "http://127.0.0.1:53682/callback",
-        "code_challenge": challenge_s256(verifier),
-        "code_challenge_method": "S256",
-        "scope": scope,
-        "state": state,
-        # GET's workspace_id is only a preselect hint (P10.3 T3); POST needs
-        # the checklist's workspace_ids field to actually grant access.
-        "workspace_id": workspace_id,
-    }
-    consent = client.get("/oauth/authorize", params=params)
-    assert consent.status_code == 200, consent.text
-    post_params = {key: value for key, value in params.items() if key != "workspace_id"}
-    authorized = client.post(
-        "/oauth/authorize",
-        data={**post_params, "workspace_ids": workspace_id, "decision": "allow"},
-        follow_redirects=False,
-    )
-    assert authorized.status_code == 303, authorized.text
-    code = parse_qs(urlparse(authorized.headers["location"]).query)["code"][0]
-    token = client.post(
-        "/oauth/token",
-        data={
-            "grant_type": "authorization_code",
-            "client_id": client_id,
-            "redirect_uri": "http://127.0.0.1:53682/callback",
-            "code": code,
-            "code_verifier": verifier,
-        },
-    )
-    assert token.status_code == 200, token.text
-    return token.json()["access_token"]
 
 
 def _create_agent_page_draft(

@@ -51,6 +51,19 @@ def test_grant_list_revoke_roundtrip(tmp_path, monkeypatch):
     runner = CliRunner()
     _add_user(runner, db, monkeypatch, "admin@example.com")
 
+    # Before any grant: an unknown email is refused, and revoking a user who
+    # is not a server-admin is a reported no-op.
+    unknown = runner.invoke(
+        cli_main.app, ["admin", "grant", "--email", "ghost@example.com", "--db", db]
+    )
+    assert unknown.exit_code == 2
+    assert "no user with email" in unknown.output
+    noop = runner.invoke(
+        cli_main.app, ["admin", "revoke", "--email", "admin@example.com", "--db", db]
+    )
+    assert noop.exit_code == 0, noop.output
+    assert "was not a server-admin" in noop.output
+
     granted = runner.invoke(
         cli_main.app, ["admin", "grant", "--email", "admin@example.com", "--db", db]
     )
@@ -161,25 +174,3 @@ def test_grant_list_revoke_roundtrip(tmp_path, monkeypatch):
         cli_main.app, ["admin", "revoke", "--user-id", user_id, "--db", db]
     )
     assert revoked.exit_code == 0, revoked.output
-
-
-def test_grant_unknown_email_fails(tmp_path, monkeypatch):
-    db = _db(tmp_path)
-    runner = CliRunner()
-    _add_user(runner, db, monkeypatch, "real@example.com")
-    result = runner.invoke(
-        cli_main.app, ["admin", "grant", "--email", "ghost@example.com", "--db", db]
-    )
-    assert result.exit_code == 2
-    assert "no user with email" in result.output
-
-
-def test_revoke_non_admin_reports_noop(tmp_path, monkeypatch):
-    db = _db(tmp_path)
-    runner = CliRunner()
-    _add_user(runner, db, monkeypatch, "plain@example.com")
-    result = runner.invoke(
-        cli_main.app, ["admin", "revoke", "--email", "plain@example.com", "--db", db]
-    )
-    assert result.exit_code == 0, result.output
-    assert "was not a server-admin" in result.output

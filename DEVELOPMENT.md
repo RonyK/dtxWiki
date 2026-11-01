@@ -264,7 +264,10 @@ leak scan, backend·static, frontend·desktop, 기본 E2E 검증을 실행합니
 Graph 검증은 별도 `graph-2k` job이 E2E와 병렬로 실행합니다. 이 job은 `@pc10k`를 제외한
 WebGL gate(`npm run test:graph-webgl -- --project=chromium`)와 `DTXWIKI_E2E_GRAPH_2K=1`
 실제 API 2K spec을 돌립니다. WebGL gate의 `@pc10k` 케이스(`--project=chromium-pc10k`)는
-`Release checks`의 `graph-10k`가 담당합니다.
+`Release checks`의 `graph-10k`가 담당합니다. 대규모 입력으로 처리량·상한을 확인하는
+backend 용량 검사는 `release_scale` marker를 붙입니다. PR의 `make test-backend`는 이를
+제외하고, `Release checks`의 `postgres-migration` job이 실행합니다(로컬:
+`make test-backend-scale`).
 `graph-10k`, `docker-frontend`, `packaging`, `postgres-migration`은 별도의
 `Release checks` 워크플로(`.github/workflows/release-checks.yml`)에서 실행합니다.
 `packaging` job에는 acceptance·release-gate 검증과 정제된 로그 업로드도 포함됩니다.

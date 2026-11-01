@@ -27,7 +27,7 @@ from backend.models.workspace_credential_grant import WorkspaceCredentialGrant
 from backend.models.workspace_purge_grant import WorkspacePurgeGrant
 from backend.policy.rbac import grant_workspace_membership
 from backend.services.credential_hashing import CredentialHasher
-from backend.services.read_errors import ReadNotFoundError, RejectedByPolicyError
+from backend.services.read_errors import RejectedByPolicyError
 from backend.services.workspace_purge_grant import issue_purge_grant
 from backend.services.workspace_write import WorkspaceWriteService
 from backend.tests.conftest import authenticate_test_client
@@ -208,26 +208,21 @@ def test_repeated_refusal_reissues_the_grant_without_double_counting(page_servic
     assert stale.json()["error_code"] == "purge_grant_required"
 
 
-@pytest.mark.parametrize(
-    ("late_outcome", "expected_status", "expected_error_code"),
-    [
-        ("workspace_deleted", 404, "not_found"),
-        ("owner_demoted", 403, "workspace_role_insufficient"),
-    ],
-)
 def test_refusal_revalidates_authorization_before_issuing_a_grant(
     page_service,
     monkeypatch,
-    late_outcome,
-    expected_status,
-    expected_error_code,
 ):
-    """A stale blocker refusal must not mint a grant for a changed target."""
+    """A stale blocker refusal must not mint a grant for a changed target.
 
-    owner_email = f"purge-revalidate-{late_outcome}@example.com"
+    The late outcome is an owner demoted between the blocker scan and the
+    grant; a workspace deleted in that gap fails the same revalidation call,
+    only with the generic not-found mapping instead of this policy refusal.
+    """
+
+    owner_email = "purge-revalidate-owner_demoted@example.com"
     owner = _client(page_service, owner_email)
     owner_id = _user_id(page_service, owner_email)
-    workspace_id = _workspace_with_blocker(owner, f"Revalidate {late_outcome}")
+    workspace_id = _workspace_with_blocker(owner, "Revalidate owner_demoted")
 
     original = WorkspaceWriteService.require_delete_authorization
     authorization_calls = 0
@@ -236,8 +231,6 @@ def test_refusal_revalidates_authorization_before_issuing_a_grant(
         nonlocal authorization_calls
         authorization_calls += 1
         if authorization_calls == 2:
-            if late_outcome == "workspace_deleted":
-                raise ReadNotFoundError("workspace not found")
             raise RejectedByPolicyError(
                 "an active workspace owner is required",
                 error_code="workspace_role_insufficient",
@@ -256,8 +249,8 @@ def test_refusal_revalidates_authorization_before_issuing_a_grant(
 
     response = owner.delete(f"/api/v1/workspaces/{workspace_id}")
 
-    assert response.status_code == expected_status, response.text
-    assert response.json()["error_code"] == expected_error_code
+    assert response.status_code == 403, response.text
+    assert response.json()["error_code"] == "workspace_role_insufficient"
     assert authorization_calls == 2
     with page_service.session_factory() as session:
         assert (
@@ -287,29 +280,6 @@ def test_purge_without_a_grant_is_refused_and_touches_no_grant_row(page_service)
     with page_service.session_factory() as session:
         after = session.get(WorkspacePurgeGrant, (owner_id, UUID(workspace_id)))
     assert after is None
-
-
-def test_valid_grant_purges_the_workspace_end_to_end(page_service):
-    """T-4: the only end-to-end verification of the purge path through the
-    real HTTP/auth stack -- a route that purged before consuming the grant
-    (S-4's ordering) would 403 here instead of returning 200."""
-
-    owner = _client(page_service, "purge-t4@example.com")
-    owner_id = _user_id(page_service, "purge-t4@example.com")
-    workspace_id = _workspace_with_blocker(owner, "T4 Workspace")
-    grant = _issue_grant(owner, workspace_id)
-
-    purged = owner.delete(
-        f"/api/v1/workspaces/{workspace_id}?purge=true",
-        headers={"X-Purge-Grant": grant},
-    )
-    assert purged.status_code == 200, purged.text
-    assert purged.json()["data"]["deleted_workspace_id"] == workspace_id
-
-    gone = owner.get(f"/api/v1/workspaces/{workspace_id}")
-    assert gone.status_code == 404
-    with page_service.session_factory() as session:
-        assert session.get(WorkspacePurgeGrant, (owner_id, UUID(workspace_id))) is None
 
 
 def test_a_grant_already_consumed_once_cannot_be_reused(page_service):
@@ -473,14 +443,16 @@ def test_a_purge_failure_rolls_back_grant_consumption_so_a_retry_can_succeed(
 def test_purge_workspace_data_runs_only_after_the_grant_row_is_gone(
     page_service, monkeypatch
 ):
-    """T-9: pins the ORDER T-8 cannot -- the grant's conditional DELETE must
-    execute before ``purge_workspace_data`` is even called, in the same
-    session. Confirmed by reverting the order during implementation: since
-    ``workspace_purge_grant`` is itself workspace-plane and purged along with
-    everything else, purging first makes the grant row gone by the time
-    consumption is attempted, so a reversed implementation gets 403
-    ``purge_grant_required`` on what should be a normal, valid purge -- not
-    merely a failed ``observed`` assertion, but the request failing outright.
+    """T-4 + T-9: the only end-to-end verification of the purge path through
+    the real HTTP/auth stack, and the ORDER T-8 cannot pin -- the grant's
+    conditional DELETE must execute before ``purge_workspace_data`` is even
+    called, in the same session. Confirmed by reverting the order during
+    implementation: since ``workspace_purge_grant`` is itself workspace-plane
+    and purged along with everything else, purging first makes the grant row
+    gone by the time consumption is attempted, so a reversed implementation
+    gets 403 ``purge_grant_required`` on what should be a normal, valid purge
+    -- not merely a failed ``observed`` assertion, but the request failing
+    outright.
     """
 
     owner = _client(page_service, "purge-t9@example.com")
@@ -507,7 +479,13 @@ def test_purge_workspace_data_runs_only_after_the_grant_row_is_gone(
         headers={"X-Purge-Grant": grant},
     )
     assert response.status_code == 200, response.text
+    assert response.json()["data"]["deleted_workspace_id"] == workspace_id
     assert observed["grant_already_gone"] is True
+
+    gone = owner.get(f"/api/v1/workspaces/{workspace_id}")
+    assert gone.status_code == 404
+    with page_service.session_factory() as session:
+        assert session.get(WorkspacePurgeGrant, (owner_id, UUID(workspace_id))) is None
 
 
 def test_reissuing_a_grant_is_one_conflict_tolerant_statement(page_service):

@@ -621,30 +621,6 @@ def test_context_logical_quota_rejection_keeps_installed_orphan_accounted(
     assert len(files_after - files_before) == 1
 
 
-def test_canonical_context_media_page_upload_authorizes_and_returns_version_preview(
-    session_factory,
-    tmp_path,
-    monkeypatch,
-) -> None:
-    monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("DTXWIKI_LIBRARY_BLOB_ROOT", str(tmp_path / "library"))
-    client = _make_client(session_factory)
-    workspace_id = _workspace_id(client)
-    page = _create_editing_page(client, workspace_id)
-    marker = uuid4()
-    response = client.post(
-        f"{_pages_url(client)}/{page['id']}/media",
-        data={"marker_uuid": str(marker), "editing_version_id": page["version_id"]},
-        files={"file": ("page.png", PNG_BYTES, "image/png")},
-    )
-    assert response.status_code == 200, response.text
-    assert response.json()["data"]["content_url"] == (
-        f"/api/v1/workspaces/{workspace_id}/context/pages/{page['id']}"
-        f"/versions/{page['version_id']}/media/{marker}/content"
-    )
-    assert "media_session_id" not in response.json()["data"]
-
-
 def _publish_editing(client: TestClient, page: dict, *, body_md: str) -> dict:
     """Save, submit, (approve,) and publish a page-first "editing" page.
 

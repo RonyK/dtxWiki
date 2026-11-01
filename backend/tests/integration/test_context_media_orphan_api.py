@@ -243,29 +243,6 @@ def test_workspace_orphan_listing_hides_from_outsider(page_service):
     ), "list_workspace_context_media_orphans must keep its own membership check"
 
 
-def test_workspace_orphan_listing_returns_the_seeded_orphan(page_service):
-    from uuid import UUID
-
-    owner = make_client(page_service, "orphans-happy@example.com")
-    workspace_id = _workspace_id(owner)
-    _seed_page_bound_orphan(page_service, UUID(workspace_id))
-
-    response = owner.get(f"/api/v1/workspaces/{workspace_id}/context/media/orphans")
-    assert response.status_code == 200, response.text
-    items = response.json()["data"]["items"]
-    assert len(items) == 1
-    assert "owner_kind" not in items[0]
-    assert "session_id" not in items[0]
-    assert items[0]["original_filename"] == "orphan.png"
-    assert items[0]["workspace_id"] == workspace_id
-    assert items[0]["page_id"] is not None
-    assert items[0]["page_title"] == "Orphan page"
-    # The seeded uploader is a random human actor id with no matching
-    # `users` row: the display-name fallback must be explicit ("Human
-    # editor"), not a raw uuid and not an omitted/blank field.
-    assert items[0]["uploaded_by_display_name"] == "Human editor"
-
-
 def test_workspace_orphan_listing_returns_page_title_and_uploader_display_name(
     page_service,
 ):
@@ -333,7 +310,9 @@ def test_admin_orphan_listing_requires_server_admin(page_service):
     )
 
 
-def test_admin_orphan_listing_returns_orphans_for_the_given_workspace(page_service):
+def test_admin_and_workspace_orphan_listings_return_the_seeded_orphan(
+    page_service,
+):
     from uuid import UUID
 
     admin_client = make_server_admin_client(page_service, "orphans-admin@example.com")
@@ -348,6 +327,25 @@ def test_admin_orphan_listing_returns_orphans_for_the_given_workspace(page_servi
     assert len(items) == 1
     assert "owner_kind" not in items[0]
     assert "session_id" not in items[0]
+
+    # The workspace endpoint (this client is also the workspace owner) serves
+    # the same orphan with its resolved page title and uploader fallback.
+    response = admin_client.get(
+        f"/api/v1/workspaces/{workspace_id}/context/media/orphans"
+    )
+    assert response.status_code == 200, response.text
+    items = response.json()["data"]["items"]
+    assert len(items) == 1
+    assert "owner_kind" not in items[0]
+    assert "session_id" not in items[0]
+    assert items[0]["original_filename"] == "orphan.png"
+    assert items[0]["workspace_id"] == workspace_id
+    assert items[0]["page_id"] is not None
+    assert items[0]["page_title"] == "Orphan page"
+    # The seeded uploader is a random human actor id with no matching
+    # `users` row: the display-name fallback must be explicit ("Human
+    # editor"), not a raw uuid and not an omitted/blank field.
+    assert items[0]["uploaded_by_display_name"] == "Human editor"
 
 
 def test_nonmember_server_admin_cannot_read_orphan_metadata(page_service):

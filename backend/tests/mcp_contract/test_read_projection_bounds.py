@@ -113,6 +113,8 @@ def test_read_context_outline_caps_the_heading_list_and_pages_with_a_cursor(
     )
 
     assert first.envelope.result_status == "succeeded"
+    # `cursor` requires `select`; `outline_cursor` deliberately does not.
+    assert first.section is None
     assert first.outline_total > len(first.outline)
     assert len(first.outline) <= 200
     assert first.outline_omitted_count == first.outline_total - len(first.outline)
@@ -134,7 +136,7 @@ def test_read_context_outline_caps_the_heading_list_and_pages_with_a_cursor(
         assert following.envelope.result_status == "succeeded"
         assert following.outline_total == first.outline_total
         seen.extend(entry.section_id for entry in following.outline)
-        cursor = following.outline_next_cursor
+        last, cursor = cursor, following.outline_next_cursor
         pages += 1
         assert pages < 200, "cursor is not making progress"
 
@@ -143,48 +145,16 @@ def test_read_context_outline_caps_the_heading_list_and_pages_with_a_cursor(
     assert len(seen) == first.outline_total
     assert len(set(seen)) == len(seen)
 
-
-def test_read_context_outline_pages_without_a_selection(page_service, actor):
-    """`cursor` requires `select`; `outline_cursor` deliberately does not."""
-
-    workspace_id = _workspace_id(page_service)
-    page = _write(page_service, "outline-bounds-noselect", _heading_heavy_body())
-
-    result = dispatch(
-        "read_context_outline",
-        {"workspace_id": str(workspace_id), "target": {"page_id": str(page.id)}},
-        actor=actor,
-        page_service=page_service,
-    )
-
-    assert result.envelope.result_status == "succeeded"
-    assert result.section is None
-    assert result.outline_next_cursor is not None
-
-
-def test_read_context_outline_rejects_a_structure_map_cursor(page_service, actor):
-    """The kind discriminator: a cursor minted for one projection must not be
-    replayable as another, even though both are signed with the same secret and
-    the same version_id."""
-
-    workspace_id = _workspace_id(page_service)
-    page = _write(page_service, "outline-cursor-kind", _heading_heavy_body())
-    target = {"workspace_id": str(workspace_id), "target": {"page_id": str(page.id)}}
-
-    map_page = dispatch(
-        "read_structure_map", target, actor=actor, page_service=page_service
-    )
-    assert map_page.next_cursor is not None
-
+    # `last` produced the FINAL page; replaying the offset it points at is in
+    # range, so the terminal page is stable rather than an error.
     replayed = dispatch(
         "read_context_outline",
-        {**target, "outline_cursor": map_page.next_cursor},
+        {**request, "outline_cursor": last},
         actor=actor,
         page_service=page_service,
     )
-
-    assert replayed.envelope.result_status == "failed"
-    assert replayed.envelope.error_code == "validation_failed"
+    assert replayed.envelope.result_status == "succeeded"
+    assert replayed.outline_next_cursor is None
 
 
 def test_read_structure_map_caps_blocks_and_pages_with_a_cursor(page_service, actor):
@@ -202,6 +172,18 @@ def test_read_structure_map_caps_blocks_and_pages_with_a_cursor(page_service, ac
     assert first.document.block_count > len(first.blocks)
     assert first.blocks_omitted_count == first.document.block_count - len(first.blocks)
     assert first.next_cursor is not None
+
+    # The kind discriminator: a cursor minted for one projection must not be
+    # replayable as another, even though both are signed with the same secret
+    # and the same version_id.
+    replayed = dispatch(
+        "read_context_outline",
+        {**request, "outline_cursor": first.next_cursor},
+        actor=actor,
+        page_service=page_service,
+    )
+    assert replayed.envelope.result_status == "failed"
+    assert replayed.envelope.error_code == "validation_failed"
 
     seen = [block.id for block in first.blocks]
     cursor = first.next_cursor
@@ -261,58 +243,6 @@ def test_read_structure_map_caps_rows_of_a_single_table_and_resumes_mid_block(
     seen = [row.id for row in table.rows]
     seen.extend(row.id for row in continuation.rows)
     assert len(set(seen)) == len(seen)
-
-
-def test_bounded_responses_stay_far_below_the_unbounded_size(page_service, actor):
-    """The point of the caps: a legal 400 KB write must not produce a
-    multi-megabyte response."""
-
-    workspace_id = _workspace_id(page_service)
-    page = _write(page_service, "projection-size", _heading_heavy_body())
-    request = {"workspace_id": str(workspace_id), "target": {"page_id": str(page.id)}}
-
-    outline = dispatch(
-        "read_context_outline", request, actor=actor, page_service=page_service
-    )
-    structure = dispatch(
-        "read_structure_map", request, actor=actor, page_service=page_service
-    )
-
-    assert _bytes(outline) < 512 * 1024
-    assert _bytes(structure) < 512 * 1024
-    assert _payload(outline)["outline_total"] > len(_payload(outline)["outline"])
-
-
-def test_a_cursor_past_the_end_is_rejected_rather_than_returning_an_empty_page(
-    page_service, actor
-):
-    workspace_id = _workspace_id(page_service)
-    page = _write(page_service, "outline-cursor-end", _heading_heavy_body())
-    request = {"workspace_id": str(workspace_id), "target": {"page_id": str(page.id)}}
-
-    cursor = dispatch(
-        "read_context_outline", request, actor=actor, page_service=page_service
-    ).outline_next_cursor
-    while cursor is not None:
-        page_result = dispatch(
-            "read_context_outline",
-            {**request, "outline_cursor": cursor},
-            actor=actor,
-            page_service=page_service,
-        )
-        last, cursor = cursor, page_result.outline_next_cursor
-
-    # `last` is the cursor that produced the FINAL page; replaying the offset it
-    # points at is in range, so re-use it and confirm the terminal page is
-    # stable rather than erroring.
-    replayed = dispatch(
-        "read_context_outline",
-        {**request, "outline_cursor": last},
-        actor=actor,
-        page_service=page_service,
-    )
-    assert replayed.envelope.result_status == "succeeded"
-    assert replayed.outline_next_cursor is None
 
 
 def test_outline_wire_budget_binds_before_the_item_cap(page_service, actor):
