@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.context_media.domain import ContextMediaError
@@ -45,6 +46,10 @@ class LintFixResult(BaseModel):
     module_fix_counts: dict[str, int] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
+
+
+class _NoLintChanges(Exception):
+    """Roll back a no-op claim without leaving a durable skip receipt."""
 
 
 class _SessionBoundFactory:
@@ -90,6 +95,14 @@ class LintFixWriter:
         base_version_id: UUID,
         base_content_hash: str,
     ) -> LintFixResult:
+        """Apply one repair in the caller's transaction and retain its locks.
+
+        Policy locks survive this method until the caller commits or rolls
+        back, so a queued run holds them across its remaining page repairs.
+        An integrity failure propagates to the transaction owner: queued-run
+        callers must abort the whole run, including earlier repairs/findings,
+        rather than continue per page or turn the failure into a review.
+        """
         if not session.in_transaction():
             raise RuntimeError("LintFixWriter requires an active caller transaction")
         from backend.services.change_review_audit import ChangeReviewAuditRecorder
@@ -115,9 +128,18 @@ class LintFixWriter:
         key = f"lint-fix:{run_id}:{page_id}:{base_version_id}"
 
         def execute() -> LintFixResult:
-            # Preserve the common lock order: media intent, then page. Settings
-            # and every live-edit/review check are made under this same lock.
+            # Keep media intent before page locks. Share-lock the policy row
+            # in between so a settings update cannot invalidate this proof
+            # before publication. The lock remains until the caller's whole
+            # transaction ends; concurrent maintenance SHARE locks coexist,
+            # while settings UPDATE locks must wait for the lint run to end.
             service._lock_context_media_usage_intent(session, workspace_id)
+            workspace = session.scalar(
+                select(Workspace)
+                .where(Workspace.id == workspace_id)
+                .with_for_update(read=True)
+                .execution_options(populate_existing=True)
+            )
             page = session.scalar(
                 select_in_workspace(
                     ContextPage,
@@ -127,7 +149,6 @@ class LintFixWriter:
                 .with_for_update()
                 .execution_options(populate_existing=True)
             )
-            workspace = session.get(Workspace, workspace_id, populate_existing=True)
             if page is None or workspace is None or page.lifecycle_status == "archived":
                 return LintFixResult(state="skipped")
             if (
@@ -192,14 +213,20 @@ class LintFixWriter:
                 if module.fixer is not None and policy.fix_existing(module)
             }
             if not fix_existing:
-                return LintFixResult(state="skipped")
+                raise _NoLintChanges
             context = WriteContext(
-                workspace=workspace, session=session, page=page, version=base, **actor
+                workspace=workspace,
+                session=session,
+                page=page,
+                version=base,
+                source_version=base,
+                link_source="published",
+                **actor,
             )
-            prepared = preparer.prepare(BodyInput(base.body_md), context)
+            prepared = preparer.prepare_maintenance(BodyInput(base.body_md), context)
             counts = dict(prepared.module_fix_counts)
             if prepared.body == base.body_md or not fix_existing.intersection(counts):
-                return LintFixResult(state="skipped")
+                raise _NoLintChanges
             opened = service.begin_context_edit(
                 page_id=page_id,
                 workspace_id=workspace_id,
@@ -208,17 +235,16 @@ class LintFixWriter:
                 base_version_id=base_version_id,
                 base_content_hash=base_content_hash,
             )
-            saved = service.autosave_page(
+            saved = service._save_prepared_context_edit_in_session(
+                session=session,
                 page_id=page_id,
                 workspace_id=workspace_id,
-                title=page.title,
-                body_md=base.body_md,
-                **actor,
-                base_version_id=opened.version_id,
+                actor_kind=actor["actor_kind"],
+                actor_id=actor["actor_id"],
+                prepared=prepared,
                 base_content_hash=opened.content_hash,
                 expected_editing_revision=opened.editing_revision,
                 editing_version_id=opened.version_id,
-                idempotency_key=key + ":save",
             )
             saved_version = get_in_workspace(
                 session,
@@ -226,13 +252,25 @@ class LintFixWriter:
                 workspace_id=workspace_id,
                 resource_id=saved.version_id,
             )
+            if (
+                saved_version is None
+                or saved_version.body_md != prepared.body
+                or saved_version.content_hash != prepared.content_hash
+                or saved.body_md != prepared.body
+                or saved.content_hash != prepared.content_hash
+            ):
+                # This is a broken persistence invariant, not uncertain
+                # approval evidence. Roll back this page's savepoint and let
+                # the queued-run owner roll back every page/finding in its
+                # transaction; do not continue through a per-page review.
+                raise RuntimeError("Lint maintenance did not persist the prepared body")
             references = copy_context_version_references(
                 session,
                 source=base,
                 target=saved_version,
             )
-            proof = references.anchors_preserved and preparer.auto_approval_matches(
-                base.body_md, saved.body_md, context
+            proof = references.anchors_preserved and preparer.auto_approval_allowed(
+                prepared, context
             )
             reason = "lint.autofix: " + json.dumps(counts, sort_keys=True)
             submitted = service._submit_context_edit_in_session(
@@ -313,6 +351,10 @@ class LintFixWriter:
                 result_model=LintFixResult,
                 execute=execute,
             )
+        except _NoLintChanges:
+            # The idempotency savepoint removed its claim; there was no write
+            # to replay. Conflicts retain the ordinary skipped-result policy.
+            return LintFixResult(state="skipped")
         except (
             PageServiceError,
             ReadServiceError,
@@ -321,4 +363,6 @@ class LintFixWriter:
         ):
             # The ledger savepoint rolled back every partial edit before this
             # expected conflict is converted into a skip. Findings stay open.
+            # Integrity RuntimeError deliberately escapes this handler, so
+            # the queued-run owner aborts the full caller transaction.
             return LintFixResult(state="skipped")

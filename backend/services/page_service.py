@@ -24,7 +24,7 @@ from backend.context_media.domain import (
     validate_markdown_media_policy,
 )
 from backend.context_media.ports import ContextMediaRepository
-from backend.domain.input_policy import validate_text
+from backend.domain.input_policy import validate_body, validate_text
 from backend.domain.prepared_body import PreparedBody, PreparedMetadata
 from backend.models.base import utc_now
 from backend.models.change import ChangeOperation, ChangeSet
@@ -145,7 +145,7 @@ from backend.utils.block_identity import (
     compute_block_map_with_ids,
     heal_block_map,
 )
-from backend.utils.content_hash import same_authored_markdown
+from backend.utils.content_hash import content_hash, same_authored_markdown
 from backend.utils.markdown_links import (
     RenderedMarkdownAnalysis,
     rendered_markdown_links,
@@ -2912,6 +2912,21 @@ class PageService:
                 workspace.id,
                 slug,
             )
+            authored_body = body_md
+            current = None
+            if page is not None:
+                current = self._require_page_version(
+                    session, page, editable_context_version_id(page)
+                )
+                self._validate_base(
+                    session,
+                    page,
+                    current,
+                    base_version_id,
+                    base_content_hash,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                )
             prepared = self._prepare_body(
                 BodyInput(
                     body_md=body_md,
@@ -2935,16 +2950,13 @@ class PageService:
                     actor_id=actor_id,
                     actor_provenance=actor_provenance,
                     page=page,
-                    version=None,
+                    version=current,
+                    source_version=current,
+                    link_source="draft",
                     session=session,
                 ),
             )
             body_md = prepared.body
-            requires_human_review = self._stages_as_draft(
-                workspace=workspace,
-                actor_provenance=actor_provenance,
-                body_md=body_md,
-            )
             page_created = False
 
             if page is None:
@@ -2958,9 +2970,21 @@ class PageService:
                     aliases=prepared.metadata.aliases or [],
                 )
                 if not page_created:
+                    current = self._require_page_version(
+                        session, page, editable_context_version_id(page)
+                    )
+                    self._validate_base(
+                        session,
+                        page,
+                        current,
+                        base_version_id,
+                        base_content_hash,
+                        actor_kind=actor_kind,
+                        actor_id=actor_id,
+                    )
                     prepared = self._prepare_body(
                         BodyInput(
-                            body_md=body_md,
+                            body_md=authored_body,
                             metadata=PageMetadataInput(
                                 title=title,
                                 slug=slug,
@@ -2981,12 +3005,19 @@ class PageService:
                             actor_id=actor_id,
                             actor_provenance=actor_provenance,
                             page=page,
-                            version=None,
+                            version=current,
+                            source_version=current,
+                            link_source="draft",
                             session=session,
                         ),
                     )
                     body_md = prepared.body
 
+            requires_human_review = self._stages_as_draft(
+                workspace=workspace,
+                actor_provenance=actor_provenance,
+                body_md=body_md,
+            )
             if page_created:
                 create_as_draft = requires_human_review or as_draft
                 version = self._insert_version(
@@ -3043,19 +3074,6 @@ class PageService:
             # targets the page's own shared head, same as before P8.1 -- it
             # has no "resume my private editing row" contract of its own
             # (that is `begin_context_edit`/`autosave_page`'s job).
-            current = self._require_page_version(
-                session, page, editable_context_version_id(page)
-            )
-            self._validate_base(
-                session,
-                page,
-                current,
-                base_version_id,
-                base_content_hash,
-                actor_kind=actor_kind,
-                actor_id=actor_id,
-            )
-
             stage_metadata = should_stage_page_metadata(page, current)
             metadata_patch = page_metadata_delta(
                 page,
@@ -3269,6 +3287,23 @@ class PageService:
             page = context_page_repo.get_page_by_id_for_update(session, page_id)
             if page is None:
                 raise PageNotFoundError("page not found")
+            # Resolve and validate the interpretation source before consulting
+            # its pins. A stale alternative belongs to its requested base,
+            # while the shared current version remains the storage target.
+            current = self._require_page_version(
+                session, page, editable_context_version_id(page)
+            )
+            alternative_base = self._autosave_check_base(
+                session=session,
+                page=page,
+                current=current,
+                base_version_id=base_version_id,
+                base_content_hash=base_content_hash,
+                expected_editing_revision=expected_editing_revision,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                on_stale=on_stale,
+            )
             next_title = title or page.title
             prepared = self._prepare_body(
                 BodyInput(
@@ -3293,7 +3328,9 @@ class PageService:
                     actor_id=actor_id,
                     actor_provenance=actor_provenance,
                     page=page,
-                    version=None,
+                    version=current,
+                    source_version=alternative_base or current,
+                    link_source="draft",
                     session=session,
                 ),
             )
@@ -3309,36 +3346,12 @@ class PageService:
             # (`publish=not requires_human_review` below), which is only a
             # safe/expected outcome for the shared head, never for another
             # author's still-private, unlinked "editing" row.
-            current = self._require_page_version(
-                session, page, editable_context_version_id(page)
-            )
-            try:
-                self._validate_base(
-                    session,
-                    page,
-                    current,
-                    base_version_id,
-                    base_content_hash,
-                    expected_editing_revision,
-                    actor_kind=actor_kind,
-                    actor_id=actor_id,
-                )
-            except PageConflictError:
-                if on_stale != "preserve_as_alternative":
-                    raise
+            if alternative_base is not None:
                 return self._preserve_alternative(
                     session=session,
                     page=page,
                     current=current,
-                    base_version=self._require_alternative_base(
-                        session=session,
-                        page=page,
-                        current=current,
-                        base_version_id=base_version_id,
-                        base_content_hash=base_content_hash,
-                        actor_kind=actor_kind,
-                        actor_id=actor_id,
-                    ),
+                    base_version=alternative_base,
                     title=title,
                     prepared=prepared,
                     actor_kind=actor_kind,
@@ -3852,6 +3865,7 @@ class PageService:
                     tags=tags,
                     aliases=aliases,
                     actor_provenance=actor_provenance,
+                    source_version=alternative_base or current,
                 )
                 receipt_base["requested"] = body_md
                 receipt_base["fixes"] = prepared.fixes
@@ -4009,6 +4023,78 @@ class PageService:
                 retry_only=retry_only,
             )
 
+    def _save_prepared_context_edit_in_session(
+        self,
+        *,
+        session: Session,
+        page_id: UUID,
+        workspace_id: UUID,
+        editing_version_id: UUID,
+        prepared: PreparedBody,
+        base_content_hash: str,
+        expected_editing_revision: int,
+        actor_kind: str,
+        actor_id: str,
+    ) -> PagePayload:
+        """Persist a trusted preparation without reinterpreting its source.
+
+        The caller owns the transaction and idempotency savepoint. Use the
+        ordinary autosave ownership, CAS, persistence and receipt helpers,
+        while leaving metadata and the prepared Markdown unchanged.
+        """
+        if not session.in_transaction():
+            raise RuntimeError("Prepared edit requires an active caller transaction")
+        if not isinstance(prepared, PreparedBody):
+            raise TypeError("Prepared edit requires a PreparedBody")
+        validate_body(prepared.body)
+        self._validate_media_markdown(prepared.body)
+        if content_hash(prepared.body) != prepared.content_hash:
+            raise RuntimeError("Prepared edit body and hash do not match")
+        page = self._autosave_lock_and_load(
+            session=session,
+            page_id=page_id,
+            editing_version_id=editing_version_id,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+        )
+        if page.workspace_id != workspace_id:
+            raise PageNotFoundError("page not found")
+        current = self._require_page_version(session, page, editing_version_id)
+        self._autosave_check_base(
+            session=session,
+            page=page,
+            current=current,
+            base_version_id=editing_version_id,
+            base_content_hash=base_content_hash,
+            expected_editing_revision=expected_editing_revision,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            on_stale="conflict",
+        )
+        receipt_base = {
+            "body": current.body_md,
+            "revision": current.editing_revision,
+            "requested": prepared.body,
+            "fixes": prepared.fixes,
+        }
+        result = self._autosave_persist_editing_row(
+            session=session,
+            page=page,
+            current=current,
+            prepared=prepared,
+            next_title=page.title,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            session_version_id=None,
+            same_actor_draft=True,
+            own_open_edit=True,
+            baseline_patch=None,
+            metadata_patch={},
+        )
+        return self._autosave_receipt(
+            result=result, receipt_base=receipt_base, with_edit_receipt=True
+        )
+
     def _autosave_lock_and_load(
         self,
         *,
@@ -4136,6 +4222,7 @@ class PageService:
         actor_kind: str,
         actor_id: str,
         actor_provenance: str,
+        source_version: ContextPageVersion | None = None,
     ) -> PreparedBody:
         workspace = self._workspace_for(session, page.workspace_id)
         return self._prepare_body(
@@ -4162,6 +4249,7 @@ class PageService:
                 actor_provenance=actor_provenance,
                 page=page,
                 version=current,
+                source_version=source_version or current,
                 session=session,
             ),
         )
@@ -4282,7 +4370,7 @@ class PageService:
                     "was_private_edit": True,
                     "editing_revision": version.editing_revision,
                     "before_content_hash": current.content_hash,
-                    "after_content_hash": version.content_hash,
+                    "after_content_hash": prepared.content_hash,
                     "parent_version_id": str(current.id),
                     "session_version_id": (
                         str(session_version_id)

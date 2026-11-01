@@ -23,6 +23,21 @@ class LintRegistry:
             if module.module_id in module_ids:
                 raise ValueError(f"duplicate lint module_id: {module.module_id}")
             module_ids.add(module.module_id)
+            if module.maintenance_role not in {"none", "trigger", "companion"}:
+                raise ValueError(f"invalid maintenance_role for {module.module_id}")
+            if module.maintenance_role != "none" and module.fixer is None:
+                raise ValueError(
+                    f"maintenance participant requires a fixer: {module.module_id}"
+                )
+            module_rule_ids = {rule.rule_id for rule in module.rules}
+            if not module.fixable_rule_ids.issubset(module_rule_ids):
+                raise ValueError(
+                    f"fixable_rule_ids must belong to module {module.module_id}"
+                )
+            if module.maintenance_role == "trigger" and not module.fixable_rule_ids:
+                raise ValueError(
+                    f"maintenance trigger requires fixable_rule_ids: {module.module_id}"
+                )
             for rule in module.rules:
                 if rule.layer not in LINT_LAYERS:
                     raise ValueError(
@@ -139,4 +154,12 @@ class LintRegistry:
             module
             for module in sorted(self.modules, key=lambda module: module.order)
             if module.fixer is not None and (preview or policy.fix_on_save(module))
+        ]
+
+    def fixers_for_maintenance(self, policy: LintPolicy) -> list[LintModule]:
+        """Select declared, enabled participants; companions cannot trigger a write."""
+        return [
+            module
+            for module in self.fixers_for_save(policy)
+            if module.maintenance_role in {"trigger", "companion"}
         ]

@@ -28,6 +28,21 @@
 
 ### Transactional Lint fixes for published documents
 
+- Prepare published repairs once against their source version and persist
+  those exact bytes. Verify the stored body and hash before review or audit;
+  draft-only destinations remain unchanged during published maintenance.
+- A prepared/stored integrity mismatch aborts the queued Lint run's transaction,
+  rolling back its earlier page repairs and finding writes as well. It is not
+  converted into a per-page review or skipped result.
+- Declare maintenance triggers and companions explicitly. Enabled formatting
+  still accompanies link repairs, while save-only modules stay out of
+  published maintenance. Aggregate all changes from each module consistently.
+- Restrict maintenance candidates to fixable findings and leave no durable
+  retry claim for a no-change repair. Hold a shared Workspace policy lock until
+  the caller's transaction ends, including the rest of a queued Lint run;
+  settings updates wait for that transaction to finish.
+- Preserve authored Context edit links and calculate inspector findings with
+  the reader's authority and selected version.
 - Queued Lint runs can repair supported links in published Context documents
   using the existing edit, review, and publication workflow. Live edits, pending
   reviews, and changed published heads prevent automatic writes.
@@ -44,6 +59,16 @@
   when saving, preserving labels, fragments, code, and unrelated source text.
   Lint settings offer automatic fixes or suggestions and a separate approval
   setting for link-only fixes; existing review gates still apply.
+- Authored Context saves consistently canonicalize links to readable draft-only
+  destinations across browser and MCP write, update, patch, and autosave paths
+  when automatic link fixes are enabled.
+- Link-fix-only automatic approval always uses published-source rules, including
+  when the base version is a draft. Newly canonicalizing a draft-only destination
+  therefore requires review instead of qualifying for immediate approval.
+- Resolve pinned destinations from the validated source version, including
+  preserved stale alternatives and concurrent create-or-update fallbacks.
+  Existing-page writes and updates now report a stale-base conflict (HTTP 409)
+  before invalid-body validation, so the caller must first refresh its base.
 - Context write responses include `lint_report` with applied fixes and findings
   for the final stored body. Stored history, restores, and copied edits retain
   their original text.

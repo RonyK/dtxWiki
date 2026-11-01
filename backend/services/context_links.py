@@ -1205,6 +1205,12 @@ class LinkDecision:
     severity: str = "warning"
 
 
+def _is_context_edit_route(locator: Locator) -> bool:
+    return locator.kind == "canonical_route" and unquote(
+        urlsplit(locator.href).path
+    ).endswith("/edit")
+
+
 def decide(
     locator: Locator,
     resolution: Resolution,
@@ -1228,6 +1234,13 @@ def decide(
         return LinkDecision(
             "finding", finding="link.target-unpublished", severity="info"
         )
+    if _is_context_edit_route(locator):
+        # An editor destination expresses a different action from reading the
+        # document. Preserve its route/view while removing a verified self host.
+        if locator.absolute:
+            relative = urlsplit(locator.href)._replace(scheme="", netloc="").geturl()
+            return LinkDecision("fix", relative, "link.internal-noncanonical")
+        return LinkDecision("keep")
     noncanonical = (
         locator.kind not in {"stable_full", "wikilink", "page_id"} or locator.absolute
     )
@@ -1475,7 +1488,7 @@ def decide_link(
                 context_workspace_id=ctx.workspace_id,
                 source_is_published=ctx.source_is_published,
             )
-            if decision.action == "fix":
+            if decision.action == "fix" and not _is_context_edit_route(view_locator):
                 decision = LinkDecision("keep")
             return view_locator, resolution, decision
     if locator.kind == "unknown":
@@ -1536,6 +1549,15 @@ def rewrite_links_with_report(
             label = occurrence.label or occurrence.slug or occurrence.href
             replacement = f"[{escape_link_label(label)}]({decision.href})"
         after_locator = classify(decision.href, ctx.self_origins)
+        if _is_context_edit_route(locator):
+            from backend.services.context_link_targets import (
+                _classify_context_navigation,
+            )
+
+            # The relative edit destination retains validated UI query state.
+            after_locator = _classify_context_navigation(
+                decision.href, ctx.self_origins
+            )
         if resolution is None:
             # Non-Context index targets were proved by the workspace-scoped
             # lifecycle lookup above; their route is not a Context locator.

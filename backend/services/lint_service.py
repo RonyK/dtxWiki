@@ -648,10 +648,10 @@ class LintService:
         )
         fix_policy = LintPolicy(workspace)
         fixable_rules = {
-            rule.rule_id
-            for module in self.lint_registry.modules
-            if module.fixer is not None and fix_policy.fix_existing(module)
-            for rule in module.rules
+            rule_id
+            for module in self.lint_registry.fixers_for_maintenance(fix_policy)
+            if module.maintenance_role == "trigger"
+            for rule_id in module.fixable_rule_ids
         }
         if fixable_rules and observed_heads:
             from backend.services.lint_fix_writer import LintFixWriter

@@ -67,10 +67,17 @@ def test_inspector_warnings_are_version_aware_and_skippable():
     # M1: warnings reflect the EXACT version read (version-aware), and the
     # internal existence-check path can skip the lint work entirely.
     session_factory = make_session_factory()
-    read_service = DomainReadService()
+    read_service = DomainReadService(
+        context_link_origins=frozenset({"https://docs.example"})
+    )
     with session_factory.begin() as session:
         seed_default_workspace(session)
-    page = _write(session_factory, slug="ver", body=UNCLOSED_FENCE_BODY)
+    # Budget exception: this adds one logical DB input for C2. The same editor
+    # must resolve a configured-origin link to their own unpublished version;
+    # format-only fixtures cannot detect lost actor/origin context, and a unit
+    # wiring assertion cannot prove the real target-visibility decision.
+    body = "[This draft](https://docs.example/pages/ver)\n\n" + UNCLOSED_FENCE_BODY
+    page = _write(session_factory, slug="ver", body=body)
     with session_factory.begin() as session:
         workspace = seed_default_workspace(session)
         explicit = read_service.read_context_page(
@@ -81,6 +88,7 @@ def test_inspector_warnings_are_version_aware_and_skippable():
             actor=_editor(workspace.id),
         )
         assert any("fence" in w.lower() for w in explicit.warnings)
+        assert "Use the permanent document link." in explicit.warnings
         skipped = read_service.read_context_page(
             session=session,
             workspace_id=workspace.id,
