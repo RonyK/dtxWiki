@@ -11,8 +11,8 @@ export type CosmosSceneBuffers = {
   /** Relation-based sizes: the only sizes that layout, FA2 units and collision may read. */
   pointSizes: Float32Array;
   /**
-   * What is drawn and picked. It is `pointSizes` itself unless a cluster of ten
-   * or more documents is emphasised, so physics never sees the emphasis.
+   * What is drawn and picked, including minimum visible diameters and cluster
+   * emphasis. Layout and collision continue to read only `pointSizes`.
    */
   drawPointSizes: Float32Array;
   links: Float32Array;
@@ -66,7 +66,7 @@ export function buildCosmosRelationColors(
     // local structure. Direct incident stars win over both density bands.
     colors[edge * 4 + 3] = emphasized.has(edge) ? .95
       : columns.edgeKinds[edge] === 1 ? (crossCommunity ? .2 : .38)
-        : crossCommunity ? .18 : .32;
+        : crossCommunity ? .18 : .35;
   }
   return colors;
 }
@@ -183,13 +183,19 @@ export function buildCosmosSceneBuffers(
       ? Math.max(2, Math.min(12, columns.nodeSizes[node] * overviewScale))
       : Math.max(3, Math.min(17, columns.nodeSizes[node] * overviewScale));
   }
-  // A separate copy exists only when some cluster is emphasised.
+  // Improve visible bodies without changing force, collision or degree inputs.
   let drawPointSizes = pointSizes;
+  const minimumDiameter = count > 1_000 ? 3 : 5;
+  for (let node = 0; node < count; node += 1) {
+    if (pointSizes[node] >= minimumDiameter) continue;
+    if (drawPointSizes === pointSizes) drawPointSizes = pointSizes.slice();
+    drawPointSizes[node] = minimumDiameter;
+  }
   if (documentCounts) {
     for (let node = 0; node < count; node += 1) {
       if (columns.nodeKinds[node] !== WORKSPACE_MAP_NODE_KIND.cluster) continue;
       const emphasised = clusterDiameterCss(documentCounts[node]);
-      if (!(emphasised > pointSizes[node])) continue;
+      if (!(emphasised > drawPointSizes[node])) continue;
       if (drawPointSizes === pointSizes) drawPointSizes = pointSizes.slice();
       drawPointSizes[node] = emphasised;
     }
@@ -210,8 +216,8 @@ export function buildCosmosSceneBuffers(
     links[edge * 2] = source;
     links[edge * 2 + 1] = target;
     linkStyles[edge] = kind;
-    const alpha = denseOverview ? (kind === 1 ? .38 : .32)
-      : kind === 1 ? (readableScene ? 0.7 : 0.35) : (readableScene ? 0.85 : 0.5);
+    const alpha = denseOverview ? (kind === 1 ? .38 : .35)
+      : kind === 1 ? (readableScene ? 0.4 : 0.35) : (readableScene ? 0.45 : 0.5);
     writeColor(
       linkColors,
       edge,

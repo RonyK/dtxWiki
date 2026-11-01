@@ -2791,6 +2791,12 @@ describe("Cosmos Map native lifecycle and semantic ownership", () => {
     adapter.select("a"); adapter.setSearchMatches(new Set(["a"]));
     config.onPointMouseOver?.(0, [0, 0], undefined, false, false);
     expect(graph.setLinkColors.mock.lastCall![0]).toEqual(colors);
+    expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({
+      linkOpacity: 2.1, linkVisibilityMinTransparency: 1, linkGreyoutOpacity: .1,
+    }));
+    config.onPointMouseOut?.(undefined);
+    adapter.select(null);
+    expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({ linkOpacity: 1 }));
     adapter.setEdgesVisible(false); expect(graph.setConfigPartial).toHaveBeenLastCalledWith({ renderLinks: false });
   });
 
@@ -2886,7 +2892,9 @@ describe("Cosmos Map interaction contracts", () => {
     expect(graph.setConfigPartial).toHaveBeenCalledWith({ enableSimulation: true });
     expect([...graph.setLinkStrength.mock.lastCall![0]]).toEqual([1, 7]);
     const collision = graph.setConfigPartial.mock.calls.find(([config]) => config.simulationCollision === 1)![0];
-    const expected = buildWorkspaceRelationCollisionBasis(graph.setPointPositions.mock.calls[0][0], graph.setPointSizes.mock.lastCall![0], 734, 608)!;
+    const buffers = buildCosmosSceneBuffers(input, readGraphTokens(document.createElement("div")));
+    expect(graph.setPointSizes.mock.lastCall![0]).toEqual(buffers.drawPointSizes);
+    const expected = buildWorkspaceRelationCollisionBasis(graph.setPointPositions.mock.calls[0][0], buffers.pointSizes, 734, 608)!;
     expect(collision.simulationCollisionRadius).toBeCloseTo(expected.radius);
     expect(collision.simulationCollisionPadding).toBe(expected.padding);
   });
@@ -2919,7 +2927,7 @@ describe("Cosmos Map interaction contracts", () => {
     expect(graph.setLinkColors.mock.lastCall![0][7]).toBeGreaterThan(0);
     expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({ pointGreyoutOpacity: .3, linkGreyoutOpacity: .08 }));
     adapter.select(null);
-    expect(graph.setLinkColors.mock.lastCall![0][3]).toBeCloseTo(.32);
+    expect(graph.setLinkColors.mock.lastCall![0][3]).toBeCloseTo(.35);
     expect(graph.setLinkColors.mock.lastCall![0][7]).toBeCloseTo(.18);
     expect(before[1]).toBe(7);
     expect(forceCommits()).toEqual([]);
@@ -2954,7 +2962,7 @@ describe("Cosmos Map interaction contracts", () => {
     config.onPointMouseOver?.(0, [0, 0], undefined, false, false);
     expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({
       highlightedPointIndices: [1, 2, 0], highlightedLinkIndices: [0, 1],
-      pointGreyoutOpacity: .3, linkGreyoutOpacity: 0,
+      pointGreyoutOpacity: .3, linkGreyoutOpacity: .08,
     }));
     expect(graph.getPointPositions()).toEqual(positions);
     expect(adapter.getViewport()).toEqual(viewport);
@@ -3002,7 +3010,7 @@ describe("Cosmos Map interaction contracts", () => {
     const palette = sdk.colors();
     graph.setPointPositions.mockClear(); graph.start.mockClear(); community.compute.mockClear();
     adapter.select("node-0");
-    expect(sdk.colors()[3]).toBeCloseTo(.95); expect(sdk.colors()[7]).toBeCloseTo(.32);
+    expect(sdk.colors()[3]).toBeCloseTo(.95); expect(sdk.colors()[7]).toBeCloseTo(.35);
     expect(sdk.running()).toBe(false); expect(sdk.activePositions()).toBe(false);
     expect(graph.getPointPositions()).toEqual(coordinates);
     adapter.select(null); expect(sdk.colors()).toEqual(palette);
@@ -3281,11 +3289,15 @@ describe("Cosmos Map interaction contracts", () => {
     expect(graph.setZoomLevel.mock.lastCall![0]).toBeLessThanOrEqual(0.005);
   });
 
-  it("grows dots with square-root fit-relative zoom, capped at four without uploading geometry", async () => {
+  it("keeps dots visible below fit zoom and grows them up to four without uploading geometry", async () => {
     graph.getZoomLevel.mockReturnValue(0.08);
     await mount();
     const config = createGraph.mock.calls[0][1];
+    expect(config).toMatchObject({ linkDefaultWidth: .9, linkVisibilityMinTransparency: .65,
+      hoveredLinkWidthIncrease: .6, focusedLinkWidthIncrease: .6 });
     graph.setConfigPartial.mockClear();
+    config.onZoom?.({ transform: { k: 0.02 } } as Parameters<NonNullable<GraphConfig["onZoom"]>>[0], false);
+    expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({ pointSizeScale: 1 }));
     config.onZoom?.({ transform: { k: 0.32 } } as Parameters<NonNullable<GraphConfig["onZoom"]>>[0], false);
     expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({ pointSizeScale: 2 }));
     config.onZoom?.({ transform: { k: 8 } } as Parameters<NonNullable<GraphConfig["onZoom"]>>[0], false);

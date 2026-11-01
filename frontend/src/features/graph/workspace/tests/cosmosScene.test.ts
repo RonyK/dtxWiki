@@ -56,7 +56,7 @@ describe("Workspace Cosmos typed scene", () => {
     expect(buffers.positions).toHaveLength(20_000);
     expect(buffers.links).toHaveLength(200_000);
     expect(buffers.adjacencyEdges).toHaveLength(200_000);
-    expect(buffers.linkColors[3]).toBeCloseTo(.32);
+    expect(buffers.linkColors[3]).toBeCloseTo(.35);
     const communities = new Uint32Array(10_000); communities[1] = 1;
     const normal = buildCosmosRelationColors(input, buffers.linkColors, communities, [], WORKSPACE_MAP_PC_10K_BUDGET);
     expect(normal[3]).toBeCloseTo(.18);
@@ -135,7 +135,7 @@ describe("Workspace Cosmos typed scene", () => {
     input.edgeWeights = new Float64Array(5_057).fill(1);
     input.edgeCrossFolder = new Uint8Array(5_057);
     const buffers = buildCosmosSceneBuffers(input, tokens);
-    expect(buffers.linkColors[3]).toBeCloseTo(0.32);
+    expect(buffers.linkColors[3]).toBeCloseTo(0.35);
   });
 
   it("separates 2K relation bands and the selected incident star without hiding or changing original relations", () => {
@@ -148,7 +148,7 @@ describe("Workspace Cosmos typed scene", () => {
     const saved = base.slice();
     const communities = new Uint32Array(count); communities[2] = 1;
     const normal = buildCosmosRelationColors(input, base, communities);
-    expect([normal[3], normal[7], normal[11]]).toEqual([expect.closeTo(.32), expect.closeTo(.2), expect.closeTo(.18)]);
+    expect([normal[3], normal[7], normal[11]]).toEqual([expect.closeTo(.35), expect.closeTo(.2), expect.closeTo(.18)]);
     const selected = buildCosmosRelationColors(input, base, communities, [0, 2]);
     expect([selected[3], selected[11]]).toEqual([expect.closeTo(.95), expect.closeTo(.95)]);
     expect(selected[7]).toBeGreaterThan(0); expect(selected[7]).toBeLessThan(selected[3]);
@@ -165,10 +165,11 @@ describe("Workspace Cosmos typed scene", () => {
     const buffers = buildCosmosSceneBuffers(columns(), tokens);
     expect(Array.from(buffers.pointShapes)).toEqual([0, 1, 0]);
     expect(Array.from(buffers.pointSizes)).toEqual([4, 6, 8]);
+    expect(Array.from(buffers.drawPointSizes)).toEqual([5, 6, 8]);
     expect(Array.from(buffers.linkStyles)).toEqual([0, 1, 0]);
     expect(Array.from(buffers.links)).toEqual([0, 1, 1, 2, 0, 2]);
-    expect(buffers.linkColors[3]).toBeCloseTo(0.85);
-    expect(buffers.linkColors[7]).toBeCloseTo(0.7);
+    expect(buffers.linkColors[3]).toBeCloseTo(0.45);
+    expect(buffers.linkColors[7]).toBeCloseTo(0.4);
     expect(incidentStar(buffers, 1)).toEqual({ points: [1, 0, 2], links: [0, 1] });
     expect(incidentStar(buffers, -1)).toEqual({ points: [], links: [] });
   });
@@ -208,6 +209,7 @@ describe("Workspace Cosmos typed scene", () => {
     expect(buffers.links).toHaveLength(edgeCount * 2);
     expect(buffers.adjacencyNodes).toHaveLength(edgeCount * 2);
     expect(buffers.pointSizes[0]).toBeCloseTo(2);
+    expect(buffers.drawPointSizes[0]).toBe(3);
     expect(document.querySelectorAll("*").length).toBe(before);
   });
 

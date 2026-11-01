@@ -65,9 +65,10 @@ describe("Workspace Map cluster glyph size", () => {
     ["clusters of nine documents or fewer", () => sceneWithClusters([2, 3, 9])],
     ["documents that claim many members", () => columnsOf(2_000, { kinds: (i) => i % 3 === 0 ? 1 : 0, sizes: () => 2.5,
       documentCounts: () => 50_000 })],
-  ])("draws a scene with %s with the very array the layout reads", (_name, build) => {
+  ])("draws a scene with %s at the visibility floor without cluster emphasis", (_name, build) => {
     const buffers = buildCosmosSceneBuffers(build(), tokens);
-    expect(buffers.drawPointSizes).toBe(buffers.pointSizes);
+    expect(buffers.drawPointSizes).toEqual(Float32Array.from(buffers.pointSizes, size => Math.max(3, size)));
+    if (buffers.pointSizes.every(size => size >= 3)) expect(buffers.drawPointSizes).toBe(buffers.pointSizes);
   });
 
   // `pointSizes` is the one array layout, FA2 units and collision read. The emphasis must never reach it.
@@ -85,7 +86,7 @@ describe("Workspace Map cluster glyph size", () => {
     const counts = [2, 3, 9, 10, 11, 100, 1_000, 10_000, 17_499, 0xffffffff];
     const { pointSizes, drawPointSizes } = buildCosmosSceneBuffers(sceneWithClusters(counts), tokens);
     const drawn = counts.map((_, row) => drawPointSizes[row]);
-    for (const row of [0, 1, 2]) expect(drawn[row], `${counts[row]} members`).toBe(pointSizes[row]);
+    for (const row of [0, 1, 2]) expect(drawn[row], `${counts[row]} members`).toBe(Math.max(3, pointSizes[row]));
     expect(drawn[3]).toBeGreaterThan(pointSizes[3]);
     for (let row = 1; row < drawn.length; row += 1) expect(drawn[row], `${counts[row]} members`).toBeGreaterThanOrEqual(drawn[row - 1]);
     // Each order of magnitude is visibly larger than the one below.
