@@ -1,10 +1,12 @@
 """Graph View extends the shipped core without replaying or rewriting it.
 
-Migration-budget exceptions retained from the complete Graph feature:
-* The populated-core traversal verifies revision-owned legacy data. The separate
-  runtime-URL traversal creates real PageService projections after upgrading;
-  frozen SQL fixtures cannot exercise that writer's durable pins/edge identity.
-  Both dialects must actually downgrade those runtime rows to catch dialect DDL.
+Migration-budget notes for the complete Graph feature:
+* SQLite runs one traversal: revision-owned legacy data seeded on the released
+  core, then real PageService projections written after the upgrade (frozen SQL
+  fixtures cannot exercise that writer's durable pins/edge identity); one
+  downgrade and one replay check both. PostgreSQL keeps its two traversals (the
+  released-core guards and the runtime-URL rows), which run in release checks;
+  both dialects must actually downgrade those runtime rows to catch dialect DDL.
 * SQLite upgrade and downgrade fault injection verify distinct transaction
   rollback paths. A successful traversal cannot execute those failure branches,
   and unit SQL checks cannot prove Alembic leaves data and its stamp atomic.
@@ -170,15 +172,14 @@ def _seed_runtime_url_projection(engine):
     )
 
 
-def test_downgrade_preserves_upstream_url_pins_and_authored_relations(
-    tmp_path,
+def _assert_runtime_url_downgrade(
+    database_url, *, after_downgrade=None, after_replay=None
 ):
-    database_url = f"sqlite:///{tmp_path / 'runtime-url-downgrade.db'}"
-    _assert_runtime_url_downgrade(database_url)
-
-
-def _assert_runtime_url_downgrade(database_url):
+    """Write runtime URL/wikilink projections at the Graph head, downgrade
+    Graph and replay it. ``after_downgrade``/``after_replay`` receive the
+    engine so a caller can check its own rows at the same two stops."""
     config = _config(database_url)
+    # A no-op when the caller already brought the database to the Graph head.
     command.upgrade(config, GRAPH_HEAD_REVISION)
     engine = create_engine(database_url)
     try:
@@ -236,6 +237,8 @@ def _assert_runtime_url_downgrade(database_url):
                 ).all()
                 == before_links
             )
+        if after_downgrade is not None:
+            after_downgrade(engine)
         # URL support belongs to upstream; a Graph round-trip preserves its
         # durable pins, row identities and projections without a reindex.
         command.upgrade(config, GRAPH_HEAD_REVISION)
@@ -247,12 +250,17 @@ def _assert_runtime_url_downgrade(database_url):
             assert (
                 connection.scalar(text("SELECT COUNT(*) FROM graph_observation")) == 0
             )
+        if after_replay is not None:
+            after_replay(engine)
     finally:
         engine.dispose()
 
 
-def test_graph_evidence_failure_rolls_back_downgrade(tmp_path):
-    database_url = f"sqlite:///{tmp_path / 'failed-url-downgrade.db'}"
+def test_graph_evidence_failure_rolls_back_downgrade(tmp_path, tmp_path_factory):
+    templates = shared_templates(tmp_path_factory)
+    database_url = templates.clone(
+        "rev_efcbcf724889", tmp_path / "failed-url-downgrade.db"
+    )
     config = _config(database_url)
     command.upgrade(config, GRAPH_HEAD_REVISION)
     scripts = tmp_path / "migrations"
@@ -345,14 +353,39 @@ def test_postgres_downgrade_preserves_upstream_url_pins_and_replays():
         command.downgrade(_config(database_url), "base")
 
 
-def test_populated_released_core_upgrades_and_downgrades_without_data_loss(
+def test_released_core_and_runtime_url_rows_survive_graph_round_trip(
     tmp_path, tmp_path_factory
 ):
+    # One SQLite traversal 0001 -> pre-Graph -> Graph head -> Graph downgrade ->
+    # replay carries two seeded shapes in separate workspaces: frozen
+    # released-core rows (a 0001 wikilink, a pre-Graph upstream URL pin and
+    # edge) and runtime PageService URL/wikilink projections written at the
+    # Graph head. Both must survive the same downgrade and replay, so they
+    # share it instead of each paying for a full chain.
     templates = shared_templates(tmp_path_factory)
     database_url = templates.clone("base_0001", tmp_path / "released-core.db")
     config = _config(database_url)
     workspace_id, page_id, version_id, link_id, edge_id = (uuid4() for _ in range(5))
     now = datetime(2026, 10, 14, tzinfo=UTC)
+    # The released rows all belong to this workspace; the runtime rows do not.
+    released_rows = {
+        "workspace": "SELECT * FROM workspace WHERE id = :workspace ORDER BY id",
+        "page_links": (
+            "SELECT * FROM page_links WHERE workspace_id = :workspace ORDER BY id"
+        ),
+        "edge_projection": (
+            "SELECT * FROM edge_projection WHERE workspace_id = :workspace ORDER BY id"
+        ),
+    }
+
+    def released_data(connection):
+        return {
+            table: connection.execute(
+                text(query), {"workspace": workspace_id.hex}
+            ).all()
+            for table, query in released_rows.items()
+        }
+
     engine = create_engine(database_url)
     try:
         with engine.begin() as connection:
@@ -413,12 +446,7 @@ def test_populated_released_core_upgrades_and_downgrades_without_data_loss(
                 first_snippet="Upstream permanent URL pin",
             )
             connection.execute(links.insert().values(**url_link))
-            before_data = {
-                table: connection.execute(
-                    text(f"SELECT * FROM {table} ORDER BY id")
-                ).all()
-                for table in ("workspace", "page_links", "edge_projection")
-            }
+            before_data = released_data(connection)
         before_schema = _schema_snapshot(engine)
         assert "graph_observation" not in before_schema
 
@@ -472,26 +500,28 @@ def test_populated_released_core_upgrades_and_downgrades_without_data_loss(
         with engine.connect() as connection:
             assert connection.exec_driver_sql("PRAGMA foreign_key_check").all() == []
 
-        command.downgrade(config, GRAPH_DOWNGRADE_TARGET)
+    finally:
+        engine.dispose()
+
+    def released_core_downgraded(engine):
         assert _schema_snapshot(engine) == before_schema
         with engine.connect() as connection:
             assert (
                 connection.scalar(text("SELECT version_num FROM alembic_version"))
                 == PRE_GRAPH_REVISION
             )
-            after_data = {
-                table: connection.execute(
-                    text(f"SELECT * FROM {table} ORDER BY id")
-                ).all()
-                for table in before_data
-            }
-            assert after_data == before_data
+            assert released_data(connection) == before_data
             assert connection.exec_driver_sql("PRAGMA foreign_key_check").all() == []
+
+    def released_core_replayed(engine):
         # Reapplying Graph View after downgrade reconstructs the same schema.
-        command.upgrade(config, GRAPH_HEAD_REVISION)
         assert "graph_observation" in inspect(engine).get_table_names()
-    finally:
-        engine.dispose()
+
+    _assert_runtime_url_downgrade(
+        database_url,
+        after_downgrade=released_core_downgraded,
+        after_replay=released_core_replayed,
+    )
 
 
 def test_graph_revision_failure_rolls_back_to_released_core(tmp_path, tmp_path_factory):

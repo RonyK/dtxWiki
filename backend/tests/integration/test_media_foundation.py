@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from pathlib import Path
@@ -56,6 +55,7 @@ from backend.models.media import (
 )
 from backend.models.workspace import Workspace
 from backend.tests.integration import test_context_media_repository as media_fixtures
+from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 epic1 = import_module("backend.migrations.versions.v0_1.efcbcf724889_core_schema")
 workspace_phase = import_module(
@@ -139,21 +139,15 @@ def _upgrade_to_media_boundary(config: Config, engine: Engine) -> None:
 
 
 @pytest.fixture(scope="session")
-def migrated_media_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Migrate once per worker; each test copies the closed, rollback-journal DB."""
+def sqlite_templates(tmp_path_factory: pytest.TempPathFactory):
+    """The run-wide ``alembic upgrade head`` template (rollback journal)."""
 
-    directory = tmp_path_factory.mktemp("media-template")
-    database_url = _database_url(directory, "media.db")
-    command.upgrade(_config(database_url), "head")
-    engine = _engine(database_url)
-    engine.dispose()
-    return directory / "media.db"
+    return shared_templates(tmp_path_factory)
 
 
 @pytest.fixture
-def media_engine(tmp_path: Path, migrated_media_template: Path) -> Engine:
-    shutil.copyfile(migrated_media_template, tmp_path / "media.db")
-    engine = _engine(_database_url(tmp_path, "media.db"))
+def media_engine(tmp_path: Path, sqlite_templates) -> Engine:
+    engine = _engine(sqlite_templates.clone("head", tmp_path / "media.db"))
     try:
         yield engine
     finally:
@@ -233,10 +227,34 @@ def _create_staging_lease(
     return staging_id, key
 
 
-def test_media_phase_upgrades_from_mcp_boundary_and_downgrades_cleanly(
+def test_media_phase_round_trips_from_mcp_boundary_and_refuses_lossy_downgrade(
     tmp_path: Path,
 ) -> None:
-    database_url = _database_url(tmp_path, "upgrade.db")
+    """One media-phase traversal from the MCP boundary: upgrade, clean
+    downgrade of the empty phase, re-upgrade, then a refused downgrade once
+    context media exists. Both downgrades start from the same boundary and
+    phase, so the populated refusal runs last on the re-upgraded schema
+    instead of rebuilding that boundary.
+
+    P3.1: ContextMediaSession is gone (page-first only now), but the same
+    downgrade guard (_refuse_lossy_integrated_media_downgrade) still checks
+    context_media_asset for populated rows, so populate that table instead --
+    a page, one of its own versions, and a ContextMediaAsset row pointed at
+    them.
+
+    context_page/context_page_version are seeded with raw SQL matched to
+    THIS migration boundary's own columns rather than the current
+    ContextPage/ContextPageVersion ORM models, which include columns (e.g.
+    context_page.public_exposure_scope) added by phases that run after this
+    one -- inserting through the current models here would write columns
+    that do not exist yet at this point in the phase sequence.
+
+    PRAGMA foreign_keys is turned off only to seed the fixture's reciprocal
+    page/current-version references in one transaction. Context schema is
+    already in its final workspace-scoped form at this domain boundary.
+    """
+
+    database_url = _database_url(tmp_path, "media-phase.db")
     config = _config(database_url)
     engine = _engine(database_url)
     try:
@@ -256,35 +274,11 @@ def test_media_phase_upgrades_from_mcp_boundary_and_downgrades_cleanly(
             media_phase.downgrade,
         )
         assert MEDIA_TABLES.isdisjoint(inspect(engine).get_table_names())
-    finally:
-        engine.dispose()
 
-
-def test_media_phase_downgrade_refuses_populated_context_media(tmp_path: Path) -> None:
-    """P3.1: ContextMediaSession is gone (page-first only now), but the same
-    downgrade guard (_refuse_lossy_integrated_media_downgrade) still checks
-    context_media_asset for populated rows, so populate that table instead --
-    a page, one of its own versions, and a ContextMediaAsset row pointed at
-    them.
-
-    context_page/context_page_version are seeded with raw SQL matched to
-    THIS migration boundary's own columns rather than the current
-    ContextPage/ContextPageVersion ORM models, which include columns (e.g.
-    context_page.public_exposure_scope) added by phases that run after this
-    one -- inserting through the current models here would write columns
-    that do not exist yet at this point in the phase sequence.
-
-    PRAGMA foreign_keys is turned off only to seed the fixture's reciprocal
-    page/current-version references in one transaction. Context schema is
-    already in its final workspace-scoped form at this domain boundary.
-    """
-
-    database_url = _database_url(tmp_path, "context-downgrade.db")
-    config = _config(database_url)
-    engine = _engine(database_url)
-    try:
-        _upgrade_to_media_boundary(config, engine)
         _run_steps(engine, media_phase.upgrade)
+        assert MEDIA_TABLES <= set(inspect(engine).get_table_names())
+
+        # Populated context media: the same downgrade must now refuse.
         now = media_fixtures.NOW
         page_id = uuid4()
         version_id = uuid4()

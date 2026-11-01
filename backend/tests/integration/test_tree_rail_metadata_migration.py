@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from itertools import product
 from uuid import UUID
 
 import pytest
@@ -22,10 +23,17 @@ FIRST_EVENT = datetime(2026, 1, 3, 4, tzinfo=UTC)
 SECOND_EVENT = FIRST_EVENT + timedelta(days=12)
 
 
-@pytest.mark.parametrize("hard_break", [False, True])
 def test_upgrade_from_previous_head_backfills_only_proven_content_events(
-    tmp_path, tmp_path_factory, hard_break
+    tmp_path, tmp_path_factory
 ):
+    # One head -> efcbcf724889 -> head traversal seeds every legacy shape the
+    # content-event backfill tells apart, for Context and Agent pages alike:
+    # a latest version that only renames (its body keeps a soft line break),
+    # so content time stays at the first event; one whose body turns that
+    # into a hard break, so it moves to the second event; a page with no
+    # publication proof; and more agent pages than one backfill batch. They
+    # are independent rows read by the same backfill, so one upgrade checks
+    # all of them together with the bounded, indexed history reads.
     database = tmp_path / "tree-metadata.sqlite"
     url = shared_templates(tmp_path_factory).clone("head", database)
     engine = create_engine(url)
@@ -33,19 +41,20 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
     private_version_ids = []
     with Session(engine) as session, session.begin():
         workspace = seed_default_workspace(session)
-        for kind in ("context_page", "agent_page"):
+        for hard_break, kind in product((False, True), ("context_page", "agent_page")):
+            suffix = "hard" if hard_break else "soft"
             if kind == "context_page":
                 page = ContextPage(
                     workspace_id=workspace.id,
                     title="Renamed",
-                    slug="legacy-context",
+                    slug=f"legacy-context-{suffix}",
                     lifecycle_status="published",
                 )
             else:
                 page = AgentPage(
                     workspace_id=workspace.id,
                     title="Renamed",
-                    slug="legacy-agent",
+                    slug=f"legacy-agent-{suffix}",
                     category="skill",
                     lifecycle_status="active",
                 )
@@ -135,7 +144,7 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
                     "previous_active_version_id",
                     "agent_page.activated",
                 )
-            ids[kind] = page.id
+            ids[kind, hard_break] = page.id
             for version, previous, timestamp in (
                 (old, None, FIRST_EVENT),
                 (latest, old.id, SECOND_EVENT),
@@ -164,6 +173,50 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
         session.add(unknown)
         session.flush()
         ids["unknown"] = unknown.id
+        # More pages than one backfill batch.
+        batch_pages = [
+            AgentPage(
+                workspace_id=workspace.id,
+                title=f"Page {number}",
+                slug=f"page-{number}",
+                category="skill",
+                lifecycle_status="active",
+            )
+            for number in range(130)
+        ]
+        session.add_all(batch_pages)
+        session.flush()
+        batch_versions = [
+            AgentPageVersion(
+                workspace_id=workspace.id,
+                agent_page_id=page.id,
+                version_no=1,
+                body_markdown="Published body.",
+                actor_type="human",
+                version_status="active_snapshot",
+            )
+            for page in batch_pages
+        ]
+        session.add_all(batch_versions)
+        session.flush()
+        for page, version in zip(batch_pages, batch_versions, strict=True):
+            page.current_active_version_id = version.id
+            session.add(
+                AuditEvent(
+                    workspace_id=workspace.id,
+                    actor_kind="human",
+                    actor_id="test",
+                    action="agent_page.activated",
+                    target_kind="agent_page",
+                    target_id=page.id,
+                    created_at=FIRST_EVENT,
+                    payload={
+                        "version_id": str(version.id),
+                        "previous_active_version_id": None,
+                    },
+                )
+            )
+        batch_page_ids = [page.id for page in batch_pages]
     engine.dispose()
     config = _config(url)
     # The actual previous release schema is the upgrade's starting point;
@@ -209,13 +262,22 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
     engine = create_engine(url)
     try:
         with Session(engine) as session:
-            assert session.get(ContextPage, ids["context_page"]).content_changed_at == (
-                SECOND_EVENT if hard_break else FIRST_EVENT
-            )
-            assert session.get(AgentPage, ids["agent_page"]).content_changed_at == (
-                SECOND_EVENT if hard_break else FIRST_EVENT
-            )
+            for hard_break in (False, True):
+                expected = SECOND_EVENT if hard_break else FIRST_EVENT
+                for model, kind in (
+                    (ContextPage, "context_page"),
+                    (AgentPage, "agent_page"),
+                ):
+                    page = session.get(model, ids[kind, hard_break])
+                    assert page.content_changed_at == expected, (kind, hard_break)
             assert session.get(ContextPage, ids["unknown"]).content_changed_at is None
+            timestamps = session.scalars(
+                select(AgentPage.content_changed_at).where(
+                    AgentPage.id.in_(batch_page_ids)
+                )
+            ).all()
+            assert len(timestamps) == 130
+            assert set(timestamps) == {FIRST_EVENT}
         inspector = inspect(engine)
         assert "ix_tree_rail_backfill_audit_target" not in {
             index["name"] for index in inspector.get_indexes("audit_event")
@@ -485,70 +547,5 @@ def test_upgrade_uses_newest_exact_version_event_across_uuid_spellings(same_time
             ).scalar_one() == timestamp.replace(tzinfo=None).isoformat(
                 sep=" ", timespec="microseconds"
             )
-    finally:
-        engine.dispose()
-
-
-def test_backfill_completes_beyond_one_page_batch(tmp_path, tmp_path_factory):
-    database = tmp_path / "tree-metadata-multiple-batches.sqlite"
-    url = shared_templates(tmp_path_factory).clone("head", database)
-    engine = create_engine(url)
-    with Session(engine) as session, session.begin():
-        workspace = seed_default_workspace(session)
-        pages = [
-            AgentPage(
-                workspace_id=workspace.id,
-                title=f"Page {number}",
-                slug=f"page-{number}",
-                category="skill",
-                lifecycle_status="active",
-            )
-            for number in range(130)
-        ]
-        session.add_all(pages)
-        session.flush()
-        versions = [
-            AgentPageVersion(
-                workspace_id=workspace.id,
-                agent_page_id=page.id,
-                version_no=1,
-                body_markdown="Published body.",
-                actor_type="human",
-                version_status="active_snapshot",
-            )
-            for page in pages
-        ]
-        session.add_all(versions)
-        session.flush()
-        for page, version in zip(pages, versions, strict=True):
-            page.current_active_version_id = version.id
-            session.add(
-                AuditEvent(
-                    workspace_id=workspace.id,
-                    actor_kind="human",
-                    actor_id="test",
-                    action="agent_page.activated",
-                    target_kind="agent_page",
-                    target_id=page.id,
-                    created_at=FIRST_EVENT,
-                    payload={
-                        "version_id": str(version.id),
-                        "previous_active_version_id": None,
-                    },
-                )
-            )
-        page_ids = [page.id for page in pages]
-    engine.dispose()
-    config = _config(url)
-    command.downgrade(config, "efcbcf724889")
-    command.upgrade(config, "head")
-    engine = create_engine(url)
-    try:
-        with Session(engine) as session:
-            timestamps = session.scalars(
-                select(AgentPage.content_changed_at).where(AgentPage.id.in_(page_ids))
-            ).all()
-            assert len(timestamps) == 130
-            assert set(timestamps) == {FIRST_EVENT}
     finally:
         engine.dispose()

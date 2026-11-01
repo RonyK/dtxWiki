@@ -65,6 +65,7 @@ from backend.app.db_errors import SCHEMA_MISMATCH_MESSAGE, is_database_schema_mi
 from backend.app.errors import build_rest_error_response
 from backend.app.plugins import load_plugins
 from backend.app.settings import Settings, get_settings
+from backend.app.shared_routes import DtxwikiApp, include_shared_router
 from backend.catalog.library_family_presets import (
     get_library_family_preset_catalog_repository,
 )
@@ -257,7 +258,7 @@ def create_app(
     # readiness: a process that cannot land workspace writes should never
     # reach the point of accepting them.
     check_storage_topology(resolved_container.db)
-    app = FastAPI(
+    app = DtxwikiApp(
         title=resolved_settings.app_name,
         version=resolved_settings.app_version,
         license_info={"name": LICENSE_EXPRESSION, "identifier": LICENSE_EXPRESSION},
@@ -358,37 +359,37 @@ def create_app(
     )
     app.add_exception_handler(Exception, unhandled_exception_handler)
     app.add_exception_handler(InputPolicyError, input_policy_exception_handler)
-    app.include_router(health_root_router)
+    include_shared_router(app, health_root_router)
     mount_storage_topology_health(app, resolved_container)
-    app.include_router(auth_router, prefix="/api/v1")
-    app.include_router(auth_sso_router, prefix="/api/v1")
-    app.include_router(auth_verification_router, prefix="/api/v1")
-    app.include_router(capabilities_router, prefix="/api/v1")
-    app.include_router(admin_router, prefix="/api/v1")
-    app.include_router(users_router, prefix="/api/v1")
-    app.include_router(inbox_router, prefix="/api/v1")
-    app.include_router(workspace_members_router, prefix="/api/v1")
-    app.include_router(workspace_access_router, prefix="/api/v1")
-    app.include_router(context_pages_router, prefix="/api/v1")
-    app.include_router(context_media_router, prefix="/api/v1")
-    app.include_router(agent_bundles_router, prefix="/api/v1")
+    include_shared_router(app, auth_router, prefix="/api/v1")
+    include_shared_router(app, auth_sso_router, prefix="/api/v1")
+    include_shared_router(app, auth_verification_router, prefix="/api/v1")
+    include_shared_router(app, capabilities_router, prefix="/api/v1")
+    include_shared_router(app, admin_router, prefix="/api/v1")
+    include_shared_router(app, users_router, prefix="/api/v1")
+    include_shared_router(app, inbox_router, prefix="/api/v1")
+    include_shared_router(app, workspace_members_router, prefix="/api/v1")
+    include_shared_router(app, workspace_access_router, prefix="/api/v1")
+    include_shared_router(app, context_pages_router, prefix="/api/v1")
+    include_shared_router(app, context_media_router, prefix="/api/v1")
+    include_shared_router(app, agent_bundles_router, prefix="/api/v1")
     # Unauthenticated public read surface (T16) — structurally RBAC-isolated.
-    app.include_router(public_router, prefix="/api/v1")
+    include_shared_router(app, public_router, prefix="/api/v1")
     # Split deployments may let an overlay own this projection. Disabling the
     # core route is required because an extra mount registered later cannot
     # replace FastAPI's first matching route.
     if include_llms_txt:
-        app.include_router(llms_txt_router)
-    app.include_router(library_preview_router, prefix="/api/v1")
-    app.include_router(library_semantic_router, prefix="/api/v1")
-    app.include_router(read_router, prefix="/api/v1")
-    app.include_router(mcp_apps_router, prefix="/api/v1")
-    app.include_router(graph_router, prefix="/api/v1")
-    app.include_router(link_preview_router, prefix="/api/v1")
-    app.include_router(mcp_chats_router, prefix="/api/v1")
-    app.include_router(oauth_router)
-    app.include_router(mcp_http_router)
-    app.include_router(metrics_router)
+        include_shared_router(app, llms_txt_router)
+    include_shared_router(app, library_preview_router, prefix="/api/v1")
+    include_shared_router(app, library_semantic_router, prefix="/api/v1")
+    include_shared_router(app, read_router, prefix="/api/v1")
+    include_shared_router(app, mcp_apps_router, prefix="/api/v1")
+    include_shared_router(app, graph_router, prefix="/api/v1")
+    include_shared_router(app, link_preview_router, prefix="/api/v1")
+    include_shared_router(app, mcp_chats_router, prefix="/api/v1")
+    include_shared_router(app, oauth_router)
+    include_shared_router(app, mcp_http_router)
+    include_shared_router(app, metrics_router)
     plugin_registry.mount(app)
     if extra_mount is not None:
         extra_mount(app)

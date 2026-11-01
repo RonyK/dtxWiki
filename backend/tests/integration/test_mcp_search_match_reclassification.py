@@ -192,10 +192,15 @@ def _seed_initial_release_search_matches(tmp_path: Path, sqlite_templates):
     return config, engine, workspace_id, chat_id, edge_id
 
 
-@pytest.mark.parametrize("target", ["efcbcf724889", "head"])
 def test_core_schema_upgrade_reclassifies_rows_from_the_initial_release(
-    tmp_path: Path, sqlite_templates, monkeypatch, target
+    tmp_path: Path, sqlite_templates, monkeypatch
 ):
+    # One traversal from the seeded 0001 search-match rows: 0001 ->
+    # efcbcf724889 (the released core) -> head. The released core is checked
+    # twice at its stop: the frozen normalizer's reclassification, and the
+    # current projection writers against its schema without graph columns
+    # (inside a rolled-back transaction). The head stop then proves later
+    # revisions keep that result. All three used to start from the same seed.
     config, engine, workspace_id, chat_id, edge_id = (
         _seed_initial_release_search_matches(tmp_path, sqlite_templates)
     )
@@ -233,52 +238,47 @@ def test_core_schema_upgrade_reclassifies_rows_from_the_initial_release(
     monkeypatch.setattr(
         search_schema, "reclassify_search_matches", seed_stale_projection
     )
-    command.upgrade(config, target)
 
-    with engine.connect() as connection:
-        assert connection.execute(
-            text(
-                "SELECT verb, occurrence_count FROM mcp_chat_artifact_link "
-                "WHERE chat_session_id = :chat_id"
-            ),
-            {"chat_id": chat_id.hex},
-        ).all() == [("search_match", 1)]
-        assert (
-            connection.scalar(
+    def assert_reclassified(expected_revision):
+        with engine.connect() as connection:
+            assert connection.execute(
                 text(
-                    "SELECT verb FROM mcp_chat_tool_call_artifact WHERE id = :edge_id"
+                    "SELECT verb, occurrence_count FROM mcp_chat_artifact_link "
+                    "WHERE chat_session_id = :chat_id"
                 ),
-                {"edge_id": edge_id.hex},
-            )
-            == "search_match"
-        )
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-            ScriptDirectory.from_config(config).get_current_head()
-            if target == "head"
-            else target
-        )
-        assert connection.scalar(text("SELECT COUNT(*) FROM edge_projection")) == 0
-        assert connection.scalar(text("SELECT COUNT(*) FROM knowledge_node_stat")) == 0
-        assert connection.execute(
-            text(
-                "SELECT edge_projection_version, authority_projection_version "
-                "FROM workspace"
-            )
-        ).one() == (1, 1)
-        if target == "head":
+                {"chat_id": chat_id.hex},
+            ).all() == [("search_match", 1)]
             assert (
-                connection.scalar(text("SELECT COUNT(*) FROM graph_observation")) == 0
+                connection.scalar(
+                    text(
+                        "SELECT verb FROM mcp_chat_tool_call_artifact "
+                        "WHERE id = :edge_id"
+                    ),
+                    {"edge_id": edge_id.hex},
+                )
+                == "search_match"
             )
-    engine.dispose()
+            assert (
+                connection.scalar(text("SELECT version_num FROM alembic_version"))
+                == expected_revision
+            )
+            assert connection.scalar(text("SELECT COUNT(*) FROM edge_projection")) == 0
+            assert (
+                connection.scalar(text("SELECT COUNT(*) FROM knowledge_node_stat")) == 0
+            )
+            assert connection.execute(
+                text(
+                    "SELECT edge_projection_version, authority_projection_version "
+                    "FROM workspace"
+                )
+            ).one() == (1, 1)
 
-
-def test_released_core_projection_can_insert_and_refresh_without_graph_columns(
-    tmp_path: Path, sqlite_templates, monkeypatch
-):
-    config, engine, workspace_id, _chat_id, _edge_id = (
-        _seed_initial_release_search_matches(tmp_path, sqlite_templates)
-    )
     command.upgrade(config, "efcbcf724889")
+    assert_reclassified("efcbcf724889")
+
+    # The released core projection can insert and refresh without the graph
+    # columns. Isolate storage compatibility from the independently tested
+    # co-read source.
     rows = [
         {
             "workspace_id": workspace_id,
@@ -295,11 +295,10 @@ def test_released_core_projection_can_insert_and_refresh_without_graph_columns(
             "first_observed_at": NOW - timedelta(days=1),
         }
     ]
-    # Isolate storage compatibility from the independently tested co-read source.
-    monkeypatch.setattr(
-        edge_registry, "_co_access_rows", lambda *_args, **_kwargs: rows
-    )
-    with engine.begin() as connection:
+    with monkeypatch.context() as co_access, engine.connect() as connection:
+        co_access.setattr(
+            edge_registry, "_co_access_rows", lambda *_args, **_kwargs: rows
+        )
         assert {"support_session_count", "first_observed_at"}.isdisjoint(
             column["name"]
             for column in inspect(connection).get_columns("edge_projection")
@@ -322,12 +321,22 @@ def test_released_core_projection_can_insert_and_refresh_without_graph_columns(
                 ).one()
                 == stored
             )
+            # The normalizer left both versions at 1 (asserted above): the
+            # first refresh and recompute bump each once, the unchanged
+            # second refresh does not.
             assert connection.execute(
                 select(
                     Workspace.edge_projection_version,
                     Workspace.authority_projection_version,
                 ).where(Workspace.id == workspace_id)
-            ).one() == (1, 1)
+            ).one() == (2, 2)
+        # Leave the released core exactly as the upgrade produced it.
+        connection.rollback()
+
+    command.upgrade(config, "head")
+    assert_reclassified(ScriptDirectory.from_config(config).get_current_head())
+    with engine.connect() as connection:
+        assert connection.scalar(text("SELECT COUNT(*) FROM graph_observation")) == 0
     engine.dispose()
 
 
