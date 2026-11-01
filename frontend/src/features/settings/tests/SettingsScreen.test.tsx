@@ -19,6 +19,7 @@ import {
   WorkspaceProvider,
 } from "../../../shared/workspace/WorkspaceContext";
 import { i18n, setLocale } from "../../../shared/i18n";
+import { useWorkspaceRoute } from "../../../shared/lib/workspaceRoutes";
 import { SettingsScreen } from "../SettingsScreen";
 
 const BASE = "https://wiki.example.test";
@@ -9163,12 +9164,43 @@ describe("SettingsScreen", () => {
     };
   }
 
-  it("opens Labs from a shared link and through the searchable account navigation", async () => {
+  it("keeps the URL workspace when browsing Labs, MCP access, and content policies", async () => {
     const user = userEvent.setup();
-    mockFetch(navFixture(false));
+    const defaultWorkspaceId = "00000000-0000-4000-8000-000000000002";
+    mockFetch({
+      ...navFixture(false),
+      [`${BASE}/api/v1/workspaces`]: {
+        data: {
+          current_workspace_id: defaultWorkspaceId,
+          default_workspace_id: defaultWorkspaceId,
+          workspaces: [
+            workspaceSummary(defaultWorkspaceId, "Default workspace", "default"),
+            workspaceSummary(WORKSPACE_ID, "URL workspace", "url-workspace"),
+          ],
+        },
+      },
+    });
+
+    function RoutedSettings() {
+      const location = useLocation();
+      const routeWorkspaceId = useWorkspaceRoute()?.workspaceId ?? null;
+      return (
+        <WorkspaceProvider routeWorkspaceId={routeWorkspaceId}>
+          <WorkspaceRefreshGate>
+            <Routes>
+              <Route path="/workspaces/:workspaceId/settings/*" element={<SettingsScreen />} />
+              <Route path="/account/integrations" element={<SettingsScreen scope="account" />} />
+              <Route path="/settings/server" element={<SettingsScreen scope="server" />} />
+            </Routes>
+            <output data-testid="settings-navigation-location">{location.pathname}{location.search}</output>
+          </WorkspaceRefreshGate>
+        </WorkspaceProvider>
+      );
+    }
+
     render(
       <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=labs`]}>
-        <SettingsScreen />
+        <RoutedSettings />
       </MemoryRouter>,
     );
 
@@ -9190,6 +9222,20 @@ describe("SettingsScreen", () => {
     expect(within(nav).queryByRole("button", { name: "Workspace" })).not.toBeInTheDocument();
     await user.click(within(nav).getByRole("button", { name: "Labs" }));
     expect(await screen.findByRole("heading", { name: "Labs", level: 1 })).toBeInTheDocument();
+    expect(screen.getByTestId("settings-navigation-location")).toHaveTextContent("/account/integrations?section=labs");
+
+    const navigation = () => within(screen.getByRole("navigation", { name: "Settings sections" }));
+    await user.clear(navigation().getByRole("searchbox", { name: "Filter settings sections" }));
+    await user.click(navigation().getByRole("button", { name: /MCP access/i }));
+    expect(await screen.findByRole("heading", { name: "Connect your AI app" })).toBeInTheDocument();
+    expect(screen.getByTestId("settings-navigation-location")).toHaveTextContent(`/workspaces/${WORKSPACE_ID}/settings/integrations?section=mcp`);
+    expect(screen.queryByRole("combobox", { name: "Choose a workspace to set up a connection" })).not.toBeInTheDocument();
+
+    await user.click(navigation().getByRole("button", { name: "Labs" }));
+    await screen.findByRole("heading", { name: "Labs", level: 1 });
+    await user.click(navigation().getByRole("button", { name: /^Content policies/ }));
+    expect(await screen.findByRole("tablist", { name: "Content policies" })).toBeInTheDocument();
+    expect(screen.getByTestId("settings-navigation-location")).toHaveTextContent(`/workspaces/${WORKSPACE_ID}/settings?section=policies`);
   });
 
   it("groups Settings sections and marks the server-wide ones for an admin", async () => {

@@ -429,6 +429,11 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
   const { t } = useTranslation("settings");
   const hasUnsavedSettings = useSettingsDirtyCheck();
   const workspaceContext = useOptionalWorkspaceContext();
+  // Account and server settings have no workspace in their URL. Use the
+  // verified selection for navigation back to workspace settings; API calls
+  // still require the workspace explicitly named by the current route.
+  const navigationWorkspaceId =
+    routeWorkspaceId ?? workspaceContext?.selectedWorkspace?.id ?? null;
   const selectedWorkspaceId = routeWorkspaceId ?? scope;
   // The line above is a STATE-BUCKET KEY, not a workspace id -- it falls back
   // to a sentinel string so per-workspace UI state can be keyed even before a
@@ -2007,8 +2012,13 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
 
   function settingsDestination(section: SettingsSection) {
     if (["deployment", "users"].includes(section) || scope === "server" && ["jobs", "attachments"].includes(section)) return "/settings/server";
-    if (section === "mcp" && scope !== "workspace" || section === "labs") return "/account/integrations";
-    return routeWorkspaceId ? workspacePath(routeWorkspaceId, "settings") : "/workspaces/find";
+    if (section === "labs") return "/account/integrations";
+    if (section === "mcp") {
+      return navigationWorkspaceId
+        ? workspacePath(navigationWorkspaceId, "settings/integrations")
+        : "/account/integrations";
+    }
+    return navigationWorkspaceId ? workspacePath(navigationWorkspaceId, "settings") : "/workspaces/find";
   }
 
   function selectSection(section: SettingsSection, tab?: SettingsPolicyTab) {
@@ -2040,7 +2050,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
       setPolicySaveError(null);
       navigate(
         {
-          pathname: routeWorkspaceId ? workspacePath(routeWorkspaceId, "settings") : "/workspaces/find",
+          pathname: navigationWorkspaceId ? workspacePath(navigationWorkspaceId, "settings") : "/workspaces/find",
           search:
             tab === DEFAULT_POLICY_TAB
               ? "?section=policies"
@@ -3905,7 +3915,24 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
                 {mcpClientError ? (
                   <StatusBanner tone="warning">{mcpClientError}</StatusBanner>
                 ) : null}
-                {routeWorkspaceId ? mcpAppHub : <section className="feature-section"><label>{t("access.chooseSetupWorkspace", { defaultValue: "Choose a workspace to set up a connection" })}<select value="" onChange={event => { if (event.target.value) navigate(workspacePath(event.target.value, "settings/integrations")); }}><option value="">{t("access.chooseWorkspace", { defaultValue: "Choose a workspace" })}</option>{membershipWorkspaces.map(workspace => <option key={workspace.id} value={workspace.id}>{workspace.title}</option>)}</select></label></section>}
+                {routeWorkspaceId ? mcpAppHub : (
+                  <section className="feature-section">
+                    <label className="field-stack">
+                      {t("access.chooseSetupWorkspace", { defaultValue: "Choose a workspace to set up a connection" })}
+                      <select
+                        value=""
+                        onChange={event => {
+                          if (event.target.value) navigate(workspacePath(event.target.value, "settings/integrations"));
+                        }}
+                      >
+                        <option value="">{t("access.chooseWorkspace", { defaultValue: "Choose a workspace" })}</option>
+                        {membershipWorkspaces.map(workspace => (
+                          <option key={workspace.id} value={workspace.id}>{workspace.title}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </section>
+                )}
                 {accessKeyIsFallback ? (
                   <>
                     {oauthAppsCard}
