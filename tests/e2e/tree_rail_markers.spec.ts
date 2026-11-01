@@ -57,15 +57,20 @@ const EDITOR_DRAWER_VIEWPORT = VIEWPORTS[1];
 // Firefox DOMRect rounding is below 1/65536 CSS px.
 const GEOMETRY_EPSILON = 0.001;
 
-// Only the viewport tests below (the two-viewport loop and the mobile editor
-// folder-menu test) carry @cross-browser. The six-combination test
-// preserves shared row geometry and Context marker styling on every engine.
-// Favorite persistence, Library/Agent marker colors, live 72-hour expiry and
-// viewer isolation are checked on Chromium in the standard profile; exhaustive
-// runs retain these checks on every engine.
+// Only the mobile-390px tests carry @cross-browser: the tooltip and
+// six-combination cases of the two-viewport loop, and the editor folder-menu
+// test. The engine behavior in the loop -- hit-testing through the tooltip,
+// native PageDown scrolling, marker paint and clipping -- does not depend on
+// the width, and the mobile drawer adds its own clipping layer, so the
+// desktop-280px-rail cases run on Chromium alone. Favorite persistence,
+// Library/Agent marker colors, live 72-hour expiry and viewer isolation are
+// checked on Chromium in the standard profile; exhaustive runs retain every
+// case here on every engine.
+const crossBrowserTag = (viewport: (typeof VIEWPORTS)[number]) =>
+  viewport === EDITOR_DRAWER_VIEWPORT ? " @cross-browser" : "";
 test.describe("TreeRail document states and personal favorites", () => {
   for (const viewport of VIEWPORTS) {
-    test(`${viewport.key}: status tooltip never takes the pointer, leaves a downward sweep to the next row, dismisses with Escape, and follows native scrolling @cross-browser`, async ({ page }, testInfo) => {
+    test(`${viewport.key}: status tooltip never takes the pointer, leaves a downward sweep to the next row, dismisses with Escape, and follows native scrolling${crossBrowserTag(viewport)}`, async ({ page }, testInfo) => {
       test.setTimeout(90_000);
       await page.setViewportSize(viewport);
       await authenticatePage(page, testInfo, `tree-tooltip-${viewport.key}`);
@@ -181,7 +186,7 @@ test.describe("TreeRail document states and personal favorites", () => {
       await evidenceScreenshot(page, testInfo, `${viewport.key}-tooltip-after-native-scroll-and-resize`, { animations: "disabled" });
     });
 
-    test(`${viewport.key}: six real Context state/favorite combinations preserve title space @cross-browser`, async ({ page }, testInfo) => {
+    test(`${viewport.key}: six real Context state/favorite combinations preserve title space${crossBrowserTag(viewport)}`, async ({ page }, testInfo) => {
       test.setTimeout(90_000);
       await page.setViewportSize(viewport);
       await authenticatePage(page, testInfo, `tree-markers-${viewport.key}`);

@@ -115,7 +115,7 @@ async function metrics(page: Page) {
   }));
 }
 
-test("real grouped feed, names, review links and filter navigation @cross-browser", async ({ page }, info) => {
+test("real grouped feed, names, review links and filter navigation", async ({ page }, info) => {
   const seed = await setup(page, info);
   await page.addInitScript(() => localStorage.setItem("dtxwiki.uiLanguage", "en"));
   await page.setViewportSize({ width: 390, height: 844 });
@@ -193,8 +193,11 @@ test("real grouped feed, names, review links and filter navigation @cross-browse
 
 // No measurement here depends on the locale. 1440px keeps the desktop grid and
 // 320px the narrow (<= 700px) footer, both with the wider English labels.
+// Computed fonts, contrast and the dark-theme cascade do not depend on the
+// width, so Firefox and WebKit run 320px alone: it adds the dark full-names
+// dialog and its fit. 1440px stays on Chromium.
 for (const [language, width] of [["en", 1440], ["en", 320]] as const) {
-  test(`activity proportions and component dark theme (${language}, ${width}) @cross-browser`, async ({ page }, info) => {
+  test(`activity proportions and component dark theme (${language}, ${width})${width === 320 ? " @cross-browser" : ""}`, async ({ page }, info) => {
     const seed = await setup(page, info);
     await page.addInitScript(locale => localStorage.setItem("dtxwiki.uiLanguage", locale), language);
     const evidence: unknown[] = [];

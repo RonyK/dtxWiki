@@ -2,8 +2,10 @@ import { expect, test } from "./fixtures";
 import { authenticatePage, currentWorkspace, workspaceUrl } from "./auth";
 import { evidenceScreenshot } from "./evidence";
 
+// The clipboard round trip does not depend on the locale or the width, so
+// Firefox and WebKit run the ko 390px case alone; en 1440px stays on Chromium.
 for (const [locale, width] of [["en", 1440], ["ko", 390]] as const) {
-  test(`@cross-browser ${locale} ${width}px copies issued keys and setup commands into the clipboard`, async ({ page }, testInfo) => {
+  test(`${locale === "ko" ? "@cross-browser " : ""}${locale} ${width}px copies issued keys and setup commands into the clipboard`, async ({ page }, testInfo) => {
     await authenticatePage(page, testInfo, `mcp-copy-${locale}`);
     await page.setViewportSize({ width, height: 900 });
     const privateHttp = process.env.DTXWIKI_E2E_PRIVATE_HTTP === "1";

@@ -2,7 +2,7 @@ import { test, expect } from "./fixtures";
 import { workspaceUrl } from "./auth";
 import { mkdirSync, writeFileSync } from "node:fs";
 
-test("Context activity shows changes, decisions and exact links @cross-browser", async ({ page, browser, browserName }, testInfo) => {
+test("Context activity shows changes, decisions and exact links", async ({ page, browser, browserName }, testInfo) => {
   const out = testInfo.outputPath("context-activity");
   mkdirSync(out, {recursive:true});
   const errors: string[] = [];

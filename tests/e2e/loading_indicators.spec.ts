@@ -6,9 +6,14 @@ const viewportCases = [
   { locale: "en", width: 1440, height: 900 },
   { locale: "ko", width: 390, height: 844 },
 ] as const;
+// The engine behavior checked here -- computed glyph size, the reduced-motion
+// media query, focus returning on Escape -- is the same at either locale and
+// width, so Firefox and WebKit run one case: 390px, where the picker's loading
+// row must still fit. The other case stays on Chromium.
+const CROSS_BROWSER_CASE = viewportCases[1];
 
 for (const viewport of viewportCases) {
-  test(`shared loading indicators ${viewport.locale} ${viewport.width}px @cross-browser`, async ({ page }, testInfo) => {
+  test(`shared loading indicators ${viewport.locale} ${viewport.width}px${viewport === CROSS_BROWSER_CASE ? " @cross-browser" : ""}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     await page.addInitScript((locale) => {
       localStorage.setItem("dtxwiki.uiLanguage", locale);

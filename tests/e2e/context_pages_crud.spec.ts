@@ -35,7 +35,7 @@ test("shows the dashboard at the authenticated root route", async ({
   ).toHaveAttribute("href", workspaceUrl(workspace.id, "context/pages/new"));
 });
 
-test("creates, reads, edits, and shows stale conflict in the browser @cross-browser", async ({
+test("creates, reads, edits, and shows stale conflict in the browser", async ({
   page,
 }, testInfo) => {
   const request = page.request;
