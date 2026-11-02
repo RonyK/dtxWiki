@@ -45,8 +45,8 @@ vi.mock("../../../shared/workspace/WorkspaceContext", () => ({
 }));
 
 vi.mock("../../../shared/auth/AuthContext", () => ({
-  useAuth: () => ({ user: { user_id: authState.userId } }),
-  useOptionalAuth: () => ({ user: { user_id: authState.userId } }),
+  useAuth: () => ({ status: "authenticated", user: { user_id: authState.userId } }),
+  useOptionalAuth: () => ({ status: "authenticated", user: { user_id: authState.userId } }),
 }));
 
 vi.mock("../workspace/WorkspaceMapCanvas", async () => {
@@ -1422,6 +1422,8 @@ describe("WorkspaceGraphScreen", () => {
   });
 
   it.each([false, true])("purges owner restoration when capability revalidation unmounts the Screen (already invalidated: %s)", async (alreadyInvalidated) => {
+    // Exercise workspace capability revalidation after the account's Labs opt-in.
+    window.localStorage.setItem(`dtxwiki:labs:${authState.userId}`, JSON.stringify({ knowledgeMap: true }));
     const enabled = {
       workspace_map: { effective_enabled: true, workspace_enabled: true, service_available: true, reason: "enabled" },
       usage_relation_signals_enabled: true,
