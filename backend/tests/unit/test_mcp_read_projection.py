@@ -967,30 +967,36 @@ def test_batch_shares_visibility_and_edge_queries_for_repeated_and_distinct_read
             _call(session, workspace, client, page, version, chat_token=token)[0]
             for _ in range(20)
         ]
-        # Reads of distinct pages share the batch too: one Context read per
-        # kind, not about three per call (Dashboard feed, Q3).
-        for _, _, other_page, other_version, _ in [_seed(session) for _ in range(20)]:
-            call, *_ = _call(
-                session, workspace, client, other_page, other_version, chat_token=token
-            )
-            calls.append(call)
-        statements = []
-
-        def capture(_connection, _cursor, statement, _parameters, _context, _many):
-            statements.append(statement)
-
+        _, _, other_page, other_version, _ = _seed(session)
+        other, *_ = _call(
+            session, workspace, client, other_page, other_version, chat_token=token
+        )
         connection = session.connection()
-        event.listen(connection, "before_cursor_execute", capture)
-        try:
-            projections = project_mcp_activity_batch(session, calls, actor)
-        finally:
-            event.remove(connection, "before_cursor_execute", capture)
-        assert len(projections) == 40
-        repeated = [projections[call.id] for call in calls[:20]]
-        assert len({projection.grouping_key for projection in repeated}) == 1
-        assert all(projection.grouping_key is not None for projection in repeated)
+
+        def project(batch):
+            statements = []
+
+            def capture(_connection, _cursor, statement, _params, _context, _many):
+                statements.append(statement)
+
+            event.listen(connection, "before_cursor_execute", capture)
+            try:
+                return project_mcp_activity_batch(session, batch, actor), statements
+            finally:
+                event.remove(connection, "before_cursor_execute", capture)
+
+        projections, statements = project(calls)
+        assert len(projections) == 20
+        assert (
+            len({projection.grouping_key for projection in projections.values()}) == 1
+        )
         assert all(
-            projection.title == "Visible read title"
-            for projection in projections.values()
+            projection.grouping_key is not None for projection in projections.values()
         )
         assert len(statements) < 10
+        # One read of another page costs no statement: pages and versions load
+        # per batch, not per distinct target (Dashboard feed, Q3). Comparing
+        # with the batch above needs one such page, not a large fixture.
+        mixed, mixed_statements = project([*calls, other])
+        assert mixed[other.id].title == "Visible read title"
+        assert len(mixed_statements) == len(statements)
