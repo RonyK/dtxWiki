@@ -32,7 +32,10 @@ from backend.models.library import LibraryItem, LibraryItemVersion
 from backend.models.mcp_chat import McpChatArtifactVerb
 from backend.models.tree import WorkspaceTreeNode
 from backend.services.entity_ref import EntityKind
-from backend.services.graph_cache import bump_edge_version
+from backend.services.graph_cache import (
+    bump_edge_version,
+    lock_edge_projection_workspace,
+)
 from backend.services.graph_observation_service import GraphObservationService
 from backend.services.graph_semantics import EDGE_SEMANTICS
 from backend.services.indexing.co_read import (
@@ -296,6 +299,7 @@ def reconcile_wikilink_edge_projection(
     caller already locked, so a page committed during the run is never mistaken
     for stale state. The caller owns the workspace revision bump.
     """
+    lock_edge_projection_workspace(session, workspace_id)
 
     locked_source_ids = frozenset(source_page_ids)
     desired_rows = [
@@ -908,6 +912,7 @@ def refresh_page_edge_projection(
     transaction while preserving stable row identity and avoiding no-op
     revision changes (failure fails the publish, like other projections).
     """
+    lock_edge_projection_workspace(session, workspace_id)
     existing_rows = list(
         session.scalars(
             select(EdgeProjection)
@@ -1114,6 +1119,7 @@ def refresh_tree_node_edge_projection(
     """
     if not node_ids:
         return
+    lock_edge_projection_workspace(session, workspace_id)
     nodes = session.scalars(
         select(WorkspaceTreeNode).where(
             WorkspaceTreeNode.workspace_id == workspace_id,
@@ -1222,6 +1228,7 @@ def refresh_tree_edge_projection(session: Session, workspace_id: UUID) -> None:
     an O(workspace) rebuild. A tripwire test asserts production paths do not
     reach here; keep it that way.
     """
+    lock_edge_projection_workspace(session, workspace_id)
     session.execute(
         delete(EdgeProjection)
         .where(EdgeProjection.workspace_id == workspace_id)
@@ -1257,12 +1264,8 @@ def refresh_co_access_edge_projection(
             rows=_co_access_rows(session, workspace_id, now=now),
             now=now,
         )
-    from backend.services.co_access import (
-        lock_co_access_workspace,
-        sync_co_access_projection,
-    )
+    from backend.services.co_access import sync_co_access_projection
 
-    lock_co_access_workspace(session, workspace_id)
     return sync_co_access_projection(session, workspace_id, usage_signals_enabled=True)
 
 
@@ -1322,10 +1325,8 @@ def clear_co_access_edge_projection(session: Session, workspace_id: UUID) -> int
     This is what the owner's usage-signal switch does when it is off. Turning
     it back on lets the next refresh rebuild the rows from the same records.
     """
+    lock_edge_projection_workspace(session, workspace_id)
 
-    from backend.services.co_access import lock_co_access_workspace
-
-    lock_co_access_workspace(session, workspace_id)
     removed = session.execute(
         delete(EdgeProjection).where(
             EdgeProjection.workspace_id == workspace_id,
@@ -1351,6 +1352,7 @@ def rebuild_edge_projection(
     ``usage_signals_enabled`` is the owner's switch and has no default: with
     it off, co_access rows are removed like every other kind but not rebuilt.
     """
+    lock_edge_projection_workspace(session, workspace_id)
 
     session.execute(
         delete(EdgeProjection)

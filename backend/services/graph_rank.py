@@ -43,7 +43,7 @@ class RankParam:
     half_life_days: float | None
 
 
-# The 0822 table, verbatim and in its order.
+# Shared display parameters; storage weighting belongs to each producer.
 RANK_PARAMS: dict[str, RankParam] = {
     "wikilink": RankParam(1.00, 3, None),
     "citation_page": RankParam(0.95, 2, None),

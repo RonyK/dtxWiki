@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from backend.models.ask import AskSession, AskTurn, AskTurnCitation
 from backend.models.base import Base
@@ -676,11 +676,25 @@ def test_narrow_wikilink_reconcile_never_mutates_sources_outside_lock_set(
         outside_before = _edge_projection_snapshots(session, outside_edge_ids)
 
     with session_factory.begin() as session:
-        delta = reconcile_wikilink_edge_projection(
-            session,
-            workspace_id,
-            source_page_ids=frozenset({locked_source_id}),
-        )
+        statements = []
+        connection = session.connection()
+
+        def capture_statement(_conn, _cursor, statement, *_args):
+            statements.append(statement.lower())
+
+        event.listen(connection, "before_cursor_execute", capture_statement)
+        try:
+            delta = reconcile_wikilink_edge_projection(
+                session,
+                workspace_id,
+                source_page_ids=frozenset({locked_source_id}),
+            )
+        finally:
+            event.remove(connection, "before_cursor_execute", capture_statement)
+        # PostgreSQL writers must acquire the Workspace lock before touching
+        # edge rows; SQLite observes the same portable no-op UPDATE first.
+        assert statements[0].startswith("update workspace set")
+        assert any("edge_projection" in statement for statement in statements[1:])
 
     assert delta.desired_count == 1
     assert delta.inserted == 0

@@ -10,19 +10,19 @@ from collections.abc import Iterable
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import tuple_, update
+from sqlalchemy import tuple_
 from sqlalchemy.orm import Session
 
 from backend.models.graph import CoAccessPair
 from backend.models.mcp_chat import McpChatArtifactVerb, McpChatToolCallArtifact
 from backend.models.mcp_trace import MCPToolCall
-from backend.models.workspace import Workspace
 from backend.policy.mcp_scopes import FOCUSED_READ_TOOLS
 from backend.repositories.workspace_scoped import (
     delete_in_workspace,
     join_in_workspace,
     select_in_workspace,
 )
+from backend.services.graph_cache import lock_edge_projection_workspace
 from backend.services.indexing.co_read import CoReadPair, EntityRef, Read
 from backend.services.indexing.co_read_policy import (
     CO_ACCESS_MIN_SESSIONS,
@@ -44,12 +44,7 @@ def lock_co_access_workspace(session: Session, workspace_id: UUID) -> None:
     A no-op UPDATE also acquires SQLite's writer lock before the read/diff.
     The public graph revision changes only if visible relations change.
     """
-    session.execute(
-        update(Workspace)
-        .where(Workspace.id == workspace_id)
-        .values(edge_projection_version=Workspace.edge_projection_version)
-        .execution_options(synchronize_session=False)
-    )
+    lock_edge_projection_workspace(session, workspace_id)
 
 
 def _reads(
@@ -261,6 +256,7 @@ def sync_co_access_projection(
     from backend.services.entity_ref import EntityKind
     from backend.services.graph_cache import bump_edge_version
 
+    lock_co_access_workspace(session, workspace_id)
     pairs_statement = select_in_workspace(
         CoAccessPair,
         workspace_id=workspace_id,

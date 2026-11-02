@@ -28,7 +28,7 @@ from backend.models.user import User
 from backend.models.workspace import MCPClient, Workspace
 from backend.policy.auth import ActorContext
 from backend.schemas.read import GraphNeighborEntry, GraphNeighborsPayload
-from backend.services import graph_ppr
+from backend.services import co_access, graph_ppr
 from backend.services.co_access import rebuild_co_access_pairs
 from backend.services.eval.harness import (
     LaneMetrics,
@@ -182,7 +182,7 @@ def _seed_touches(
             workspace_id=workspace_id,
             request_id=uuid4(),
             tool_name=tool_name,
-            result_status="success",
+            result_status="succeeded",
         )
         session.add(tool_call)
         session.flush()
@@ -729,7 +729,7 @@ def test_a_failed_refresh_keeps_the_projection_and_a_retry_rebuilds_it(
         before = weight(session)
         _seed_chat_pair(session, workspace_id, left_id, right_id, occurred_at=now)
 
-    real_pairs = edge_registry.co_access_pairs
+    real_pairs = co_access.co_access_pairs
 
     def dies_after_one_pair(reads):
         for index, pair in enumerate(real_pairs(reads)):
@@ -737,14 +737,14 @@ def test_a_failed_refresh_keeps_the_projection_and_a_retry_rebuilds_it(
                 raise RuntimeError("tick cancelled")
             yield pair
 
-    monkeypatch.setattr(edge_registry, "co_access_pairs", dies_after_one_pair)
+    monkeypatch.setattr(co_access, "co_access_pairs", dies_after_one_pair)
     with pytest.raises(RuntimeError, match="tick cancelled"):
         with session_factory.begin() as session:
             rebuild_co_access_pairs(session, workspace_id)
     with session_factory() as session:
         assert weight(session) == pytest.approx(before)
 
-    monkeypatch.setattr(edge_registry, "co_access_pairs", real_pairs)
+    monkeypatch.setattr(co_access, "co_access_pairs", real_pairs)
     with session_factory.begin() as session:
         rebuild_co_access_pairs(session, workspace_id)
         assert weight(session) == pytest.approx(before * 1.5)

@@ -48,7 +48,7 @@ def test_no_amount_of_co_reading_outranks_one_authored_link():
     assert rank_score("wikilink", 1.0, None, NOW) == 0.25
 
 
-def test_rank_table_preserves_family_weights_with_lifetime_co_access():
+def test_rank_table_declares_shared_display_parameters():
     assert RANK_PARAMS == {
         "wikilink": RankParam(1.00, 3, None),
         "citation_page": RankParam(0.95, 2, None),
@@ -180,8 +180,8 @@ def test_denominator_kinds_are_exactly_the_kinds_effective_weight_divides():
     assert divided == DENOMINATOR_KINDS
 
 
-def test_co_access_ranks_lifetime_conversation_counts_without_recency():
-    """Cumulative counts stay comparable until recency is enabled separately."""
+def test_usage_ranking_consumes_stored_weights_without_recency():
+    """Display ranking leaves storage-time aging to its producer."""
 
     assert rank_param("co_access").half_life_days is None
     assert PREDECAYED_KINDS == frozenset()

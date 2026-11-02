@@ -8,6 +8,7 @@ from sqlalchemy import event, inspect, select
 from backend.models.context import EdgeProjection
 from backend.models.workspace import Workspace
 from backend.services.entity_ref import EntityKind
+from backend.services.graph_cache import lock_edge_projection_workspace
 from backend.services.indexing.edge_projection import (
     EdgeProjectionScope,
     build_edge_row,
@@ -19,9 +20,13 @@ def test_expired_foreign_row_is_rejected_without_autoflush(session_factory):
     # One DB case is necessary: a fake Session cannot reproduce an expired
     # ORM attribute refreshing itself and flushing unrelated pending work.
     with session_factory() as session:
-        workspace_id = session.scalar(
-            select(Workspace.id).where(Workspace.slug == "default")
-        )
+        workspace_id, revision_before, updated_before = session.execute(
+            select(
+                Workspace.id,
+                Workspace.edge_projection_version,
+                Workspace.updated_at,
+            ).where(Workspace.slug == "default")
+        ).one()
         foreign_workspace = Workspace(
             slug="projection-foreign", name="projection-foreign", title="Foreign"
         )
@@ -62,6 +67,16 @@ def test_expired_foreign_row_is_rejected_without_autoflush(session_factory):
 
         event.listen(session, "before_flush", before_flush)
         try:
+            # A producer's workspace lock must precede autoflush, while keeping
+            # both its public revision and ordinary workspace timestamp intact.
+            lock_edge_projection_workspace(session, workspace_id)
+            assert flushes == []
+            assert inspect(pending).pending
+            assert session.connection().execute(
+                select(Workspace.edge_projection_version, Workspace.updated_at).where(
+                    Workspace.id == workspace_id
+                )
+            ).one() == (revision_before, updated_before)
             with pytest.raises(ValueError, match="outside the producer"):
                 reconcile_edge_projection_rows(
                     session,
