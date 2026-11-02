@@ -7,6 +7,7 @@ the changed conversation; no conversation identity is copied into aggregates.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import tuple_, update
@@ -14,12 +15,25 @@ from sqlalchemy.orm import Session
 
 from backend.models.graph import CoAccessPair
 from backend.models.mcp_chat import McpChatArtifactVerb, McpChatToolCallArtifact
+from backend.models.mcp_trace import MCPToolCall
 from backend.models.workspace import Workspace
+from backend.policy.mcp_scopes import FOCUSED_READ_TOOLS
 from backend.repositories.workspace_scoped import (
     delete_in_workspace,
+    join_in_workspace,
     select_in_workspace,
 )
 from backend.services.indexing.co_read import CoReadPair, EntityRef, Read
+from backend.services.indexing.co_read_policy import (
+    CO_ACCESS_MIN_SESSIONS,
+    CO_ACCESS_SOURCE_BATCH_ROWS,
+    co_access_pairs,
+)
+from backend.services.indexing.edge_projection import (
+    EdgeProjectionScope,
+    build_edge_row,
+    reconcile_edge_projection_rows,
+)
 
 PairKey = tuple[EntityRef, EntityRef]
 
@@ -39,16 +53,30 @@ def lock_co_access_workspace(session: Session, workspace_id: UUID) -> None:
 
 
 def _reads(
-    session: Session, workspace_id: UUID, *, chat_session_id: UUID | None = None
+    session: Session,
+    workspace_id: UUID,
+    *,
+    chat_session_id: UUID | None = None,
+    since: datetime | None = None,
 ) -> Iterable[Read]:
     from backend.services.entity_ref import EntityKind
-    from backend.services.indexing.edge_registry import CO_ACCESS_SOURCE_BATCH_ROWS
 
     conditions = [McpChatToolCallArtifact.verb == McpChatArtifactVerb.VIEWED]
     if chat_session_id is not None:
         conditions.append(McpChatToolCallArtifact.chat_session_id == chat_session_id)
+    if since is not None:
+        conditions.append(McpChatToolCallArtifact.occurred_at >= since)
     statement = select_in_workspace(
         McpChatToolCallArtifact, workspace_id=workspace_id, conditions=conditions
+    )
+    statement = join_in_workspace(
+        statement,
+        McpChatToolCallArtifact,
+        MCPToolCall,
+        workspace_id=workspace_id,
+        on=(MCPToolCall.id == McpChatToolCallArtifact.mcp_tool_call_id)
+        & (MCPToolCall.result_status == "succeeded")
+        & MCPToolCall.tool_name.in_(FOCUSED_READ_TOOLS),
     )
     kinds = {kind.value for kind in EntityKind}
     rows = session.scalars(
@@ -74,7 +102,6 @@ def _reads(
 
 
 def _pairs(reads: Iterable[Read]) -> dict[PairKey, CoReadPair]:
-    from backend.services.indexing.edge_registry import co_access_pairs
 
     return {(pair.left, pair.right): pair for pair in co_access_pairs(reads)}
 
@@ -233,11 +260,6 @@ def sync_co_access_projection(
     from backend.models.context import EdgeProjection
     from backend.services.entity_ref import EntityKind
     from backend.services.graph_cache import bump_edge_version
-    from backend.services.indexing.edge_registry import (
-        CO_ACCESS_MIN_SESSIONS,
-        _edge,
-        _reconcile_edge_projection_rows,
-    )
 
     pairs_statement = select_in_workspace(
         CoAccessPair,
@@ -253,13 +275,14 @@ def sync_co_access_projection(
         ),
     )
     desired = [
-        _edge(
+        build_edge_row(
             workspace_id=workspace_id,
             source_kind=EntityKind(pair.source_kind),
             source_id=pair.source_id,
             target_kind=EntityKind(pair.target_kind),
             target_id=pair.target_id,
             edge_kind="co_access",
+            provenance="usage",
             source_table="co_access_pair",
             weight=float(pair.support_session_count),
             occurred_at=pair.occurred_at,
@@ -270,8 +293,9 @@ def sync_co_access_projection(
         if usage_signals_enabled
         and pair.support_session_count >= CO_ACCESS_MIN_SESSIONS
     ]
-    delta = _reconcile_edge_projection_rows(
+    delta = reconcile_edge_projection_rows(
         session,
+        scope=EdgeProjectionScope(workspace_id, frozenset({"co_access"})),
         existing_rows=list(session.scalars(edges_statement)),
         desired_rows=desired,
     )
@@ -283,7 +307,6 @@ def sync_co_access_projection(
 def co_access_projection_needs_repair(session: Session, workspace_id: UUID) -> bool:
     """Recover a missed policy-toggle job without replaying the read history."""
     from backend.models.context import EdgeProjection
-    from backend.services.indexing.edge_registry import CO_ACCESS_MIN_SESSIONS
 
     matches = (
         (EdgeProjection.workspace_id == CoAccessPair.workspace_id)
@@ -320,7 +343,6 @@ def rebuild_co_access_pairs(
     session: Session, workspace_id: UUID, *, usage_signals_enabled: bool = True
 ) -> int:
     """Explicit recovery/reindex replay; normal graph reads never call this."""
-    from backend.services.indexing.edge_registry import co_access_pairs
 
     lock_co_access_workspace(session, workspace_id)
     aggregates = {}
@@ -354,3 +376,55 @@ def rebuild_co_access_pairs(
     return sync_co_access_projection(
         session, workspace_id, usage_signals_enabled=usage_signals_enabled
     )
+
+
+def co_access_projection_rows(
+    session: Session,
+    workspace_id: UUID,
+    *,
+    now: datetime | None = None,
+) -> list[dict[str, object]]:
+    """Project lifetime counters; this never scans raw MCP history."""
+    from sqlalchemy import inspect
+    from sqlalchemy.engine import Connection
+
+    from backend.services.entity_ref import EntityKind
+
+    # Frozen core upgrade invokes this seam before the new counters exist.
+    # Its read model is superseded by the new revision's frozen backfill.
+    if (
+        session.join_transaction_mode == "rollback_only"
+        and isinstance(session.get_bind(), Connection)
+        and not inspect(session.connection()).has_table("co_access_pair")
+    ):
+        return []
+    return [
+        build_edge_row(
+            workspace_id=workspace_id,
+            source_kind=EntityKind(pair.source_kind),
+            source_id=pair.source_id,
+            target_kind=EntityKind(pair.target_kind),
+            target_id=pair.target_id,
+            edge_kind="co_access",
+            provenance="usage",
+            source_table="co_access_pair",
+            weight=float(pair.support_session_count),
+            occurred_at=pair.occurred_at,
+            support_session_count=pair.support_session_count,
+            first_observed_at=pair.first_observed_at,
+        )
+        for pair in session.scalars(
+            select_in_workspace(
+                CoAccessPair,
+                workspace_id=workspace_id,
+                conditions=(
+                    CoAccessPair.support_session_count >= CO_ACCESS_MIN_SESSIONS,
+                ),
+            )
+        )
+    ]
+
+
+def co_access_reads(session: Session, workspace_id: UUID, *, since: datetime):
+    """The same successful-body source for bounded hot-path analysis."""
+    return _reads(session, workspace_id, since=since)

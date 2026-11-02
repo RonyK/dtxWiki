@@ -20,7 +20,8 @@ from backend.services.mcp_trace_capture import derive_artifact_links
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROJECTION_SOURCES = {
     "backend/services/co_access.py": 2,
-    "backend/services/indexing/edge_registry.py": 1,
+    # Registry entrypoints delegate to the usage adapter; policy stays there.
+    "backend/services/indexing/edge_registry.py": 0,
     "backend/services/trail_analysis.py": 1,
 }
 # Projection verb filters may name only these allowlists. Both are pinned to

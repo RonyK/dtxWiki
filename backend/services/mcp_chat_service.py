@@ -90,11 +90,21 @@ from backend.services.actor_visible_read import (
     library_item_visible,
 )
 from backend.services.audit_service import AuditService
+from backend.services.mcp_artifact_activity import (
+    ArtifactLinkCandidate as ArtifactLinkCandidate,
+)
+from backend.services.mcp_artifact_activity import (
+    InsertedArtifactUsage,
+)
 from backend.services.mcp_display_text import (
     sanitize_display_text as _sanitize_display_text,
 )
 from backend.services.mcp_display_text import (
     truncate_graphemes as _truncate_graphemes,
+)
+from backend.services.mcp_focused_read_usage import (
+    prepare_artifact_usage,
+    project_inserted_artifact_usage,
 )
 from backend.services.mcp_trace_redaction import (
     PATCH_OPERATION_KINDS,
@@ -267,19 +277,6 @@ _TARGET_SCAN_MAX_ITEMS = 500
 _TARGET_SCAN_MAX_REFS = 200
 
 
-@dataclass(frozen=True)
-class ArtifactLinkCandidate:
-    resource_kind: McpChatArtifactKind
-    resource_id: UUID
-    verb: McpChatArtifactVerb
-    # The conversation base ledger (design doc section 9): exact version
-    # evidence from a versioned read or successful non-replayed patch. It is
-    # carried by that call's own CONTEXT_PAGE relation (VIEWED for a body read,
-    # EDITED for a patch) and is None when no exact version can be resolved.
-    version_id: UUID | None = None
-    root_hash: str | None = None
-
-
 class McpChatService:
     """Aggregates raw MCP tool traces into external chat provenance."""
 
@@ -378,10 +375,13 @@ class McpChatService:
         root_hash: str | None = None,
     ) -> McpChatArtifactLink:
         occurred_at = tool_call.completed_at or tool_call.started_at or utc_now()
-        if verb == McpChatArtifactVerb.VIEWED:
-            from backend.services.co_access import lock_co_access_workspace
-
-            lock_co_access_workspace(session, chat_session.workspace_id)
+        prepare_artifact_usage(
+            session,
+            workspace_id=chat_session.workspace_id,
+            verb=verb.value,
+            result_status=tool_call.result_status,
+            tool_name=tool_call.tool_name,
+        )
 
         def _advance_read_pointer(existing: McpChatArtifactLink) -> None:
             if version_id is None:
@@ -500,7 +500,7 @@ class McpChatService:
                 McpChatToolCallArtifact.verb == verb.value,
             )
         )
-        inserted_view = None
+        inserted_edge = None
         if edge is None:
             new_edge = McpChatToolCallArtifact(
                 workspace_id=chat_session.workspace_id,
@@ -515,20 +515,22 @@ class McpChatService:
                 with session.begin_nested():
                     session.add(new_edge)
                     session.flush()
-                if verb == McpChatArtifactVerb.VIEWED:
-                    inserted_view = new_edge
+                inserted_edge = new_edge
             except IntegrityError:
                 # Concurrent insert of the identical per-call edge
                 # (uq_mcp_chat_tool_call_artifact); idempotent, so ignore.
                 pass
-        if inserted_view is not None:
-            from backend.services.co_access import record_co_access_read
-
-            record_co_access_read(
+        if inserted_edge is not None:
+            project_inserted_artifact_usage(
                 session,
-                workspace_id=chat_session.workspace_id,
-                chat_session_id=chat_session.id,
-                artifact_id=inserted_view.id,
+                InsertedArtifactUsage(
+                    workspace_id=inserted_edge.workspace_id,
+                    chat_session_id=inserted_edge.chat_session_id,
+                    artifact_id=inserted_edge.id,
+                    verb=inserted_edge.verb,
+                    result_status=tool_call.result_status,
+                    tool_name=tool_call.tool_name,
+                ),
             )
         self._refresh_chat_labels(session, chat_session)
         return link

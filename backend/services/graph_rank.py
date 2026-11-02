@@ -1,7 +1,7 @@
 """One comparable rank for relations whose raw weights mean different things.
 
 ``EdgeProjection.weight`` is in a different unit for every kind: summed link
-occurrences, citation counts, a co-view conversation count, or
+occurrences, citation counts, producer-defined usage weights, or
 a flat 1.0. Sorting by it lets whichever kind has the biggest numbers crowd
 out the rest. ``rank_score`` maps every kind onto ``[0, w]``: a saturating
 curve in the kind's own unit, ``weight / (weight + k)`` (``k`` is the weight
@@ -56,14 +56,20 @@ RANK_PARAMS: dict[str, RankParam] = {
     "ask_citation": RankParam(0.30, 2, 60),
     "co_access": RankParam(0.20, 25, None),
 }
-# A merge is the same lineage relation as a parent version.
-RANK_ALIASES: dict[str, str] = {"version_merge": "version_parent"}
-# No current relation stores a pre-decayed weight. Co-access stores lifetime
-# conversation support; recency ranking is deliberately a separate follow-up.
+# Usage producers own any storage-time aging. The shared display profile
+# consumes their supplied weight without applying another age multiplier.
 PREDECAYED_KINDS: frozenset[str] = frozenset()
 # The order a seed's queues take turns in: its own links, links to it, then
 # the undirected and unanchored relations.
 ROLE_ORDER: tuple[str, ...] = ("out", "in", "undirected", "context")
+
+
+# Producers declare aliases with their relation semantics; the math is shared.
+RANK_ALIASES: dict[str, str] = {
+    kind: semantic.rank_alias
+    for kind, semantic in EDGE_SEMANTICS.items()
+    if semantic.rank_alias is not None
+}
 
 
 def _kind_order() -> tuple[str, ...]:
@@ -173,7 +179,12 @@ _NO_DENOMINATORS = RankDenominators()
 
 
 # The kinds effective_weight divides by their stored source's denominators.
-DENOMINATOR_KINDS = frozenset(("wikilink", "citation_page", "citation_source", "tree"))
+DENOMINATOR_KINDS = frozenset(
+    kind
+    for kind in EDGE_SEMANTICS
+    if RANK_ALIASES.get(kind, kind)
+    in ("wikilink", "citation_page", "citation_source", "tree")
+)
 
 
 def effective_weight(
@@ -191,6 +202,7 @@ def effective_weight(
 
     counts = denominators or _NO_DENOMINATORS
     raw = max(0.0, raw_weight)
+    edge_kind = RANK_ALIASES.get(edge_kind, edge_kind)
     if edge_kind == "wikilink":
         return wikilink_weight(raw, counts.wikilink_out_degree)
     if edge_kind in ("citation_page", "citation_source"):

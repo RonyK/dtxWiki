@@ -189,7 +189,7 @@ def test_an_older_supporting_session_moves_the_first_observation_back(
 
 
 def test_view_trace_updates_lifetime_pairs_atomically_and_repairs_late_reads(
-    session_factory,
+    session_factory, monkeypatch
 ):
     """One trace trajectory covers incremental support, late delivery and retry.
 
@@ -197,6 +197,16 @@ def test_view_trace_updates_lifetime_pairs_atomically_and_repairs_late_reads(
     not four input variants: together they move the original pair beyond the
     five-read adjacency window and require removing that chat's contribution.
     """
+    from backend.services import co_access
+
+    projected_artifacts = []
+    record_read = co_access.record_co_access_read
+
+    def record_new_view(*args, **kwargs):
+        projected_artifacts.append(kwargs["artifact_id"])
+        return record_read(*args, **kwargs)
+
+    monkeypatch.setattr(co_access, "record_co_access_read", record_new_view)
     left, right = sorted((uuid4(), uuid4()))
     now = datetime.now(UTC).replace(microsecond=0)
     service = McpChatService()
@@ -262,9 +272,66 @@ def test_view_trace_updates_lifetime_pairs_atomically_and_repairs_late_reads(
         assert edge().first_observed_at == first
         assert edge().occurred_at == now + timedelta(seconds=70)
         edge_id = edge().id
+        projections_before_retry = len(projected_artifacts)
         view(client, chat, left, now, call=call)
+        assert len(projected_artifacts) == projections_before_retry
         assert pair().support_session_count == 2
         assert edge().id == edge_id
+
+        # A citation registration is a distinct action. Reuse this conversation
+        # to prove that the shared insertion hook never invokes read projection
+        # for it, even though legacy presentation classes include CITED.
+        citation_call = MCPToolCall(
+            workspace_id=workspace_id,
+            client_id=client.id,
+            request_id=uuid4(),
+            tool_name="cite",
+            result_status="succeeded",
+            started_at=now,
+            completed_at=now,
+        )
+        session.add(citation_call)
+        session.flush()
+        service.link_artifact(
+            session=session,
+            chat_session=chat,
+            tool_call=citation_call,
+            resource_kind=McpChatArtifactKind.CONTEXT_PAGE,
+            resource_id=uuid4(),
+            verb=McpChatArtifactVerb.CITED,
+        )
+        assert len(projected_artifacts) == projections_before_retry
+        assert pair().support_session_count == 2
+
+        # Budget exception: two malformed-history inputs exercise distinct
+        # proof fields: VIEWED on a non-read command and on a failed read.
+        # An incremental-hook spy alone cannot prove the persisted SQL/rebuild
+        # boundary, so reuse this real lifecycle rather than add DB cases.
+        # They remain auditable but cannot contribute merely by saying VIEWED.
+        invalid_view_targets = []
+        for tool_name, result_status in (("cite", "succeeded"), ("read", "failed")):
+            invalid_target = uuid4()
+            invalid_view_targets.append(invalid_target)
+            invalid_call = MCPToolCall(
+                workspace_id=workspace_id,
+                client_id=client.id,
+                request_id=uuid4(),
+                tool_name=tool_name,
+                result_status=result_status,
+                started_at=now,
+                completed_at=now,
+            )
+            session.add(invalid_call)
+            session.flush()
+            service.link_artifact(
+                session=session,
+                chat_session=chat,
+                tool_call=invalid_call,
+                resource_kind=McpChatArtifactKind.CONTEXT_PAGE,
+                resource_id=invalid_target,
+                verb=McpChatArtifactVerb.VIEWED,
+            )
+            assert len(projected_artifacts) == projections_before_retry
 
         with pytest.raises(RuntimeError, match="rollback view"):
             with session.begin_nested():
@@ -286,3 +353,10 @@ def test_view_trace_updates_lifetime_pairs_atomically_and_repairs_late_reads(
 
         sync_co_access_projection(session, workspace_id, usage_signals_enabled=True)
         assert edge().weight == edge().support_session_count == 3
+        rebuild_co_access_pairs(session, workspace_id)
+        assert session.scalar(
+            select(CoAccessPair.id).where(
+                (CoAccessPair.source_id.in_(invalid_view_targets))
+                | (CoAccessPair.target_id.in_(invalid_view_targets))
+            )
+        ) is None

@@ -1112,8 +1112,6 @@
   "backend/services/indexing/edge_registry.py|_workspace_page_ids|where|ContextPage|d88412e6d3de721b": 1,
   "backend/services/indexing/edge_registry.py|_workspace_page_ids|where|ContextPage|f1a408dc69e427e6": 1,
   "backend/services/indexing/edge_registry.py|clear_co_access_edge_projection|where|EdgeProjection|293abc3b381093b1": 1,
-  "backend/services/indexing/edge_registry.py|co_read_source|select|McpChatToolCallArtifact|153d1e3503460bc6": 1,
-  "backend/services/indexing/edge_registry.py|co_read_source|where|McpChatToolCallArtifact|0db84eefff3bb21a": 1,
   "backend/services/indexing/edge_registry.py|rebuild_edge_projection|where|EdgeProjection|7fc2651b47151f7d": 1,
   "backend/services/indexing/edge_registry.py|rebuild_edge_projection|where|EdgeProjection|b3a379399b491fde": 1,
   "backend/services/indexing/edge_registry.py|reconcile_wikilink_edge_projection|select|EdgeProjection|c0489e2a379581b3": 1,

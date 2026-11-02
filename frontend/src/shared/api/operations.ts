@@ -185,17 +185,9 @@ export type GraphNeighborEntry = components["schemas"]["GraphNeighborEntry"];
 export type GraphNeighborsPayload = components["schemas"]["GraphNeighborsPayload"];
 
 export type McpChatArtifactKind =
-  | "context_page"
-  | "library_item"
-  | "agent_page"
-  | "context_media_asset";
+  components["schemas"]["McpChatArtifactLinkPayload"]["resource_kind"];
 export type McpChatArtifactVerb =
-  | "created"
-  | "edited"
-  | "cited"
-  | "viewed"
-  | "referenced"
-  | "search_match";
+  components["schemas"]["McpChatArtifactLinkPayload"]["verb"];
 export type McpChatPeriod = "today" | "week" | "month" | "all";
 export type McpChatSort = "last_activity_desc" | "write_count_desc";
 

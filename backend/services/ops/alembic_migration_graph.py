@@ -1,5 +1,6 @@
 """Alembic adapter for revision-inventory code-head evidence."""
 
+import json
 from functools import lru_cache
 from pathlib import Path
 
@@ -11,6 +12,18 @@ from backend.services.ops.db_revision_inventory import is_revision_id
 # backend/services/ops/ -> backend/migrations; resolved here rather than through
 # backend.app.bootstrap, which imports the migration preflight that uses this.
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
+
+
+def schema_release_head(release: str) -> str:
+    """Read one release's declared head without coupling consumers to a feature."""
+
+    manifest = json.loads(
+        (_MIGRATIONS_DIR / "release_manifest.json").read_text(encoding="utf-8")
+    )
+    head = manifest["schema_releases"][release]["head"]
+    if not isinstance(head, str) or not is_revision_id(head):
+        raise ValueError(f"invalid schema head for release {release}")
+    return head
 
 
 @lru_cache(maxsize=1)

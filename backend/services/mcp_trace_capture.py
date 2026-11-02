@@ -14,10 +14,9 @@ from backend.models.mcp_chat import McpChatArtifactKind, McpChatArtifactVerb
 from backend.models.mcp_trace import MCPToolCall
 from backend.models.workspace import MCPClient
 from backend.policy.auth import ActorContext
-from backend.policy.mcp_scopes import FOCUSED_READ_TOOLS
+from backend.services.mcp_artifact_activity import ArtifactLinkCandidate
 from backend.services.mcp_chat_service import (
     CONTEXT_EDIT_TOOLS,
-    ArtifactLinkCandidate,
     McpChatService,
     mcp_session_trace_uuid,
 )
@@ -65,6 +64,8 @@ def persist_mcp_tool_trace(
     read_projection: dict[str, Any] | None = None,
     edit_first_change: dict[str, Any] | None = None,
 ) -> MCPToolCall | None:
+    from backend.policy.mcp_scopes import FOCUSED_READ_TOOLS
+
     arguments, payload = redact_tool_capture(tool_name, arguments, payload)
     envelope = payload.get("envelope", {})
     workspace_id = _workspace_id(envelope, actor)
