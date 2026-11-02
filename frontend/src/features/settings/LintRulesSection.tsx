@@ -337,15 +337,20 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
               id="lint-auto-approve-link-fixes"
               type="checkbox"
               checked={autoApproveLinkFixes === true}
+              aria-describedby="lint-auto-approve-link-fixes-hint"
               title={autoApproveLinkFixes === null ? t("lint.unknownValue") : undefined}
               ref={(input) => { if (input) input.indeterminate = autoApproveLinkFixes === null; }}
               disabled={readOnly || !policyReady || busy.has("auto_approve_link_fixes")}
               onChange={() => void saveLinkPolicy("auto_approve_link_fixes", !autoApproveLinkFixes)}
             />
-            <label className="lint-rule-copy" htmlFor="lint-auto-approve-link-fixes">
-              <span className="lint-rule-label">{t("lint.autoApproveLinkFixes")}</span>
-              <span className="lint-rule-description">{t("lint.autoApproveLinkFixesHint")}</span>
-            </label>
+            <div className="lint-rule-copy">
+              <span className="lint-rule-label">
+                <label htmlFor="lint-auto-approve-link-fixes">{t("lint.autoApproveLinkFixes")}</label>
+              </span>
+              <span className="lint-rule-description" id="lint-auto-approve-link-fixes-hint">
+                {t("lint.autoApproveLinkFixesHint")}
+              </span>
+            </div>
           </div>
         </div>
         {policyReady ? (

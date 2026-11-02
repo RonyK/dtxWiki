@@ -4392,7 +4392,7 @@ button.history-card {
 @media (max-width: 1024px), (any-pointer: coarse) {
   /* Align the control with the title's hit area, independently of description
      height. Both remain centred when a long title wraps over several lines. */
-  .lint-rules-card .lint-rule-row > .lint-rule-copy {
+  .lint-rules-card .lint-rule-row > div.lint-rule-copy {
     display: contents;
   }
 

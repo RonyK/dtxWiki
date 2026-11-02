@@ -696,9 +696,7 @@ class SettingsService:
                 title="Lint rules",
                 # Rule toggles ({rule_id: bool}) plus the auto-fix mode flag (F2),
                 # so the Settings lint section can render both from one card.
-                policy=LintPolicy(workspace).effective_settings(
-                    self.lint_registry.modules
-                ),
+                policy=self._policy_group_projection(workspace, "lint"),
             ),
             mcp_clients=mcp_payload,
             mcp_clients_next_cursor=mcp_next_cursor,
