@@ -26,8 +26,9 @@
   review cards name the page under review when the reader may see it.
 - Each card is one link: the whole card opens its document or review, with a
   single focus stop, a hover highlight, and an edge chevron on touch screens;
-  name chips, call details and read-group controls keep their own actions. The
-  pending "Review required" status is no longer a second link.
+  the time keeps its exact-time tooltip and opens the same target. Name chips,
+  call details and read-group controls keep their own actions. The pending
+  "Review required" status is no longer a second link.
 - Badges separate requests from decisions: submissions read "Review
   requested", and decisions show "Approved", "Requested changes", or
   "Rejected". The activity feed reports submissions as `request_review`.

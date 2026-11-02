@@ -131,8 +131,10 @@ test("real grouped feed, names, review links and filter navigation", async ({ pa
   const review = recent.locator(".activity-entry__layout--review");
   const reviewHref = workspaceUrl(seed.workspaceId, `review/${seed.review_id}`);
   await expect(review.locator(".activity-entry__title-link")).toHaveAttribute("href", reviewHref);
-  // One link per card: the status is a badge, and the card itself is the target.
-  await expect(review.locator("a")).toHaveCount(1);
+  // One link per card: the status is a badge, and the card itself is the
+  // target. The time repeats that link for pointers only (tooltip, no tab stop).
+  await expect(review.getByRole("link")).toHaveCount(1);
+  await expect(review.locator("a.activity-entry__times")).toHaveAttribute("href", reviewHref);
   await expect(review.getByRole("button")).toHaveCount(0);
   await expect(recent.locator(".activity-feed-counts")).toHaveText("5 entries · 8 original events");
   await page.getByRole("checkbox", { name: "Group repeated reads" }).uncheck();

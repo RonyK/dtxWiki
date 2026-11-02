@@ -55,19 +55,29 @@ function ActivityEventContent({ event, query, count, firstOccurredAt, lastOccurr
 }) {
   const { t, i18n } = useTranslation("activity");
   const descriptionId = useId();
+  const timeId = useId();
   const presentation = presentActivityFeedEvent(event, count);
   const workspaceId = useRouteWorkspaceId();
   const navigation = activityNavigation(event, query, workspaceId);
   const { from: rangeFrom, to: rangeTo, spansDays } = rangeEnds(firstOccurredAt, lastOccurredAt);
   const TypeIcon = TYPE_ICONS[presentation.typeKey];
-  const times = <div className="activity-entry__times" data-range-spans-days={count > 1 && spansDays ? true : undefined}>
-    <RelativeTime value={lastOccurredAt} locale={i18n.language} />
+  const rangeSpansDays = count > 1 && spansDays ? true : undefined;
+  const timeContent = <>
+    <RelativeTime id={timeId} value={lastOccurredAt} locale={i18n.language} />
     {count > 1 && <span className="activity-entry__time-range" aria-label={t("feed.group.timeRange")}>
       <time dateTime={firstOccurredAt} title={formatVersionTimestamp(firstOccurredAt, "long")}>{rangeFrom}</time>
       <span aria-hidden="true"> – </span>
       <time dateTime={lastOccurredAt} title={formatVersionTimestamp(lastOccurredAt, "long")}>{rangeTo}</time>
     </span>}
-  </div>;
+  </>;
+  // On a linked card the time sits above the stretched title link so its
+  // exact-time tooltips show, and opens the same target so the card stays one
+  // click target. It is a pointer-only copy of that link: no tab stop and
+  // hidden from assistive tech, which hears the time in the title link's
+  // description instead.
+  const times = navigation.href
+    ? <Link className="activity-entry__times" data-range-spans-days={rangeSpansDays} to={navigation.href} tabIndex={-1} aria-hidden="true">{timeContent}</Link>
+    : <div className="activity-entry__times" data-range-spans-days={rangeSpansDays}>{timeContent}</div>;
   const heading = <span className="activity-entry__heading"><span>{presentation.title}</span></span>;
   return (
     <div className={`activity-entry__layout${presentation.pendingReview ? " activity-entry__layout--review" : ""}`}>
@@ -79,7 +89,7 @@ function ActivityEventContent({ event, query, count, firstOccurredAt, lastOccurr
           </span>
           <ActivityActorBadge actor={event.actor} />
         </div>
-        {navigation.href ? <Link className="activity-entry__title-link" to={navigation.href} aria-label={presentation.pendingReview ? t("feed.openReview", { title: presentation.title }) : presentation.title} aria-describedby={presentation.body ? descriptionId : undefined}>
+        {navigation.href ? <Link className="activity-entry__title-link" to={navigation.href} aria-label={presentation.pendingReview ? t("feed.openReview", { title: presentation.title }) : presentation.title} aria-describedby={presentation.body ? `${descriptionId} ${timeId}` : timeId}>
           {heading}
           {presentation.body && <span id={descriptionId} className="activity-entry__description">{presentation.body}</span>}
         </Link> : <div className="activity-entry__plain-title">{heading}{presentation.body && <p className="activity-entry__description">{presentation.body}</p>}</div>}

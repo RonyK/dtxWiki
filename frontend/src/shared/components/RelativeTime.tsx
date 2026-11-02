@@ -46,14 +46,17 @@ export function RelativeTime({
   value,
   locale,
   className,
+  id,
 }: {
   value: string | null | undefined;
   locale: string;
   className?: string;
+  id?: string;
 }) {
   useNowTick();
   return (
     <time
+      id={id}
       className={className}
       dateTime={value ?? undefined}
       title={value ? formatVersionTimestamp(value, "long") : undefined}

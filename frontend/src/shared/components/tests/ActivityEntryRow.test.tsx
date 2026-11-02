@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { i18n } from "../../i18n";
 import type { ActivityFeedEntry, ActivityFeedEvent } from "../../lib/activityFeed";
@@ -18,7 +18,9 @@ function entry(overrides: Partial<ActivityFeedEvent> = {}): ActivityFeedEntry {
 function show(value: ActivityFeedEntry, loadGroup?: (token: string) => Promise<ActivityFeedEvent[]>, density?: "summary" | "detail") {
   return render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/activity"]}><ActivityEntryRow entry={value} loadGroup={loadGroup} density={density} /></MemoryRouter>);
 }
-afterEach(async () => { await i18n.changeLanguage("en"); });
+// Titles describe themselves with the relative time, so pin the clock (Date only).
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-10-20T05:00:00Z")); });
+afterEach(async () => { vi.useRealTimers(); await i18n.changeLanguage("en"); });
 
 describe("shared activity entry", () => {
   it("puts type before the actor and makes the title the sole direct resource link", () => {
@@ -29,8 +31,15 @@ describe("shared activity entry", () => {
     expect(identity.firstElementChild?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(identity.lastElementChild?.tagName).toBe("BUTTON");
     // The document names the card; what happened describes it.
-    expect(screen.getByRole("link", { name: "Guide", description: "Read" })).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000106");
-    expect(container.querySelectorAll("a")).toHaveLength(1);
+    const href = "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000106";
+    expect(screen.getByRole("link", { name: "Guide", description: "Read 4 minutes ago" })).toHaveAttribute("href", href);
+    // One link for keyboards and screen readers; the time is a pointer-only
+    // copy of it, so its exact-time tooltip shows and a click still opens it.
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    const time = container.querySelector("a.activity-entry__times")!;
+    expect(time).toHaveAttribute("href", href);
+    expect(time).toHaveAttribute("tabindex", "-1");
+    expect(time).toHaveAttribute("aria-hidden", "true");
     expect(container.querySelectorAll("a a, a button, button a, button button")).toHaveLength(0);
     expect(screen.queryByText(/Raw input/)).not.toBeInTheDocument();
   });
@@ -155,7 +164,7 @@ describe("shared activity entry", () => {
     const { container } = show(entry({ actor: null, lane: "pending", review_item_id: "review-1", operation: "review" }));
     const title = screen.getByRole("link", { name: /^검토 열기:/ });
     expect(title).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/review/review-1");
-    expect(container.querySelectorAll("a")).toHaveLength(1);
+    expect(screen.getAllByRole("link")).toHaveLength(1);
     const status = screen.getByText("검토 필요");
     expect(status.closest("[data-action=pending]")).toBeInTheDocument();
     expect(status.closest("a")).toBeNull();
@@ -212,10 +221,10 @@ describe("repeated read disclosure", () => {
     const expand = screen.getByRole("button", { name: "Expand 4 original events" });
     await user.click(expand);
     expect(await screen.findByRole("alert")).toHaveTextContent("Original events could not be loaded");
-    expect(screen.getByRole("link", { name: "Guide", description: "Read 4 times" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Guide", description: "Read 4 times 4 minutes ago" })).toBeVisible();
     expect(expand).toHaveAttribute("aria-expanded", "true");
     await user.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("link", { name: "Guide", description: "Read" })).toBeVisible();
+    expect(await screen.findByRole("link", { name: "Guide", description: "Read 4 minutes ago" })).toBeVisible();
     expect(load).toHaveBeenNthCalledWith(2, "opaque-token");
     expect(container.querySelectorAll(".activity-feed-entry")).toHaveLength(2);
     const collapse = screen.getAllByRole("button", { name: "Collapse events" });
@@ -223,7 +232,7 @@ describe("repeated read disclosure", () => {
     expect(expand).toHaveFocus();
     expect(expand).toHaveAttribute("aria-expanded", "false");
     await user.click(expand);
-    await waitFor(() => expect(screen.getByRole("link", { name: "Guide", description: "Read" })).toBeVisible());
+    await waitFor(() => expect(screen.getByRole("link", { name: "Guide", description: "Read 4 minutes ago" })).toBeVisible());
     expect(load).toHaveBeenCalledTimes(2);
   });
   it("preserves the group heading and loading status until the request completes", async () => {
@@ -232,8 +241,8 @@ describe("repeated read disclosure", () => {
     show({ ...entry(), entry_type: "read_group", event_count: 4, group_token: "opaque-token" }, load);
     await userEvent.click(screen.getByRole("button", { name: "Expand 4 original events" }));
     expect(screen.getByRole("status")).toHaveTextContent("Loading original events");
-    expect(screen.getByRole("link", { name: "Guide", description: "Read 4 times" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Guide", description: "Read 4 times 4 minutes ago" })).toBeVisible();
     resolve([entry({ id: "member-1" }).event]);
-    expect(await screen.findByRole("link", { name: "Guide", description: "Read" })).toBeVisible();
+    expect(await screen.findByRole("link", { name: "Guide", description: "Read 4 minutes ago" })).toBeVisible();
   });
 });

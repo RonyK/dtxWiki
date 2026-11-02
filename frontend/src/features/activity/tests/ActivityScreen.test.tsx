@@ -67,7 +67,7 @@ describe("ActivityScreen", () => {
     const title = screen.getByRole("link", { name: "Open review: Review required details" });
     expect(title).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/review/review-1");
     const card = title.closest("article")!;
-    expect(card.querySelectorAll("a")).toHaveLength(1);
+    expect(within(card).getAllByRole("link")).toHaveLength(1);
     expect(within(card).getByText("Review required").closest("a")).toBeNull();
     expect(screen.queryByRole("button", { name: "Review" })).not.toBeInTheDocument();
   });

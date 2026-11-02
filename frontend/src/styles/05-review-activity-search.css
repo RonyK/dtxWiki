@@ -1863,10 +1863,12 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
   background: var(--surface);
 }
 /* Each card is one link target: the title link stretches over the card and the
-   card's own controls stay above it. Hover and focus mark the whole card on
-   desktop; touch screens, which have no hover, get an edge chevron instead. */
+   card's own controls stay above it, as does the time, a pointer-only copy of
+   the same link that keeps its exact-time tooltips. Hover and focus mark the
+   whole card on desktop; touch screens, which have no hover, get an edge
+   chevron instead. */
 .activity-entry__title-link::after { content: ""; position: absolute; inset: 0; }
-:is(.activity-actor-disclosure, .activity-entry__technical, .activity-entry__fallback > a, .activity-read-group__toggle, .activity-read-group__members) { position: relative; z-index: 1; }
+:is(.activity-actor-disclosure, .activity-entry__technical, .activity-entry__fallback > a, a.activity-entry__times, .activity-read-group__toggle, .activity-read-group__members) { position: relative; z-index: 1; }
 .activity-entry__go { display: none; position: absolute; top: 50%; right: 10px; transform: translateY(-50%); color: var(--ink-muted); pointer-events: none; }
 .activity-feed-entry:has(> .activity-entry__layout .activity-entry__title-link:focus-visible) { outline: 3px solid var(--info); outline-offset: -3px; }
 .activity-feed-entry :is(.activity-entry__layout, .activity-entry__body, .activity-entry__trailing, .activity-entry__review-footer, .activity-read-group) { display: contents; }
