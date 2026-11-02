@@ -244,7 +244,7 @@ describe("GraphView", () => {
     expect(canvas).toHaveAttribute("data-pinned", payload.nodes[0].id);
     for (const mock of Object.values(canvasHandle)) expect(mock).not.toHaveBeenCalled();
     for (const action of [onCollapse, onDepthChange, onExpand, onHistoryModeChange]) expect(action).not.toHaveBeenCalled();
-  }, 15_000);
+  });
 
   it("shows and hides Details without remounting the stage or canvas, changing pins, or invoking graph actions", async () => {
     const user = userEvent.setup();
@@ -2098,7 +2098,12 @@ function renderGraph({
     workspaceId,
   }));
   // List interaction regressions explicitly enter the now-collapsed parity view.
-  if (openContents) fireEvent.click(screen.getByRole("button", { name: /View as list|목록으로 보기/ }));
+  // Scope the role query to the status actions: a document-wide one also walks
+  // the hidden parity list and costs seconds per render at 500+ relationships.
+  if (openContents) {
+    fireEvent.click(within(view.container.querySelector<HTMLElement>(".graph-status-actions")!)
+      .getByRole("button", { name: /View as list|목록으로 보기/ }));
+  }
   return view;
 }
 
