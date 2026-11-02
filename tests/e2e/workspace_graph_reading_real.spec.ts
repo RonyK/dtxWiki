@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { writeFile } from "node:fs/promises";
 import type { WorkspaceGraphDocumentNode, WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
-import { login } from "./auth";
+import { login, enableKnowledgeMapLab } from "./auth";
 
 const OVERVIEW_PATH = "/graph/overview/query";
 const CONNECTED_DOCUMENTS = 1_928;
@@ -18,6 +18,7 @@ test.describe("real API 2K Knowledge Map reading", () => {
     test.setTimeout(90_000);
     await page.emulateMedia({ reducedMotion: "reduce" });
     await login(page.request, "e2e-graph-2k-owner@example.com");
+    await enableKnowledgeMapLab(page);
     const pageErrors: string[] = [], consoleErrors: string[] = [], failedReads: string[] = [], graphQueries: string[] = [];
     page.on("pageerror", error => pageErrors.push(error.message));
     page.on("console", message => { if (message.type() === "error") consoleErrors.push(message.text()); });
@@ -144,6 +145,7 @@ test.describe("real API 2K Knowledge Map reading", () => {
     test.setTimeout(240_000);
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await login(page.request, "e2e-graph-2k-owner@example.com");
+    await enableKnowledgeMapLab(page);
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
     page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });

@@ -1,7 +1,7 @@
 import { expect, test as base, type Page, type Response } from "@playwright/test";
 
 import type { WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
-import { currentWorkspace, login } from "./auth";
+import { currentWorkspace, login, enableKnowledgeMapLab } from "./auth";
 import { expectNativeCounts, installNativeDrawMeter } from "./workspace_graph_native_draw";
 import { createOverviewResponseReader } from "./workspace_graph_response_reader";
 
@@ -55,6 +55,7 @@ test.describe("PC10K real-API aggregated GPU integration", () => {
     // Deterministic functional evidence, not normal-motion framing or a hardware SLA.
     await page.emulateMedia({ reducedMotion: "reduce" });
     await login(page.request, "e2e-graph-10k-aggregated-owner@example.com");
+    await enableKnowledgeMapLab(page);
     const workspace = await currentWorkspace(page.request);
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));

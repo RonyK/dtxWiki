@@ -6,7 +6,7 @@ import type { GraphRenderScene } from "../../frontend/src/features/graph/shared/
 import type { GraphQueryPayload, GraphQueryRequest } from "../../frontend/src/shared/api/graph";
 import type { components } from "../../frontend/src/shared/api/types.gen";
 import type { WorkspaceGraphDocumentNode, WorkspaceGraphOverviewRequest, WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
-import { backendBaseUrl, currentWorkspace, e2ePassword, login } from "./auth";
+import { backendBaseUrl, currentWorkspace, e2ePassword, login, enableKnowledgeMapLab } from "./auth";
 import { createOverviewResponseReader } from "./workspace_graph_response_reader";
 import { expectNativeCounts, installNativeDrawMeter, readNativeDraw } from "./workspace_graph_native_draw";
 
@@ -38,6 +38,7 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
     test.setTimeout(240_000);
     await page.emulateMedia({ reducedMotion: "reduce" });
     await login(page.request, OWNER_EMAIL);
+    await enableKnowledgeMapLab(page);
     const workspace = await currentWorkspace(page.request);
     const diagnostics = watchBrowserDiagnostics(page);
     const overviewRequests = watchOverviewRequests(page);
@@ -172,6 +173,7 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
     try {
       const page = await context.newPage();
       await login(page.request, OWNER_EMAIL);
+      await enableKnowledgeMapLab(page);
       const workspace = await currentWorkspace(page.request);
       const diagnostics = watchBrowserDiagnostics(page);
       const overviewRequests = watchOverviewRequests(page);
@@ -251,6 +253,7 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
     test.setTimeout(240_000);
     await page.emulateMedia({ reducedMotion: "reduce" });
     await login(page.request, OWNER_EMAIL);
+    await enableKnowledgeMapLab(page);
     const workspace = await currentWorkspace(page.request);
     const diagnostics = watchBrowserDiagnostics(page);
     const failedReads = watchFailedWorkspaceReads(page);
@@ -356,6 +359,7 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
     expect(process.env.DTXWIKI_E2E_DATABASE_PATH).toBeTruthy();
     await page.emulateMedia({ reducedMotion: "reduce" });
     const ownerLogin = await login(page.request, OWNER_EMAIL);
+    await enableKnowledgeMapLab(page);
     const actorId = (await ownerLogin.json()).data.user.user_id as string;
     const primary = await currentWorkspace(page.request);
     const title = `10K scope ${testInfo.workerIndex} ${Date.now()}`;
@@ -495,6 +499,7 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
       expect(trace, "This credential-flow case must never retain a trace").toBe("off");
       await page.emulateMedia({ reducedMotion: "reduce" });
       const ownerLogin = await login(page.request, OWNER_EMAIL);
+      await enableKnowledgeMapLab(page);
       const ownerId = (await ownerLogin.json()).data.user.user_id as string;
       const workspace = await currentWorkspace(page.request);
       await installNativeDrawMeter(page);
@@ -845,6 +850,11 @@ async function openAccountWorkspaceMapThroughUi(page: Page, workspace: { id: str
   await switcher.locator(".workspace-menu-item").filter({ has: page.getByText(workspace.title, { exact: true }) }).click();
   await expect(switcher).not.toBeVisible();
   await expect(page.locator(".workspace-switcher-button")).toHaveAttribute("aria-label", `Switch workspace, current: ${workspace.title}`);
+  // Each new account opts in separately. Keep navigation in this document so
+  // the account-transition test still proves the same browser realm survives.
+  await page.locator(`.sidebar-nav a[href="/workspaces/${workspace.id}/settings"]`).click();
+  await page.getByRole("button", { name: "Labs", exact: true }).click();
+  await page.getByRole("checkbox", { name: "Show Knowledge Map menu", exact: true }).check();
   await page.locator(`.sidebar-nav a[href="/workspaces/${workspace.id}/graph"]`).click();
   await expect(page).toHaveURL(/\/graph$/);
   return read;

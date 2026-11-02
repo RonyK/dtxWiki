@@ -17,6 +17,17 @@ export function LabsSection({ labelledBy }: { labelledBy: string }) {
         <p>{t("labs.description")}</p>
         <label className="checkbox-field">
           <input
+            aria-describedby="labs-knowledge-map-hint"
+            checked={preferences.knowledgeMap}
+            disabled={!ready}
+            onChange={(event) => setMenuVisible("knowledgeMap", event.target.checked)}
+            type="checkbox"
+          />
+          <span>{t("labs.showKnowledgeMap")}</span>
+        </label>
+        <p className="field-hint" id="labs-knowledge-map-hint">{t("labs.knowledgeMapHint")}</p>
+        <label className="checkbox-field">
+          <input
             checked={preferences.ask}
             disabled={!ready}
             onChange={(event) => setMenuVisible("ask", event.target.checked)}

@@ -45,8 +45,10 @@ make frontend-dev       # Vite dev server (21173, HMR)
 ```
 
 Workspace Knowledge Map은 workspace마다 기본적으로 꺼져 있습니다. Owner가
-Settings > Workspace의 Knowledge graph 카드에서 켜면 메뉴와 `/graph`가
-활성화되며, 재빌드나 서버 재시작은 필요 없습니다. 운영자는
+Settings > Workspace의 Knowledge graph 카드에서 켠 뒤, 각 사용자가
+Settings > Labs에서 Knowledge Map 메뉴를 켜면 메뉴와 `/graph`가 활성화됩니다.
+Labs 설정도 기본 꺼짐이며 현재 계정·브라우저에 저장됩니다.
+재빌드나 서버 재시작은 필요 없습니다. 운영자는
 `DTXWIKI_GRAPH_SERVICE_AVAILABLE=false`로 모든 workspace의 지도를 일시적으로
 끌 수 있습니다. 문서별 Local Graph는 이 설정과 독립적으로 사용할 수 있습니다.
 

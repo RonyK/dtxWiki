@@ -62,6 +62,12 @@ export async function currentWorkspace(request: APIRequestContext) {
   return workspace!;
 }
 
+/** Opt the current account into the experimental map through its real Labs UI. */
+export async function enableKnowledgeMapLab(page: Page) {
+  await page.goto("/settings?section=labs");
+  await page.getByRole("checkbox", { name: /^(Show Knowledge Map menu|지식 지도 메뉴 표시)$/ }).check();
+}
+
 /** Build a product URL whose workspace scope is explicit in its path. */
 export function workspaceUrl(workspaceId: string, suffix: string) {
   return `/workspaces/${encodeURIComponent(workspaceId)}/${suffix.replace(/^\/+/, "")}`;

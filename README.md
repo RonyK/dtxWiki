@@ -28,6 +28,8 @@ access you grant.
 - **Explore the connections.** Open a Context page's Local Graph to follow
   links, citations, and documents read together. A workspace owner can enable
   the Workspace Knowledge Map in **Settings > Workspace > Knowledge graph**.
+  To try it, also turn on **Show Knowledge Map menu** in **Settings > Labs**;
+  this experimental menu is off by default for each account and browser.
 - **See what your AI did.** **Chats** shows the searches, reads, and updates
   performed through dtxWiki's MCP tools. Inspect each call's inputs, results,
   and linked materials, and review changes in document history. Chats records

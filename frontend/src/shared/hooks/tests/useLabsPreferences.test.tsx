@@ -20,12 +20,13 @@ function Consumer({ name }: { name: string }) {
       <output data-testid={name}>{JSON.stringify({ ...preferences, ready })}</output>
       <button onClick={() => setMenuVisible("ask", !preferences.ask)}>{name} ask</button>
       <button onClick={() => setMenuVisible("agent", !preferences.agent)}>{name} agent</button>
+      <button onClick={() => setMenuVisible("knowledgeMap", !preferences.knowledgeMap)}>{name} knowledge map</button>
     </div>
   );
 }
 
-function expectPreferences(name: string, ask: boolean, agent: boolean, ready = true) {
-  expect(screen.getByTestId(name).textContent).toBe(JSON.stringify({ ask, agent, ready }));
+function expectPreferences(name: string, ask: boolean, agent: boolean, ready = true, knowledgeMap = false) {
+  expect(screen.getByTestId(name).textContent).toBe(JSON.stringify({ ask, agent, knowledgeMap, ready }));
 }
 
 function remoteChange(key: string | null, value: string | null) {
@@ -53,19 +54,24 @@ afterEach(() => {
 });
 
 describe("useLabsPreferences", () => {
-  it("starts with both menus hidden and changes mounted consumers independently", () => {
+  it("starts with all Labs menus hidden and changes mounted consumers independently", () => {
     render(<><Consumer name="settings" /><Consumer name="navigation" /></>);
     expectPreferences("settings", false, false);
     expectPreferences("navigation", false, false);
 
     fireEvent.click(screen.getByRole("button", { name: "settings ask" }));
     expectPreferences("navigation", true, false);
-    expect(JSON.parse(window.localStorage.getItem(storageKey)!)).toEqual({ ask: true, agent: false });
+    expect(JSON.parse(window.localStorage.getItem(storageKey)!)).toEqual({ ask: true, agent: false, knowledgeMap: false });
 
     fireEvent.click(screen.getByRole("button", { name: "navigation agent" }));
     expectPreferences("settings", true, true);
     fireEvent.click(screen.getByRole("button", { name: "settings ask" }));
     expectPreferences("navigation", false, true);
+    fireEvent.click(screen.getByRole("button", { name: "settings knowledge map" }));
+    expectPreferences("navigation", false, true, true, true);
+    expect(JSON.parse(window.localStorage.getItem(storageKey)!)).toEqual({ ask: false, agent: true, knowledgeMap: true });
+    fireEvent.click(screen.getByRole("button", { name: "navigation knowledge map" }));
+    expectPreferences("settings", false, true);
   });
 
   it("restores saved preferences on mount and retains changes after remount", () => {
@@ -73,19 +79,20 @@ describe("useLabsPreferences", () => {
     const first = render(<Consumer name="first" />);
     expectPreferences("first", false, true);
     fireEvent.click(screen.getByRole("button", { name: "first ask" }));
+    fireEvent.click(screen.getByRole("button", { name: "first knowledge map" }));
     first.unmount();
     render(<Consumer name="second" />);
-    expectPreferences("second", true, true);
+    expectPreferences("second", true, true, true, true);
   });
 
   it("updates both consumers for another tab's changes, removal and clear", () => {
     render(<><Consumer name="settings" /><Consumer name="navigation" /></>);
-    act(() => remoteChange(storageKey, JSON.stringify({ ask: true, agent: false })));
-    expectPreferences("settings", true, false);
-    expectPreferences("navigation", true, false);
+    act(() => remoteChange(storageKey, JSON.stringify({ ask: true, agent: false, knowledgeMap: true })));
+    expectPreferences("settings", true, false, true, true);
+    expectPreferences("navigation", true, false, true, true);
 
     act(() => remoteChange("dtxwiki:labs:other-user", JSON.stringify({ ask: false, agent: true })));
-    expectPreferences("settings", true, false);
+    expectPreferences("settings", true, false, true, true);
     act(() => remoteChange(storageKey, null));
     expectPreferences("navigation", false, false);
     fireEvent.click(screen.getByRole("button", { name: "settings agent" }));
@@ -93,7 +100,7 @@ describe("useLabsPreferences", () => {
     expectPreferences("navigation", false, false);
   });
 
-  it.each(["invalid json", "null", "[]", "true", '{"ask":"true","agent":1}'])(
+  it.each(["invalid json", "null", "[]", "true", '{"ask":"true","agent":1,"knowledgeMap":"true"}'])(
     "defaults safely for invalid storage: %s", (value) => {
       window.localStorage.setItem(storageKey, value);
       render(<Consumer name="settings" />);
@@ -106,7 +113,7 @@ describe("useLabsPreferences", () => {
     render(<Consumer name="settings" />);
     expectPreferences("settings", false, true);
     fireEvent.click(screen.getByRole("button", { name: "settings ask" }));
-    expect(JSON.parse(window.localStorage.getItem(storageKey)!)).toEqual({ ask: true, agent: true });
+    expect(JSON.parse(window.localStorage.getItem(storageKey)!)).toEqual({ ask: true, agent: true, knowledgeMap: false });
   });
 
   it("retains local changes when storage writes fail", () => {
@@ -129,9 +136,9 @@ describe("useLabsPreferences", () => {
 
   it("switches accounts without exposing or overwriting the previous user's settings", () => {
     const firstKey = storageKey;
-    window.localStorage.setItem(firstKey, JSON.stringify({ ask: true, agent: false }));
+    window.localStorage.setItem(firstKey, JSON.stringify({ ask: true, agent: false, knowledgeMap: true }));
     const view = render(<Consumer name="settings" />);
-    expectPreferences("settings", true, false);
+    expectPreferences("settings", true, false, true, true);
 
     authState.current = { status: "authenticated", user: { user_id: `${userId}-other` } };
     const secondKey = `dtxwiki:labs:${userId}-other`;
@@ -139,18 +146,18 @@ describe("useLabsPreferences", () => {
     expectPreferences("settings", false, false);
     expect(window.localStorage.getItem(secondKey)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "settings agent" }));
-    expect(JSON.parse(window.localStorage.getItem(firstKey)!)).toEqual({ ask: true, agent: false });
-    expect(JSON.parse(window.localStorage.getItem(secondKey)!)).toEqual({ ask: false, agent: true });
+    expect(JSON.parse(window.localStorage.getItem(firstKey)!)).toEqual({ ask: true, agent: false, knowledgeMap: true });
+    expect(JSON.parse(window.localStorage.getItem(secondKey)!)).toEqual({ ask: false, agent: true, knowledgeMap: false });
 
     authState.current = { status: "anonymous", user: null };
     view.rerender(<Consumer name="settings" />);
     expectPreferences("settings", false, false, false);
     fireEvent.click(screen.getByRole("button", { name: "settings ask" }));
-    expect(JSON.parse(window.localStorage.getItem(secondKey)!)).toEqual({ ask: false, agent: true });
+    expect(JSON.parse(window.localStorage.getItem(secondKey)!)).toEqual({ ask: false, agent: true, knowledgeMap: false });
 
     authState.current = { status: "authenticated", user: { user_id: userId } };
     view.rerender(<Consumer name="settings" />);
-    expectPreferences("settings", true, false);
+    expectPreferences("settings", true, false, true, true);
   });
 
   it.each([null, { status: "checking", user: { user_id: "checking-user" } }])(

@@ -2096,6 +2096,8 @@
   "labs": {
     "title": "Experimental menus",
     "description": "These features are still being developed. Turn on the menus you want to try.",
+    "showKnowledgeMap": "Show Knowledge Map menu",
+    "knowledgeMapHint": "Also requires a workspace owner to enable Knowledge Map in Settings > Workspace > Knowledge graph.",
     "showAsk": "Show Ask menu",
     "showAgent": "Show Agent menu",
     "savedLocally": "Changes apply immediately and are saved for your account in this browser."

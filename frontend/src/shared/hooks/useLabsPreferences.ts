@@ -2,22 +2,24 @@ import { useCallback, useSyncExternalStore } from "react";
 
 import { useOptionalAuth } from "../auth/AuthContext";
 
-type LabsMenu = "ask" | "agent";
+type LabsMenu = "ask" | "agent" | "knowledgeMap";
 type LabsPreferences = Readonly<Record<LabsMenu, boolean>>;
 
-const snapshots: readonly LabsPreferences[] = [
-  { ask: false, agent: false },
-  { ask: true, agent: false },
-  { ask: false, agent: true },
-  { ask: true, agent: true },
-];
+const menuFlags: Record<LabsMenu, number> = { ask: 1, agent: 2, knowledgeMap: 4 };
+const snapshots: readonly LabsPreferences[] = Array.from({ length: 8 }, (_, flags) => ({
+  ask: (flags & menuFlags.ask) !== 0,
+  agent: (flags & menuFlags.agent) !== 0,
+  knowledgeMap: (flags & menuFlags.knowledgeMap) !== 0,
+}));
 
 function parseSnapshot(value: string | null): number {
   try {
     const parsed: unknown = JSON.parse(value ?? "null");
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return 0;
     const record = parsed as Record<string, unknown>;
-    return (record.ask === true ? 1 : 0) | (record.agent === true ? 2 : 0);
+    return (record.ask === true ? menuFlags.ask : 0)
+      | (record.agent === true ? menuFlags.agent : 0)
+      | (record.knowledgeMap === true ? menuFlags.knowledgeMap : 0);
   } catch {
     return 0;
   }
@@ -64,7 +66,7 @@ function createStore(key: string) {
     },
     setMenuVisible(menu: LabsMenu, visible: boolean) {
       const current = getSnapshot();
-      const flag = menu === "ask" ? 1 : 2;
+      const flag = menuFlags[menu];
       const next = visible ? current | flag : current & ~flag;
       if (next === current) return;
       lastSnapshot = next;
