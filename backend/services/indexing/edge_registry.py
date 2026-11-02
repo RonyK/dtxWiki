@@ -14,8 +14,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import and_, delete, func, inspect, or_, select
-from sqlalchemy.engine import Connection
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.models.ask import AskSession, AskTurn, AskTurnCitation
@@ -29,7 +28,6 @@ from backend.models.context import (
     PageProvenance,
 )
 from backend.models.library import LibraryItem, LibraryItemVersion
-from backend.models.mcp_chat import McpChatArtifactVerb
 from backend.models.tree import WorkspaceTreeNode
 from backend.services.entity_ref import EntityKind
 from backend.services.graph_cache import (
@@ -62,6 +60,12 @@ from backend.services.indexing.co_read_policy import (
 from backend.services.indexing.co_read_policy import (
     co_access_pairs as co_access_pairs,
 )
+
+# Only successful body views qualify; structural/outline/edit-session touches
+# remain REFERENCED and never contribute to co-access.
+from backend.services.indexing.co_read_source import (
+    CO_ACCESS_SOURCE_VERBS as CO_ACCESS_SOURCE_VERBS,
+)
 from backend.services.indexing.edge_projection import (
     EdgeProjectionDelta as EdgeProjectionDelta,
 )
@@ -77,9 +81,6 @@ from backend.services.indexing.edge_projection import (
     stored_edge_identity as _stored_edge_identity,
 )
 
-# Only successful body views qualify; structural/outline/edit-session touches
-# remain REFERENCED and never contribute to co-access.
-CO_ACCESS_SOURCE_VERBS = frozenset({McpChatArtifactVerb.VIEWED})
 _ENTITY_KIND_VALUES = frozenset(kind.value for kind in EntityKind)
 PAGE_EDGE_OBSERVATION_EXTRACTOR_VERSION = "page-edge-write-through.v1"
 PAGE_EDGE_KINDS = ("wikilink", "citation_page", "citation_source")
@@ -156,13 +157,11 @@ def _ask_citation_rows(session: Session, workspace_id: UUID) -> list[dict[str, o
     ]
 
 
-def co_read_source(
-    session: Session, workspace_id: UUID, *, since: datetime
-) -> Iterator[Read]:
-    """Compatibility entrypoint; usage adapters prove successful body reads."""
-    from backend.services.co_access import co_access_reads
+def co_read_source(session: Session, workspace_id: UUID, **filters) -> Iterator[Read]:
+    """Compatibility entrypoint to the single focused-body evidence source."""
+    from backend.services.indexing.co_read_source import co_read_source as source
 
-    return co_access_reads(session, workspace_id, since=since)
+    return source(session, workspace_id, **filters)
 
 
 def _co_access_rows(
@@ -1247,22 +1246,23 @@ def refresh_co_access_edge_projection(
     *,
     now: datetime | None = None,
 ) -> int:
-    # The frozen core migration calls this runtime seam before Graph View's
-    # revision exists. Reflection is confined to its connection-bound Session;
-    # ordinary Engine-bound workers and graph requests keep the current path.
-    if (
-        session.join_transaction_mode == "rollback_only"
-        and isinstance(session.get_bind(), Connection)
-        and {"support_session_count", "first_observed_at"}.isdisjoint(
-            column["name"]
-            for column in inspect(session.connection()).get_columns("edge_projection")
+    from backend.migrations.revision_modules.v0_2.legacy_usage_v1 import (
+        legacy_migration_session,
+        restore_legacy_usage,
+    )
+
+    if legacy_migration_session(session):
+        restore_legacy_usage(
+            session.connection(), workspace_id, now=now or datetime.now(UTC)
         )
-    ):
-        return _refresh_released_co_access_projection(
-            session,
-            workspace_id,
-            rows=_co_access_rows(session, workspace_id, now=now),
-            now=now,
+        from backend.repositories.workspace_scoped import select_in_workspace
+
+        return session.scalar(
+            select_in_workspace(
+                EdgeProjection,
+                workspace_id=workspace_id,
+                conditions=(EdgeProjection.edge_kind == "co_access",),
+            ).with_only_columns(func.count())
         )
     from backend.services.co_access import sync_co_access_projection
 

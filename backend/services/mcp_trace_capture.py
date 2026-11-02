@@ -151,18 +151,21 @@ def persist_mcp_tool_trace(
                 )
             ]
         for candidate in candidates:
+            verb = candidate.verb
             if (
-                candidate.verb == McpChatArtifactVerb.VIEWED
+                verb == McpChatArtifactVerb.VIEWED
                 and tool_call.result_status != "succeeded"
             ):
-                continue
+                # A partial body read is still an auditable reference, but
+                # cannot contribute to successful body-view relationships.
+                verb = McpChatArtifactVerb.REFERENCED
             chat_service.link_artifact(
                 session=session,
                 chat_session=chat,
                 tool_call=tool_call,
                 resource_kind=candidate.resource_kind,
                 resource_id=candidate.resource_id,
-                verb=candidate.verb,
+                verb=verb,
                 version_id=candidate.version_id,
                 root_hash=candidate.root_hash,
             )

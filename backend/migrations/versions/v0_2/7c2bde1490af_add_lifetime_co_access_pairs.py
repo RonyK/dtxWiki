@@ -12,7 +12,10 @@ the visible graph continues to admit only pairs supported by two or more.
 import sqlalchemy as sa
 from alembic import op
 
-from backend.migrations.revision_modules.v0_2 import lifetime_co_access_v1
+from backend.migrations.revision_modules.v0_2 import (
+    bounded_co_access_v1,
+    lifetime_co_access_v1,
+)
 
 revision = "7c2bde1490af"
 down_revision = "1d8f1c08ca36"
@@ -20,6 +23,7 @@ branch_labels = None
 depends_on = None
 
 VIEWED_SESSION_INDEX = "ix_mcp_chat_tool_call_artifact_viewed_session"
+VIEWED_PAIR_INDEX = "ix_mcp_chat_tool_call_artifact_viewed_pair"
 
 
 def upgrade() -> None:
@@ -72,9 +76,41 @@ def upgrade() -> None:
         postgresql_where=sa.text("verb = 'viewed'"),
     )
     lifetime_co_access_v1.upgrade(op.get_bind())
+    op.add_column(
+        "mcp_chat_session", sa.Column("co_access_state", sa.JSON(), nullable=True)
+    )
+    op.add_column(
+        "mcp_chat_tool_call_artifact",
+        sa.Column("co_access_segment", sa.Integer(), nullable=True),
+    )
+    op.add_column(
+        "mcp_chat_tool_call_artifact",
+        sa.Column("co_access_position", sa.Integer(), nullable=True),
+    )
+    # Backfill before creating the index to avoid per-row index rewrites.
+    bounded_co_access_v1.upgrade(op.get_bind())
+    op.create_index(
+        VIEWED_PAIR_INDEX,
+        "mcp_chat_tool_call_artifact",
+        [
+            "workspace_id",
+            "chat_session_id",
+            "resource_kind",
+            "resource_id",
+            "co_access_segment",
+            "co_access_position",
+        ],
+        sqlite_where=sa.text("verb = 'viewed'"),
+        postgresql_where=sa.text("verb = 'viewed'"),
+    )
 
 
 def downgrade() -> None:
+    bounded_co_access_v1.downgrade(op.get_bind())
+    op.drop_index(VIEWED_PAIR_INDEX, table_name="mcp_chat_tool_call_artifact")
+    op.drop_column("mcp_chat_tool_call_artifact", "co_access_position")
+    op.drop_column("mcp_chat_tool_call_artifact", "co_access_segment")
+    op.drop_column("mcp_chat_session", "co_access_state")
     lifetime_co_access_v1.downgrade(op.get_bind())
     op.drop_index(VIEWED_SESSION_INDEX, table_name="mcp_chat_tool_call_artifact")
     op.drop_table("co_access_pair")

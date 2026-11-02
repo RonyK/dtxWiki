@@ -3,6 +3,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from sqlalchemy import (
+    JSON,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -131,6 +132,8 @@ class McpChatSession(UuidPrimaryKeyMixin, Base):
     frozen_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     archived_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     conversation_group_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    # Bounded active co-read segment; completed evidence stays in per-call rows.
+    co_access_state: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
 
     artifact_links: Mapped[list["McpChatArtifactLink"]] = relationship(
         back_populates="chat_session",
@@ -259,6 +262,17 @@ class McpChatToolCallArtifact(UuidPrimaryKeyMixin, Base):
             sqlite_where=text("verb = 'viewed'"),
             postgresql_where=text("verb = 'viewed'"),
         ),
+        Index(
+            "ix_mcp_chat_tool_call_artifact_viewed_pair",
+            "workspace_id",
+            "chat_session_id",
+            "resource_kind",
+            "resource_id",
+            "co_access_segment",
+            "co_access_position",
+            sqlite_where=text("verb = 'viewed'"),
+            postgresql_where=text("verb = 'viewed'"),
+        ),
         # Epic-3 D-3 final schema: workspace-scoped, not just
         # session/tool-call-scoped.
         ForeignKeyConstraint(
@@ -297,6 +311,8 @@ class McpChatToolCallArtifact(UuidPrimaryKeyMixin, Base):
     resource_kind: Mapped[str] = mapped_column(Text, nullable=False)
     resource_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
     verb: Mapped[str] = mapped_column(Text, nullable=False)
+    co_access_segment: Mapped[int | None] = mapped_column(Integer)
+    co_access_position: Mapped[int | None] = mapped_column(Integer)
     occurred_at: Mapped[datetime] = mapped_column(
         UTCDateTime(),
         default=utc_now,

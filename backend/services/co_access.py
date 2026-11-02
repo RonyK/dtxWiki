@@ -1,34 +1,42 @@
-"""Lifetime co-view counts, maintained with the read trace transaction.
+"""Lifetime co-view evidence with bounded append work and exact late recovery.
 
-The raw per-call history is the replay source. Normal writes inspect only
-the changed conversation; no conversation identity is copied into aggregates.
+Raw views carry their segment/position; the conversation keeps only twelve
+active runs. Aggregate pairs contain counts/dates, never conversation IDs.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from sqlalchemy import tuple_
+from sqlalchemy import and_, case, select, tuple_
 from sqlalchemy.orm import Session
 
 from backend.models.graph import CoAccessPair
-from backend.models.mcp_chat import McpChatArtifactVerb, McpChatToolCallArtifact
-from backend.models.mcp_trace import MCPToolCall
-from backend.policy.mcp_scopes import FOCUSED_READ_TOOLS
+from backend.models.mcp_chat import McpChatSession, McpChatToolCallArtifact
 from backend.repositories.workspace_scoped import (
     delete_in_workspace,
-    join_in_workspace,
     select_in_workspace,
+    update_in_workspace,
 )
-from backend.services.graph_cache import lock_edge_projection_workspace
-from backend.services.indexing.co_read import CoReadPair, EntityRef, Read
+from backend.services.graph_cache import (
+    bump_edge_version,
+    lock_edge_projection_workspace,
+    try_edge_projection_reader,
+)
+from backend.services.indexing.co_read import EntityRef, Read
 from backend.services.indexing.co_read_policy import (
+    CO_ACCESS_ADJACENCY_WINDOW,
     CO_ACCESS_MIN_SESSIONS,
-    CO_ACCESS_SOURCE_BATCH_ROWS,
     co_access_pairs,
 )
+from backend.services.indexing.co_read_source import (
+    co_read_rows,
+    co_read_source,
+    co_read_statement,
+)
+from backend.services.indexing.co_read_state import advance_co_read_state
 from backend.services.indexing.edge_projection import (
     EdgeProjectionScope,
     build_edge_row,
@@ -39,76 +47,22 @@ PairKey = tuple[EntityRef, EntityRef]
 
 
 def lock_co_access_workspace(session: Session, workspace_id: UUID) -> None:
-    """Serialize counter and projection changes, including a first pair insert.
-
-    A no-op UPDATE also acquires SQLite's writer lock before the read/diff.
-    The public graph revision changes only if visible relations change.
-    """
+    """Administrative projection/recovery lock; never taken for ordinary views."""
     lock_edge_projection_workspace(session, workspace_id)
 
 
-def _reads(
-    session: Session,
-    workspace_id: UUID,
-    *,
-    chat_session_id: UUID | None = None,
-    since: datetime | None = None,
-) -> Iterable[Read]:
-    from backend.services.entity_ref import EntityKind
-
-    conditions = [McpChatToolCallArtifact.verb == McpChatArtifactVerb.VIEWED]
-    if chat_session_id is not None:
-        conditions.append(McpChatToolCallArtifact.chat_session_id == chat_session_id)
-    if since is not None:
-        conditions.append(McpChatToolCallArtifact.occurred_at >= since)
-    statement = select_in_workspace(
-        McpChatToolCallArtifact, workspace_id=workspace_id, conditions=conditions
-    )
-    statement = join_in_workspace(
-        statement,
-        McpChatToolCallArtifact,
-        MCPToolCall,
-        workspace_id=workspace_id,
-        on=(MCPToolCall.id == McpChatToolCallArtifact.mcp_tool_call_id)
-        & (MCPToolCall.result_status == "succeeded")
-        & MCPToolCall.tool_name.in_(FOCUSED_READ_TOOLS),
-    )
-    kinds = {kind.value for kind in EntityKind}
-    rows = session.scalars(
-        statement.order_by(
-            McpChatToolCallArtifact.chat_session_id,
-            McpChatToolCallArtifact.occurred_at,
-            McpChatToolCallArtifact.mcp_tool_call_id,
-            McpChatToolCallArtifact.id,
-        ).execution_options(yield_per=CO_ACCESS_SOURCE_BATCH_ROWS)
-    )
-    try:
-        for row in rows:
-            if row.resource_kind in kinds:
-                yield Read(
-                    session_id=row.chat_session_id,
-                    entity=(row.resource_kind, row.resource_id),
-                    occurred_at=row.occurred_at,
-                    mcp_tool_call_id=row.mcp_tool_call_id,
-                    artifact_id=row.id,
-                )
-    finally:
-        rows.close()
+def _reads(session: Session, workspace_id: UUID, **filters) -> Iterable[Read]:
+    return co_read_source(session, workspace_id, **filters)
 
 
-def _pairs(reads: Iterable[Read]) -> dict[PairKey, CoReadPair]:
-
-    return {(pair.left, pair.right): pair for pair in co_access_pairs(reads)}
-
-
-def _identity(pair: PairKey) -> tuple[str, UUID, str, UUID]:
+def _identity(pair: PairKey):
     return (*pair[0], *pair[1])
 
 
 def _scope(model, keys: Iterable[PairKey]):
     return tuple_(
         model.source_kind, model.source_id, model.target_kind, model.target_id
-    ).in_([_identity(key) for key in keys])
+    ).in_([_identity(k) for k in keys])
 
 
 def _usage_enabled(session: Session, workspace_id: UUID) -> bool:
@@ -124,124 +78,287 @@ def _usage_enabled(session: Session, workspace_id: UUID) -> bool:
         return usage_relation_signals_enabled(control_session, workspace_id)
 
 
-def _recount_pair(session: Session, workspace_id: UUID, key: PairKey):
-    """Repair an affected pair after an out-of-order read changes segmentation.
+def _key(row):
+    return row.occurred_at, row.mcp_tool_call_id, row.id
 
-    Only conversations containing both endpoints can contribute. This rare
-    repair preserves exact first/last times without a per-conversation ledger.
-    """
+
+def _read(row):
+    return Read(
+        row.chat_session_id,
+        (row.resource_kind, row.resource_id),
+        row.occurred_at,
+        row.mcp_tool_call_id,
+        row.id,
+    )
+
+
+def _conversation_has_pair(session, workspace_id, chat_id, key):
+    # Source-level ordinal metadata makes this indexed existence check exact
+    # even when this pair was already seen in an earlier closed segment.
+    def endpoint(entity):
+        return (
+            co_read_statement(
+                workspace_id,
+                chat_session_id=chat_id,
+                conditions=(
+                    McpChatToolCallArtifact.resource_kind == entity[0],
+                    McpChatToolCallArtifact.resource_id == entity[1],
+                    McpChatToolCallArtifact.co_access_segment.is_not(None),
+                ),
+            )
+            .with_only_columns(
+                McpChatToolCallArtifact.id,
+                McpChatToolCallArtifact.co_access_segment.label("segment"),
+                McpChatToolCallArtifact.co_access_position.label("position"),
+            )
+            .subquery()
+        )
+
+    left, right = endpoint(key[0]), endpoint(key[1])
+    gap = CO_ACCESS_ADJACENCY_WINDOW - 1
+    match = and_(
+        left.c.segment == right.c.segment,
+        left.c.position != right.c.position,
+        left.c.position.between(right.c.position - gap, right.c.position + gap),
+    )
+    statement = select(left.c.id).select_from(left.join(right, match)).limit(1)
+    return session.scalar(statement) is not None
+
+
+def _upsert_pair(session, workspace_id, key, *, delta, first, last):
+    if session.get_bind().dialect.name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert
+    else:
+        from sqlalchemy.dialects.sqlite import insert
+    values = dict(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        source_kind=key[0][0],
+        source_id=key[0][1],
+        target_kind=key[1][0],
+        target_id=key[1][1],
+        support_session_count=1,
+        first_observed_at=first,
+        occurred_at=last,
+    )
+    statement = insert(CoAccessPair).values(**values)
+    statement = statement.on_conflict_do_update(
+        index_elements=[
+            CoAccessPair.workspace_id,
+            CoAccessPair.source_kind,
+            CoAccessPair.source_id,
+            CoAccessPair.target_kind,
+            CoAccessPair.target_id,
+        ],
+        set_={
+            "support_session_count": CoAccessPair.support_session_count + delta,
+            "first_observed_at": case(
+                (CoAccessPair.first_observed_at > first, first),
+                else_=CoAccessPair.first_observed_at,
+            ),
+            "occurred_at": case(
+                (CoAccessPair.occurred_at < last, last), else_=CoAccessPair.occurred_at
+            ),
+        },
+    )
+    session.execute(statement)
+
+
+def _recount_pair(session, workspace_id, key):
+    """Rare late-delivery repair, scoped to conversations containing both ends."""
 
     def conversations(entity):
-        return select_in_workspace(
-            McpChatToolCallArtifact,
-            workspace_id=workspace_id,
+        return co_read_statement(
+            workspace_id,
             conditions=(
-                McpChatToolCallArtifact.verb == McpChatArtifactVerb.VIEWED,
                 McpChatToolCallArtifact.resource_kind == entity[0],
                 McpChatToolCallArtifact.resource_id == entity[1],
+                McpChatToolCallArtifact.co_access_segment.is_not(None),
             ),
         ).with_only_columns(McpChatToolCallArtifact.chat_session_id)
 
-    ids = session.scalars(conversations(key[0]).intersect(conversations(key[1])))
+    ids = session.scalars(conversations(key[0]).intersect(conversations(key[1]))).all()
     count, first, last = 0, None, None
-    for chat_id in ids.all():
-        pair = _pairs(_reads(session, workspace_id, chat_session_id=chat_id)).get(key)
-        if pair is not None:
-            count += 1
-            first = min(first, pair.first_pair_at) if first else pair.first_pair_at
-            last = max(last, pair.last_pair_at) if last else pair.last_pair_at
+    for chat_id in ids:
+        for pair in co_access_pairs(
+            co_read_source(
+                session,
+                workspace_id,
+                chat_session_id=chat_id,
+                conditions=(McpChatToolCallArtifact.co_access_segment.is_not(None),),
+            )
+        ):
+            if (pair.left, pair.right) == key:
+                count += 1
+                first = min(first, pair.first_pair_at) if first else pair.first_pair_at
+                last = max(last, pair.last_pair_at) if last else pair.last_pair_at
+                break
     return count, first, last
 
 
-def record_co_access_read(
-    session: Session,
-    *,
-    workspace_id: UUID,
-    chat_session_id: UUID,
-    artifact_id: UUID,
-) -> None:
-    """Apply one newly inserted VIEWED row exactly once in its transaction.
-
-    The caller locks the workspace before inserting the row. A duplicate
-    per-call artifact never enters this function. Repeated views in one chat
-    update dates but cannot add a second supporting conversation.
-    """
-    reads = list(_reads(session, workspace_id, chat_session_id=chat_session_id))
-    after = _pairs(reads)
-    before = _pairs(read for read in reads if read.artifact_id != artifact_id)
-    changed = {
-        key
-        for key in before.keys() | after.keys()
-        if key not in before
-        or key not in after
-        or (before[key].first_pair_at, before[key].last_pair_at)
-        != (after[key].first_pair_at, after[key].last_pair_at)
+def _replay_conversation(session, workspace_id, chat):
+    """Rebuild only a cold/late conversation, then repair its affected pairs."""
+    before = {
+        (p.left, p.right)
+        for p in co_access_pairs(
+            co_read_source(
+                session,
+                workspace_id,
+                chat_session_id=chat.id,
+                conditions=(McpChatToolCallArtifact.co_access_segment.is_not(None),),
+            )
+        )
     }
-    if not changed:
-        return
-
-    for key in sorted(changed):
-        row = session.scalar(
-            select_in_workspace(
-                CoAccessPair,
-                workspace_id=workspace_id,
-                conditions=(_scope(CoAccessPair, [key]),),
-            )
+    rows = list(co_read_rows(session, workspace_id, chat_session_id=chat.id))
+    after = {(p.left, p.right) for p in co_access_pairs(_read(row) for row in rows)}
+    keys = before | after
+    if keys:
+        try_edge_projection_reader(session, workspace_id)
+    state = None
+    for row in rows:
+        state, _, row.co_access_segment, row.co_access_position = advance_co_read_state(
+            state, _read(row)
         )
-        old, new = before.get(key), after.get(key)
-        # A late insertion may remove a pair or move an extremal timestamp
-        # inward. Recount its actual contributors instead of guessing dates.
-        repair = (
-            (row is None and old is not None)
-            or new is None
-            or (
-                old is not None
-                and row is not None
-                and (
-                    old.first_pair_at == row.first_observed_at
-                    and new.first_pair_at > old.first_pair_at
-                    or old.last_pair_at == row.occurred_at
-                    and new.last_pair_at < old.last_pair_at
-                )
-            )
-        )
-        if repair:
-            count, first, last = _recount_pair(session, workspace_id, key)
-        else:
-            count = (row.support_session_count if row else 0) + (old is None)
-            first = (
-                min(row.first_observed_at, new.first_pair_at)
-                if row
-                else new.first_pair_at
-            )
-            last = max(row.occurred_at, new.last_pair_at) if row else new.last_pair_at
-        if not count:
-            if row is not None:
-                session.delete(row)
-        elif row is None:
-            session.add(
-                CoAccessPair(
-                    workspace_id=workspace_id,
-                    source_kind=key[0][0],
-                    source_id=key[0][1],
-                    target_kind=key[1][0],
-                    target_id=key[1][1],
-                    support_session_count=count,
-                    first_observed_at=first,
-                    occurred_at=last,
-                )
-            )
-        else:
-            row.support_session_count = count
-            row.first_observed_at = first
-            row.occurred_at = last
+    chat.co_access_state = state
     session.flush()
-    sync_co_access_projection(
-        session,
-        workspace_id,
-        keys=changed,
-        usage_signals_enabled=_usage_enabled(session, workspace_id),
+    for key in sorted(keys):
+        # Obtain/create the canonical pair lock before querying contributors.
+        stamp = rows[-1].occurred_at
+        _upsert_pair(session, workspace_id, key, delta=0, first=stamp, last=stamp)
+        count, first, last = _recount_pair(session, workspace_id, key)
+        if count:
+            session.execute(
+                update_in_workspace(
+                    CoAccessPair,
+                    workspace_id=workspace_id,
+                    conditions=(_scope(CoAccessPair, [key]),),
+                    values=dict(
+                        support_session_count=count,
+                        first_observed_at=first,
+                        occurred_at=last,
+                    ),
+                )
+            )
+        else:
+            session.execute(
+                delete_in_workspace(
+                    CoAccessPair,
+                    workspace_id=workspace_id,
+                    conditions=(_scope(CoAccessPair, [key]),),
+                )
+            )
+    return keys
+
+
+def record_co_access_read(
+    session: Session, *, workspace_id: UUID, chat_session_id: UUID, artifact_id: UUID
+) -> None:
+    """Process pending views under a conversation lock, not a workspace row lock."""
+    chat = session.scalar(
+        select_in_workspace(
+            McpChatSession,
+            workspace_id=workspace_id,
+            conditions=(McpChatSession.id == chat_session_id,),
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
+    row = session.scalar(
+        co_read_statement(
+            workspace_id,
+            chat_session_id=chat_session_id,
+            conditions=(McpChatToolCallArtifact.id == artifact_id,),
+        ).execution_options(populate_existing=True)
+    )
+    if chat is None or row is None or row.co_access_segment is not None:
+        return
+    state = chat.co_access_state
+    if state is None:
+        changed = _replay_conversation(session, workspace_id, chat)
+    else:
+        cursor = state["last_key"]
+        cursor_key = (
+            datetime.fromisoformat(cursor[0]),
+            UUID(cursor[1]),
+            UUID(cursor[2]),
+        )
+        if _key(row) <= cursor_key:
+            changed = _replay_conversation(session, workspace_id, chat)
+        else:
+            changed = set()
+            pending = co_read_rows(
+                session, workspace_id, chat_session_id=chat.id, after_key=cursor_key
+            )
+            try:
+                for event in pending:
+                    updated, spans, segment, position = advance_co_read_state(
+                        state, _read(event)
+                    )
+                    if spans:
+                        try_edge_projection_reader(session, workspace_id)
+                    seen = {
+                        key: _conversation_has_pair(session, workspace_id, chat.id, key)
+                        for key in spans
+                    }
+                    # Check prior support before annotating this event.
+                    event.co_access_segment, event.co_access_position = (
+                        segment,
+                        position,
+                    )
+                    for key in sorted(spans):
+                        first, last = spans[key]
+                        _upsert_pair(
+                            session,
+                            workspace_id,
+                            key,
+                            delta=int(not seen[key]),
+                            first=first,
+                            last=last,
+                        )
+                    changed.update(spans)
+                    state = updated
+                    chat.co_access_state = state
+                session.flush()
+            finally:
+                pending.close()
+    if changed:
+        sync_co_access_projection(
+            session,
+            workspace_id,
+            keys=changed,
+            usage_signals_enabled=_usage_enabled(session, workspace_id),
+            incremental=True,
+        )
+
+
+def _projection_row(pair, workspace_id):
+    from backend.services.entity_ref import EntityKind
+
+    return build_edge_row(
+        workspace_id=workspace_id,
+        source_kind=EntityKind(pair.source_kind),
+        source_id=pair.source_id,
+        target_kind=EntityKind(pair.target_kind),
+        target_id=pair.target_id,
+        edge_kind="co_access",
+        provenance="usage",
+        source_table="co_access_pair",
+        weight=float(pair.support_session_count),
+        occurred_at=pair.occurred_at,
+        support_session_count=pair.support_session_count,
+        first_observed_at=pair.first_observed_at,
+    )
+
+
+def _pair_statement(workspace_id, keys=None):
+    return select_in_workspace(
+        CoAccessPair,
+        workspace_id=workspace_id,
+        conditions=(
+            CoAccessPair.support_session_count >= CO_ACCESS_MIN_SESSIONS,
+            *((_scope(CoAccessPair, keys),) if keys is not None else ()),
+        ),
+    ).execution_options(populate_existing=True)
 
 
 def sync_co_access_projection(
@@ -249,20 +366,14 @@ def sync_co_access_projection(
     workspace_id: UUID,
     *,
     usage_signals_enabled: bool,
-    keys: set[PairKey] | None = None,
+    keys=None,
+    incremental: bool = False,
 ) -> int:
-    """Restore/toggle the read model from counters without reading MCP history."""
     from backend.models.context import EdgeProjection
-    from backend.services.entity_ref import EntityKind
-    from backend.services.graph_cache import bump_edge_version
 
-    lock_co_access_workspace(session, workspace_id)
-    pairs_statement = select_in_workspace(
-        CoAccessPair,
-        workspace_id=workspace_id,
-        conditions=(_scope(CoAccessPair, keys),) if keys is not None else (),
-    )
-    edges_statement = select_in_workspace(
+    if not incremental:
+        lock_co_access_workspace(session, workspace_id)
+    edges = select_in_workspace(
         EdgeProjection,
         workspace_id=workspace_id,
         conditions=(
@@ -270,38 +381,53 @@ def sync_co_access_projection(
             *((_scope(EdgeProjection, keys),) if keys is not None else ()),
         ),
     )
-    desired = [
-        build_edge_row(
-            workspace_id=workspace_id,
-            source_kind=EntityKind(pair.source_kind),
-            source_id=pair.source_id,
-            target_kind=EntityKind(pair.target_kind),
-            target_id=pair.target_id,
-            edge_kind="co_access",
-            provenance="usage",
-            source_table="co_access_pair",
-            weight=float(pair.support_session_count),
-            occurred_at=pair.occurred_at,
-            support_session_count=pair.support_session_count,
-            first_observed_at=pair.first_observed_at,
-        )
-        for pair in session.scalars(pairs_statement)
+    if incremental:
+        edges = edges.with_for_update(nowait=True)
+    existing = list(session.scalars(edges.execution_options(populate_existing=True)))
+    desired = (
+        [
+            _projection_row(pair, workspace_id)
+            for pair in session.scalars(_pair_statement(workspace_id, keys))
+        ]
         if usage_signals_enabled
-        and pair.support_session_count >= CO_ACCESS_MIN_SESSIONS
-    ]
-    delta = reconcile_edge_projection_rows(
+        else []
+    )
+
+    def rank_values(row):
+        return (
+            row["support_session_count"],
+            row["weight"],
+            row["provenance"],
+            row["source_ref"],
+        )
+
+    def identity(row):
+        return (
+            row["source_kind"],
+            row["source_id"],
+            row["target_kind"],
+            row["target_id"],
+        )
+
+    before = {identity(vars(edge)): rank_values(vars(edge)) for edge in existing}
+    after = {identity(row): rank_values(row) for row in desired}
+    rank_changed = before != after
+    if incremental and rank_changed:
+        lock_edge_projection_workspace(session, workspace_id, nowait=True)
+    reconcile_edge_projection_rows(
         session,
         scope=EdgeProjectionScope(workspace_id, frozenset({"co_access"})),
-        existing_rows=list(session.scalars(edges_statement)),
+        existing_rows=existing,
         desired_rows=desired,
     )
-    if delta.changed:
+    # Dates remain fresh for evidence display, but no recency rank is enabled.
+    # Re-reading in one conversation cannot invalidate topology/PPR caches.
+    if rank_changed:
         bump_edge_version(session, workspace_id)
-    return delta.desired_count
+    return len(desired)
 
 
-def co_access_projection_needs_repair(session: Session, workspace_id: UUID) -> bool:
-    """Recover a missed policy-toggle job without replaying the read history."""
+def co_access_projection_needs_repair(session, workspace_id):
     from backend.models.context import EdgeProjection
 
     matches = (
@@ -336,24 +462,38 @@ def co_access_projection_needs_repair(session: Session, workspace_id: UUID) -> b
 
 
 def rebuild_co_access_pairs(
-    session: Session, workspace_id: UUID, *, usage_signals_enabled: bool = True
-) -> int:
-    """Explicit recovery/reindex replay; normal graph reads never call this."""
-
+    session, workspace_id, *, usage_signals_enabled=True, sync_projection=True
+):
+    """Explicit administrative recovery; normal reindex trusts these counters."""
     lock_co_access_workspace(session, workspace_id)
-    aggregates = {}
-    for pair in co_access_pairs(_reads(session, workspace_id)):
-        key = (pair.left, pair.right)
-        previous = aggregates.get(key)
-        aggregates[key] = (
-            (
-                previous[0] + 1,
-                min(previous[1], pair.first_pair_at),
-                max(previous[2], pair.last_pair_at),
-            )
-            if previous
-            else (1, pair.first_pair_at, pair.last_pair_at)
+    chats = {
+        chat.id: chat
+        for chat in session.scalars(
+            select_in_workspace(McpChatSession, workspace_id=workspace_id)
+            .order_by(McpChatSession.id)
+            .with_for_update()
         )
+    }
+    aggregates = {}
+    rows = co_read_rows(session, workspace_id)
+    states = {}
+    try:
+        for row in rows:
+            state, _, row.co_access_segment, row.co_access_position = (
+                advance_co_read_state(states.get(row.chat_session_id), _read(row))
+            )
+            states[row.chat_session_id] = state
+        for chat_id, state in states.items():
+            chats[chat_id].co_access_state = state
+        session.flush()
+    finally:
+        rows.close()
+    for pair in co_access_pairs(co_read_source(session, workspace_id)):
+        key = (pair.left, pair.right)
+        value = aggregates.setdefault(key, [0, pair.first_pair_at, pair.last_pair_at])
+        value[0] += 1
+        value[1] = min(value[1], pair.first_pair_at)
+        value[2] = max(value[2], pair.last_pair_at)
     session.execute(delete_in_workspace(CoAccessPair, workspace_id=workspace_id))
     for key, (count, first, last) in aggregates.items():
         session.add(
@@ -369,58 +509,24 @@ def rebuild_co_access_pairs(
             )
         )
     session.flush()
-    return sync_co_access_projection(
-        session, workspace_id, usage_signals_enabled=usage_signals_enabled
+    if sync_projection:
+        return sync_co_access_projection(
+            session, workspace_id, usage_signals_enabled=usage_signals_enabled
+        )
+    return sum(
+        1
+        for count, _, _ in aggregates.values()
+        if usage_signals_enabled and count >= CO_ACCESS_MIN_SESSIONS
     )
 
 
-def co_access_projection_rows(
-    session: Session,
-    workspace_id: UUID,
-    *,
-    now: datetime | None = None,
-) -> list[dict[str, object]]:
-    """Project lifetime counters; this never scans raw MCP history."""
-    from sqlalchemy import inspect
-    from sqlalchemy.engine import Connection
-
-    from backend.services.entity_ref import EntityKind
-
-    # Frozen core upgrade invokes this seam before the new counters exist.
-    # Its read model is superseded by the new revision's frozen backfill.
-    if (
-        session.join_transaction_mode == "rollback_only"
-        and isinstance(session.get_bind(), Connection)
-        and not inspect(session.connection()).has_table("co_access_pair")
-    ):
-        return []
+def co_access_projection_rows(session, workspace_id, *, now=None):
+    """One shared pair-to-edge producer for maintenance and full reindex."""
     return [
-        build_edge_row(
-            workspace_id=workspace_id,
-            source_kind=EntityKind(pair.source_kind),
-            source_id=pair.source_id,
-            target_kind=EntityKind(pair.target_kind),
-            target_id=pair.target_id,
-            edge_kind="co_access",
-            provenance="usage",
-            source_table="co_access_pair",
-            weight=float(pair.support_session_count),
-            occurred_at=pair.occurred_at,
-            support_session_count=pair.support_session_count,
-            first_observed_at=pair.first_observed_at,
-        )
-        for pair in session.scalars(
-            select_in_workspace(
-                CoAccessPair,
-                workspace_id=workspace_id,
-                conditions=(
-                    CoAccessPair.support_session_count >= CO_ACCESS_MIN_SESSIONS,
-                ),
-            )
-        )
+        _projection_row(pair, workspace_id)
+        for pair in session.scalars(_pair_statement(workspace_id))
     ]
 
 
-def co_access_reads(session: Session, workspace_id: UUID, *, since: datetime):
-    """The same successful-body source for bounded hot-path analysis."""
-    return _reads(session, workspace_id, since=since)
+def co_access_reads(session, workspace_id, *, since=None, **filters):
+    return co_read_source(session, workspace_id, since=since, **filters)

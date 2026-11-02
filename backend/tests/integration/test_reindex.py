@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -6,7 +7,13 @@ from sqlalchemy import select
 from backend.app.container import DatabaseProvider
 from backend.llm.embedding import DeterministicEmbedding
 from backend.models.chunk import ContentChunk
-from backend.models.context import ContextPage, ContextPageVersion, PageLink
+from backend.models.context import (
+    ContextPage,
+    ContextPageVersion,
+    EdgeProjection,
+    PageLink,
+)
+from backend.models.graph import CoAccessPair
 from backend.models.workspace import Workspace
 from backend.services.indexing import (
     CompositeIndexer,
@@ -36,6 +43,8 @@ def test_reindex_workspace_indexes_published_pages(session_factory):
         workspace_id = session.scalar(
             select(Workspace).where(Workspace.slug == "default")
         ).id
+        pages = []
+        versions = []
         for slug in ("one", "two"):
             page = ContextPage(
                 workspace_id=workspace_id,
@@ -60,12 +69,44 @@ def test_reindex_workspace_indexes_published_pages(session_factory):
             session.flush()
             page.current_published_version_id = version.id
             session.flush()
+            pages.append(page)
+            versions.append(version)
+
+        # This one rebuild restores both curated edges and usage edges. It
+        # must not publish each producer's intermediate projection/revision.
+        versions[0].body_md += f"\n\n[Two](/p/{workspace_id}/{pages[1].id})"
+        source_id, target_id = sorted(page.id for page in pages)
+        at = datetime(2026, 1, 1, tzinfo=UTC)
+        session.add(
+            CoAccessPair(
+                workspace_id=workspace_id,
+                source_kind="context_page",
+                source_id=source_id,
+                target_kind="context_page",
+                target_id=target_id,
+                support_session_count=2,
+                first_observed_at=at,
+                occurred_at=at + timedelta(days=1),
+            )
+        )
+        session.flush()
+        before_revision = session.get(Workspace, workspace_id).edge_projection_version
 
     counts = reindex_workspace(provider, indexer, workspace_id)
     with session_factory() as session:
         chunks = session.scalars(select(ContentChunk)).all()
+        edges = list(session.scalars(select(EdgeProjection)))
+        assert {"wikilink", "co_access"} <= {edge.edge_kind for edge in edges}
+        pair = session.scalar(select(CoAccessPair))
+        assert pair.support_session_count == 2
+        assert len([edge for edge in edges if edge.edge_kind == "co_access"]) == 1
+        assert (
+            session.get(Workspace, workspace_id).edge_projection_version
+            == before_revision + 1
+        )
 
     assert counts["context_pages"] == 2
+    assert counts["edge_projections"] == len(edges)
     assert {chunk.document_kind for chunk in chunks} == {"context_page"}
     assert len(chunks) >= 2
 

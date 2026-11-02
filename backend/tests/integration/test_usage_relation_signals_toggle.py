@@ -157,7 +157,7 @@ def test_switching_signals_off_clears_co_access_and_back_on_rebuilds_it(
         session_factory, page_service, now
     )
     with session_factory.begin() as session:
-        run_trail_tick(
+        first_tick = run_trail_tick(
             session,
             workspace_id,
             now=now,
@@ -165,6 +165,21 @@ def test_switching_signals_off_clears_co_access_and_back_on_rebuilds_it(
             refresh_usage_projection=True,
         )
         assert _co_access_count(session, workspace_id) == 1
+        assert first_tick["co_access_edges"] == 1
+
+        # A periodic no-op reports the same live edge inventory, rather than
+        # misreporting zero just because it did not need to restore anything.
+        def unexpected_refresh(*_args, **_kwargs):
+            raise AssertionError("unchanged projection must not be rebuilt")
+
+        monkeypatch.setattr(
+            trail_analysis, "refresh_co_access_edge_projection", unexpected_refresh
+        )
+        no_op_tick = run_trail_tick(
+            session, workspace_id, now=now, usage_signals_enabled=True
+        )
+        assert no_op_tick["co_access_edges"] == first_tick["co_access_edges"] == 1
+        monkeypatch.undo()
 
     # Off: the Local Graph stops showing the edge at once, before any tick.
     with session_factory() as session:

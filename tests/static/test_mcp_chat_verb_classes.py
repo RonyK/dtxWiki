@@ -19,7 +19,8 @@ from backend.services.mcp_trace_capture import derive_artifact_links
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROJECTION_SOURCES = {
-    "backend/services/co_access.py": 2,
+    "backend/services/co_access.py": 0,
+    "backend/services/indexing/co_read_source.py": 1,
     # Registry entrypoints delegate to the usage adapter; policy stays there.
     "backend/services/indexing/edge_registry.py": 0,
     "backend/services/trail_analysis.py": 1,
@@ -119,8 +120,7 @@ def test_projection_filters_only_admit_consumption_verbs():
 
         assert len(arguments) + len(direct_filters) == expected_count, relative_path
         assert all(
-            isinstance(argument, ast.Name)
-            and argument.id in PROJECTION_VERB_ALLOWLISTS
+            isinstance(argument, ast.Name) and argument.id in PROJECTION_VERB_ALLOWLISTS
             for argument in arguments
         ), relative_path
         # An equality predicate lets SQLite use the partial viewed-session

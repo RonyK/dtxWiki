@@ -28,7 +28,7 @@ from backend.models.user import User
 from backend.models.workspace import MCPClient, Workspace
 from backend.policy.auth import ActorContext
 from backend.schemas.read import GraphNeighborEntry, GraphNeighborsPayload
-from backend.services import co_access, graph_ppr
+from backend.services import co_access, graph_ppr, trail_analysis
 from backend.services.co_access import rebuild_co_access_pairs
 from backend.services.eval.harness import (
     LaneMetrics,
@@ -690,8 +690,10 @@ def test_co_access_does_not_depend_on_the_fetch_batch(session_factory, monkeypat
                 occurred_at=now - timedelta(hours=shift + 1),
             )
         for batch_rows in (1, 2, 5_000):
+            from backend.services.indexing import co_read_source as shared_source
+
             monkeypatch.setattr(
-                edge_registry, "CO_ACCESS_SOURCE_BATCH_ROWS", batch_rows
+                shared_source, "CO_ACCESS_SOURCE_BATCH_ROWS", batch_rows
             )
             rebuild_co_access_pairs(session, workspace_id)
             results[batch_rows] = sorted(
@@ -1142,6 +1144,7 @@ def test_associative_search_lane_is_opt_in_and_keeps_exact_hit_first(
 
 def test_ppr_cache_uses_database_revision_across_sessions(session_factory):
     seed, first_target, second_target = uuid4(), uuid4(), uuid4()
+    usage_target = uuid4()
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         session.add(
@@ -1157,11 +1160,55 @@ def test_ppr_cache_uses_database_revision_across_sessions(session_factory):
                 source_ref={},
             )
         )
+        session.add(
+            EdgeProjection(
+                workspace_id=workspace_id,
+                source_kind="context_page",
+                source_id=seed,
+                target_kind="context_page",
+                target_id=usage_target,
+                edge_kind="co_access",
+                provenance="usage",
+                weight=300.0,
+                source_ref={},
+            )
+        )
         bump_edge_version(session, workspace_id)
+        access_revision = session.scalar(
+            select(Workspace.updated_at).where(Workspace.id == workspace_id)
+        )
+        recompute_authority(session, workspace_id)
+        assert (
+            session.scalar(
+                select(Workspace.updated_at).where(Workspace.id == workspace_id)
+            )
+            == access_revision
+        )
+        authority = dict(
+            session.execute(
+                select(KnowledgeNodeStat.entity_id, KnowledgeNodeStat.authority).where(
+                    KnowledgeNodeStat.workspace_id == workspace_id,
+                    KnowledgeNodeStat.entity_id.in_((first_target, usage_target)),
+                )
+            ).all()
+        )
+        assert authority[first_target] > authority[usage_target]
 
     with session_factory() as session:
         first = subgraph_ppr(session, workspace_id, [("context_page", seed, 1.0)])
         assert first_target in {result.entity_id for result in first}
+        scores = {result.entity_id: result.score for result in first}
+        assert scores[first_target] > scores[usage_target]
+        # The normalization is an input policy, not a rewrite of evidence.
+        assert (
+            session.scalar(
+                select(EdgeProjection.weight).where(
+                    EdgeProjection.workspace_id == workspace_id,
+                    EdgeProjection.edge_kind == "co_access",
+                )
+            )
+            == 300
+        )
 
     with session_factory.begin() as session:
         session.execute(
@@ -1894,9 +1941,9 @@ def _metered_edges(rows, *, probe_budget):
     The calculation is a pure function over its edges, so the edges are the one
     place to watch it from. Every wrapper delegates to the value it stands for,
     leaving the ranks exactly as the plain call computes them; each only counts.
-    ``passes`` and ``rows`` count reads of the edge sequence, ``transitions`` the
-    weights scaled into transition probabilities (by whichever of ``*`` and ``/``
-    reaches a weight first, so the order the code writes them in is immaterial),
+    ``passes`` and ``rows`` count reads of the edge sequence. ``transitions``
+    counts normalized weights scaled into probabilities (by whichever of ``*``
+    and ``/`` reaches a weight first), separately from storage-count conversion.
     ``probes`` the hash-table probes made on node ids. A probe past
     ``probe_budget`` raises on the spot, so a quadratic node index fails at once
     instead of running for hours.
@@ -1929,6 +1976,8 @@ def _metered_edges(rows, *, probe_budget):
             probe()
             return super().__eq__(other)
 
+    meter.weight_type = Weight
+
     class Edges:
         def __iter__(self):
             meter.passes += 1
@@ -1940,7 +1989,7 @@ def _metered_edges(rows, *, probe_budget):
                     target_kind,
                     NodeId(int=target_id.int),
                     kind,
-                    Weight(weight),
+                    weight,
                 )
 
     return Edges(), meter
@@ -1950,7 +1999,7 @@ def _metered_edges(rows, *, probe_budget):
 # transition meter (test_authority_builds_at_most_two_transitions_per_edge)
 # and authority projection (test_ppr_visibility_and_authority_projection).
 @pytest.mark.release_scale
-def test_authority_work_is_bounded_at_100k_edges(session_factory):
+def test_authority_work_is_bounded_at_100k_edges(session_factory, monkeypatch):
     # The 5s budget (§19.5.7) rests on the calculation doing a bounded amount of
     # work per edge. That is counted on every run instead of timed (the wall
     # clock lives in the opt-in benchmark below): the edges are read once, one
@@ -1961,6 +2010,12 @@ def test_authority_work_is_bounded_at_100k_edges(session_factory):
         seeded_nodes, nodes, edge_rows = _seed_authority_chain(session, workspace_id)
 
     edges, meter = _metered_edges(edge_rows, probe_budget=8 * len(edge_rows))
+    normalize = trail_analysis.pagerank_weight
+    monkeypatch.setattr(
+        trail_analysis,
+        "pagerank_weight",
+        lambda kind, value: meter.weight_type(normalize(kind, value)),
+    )
     stats = _authority_stat_rows(
         edges,
         workspace_id=workspace_id,
@@ -1986,7 +2041,7 @@ def test_authority_work_is_bounded_at_100k_edges(session_factory):
     assert set(chain[20:]) == {plateau}
 
 
-def test_authority_builds_at_most_two_transitions_per_edge():
+def test_authority_builds_at_most_two_transitions_per_edge(monkeypatch):
     # A co_access edge is mutual, so it builds its reverse as well; every other
     # kind builds one. Two per edge is therefore the ceiling on inner-loop work.
     kinds = ["wikilink", "co_access", "wikilink", "co_access", "co_access"]
@@ -1996,6 +2051,12 @@ def test_authority_builds_at_most_two_transitions_per_edge():
         for index, kind in enumerate(kinds)
     ]
     edges, meter = _metered_edges(rows, probe_budget=8 * len(rows))
+    normalize = trail_analysis.pagerank_weight
+    monkeypatch.setattr(
+        trail_analysis,
+        "pagerank_weight",
+        lambda kind, value: meter.weight_type(normalize(kind, value)),
+    )
 
     _authority_stat_rows(
         edges, workspace_id=uuid4(), now=datetime(2026, 1, 1, tzinfo=UTC)

@@ -34,6 +34,7 @@ from backend.services.entity_ref import (
     context_concept_path,
     library_concept_path,
 )
+from backend.services.graph_rank import pagerank_weight
 from backend.services.indexing.edge_registry import (
     clear_co_access_edge_projection,
     co_access_pairs,
@@ -62,6 +63,7 @@ def run_trail_tick(
     the co_access projection is removed and no hot path is staged: hot paths
     are the page-to-page co_access pairs, so they are the same signal.
     """
+    from backend.repositories.workspace_scoped import select_in_workspace
 
     now = now or datetime.now(UTC)
     if usage_signals_enabled:
@@ -75,7 +77,16 @@ def run_trail_tick(
             refresh_co_access_edge_projection(session, workspace_id, now=now)
             if refresh_usage_projection
             or co_access_projection_needs_repair(session, workspace_id)
-            else 0
+            else int(
+                session.scalar(
+                    select_in_workspace(
+                        EdgeProjection,
+                        workspace_id=workspace_id,
+                        conditions=(EdgeProjection.edge_kind == "co_access",),
+                    ).with_only_columns(func.count(EdgeProjection.id))
+                )
+                or 0
+            )
         )
     else:
         hot_paths = 0
@@ -147,6 +158,13 @@ def recompute_authority(
     now: datetime | None = None,
 ) -> int:
     now = now or datetime.now(UTC)
+    from backend.migrations.revision_modules.v0_2.legacy_usage_v1 import (
+        legacy_migration_session,
+        recompute_legacy_authority,
+    )
+
+    if legacy_migration_session(session):
+        return recompute_legacy_authority(session, workspace_id, now=now)
     # The frozen core migration also invokes this function. Select only its
     # released version columns, since later Workspace settings do not exist yet.
     versions = session.execute(
@@ -192,7 +210,10 @@ def recompute_authority(
     session.execute(
         update(Workspace)
         .where(Workspace.id == workspace_id)
-        .values(authority_projection_version=projection_version)
+        .values(
+            authority_projection_version=projection_version,
+            updated_at=Workspace.updated_at,
+        )
     )
     session.flush()
     return len(stat_rows)
@@ -224,7 +245,7 @@ def _authority_stat_rows(
     for source_kind, source_id, target_kind, target_id, edge_kind, weight in edges:
         source = node_index((source_kind, source_id))
         target = node_index((target_kind, target_id))
-        bounded_weight = max(weight, 0.0)
+        bounded_weight = pagerank_weight(edge_kind, weight)
         indexed_edges.append((source, target, bounded_weight))
         in_degree[target] += 1
         if edge_kind == "co_access":
@@ -358,6 +379,13 @@ def _context_pair_session_counts(
     this used to read keeps no per-read instant, which forced a whole-session
     clique: one session of 200 reads became 19,900 pairs.
     """
+    from backend.migrations.revision_modules.v0_2.legacy_usage_v1 import (
+        legacy_context_pair_counts,
+        legacy_migration_session,
+    )
+
+    if legacy_migration_session(session):
+        return legacy_context_pair_counts(session, workspace_id, now=now)
 
     page = EntityKind.CONTEXT_PAGE.value
     reads = co_read_source(

@@ -1,45 +1,36 @@
-"""The focused-view boundary for incremental read-together projection.
+"""Best-effort derived co-access projection; source trace capture stays durable."""
 
-Legacy REFERENCED touches and citation registrations retain their existing
-history/presentation meaning. Neither is evidence of a focused body view.
-"""
+import logging
+from contextlib import contextmanager
 
-from uuid import UUID
-
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.policy.mcp_scopes import FOCUSED_READ_TOOLS
 from backend.services.mcp_artifact_activity import InsertedArtifactUsage
 
+logger = logging.getLogger(__name__)
 FOCUSED_VIEW_VERB = "viewed"
 
 
-def prepare_artifact_usage(
-    session: Session,
-    *,
-    workspace_id: UUID,
-    verb: str,
-    result_status: str,
-    tool_name: str,
-) -> None:
-    """Take the usage lock before artifact writes, only for a real view."""
-    if (
-        verb != FOCUSED_VIEW_VERB
-        or result_status != "succeeded"
-        or tool_name not in FOCUSED_READ_TOOLS
-    ):
+@contextmanager
+def co_access_write_budget(session: Session):
+    """A slow administrative writer must not stall a focused MCP read."""
+    if session.get_bind().dialect.name != "postgresql":
+        yield
         return
-    # The legacy runtime does not emit VIEWED. Keep the feature dependency
-    # behind its explicit persisted verb until read-together is installed.
-    from backend.services.co_access import lock_co_access_workspace
-
-    lock_co_access_workspace(session, workspace_id)
+    previous = session.scalar(text("SELECT current_setting('lock_timeout')"))
+    session.execute(text("SELECT set_config('lock_timeout', '25ms', true)"))
+    yield
+    session.execute(
+        text("SELECT set_config('lock_timeout', :value, true)"), {"value": previous}
+    )
 
 
 def project_inserted_artifact_usage(
     session: Session, event: InsertedArtifactUsage
 ) -> None:
-    """Project a new VIEWED row; the caller must not pass duplicate inserts."""
+    """Keep raw events even if derived usage work fails or maintenance owns it."""
     if (
         event.verb != FOCUSED_VIEW_VERB
         or event.result_status != "succeeded"
@@ -48,9 +39,35 @@ def project_inserted_artifact_usage(
         return
     from backend.services.co_access import record_co_access_read
 
-    record_co_access_read(
-        session,
-        workspace_id=event.workspace_id,
-        chat_session_id=event.chat_session_id,
-        artifact_id=event.artifact_id,
-    )
+    try:
+        # begin_nested flushes the original trace before the derived savepoint.
+        # Its rollback cannot erase the call, artifact or independent read base.
+        with session.begin_nested():
+            with co_access_write_budget(session):
+                record_co_access_read(
+                    session,
+                    workspace_id=event.workspace_id,
+                    chat_session_id=event.chat_session_id,
+                    artifact_id=event.artifact_id,
+                )
+    except Exception:
+        logger.exception("Co-access projection deferred; original read trace retained")
+        from backend.services.job_queue import JobQueueService
+
+        try:
+            with session.begin_nested():
+                JobQueueService().enqueue(
+                    session,
+                    event.workspace_id,
+                    "co_access_repair",
+                    "usage",
+                    idempotency_key=f"co-access:{event.artifact_id}",
+                    target_ref={
+                        "chat_session_id": str(event.chat_session_id),
+                        "artifact_id": str(event.artifact_id),
+                    },
+                )
+        except Exception:
+            logger.exception(
+                "Could not queue co-access repair; source evidence retained"
+            )

@@ -103,7 +103,6 @@ from backend.services.mcp_display_text import (
     truncate_graphemes as _truncate_graphemes,
 )
 from backend.services.mcp_focused_read_usage import (
-    prepare_artifact_usage,
     project_inserted_artifact_usage,
 )
 from backend.services.mcp_trace_redaction import (
@@ -375,13 +374,6 @@ class McpChatService:
         root_hash: str | None = None,
     ) -> McpChatArtifactLink:
         occurred_at = tool_call.completed_at or tool_call.started_at or utc_now()
-        prepare_artifact_usage(
-            session,
-            workspace_id=chat_session.workspace_id,
-            verb=verb.value,
-            result_status=tool_call.result_status,
-            tool_name=tool_call.tool_name,
-        )
 
         def _advance_read_pointer(existing: McpChatArtifactLink) -> None:
             if version_id is None:
@@ -1093,8 +1085,7 @@ class McpChatService:
                         )
                     ),
                 ),
-            )
-            .order_by(McpChatArtifactLink.last_occurred_at.desc())
+            ).order_by(McpChatArtifactLink.last_occurred_at.desc())
         )
         if link is not None:
             title, _path = self._artifact_title_and_path(

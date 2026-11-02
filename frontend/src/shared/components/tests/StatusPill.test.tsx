@@ -82,7 +82,7 @@ describe("StatusPill", () => {
 
     await i18n.changeLanguage("ko");
     rerender(<StatusPill status="viewed" />);
-    expect(screen.getByText("열람")).toBeInTheDocument();
+    expect(screen.getByText("열람됨")).toBeInTheDocument();
     rerender(<StatusPill status="extract_pending" />);
     expect(screen.getByText("추출 대기 중")).toBeInTheDocument();
     // The raw enum no longer leaks English into a ko surface.

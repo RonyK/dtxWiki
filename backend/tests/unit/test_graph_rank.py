@@ -22,6 +22,7 @@ from backend.services.graph_rank import (
     citation_weight,
     effective_weight,
     fair_share_quotas,
+    pagerank_weight,
     rank_param,
     rank_score,
     round_robin_take,
@@ -46,6 +47,12 @@ def test_no_amount_of_co_reading_outranks_one_authored_link():
         "wikilink", 1.0, None, NOW
     )
     assert rank_score("wikilink", 1.0, None, NOW) == 0.25
+    # Stored co-access counts are a different unit from an authored link.
+    # Importance/PageRank must bound them too, without applying age decay.
+    assert pagerank_weight("co_access", 300) == pytest.approx(0.20 * 300 / 325)
+    assert pagerank_weight("co_access", 40_000) < pagerank_weight("wikilink", 1)
+    assert pagerank_weight("wikilink", 1) == 1
+    assert pagerank_weight("co_access", 0) == 0
 
 
 def test_rank_table_declares_shared_display_parameters():

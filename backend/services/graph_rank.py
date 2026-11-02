@@ -16,8 +16,9 @@ page that links to everything. Callers count the denominators over what the
 reader can see; this module only does the arithmetic, so the Knowledge Map
 can reuse it on its own relation counts.
 
-Stored ``EdgeProjection.weight`` stays raw. PPR and authority read it as the
-relation was recorded; rank is a display order, computed per request.
+Stored ``EdgeProjection.weight`` stays raw. PPR and authority bound lifetime
+co-access counts separately so reading habits cannot outweigh authored links.
+Display rank is computed per request.
 """
 
 from __future__ import annotations
@@ -140,6 +141,19 @@ def rank_score(
     """The comparable rank of one relation, in ``[0, w]`` and so ``[0, 1]``."""
 
     return saturation(edge_kind, effective_weight) * decay(edge_kind, occurred_at, now)
+
+
+def pagerank_weight(edge_kind: str, raw_weight: float) -> float:
+    """Bound cumulative usage evidence without changing stored counts or age.
+
+    A co-access pair carries lifetime conversation support, not link strength.
+    Reuse its 0.20 ceiling and 25-conversation midpoint for importance inputs;
+    authored and other producer weights retain their existing units.
+    """
+    raw = max(float(raw_weight), 0.0)
+    if RANK_ALIASES.get(edge_kind, edge_kind) == "co_access":
+        return saturation("co_access", raw)
+    return raw
 
 
 def wikilink_weight(occurrences: float, out_degree: int) -> float:

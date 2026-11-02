@@ -96,16 +96,62 @@ def upgrade(connection: Connection) -> None:
 
 
 def downgrade(connection: Connection) -> None:
-    """Keep old runtimes able to read the trace after dropping the new model."""
-
-    groups = connection.execute(
-        sa.select(rollup).where(rollup.c.verb == "viewed")
-    ).mappings()
-    for viewed in list(groups):
-        _merge_viewed_rollup_back(connection, viewed)
+    """Restore reference traces and the old rolling, decayed projection."""
+    groups = list(
+        connection.execute(
+            sa.select(rollup).where(rollup.c.verb == "viewed")
+        ).mappings()
+    )
+    updates, deletes = [], []
+    for batch in _batches(groups):
+        keys = [_key(row) for row in batch]
+        references = {
+            _key(row): row
+            for row in connection.execute(
+                sa.select(rollup).where(
+                    _identities(rollup, keys), rollup.c.verb == "referenced"
+                )
+            ).mappings()
+        }
+        for viewed in batch:
+            reference = references.get(_key(viewed))
+            if reference is None:
+                updates.append((viewed["id"], {"verb": "referenced"}))
+                continue
+            latest = max((reference, viewed), key=_rollup_order)
+            pointer = max((reference, viewed), key=_pointer_time)
+            updates.append(
+                (
+                    reference["id"],
+                    dict(
+                        occurrence_count=reference["occurrence_count"]
+                        + viewed["occurrence_count"],
+                        first_occurred_at=min(
+                            reference["first_occurred_at"], viewed["first_occurred_at"]
+                        ),
+                        last_occurred_at=latest["last_occurred_at"],
+                        last_mcp_tool_call_id=latest["last_mcp_tool_call_id"],
+                        **{field: pointer[field] for field in _POINTER_FIELDS},
+                    ),
+                )
+            )
+            deletes.append(viewed["id"])
+    _update_rollups(connection, updates)
+    _delete_rollups(connection, deletes)
     connection.execute(
         per_call.update().where(per_call.c.verb == "viewed").values(verb="referenced")
     )
+    # A pre-lifetime runtime treats weight as an already-decayed read sum.
+    # Never leave cumulative counts behind after their backing table is gone.
+    from . import legacy_usage_v1
+
+    now = datetime.now(UTC)
+    for workspace_id, enabled in connection.execute(
+        sa.select(workspace.c.id, workspace.c.usage_relation_signals_enabled)
+    ):
+        legacy_usage_v1.restore_legacy_usage(
+            connection, workspace_id, now=now, usage_signals_enabled=enabled
+        )
 
 
 def _identity(table, key):
@@ -164,101 +210,168 @@ def _move_body_views(connection: Connection) -> None:
     connection.execute(
         per_call.update().where(per_call.c.id.in_(eligible_ids)).values(verb="viewed")
     )
-    for key, changed in grouped.items():
-        reference = (
-            connection.execute(
+    for key_batch in _batches(list(grouped)):
+        existing = {
+            (_key(row), row["verb"]): row
+            for row in connection.execute(
                 sa.select(rollup).where(
-                    *_identity(rollup, key), rollup.c.verb == "referenced"
+                    _identities(rollup, key_batch),
+                    rollup.c.verb.in_(("referenced", "viewed")),
                 )
-            )
-            .mappings()
-            .first()
-        )
-        viewed = (
-            connection.execute(
-                sa.select(rollup).where(
-                    *_identity(rollup, key), rollup.c.verb == "viewed"
-                )
-            )
-            .mappings()
-            .first()
-        )
-        values = {
-            "occurrence_count": changed["count"]
-            + (viewed["occurrence_count"] if viewed else 0),
-            "first_occurred_at": changed["first"],
-            "last_occurred_at": changed["last"]["occurred_at"],
-            "last_mcp_tool_call_id": changed["last"]["mcp_tool_call_id"],
+            ).mappings()
         }
-        if viewed:
-            values["first_occurred_at"] = min(
-                values["first_occurred_at"], viewed["first_occurred_at"]
+        remaining_by_key = {}
+        for row in connection.execute(
+            sa.select(per_call).where(
+                _identities(per_call, key_batch), per_call.c.verb == "referenced"
             )
-            if _rollup_order(viewed) > (
-                values["last_occurred_at"],
-                values["last_mcp_tool_call_id"],
-            ):
-                values.update(
-                    last_occurred_at=viewed["last_occurred_at"],
-                    last_mcp_tool_call_id=viewed["last_mcp_tool_call_id"],
+        ).mappings():
+            summary = remaining_by_key.setdefault(
+                _key(row),
+                {
+                    "count": 0,
+                    "first": row["occurred_at"],
+                    "last": row,
+                },
+            )
+            summary["count"] += 1
+            summary["first"] = min(summary["first"], row["occurred_at"])
+            if _read_order(row) > _read_order(summary["last"]):
+                summary["last"] = row
+        updates, inserts, deletes = [], [], []
+        for key in key_batch:
+            changed = grouped[key]
+            reference = existing.get((key, "referenced"))
+            viewed = existing.get((key, "viewed"))
+            values = {
+                "occurrence_count": changed["count"]
+                + (viewed["occurrence_count"] if viewed else 0),
+                "first_occurred_at": changed["first"],
+                "last_occurred_at": changed["last"]["occurred_at"],
+                "last_mcp_tool_call_id": changed["last"]["mcp_tool_call_id"],
+            }
+            if viewed:
+                values["first_occurred_at"] = min(
+                    values["first_occurred_at"], viewed["first_occurred_at"]
                 )
-
-        remaining = []
-        remaining_count = 0
-        if reference:
-            remaining = list(
-                connection.execute(
-                    sa.select(per_call).where(
-                        *_identity(per_call, key), per_call.c.verb == "referenced"
+                if _rollup_order(viewed) > (
+                    values["last_occurred_at"],
+                    values["last_mcp_tool_call_id"],
+                ):
+                    values.update(
+                        last_occurred_at=viewed["last_occurred_at"],
+                        last_mcp_tool_call_id=viewed["last_mcp_tool_call_id"],
                     )
-                ).mappings()
-            )
-            remaining_count = max(
-                len(remaining), reference["occurrence_count"] - changed["count"]
-            )
-        # Read-base pointers are independent correctness state. Keep a pointer
-        # with a surviving reference, or transfer it before removing that row.
-        pointer = reference if reference and remaining_count == 0 else None
-        if viewed and (
-            pointer is None or _pointer_time(viewed) >= _pointer_time(pointer)
-        ):
-            pointer = viewed
-        if pointer:
-            values.update({field: pointer[field] for field in _POINTER_FIELDS})
-        if viewed:
-            connection.execute(
-                rollup.update().where(rollup.c.id == viewed["id"]).values(**values)
-            )
-        else:
-            connection.execute(
-                rollup.insert().values(
-                    id=uuid4(),
-                    workspace_id=key[0],
-                    chat_session_id=key[1],
-                    resource_kind=key[2],
-                    resource_id=key[3],
-                    verb="viewed",
-                    **values,
+            remaining = remaining_by_key.get(key)
+            known_remaining_count = remaining["count"] if remaining else 0
+            remaining_count = (
+                max(
+                    known_remaining_count,
+                    reference["occurrence_count"] - changed["count"],
                 )
+                if reference
+                else 0
             )
-        if not reference:
-            continue
-        if remaining_count == 0:
-            connection.execute(rollup.delete().where(rollup.c.id == reference["id"]))
-        else:
+            # Preserve read-base correctness independently of display verbs.
+            pointer = reference if reference and remaining_count == 0 else None
+            if viewed and (
+                pointer is None or _pointer_time(viewed) >= _pointer_time(pointer)
+            ):
+                pointer = viewed
+            values.update(
+                {
+                    field: pointer[field] if pointer else None
+                    for field in _POINTER_FIELDS
+                }
+            )
+            if viewed:
+                updates.append((viewed["id"], values))
+            else:
+                inserts.append(
+                    dict(
+                        id=uuid4(),
+                        workspace_id=key[0],
+                        chat_session_id=key[1],
+                        resource_kind=key[2],
+                        resource_id=key[3],
+                        verb="viewed",
+                        **values,
+                    )
+                )
+            if not reference:
+                continue
+            if remaining_count == 0:
+                deletes.append(reference["id"])
+                continue
             values = {"occurrence_count": remaining_count}
-            # A rollup can contain older touches with no per-call provenance;
-            # do not pretend their first/last times are known after splitting.
-            if len(remaining) == remaining_count:
-                ordered = sorted(remaining, key=_read_order)
+            # Rollup-only history has no proven replacement first/last time.
+            if remaining and known_remaining_count == remaining_count:
                 values.update(
-                    first_occurred_at=ordered[0]["occurred_at"],
-                    last_occurred_at=ordered[-1]["occurred_at"],
-                    last_mcp_tool_call_id=ordered[-1]["mcp_tool_call_id"],
+                    first_occurred_at=remaining["first"],
+                    last_occurred_at=remaining["last"]["occurred_at"],
+                    last_mcp_tool_call_id=remaining["last"]["mcp_tool_call_id"],
                 )
+            updates.append((reference["id"], values))
+        _insert_batches(connection, rollup, inserts)
+        _update_rollups(connection, updates)
+        _delete_rollups(connection, deletes)
+
+
+def _key(row):
+    return tuple(
+        row[field]
+        for field in ("workspace_id", "chat_session_id", "resource_kind", "resource_id")
+    )
+
+
+def _batches(values, size=500):
+    for index in range(0, len(values), size):
+        yield values[index : index + size]
+
+
+def _identities(table, keys):
+    return sa.tuple_(
+        table.c.workspace_id,
+        table.c.chat_session_id,
+        table.c.resource_kind,
+        table.c.resource_id,
+    ).in_(keys)
+
+
+def _update_rollups(connection, updates):
+    _update_rows(connection, rollup, updates)
+
+
+def _update_rows(connection, table, updates):
+    groups = {}
+    for row_id, values in updates:
+        groups.setdefault(tuple(sorted(values)), []).append((row_id, values))
+    for columns, rows in groups.items():
+        for batch in _batches(rows):
+            values = {
+                column: sa.case(
+                    *(
+                        (
+                            sa.literal(row_id, type_=sa.Uuid()),
+                            sa.literal(row[column], type_=table.c[column].type),
+                        )
+                        for row_id, row in batch
+                    ),
+                    value=table.c.id,
+                    else_=table.c[column],
+                )
+                for column in columns
+            }
             connection.execute(
-                rollup.update().where(rollup.c.id == reference["id"]).values(**values)
+                table.update()
+                .where(table.c.id.in_([row_id for row_id, _row in batch]))
+                .values(**values)
             )
+
+
+def _delete_rollups(connection, ids):
+    for batch in _batches(ids):
+        connection.execute(rollup.delete().where(rollup.c.id.in_(batch)))
 
 
 _POINTER_FIELDS = ("last_read_version_id", "last_read_root_hash", "last_read_at")
@@ -276,43 +389,6 @@ def _read_order(row):
 
 def _rollup_order(row):
     return row["last_occurred_at"], row["last_mcp_tool_call_id"]
-
-
-def _merge_viewed_rollup_back(connection: Connection, viewed) -> None:
-    key = tuple(
-        viewed[field]
-        for field in ("workspace_id", "chat_session_id", "resource_kind", "resource_id")
-    )
-    reference = (
-        connection.execute(
-            sa.select(rollup).where(
-                *_identity(rollup, key), rollup.c.verb == "referenced"
-            )
-        )
-        .mappings()
-        .first()
-    )
-    if reference is None:
-        connection.execute(
-            rollup.update().where(rollup.c.id == viewed["id"]).values(verb="referenced")
-        )
-        return
-    latest = max((reference, viewed), key=_rollup_order)
-    pointer = max((reference, viewed), key=_pointer_time)
-    connection.execute(
-        rollup.update()
-        .where(rollup.c.id == reference["id"])
-        .values(
-            occurrence_count=reference["occurrence_count"] + viewed["occurrence_count"],
-            first_occurred_at=min(
-                reference["first_occurred_at"], viewed["first_occurred_at"]
-            ),
-            last_occurred_at=latest["last_occurred_at"],
-            last_mcp_tool_call_id=latest["last_mcp_tool_call_id"],
-            **{field: pointer[field] for field in _POINTER_FIELDS},
-        )
-    )
-    connection.execute(rollup.delete().where(rollup.c.id == viewed["id"]))
 
 
 def _backfill_pairs(connection: Connection) -> None:
@@ -445,7 +521,7 @@ def _insert_batches(connection, table, rows):
     for row in rows:
         batch.append(row)
         if len(batch) == 1_000:
-            connection.execute(table.insert(), batch)
+            connection.execute(table.insert().values(batch))
             batch = []
     if batch:
-        connection.execute(table.insert(), batch)
+        connection.execute(table.insert().values(batch))

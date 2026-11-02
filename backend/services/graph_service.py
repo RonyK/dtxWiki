@@ -61,6 +61,7 @@ from backend.services.graph_rank import (
     candidate_order_key,
     effective_weight,
     kind_order_key,
+    pagerank_weight,
     rank_score,
 )
 from backend.services.graph_semantics import EDGE_SEMANTICS
@@ -1706,7 +1707,7 @@ class GraphService:
         for edge in selected.values():
             source = (edge.source_kind, edge.source_id)
             target = (edge.target_kind, edge.target_id)
-            weight = max(float(edge.weight), 0.0)
+            weight = pagerank_weight(edge.edge_kind, edge.weight)
             adjacency[source][target] = adjacency[source].get(target, 0.0) + weight
             adjacency[target][source] = adjacency[target].get(source, 0.0) + weight
 

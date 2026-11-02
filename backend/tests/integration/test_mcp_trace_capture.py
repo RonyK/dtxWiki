@@ -589,16 +589,22 @@ def test_persist_trace_stores_no_detail_for_a_read_or_a_failed_edit(
 
     with page_service.session_factory() as session:
         assert session.get(MCPToolCall, read_id).result_detail is None
-        assert session.scalar(
-            select(McpChatToolCallArtifact.verb).where(
-                McpChatToolCallArtifact.mcp_tool_call_id == read_id
+        assert (
+            session.scalar(
+                select(McpChatToolCallArtifact.verb).where(
+                    McpChatToolCallArtifact.mcp_tool_call_id == read_id
+                )
             )
-        ) == "viewed"
-        assert session.scalar(
-            select(McpChatToolCallArtifact.id).where(
-                McpChatToolCallArtifact.mcp_tool_call_id == partial_read_id
+            == "viewed"
+        )
+        assert (
+            session.scalar(
+                select(McpChatToolCallArtifact.verb).where(
+                    McpChatToolCallArtifact.mcp_tool_call_id == partial_read_id
+                )
             )
-        ) is None
+            == "referenced"
+        )
         assert session.get(MCPToolCall, failed_id).result_detail is None
 
 

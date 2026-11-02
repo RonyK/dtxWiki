@@ -51,6 +51,7 @@ def reindex_workspace(
                     page=page,
                     version=None,
                     record_graph_observations=False,
+                    sync_graph_edges=False,
                     self_origins=configured_self_origins(database_provider.settings),
                 )
             for version in live_versions:
@@ -59,16 +60,13 @@ def reindex_workspace(
                     page=page,
                     version=version,
                     record_graph_observations=False,
+                    sync_graph_edges=False,
                     self_origins=configured_self_origins(database_provider.settings),
                 )
                 synced_versions += 1
-        # Explicit recovery may replay raw body views. Ordinary reads and
-        # scheduled maintenance never scan lifetime history.
-        from backend.services.co_access import rebuild_co_access_pairs
-
-        rebuild_co_access_pairs(
-            session, workspace_id, usage_signals_enabled=usage_signals
-        )
+        # Lifetime counters are maintained by the view producer. A normal
+        # reindex restores the edge model from those counters, without a
+        # second raw-history replay or intermediate projection/revision.
         edge_counts = rebuild_edge_projection(
             session, workspace_id, usage_signals_enabled=usage_signals
         )

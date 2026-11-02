@@ -7,6 +7,7 @@ share this traversal; no extra database scenarios are needed for those states.
 import os
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -31,6 +32,7 @@ from backend.tests.utils.migrated_sqlite_templates import shared_templates
 PARENT = "1d8f1c08ca36"
 REVISION = "7c2bde1490af"
 VIEW_INDEX = "ix_mcp_chat_tool_call_artifact_viewed_session"
+PAIR_INDEX = "ix_mcp_chat_tool_call_artifact_viewed_pair"
 
 
 @contextmanager
@@ -58,15 +60,19 @@ def _legacy_trace(
     )
     session.add(client)
     session.flush()
-    chat = McpChatSession(
-        workspace_id=workspace_id,
-        client_id=client.id,
-        mcp_session_id=str(uuid4()),
-        started_at=at,
-        last_activity_at=at,
+    # This data belongs to the pre-cursor schema. Explicit old columns keep
+    # the traversal independent of newer nullable ORM columns.
+    chat = SimpleNamespace(id=uuid4())
+    session.execute(
+        McpChatSession.__table__.insert().values(
+            id=chat.id,
+            workspace_id=workspace_id,
+            client_id=client.id,
+            mcp_session_id=str(uuid4()),
+            started_at=at,
+            last_activity_at=at,
+        )
     )
-    session.add(chat)
-    session.flush()
     per_call = []
     for offset, document in enumerate(documents):
         occurred = at + timedelta(minutes=offset)
@@ -81,16 +87,19 @@ def _legacy_trace(
         )
         session.add(call)
         session.flush()
-        row = McpChatToolCallArtifact(
-            workspace_id=workspace_id,
-            chat_session_id=chat.id,
-            mcp_tool_call_id=call.id,
-            resource_kind="context_page",
-            resource_id=document,
-            verb="referenced",
-            occurred_at=occurred,
+        row = SimpleNamespace(id=uuid4(), chat_session_id=chat.id)
+        session.execute(
+            McpChatToolCallArtifact.__table__.insert().values(
+                id=row.id,
+                workspace_id=workspace_id,
+                chat_session_id=chat.id,
+                mcp_tool_call_id=call.id,
+                resource_kind="context_page",
+                resource_id=document,
+                verb="referenced",
+                occurred_at=occurred,
+            )
         )
-        session.add(row)
         session.add(
             McpChatArtifactLink(
                 workspace_id=workspace_id,
@@ -134,7 +143,7 @@ def test_lifetime_co_access_round_trip_preserves_trace_and_rebuilds_evidence(
         migrated = True
         assert "co_access_pair" not in inspect(engine).get_table_names()
         left, right, single = UUID(int=101), UUID(int=102), UUID(int=103)
-        now = datetime(2026, 11, 2, 8, tzinfo=UTC)
+        now = datetime.now(UTC).replace(microsecond=0) - timedelta(minutes=10)
         old = now - timedelta(days=90)
         with Session(engine) as session, session.begin():
             workspace = seed_default_workspace(session)
@@ -146,6 +155,19 @@ def test_lifetime_co_access_round_trip_preserves_trace_and_rebuilds_evidence(
             )
             viewed += _legacy_trace(
                 session, workspace_id, at=now, documents=(right, left)
+            )
+            recent_left, recent_right = UUID(int=104), UUID(int=105)
+            viewed += _legacy_trace(
+                session,
+                workspace_id,
+                at=now - timedelta(days=20),
+                documents=(recent_left, recent_right),
+            )
+            viewed += _legacy_trace(
+                session,
+                workspace_id,
+                at=now,
+                documents=(recent_left, recent_right),
             )
             references = _legacy_trace(
                 session,
@@ -162,7 +184,11 @@ def test_lifetime_co_access_round_trip_preserves_trace_and_rebuilds_evidence(
             source_session_id = source.chat_session_id
             opener = MCPToolCall(
                 workspace_id=workspace_id,
-                client_id=session.get(McpChatSession, source_session_id).client_id,
+                client_id=session.scalar(
+                    select(McpChatSession.client_id).where(
+                        McpChatSession.id == source_session_id
+                    )
+                ),
                 request_id=uuid4(),
                 tool_name="begin_context_edit",
                 result_status="succeeded",
@@ -171,16 +197,19 @@ def test_lifetime_co_access_round_trip_preserves_trace_and_rebuilds_evidence(
             )
             session.add(opener)
             session.flush()
-            mixed = McpChatToolCallArtifact(
-                workspace_id=workspace_id,
-                chat_session_id=source.chat_session_id,
-                mcp_tool_call_id=opener.id,
-                resource_kind="context_page",
-                resource_id=left,
-                verb="referenced",
-                occurred_at=opener.completed_at,
+            mixed = SimpleNamespace(id=uuid4())
+            session.execute(
+                McpChatToolCallArtifact.__table__.insert().values(
+                    id=mixed.id,
+                    workspace_id=workspace_id,
+                    chat_session_id=source.chat_session_id,
+                    mcp_tool_call_id=opener.id,
+                    resource_kind="context_page",
+                    resource_id=left,
+                    verb="referenced",
+                    occurred_at=opener.completed_at,
+                )
             )
-            session.add(mixed)
             mixed_rollup = session.scalar(
                 select(McpChatArtifactLink).where(
                     McpChatArtifactLink.chat_session_id == source.chat_session_id,
@@ -233,6 +262,10 @@ def test_lifetime_co_access_round_trip_preserves_trace_and_rebuilds_evidence(
                 "mcp_tool_call_id",
                 "id",
             ]
+            assert indexes[PAIR_INDEX]["column_names"] == [
+                "workspace_id", "chat_session_id", "resource_kind", "resource_id",
+                "co_access_segment", "co_access_position",
+            ]
             predicate = indexes[VIEW_INDEX]["dialect_options"][f"{dialect}_where"]
             assert "viewed" in str(predicate)
             pair_columns = {
@@ -247,6 +280,7 @@ def test_lifetime_co_access_round_trip_preserves_trace_and_rebuilds_evidence(
                     (left, right),
                     (left, single),
                     (right, single),
+                    (recent_left, recent_right),
                 }
                 pair = by_target[(left, right)]
                 assert pair.support_session_count == 2
@@ -255,7 +289,9 @@ def test_lifetime_co_access_round_trip_preserves_trace_and_rebuilds_evidence(
                 assert by_target[(left, single)].support_session_count == 1
                 edge = session.scalar(
                     select(EdgeProjection).where(
-                        EdgeProjection.edge_kind == "co_access"
+                        EdgeProjection.edge_kind == "co_access",
+                        EdgeProjection.source_id == left,
+                        EdgeProjection.target_id == right,
                     )
                 )
                 assert edge.weight == 2
@@ -345,9 +381,36 @@ def test_lifetime_co_access_round_trip_preserves_trace_and_rebuilds_evidence(
 
         command.upgrade(config, REVISION)
         verify_upgrade()
+        with Session(engine) as session:
+            cursor = session.get(McpChatSession, source_session_id).co_access_state
+            assert cursor["version"] == 1 and len(cursor["runs"]) <= 12
+            assert cursor["segment"] == 0
+            positions = session.execute(
+                select(
+                    McpChatToolCallArtifact.co_access_segment,
+                    McpChatToolCallArtifact.co_access_position,
+                ).where(McpChatToolCallArtifact.id.in_(viewed_ids))
+            ).all()
+            assert all(
+                segment is not None and 0 <= position < 12
+                for segment, position in positions
+            )
+            assert (
+                session.get(Workspace, workspace_id).authority_projection_version == -1
+            )
+
+        before_downgrade = datetime.now(UTC)
         command.downgrade(config, PARENT)
+        after_downgrade = datetime.now(UTC)
         assert "co_access_pair" not in inspect(engine).get_table_names()
+        assert "co_access_state" not in {
+            column["name"] for column in inspect(engine).get_columns("mcp_chat_session")
+        }
         assert VIEW_INDEX not in {
+            index["name"]
+            for index in inspect(engine).get_indexes("mcp_chat_tool_call_artifact")
+        }
+        assert PAIR_INDEX not in {
             index["name"]
             for index in inspect(engine).get_indexes("mcp_chat_tool_call_artifact")
         }
@@ -356,7 +419,38 @@ def test_lifetime_co_access_round_trip_preserves_trace_and_rebuilds_evidence(
                 "referenced"
             }
             assert (
-                sum(session.scalars(select(McpChatArtifactLink.occurrence_count))) == 9
+                sum(session.scalars(select(McpChatArtifactLink.occurrence_count))) == 13
+            )
+            legacy_edges = session.scalars(
+                select(EdgeProjection).where(EdgeProjection.edge_kind == "co_access")
+            ).all()
+            # The 90-day contribution disappears; the surviving recent pair
+            # carries the released decayed read sum, never lifetime count 2.
+            legacy_by_pair = {
+                (row.source_id, row.target_id): row for row in legacy_edges
+            }
+            # Released semantics also counted structural references: this pair
+            # has one current body-read chat plus one structural-read chat.
+            assert set(legacy_by_pair) == {(left, right), (recent_left, recent_right)}
+            assert legacy_by_pair[(left, right)].first_observed_at == now + timedelta(
+                minutes=1
+            )
+            legacy = legacy_by_pair[(recent_left, recent_right)]
+            assert legacy.source_ref == {"table": "mcp_chat_tool_call_artifact"}
+
+            def expected_legacy_weight(at):
+                return sum(
+                    0.5 ** (max(0, (at - paired_at).total_seconds()) / 86400 / 30)
+                    for paired_at in (
+                        now - timedelta(days=20) + timedelta(minutes=1),
+                        now + timedelta(minutes=1),
+                    )
+                )
+
+            assert (
+                expected_legacy_weight(after_downgrade)
+                <= legacy.weight
+                <= expected_legacy_weight(before_downgrade)
             )
         command.upgrade(config, REVISION)
         verify_upgrade()

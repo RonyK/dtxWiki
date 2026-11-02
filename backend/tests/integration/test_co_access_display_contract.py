@@ -6,14 +6,16 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from backend.models.context import EdgeProjection
 from backend.models.graph import CoAccessPair
+from backend.models.job import Job
 from backend.models.mcp_chat import (
     McpChatArtifactKind,
     McpChatArtifactVerb,
     McpChatSession,
+    McpChatToolCallArtifact,
 )
 from backend.models.mcp_trace import MCPToolCall
 from backend.models.workspace import MCPClient, Workspace
@@ -212,6 +214,7 @@ def test_view_trace_updates_lifetime_pairs_atomically_and_repairs_late_reads(
     service = McpChatService()
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
+        access_timestamp = session.get(Workspace, workspace_id).updated_at
 
         def pair():
             return session.scalar(
@@ -277,6 +280,16 @@ def test_view_trace_updates_lifetime_pairs_atomically_and_repairs_late_reads(
         assert len(projected_artifacts) == projections_before_retry
         assert pair().support_session_count == 2
         assert edge().id == edge_id
+        from backend.services.graph_cache import edge_version
+
+        revision = edge_version(session, workspace_id)
+        view(client, chat, left, now + timedelta(seconds=80))
+        assert pair().support_session_count == 2
+        assert edge().occurred_at == now + timedelta(seconds=80)
+        assert edge_version(session, workspace_id) == revision
+        session.refresh(session.get(Workspace, workspace_id))
+        assert session.get(Workspace, workspace_id).updated_at == access_timestamp
+        projections_before_retry = len(projected_artifacts)
 
         # A citation registration is a distinct action. Reuse this conversation
         # to prove that the shared insertion hook never invokes read projection
@@ -354,9 +367,56 @@ def test_view_trace_updates_lifetime_pairs_atomically_and_repairs_late_reads(
         sync_co_access_projection(session, workspace_id, usage_signals_enabled=True)
         assert edge().weight == edge().support_session_count == 3
         rebuild_co_access_pairs(session, workspace_id)
-        assert session.scalar(
-            select(CoAccessPair.id).where(
-                (CoAccessPair.source_id.in_(invalid_view_targets))
-                | (CoAccessPair.target_id.in_(invalid_view_targets))
+        assert (
+            session.scalar(
+                select(CoAccessPair.id).where(
+                    (CoAccessPair.source_id.in_(invalid_view_targets))
+                    | (CoAccessPair.target_id.in_(invalid_view_targets))
+                )
             )
-        ) is None
+            is None
+        )
+
+        # Failure isolation is part of this trace trajectory: two raw views
+        # survive a derived-projection failure, and replay repairs them once.
+        from backend.app.settings import Settings
+        from backend.services.job_queue import JobQueueService
+        from backend.worker.runtime import OneShotWorker
+
+        raw_count = session.scalar(select(func.count(McpChatToolCallArtifact.id)))
+        with monkeypatch.context() as failed_projection:
+
+            def fail_derived(*args, **kwargs):
+                raise RuntimeError("derived projection unavailable")
+
+            failed_projection.setattr(co_access, "record_co_access_read", fail_derived)
+            _read_pair(session, workspace_id, left, right, at=now + timedelta(days=3))
+        assert (
+            session.scalar(select(func.count(McpChatToolCallArtifact.id)))
+            == raw_count + 2
+        )
+        assert pair().support_session_count == 3
+        assert (
+            session.scalar(
+                select(func.count(Job.id)).where(
+                    Job.job_type == "co_access_repair", Job.status == "queued"
+                )
+            )
+            == 2
+        )
+        worker = OneShotWorker(job_queue=JobQueueService(), settings=Settings())
+        worker.dispatch_once(
+            session, workspace_id=workspace_id, job_types={"co_access_repair"}
+        )
+        worker.dispatch_once(
+            session, workspace_id=workspace_id, job_types={"co_access_repair"}
+        )
+        assert pair().support_session_count == 4
+        assert (
+            session.scalar(
+                select(func.count(Job.id)).where(
+                    Job.job_type == "co_access_repair", Job.status == "completed"
+                )
+            )
+            == 2
+        )
