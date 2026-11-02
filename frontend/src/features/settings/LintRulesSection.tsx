@@ -293,7 +293,6 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
               id="lint-auto-fix"
               type="checkbox"
               checked={autoFix === true}
-              aria-checked={autoFix === null ? "mixed" : undefined}
               title={autoFix === null ? t("lint.unknownValue") : undefined}
               ref={(input) => { if (input) input.indeterminate = autoFix === null; }}
               disabled={readOnly || !policyReady || busy.has("auto_fix")}
@@ -323,7 +322,9 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
               disabled={readOnly || !policyReady || busy.has("link_fix_mode")}
               onChange={(event) => void saveLinkPolicy("link_fix_mode", event.target.value)}
             >
-              <option value="" disabled aria-label={t("lint.unknownValue")}>—</option>
+              {linkFixMode === null ? (
+                <option value="" disabled aria-label={t("lint.unknownValue")}>—</option>
+              ) : null}
               <option value="auto">{t("lint.linkFixAuto")}</option>
               <option value="suggest">{t("lint.linkFixSuggest")}</option>
             </select>
@@ -336,7 +337,6 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
               id="lint-auto-approve-link-fixes"
               type="checkbox"
               checked={autoApproveLinkFixes === true}
-              aria-checked={autoApproveLinkFixes === null ? "mixed" : undefined}
               title={autoApproveLinkFixes === null ? t("lint.unknownValue") : undefined}
               ref={(input) => { if (input) input.indeterminate = autoApproveLinkFixes === null; }}
               disabled={readOnly || !policyReady || busy.has("auto_approve_link_fixes")}

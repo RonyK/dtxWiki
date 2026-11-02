@@ -5,18 +5,18 @@
 ### Lint settings
 
 - Disable unconfirmed save and approval options while loading or after a
-  failed policy read, with independent retries that preserve the checks list.
+  failed policy read, showing them without guessed values. Options and checks
+  retry independently, and a failed checks read stays visible while the checks
+  list is collapsed.
 - Group the existing formatting, link fixing, and approval options by save
-  and review behavior. Show their current effects and keep searchable checks
-  collapsed by default, distinguishing required safeguards and external results.
+  and review behavior. Show their current effects, including that safe
+  formatting-only saves can qualify for immediate approval independently of
+  link-fix approval, and keep searchable checks collapsed by default,
+  distinguishing required safeguards and external results.
 - Use the same effective policy defaults for reads and settings revision checks,
   so a newly loaded Lint card can be saved without a false revision conflict.
-- Keep failed checks reads and retries visible when the checks list is collapsed,
-  and show unconfirmed options without guessed values. Align checkbox labels on
-  mobile and touch layouts while preserving their 44px targets.
-- Clarify that safe formatting-only saves can qualify for immediate approval
-  independently of link-fix approval. Reject attempts to disable required
-  publication safeguards through Settings.
+- Reject attempts to disable required publication safeguards through Settings,
+  and report a previously stored override for them as enabled.
 
 ### Index navigation and formatted previews
 

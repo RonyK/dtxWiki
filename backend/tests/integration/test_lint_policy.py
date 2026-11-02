@@ -145,7 +145,7 @@ def test_update_lint_policy_validates_rule_id_and_bool(session_factory):
             svc._update_lint_policy(ws, "test.policy_rule", "yes")
 
 
-def test_update_lint_policy_rejects_external_rules(session_factory):
+def test_update_lint_policy_rejects_external_and_required_rules(session_factory):
     registry = LintRegistry(
         (
             *LintRegistry.builtin().modules,
@@ -157,7 +157,11 @@ def test_update_lint_policy_rejects_external_rules(session_factory):
         ws = _ws(session)
         with pytest.raises(SettingsPolicyUpdateRejected, match="supplied externally"):
             svc._update_lint_policy(ws, "test.external_rule", False)
-        assert "test.external_rule" not in (ws.lint_policy or {})
+        with pytest.raises(SettingsPolicyUpdateRejected, match="required publication"):
+            svc._update_lint_policy(ws, "md.code_fence_balance", False)
+        assert not {"test.external_rule", "md.code_fence_balance"} & set(
+            ws.lint_policy or {}
+        )
 
 
 def test_create_run_honors_lint_policy_toggle(session_factory):

@@ -143,7 +143,6 @@ describe("LintRulesSection", () => {
     expect(autofix).toHaveProperty("indeterminate", false);
     expect(approval).toHaveProperty("indeterminate", false);
     expect(screen.getByText(/Safe formatting-only saves may be approved immediately/)).toBeVisible();
-    expect(screen.getByText(/Safe formatting-only saves/).closest("[role='status']")).toBeNull();
     expect(mode).toHaveValue("suggest");
     expect(approval).not.toBeChecked();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();

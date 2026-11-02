@@ -267,8 +267,10 @@ def test_builtin_registry_and_container_module_injection_preserve_publication_fl
     assert get_page_service_from_app(request) is pages
     assert extra.rule_id not in builtin.rule_ids()
     policy = LintPolicy(SimpleNamespace(lint_policy={"md.code_fence_balance": False}))
+    # A legacy false cannot switch off the publication floor, so the settings
+    # card reports the rule as enabled, matching the rule catalogue below.
     assert policy.effective_settings(registry.modules) == {
-        "md.code_fence_balance": False,
+        "md.code_fence_balance": True,
         "auto_fix": False,
         "link_fix_mode": "auto",
         "auto_approve_link_fixes": True,
