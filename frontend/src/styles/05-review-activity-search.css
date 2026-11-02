@@ -1862,13 +1862,12 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
   padding: 16px 20px;
   background: var(--surface);
 }
-/* Each card is one link target: the title link stretches over the card, its
-   chevron sits at the card edge, and the card's own controls stay above it. */
-.activity-feed-list > .activity-feed-entry { padding-right: 48px; }
+/* Each card is one link target: the title link stretches over the card and the
+   card's own controls stay above it. Hover and focus mark the whole card on
+   desktop; touch screens, which have no hover, get an edge chevron instead. */
 .activity-entry__title-link::after { content: ""; position: absolute; inset: 0; }
 :is(.activity-actor-disclosure, .activity-entry__technical, .activity-entry__fallback > a, .activity-read-group__toggle, .activity-read-group__members) { position: relative; z-index: 1; }
-.activity-entry__go { position: absolute; top: 50%; right: 16px; transform: translateY(-50%); color: var(--ink-muted); pointer-events: none; }
-.activity-read-group__list .activity-entry__go { display: none; }
+.activity-entry__go { display: none; position: absolute; top: 50%; right: 10px; transform: translateY(-50%); color: var(--ink-muted); pointer-events: none; }
 .activity-feed-entry:has(> .activity-entry__layout .activity-entry__title-link:focus-visible) { outline: 3px solid var(--info); outline-offset: -3px; }
 .activity-feed-entry :is(.activity-entry__layout, .activity-entry__body, .activity-entry__trailing, .activity-entry__review-footer, .activity-read-group) { display: contents; }
 
@@ -2105,7 +2104,7 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
 @media (max-width: 700px) {
   .activity-feed-entry { padding: 14px 16px; column-gap: 12px; }
   .activity-feed-list > .activity-feed-entry { padding-right: 40px; }
-  .activity-entry__go { right: 10px; }
+  .activity-feed-list > .activity-feed-entry > .activity-entry__layout > .activity-entry__go { display: block; }
   .activity-entry__identity,
   .activity-entry__title-link,
   .activity-entry__plain-title,
