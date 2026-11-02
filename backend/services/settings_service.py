@@ -56,7 +56,7 @@ from backend.services.library_policy import (
     LibraryFamilyPolicyService,
     get_default_library_family_policy_service,
 )
-from backend.services.lint import LintPolicy, LintRegistry
+from backend.services.lint import LintPolicy, LintRegistry, LintStage
 from backend.services.mcp_credential_health import binding_key_for_client
 from backend.services.oauth_service import (
     WorkspaceOAuthHealth,
@@ -696,9 +696,7 @@ class SettingsService:
                 title="Lint rules",
                 # Rule toggles ({rule_id: bool}) plus the auto-fix mode flag (F2),
                 # so the Settings lint section can render both from one card.
-                policy=LintPolicy(workspace).effective_settings(
-                    self.lint_registry.modules
-                ),
+                policy=self._policy_group_projection(workspace, "lint"),
             ),
             mcp_clients=mcp_payload,
             mcp_clients_next_cursor=mcp_next_cursor,
@@ -956,10 +954,7 @@ class SettingsService:
                 "ask_retrieval_mode": workspace.ask_retrieval_mode,
             }
         if group == "lint":
-            return {
-                **dict(workspace.lint_policy or {}),
-                "auto_fix": workspace.auto_fix_enabled,
-            }
+            return LintPolicy(workspace).effective_settings(self.lint_registry.modules)
         if group == "context_write":
             return {}
         if group == "graph":
@@ -1194,6 +1189,10 @@ class SettingsService:
         rule = self.lint_registry.rule(key)
         if rule is None:
             raise SettingsPolicyUpdateRejected(f"unknown lint rule_id: {key}")
+        if value is False and LintStage.PUBLISH_FLOOR in rule.stages:
+            raise SettingsPolicyUpdateRejected(
+                f"cannot disable required publication safeguard: {key}"
+            )
         if not getattr(rule, "runtime_checkable", True):
             raise SettingsPolicyUpdateRejected(
                 f"lint rule is supplied externally and cannot be toggled: {key}"

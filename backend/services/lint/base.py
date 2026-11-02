@@ -127,9 +127,16 @@ class LintPolicy:
         return self._overrides.get(setting, default)
 
     def effective_settings(self, modules: Iterable[LintModule]) -> dict[str, object]:
-        """Keep stored rule toggles and fill module options from their declarations."""
+        """Keep stored rule toggles and fill module options from their declarations.
+
+        A publication-floor rule always runs, so a stored override for it (such
+        as a legacy false) is reported as enabled rather than echoed.
+        """
         values = dict(self._overrides)
         for module in modules:
+            for rule in module.rules:
+                if rule.rule_id in values and LintStage.PUBLISH_FLOOR in rule.stages:
+                    values[rule.rule_id] = True
             for setting, default in (
                 (module.fix_on_save_setting, module.fix_on_save_default),
                 (module.auto_approve_setting, module.auto_approve_default),

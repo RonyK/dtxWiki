@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -29,6 +29,7 @@ const RULES = {
       default_enabled: true,
       enabled: true,
       runtime_checkable: true,
+      policy_locked: true,
     },
     {
       rule_id: "kb.orphan_page",
@@ -46,15 +47,15 @@ const RULES = {
     },
   ],
 };
+const POLICY = { lint: { policy: { auto_fix: false, link_fix_mode: "auto", auto_approve_link_fixes: true } } };
+
 const WORKSPACE_ID = "00000000-0000-4000-8000-000000000110";
 
 describe("LintRulesSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getLintRules).mockResolvedValue(RULES as never);
-    vi.mocked(getSettingsPolicies).mockResolvedValue({
-      lint: { policy: { auto_fix: false } },
-    } as never);
+    vi.mocked(getSettingsPolicies).mockResolvedValue(POLICY as never);
     vi.mocked(updateSettingsPolicy).mockResolvedValue({} as never);
   });
 
@@ -62,11 +63,16 @@ describe("LintRulesSection", () => {
     const user = userEvent.setup();
     renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
 
+    const checks = screen.getByText("Checks");
+    expect(checks.closest("details")).not.toHaveAttribute("open");
+    await user.click(checks);
     expect(await screen.findByText("Format")).toBeInTheDocument();
     expect(screen.getByText("Knowledge")).toBeInTheDocument();
     expect(screen.getByText("Maintenance")).toBeInTheDocument();
     expect(screen.getByText("Code fence balance")).toBeInTheDocument();
     expect(screen.getByText("External source")).toBeInTheDocument();
+    expect(screen.getByText("Required safeguard")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Code fence balance" })).not.toBeInTheDocument();
     expect(screen.getByText("client suggestion").closest("label")).toBeNull();
 
     // Queried by accessible name: the checkbox and its label are associated by
@@ -86,7 +92,8 @@ describe("LintRulesSection", () => {
   it("toggles auto-fix mode via the lint policy (F2b)", async () => {
     const user = userEvent.setup();
     renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
-    const autofix = await screen.findByRole("checkbox", { name: /auto-fix/i });
+    const autofix = screen.getByRole("checkbox", { name: /auto-fix/i });
+    await waitFor(() => expect(autofix).toBeEnabled());
     expect(autofix).not.toBeChecked();
     await user.click(autofix);
     await waitFor(() =>
@@ -108,24 +115,125 @@ describe("LintRulesSection", () => {
     expect(updateSettingsPolicy).toHaveBeenCalledWith(WORKSPACE_ID, { group: "lint", key: "auto_approve_link_fixes", value: false });
   });
 
-  it("still renders the rules list when the policies fetch fails (I10)", async () => {
+  it("keeps checks editable on policy failure and retries the actual options", async () => {
+    const user = userEvent.setup();
     vi.mocked(getSettingsPolicies).mockRejectedValue(new Error("boom"));
     renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
-    // the rule list must still appear despite the auto-fix policies failure
-    expect(await screen.findByText("Code fence balance")).toBeInTheDocument();
-    // auto-fix degrades to off rather than breaking the whole section
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not be loaded");
     const autofix = screen.getByRole("checkbox", { name: /auto-fix/i });
-    expect(autofix).not.toBeChecked();
+    const mode = screen.getByRole("combobox", { name: /Fix internal links/ });
+    const approval = screen.getByRole("checkbox", { name: /Automatically approve safe link fixes/ });
+    expect(autofix).toBeDisabled();
+    expect(mode).toBeDisabled();
+    expect(approval).toBeDisabled();
+    expect(autofix).toHaveProperty("indeterminate", true);
+    expect(approval).toHaveProperty("indeterminate", true);
+    expect(mode).toHaveValue("");
+    await user.click(autofix);
+    expect(updateSettingsPolicy).not.toHaveBeenCalled();
+    await user.click(screen.getByText("Checks"));
+    expect(screen.getByText("Code fence balance")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Orphan page" })).toBeEnabled();
+    vi.mocked(getSettingsPolicies).mockResolvedValue({ lint: { policy: {
+      auto_fix: true, link_fix_mode: "suggest", auto_approve_link_fixes: false,
+    } } } as never);
+    await user.click(screen.getByRole("button", { name: "Retry options" }));
+    await waitFor(() => expect(autofix).toBeEnabled());
+    expect(autofix).toBeChecked();
+    expect(autofix).toHaveProperty("indeterminate", false);
+    expect(approval).toHaveProperty("indeterminate", false);
+    expect(screen.getByText(/Safe formatting-only saves may be approved immediately/)).toBeVisible();
+    expect(mode).toHaveValue("suggest");
+    expect(approval).not.toBeChecked();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(getLintRules).toHaveBeenCalledTimes(1);
+    expect(updateSettingsPolicy).not.toHaveBeenCalled();
   });
 
   it("disables toggles when read-only", async () => {
     renderRouted(<LintRulesSection readOnly={true} workspaceId={WORKSPACE_ID} />);
-    const checkboxes = await screen.findAllByRole("checkbox");
+    await userEvent.click(screen.getByText("Checks"));
+    await screen.findByText("Code fence balance");
+    const checkboxes = screen.getAllByRole("checkbox");
     expect(checkboxes.length).toBeGreaterThan(0);
     for (const checkbox of checkboxes) {
       expect(checkbox).toBeDisabled();
     }
     expect(screen.getByRole("combobox", { name: /Fix internal links/ })).toBeDisabled();
     expect(updateSettingsPolicy).not.toHaveBeenCalled();
+  });
+  it("loads policies independently while checks are pending and filters visible checks", async () => {
+    const user = userEvent.setup();
+    let resolveRules!: (value: never) => void;
+    let resolvePolicies!: (value: never) => void;
+    vi.mocked(getLintRules).mockImplementation(() => new Promise(resolve => { resolveRules = resolve; }));
+    vi.mocked(getSettingsPolicies).mockImplementation(() => new Promise(resolve => { resolvePolicies = resolve; }));
+    renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
+    const autofix = screen.getByRole("checkbox", { name: /auto-fix/i });
+    expect(autofix).toBeDisabled();
+    expect(screen.getByRole("combobox")).toBeDisabled();
+    expect(screen.getByRole("combobox")).toHaveValue("");
+    expect(autofix).toHaveProperty("indeterminate", true);
+    await act(async () => resolvePolicies(POLICY as never));
+    expect(autofix).toBeEnabled();
+    await act(async () => resolveRules(RULES as never));
+    await user.click(screen.getByText("Checks"));
+    await user.type(screen.getByRole("searchbox", { name: "Search checks" }), "orphan");
+    expect(screen.queryByText("Code fence balance")).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Orphan page" })).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Toggle shown Knowledge checks" }));
+    expect(updateSettingsPolicy).toHaveBeenCalledWith(WORKSPACE_ID, { group: "lint", key: "kb.orphan_page", value: true });
+  });
+
+  it("rejects incomplete policy responses and retries checks without resetting saved options", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getSettingsPolicies).mockResolvedValue({ lint: { policy: {} } } as never);
+    vi.mocked(getLintRules).mockRejectedValue(new Error("checks offline"));
+    renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
+    await screen.findByText(/could not be loaded/);
+    expect(screen.getByText("Checks").closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: "Retry checks" })).toBeVisible();
+    expect(screen.getByRole("combobox")).toBeDisabled();
+    vi.mocked(getSettingsPolicies).mockResolvedValue(POLICY as never);
+    await user.click(screen.getByRole("button", { name: "Retry options" }));
+    await waitFor(() => expect(screen.getByRole("combobox")).toBeEnabled());
+    await user.selectOptions(screen.getByRole("combobox"), "suggest");
+    vi.mocked(getLintRules).mockResolvedValue(RULES as never);
+    await user.click(screen.getByRole("button", { name: "Retry checks" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Retry checks" })).not.toBeInTheDocument());
+    expect(screen.getByText("Checks").closest("details")).not.toHaveAttribute("open");
+    await user.click(screen.getByText("Checks"));
+    await screen.findByText("Code fence balance");
+    expect(screen.getByRole("combobox")).toHaveValue("suggest");
+    expect(getSettingsPolicies).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves confirmed values when policy and rule saves fail", async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateSettingsPolicy).mockRejectedValue(new Error("save failed"));
+    renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
+    const autofix = screen.getByRole("checkbox", { name: /auto-fix/i });
+    await waitFor(() => expect(autofix).toBeEnabled());
+    await user.click(autofix);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Failed to update the option.");
+    expect(autofix).not.toBeChecked();
+    await user.click(screen.getByText("Checks"));
+    const orphan = screen.getByRole("checkbox", { name: "Orphan page" });
+    await user.click(orphan);
+    await waitFor(() => expect(orphan).toBeEnabled());
+    expect(orphan).not.toBeChecked();
+    expect(screen.getByRole("alert")).toHaveTextContent("Failed to update the rule.");
+  });
+
+  it("discards pending options when the workspace changes", async () => {
+    let resolveOld!: (value: never) => void;
+    vi.mocked(getSettingsPolicies).mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
+    const view = renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
+    view.rerender(<MemoryRouter><LintRulesSection readOnly={false} workspaceId="00000000-0000-4000-8000-000000000120" /></MemoryRouter>);
+    const autofix = screen.getByRole("checkbox", { name: /auto-fix/i });
+    await waitFor(() => expect(autofix).toBeEnabled());
+    await act(async () => resolveOld({ lint: { policy: { auto_fix: true, link_fix_mode: "suggest", auto_approve_link_fixes: false } } } as never));
+    expect(autofix).not.toBeChecked();
+    expect(screen.getByRole("combobox")).toHaveValue("auto");
   });
 });
