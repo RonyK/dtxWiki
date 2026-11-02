@@ -97,6 +97,8 @@ const fixtureUuid = (value: number) =>
   `00000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
 
 async function selectGraphNodeDetails(graph: HTMLElement, label: string) {
+  const toggle = within(graph).getByRole("button", { name: "View as list" });
+  if (toggle.getAttribute("aria-expanded") === "false") await userEvent.click(toggle);
   const row = within(graph).getByText(label, {
     exact: true,
     selector: ".graph-relationship-list > details > ul > li > button strong",
@@ -104,7 +106,7 @@ async function selectGraphNodeDetails(graph: HTMLElement, label: string) {
   expect(row).not.toBeNull();
   await userEvent.click(row!);
   const details = within(graph).getByRole("complementary", { name: "Details" });
-  expect(within(details).getByRole("heading", { level: 5 }).textContent).toBe(label);
+  expect(within(details).getByRole("heading", { level: 5, name: label }).textContent).toBe(label);
   return details;
 }
 
@@ -156,6 +158,7 @@ describe("ContextScreen", () => {
           seeds?: Array<{ kind: "context_page"; id: string }>;
           time?: { mode?: "current" | "appearance" | "action" | "as_of" };
           depth?: 1 | 2;
+          relation_scope?: "direct" | "neighbors";
           budget?: { nodes: number; edges: number };
         },
         init?: RequestInit,
@@ -524,6 +527,7 @@ describe("ContextScreen", () => {
           seeds?: Array<{ kind: "context_page"; id: string }>;
           time?: { mode?: "current" | "appearance" | "action" | "as_of" };
           depth?: 1 | 2;
+          relation_scope?: "direct" | "neighbors";
           budget?: { nodes: number; edges: number };
         };
         if (options.graphQueryHandler) {
@@ -535,6 +539,7 @@ describe("ContextScreen", () => {
           request.seeds,
           options.libraryGraphNodeKind,
           request.depth,
+          request.relation_scope,
         );
         return {
           data: options.graphBounded
@@ -606,6 +611,7 @@ describe("ContextScreen", () => {
           seeds?: Array<{ kind: "context_page"; id: string }>;
           time?: { mode?: "current" | "appearance" | "action" | "as_of" };
           depth?: 1 | 2;
+          relation_scope?: "direct" | "neighbors";
           budget?: { nodes: number; edges: number };
         },
         init?: RequestInit,
@@ -2050,6 +2056,7 @@ describe("ContextScreen", () => {
     await userEvent.click(within(await screen.findByRole("tablist", { name: "Context reader views" }))
       .getByRole("tab", { name: /^Graph, Preview$/ }));
     const graph = await screen.findByTestId("graph-view");
+    await userEvent.click(within(graph).getByRole("button", { name: "View as list" }));
     const nodeList = within(graph).getByRole("list", { name: "Nodes" });
     const rows = within(nodeList).getAllByRole("button");
     expect(rows).toHaveLength(3);
@@ -2067,9 +2074,9 @@ describe("ContextScreen", () => {
     await userEvent.keyboard("{Enter}");
     const details = within(graph).getByRole("complementary", { name: "Details" });
     expect(details).toHaveFocus();
-    expect(within(details).getByRole("heading", { level: 5 })).toHaveTextContent("Architecture Notes");
+    expect(within(details).getByRole("heading", { level: 5, name: "Architecture Notes" })).toBeInTheDocument();
     await userEvent.tab();
-    expect(within(details).getByRole("link", { name: "Open" })).toHaveFocus();
+    expect(within(details).getByRole("button", { name: "Clear selection" })).toHaveFocus();
     // Re-selecting the same ID must hand off even when selection state does
     // not change and the original main-list button remains connected.
     await act(async () => rows[1].focus());
@@ -2152,9 +2159,9 @@ describe("ContextScreen", () => {
     await userEvent.click(readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }));
     const graph = await screen.findByTestId("graph-view");
     const graphUi = within(graph);
-    expect(graphUi.getByRole("button", { name: "Depth 2" })).toHaveAttribute("aria-pressed", "true");
-    await userEvent.click(graphUi.getByRole("button", { name: "Depth 1" }));
-    await waitFor(() => expect(graphUi.getByRole("button", { name: "Depth 1" }))
+    expect(graphUi.getByRole("button", { name: "Direct connections" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(graphUi.getByRole("button", { name: "Neighbor connections" }));
+    await waitFor(() => expect(graphUi.getByRole("button", { name: "Neighbor connections" }))
       .toHaveAttribute("aria-pressed", "true"));
     const requests = () => fetchMock.mock.calls.filter(([input]) =>
       String(input).endsWith(`/workspaces/${WORKSPACE_ID}/graph/query`),
@@ -2163,8 +2170,8 @@ describe("ContextScreen", () => {
       seeds: [{ kind: "context_page", id: PAGE_ID }],
       depth: 1, time: { mode: "current" }, budget: { nodes: 250, edges: 750 },
     });
-    await userEvent.click(graphUi.getByRole("button", { name: "Depth 2" }));
-    await waitFor(() => expect(graphUi.getByRole("button", { name: "Depth 2" }))
+    await userEvent.click(graphUi.getByRole("button", { name: "Two-step expansion" }));
+    await waitFor(() => expect(graphUi.getByRole("button", { name: "Two-step expansion" }))
       .toHaveAttribute("aria-pressed", "true"));
     expect(requests().at(-1)).toMatchObject({ depth: 2, time: { mode: "current" } });
     await userEvent.click(readerTabs.getByRole("tab", { name: /^View$/ }));
@@ -2179,14 +2186,14 @@ describe("ContextScreen", () => {
       .getByRole("tab", { name: /^Graph, Preview$/ }));
     const graph = await screen.findByTestId("graph-view");
     const graphUi = within(graph);
-    await userEvent.click(graphUi.getByRole("button", { name: "Depth 1" }));
-    await waitFor(() => expect(graphUi.getByRole("button", { name: "Depth 1" }))
+    await userEvent.click(graphUi.getByRole("button", { name: "Neighbor connections" }));
+    await waitFor(() => expect(graphUi.getByRole("button", { name: "Neighbor connections" }))
       .toHaveAttribute("aria-pressed", "true"));
     const relatedDetails = await selectGraphNodeDetails(graph, "Architecture Notes");
     await userEvent.click(within(relatedDetails).getByRole("button", { name: "Expand" }));
     await waitFor(() => expect(within(relatedDetails).getByRole("button", { name: "Collapse" })).toBeEnabled());
-    await userEvent.selectOptions(graphUi.getByLabelText("History mode"), "appearance");
-    await waitFor(() => expect(graphUi.getByRole("button", { name: "Depth 2" })).toBeDisabled());
+    await userEvent.click(graphUi.getByRole("button", { name: /Change history/ }));
+    await waitFor(() => expect(graphUi.getByRole("button", { name: "Two-step expansion" })).toBeDisabled());
     const requests = () => fetchMock.mock.calls.filter(([input]) =>
       String(input).endsWith(`/workspaces/${WORKSPACE_ID}/graph/query`),
     ).map(([, init]) => JSON.parse(String(init?.body)));
@@ -2194,9 +2201,9 @@ describe("ContextScreen", () => {
     expect(requests().at(-1)).toMatchObject({
       seeds, depth: 1, time: { mode: "appearance" }, budget: { nodes: 50, edges: 150 }, cursor: null,
     });
-    await userEvent.selectOptions(graphUi.getByLabelText("History mode"), "current");
-    await waitFor(() => expect(graphUi.getByRole("button", { name: "Depth 2" })).toBeEnabled());
-    expect(graphUi.getByRole("button", { name: "Depth 1" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(graphUi.getByRole("button", { name: "Current relationships" }));
+    await waitFor(() => expect(graphUi.getByRole("button", { name: "Two-step expansion" })).toBeEnabled());
+    expect(graphUi.getByRole("button", { name: "Neighbor connections" })).toHaveAttribute("aria-pressed", "true");
     expect(requests().at(-1)).toMatchObject({
       seeds, depth: 1, time: { mode: "current" }, budget: { nodes: 250, edges: 750 },
     });
@@ -2207,7 +2214,7 @@ describe("ContextScreen", () => {
     let depthSignal: AbortSignal | null | undefined;
     await renderDecisionLog({
       graphQueryHandler: (request, init) => {
-        if (request.time?.mode === "current" && request.depth === 1) {
+        if (request.time?.mode === "current" && request.relation_scope === "neighbors" && request.depth === 1) {
           depthSignal = init?.signal;
           return pendingDepth.promise;
         }
@@ -2219,17 +2226,16 @@ describe("ContextScreen", () => {
       .getByRole("tab", { name: /^Graph, Preview$/ }));
     const graph = await screen.findByTestId("graph-view");
     const graphUi = within(graph);
-    await userEvent.click(graphUi.getByRole("button", { name: "Depth 1" }));
+    await userEvent.click(graphUi.getByRole("button", { name: "Neighbor connections" }));
     await waitFor(() => expect(depthSignal).toBeDefined());
-    await userEvent.selectOptions(graphUi.getByLabelText("History mode"), "appearance");
+    await userEvent.click(graphUi.getByRole("button", { name: /Change history/ }));
     await waitFor(() => expect(depthSignal?.aborted).toBe(true));
-    await waitFor(() => expect(graphUi.getByText("History views currently support depth 1 only."))
-      .toBeInTheDocument());
+    await waitFor(() => expect(graphUi.getByRole("button", { name: /Change history/ })).toHaveAttribute("aria-pressed", "true"));
     await act(async () => {
       pendingDepth.resolve({ data: contextGraphPayload(PAGE_ID, "current", undefined, undefined, 1) });
     });
-    expect(graphUi.getByLabelText("History mode")).toHaveValue("appearance");
-    expect(graphUi.getByRole("button", { name: "Depth 2" })).toBeDisabled();
+    expect(graphUi.getByRole("button", { name: /Change history/ })).toHaveAttribute("aria-pressed", "true");
+    expect(graphUi.getByRole("button", { name: "Two-step expansion" })).toBeDisabled();
   });
 
   it("keeps the newest graph action when an aborted expand settles after a history query", async () => {
@@ -2274,14 +2280,14 @@ describe("ContextScreen", () => {
       within(relatedDetails).getByRole("button", { name: "Expand" }),
     );
     await waitFor(() => expect(expandSignal).toBeDefined());
-    await userEvent.selectOptions(screen.getByLabelText("History mode"), "appearance");
+    await userEvent.click(screen.getByRole("button", { name: /Change history/ }));
     await waitFor(() => expect(expandSignal?.aborted).toBe(true));
 
     await act(async () => {
       appearance.resolve({ data: contextGraphPayload(PAGE_ID, "appearance") });
     });
     await waitFor(() =>
-      expect(screen.getByText(/Observations/)).toBeInTheDocument(),
+      expect(screen.getByRole("button", { name: /Change history/ })).toHaveAttribute("aria-pressed", "true"),
     );
     // History changes deliberately clear selection. Re-select the exact
     // current row before settling the aborted query, so its selected action
@@ -2298,7 +2304,7 @@ describe("ContextScreen", () => {
       });
     });
     await waitFor(() => {
-      expect(screen.getByText(/Observations/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Change history/ })).toBeInTheDocument();
       expect(
         within(historyDetails).getByRole("button", { name: "Expand" }),
       ).toBeEnabled();
@@ -6067,6 +6073,7 @@ function mockFetch(responses: Record<string, MockFetchResponse>) {
         seeds?: Array<{ kind: "context_page"; id: string }>;
         time?: { mode?: "current" | "appearance" | "action" | "as_of" };
         depth?: 1 | 2;
+          relation_scope?: "direct" | "neighbors";
       };
       response = {
         data: contextGraphPayload(
@@ -6075,6 +6082,7 @@ function mockFetch(responses: Record<string, MockFetchResponse>) {
           request.seeds,
           undefined,
           request.depth,
+          request.relation_scope,
         ),
       };
     }
@@ -6140,7 +6148,8 @@ function contextGraphPayload(
   ],
   libraryGraphNodeKind: "library_artifact" | "library_item_version" =
     "library_artifact",
-  depth: 1 | 2 = 2,
+  depth: 1 | 2 = 1,
+  relationScope: "direct" | "neighbors" = "direct",
 ) {
   const isDecisionLog = pageId === PAGE_ID;
   const seedTitle = isDecisionLog ? "Decision Log" : "Architecture Notes";
@@ -6275,6 +6284,7 @@ function contextGraphPayload(
       action_kinds: [],
       direction: "both",
       depth: mode === "current" ? depth : 1,
+      relation_scope: mode === "current" ? relationScope : "direct",
       time: { mode },
       budget: mode === "current"
         ? { nodes: 250, edges: 750 }

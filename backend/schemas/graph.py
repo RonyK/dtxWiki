@@ -91,6 +91,12 @@ class GraphQueryRequest(BaseModel):
     action_kinds: list[str] = Field(default_factory=list, max_length=32)
     direction: Literal["in", "out", "both"] = "both"
     depth: Literal[1, 2] = 2
+    relation_scope: Literal["direct", "neighbors"] = Field(
+        default="neighbors",
+        description="Direct selects only seed-incident relationships, "
+        "independent of depth. "
+        "Neighbors includes induced relationships at the requested depth.",
+    )
     time: GraphTimeQuery = Field(default_factory=GraphTimeQuery)
     budget: GraphBudget = Field(default_factory=GraphBudget)
     cursor: None = None

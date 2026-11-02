@@ -18,7 +18,7 @@ export function localSceneScopeKey({
     workspaceId,
     // The first seed is the protected primary seed; ordering is meaningful.
     query.seeds.map(({ kind, id }) => [kind, id]),
-    query.scope, query.preset, query.depth, query.direction,
+    query.scope, query.preset, query.depth, query.relation_scope ?? "neighbors", query.direction,
     orderedSet(query.layers), orderedSet(query.node_families), orderedSet(query.node_kinds),
     orderedSet(query.edge_kinds), orderedSet(query.action_kinds),
     [query.time?.mode ?? "current", query.time?.as_of ?? null,

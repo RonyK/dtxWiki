@@ -40,7 +40,7 @@ function semanticKey(node: GraphRenderNode): string | null {
 }
 
 function edgeCount(edge: GraphRenderEdge): number {
-  const count = edge.count ?? 1;
+  const count = edge.layoutCount ?? edge.count ?? 1;
   return Number.isFinite(count) && count > 0 ? Math.floor(count) || 1 : 1;
 }
 

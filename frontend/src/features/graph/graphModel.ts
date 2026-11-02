@@ -40,14 +40,10 @@ export type GraphScene = {
 
 export function graphFacets(payload: GraphQueryPayload) {
   const events = sortedTimeline(payload);
-  const allNodes = mergeById(
-    events.flatMap(timelineNodeSnapshots),
-    payload.nodes,
-  );
-  const allEdges = mergeById(
-    events.flatMap(timelineEdgeSnapshots),
-    payload.edges,
-  );
+  // The same relationship can be projected today and observed in history.
+  // Keep every snapshot's facet values so the default filters admit both.
+  const allNodes = [...events.flatMap(timelineNodeSnapshots), ...payload.nodes];
+  const allEdges = [...events.flatMap(timelineEdgeSnapshots), ...payload.edges];
   return {
     nodeFamilies: uniqueSorted(
       [
@@ -409,14 +405,6 @@ function stableEdges(edges: GraphEdge[]) {
       || left.label.localeCompare(right.label)
       || left.id.localeCompare(right.id),
   );
-}
-
-function mergeById<T extends { id: string }>(left: T[], right: T[]) {
-  const merged = new Map(left.map((item) => [item.id, item]));
-  for (const item of right) {
-    merged.set(item.id, item);
-  }
-  return [...merged.values()];
 }
 
 function uniqueSorted<T extends string>(values: T[]) {

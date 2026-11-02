@@ -1264,13 +1264,14 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await expect(
             graphPanel.getByRole("heading", { name: "Graph relationships" }),
           ).toBeVisible();
+          await graphPanel.getByRole("button", { name: "View as list" }).click();
           const relatedRow = graphPanel
             .locator(".graph-relationship-list > details > ul > li")
             .filter({ hasText: relatedTitle })
             .first();
           await relatedRow.locator(":scope > .graph-list-select").click();
           const graphDetails = graphPanel.locator(".graph-details");
-          await expect(graphDetails.locator("h5")).toHaveText(relatedTitle);
+          await expect(graphDetails.locator(".graph-details-title-row h5")).toHaveText(relatedTitle);
           await expect(
             graphDetails.getByRole("link", { name: "Open", exact: true }),
           ).toHaveAttribute(
@@ -1294,9 +1295,9 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               return context?.getParameter(context.VERSION) as string | undefined;
             });
           expect(webglVersion).toMatch(/^WebGL [12]\.0/);
-          const depthOne = graphPanel.getByRole("button", { name: "Depth 1", exact: true });
-          const depthTwo = graphPanel.getByRole("button", { name: "Depth 2", exact: true });
-          await expect(depthTwo).toHaveAttribute("aria-pressed", "true");
+          const depthOne = graphPanel.getByRole("button", { name: "Neighbor connections", exact: true });
+          const depthTwo = graphPanel.getByRole("button", { name: "Two-step expansion", exact: true });
+          await expect(graphPanel.getByRole("button", { name: "Direct connections", exact: true })).toHaveAttribute("aria-pressed", "true");
           for (const [depth, control] of [[1, depthOne], [2, depthTwo]] as const) {
             const responsePromise = page.waitForResponse((response) =>
               response.url().endsWith(`/api/v1/workspaces/${workspace.id}/graph/query`)
@@ -1320,16 +1321,17 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             await page.screenshot({
               path: `${graphScreenshotPrefix}-${viewport.key}-page.png`,
             });
-            await graphPanel.locator(".graph-local-toolbar").scrollIntoViewIfNeeded();
+            await graphPanel.locator(".graph-frame-header").scrollIntoViewIfNeeded();
             await page.screenshot({
               path: `${graphScreenshotPrefix}-${viewport.key}-toolbar.png`,
             });
           }
 
           await relatedRow.locator(":scope > .graph-list-select").click();
-          await expect(graphDetails.locator("h5")).toHaveText(relatedTitle);
+          await expect(graphDetails.locator(".graph-details-title-row h5")).toHaveText(relatedTitle);
+          await graphDetails.locator(".graph-details-more > summary").click();
           await graphDetails.getByRole("button", { name: "Pin", exact: true }).click();
-          await graphPanel.getByText("More filters", { exact: true }).click();
+          await graphPanel.locator(".graph-frame-filters > summary").click();
           const statusFilters = graphPanel.getByRole("group", {
             name: "Node status",
           });
@@ -1338,13 +1340,15 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await expect(
             graphDetails.getByRole("link", { name: "Open", exact: true }),
           ).toHaveCount(0);
-          await graphPanel.getByRole("button", { name: "Clear all" }).click();
+          await graphPanel.locator(".graph-frame-filters").getByRole("button", { name: "Clear all" }).click();
           await expect(relatedRow).toHaveCount(1);
           await relatedRow.locator(":scope > .graph-list-select").click();
-          await expect(graphDetails.locator("h5")).toHaveText(relatedTitle);
+          await expect(graphDetails.locator(".graph-details-title-row h5")).toHaveText(relatedTitle);
+          await graphDetails.locator(".graph-details-more > summary").click();
           await expect(
             graphDetails.getByRole("button", { name: "Unpin", exact: true }),
           ).toBeVisible();
+          await graphDetails.locator(".graph-details-more > summary").click();
 
           const expandedResponsePromise = page.waitForResponse((response) =>
             response.url().endsWith(`/api/v1/workspaces/${workspace.id}/graph/query`)
@@ -1383,7 +1387,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             && response.request().method() === "POST"
             && response.request().postDataJSON().time?.mode === "action",
           );
-          await graphPanel.getByLabel("History mode").selectOption("action");
+          await graphPanel.getByRole("button", { name: /Activity history/ }).click();
           const actionsResponse = await actionsResponsePromise;
           expect(actionsResponse.ok()).toBeTruthy();
           const actionsPayload = (await actionsResponse.json()).data as GraphQueryPayload;
@@ -1392,17 +1396,16 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           );
           expect(actionOccurrences.length).toBeGreaterThan(0);
           expect(actionOccurrences.some((edge) => edge.edge_kind === "created")).toBe(true);
-          const actionChip = graphPanel.getByRole("button", {
-            name: `Actions ${actionOccurrences.length}`, exact: true,
-          });
-          await expect(actionChip).toHaveAttribute("aria-pressed", "true");
           await expect(graphPanel.getByTestId("graph-canvas").locator(".."))
             .toHaveAttribute("data-renderer-status", "ready");
+          // The compact frame exposes the same filter in the mobile popover.
+          const historicalFilter = graphPanel.locator(".graph-frame-filters").getByRole("checkbox", { name: /Historical relationships/ });
           const relationships = graphPanel.locator(".graph-relationship-list > details").nth(1);
           await relationships.locator("summary").click();
           const createdRow = relationships.getByRole("button", { name: /^Created / }).first();
           await createdRow.click();
-          await expect(graphPanel.locator(".graph-details h5")).toHaveText("Created");
+          await expect(graphPanel.locator(".graph-details-title-row h5")).toHaveText("Created");
+          await graphPanel.locator(".graph-details-more > summary").click();
           await graphPanel.locator(".graph-details").getByRole("button", { name: "Center", exact: true }).click();
           if (graphScreenshotPrefix) {
             await graphPanel.getByTestId("graph-canvas").screenshot({
@@ -1410,10 +1413,13 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             });
             await page.screenshot({ path: `${graphScreenshotPrefix}-${viewport.key}-actions-page.png` });
           }
-          await actionChip.click();
+          await graphPanel.locator(".graph-frame-filters > summary").click();
+          await expect(historicalFilter).toBeChecked();
+          await historicalFilter.uncheck();
           await expect(relationships.getByRole("button", { name: /^Created / })).toHaveCount(0);
-          await expect(graphPanel.locator(".graph-details h5")).toHaveCount(0);
-          await actionChip.click();
+          await expect(graphPanel.locator(".graph-details-title-row h5")).toHaveCount(0);
+          await historicalFilter.check();
+          await graphPanel.locator(".graph-frame-filters > summary").click();
           await expect(relationships.getByRole("button", { name: /^Created / }).first()).toBeVisible();
           await expectViewportFits(page);
           const appearanceResponsePromise = page.waitForResponse((response) =>
@@ -1421,7 +1427,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             && response.request().method() === "POST"
             && response.request().postDataJSON().time?.mode === "appearance",
           );
-          await graphPanel.getByLabel("History mode").selectOption("appearance");
+          await graphPanel.getByRole("button", { name: /Change history/ }).click();
           const appearanceResponse = await appearanceResponsePromise;
           expect(appearanceResponse.ok()).toBeTruthy();
           expect((await appearanceResponse.json()).data.query).toMatchObject({
@@ -1431,14 +1437,14 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           const timeline = graphPanel.getByRole("slider", {
             name: "Timeline position",
           });
-          await graphPanel.getByRole("button", { name: "Reset timeline" }).click();
+          await timeline.press("Home");
           await expect(timeline).toHaveValue("0");
           const timelineMax = await timeline.getAttribute("max");
           expect(Number(timelineMax)).toBeGreaterThan(0);
           await timeline.press("End");
           await expect(relatedRow).toHaveCount(1);
           await relatedRow.locator(":scope > .graph-list-select").click();
-          await expect(graphDetails.locator("h5")).toHaveText(relatedTitle);
+          await expect(graphDetails.locator(".graph-details-title-row h5")).toHaveText(relatedTitle);
           await expect(
             graphDetails.getByRole("link", { name: "Open", exact: true }),
           ).toHaveAttribute("href", `/workspaces/${workspace.id}/context/pages/${related.id}`);
@@ -1449,6 +1455,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           ).toHaveAttribute("open", "");
 
           const downloadPromise = page.waitForEvent("download");
+          await graphPanel.locator(".graph-canvas-more > summary").click();
           await graphPanel.getByRole("button", {
             name: "Export filtered graph",
           }).click();

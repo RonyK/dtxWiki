@@ -9355,6 +9355,16 @@
             "title": "Preset",
             "type": "string"
           },
+          "relation_scope": {
+            "default": "neighbors",
+            "description": "Direct selects only seed-incident relationships, independent of depth. Neighbors includes induced relationships at the requested depth.",
+            "enum": [
+              "direct",
+              "neighbors"
+            ],
+            "title": "Relation Scope",
+            "type": "string"
+          },
           "schema_version": {
             "const": "dtxwiki.graph-query.v1",
             "default": "dtxwiki.graph-query.v1",

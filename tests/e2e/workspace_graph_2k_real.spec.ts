@@ -270,14 +270,18 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
       await tabs.getByRole("tab", { name: /^Graph/ }).click();
       const current = await currentResponse;
       expect(current.ok()).toBe(true);
-      const local = (await current.json()).data as GraphQueryPayload;
-      expect(local.query).toMatchObject({ depth: 2, budget: { nodes: 250, edges: 750 } });
+      let local = (await current.json()).data as GraphQueryPayload;
+      expect(local.query).toMatchObject({ depth: 1, relation_scope: "direct", budget: { nodes: 250, edges: 750 } });
       expect(local.nodes.some((node) => node.entity_id === contextDocument.entity_id)).toBe(true);
       expect(local.edges.length).toBeGreaterThan(0);
       const graphPanel = page.getByRole("tabpanel", { name: /^Graph/ });
       const localCanvas = graphPanel.getByTestId("graph-canvas");
       await expect(localCanvas.locator("..")).toHaveAttribute("data-renderer-status", "ready");
       await expect(localCanvas.locator("canvas.sigma-nodes")).toBeVisible();
+      const expandedRead = page.waitForResponse((response) => response.url().endsWith(`/workspaces/${workspaceId}/graph/query`)
+        && response.request().method() === "POST" && response.request().postDataJSON().depth === 2);
+      await graphPanel.getByRole("button", { name: "Two-step expansion", exact: true }).click();
+      local = (await (await expandedRead).json()).data as GraphQueryPayload;
       await expectLocalSceneNavigation(page, graphPanel, local, workspaceId, testInfo, "en");
       await capture(page, testInfo, `real-api-2k-context-${viewport.width}.png`);
 
@@ -285,7 +289,7 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
         response.url().endsWith(`/workspaces/${workspaceId}/graph/query`)
         && response.request().method() === "POST"
         && response.request().postDataJSON().time?.mode === "action");
-      await graphPanel.getByLabel("History mode").selectOption("action");
+      await graphPanel.getByRole("button", { name: /Activity history/ }).click();
       const actions = await actionsResponse;
       expect(actions.ok()).toBe(true);
       const actionScene = (await actions.json()).data as GraphQueryPayload;
@@ -363,8 +367,8 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
       .getByRole("tab", { name: /^그래프/ }).click();
     const current = await currentResponse;
     expect(current.ok()).toBe(true);
-    const local = (await current.json()).data as GraphQueryPayload;
-    expect(local.query).toMatchObject({ depth: 2, budget: { nodes: 250, edges: 750 } });
+    let local = (await current.json()).data as GraphQueryPayload;
+    expect(local.query).toMatchObject({ depth: 1, relation_scope: "direct", budget: { nodes: 250, edges: 750 } });
     const panel = page.getByRole("tabpanel", { name: /^그래프/ });
     const canvas = panel.getByTestId("graph-canvas");
     await expect(canvas.locator("..")).toHaveAttribute("data-renderer-status", "ready");
@@ -1278,6 +1282,8 @@ async function expectLocalSceneNavigation(
   language: keyof typeof SCENE_NAVIGATION_LABELS,
 ) {
   const labels = SCENE_NAVIGATION_LABELS[language];
+  const listToggle = panel.getByRole("button", { name: language === "en" ? "View as list" : "목록으로 보기" });
+  if (await listToggle.getAttribute("aria-expanded") === "false") await listToggle.click();
   const suffix = `${language}-${page.viewportSize()!.width}`;
   const details = panel.locator(".graph-details");
   const canvasFrame = panel.getByTestId("graph-canvas").locator("..");
@@ -1291,15 +1297,13 @@ async function expectLocalSceneNavigation(
   };
   const expectDetailsAtTop = async () => {
     await expect.poll(() => details.evaluate((element) => element.scrollTop)).toBe(0);
-    const heading = await details.locator("h5").boundingBox();
+    const heading = await details.locator(".graph-details-title-row h5").boundingBox();
     const box = await details.boundingBox();
-    const actions = await details.locator(".graph-details-actions").boundingBox();
+    const actions = await details.locator(".graph-details-footer").boundingBox();
     expect(heading).not.toBeNull();
     expect(box).not.toBeNull();
     expect(actions).not.toBeNull();
-    // The bounded mobile sheet puts actions before the untruncated title.
-    // A wrapping full title may need its own scrolling; initial controls must
-    // be available without requiring a title-sized always-open sidebar.
+    // Title comes first; primary actions stay in the sticky footer.
     expect(actions!.y).toBeGreaterThanOrEqual(box!.y);
     expect(actions!.y + actions!.height).toBeLessThanOrEqual(box!.y + box!.height);
     expect(heading!.y).toBeGreaterThanOrEqual(box!.y);
@@ -1312,7 +1316,7 @@ async function expectLocalSceneNavigation(
       const panel = element.getBoundingClientRect();
       const reader = element.closest(".graph-view")!.getBoundingClientRect();
       return Array.from(element.querySelectorAll<HTMLElement>(
-        ".graph-details-actions a,.graph-details-actions button,.graph-details-context-actions a,.graph-details-context-actions button",
+        ".graph-details-close,.graph-details-footer > a,.graph-details-context-actions > button",
       )).map((control) => {
         const bounds = control.getBoundingClientRect();
         const points = [[bounds.left + 4, bounds.top + 4], [bounds.right - 4, bounds.top + 4],
@@ -1333,8 +1337,9 @@ async function expectLocalSceneNavigation(
       });
     });
     expect(controls.length).toBeGreaterThan(0);
-    expect(controls.filter((control) => control.width < 44 || control.height < 44
-      || !control.contained || !control.painted), "All Details actions must be complete native targets before any scroll")
+    const minimum = initialCanvasBox!.width <= 620 ? 44 : 36;
+    expect(controls.filter((control) => control.width < minimum || control.height < minimum
+      || !control.contained || !control.painted), "Primary Details actions must remain complete native targets")
       .toEqual([]);
     return controls;
   };
@@ -1385,7 +1390,7 @@ async function expectLocalSceneNavigation(
   const rowFor = (node: GraphNode) => rows.nth(mainLabels.indexOf(node.label));
   const selectMain = async (node: GraphNode) => {
     await rowFor(node).locator(":scope > button.graph-list-select").click();
-    await expect(details.locator("h5")).toHaveText(node.label);
+    await expect(details.locator(".graph-details-title-row h5")).toHaveText(node.label);
   };
   const listFor = (scope: Locator, name: string) => scope.getByRole("list", { name, exact: true });
   const expectList = async (list: Locator, expected: GraphNode[]) => {
@@ -1402,7 +1407,7 @@ async function expectLocalSceneNavigation(
     // space, focus stops or a complementary landmark in the accessible tree.
     await expect(details).toBeHidden();
     await expect(details).toHaveAttribute("hidden", "");
-    await expect(details.locator("h5")).toHaveCount(0);
+    await expect(details.locator(".graph-details-title-row h5")).toHaveCount(0);
     await expect(details.getByText(labels.empty, { exact: true })).toHaveCount(1);
     await expect(details.locator("button,a")).toHaveCount(0);
     await expect(panel.getByRole("complementary")).toHaveCount(0);
@@ -1469,7 +1474,7 @@ async function expectLocalSceneNavigation(
       if (key === "Space") await page.keyboard.press("ArrowDown");
       const selected = await buttons.nth(key === "Enter" ? 0 : 1).locator("strong").innerText();
       await page.keyboard.press(key);
-      await expect(details.locator("h5")).toHaveText(selected);
+      await expect(details.locator(".graph-details-title-row h5")).toHaveText(selected);
       await expect(details).toBeFocused();
       await expectDetailsAtTop();
       await expectAllDetailsActionsPainted();
@@ -1486,7 +1491,7 @@ async function expectLocalSceneNavigation(
     const pointerNeighbor = listFor(details, labels.neighbors).locator(":scope > li > button").first();
     const pointerLabel = await pointerNeighbor.locator("strong").innerText();
     await pointerNeighbor.click();
-    await expect(details.locator("h5")).toHaveText(pointerLabel);
+    await expect(details.locator(".graph-details-title-row h5")).toHaveText(pointerLabel);
     await expect(details).not.toBeFocused();
     // Membership now lives in selected Details, not repeated in every main
     // folder row. Keyboard activation deliberately hands off to Details.
@@ -1495,11 +1500,11 @@ async function expectLocalSceneNavigation(
     const memberLabel = await memberButton.locator("strong").innerText();
     await memberButton.focus();
     await page.keyboard.press("Enter");
-    await expect(details.locator("h5")).toHaveText(memberLabel);
+    await expect(details.locator(".graph-details-title-row h5")).toHaveText(memberLabel);
     await expect(details).toBeFocused();
     await expectAllDetailsActionsPainted();
     await page.keyboard.press("Tab");
-    await expect(details.locator(".graph-details-actions > a, .graph-details-actions > button").first())
+    await expect(details.locator(".graph-details-close"))
       .toBeFocused();
     await page.keyboard.press("Escape");
     await expectEmptyDetails();
@@ -1513,7 +1518,7 @@ async function expectLocalSceneNavigation(
     expect(summaries.length).toBeGreaterThan(0);
     for (const summary of summaries) expect(summary.height).toBeGreaterThanOrEqual(44);
     await memberButton.click();
-    await expect(details.locator("h5")).toHaveText(memberLabel);
+    await expect(details.locator(".graph-details-title-row h5")).toHaveText(memberLabel);
     await expect(details).not.toBeFocused();
     await page.keyboard.press("Escape");
     await expectEmptyDetails();

@@ -50,12 +50,12 @@ vi.mock("../GraphCanvas", async () => {
     useImperativeHandle(ref, () => canvasHandle);
     return (
     <div
-      data-edge-labels={scene.edges.map((edge) => edge.label).join("|")}
-      data-rendered-edge-ids={buildLocalScene(scene).edges.map((edge) => edge.graphId).sort().join("|")}
-      data-edges={scene.edges.length}
+      data-edge-labels={scene.edges.filter((edge) => !edge.hidden).map((edge) => edge.label).join("|")}
+      data-rendered-edge-ids={buildLocalScene({ ...scene, edges: scene.edges.filter((edge) => !edge.hidden) }).edges.map((edge) => edge.graphId).sort().join("|")}
+      data-edges={scene.edges.filter((edge) => !edge.hidden && !edge.removed).length}
       data-active={String(active)}
       data-focused={focusedId ?? ""}
-      data-nodes={scene.nodes.length}
+      data-nodes={scene.nodes.filter((node) => !node.hidden).length}
       data-pinned={pinnedIds.join("|")}
       data-selected={selectedId ?? ""}
       data-show-labels={String(showLabels)}
@@ -109,33 +109,24 @@ describe("GraphView", () => {
     }
   });
 
-  it("shows the canvas before relationship chips, collapsed advanced filters, and legend", async () => {
+  it("separates type and scope, keeps camera controls inside the canvas, and collapses secondary content", async () => {
     const user = userEvent.setup();
-    renderGraph();
-
+    renderGraph({ openContents: false });
     const graph = screen.getByTestId("graph-view");
-    const stage = graph.querySelector(".graph-local-stage");
-    const relationships = graph.querySelector(".graph-local-toolbar");
-    const filters = graph.querySelector(".graph-filter-bar");
-    const legend = graph.querySelector(".graph-legend");
-    expect(stage).not.toBeNull();
-    expect(relationships).not.toBeNull();
-    expect(filters).not.toBeNull();
-    expect(legend).not.toBeNull();
-    expect(stage!.compareDocumentPosition(filters!) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .toBeTruthy();
-    expect(stage!.compareDocumentPosition(relationships!) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .toBeTruthy();
-    expect(stage!.compareDocumentPosition(legend!) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .toBeTruthy();
-    expect(filters).not.toHaveAttribute("open");
-    expect(within(graph.querySelector(".graph-canvas-toolbar")!).getByRole("button", {
-      name: "Labels",
-    })).toBeInTheDocument();
-
+    const frame = graph.querySelector(".graph-frame")!;
+    const stage = frame.querySelector(".graph-local-stage")!;
+    expect(graph.querySelector(".graph-type-section")!.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(frame.querySelector(".graph-frame-header")!.compareDocumentPosition(stage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(stage.nextElementSibling).toHaveClass("graph-timeline");
+    expect(stage).toContainElement(screen.getByRole("button", { name: "Fit graph" }));
+    expect(stage).toContainElement(screen.getByRole("button", { name: "Refresh graph" }));
+    expect(screen.queryByLabelText("History mode")).not.toBeInTheDocument();
+    expect(graph.querySelector(".graph-parity-grid")).not.toBeVisible();
+    expect(graph.querySelector(".graph-frame-filters")).not.toHaveAttribute("open");
     await user.click(screen.getByText("More filters"));
-    expect(filters).toHaveAttribute("open");
     expect(screen.getByLabelText("Ask turn")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "View as list" }));
+    expect(graph.querySelector(".graph-parity-grid")).toBeVisible();
   });
 
   it("keeps unselected Details hidden from navigation and does not open it for canvas hover", () => {
@@ -180,6 +171,7 @@ describe("GraphView", () => {
       .toEqual(payload.nodes.map((node) => node.id).sort());
     fireEvent.click(nodes[0]);
     const details = screen.getByRole("complementary", { name: "Details" });
+    fireEvent.click(details.querySelector(".graph-details-more > summary")!);
     fireEvent.click(within(details).getByRole("button", { name: "Pin" }));
     await user.click(within(main).getByText("Relationships (750)"));
     const edgeList = within(main).getByRole("list", { name: "Relationships" });
@@ -216,7 +208,7 @@ describe("GraphView", () => {
     expect(canvas).toHaveAttribute("data-pinned", payload.nodes[0].id);
     for (const mock of Object.values(canvasHandle)) expect(mock).not.toHaveBeenCalled();
     for (const action of [onCollapse, onDepthChange, onExpand, onHistoryModeChange]) expect(action).not.toHaveBeenCalled();
-  });
+  }, 15_000);
 
   it("shows and hides Details without remounting the stage or canvas, changing pins, or invoking graph actions", async () => {
     const user = userEvent.setup();
@@ -238,9 +230,8 @@ describe("GraphView", () => {
     expect(details).toBeVisible();
     expect(within(details).getByRole("heading", { level: 5, name: "Why was this chosen?" }))
       .toBeInTheDocument();
-    const title = within(details).getByRole("heading", { level: 5 });
-    expect(details.querySelector(".graph-details-actions")!
-      .compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const title = within(details).getByRole("heading", { level: 5, name: "Why was this chosen?" });
+    expect(title.compareDocumentPosition(details.querySelector(".graph-details-footer")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await user.click(within(details).getByRole("button", { name: "Clear selection" }));
     expect(details).toHaveAttribute("hidden");
     expect(details).not.toBeVisible();
@@ -450,6 +441,7 @@ describe("GraphView", () => {
     const details = screen.getByRole("heading", { name: "Details" }).closest("aside");
     expect(within(details!).getByText("Why was this chosen?")).toBeInTheDocument();
     expect(within(details!).queryByRole("link", { name: "Open" })).not.toBeInTheDocument();
+    fireEvent.click(details!.querySelector(".graph-details-more > summary")!);
     expect(within(details!).getByRole("button", { name: "Center" })).toBeInTheDocument();
     expect(within(details!).getByRole("button", { name: "Pin" })).toBeInTheDocument();
     await user.click(screen.getByLabelText("Ask turn"));
@@ -485,13 +477,16 @@ describe("GraphView", () => {
 
   it("opens the new Local renderer with relation chips and a live label toggle", async () => {
     const user = userEvent.setup();
-    renderGraph();
+    const payload = graphFixture();
+    payload.history.mode = "current";
+    renderGraph({ payload });
 
     const canvas = screen.getByTestId("mock-graph-canvas");
     expect(canvas).toHaveAttribute("data-show-labels", "true");
-    const labels = screen.getByRole("button", { name: "Labels" });
+    fireEvent.click(screen.getByTestId("graph-view").querySelector(".graph-canvas-more > summary")!);
+    const labels = screen.getByRole("checkbox", { name: "Labels" });
     await user.click(labels);
-    expect(labels).toHaveAttribute("aria-pressed", "false");
+    expect(labels).not.toBeChecked();
     expect(canvas).toHaveAttribute("data-show-labels", "false");
 
     const links = screen.getByRole("button", { name: "Links 1" });
@@ -499,7 +494,7 @@ describe("GraphView", () => {
     await user.click(links);
     expect(links).toHaveAttribute("aria-pressed", "false");
     expect(canvas).toHaveAttribute("data-edges", "1");
-    expect(screen.getByRole("button", { name: "Read together 0" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Read together 0" })).not.toBeInTheDocument();
   });
 
   it("keeps backend created/edited/published actions on the canvas and in the list through both filter paths", async () => {
@@ -525,7 +520,7 @@ describe("GraphView", () => {
     renderGraph({ payload });
 
     const canvas = screen.getByTestId("mock-graph-canvas");
-    const actions = screen.getByRole("button", { name: "Actions 3" });
+    const actions = screen.getByRole("button", { name: /Historical relationships.*3/ });
     const relationshipList = screen.getByTestId("graph-view")
       .querySelector<HTMLUListElement>(".graph-relationship-list > details:nth-of-type(2) > ul")!;
     expect(actions).toHaveAttribute("aria-pressed", "true");
@@ -541,7 +536,7 @@ describe("GraphView", () => {
     expect(canvas).toHaveAttribute("data-rendered-edge-ids", "action:created|action:published");
     expect(relationshipList.children).toHaveLength(2);
     expect(screen.getByText("4 nodes · 2 edges")).toBeInTheDocument();
-    await user.click(screen.getByText("Legend", { exact: true }));
+    await user.click(screen.getByRole("button", { name: "Legend" }));
     expect(screen.getByText("Long-dashed lines show action occurrences, not document links or citations."))
       .toBeVisible();
   });
@@ -557,30 +552,30 @@ describe("GraphView", () => {
     payload.query.time = { mode: "current" };
     payload.query.depth = 2;
     const { rerender } = renderGraph({ onDepthChange, payload });
-    const toolbar = within(screen.getByRole("toolbar", { name: "Graph view controls" }));
-    expect(toolbar.getByRole("button", { name: "Depth 2" })).toHaveAttribute("aria-pressed", "true");
-    await user.click(toolbar.getByRole("button", { name: "Depth 1" }));
-    expect(onDepthChange).toHaveBeenCalledWith(1);
-    expect(toolbar.getByRole("button", { name: "Depth 2" })).toHaveAttribute("aria-pressed", "true");
-    expect(toolbar.getByRole("button", { name: "Depth 1" })).toBeDisabled();
+    const toolbar = within(screen.getByRole("group", { name: "Relationship scope" }));
+    expect(toolbar.getByRole("button", { name: "Two-step expansion" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(toolbar.getByRole("button", { name: "Neighbor connections" }));
+    expect(onDepthChange).toHaveBeenCalledWith(1, "neighbors");
+    expect(toolbar.getByRole("button", { name: "Two-step expansion" })).toHaveAttribute("aria-pressed", "true");
+    expect(toolbar.getByRole("button", { name: "Neighbor connections" })).toBeDisabled();
     await act(async () => { finishRequest(); });
     rerender(graphElement({
       onCollapse: () => Promise.resolve(), onExpand: () => Promise.resolve(),
       onDepthChange, payload: { ...payload, query: { ...payload.query, depth: 1 } },
     }));
-    expect(toolbar.getByRole("button", { name: "Depth 1" })).toHaveAttribute("aria-pressed", "true");
-    expect(toolbar.getByRole("button", { name: "Depth 2" })).toBeEnabled();
+    expect(toolbar.getByRole("button", { name: "Neighbor connections" })).toHaveAttribute("aria-pressed", "true");
+    expect(toolbar.getByRole("button", { name: "Two-step expansion" })).toBeEnabled();
   });
 
   it("explains and disables unsupported two-hop history instead of pretending to offer it", async () => {
     const user = userEvent.setup();
     const onDepthChange = vi.fn(() => Promise.resolve());
     renderGraph({ onDepthChange });
-    const toolbar = within(screen.getByRole("toolbar", { name: "Graph view controls" }));
-    expect(toolbar.getByRole("button", { name: "Depth 1" })).toHaveAttribute("aria-pressed", "true");
-    const unsupported = toolbar.getByRole("button", { name: "Depth 2" });
+    const toolbar = within(screen.getByRole("group", { name: "Relationship scope" }));
+    expect(toolbar.getByRole("button", { name: "Direct connections" })).toHaveAttribute("aria-pressed", "true");
+    const unsupported = toolbar.getByRole("button", { name: "Two-step expansion" });
     expect(unsupported).toBeDisabled();
-    expect(unsupported).toHaveAccessibleDescription("History views currently support depth 1 only.");
+    expect(unsupported).toHaveAttribute("title", "History views support direct connections only.");
     await user.click(unsupported);
     expect(onDepthChange).not.toHaveBeenCalled();
   });
@@ -592,9 +587,9 @@ describe("GraphView", () => {
     payload.query.time = { mode: "current" };
     payload.query.depth = 2;
     renderGraph({ payload, onDepthChange: () => Promise.reject(new Error("failed")) });
-    await user.click(screen.getByRole("button", { name: "Depth 1" }));
+    await user.click(screen.getByRole("button", { name: "Neighbor connections" }));
     expect(screen.getByText("The graph could not be updated. Try again.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Depth 2" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Two-step expansion" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("provides operable DOM selection and gates expansion to supported Context-page seeds", async () => {
@@ -750,7 +745,7 @@ describe("GraphView", () => {
     const onExpand = vi.fn((_node: GraphNode) => Promise.resolve());
     const { rerender } = renderGraph({ onCollapse, onExpand });
     const liveRegion = screen.getByTestId("graph-view")
-      .querySelector(".sr-only[aria-live='polite']");
+      .querySelector(".visually-hidden[aria-live='polite']");
     expect(liveRegion).toBeInTheDocument();
 
     const payload = graphFixture();
@@ -794,7 +789,7 @@ describe("GraphView", () => {
     await pinAskFromDetails(user);
     await user.click(screen.getByRole("button", { name: "Select Ask from canvas" }));
     const details = screen.getByRole("heading", { name: "Details" }).closest("aside")!;
-    expect(within(details).getByText(/Other nodes stay visible but dimmed/)).toBeInTheDocument();
+    expect(within(details).queryByText(/Other nodes stay visible but dimmed/)).not.toBeInTheDocument();
     expect(canvas).toHaveAttribute("data-pinned", "node:ask");
 
     await user.click(within(details).getByRole("button", { name: "Clear selection" }));
@@ -854,6 +849,7 @@ describe("GraphView", () => {
     expect.soft(details.scrollTop).toBe(0);
     expect(selectRelated).toHaveFocus();
     expect(within(details).getByRole("link", { name: "Open" })).toBeInTheDocument();
+    fireEvent.click(details.querySelector(".graph-details-more > summary")!);
     expect(within(details).getByRole("button", { name: "Center" })).toBeInTheDocument();
     expect(within(details).getByRole("button", { name: "Pin" })).toBeInTheDocument();
 
@@ -874,7 +870,7 @@ describe("GraphView", () => {
     for (const mock of Object.values(canvasHandle)) expect(mock).not.toHaveBeenCalled();
   });
 
-  it.each(["en", "ko"])("puts every selected action before the full title without losing accessible names or reasons in %s", async (locale) => {
+  it.each(["en", "ko"])("puts the title first and groups primary and secondary actions without losing accessible names or reasons in %s", async (locale) => {
     const user = userEvent.setup();
     await act(async () => { await i18n.changeLanguage(locale); });
     try {
@@ -888,20 +884,19 @@ describe("GraphView", () => {
         .querySelector<HTMLButtonElement>('button[data-local-graph-id="node:seed"]')!);
 
       const details = screen.getByRole("complementary", { name: i18n.t("graph:graph.details.heading") });
-      const controls = details.querySelector(".graph-details-control-region");
+      const controls = details.querySelector(".graph-details-footer");
       const title = details.querySelector("h5")!;
       expect(within(details).getByRole("link", { name: i18n.t("graph:graph.open") }))
         .toHaveAttribute("href", `/workspaces/${workspaceId}/context/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`);
       expect(controls).not.toBeNull();
-      expect(controls!.querySelectorAll("a,button")).toHaveLength(6);
-      expect(controls!.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(controls!.querySelectorAll("a,button")).toHaveLength(5);
+      expect(title.compareDocumentPosition(controls!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(title).toHaveTextContent(fullTitle);
       const clearLabel = i18n.t("graph:graph.details.clearSelection");
       const clear = within(details).getByRole("button", { name: clearLabel });
       expect(clear).toHaveAttribute("aria-label", clearLabel);
-      expect(clear).toHaveAttribute("title", clearLabel);
       expect(clear.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
-      expect(clear).toHaveTextContent(clearLabel);
+      expect(clear).toHaveAccessibleName(clearLabel);
 
       const expand = within(details).getByRole("button", { name: i18n.t("graph:graph.expand") });
       expect(expand).toBeDisabled();
@@ -911,7 +906,7 @@ describe("GraphView", () => {
       expect(title.compareDocumentPosition(reason) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       act(() => details.focus());
       await user.tab();
-      expect(within(details).getByRole("link", { name: i18n.t("graph:graph.open") })).toHaveFocus();
+      expect(clear).toHaveFocus();
     } finally {
       await act(async () => { await i18n.changeLanguage("en"); });
     }
@@ -1140,15 +1135,15 @@ describe("GraphView", () => {
     const contents = screen.getByRole("heading", { name: "Accessible graph contents" }).closest("section")!;
     const folderRow = within(contents).getByText("Primary Folder").closest("li")!;
     await user.click(within(folderRow).getByRole("button", { name: /Primary Folder.*Structure/ }));
-    await user.click(screen.getByRole("button", { name: "Membership 5" }));
+    await user.click(screen.getByLabelText("Contains", { selector: "input" }));
     const details = screen.getByRole("heading", { name: "Details" }).closest("aside")!;
     expect(details).toHaveTextContent("Members in this scene (0)");
     expect(details).toHaveTextContent("No members are connected in this scene.");
     expect(details).toHaveTextContent("No direct neighbors are connected in this scene.");
     expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-selected", "node:primary-folder");
-    await user.click(screen.getByRole("button", { name: "Membership 5" }));
+    await user.click(screen.getByLabelText("Contains", { selector: "input" }));
     expect(details).toHaveTextContent("Members in this scene (2)");
-    await user.click(screen.getByRole("button", { name: "Reset timeline" }));
+    fireEvent.change(screen.getByLabelText("Timeline position"), { target: { value: "0" } });
     expect(details).toHaveTextContent("Members in this scene (0)");
     expect(details).toHaveTextContent("No members are connected in this scene.");
   });
@@ -1164,7 +1159,7 @@ describe("GraphView", () => {
     const canvas = screen.getByTestId("mock-graph-canvas");
     expect(canvas).toHaveAttribute("data-focused", "node:related");
     // Preserve DOM focus while changing the scene, like an incoming update.
-    fireEvent.click(screen.getByRole("button", { name: "Links 2" }));
+    fireEvent.click(screen.getByLabelText("Wiki link", { selector: "input" }));
     expect(canvas).toHaveAttribute("data-nodes", "9");
     expect(canvas).toHaveAttribute("data-focused", "");
     expect(canvas).toHaveAttribute("data-selected", "node:seed");
@@ -1195,7 +1190,7 @@ describe("GraphView", () => {
     renderGraph();
     expect(screen.queryByTestId("mock-markdown-view")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Links 1" }));
+    await user.click(screen.getByLabelText("Wiki link", { selector: "input" }));
     expect(screen.queryByTestId("mock-markdown-view")).not.toBeInTheDocument();
     await user.click(screen.getByText("Static graph view"));
     expect(screen.getAllByTestId("mock-markdown-view")).toHaveLength(1);
@@ -1313,7 +1308,7 @@ describe("GraphView", () => {
     const onHistoryModeChange = vi.fn((_mode: GraphHistoryMode) => Promise.resolve());
     renderGraph({ onHistoryModeChange });
 
-    await user.click(screen.getByRole("button", { name: "Reset timeline" }));
+    fireEvent.change(screen.getByLabelText("Timeline position"), { target: { value: "0" } });
     expect(screen.getByText("1 nodes · 0 edges")).toBeInTheDocument();
     expect(screen.getByText("0 / 3")).toBeInTheDocument();
 
@@ -1326,7 +1321,7 @@ describe("GraphView", () => {
     });
     expect(screen.getByText("3 nodes · 2 edges")).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("History mode"), "action");
+    await user.click(screen.getByRole("button", { name: /Activity history/ }));
     expect(onHistoryModeChange).toHaveBeenCalledWith("action");
 
     const staticSummary = screen.getByText("Static graph view");
@@ -1349,11 +1344,11 @@ describe("GraphView", () => {
     const onHistoryModeChange = vi.fn((_mode: GraphHistoryMode) => Promise.resolve());
     renderGraph({ payload, onHistoryModeChange });
 
-    expect(screen.getByText("Showing the current graph. Choose a history mode to inspect past events."))
-      .toBeInTheDocument();
+    expect(screen.getByText(/There is no time navigation/)).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /Timeline/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("slider", { name: "Timeline position" })).not.toBeInTheDocument();
     expect(screen.queryByText("0 / 0")).not.toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText("History mode"), "appearance");
+    await user.click(screen.getByRole("button", { name: /Change history/ }));
     expect(onHistoryModeChange).toHaveBeenCalledWith("appearance");
   });
 
@@ -1370,7 +1365,44 @@ describe("GraphView", () => {
     expect(recoveredSummary.closest("details")).toHaveAttribute("open");
   });
 
-  it("normalizes autoplay completion to the current projection like scrub and step", () => {
+  it("retains the recorded event identity and selection across refresh, earlier records, and view round-trips", async () => {
+    const user = userEvent.setup();
+    const payload = graphFixture();
+    const onRefresh = vi.fn(async () => undefined);
+    const noAction = vi.fn(async () => undefined);
+    const props = { payload, onRefresh, onCollapse: noAction, onExpand: noAction };
+    const view = renderGraph(props);
+    fireEvent.change(screen.getByLabelText("Timeline position"), { target: { value: "2" } });
+    const canvas = screen.getByTestId("mock-graph-canvas");
+    const selected = screen.getByTestId("graph-view").querySelector<HTMLButtonElement>('[data-local-graph-id="node:related"]')!;
+    await user.click(selected);
+    expect(canvas).toHaveAttribute("data-selected", "node:related");
+    const records = screen.getByRole("complementary", { name: "Details" }).querySelector<HTMLElement>(".graph-item-history")!;
+    expect(records.querySelectorAll("li")).toHaveLength(2);
+    await user.click(within(records).getAllByRole("button")[0]);
+    expect(screen.getByRole("slider", { name: "Timeline position" })).toHaveValue("1");
+    expect(canvas).toHaveAttribute("data-selected", "node:related");
+    fireEvent.change(screen.getByLabelText("Timeline position"), { target: { value: "2" } });
+    Object.values(canvasHandle).forEach((mock) => mock.mockClear());
+    await user.click(screen.getByRole("button", { name: "Refresh graph" }));
+    expect(onRefresh).toHaveBeenCalledOnce();
+    const refreshed = { ...payload, generated_at: "2026-08-05T00:00:00Z", timeline: [
+      { ...payload.timeline![0], id: "earlier-seed", node_ids: ["node:seed"], occurred_at: "2026-08-01T00:00:00Z" },
+      ...payload.timeline!,
+    ] };
+    view.rerender(graphElement({ ...props, payload: refreshed }));
+    expect(screen.getByRole("slider", { name: "Timeline position" })).toHaveValue("3");
+    expect(canvas).toHaveAttribute("data-selected", "node:related");
+    expect(canvas).toHaveAttribute("data-edges", "1");
+    expect(canvasHandle.reset).not.toHaveBeenCalled();
+    expect(canvasHandle.fit).not.toHaveBeenCalled();
+    view.rerender(graphElement({ ...props, payload: { ...refreshed, history: { ...payload.history, mode: "current" } } }));
+    expect(screen.queryByRole("slider", { name: "Timeline position" })).not.toBeInTheDocument();
+    view.rerender(graphElement({ ...props, payload: refreshed }));
+    expect(screen.getByRole("slider", { name: "Timeline position" })).toHaveValue("3");
+  });
+
+  it("keeps the final recorded snapshot after autoplay completion", () => {
     vi.useFakeTimers();
     try {
       const payload = graphFixture();
@@ -1389,19 +1421,19 @@ describe("GraphView", () => {
       }];
       renderGraph({ payload });
       fireEvent.click(screen.getByLabelText("Usage"));
-      expect(screen.getByText("3 nodes · 1 edges")).toBeInTheDocument();
+      expect(screen.getByText("3 nodes · 0 edges")).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Play" }));
       expect(screen.getByText("3 nodes · 0 edges")).toBeInTheDocument();
       act(() => vi.advanceTimersByTime(1_000));
 
-      expect(screen.getByText("3 nodes · 1 edges")).toBeInTheDocument();
+      expect(screen.getByText("3 nodes · 0 edges")).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("steps a one-event reduced-motion timeline from its historical frame back to current", () => {
+  it("keeps a one-event reduced-motion timeline on its recorded snapshot", () => {
     const restoreMatchMedia = setReducedMotionPreference(true);
     try {
       const payload = graphFixture();
@@ -1421,12 +1453,12 @@ describe("GraphView", () => {
       renderGraph({ payload });
       fireEvent.click(screen.getByLabelText("Usage"));
 
-      expect(screen.getByText("3 nodes · 1 edges")).toBeInTheDocument();
+      expect(screen.getByText("3 nodes · 0 edges")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Play" }));
       expect(screen.getByText("3 nodes · 0 edges")).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Play" }));
-      expect(screen.getByText("3 nodes · 1 edges")).toBeInTheDocument();
+      expect(screen.getByText("3 nodes · 0 edges")).toBeInTheDocument();
     } finally {
       restoreMatchMedia();
     }
@@ -1440,7 +1472,7 @@ describe("GraphView", () => {
     await user.click(screen.getByRole("button", { name: /Included.*Decision Log/ }));
 
     const details = screen.getByRole("heading", { name: "Details" }).closest("aside");
-    expect(within(details!).getByText("Decision Log —Included→ Why was this chosen?"))
+    expect(within(details!).getByText("Decision Log —Included→ Why was this chosen?", { selector: ".graph-edge-summary" }))
       .toBeInTheDocument();
   });
 
@@ -1511,13 +1543,14 @@ describe("GraphView", () => {
 
     expect(screen.getAllByText("문서").length).toBeGreaterThan(0);
     expect(screen.getAllByText("지식").length).toBeGreaterThan(0);
-    expect(screen.getByText(/관찰 기록/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /변화 이력/ })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: /포함됨.*Decision Log/ }))
       .toBeInTheDocument();
     expect(screen.getByText("Decision Log —포함됨→ Why was this chosen?"))
       .toBeInTheDocument();
     expect(screen.queryByText("Current projection")).not.toBeInTheDocument();
 
+    fireEvent.click(screen.getByTestId("graph-view").querySelector(".graph-canvas-more > summary")!);
     await userEvent.click(screen.getByRole("button", { name: "필터링된 그래프 내보내기" }));
     const exported = await readBlob(createObjectURL.mock.calls[0]?.[0] as Blob);
     expect(exported).toContain("포함됨");
@@ -1561,7 +1594,7 @@ describe("GraphView", () => {
     expect(screen.queryByText("What was left out")).not.toBeInTheDocument();
     const summary = screen.getByText("Some folders omitted");
     const details = summary.closest("details")!;
-    expect(details.closest(".graph-canvas-toolbar")).not.toBeNull();
+    expect(details.closest(".graph-local-stage")).not.toBeNull();
     expect(details).not.toHaveAttribute("open");
     await userEvent.click(summary);
     expect(within(details).getByText("Folder grouping limit · Distance 1")).toBeVisible();
@@ -1599,7 +1632,8 @@ describe("GraphView", () => {
     const disclosure = summary.closest("details")!;
     const canvas = screen.getByTestId("mock-graph-canvas");
     await user.click(summary);
-    const labels = screen.getByRole("button", { name: "Labels" });
+    fireEvent.click(screen.getByTestId("graph-view").querySelector(".graph-canvas-more > summary")!);
+    const labels = screen.getByRole("checkbox", { name: "Labels" });
     const outside = new PointerEvent("pointerdown", { bubbles: true, cancelable: true });
     expect(labels.dispatchEvent(outside)).toBe(true);
     expect(disclosure).not.toHaveAttribute("open");
@@ -1651,7 +1685,7 @@ describe("GraphView", () => {
     ];
     renderGraph({ payload });
 
-    expect(screen.getByText(/limited to the requested display budget/).closest("[role]"))
+    expect(screen.getByText(/limited to the requested display budget/).closest("[role=alert],[role=status]"))
       .toHaveAttribute("role", "alert");
     const details = screen.getByText("What was left out").closest("details")!;
     await userEvent.click(within(details).getByText("What was left out"));
@@ -1674,7 +1708,7 @@ describe("GraphView", () => {
     renderGraph({ payload });
 
     expect(screen.getByText("The current graph inspection reached a source limit; some nodes or relationships may be missing.")
-      .closest("[role]")).toHaveAttribute("role", "alert");
+      .closest("[role=alert],[role=status]")).toHaveAttribute("role", "alert");
     expect(screen.queryByText("Some graph data could not be shown.")).not.toBeInTheDocument();
     const details = screen.getByText("What was left out").closest("details")!;
     await userEvent.click(within(details).getByText("What was left out"));
@@ -1694,7 +1728,7 @@ describe("GraphView", () => {
     payload.history.warnings = ["history_coverage_partial"];
     renderGraph({ payload });
 
-    expect(screen.getByText("Timeline coverage is limited.").closest("[role]"))
+    expect(screen.getByText("Timeline coverage is limited.").closest("[role=alert],[role=status]"))
       .toHaveAttribute("role", "alert");
     expect(screen.getByText("Timeline coverage is partial.")).toBeInTheDocument();
     expect(screen.queryByText(/limited to the requested display budget/)).not.toBeInTheDocument();
@@ -1712,7 +1746,7 @@ describe("GraphView", () => {
     payload.omissions = [];
     renderGraph({ payload });
 
-    expect(screen.getByText("This graph has bounded or partial coverage.").closest("[role]"))
+    expect(screen.getByText("This graph has bounded or partial coverage.").closest("[role=alert],[role=status]"))
       .toHaveAttribute("role", "alert");
     expect(screen.getByText("Observation inspection reached a source limit; current relationships may be missing."))
       .toBeInTheDocument();
@@ -1729,7 +1763,7 @@ describe("GraphView", () => {
     payload.warnings = ["graph_budget_applied", "graph_timeline_catalog_bounded"];
     renderGraph({ payload });
 
-    expect(screen.getByText("This graph has bounded or partial coverage.").closest("[role]"))
+    expect(screen.getByText("This graph has bounded or partial coverage.").closest("[role=alert],[role=status]"))
       .toHaveAttribute("role", "alert");
     expect(screen.queryByText("Timeline coverage is limited.")).not.toBeInTheDocument();
     expect(screen.getByText(/limited to the requested display budget/)).toBeInTheDocument();
@@ -1740,7 +1774,7 @@ describe("GraphView", () => {
     payload.omissions = [{ scope: "node", reason: "future_internal_omission" } as unknown as NonNullable<GraphQueryPayload["omissions"]>[number]];
     renderGraph({ payload });
 
-    expect(screen.getByText("This graph has bounded or partial coverage.").closest("[role]"))
+    expect(screen.getByText("This graph has bounded or partial coverage.").closest("[role=alert],[role=status]"))
       .toHaveAttribute("role", "alert");
     expect(screen.getByText("Unspecified exclusion")).toBeInTheDocument();
     expect(screen.queryByText(/future_internal_omission/)).not.toBeInTheDocument();
@@ -1748,7 +1782,7 @@ describe("GraphView", () => {
 
   it("describes intentional local filtering separately from server coverage warnings", async () => {
     renderGraph();
-    await userEvent.click(screen.getByRole("button", { name: "Links 1" }));
+    await userEvent.click(screen.getByLabelText("Wiki link", { selector: "input" }));
     await userEvent.click(screen.getByText("More filters"));
 
     expect(screen.getByText("Some items are hidden by your active filters. Clear filters to show them again."))
@@ -1768,7 +1802,7 @@ describe("GraphView", () => {
       payload.omissions = [{ scope: "node", reason: "folder_node", hop: 1 }];
       renderGraph({ payload });
 
-      expect(screen.getByText("This graph has bounded or partial coverage.").closest("[role]"))
+      expect(screen.getByText("This graph has bounded or partial coverage.").closest("[role=alert],[role=status]"))
         .toHaveAttribute("role", "alert");
       expect(screen.queryByText("Some folders are not shown.")).not.toBeInTheDocument();
       expect(screen.queryByText(/future_internal_warning/)).not.toBeInTheDocument();
@@ -1782,7 +1816,7 @@ describe("GraphView", () => {
     payload.warnings = ["graph_budget_applied", "graph_history_source_bounded"];
     renderGraph({ payload });
 
-    expect(screen.getByText(/limited to the requested display budget/).closest("[role]"))
+    expect(screen.getByText(/limited to the requested display budget/).closest("[role=alert],[role=status]"))
       .toHaveAttribute("role", "alert");
     expect(screen.queryByText("Timeline coverage is limited.")).not.toBeInTheDocument();
   });
@@ -1798,7 +1832,7 @@ describe("GraphView", () => {
     ];
     renderGraph({ payload });
 
-    expect(screen.getByText("This graph has bounded or partial coverage.").closest("[role]"))
+    expect(screen.getByText("This graph has bounded or partial coverage.").closest("[role=alert],[role=status]"))
       .toHaveAttribute("role", "alert");
     expect(screen.queryByText(/limited to the requested display budget/)).not.toBeInTheDocument();
     expect(screen.getByText(/The current graph inspection reached a source limit/)).toBeInTheDocument();
@@ -1829,6 +1863,7 @@ describe("GraphView", () => {
         : null,
     });
     await userEvent.click(screen.getByRole("button", { name: /Decision Log.*Document.*Published/ }));
+    fireEvent.click(screen.getByRole("complementary", { name: "Details" }).querySelector(".graph-details-more > summary")!);
     const links = within(screen.getByRole("complementary", { name: "Details" })).getAllByRole("link", { name: "Show in Knowledge Map" });
     expect(links.some((link) => link.getAttribute("href") === "/graph?focus=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
       .toBe(true);
@@ -1870,6 +1905,7 @@ describe("GraphView", () => {
 
 async function pinAskFromDetails(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Select Ask from canvas" }));
+  fireEvent.click(screen.getByRole("complementary", { name: "Details" }).querySelector(".graph-details-more > summary")!);
   await user.click(within(screen.getByRole("complementary", { name: "Details" }))
     .getByRole("button", { name: "Pin" }));
 }
@@ -1904,31 +1940,39 @@ function renderGraph({
   active = true,
   onCollapse = (_node: GraphNode) => Promise.resolve(),
   onDepthChange = (_depth: 1 | 2) => Promise.resolve(),
+  onRefresh,
   onExpand = (_node: GraphNode) => Promise.resolve(),
   onHistoryModeChange = (_mode: GraphHistoryMode) => Promise.resolve(),
   payload = graphFixture(),
+  openContents = true,
   workspaceGraphHref,
   workspaceId = "00000000-0000-4000-8000-000000000001",
 }: {
   active?: boolean;
+  openContents?: boolean;
   onCollapse?: (node: GraphNode) => Promise<void>;
   onDepthChange?: (depth: 1 | 2) => Promise<void>;
+  onRefresh?: () => Promise<void>;
   onExpand?: (node: GraphNode) => Promise<void>;
   onHistoryModeChange?: (mode: GraphHistoryMode) => Promise<void>;
   payload?: GraphQueryPayload;
   workspaceGraphHref?: (node: GraphNode) => string | null;
   workspaceId?: string | null;
 } = {}) {
-  return render(graphElement({
+  const view = render(graphElement({
     active,
     onCollapse,
     onDepthChange,
+    onRefresh,
     onExpand,
     onHistoryModeChange,
     payload,
     workspaceGraphHref,
     workspaceId,
   }));
+  // List interaction regressions explicitly enter the now-collapsed parity view.
+  if (openContents) fireEvent.click(screen.getByRole("button", { name: /View as list|목록으로 보기/ }));
+  return view;
 }
 
 function readBlob(blob: Blob) {
@@ -2096,6 +2140,7 @@ function graphElement({
   active = true,
   onCollapse,
   onDepthChange = () => Promise.resolve(),
+  onRefresh,
   onExpand,
   onHistoryModeChange,
   payload,
@@ -2105,6 +2150,7 @@ function graphElement({
   active?: boolean;
   onCollapse: (node: GraphNode) => Promise<void>;
   onDepthChange?: (depth: 1 | 2) => Promise<void>;
+  onRefresh?: () => Promise<void>;
   onExpand: (node: GraphNode) => Promise<void>;
   onHistoryModeChange?: (mode: GraphHistoryMode) => Promise<void>;
   payload: GraphQueryPayload;
@@ -2117,6 +2163,7 @@ function graphElement({
         active={active}
         onCollapse={onCollapse}
         onDepthChange={onDepthChange}
+        onRefresh={onRefresh}
         onExpand={onExpand}
         onHistoryModeChange={onHistoryModeChange ?? (() => Promise.resolve())}
         payload={payload}

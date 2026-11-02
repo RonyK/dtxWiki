@@ -1,16 +1,4 @@
-import {
-  Download,
-  Focus,
-  Maximize2,
-  Pause,
-  Play,
-  RotateCcw,
-  StepBack,
-  StepForward,
-  X,
-  ZoomIn,
-  ZoomOut,
-} from "lucide-react";
+import { Clock3, Download, Focus, Layers, List, Maximize2, Minimize2, MoreHorizontal, RefreshCw, RotateCcw, SlidersHorizontal, X } from "lucide-react";
 import type { TFunction } from "i18next";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -20,14 +8,19 @@ import { Link } from "react-router-dom";
 import { MarkdownView } from "../pages/MarkdownView";
 import { LOCAL_EDGE_VISUAL_KIND_ORDER, localEdgeVisualKind } from "./local/edgeKinds";
 import { localNodeVisualKind } from "./local/nodeVisual";
+import { GraphCameraControls, GraphPreviewBadge, GraphScopeSelector, GraphTypeSelector, LocalGraphTimeline, eventInvolves } from "./local/LocalGraphChrome";
+import { historySceneCatalog, renderHistoryScene } from "./local/historyScene";
 import { LocalGraphCoverageInfo } from "./local/LocalGraphCoverageInfo";
 import { LocalGraphList, type LocalGraphSelectionOrigin } from "./local/LocalGraphList";
 import { localSceneScopeKey } from "./local/sceneScope";
 import { buildSceneNavigation, type SceneNavigation } from "./sceneNavigation";
 import { GRAPH_EDGE_PATTERN, readGraphTokens, type GraphEdgeVisualKind, type GraphNodeVisualKind, type GraphVisualTokens } from "./shared/graphTokens";
+import type { GraphRenderScene } from "./shared/rendererTypes";
 import type {
   GraphEdge,
   GraphDepth,
+  GraphRange,
+  GraphRelationScope,
   GraphHistoryMode,
   GraphNode,
   GraphQueryPayload,
@@ -56,7 +49,8 @@ import {
 type GraphViewProps = {
   active: boolean;
   onCollapse: (node: GraphNode) => Promise<void>;
-  onDepthChange: (depth: GraphDepth) => Promise<void>;
+  onDepthChange: (depth: GraphDepth, relationScope?: GraphRelationScope) => Promise<void>;
+  onRefresh?: () => Promise<void>;
   onExpand: (node: GraphNode) => Promise<void>;
   onHistoryModeChange: (mode: GraphHistoryMode) => Promise<void>;
   payload: GraphQueryPayload;
@@ -66,7 +60,6 @@ type GraphViewProps = {
   workspaceId?: string | null;
 };
 
-const PLAYBACK_SPEEDS = [0.5, 1, 2] as const;
 // Match Mermaid's default parsing limit. Larger Local scenes keep the
 // complete text fallback rather than mounting a diagram that cannot render.
 const STATIC_DIAGRAM_EDGE_LIMIT = 500;
@@ -76,6 +69,7 @@ export function GraphView({
   active,
   onCollapse,
   onDepthChange,
+  onRefresh,
   onExpand,
   onHistoryModeChange,
   payload,
@@ -93,7 +87,19 @@ export function GraphView({
     workspaceId: string | null;
   } | null>(null);
   const actionGenerationRef = useRef(0);
-  const depthReasonId = useId();
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [showFuture, setShowFuture] = useState(false);
+  const [hoveredEventId, setHoveredEventId] = useState<string | null>(null);
+  const [dismissedCoverageKey, setDismissedCoverageKey] = useState<string | null>(null);
+  const [historyVisibility, setHistoryVisibility] = useState({ recorded: true, background: true });
+  const [listOpen, setListOpen] = useState(false);
+  const [legendOpen, setLegendOpen] = useState(false);
+  useEffect(() => {
+    const change = () => setFullscreen(document.fullscreenElement === frameRef.current);
+    document.addEventListener("fullscreenchange", change);
+    return () => document.removeEventListener("fullscreenchange", change);
+  }, []);
   const facets = useMemo(() => graphFacets(payload), [payload]);
   const facetSignature = JSON.stringify(facets);
   const previousFacetsRef = useRef(facets);
@@ -108,12 +114,13 @@ export function GraphView({
   const [showLabels, setShowLabels] = useState(true);
   const [staticOpen, setStaticOpen] = useState(false);
   const [printing, setPrinting] = useState(false);
-  const [timelineCursor, setTimelineCursor] = useState<number | null>(null);
+  const [timelinePositions, setTimelinePositions] = useState<Record<string, string | null>>({});
   const [playing, setPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [announcement, setAnnouncement] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [retryAction, setRetryAction] = useState<{ key: string; action: () => Promise<void> } | null>(null);
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const forcedColors = useMediaQuery("(forced-colors: active)");
   const tokens = useLocalGraphTokens(graphRegionRef, forcedColors);
@@ -124,40 +131,65 @@ export function GraphView({
       ? "cap"
       : "available";
   const previousExpansionAvailabilityRef = useRef(expansionAvailability);
-  const supportsDepthTwo = payload.history.mode === "current";
+  const historical = payload.history.mode !== "current";
+  const range: GraphRange = historical || payload.query.relation_scope === "direct" ? "direct"
+    : payload.query.depth === 2 ? "extended" : "neighbors";
   const depthBusy = Boolean(busyAction?.startsWith("depth:") || busyAction?.startsWith("mode:"));
+  const recordedEdgeIds = useMemo(() => new Set([
+    ...sortedTimeline(payload).flatMap((event) => [...(event.edge_ids ?? []), ...(event.edge_snapshots ?? []).map((edge) => edge.id)]),
+    ...payload.edges.filter((edge) => localEdgeVisualKind(edge.edge_kind) === "action").map((edge) => edge.id),
+  ]), [payload]);
+  const applyHistoryVisibility = useCallback((value: GraphScene): GraphScene => !historical ? value : ({
+    ...value,
+    edges: value.edges.filter((edge) => recordedEdgeIds.has(edge.id) ? historyVisibility.recorded : historyVisibility.background),
+  }), [historical, historyVisibility, recordedEdgeIds]);
   const timeline = useMemo(
-    () => localizedGraphTimeline(payload, filters, t),
-    [filters, payload, t],
+    () => localizedGraphTimeline(payload, filters, t, applyHistoryVisibility),
+    [applyHistoryVisibility, filters, payload, t],
   );
-  const filteredScene = useMemo(
-    () => deriveGraphScene(payload, filters, timelineCursor),
-    [filters, payload, timelineCursor],
-  );
-  const scene = useMemo(
-    () => localizedGraphScene(filteredScene, t),
-    [filteredScene, t],
-  );
-  const sceneNavigation = useMemo(() => buildSceneNavigation(scene), [scene]);
-  // The canvas shows an edge's label while it is hovered or selected; a
-  // "read together" edge shows what it rests on instead of its kind.
   const canvasScopeKey = localSceneScopeKey({
     workspaceId, query: payload.query, filters, historyMode: payload.history.mode,
-    cursor: timelineCursor, event: timelineCursor === null ? undefined : timeline[timelineCursor],
+    cursor: null,
   });
-  const canvasScene = useMemo(
-    () => ({ ...withCoAccessLabels(scene, t), scopeKey: canvasScopeKey }),
-    [canvasScopeKey, scene, t],
+  const timelineStateKey = JSON.stringify([workspaceId, payload.query.seeds, payload.history.mode,
+    payload.query.depth, payload.query.relation_scope, payload.query.time, payload.query.budget]);
+  const coverageKey = `${canvasScopeKey}:${payload.generated_at}`;
+  const storedEvent = timelinePositions[timelineStateKey];
+  const storedIndex = storedEvent ? timeline.findIndex((event) => event.id === storedEvent) : -1;
+  const timelineCursor = !historical ? null : storedEvent === null ? -1
+    : storedIndex >= 0 ? storedIndex : timeline.length - 1;
+  const visibleCursor = timelineCursor ?? timeline.length - 1;
+  const currentEvent = timeline[visibleCursor];
+  const setTimelineCursor = useCallback((next: number | null | ((cursor: number | null) => number | null)) => {
+    const index = typeof next === "function" ? next(timelineCursor) : next;
+    const id = index === null ? timeline.at(-1)?.id : index < 0 ? null : timeline[index]?.id;
+    setTimelinePositions((positions) => ({ ...positions, [timelineStateKey]: id ?? null }));
+  }, [timelineStateKey, timeline, timelineCursor]);
+  const filteredScene = useMemo(
+    () => applyHistoryVisibility(deriveGraphScene(payload, filters, timelineCursor)),
+    [applyHistoryVisibility, filters, payload, timelineCursor],
   );
+  const scene = useMemo(() => localizedGraphScene(filteredScene, t), [filteredScene, t]);
+  const historyCatalog = useMemo(() => localizedGraphScene(applyHistoryVisibility(historySceneCatalog(payload, filters)), t),
+    [applyHistoryVisibility, filters, payload, t]);
+  const sceneNavigation = useMemo(() => buildSceneNavigation(scene), [scene]);
+  const canvasScene = useMemo<GraphRenderScene>(() => ({
+    ...(historical ? renderHistoryScene(withCoAccessLabels(historyCatalog, t), withCoAccessLabels(scene, t),
+      timeline.find((event) => event.id === hoveredEventId) ?? currentEvent, showFuture, payload.history.mode === "action", hoveredEventId !== null)
+      : withCoAccessLabels(scene, t)),
+    scopeKey: canvasScopeKey,
+    freezeLayout: historical,
+  }), [canvasScopeKey, currentEvent, historical, historyCatalog, hoveredEventId, payload.history.mode, scene, showFuture, t, timeline]);
   const mermaidSource = useMemo(
     () => staticOpen && scene.edges.length <= STATIC_DIAGRAM_EDGE_LIMIT
       ? graphSceneToMermaid(scene)
       : null,
     [scene, staticOpen],
   );
-  const visibleCursor = timelineCursor ?? timeline.length - 1;
-  const selectedNode = scene.nodes.find((node) => node.id === selectedId) ?? null;
-  const selectedEdge = scene.edges.find((edge) => edge.id === selectedId) ?? null;
+  const selectedNode = scene.nodes.find((node) => node.id === selectedId)
+    ?? (historical ? historyCatalog.nodes.find((node) => node.id === selectedId) : null) ?? null;
+  const selectedEdge = scene.edges.find((edge) => edge.id === selectedId)
+    ?? (historical ? historyCatalog.edges.find((edge) => edge.id === selectedId) : null) ?? null;
   const effectiveSelectedId = selectedNode || selectedEdge ? selectedId : null;
   const effectiveFocusedId = focusedId && (
     scene.nodes.some((node) => node.id === focusedId)
@@ -231,15 +263,23 @@ export function GraphView({
       ...scene.nodes.map((node) => node.id),
       ...scene.edges.map((edge) => edge.id),
     ]);
-    if (selectedId && !visibleIds.has(selectedId)) setSelectedId(null);
+    if (selectedId && !visibleIds.has(selectedId) && !(historical && (historyCatalog.nodes.some((node) => node.id === selectedId) || historyCatalog.edges.some((edge) => edge.id === selectedId)))) setSelectedId(null);
     if (focusedId && !visibleIds.has(focusedId)) setFocusedId(null);
-  }, [focusedId, scene, selectedId]);
+  }, [focusedId, historical, historyCatalog, scene, selectedId]);
 
   useEffect(() => {
     const region = graphRegionRef.current;
     if (!region) return undefined;
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      if (document.fullscreenElement === frameRef.current) {
+        event.preventDefault(); void document.exitFullscreen(); return;
+      }
+      const target = event.target instanceof Element ? event.target.closest("details[open]") : null;
+      if (target && target.matches(".graph-type-comparison,.graph-frame-filters,.graph-canvas-more,.graph-details-more,.graph-history-cluster,.graph-local-coverage-info")) {
+        target.removeAttribute("open"); target.querySelector("summary")?.focus();
+        event.preventDefault(); event.stopPropagation(); return;
+      }
       if (!effectiveSelectedId && !effectiveFocusedId) return;
       event.preventDefault();
       event.stopPropagation();
@@ -250,6 +290,17 @@ export function GraphView({
     region.addEventListener("keydown", handleEscape);
     return () => region.removeEventListener("keydown", handleEscape);
   }, [effectiveFocusedId, effectiveSelectedId]);
+
+  useEffect(() => {
+    const closeOutside = (event: PointerEvent) => {
+      if (!(event.target instanceof Node)) return;
+      for (const details of graphRegionRef.current?.querySelectorAll<HTMLDetailsElement>(
+        ".graph-type-comparison[open],.graph-frame-filters[open],.graph-canvas-more[open],.graph-details-more[open],.graph-history-cluster[open]",
+      ) ?? []) if (!details.contains(event.target)) details.open = false;
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, []);
 
   useEffect(() => {
     if (!active) return undefined;
@@ -279,11 +330,7 @@ export function GraphView({
     if (!active || !playing) return undefined;
     if (visibleCursor >= timeline.length - 1) {
       setPlaying(false);
-      // The last scrub/step position represents the actor-visible current
-      // projection, not merely the final observation snapshot. Normalize the
-      // autoplay path the same way so provenance/evidence cannot diverge by
-      // control method when a stable edge ID has newer current metadata.
-      setTimelineCursor(null);
+      // The last event remains its observed snapshot, including deletions.
       setAnnouncement(
         t("graph.timeline.completeAnnouncement", {
           defaultValue: "Timeline playback complete.",
@@ -298,7 +345,7 @@ export function GraphView({
       });
     }, Math.round(900 / playbackSpeed));
     return () => window.clearTimeout(timeout);
-  }, [active, playbackSpeed, playing, t, timeline.length, visibleCursor]);
+  }, [active, playbackSpeed, playing, setTimelineCursor, t, timeline.length, visibleCursor]);
 
   useEffect(() => {
     if (!active) {
@@ -426,7 +473,7 @@ export function GraphView({
       -1,
       Math.min(timeline.length - 1, visibleCursor + direction),
     );
-    setTimelineCursor(next === timeline.length - 1 ? null : next);
+    setTimelineCursor(next);
     const event = timeline[next];
     setAnnouncement(
       event
@@ -445,11 +492,7 @@ export function GraphView({
   function startPlayback() {
     if (timeline.length === 0) return;
     if (reducedMotion) {
-      // `null` is the actor-visible current projection, while a numeric cursor
-      // is an observed historical frame. Keep those states distinct even for
-      // a one-event timeline so repeated Play presses can reveal frame 0 and
-      // then advance back to current instead of becoming stuck on frame 0.
-      if (timelineCursor === null) setTimelineCursor(0);
+      if (visibleCursor >= timeline.length - 1) setTimelineCursor(0);
       else stepTimeline(1);
       setAnnouncement(
         t("graph.timeline.reducedMotionAnnouncement", {
@@ -481,10 +524,12 @@ export function GraphView({
     const generation = ++actionGenerationRef.current;
     setBusyAction(key);
     setActionError(null);
+    setRetryAction(null);
     try {
       await action();
     } catch {
       if (generation !== actionGenerationRef.current) return;
+      setRetryAction({ key, action });
       setActionError(
         t("graph.actionError", {
           defaultValue: "The graph could not be updated. Try again.",
@@ -495,18 +540,35 @@ export function GraphView({
     }
   }
 
-  async function changeDepth(depth: GraphDepth) {
-    if (!supportsDepthTwo || depth === payload.query.depth) return;
-    await runAction(`depth:${depth}`, () => onDepthChange(depth));
+  async function changeRange(next: GraphRange) {
+    if (historical || next === range) return;
+    await runAction(`depth:${next}`, () => onDepthChange(next === "extended" ? 2 : 1, next === "direct" ? "direct" : "neighbors"));
   }
 
   async function changeHistoryMode(mode: GraphHistoryMode) {
+    if (mode === payload.history.mode) return;
     setPlaying(false);
-    await runAction(`mode:${mode}`, async () => {
-      await onHistoryModeChange(mode);
-      setTimelineCursor(null);
-      setSelectedId(null);
-    });
+    setHoveredEventId(null);
+    await runAction(`mode:${mode}`, () => onHistoryModeChange(mode));
+  }
+
+  function seekEvent(index: number) {
+    setPlaying(false);
+    setHoveredEventId(null);
+    setTimelineCursor(index);
+  }
+
+  async function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement === frameRef.current) await document.exitFullscreen();
+      else await frameRef.current?.requestFullscreen();
+    } catch { setRetryAction(null); setActionError(t("graph.view.fullscreenUnavailable")); }
+  }
+
+  function showEventInGraph() {
+    const id = currentEvent?.node_ids?.find((id) => canvasScene.nodes.some((node) => node.id === id && !node.hidden))
+      ?? currentEvent?.edge_ids?.find((id) => canvasScene.edges.some((edge) => edge.id === id && !edge.hidden));
+    if (id) canvasRef.current?.centerOn(id);
   }
 
   function togglePin(node: GraphNode) {
@@ -557,225 +619,51 @@ export function GraphView({
       ref={graphRegionRef}
       tabIndex={-1}
     >
-      <header className="graph-view-header">
-        <div>
-          <h3 id="graph-view-heading">{t("graph.heading", { defaultValue: "Graph relationships" })}</h3>
-          <p>
-            {t("graph.description", {
-              defaultValue:
-                "Explore documents, conversations, actions, and the evidence connecting them.",
-            })}
-          </p>
-        </div>
-        <p className="graph-view-count" aria-live="polite">
-          {t("graph.visibleCount", {
-            defaultValue: "{{nodes}} nodes · {{edges}} edges",
-            edges: scene.edges.length,
-            nodes: scene.nodes.length,
-          })}
-        </p>
-      </header>
-
-      {coverageNotice && !coverageNotice.folderOnly ? (
-        <StatusBanner tone={coverageNotice.tone}>
-          <strong>{coverageNotice.heading}</strong>
-          {coverageNotice.messages.length ? <> <span>{coverageNotice.messages.join(" ")}</span></> : null}
-        </StatusBanner>
-      ) : null}
-      {omissionDescriptions.length && !coverageNotice?.folderOnly ? (
-        <details className="graph-filter-bar graph-filter-options">
-          <summary>{t("graph.omissions.heading", { defaultValue: "What was left out" })}</summary>
-          <ul>
-            {omissionDescriptions.map((description) => <li key={description}>{description}</li>)}
-          </ul>
-          {hasDisplayQuota ? (
-            <p>{t("graph.omissions.appliedBudget", {
-              defaultValue: "Applied display limit: {{nodes}} nodes · {{edges}} relationships.",
-              nodes: payload.budget.applied.nodes,
-              edges: payload.budget.applied.edges,
-            })}</p>
-          ) : null}
-          <p>{t("graph.omissions.noCounts", {
-            defaultValue: "The server does not report how many items were excluded.",
-          })}</p>
-        </details>
-      ) : null}
-      {actionError ? <StatusBanner tone="warning">{actionError}</StatusBanner> : null}
-
-      {scene.nodes.length > 0 && scene.edges.length === 0 ? (
-        <p className="graph-no-relationships">
-          {t("graph.noRelationships", {
-            defaultValue: "No graph relationships to show.",
-          })}
-        </p>
-      ) : null}
-
-      <div className="graph-canvas-toolbar" role="toolbar" aria-label={t("graph.canvasControls", { defaultValue: "Graph view controls" })}>
-        <div
-          aria-label={t("graph.depth.heading", { defaultValue: "Graph depth" })}
-          aria-busy={depthBusy}
-          className="graph-local-depth-control"
-          role="group"
-        >
-          <span className="graph-local-toolbar-title">{t("graph.depth.label", { defaultValue: "Depth" })}</span>
-          {([1, 2] as const).map((depth) => (
-            <button
-              aria-describedby={depth === 2 && !supportsDepthTwo ? depthReasonId : undefined}
-              aria-label={t("graph.depth.option", { defaultValue: "Depth {{depth}}", depth })}
-              aria-pressed={(payload.query.depth ?? 1) === depth}
-              className="graph-local-label-toggle"
-              disabled={!active || depthBusy || (depth === 2 && !supportsDepthTwo)}
-              key={depth}
-              onClick={() => void changeDepth(depth)}
-              type="button"
-            >
-              {depth}
-            </button>
-          ))}
-          {!supportsDepthTwo ? (
-            <small className="graph-local-depth-note" id={depthReasonId}>
-              {t("graph.depth.historyOneHop", { defaultValue: "History views currently support depth 1 only." })}
-            </small>
-          ) : null}
-        </div>
-        <GraphIconButton label={t("graph.zoomIn", { defaultValue: "Zoom in" })} onClick={() => canvasRef.current?.zoomIn()}>
-          <ZoomIn aria-hidden="true" size={17} />
-        </GraphIconButton>
-        <GraphIconButton label={t("graph.zoomOut", { defaultValue: "Zoom out" })} onClick={() => canvasRef.current?.zoomOut()}>
-          <ZoomOut aria-hidden="true" size={17} />
-        </GraphIconButton>
-        <GraphIconButton label={t("graph.fit", { defaultValue: "Fit graph" })} onClick={() => canvasRef.current?.fit()}>
-          <Maximize2 aria-hidden="true" size={17} />
-        </GraphIconButton>
-        <GraphIconButton label={t("graph.resetView", { defaultValue: "Reset viewport, pins, and selection" })} onClick={resetView}>
-          <RotateCcw aria-hidden="true" size={17} />
-        </GraphIconButton>
-        <GraphIconButton
-          disabled={payload.capabilities?.export === false}
-          label={t("graph.export", { defaultValue: "Export filtered graph" })}
-          onClick={exportFilteredScene}
-        >
-          <Download aria-hidden="true" size={17} />
-        </GraphIconButton>
-        <button
-          aria-pressed={showLabels}
-          className="graph-local-label-toggle"
-          onClick={() => setShowLabels((current) => !current)}
-          type="button"
-        >
-          {t("graph.localToolbar.labels", { defaultValue: "Labels" })}
-        </button>
-        {coverageNotice?.folderOnly ? (
-          <LocalGraphCoverageInfo
-            active={active}
-            descriptions={omissionDescriptions}
-            heading={coverageNotice.heading}
-            messages={coverageNotice.messages}
-            payload={payload}
-            workspaceId={workspaceId}
-          />
-        ) : null}
-      </div>
-
-      <div className="graph-local-stage">
-        {scene.nodes.length ? (
-          <GraphCanvas
-          ref={canvasRef}
-          active={active}
-          focusedId={effectiveFocusedId}
-          forcedColors={forcedColors}
-          // The adapter owns transient pointer hover. Feeding it back as
-          // keyboard focus makes edge hover replace a selected node's star.
-          onHover={() => undefined}
-          onPin={(id, position) => {
-            setPinnedIds((current) => current.includes(id) ? current : [...current, id]);
-            setPinnedPositions((current) => ({ ...current, [id]: position }));
-          }}
-          onRendererStatusChange={(nextStatus) => {
-            setRendererStatus(nextStatus);
-            if (nextStatus === "error") setStaticOpen(true);
-          }}
-          onSelect={selectCanvasItem}
-          pinnedIds={pinnedIds}
-          pinnedPositions={pinnedPositions}
-          reducedMotion={reducedMotion}
-          scene={canvasScene}
-          selectedId={effectiveSelectedId}
-          showLabels={showLabels}
-          />
-        ) : (
-          <p className="graph-empty-state">
-            {t("graph.emptyFiltered", {
-              defaultValue: "No nodes match the current filter and timeline position.",
-            })}
-          </p>
-        )}
-        <GraphDetails
-          active={active}
-          busyAction={busyAction}
-          edge={selectedEdge}
-          node={selectedNode}
-          nodes={scene.nodes}
-          navigation={sceneNavigation}
-          nodeVisuals={nodeVisuals}
-          onCenter={(id) => canvasRef.current?.centerOn(id)}
-          onClearSelection={clearSelection}
-          onBlur={clearItemFocus}
-          onCollapse={(node) => runAction(`collapse:${node.id}`, () => onCollapse(node))}
-          onExpand={(node) => runAction(`expand:${node.id}`, () => onExpand(node))}
-          onFocus={setFocusedId}
-          onSelect={selectItem}
-          onTogglePin={togglePin}
-          pinnedIds={pinnedIds}
-          querySeeds={payload.query.seeds}
-          supportsExpand={payload.capabilities?.expand !== false}
-          workspaceGraphHref={workspaceGraphHref}
-          workspaceId={workspaceId}
-        />
-      </div>
-
-      <div
-        aria-label={t("graph.localToolbar.relationships", { defaultValue: "Relationships" })}
-        className="graph-local-toolbar"
-        role="toolbar"
-      >
-        <span className="graph-local-toolbar-title">
-          {t("graph.localToolbar.relationships", { defaultValue: "Relationships" })}
-        </span>
-        <div className="graph-local-relation-chips">
-          {relationKinds.map(({ kind, edgeKinds, count, enabled }) => (
-            <button
-              aria-label={`${localRelationLabel(t, kind)} ${count}`}
-              aria-pressed={enabled}
-              className={`graph-local-relation-chip graph-local-relation-chip-${kind}`}
-              disabled={edgeKinds.length === 0}
-              key={kind}
-              onClick={() => toggleRelationKinds(edgeKinds)}
-              type="button"
-            >
-              <span aria-hidden="true" className="graph-local-relation-line" />
-              {localRelationLabel(t, kind)}
+      <h3 className="visually-hidden" id="graph-view-heading">{t("graph.heading")}</h3>
+      <GraphTypeSelector mode={payload.history.mode} busy={!active || Boolean(busyAction?.startsWith("mode:"))} onChange={(mode) => void changeHistoryMode(mode)} />
+      <div className={`graph-frame ${historical ? "graph-frame-history" : ""}`} ref={frameRef}>
+        {actionError ? <StatusBanner tone="warning">{actionError}{retryAction ? <button type="button" onClick={() => {
+          void runAction(retryAction.key, retryAction.action);
+        }}>{t("graph.view.retry")}</button> : null}</StatusBanner> : null}
+        <div className="graph-frame-header">
+          <GraphScopeSelector range={range} historical={historical} busy={!active || depthBusy} onChange={(next) => void changeRange(next)} />
+          <div className="graph-local-relation-chips" role="group" aria-label={t("graph.localToolbar.relationships")}>
+            {!historical ? relationKinds.filter(({ count }) => count > 0).map(({ kind, edgeKinds, count, enabled }) => <button
+              aria-label={`${localRelationLabel(t, kind)} ${count}`} aria-pressed={enabled}
+              className={`graph-local-relation-chip graph-local-relation-chip-${kind}`} key={kind}
+              onClick={() => toggleRelationKinds(edgeKinds)} type="button">
+              <span aria-hidden="true" className="graph-local-relation-line" />{localRelationLabel(t, kind)}
               <span className="graph-local-relation-count">{count}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
+            </button>) : (["background", "recorded"] as const).map((kind) => <button key={kind} type="button"
+              className={`graph-local-relation-chip graph-local-relation-chip-${kind === "recorded" ? "action" : "link"}`}
+              aria-pressed={historyVisibility[kind]} title={kind === "background" ? t("graph.historyUi.baseline") : undefined}
+              onClick={() => setHistoryVisibility((state) => ({ ...state, [kind]: !state[kind] }))}>
+              <span aria-hidden="true" className="graph-local-relation-line" />
+              {t(kind === "recorded" ? "graph.historyUi.historyRelations" : "graph.historyUi.currentRelations")}
+              {kind === "recorded" ? <GraphPreviewBadge /> : null}
+              <span>{kind === "recorded" ? recordedEdgeIds.size : payload.edges.filter((edge) => !recordedEdgeIds.has(edge.id)).length}</span>
+            </button>)}
+          </div>
       <details
         aria-label={t("graph.filters.heading", { defaultValue: "Graph filters" })}
-        className="graph-filter-bar graph-filter-options"
+        className="graph-filter-bar graph-filter-options graph-frame-filters"
       >
-        <summary>
+        <summary title={t("graph.filters.heading")}><SlidersHorizontal size={16} aria-hidden="true" />
           <span>{t("graph.localToolbar.moreFilters", { defaultValue: "More filters" })}</span>
-          {" · "}
-          <span aria-live="polite">
+          {" "}
+          <span className="graph-filter-active-count" aria-live="polite">
             {t("graph.filters.activeCount", {
               defaultValue: "{{count}} active filters",
               count: activeFilters.length,
             })}
           </span>
         </summary>
-        <div className="graph-filter-summary">
+        <div className="graph-filter-popover">
+          {historical ? <fieldset className="graph-filter-group"><legend>{t("graph.localToolbar.relationships")}</legend><div>
+            <label><input type="checkbox" checked={historyVisibility.background} onChange={(e) => setHistoryVisibility((state) => ({ ...state, background: e.target.checked }))} />{t("graph.historyUi.currentRelations")}</label>
+            <label><input type="checkbox" checked={historyVisibility.recorded} onChange={(e) => setHistoryVisibility((state) => ({ ...state, recorded: e.target.checked }))} />{t("graph.historyUi.historyRelations")} <GraphPreviewBadge /></label>
+          </div></fieldset> : null}
+          <div className="graph-filter-summary">
           <button
             className="graph-filter-clear"
             disabled={activeFilters.length === 0}
@@ -868,38 +756,143 @@ export function GraphView({
             onToggle={toggleFilter}
           />
         </div>
+        </div>
       </details>
 
-      <GraphLegend nodeVisuals={nodeVisuals} scene={scene} />
+        </div>
+      <div className={`graph-local-stage ${busyAction ? "is-loading" : ""}`} aria-busy={!!busyAction}>
+        {busyAction ? <div className="graph-canvas-loading" role="status"><RefreshCw size={20} aria-hidden="true" />
+          {t("graph.view.loading", { view: busyAction.startsWith("mode:") ? t(`graph.view.${busyAction.slice(5)}.name`) : t(`graph.view.${payload.history.mode}.name`) })}</div> : null}
+        {!busyAction && !historical && scene.edges.length === 0 ? <div className="graph-canvas-empty" role="status">
+          <p>{t(activeFilters.length ? "graph.view.allHidden" : "graph.view.noRelations")}</p>
+          {activeFilters.length ? <button type="button" onClick={() => setFilters(facets)}>{t("graph.filters.clearAll")}</button> : <small>{t("graph.view.addRelations")}</small>}
+        </div> : null}
+        <div className="graph-canvas-context">
+          <span className="graph-seed-pill" title={payload.nodes.find((node) => node.is_seed)?.label}>
+            {t("graph.view.seed")} <strong>{payload.nodes.find((node) => node.is_seed)?.label}</strong>
+            {payload.query.seeds.length > 1 ? <small>+{payload.query.seeds.length - 1}</small> : null}
+          </span>
+          {historical ? <span className="graph-time-pill"><Clock3 size={16} aria-hidden="true" />
+            {t("graph.historyUi.recordedAt")} <strong>{currentEvent ? formatVersionTimestamp(currentEvent.occurred_at) : t("graph.timeline.start")}</strong>
+            {Math.max(0, visibleCursor + 1)}/{timeline.length}</span> : null}
+        </div>
+        <div className="graph-canvas-utilities" role="toolbar" aria-label={t("graph.view.utilities")}>
+          <GraphIconButton disabled={!active || !!busyAction || !onRefresh} label={t("graph.view.refresh")} onClick={() => {
+            setPlaying(false); if (onRefresh) void runAction("refresh", onRefresh);
+          }}><RefreshCw size={17} aria-hidden="true" className={busyAction === "refresh" ? "graph-refreshing" : undefined} /></GraphIconButton>
+          <GraphIconButton className="graph-fullscreen-control" label={t(fullscreen ? "graph.view.exitFullscreen" : "graph.view.fullscreen")} onClick={() => void toggleFullscreen()}>
+            {fullscreen ? <Minimize2 size={17} aria-hidden="true" /> : <Maximize2 size={17} aria-hidden="true" />}
+          </GraphIconButton>
+          <details className="graph-canvas-more"><summary aria-label={t("graph.view.more")} title={t("graph.view.more")}><MoreHorizontal size={17} aria-hidden="true" /></summary>
+            <div>
+              <button className="graph-mobile-fullscreen" type="button" onClick={() => void toggleFullscreen()}><Maximize2 size={16} aria-hidden="true" />{t(fullscreen ? "graph.view.exitFullscreen" : "graph.view.fullscreen")}</button>
+              <button type="button" onClick={resetView}><RotateCcw size={16} aria-hidden="true" />{t("graph.resetView")}</button>
+              <button type="button" disabled={payload.capabilities?.export === false} onClick={exportFilteredScene}><Download size={16} aria-hidden="true" />{t("graph.export")}</button>
+              <button type="button" onClick={() => { setStaticOpen(true); requestAnimationFrame(() => graphRegionRef.current?.querySelector(".graph-static-fallback")?.scrollIntoView({ block: "nearest" })); }}>{t("graph.view.openStatic")}</button>
+              <label><input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} />{t("graph.localToolbar.labels")}</label>
+              {historical ? <label><input type="checkbox" checked={showFuture} onChange={(e) => setShowFuture(e.target.checked)} />{t("graph.historyUi.showFuture")}</label> : null}
+            </div>
+          </details>
+        </div>
+        {coverageNotice && dismissedCoverageKey !== coverageKey ? <div className="graph-canvas-coverage">
+          <LocalGraphCoverageInfo active={active} descriptions={omissionDescriptions}
+            heading={coverageNotice.heading} messages={coverageNotice.messages} payload={payload} workspaceId={workspaceId}
+            folderOnly={coverageNotice.folderOnly} tone={coverageNotice.tone}
+            budgetNote={hasDisplayQuota ? t("graph.omissions.appliedBudget", { nodes: payload.budget.applied.nodes, edges: payload.budget.applied.edges }) : undefined} />
+          <button type="button" aria-label={t("graph.view.dismissNotice")} onClick={() => setDismissedCoverageKey(coverageKey)}><X size={14} aria-hidden="true" /></button>
+        </div> : null}
+        <GraphCameraControls disabled={rendererStatus !== "ready"} onZoomIn={() => canvasRef.current?.zoomIn()} onZoomOut={() => canvasRef.current?.zoomOut()} onFit={() => canvasRef.current?.fit()} />
+        {canvasScene.nodes.length ? (
+          <GraphCanvas
+          ref={canvasRef}
+          viewportInsets={() => {
+            const stage = graphRegionRef.current?.querySelector(".graph-local-stage")?.getBoundingClientRect();
+            const detail = graphRegionRef.current?.querySelector(".graph-details:not([hidden])")?.getBoundingClientRect();
+            const sheet = !!stage && !!detail && detail.width > stage.width * .75;
+            return { top: historical ? 90 : 60, left: 0,
+              right: detail && !sheet ? detail.width + 24 : 0,
+              bottom: detail && sheet ? detail.height + 12 : 60 };
+          }}
+          active={active}
+          focusedId={effectiveFocusedId}
+          forcedColors={forcedColors}
+          // The adapter owns transient pointer hover. Feeding it back as
+          // keyboard focus makes edge hover replace a selected node's star.
+          onHover={() => undefined}
+          onPin={(id, position) => {
+            setPinnedIds((current) => current.includes(id) ? current : [...current, id]);
+            setPinnedPositions((current) => ({ ...current, [id]: position }));
+          }}
+          onRendererStatusChange={(nextStatus) => {
+            setRendererStatus(nextStatus);
+            if (nextStatus === "error") setStaticOpen(true);
+          }}
+          onSelect={selectCanvasItem}
+          pinnedIds={pinnedIds}
+          pinnedPositions={pinnedPositions}
+          reducedMotion={reducedMotion}
+          scene={canvasScene}
+          selectedId={effectiveSelectedId}
+          showLabels={showLabels}
+          />
+        ) : (
+          <p className="graph-empty-state">
+            {t("graph.emptyFiltered", {
+              defaultValue: "No nodes match the current filter and timeline position.",
+            })}
+          </p>
+        )}
+        <GraphDetails
+          active={active}
+          historyEvents={historical ? timeline : undefined}
+          historyEdges={historyCatalog.edges}
+          historicalOnly={historical && !!selectedId && !scene.nodes.some((node) => node.id === selectedId) && !scene.edges.some((edge) => edge.id === selectedId)}
+          currentEventId={currentEvent?.id}
+          onSeekEvent={(id) => seekEvent(timeline.findIndex((event) => event.id === id))}
+          busyAction={busyAction}
+          edge={selectedEdge}
+          node={selectedNode}
+          nodes={scene.nodes}
+          navigation={sceneNavigation}
+          sceneEdges={scene.edges}
+          nodeVisuals={nodeVisuals}
+          onCenter={(id) => canvasRef.current?.centerOn(id)}
+          onClearSelection={clearSelection}
+          onBlur={clearItemFocus}
+          onCollapse={(node) => runAction(`collapse:${node.id}`, () => onCollapse(node))}
+          onExpand={(node) => runAction(`expand:${node.id}`, () => onExpand(node))}
+          onFocus={setFocusedId}
+          onSelect={selectItem}
+          onTogglePin={togglePin}
+          pinnedIds={pinnedIds}
+          querySeeds={payload.query.seeds}
+          supportsExpand={payload.capabilities?.expand !== false}
+          workspaceGraphHref={workspaceGraphHref}
+          workspaceId={workspaceId}
+        />
+      </div>
 
-      <GraphTimeline
-        busy={Boolean(busyAction?.startsWith("mode:"))}
-        cursor={visibleCursor}
-        historyMode={payload.history.mode}
-        onCursorChange={(next) => {
-          setPlaying(false);
-          setTimelineCursor(next >= timeline.length - 1 ? null : next);
-        }}
-        onHistoryModeChange={changeHistoryMode}
-        onPause={pausePlayback}
-        onPlay={startPlayback}
-        onReset={() => {
-          setPlaying(false);
-          setTimelineCursor(-1);
-          setAnnouncement(t("graph.timeline.startAnnouncement", { defaultValue: "Timeline reset to the starting scene." }));
-        }}
-        onSpeedChange={setPlaybackSpeed}
-        onStep={stepTimeline}
-        payload={payload}
-        playing={playing}
-        reducedMotion={reducedMotion}
-        speed={playbackSpeed}
-        timeline={timeline}
-      />
+        {historical ? <LocalGraphTimeline cursor={visibleCursor} onCursorChange={seekEvent}
+          onHoverEvent={setHoveredEventId} onPause={pausePlayback} onPlay={startPlayback}
+          onSpeedChange={setPlaybackSpeed} onStep={stepTimeline} onShowEvent={showEventInGraph}
+          payload={payload} playing={playing} reducedMotion={reducedMotion} selectedId={selectedId}
+          speed={playbackSpeed} timeline={timeline} /> : null}
+        <footer className="graph-frame-status">
+          <strong>{t(`graph.range.${range}.name`)} · {t(`graph.range.${range}.description`)}</strong>
+          <span className="graph-view-count" aria-live={playing ? "off" : "polite"}>{t("graph.visibleCount", { nodes: scene.nodes.length, edges: scene.edges.length })}</span>
+          <time dateTime={payload.generated_at}>{t("graph.view.fetched", { time: formatVersionTimestamp(payload.generated_at) })}</time>
+          {coverageNotice ? <span className="graph-status-omitted">{t("graph.view.omitted")}</span> : null}
+          <div className="graph-status-actions">
+            <button type="button" aria-expanded={listOpen} onClick={() => setListOpen((open) => !open)}><List size={15} aria-hidden="true" />{t("graph.view.list")}</button>
+            <button type="button" aria-expanded={legendOpen} onClick={() => setLegendOpen((open) => !open)}><Layers size={15} aria-hidden="true" />{t("graph.view.legend")}</button>
+          </div>
+        </footer>
+        <div hidden={!legendOpen}><GraphLegend nodeVisuals={nodeVisuals} scene={scene} /></div>
+      </div>
 
-      <p className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</p>
+      <p className="visually-hidden" aria-live="polite" aria-atomic="true">{announcement}</p>
 
-      <div className="graph-parity-grid">
+      <div className="graph-parity-grid" hidden={!listOpen}>
         <GraphRelationshipList
           active={active}
           edges={scene.edges}
@@ -1026,8 +1019,8 @@ function GraphLegend({ nodeVisuals, scene }: { nodeVisuals: LocalNodeVisuals; sc
     scene.edges.flatMap((edge) => edge.action_kind ? [edge.action_kind] : []),
   );
   return (
-    <details className="graph-legend">
-      <summary>{t("graph.legend.heading", { defaultValue: "Legend" })}</summary>
+    <div className="graph-legend">
+      <h4 className="visually-hidden">{t("graph.legend.heading", { defaultValue: "Legend" })}</h4>
       {scene.edges.some((edge) => localEdgeVisualKind(edge.edge_kind) === "action") ? (
         <p className="graph-local-action-legend graph-local-relation-chip-action">
           <span aria-hidden="true" className="graph-local-relation-line" />
@@ -1086,7 +1079,7 @@ function GraphLegend({ nodeVisuals, scene }: { nodeVisuals: LocalNodeVisuals; sc
           </ul>
         ) : null}
       </div>
-    </details>
+    </div>
   );
 }
 
@@ -1109,128 +1102,6 @@ function LocalNodeCue({ node, visuals }: { node: GraphNode; visuals: LocalNodeVi
   const kind = localNodeVisualKind(node.entity_kind, node.family);
   return <LocalNodeSwatch color={visuals.tokens.node[kind]} forcedColors={visuals.forcedColors}
     kind={kind} surface={visuals.tokens.surface} />;
-}
-
-function GraphTimeline({
-  busy,
-  cursor,
-  historyMode,
-  onCursorChange,
-  onHistoryModeChange,
-  onPause,
-  onPlay,
-  onReset,
-  onSpeedChange,
-  onStep,
-  payload,
-  playing,
-  reducedMotion,
-  speed,
-  timeline,
-}: {
-  busy: boolean;
-  cursor: number;
-  historyMode: GraphHistoryMode;
-  onCursorChange: (cursor: number) => void;
-  onHistoryModeChange: (mode: GraphHistoryMode) => void;
-  onPause: () => void;
-  onPlay: () => void;
-  onReset: () => void;
-  onSpeedChange: (speed: number) => void;
-  onStep: (direction: -1 | 1) => void;
-  payload: GraphQueryPayload;
-  playing: boolean;
-  reducedMotion: boolean;
-  speed: number;
-  timeline: ReturnType<typeof localizedGraphTimeline>;
-}) {
-  const { t } = useTranslation("graph");
-  const event = timeline[cursor];
-  return (
-    <section className="graph-timeline" aria-labelledby="graph-timeline-heading">
-      <div className="graph-timeline-heading-row">
-        <div>
-          <h4 id="graph-timeline-heading">{t("graph.timeline.heading", { defaultValue: "Timeline" })}</h4>
-          <p>
-            {t("graph.timeline.coverage", {
-              defaultValue: "{{basis}} · {{status}} · coverage {{from}} to {{to}}",
-              basis: graphLabel(t, "graphHistoryBasis", payload.history.basis),
-              from: payload.history.coverage_from ? formatVersionTimestamp(payload.history.coverage_from) : t("graph.timeline.unknown", { defaultValue: "unknown" }),
-              status: graphLabel(t, "graphHistoryStatus", payload.history.status),
-              to: payload.history.watermark ? formatVersionTimestamp(payload.history.watermark) : t("graph.timeline.now", { defaultValue: "now" }),
-            })}
-          </p>
-        </div>
-        <label className="graph-history-mode">
-          <span>{t("graph.timeline.mode", { defaultValue: "History mode" })}</span>
-          <select
-            disabled={busy}
-            value={historyMode}
-            onChange={(event) => onHistoryModeChange(event.target.value as GraphHistoryMode)}
-          >
-            <option value="current">{t("graph.timeline.modeCurrent", { defaultValue: "Current" })}</option>
-            <option value="appearance">{t("graph.timeline.modeAppearance", { defaultValue: "Appearance" })}</option>
-            <option value="action">{t("graph.timeline.modeAction", { defaultValue: "Actions" })}</option>
-          </select>
-        </label>
-      </div>
-      {historyMode === "current" || !timeline.length ? (
-        <p className="graph-timeline-event">
-          {historyMode === "current"
-            ? t("graph.timeline.currentScene", {
-                defaultValue: "Showing the current graph. Choose a history mode to inspect past events.",
-              })
-            : t("graph.timeline.noEvents", {
-                defaultValue: "No history events are available for this view.",
-              })}
-        </p>
-      ) : <>
-      {reducedMotion ? (
-        <p className="graph-timeline-motion-note">
-          {t("graph.timeline.reducedMotion", {
-            defaultValue: "Reduced motion is on; Play reveals one event at a time.",
-          })}
-        </p>
-      ) : null}
-      <div className="graph-timeline-controls">
-        <GraphIconButton disabled={!timeline.length} label={playing ? t("graph.timeline.pause", { defaultValue: "Pause" }) : t("graph.timeline.play", { defaultValue: "Play" })} onClick={playing ? onPause : onPlay}>
-          {playing ? <Pause aria-hidden="true" size={17} /> : <Play aria-hidden="true" size={17} />}
-        </GraphIconButton>
-        <GraphIconButton disabled={cursor < 0 || !timeline.length} label={t("graph.timeline.previous", { defaultValue: "Previous event" })} onClick={() => onStep(-1)}>
-          <StepBack aria-hidden="true" size={17} />
-        </GraphIconButton>
-        <GraphIconButton disabled={cursor >= timeline.length - 1 || !timeline.length} label={t("graph.timeline.next", { defaultValue: "Next event" })} onClick={() => onStep(1)}>
-          <StepForward aria-hidden="true" size={17} />
-        </GraphIconButton>
-        <GraphIconButton disabled={!timeline.length} label={t("graph.timeline.reset", { defaultValue: "Reset timeline" })} onClick={onReset}>
-          <RotateCcw aria-hidden="true" size={17} />
-        </GraphIconButton>
-        <input
-          aria-label={t("graph.timeline.scrubber", { defaultValue: "Timeline position" })}
-          aria-valuetext={event ? `${event.label}, ${formatVersionTimestamp(event.occurred_at)}` : t("graph.timeline.start", { defaultValue: "Start" })}
-          disabled={!timeline.length}
-          max={timeline.length}
-          min={0}
-          onChange={(event) => onCursorChange(Number(event.target.value) - 1)}
-          type="range"
-          value={Math.max(0, cursor + 1)}
-        />
-        <span className="graph-timeline-position">{Math.max(0, cursor + 1)} / {timeline.length}</span>
-        <label className="graph-timeline-speed">
-          <span>{t("graph.timeline.speed", { defaultValue: "Speed" })}</span>
-          <select disabled={reducedMotion || !timeline.length} onChange={(event) => onSpeedChange(Number(event.target.value))} value={speed}>
-            {PLAYBACK_SPEEDS.map((option) => <option key={option} value={option}>{option}×</option>)}
-          </select>
-        </label>
-      </div>
-      <p className="graph-timeline-event">
-        {event
-          ? <><strong>{event.label}</strong><span>{graphLabel(t, "graphActionKind", event.action_kind)} · {formatVersionTimestamp(event.occurred_at, "long")}</span>{!event.visible_change ? <em>{t("graph.timeline.filteredEvent", { defaultValue: "No visible change under the current filters." })}</em> : null}</>
-          : t("graph.timeline.start", { defaultValue: "Start" })}
-      </p>
-      </>}
-    </section>
-  );
 }
 
 function GraphRelationshipList({
@@ -1285,10 +1156,16 @@ function GraphRelationshipList({
 
 function GraphDetails({
   active,
+  historyEvents,
+  historyEdges,
+  historicalOnly,
+  currentEventId,
+  onSeekEvent,
   busyAction,
   edge,
   node,
   nodes,
+  sceneEdges,
   navigation,
   nodeVisuals,
   onCenter,
@@ -1306,10 +1183,16 @@ function GraphDetails({
   workspaceId,
 }: {
   active: boolean;
+  historyEvents?: GraphTimelineEvent[];
+  historyEdges: GraphEdge[];
+  historicalOnly: boolean;
+  currentEventId?: string;
+  onSeekEvent: (id: string) => void;
   busyAction: string | null;
   edge: GraphEdge | null;
   node: GraphNode | null;
   nodes: GraphNode[];
+  sceneEdges: GraphEdge[];
   navigation: SceneNavigation;
   nodeVisuals: LocalNodeVisuals;
   onCenter: (id: string) => void;
@@ -1328,12 +1211,14 @@ function GraphDetails({
 }) {
   const { t } = useTranslation("graph");
   const detailsRef = useRef<HTMLElement>(null);
+  const [sheetExpanded, setSheetExpanded] = useState(false);
   const actionReasonId = useId();
   useLayoutEffect(() => {
     // A newly selected object starts at its title and actions. Keep the
     // sidebar's scroll position for ordinary updates to the same selection;
     // never scroll the outer reader or move keyboard/pointer focus here.
     if (detailsRef.current) detailsRef.current.scrollTop = 0;
+    setSheetExpanded(false);
   }, [node?.id, edge?.id]);
   if (!node && !edge) {
     return (
@@ -1360,43 +1245,33 @@ function GraphDetails({
   }) : null;
   const clearLabel = t("graph.details.clearSelection", { defaultValue: "Clear selection" });
   return (
-    <aside className="graph-details" aria-labelledby="graph-details-heading" ref={detailsRef} tabIndex={-1}>
-      <div className="graph-details-control-region">
-        <h4 id="graph-details-heading">{t("graph.details.heading", { defaultValue: "Details" })}</h4>
-        <div className="graph-details-actions">
-          {href ? (
-            <Link to={href}>
-              {t("graph.open", { defaultValue: "Open" })}
-            </Link>
-          ) : null}
-          <button className="graph-list-action-button" onClick={() => onCenter((node ?? edge)!.id)} type="button">
-            {t("graph.details.center", { defaultValue: "Center" })}
-          </button>
-          {node ? (
-            <button className="graph-list-action-button" onClick={() => onTogglePin(node)} type="button">
-              {pinnedIds.includes(node.id)
-                ? t("graph.details.unpin", { defaultValue: "Unpin" })
-                : t("graph.details.pin", { defaultValue: "Pin" })}
-            </button>
-          ) : null}
-          <button aria-label={clearLabel} className="graph-list-action-button graph-details-clear-selection"
-            onClick={onClearSelection} title={clearLabel} type="button">
-            <X aria-hidden="true" className="graph-details-clear-icon" size={17} />
-            <span className="graph-details-clear-label">{clearLabel}</span>
-          </button>
-        </div>
-        {node && nodeActions ? <GraphSelectedNodeActions
-          actions={nodeActions} node={node} onCollapse={onCollapse} onExpand={onExpand}
-          reasonId={actionReasonId}
-        /> : null}
+    <aside className={`graph-details ${sheetExpanded ? "is-sheet-expanded" : ""}`} aria-labelledby="graph-details-heading" ref={detailsRef} tabIndex={-1}>
+      <div className="graph-details-title-row">
+        <h4 id="graph-details-heading" className="visually-hidden">{t("graph.details.heading")}</h4>
+        <h5>{node?.label ?? edge?.label}</h5>
+        <button aria-label={clearLabel} className="graph-details-close" onClick={onClearSelection} type="button"><X size={17} aria-hidden="true" /></button>
       </div>
-      <h5>{node?.label ?? edge?.label}</h5>
+      <button className="graph-details-sheet-toggle" type="button" aria-expanded={sheetExpanded} onClick={() => setSheetExpanded((value) => !value)}>{t(sheetExpanded ? "graph.details.collapseSheet" : "graph.details.expandSheet")}</button>
+      {historicalOnly ? <p className="graph-history-inactive">{t("graph.historyUi.notPresent")}</p> : null}
+      {node ? <p className="graph-details-location">{graphLabel(t, "graphEntityKind", node.entity_kind)}{node.path ? ` · ${node.path}` : ""}</p> : null}
       {nodeActions?.reason ? <p className="graph-action-reason" id={actionReasonId}>{nodeActions.reason}</p> : null}
-      <p>{t("graph.details.selectionHint", {
-        defaultValue: "Other nodes stay visible but dimmed to highlight direct relationships. Click or tap empty space, or press Escape, to clear the selection.",
-      })}</p>
       {edgeSentence ? <p className="graph-edge-summary">{edgeSentence}</p> : null}
       {coAccess ? <p className="graph-edge-summary">{coAccess}</p> : null}
+      {node && !node.is_seed ? <div className="graph-seed-relationships"><h5>{t("graph.details.seedRelationships")}</h5>
+        {sceneEdges.filter((entry) => (entry.source === node.id || entry.target === node.id) && querySeeds.some((seed) => {
+          const other = nodes.find((item) => item.id === (entry.source === node.id ? entry.target : entry.source));
+          return other?.entity_kind === seed.kind && other.entity_id === seed.id;
+        })).map((entry) => <p key={entry.id}><span aria-hidden="true">{entry.direction === "undirected" ? "↔" : entry.source === node.id ? "→" : "←"}</span> {entry.label}</p>)}
+      </div> : null}
+      {historyEvents ? <div className="graph-item-history">
+        <h5>{t("graph.historyUi.itemRecords")} <GraphPreviewBadge /></h5>
+        <ul>{historyEvents.filter((event) => eventInvolves(event, node?.id ?? edge?.id ?? null, historyEdges)).map((event) => <li key={event.id}>
+          <button type="button" aria-current={currentEventId === event.id ? "step" : undefined} onClick={() => onSeekEvent(event.id)}>
+            <time dateTime={event.occurred_at}>{formatVersionTimestamp(event.occurred_at)}</time><span>{event.label}</span><small>{t("graph.historyUi.seek")}</small>
+          </button>
+        </li>)}</ul>
+        {!historyEvents.some((event) => eventInvolves(event, node?.id ?? edge?.id ?? null, historyEdges)) ? <p>{t("graph.historyUi.noItemRecords")}</p> : null}
+      </div> : null}
       <dl>
         {node ? <><GraphDetail label={t("graph.details.type", { defaultValue: "Type" })} value={graphLabel(t, "graphNodeFamily", node.family)} /><GraphDetail label={t("graph.details.kind", { defaultValue: "Kind" })} value={graphLabel(t, "graphEntityKind", node.entity_kind)} />{node.status ? <GraphDetail label={t("graph.details.status", { defaultValue: "Status" })} value={graphLabel(t, "graphStatus", node.status)} /> : null}{node.actor_label ? <GraphDetail label={t("graph.details.actor", { defaultValue: "Actor" })} value={node.actor_label} /> : null}</> : null}
         {edge ? <><GraphDetail label={t("graph.details.layer", { defaultValue: "Layer" })} value={graphLabel(t, "graphLayer", edge.layer)} /><GraphDetail label={t("graph.details.relationship", { defaultValue: "Relationship" })} value={graphLabel(t, "graphEdgeKind", edge.edge_kind)} />{edge.action_kind ? <GraphDetail label={t("graph.details.action", { defaultValue: "Action" })} value={graphLabel(t, "graphActionKind", edge.action_kind)} /> : null}<GraphDetail label={t("graph.details.direction", { defaultValue: "Direction" })} value={graphLabel(t, "graphDirection", edge.direction)} /><GraphDetail label={t("graph.details.provenance", { defaultValue: "Provenance" })} value={graphLabel(t, "graphProvenance", edge.provenance)} />{edge.aggregate && !coAccess ? <GraphDetail label={t("graph.details.aggregate", { defaultValue: "Aggregate" })} value={String(edge.count ?? edge.weight)} /> : null}</> : null}
@@ -1444,6 +1319,15 @@ function GraphDetails({
           scopeKey={`${workspaceId ?? ""}:${node.id}`}
         /> : null}
       </> : null}
+      <div className="graph-details-footer">
+        {href ? <Link className="graph-details-open" to={href}>{t("graph.open")}</Link> : null}
+        {node && nodeActions ? <GraphSelectedNodeActions actions={{ ...nodeActions, href: null }} node={node} onCollapse={onCollapse} onExpand={onExpand} reasonId={actionReasonId} /> : null}
+        <details className="graph-details-more"><summary aria-label={t("graph.view.more")}><MoreHorizontal size={17} aria-hidden="true" /></summary><div>
+          <button type="button" onClick={() => onCenter((node ?? edge)!.id)}>{t("graph.details.center")}</button>
+          {node ? <button type="button" onClick={() => onTogglePin(node)}>{t(pinnedIds.includes(node.id) ? "graph.details.unpin" : "graph.details.pin")}</button> : null}
+          {nodeActions?.href ? <Link to={nodeActions.href}>{t("graph.showInKnowledgeMap")}</Link> : null}
+        </div></details>
+      </div>
     </aside>
   );
 }
@@ -1559,8 +1443,8 @@ function GraphDetail({ label, value }: { label: string; value: string }) {
   return <><dt>{label}</dt><dd>{value}</dd></>;
 }
 
-function GraphIconButton({ children, disabled = false, label, onClick }: { children: React.ReactNode; disabled?: boolean; label: string; onClick: () => void }) {
-  return <button aria-label={label} className="graph-icon-button" disabled={disabled} onClick={onClick} title={label} type="button">{children}</button>;
+function GraphIconButton({ children, className = "", disabled = false, label, onClick }: { children: React.ReactNode; className?: string; disabled?: boolean; label: string; onClick: () => void }) {
+  return <button aria-label={label} className={`graph-icon-button ${className}`} disabled={disabled} onClick={onClick} title={label} type="button">{children}</button>;
 }
 
 function nodeHref(node: GraphNode, workspaceId: string | null) {
@@ -1629,6 +1513,7 @@ function localizedGraphTimeline(
   payload: GraphQueryPayload,
   filters: GraphFilters,
   t: TFunction,
+  applyVisibility: (scene: GraphScene) => GraphScene = (scene) => scene,
 ) {
   const events = sortedTimeline(payload);
   const nodes = new Map(payload.nodes.map((node) => [node.id, node]));
@@ -1638,8 +1523,8 @@ function localizedGraphTimeline(
     for (const edge of timelineEdgeSnapshots(event)) edges.set(edge.id, edge);
   }
   return events.map((event, index) => {
-    const before = deriveGraphScene(payload, filters, index - 1);
-    const after = deriveGraphScene(payload, filters, index);
+    const before = applyVisibility(deriveGraphScene(payload, filters, index - 1));
+    const after = applyVisibility(deriveGraphScene(payload, filters, index));
     const visibleChange = graphSceneSignature(before) !== graphSceneSignature(after);
     const action = graphLabel(t, "graphActionKind", event.action_kind);
     const edge = [

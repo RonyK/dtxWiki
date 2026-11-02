@@ -6910,6 +6910,13 @@ export interface components {
              */
             preset: "linked-knowledge" | "evidence" | "activity" | "all";
             /**
+             * Relation Scope
+             * @description Direct selects only seed-incident relationships, independent of depth. Neighbors includes induced relationships at the requested depth.
+             * @default neighbors
+             * @enum {string}
+             */
+            relation_scope: "direct" | "neighbors";
+            /**
              * Schema Version
              * @default dtxwiki.graph-query.v1
              * @constant

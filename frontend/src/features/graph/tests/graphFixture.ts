@@ -15,6 +15,7 @@ export function graphFixture(): GraphQueryPayload {
       action_kinds: [],
       direction: "both",
       depth: 1,
+      relation_scope: "neighbors",
       time: { mode: "appearance" },
       budget: { nodes: 50, edges: 150 },
       cursor: null,

@@ -126,12 +126,107 @@ def test_depth_two_admits_second_hop_and_induced_neighbor_relations(session_fact
         _link(session, workspace_id, left, right)  # induced h1 relation
         _link(session, workspace_id, right, second)  # h1 -> h2
         _link(session, workspace_id, left, second)  # another induced h1 -> h2
+        # A neighbor's placement must never consume the direct scope budget.
+        seed_folder = WorkspaceTreeNode(
+            id=uuid4(),
+            workspace_id=workspace_id,
+            section="context",
+            node_kind="folder",
+            sort_key="direct-seed",
+            title="Seed folder",
+            slug=f"seed-folder-{uuid4().hex}",
+            visibility_status="visible",
+        )
+        neighbor_folder = WorkspaceTreeNode(
+            id=uuid4(),
+            workspace_id=workspace_id,
+            section="context",
+            node_kind="folder",
+            sort_key="direct-neighbor",
+            title="Neighbor folder",
+            slug=f"neighbor-folder-{uuid4().hex}",
+            visibility_status="visible",
+        )
+        session.add_all([seed_folder, neighbor_folder])
+        session.flush()
+        session.add_all(
+            [
+                WorkspaceTreeNode(
+                    id=uuid4(),
+                    workspace_id=workspace_id,
+                    section="context",
+                    node_kind="page",
+                    parent_id=seed_folder.id,
+                    sort_key="seed",
+                    title=seed.title,
+                    slug=f"seed-placement-{uuid4().hex}",
+                    target_kind="context_page",
+                    target_id=seed.id,
+                    primary_placement=True,
+                    visibility_status="visible",
+                ),
+                WorkspaceTreeNode(
+                    id=uuid4(),
+                    workspace_id=workspace_id,
+                    section="context",
+                    node_kind="page",
+                    parent_id=neighbor_folder.id,
+                    sort_key="left",
+                    title=left.title,
+                    slug=f"neighbor-placement-{uuid4().hex}",
+                    target_kind="context_page",
+                    target_id=left.id,
+                    primary_placement=True,
+                    visibility_status="visible",
+                ),
+            ]
+        )
         seed_id = seed.id
 
     with session_factory() as session:
+        direct = _query(
+            session,
+            workspace_id,
+            seed_id,
+            1,
+            relation_scope="direct",
+            budget=GraphBudget(nodes=3, edges=2),
+        )
+        direct_folders = _query(
+            session,
+            workspace_id,
+            seed_id,
+            1,
+            relation_scope="direct",
+            edge_kinds=("wikilink", "tree"),
+        )
+        multi_seed = _query(
+            session,
+            workspace_id,
+            seed_id,
+            1,
+            relation_scope="direct",
+            seeds=[
+                GraphSeed(kind="context_page", id=seed_id),
+                GraphSeed(kind="context_page", id=left.id),
+            ],
+        )
         depth1 = _query(session, workspace_id, seed_id, 1)
         depth2 = _query(session, workspace_id, seed_id, 2)
 
+    assert _relations(direct) == {("seed", "left"), ("seed", "right")}
+    assert not direct.truncated
+    assert _relations(direct_folders) == {
+        ("seed", "left"),
+        ("seed", "right"),
+        ("Seed folder", "seed"),
+    }
+    assert _relations(multi_seed) == {
+        ("seed", "left"),
+        ("seed", "right"),
+        ("left", "right"),
+        ("left", "second"),
+    }
     assert {node.label for node in depth1.nodes} == {"seed", "left", "right"}
     assert ("left", "right") in _relations(depth1)
     assert {node.label for node in depth2.nodes} == {"seed", "left", "right", "second"}

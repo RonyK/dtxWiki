@@ -158,7 +158,7 @@ describe("graphModel", () => {
   it("does not preload future metadata when a stable edge id is removed and re-added", () => {
     const payload = graphFixture();
     const currentEdge = { ...payload.edges[0], label: "current relationship" };
-    const originalEdge = { ...currentEdge, label: "original relationship" };
+    const originalEdge: GraphEdge = { ...currentEdge, label: "original relationship", provenance: "observed" };
     payload.nodes = payload.nodes.slice(0, 2);
     payload.edges = [currentEdge];
     payload.timeline = [
@@ -200,6 +200,8 @@ describe("graphModel", () => {
 
     expect(deriveGraphScene(payload, filters, 0).edges[0]?.label)
       .toBe("original relationship");
+    expect(deriveGraphScene(payload, { ...filters, provenances: [currentEdge.provenance] }, 0).edges)
+      .toEqual([]);
     expect(deriveGraphScene(payload, filters, 1).edges).toEqual([]);
     expect(deriveGraphScene(payload, filters, 2).edges[0]?.label)
       .toBe("current relationship");

@@ -46,6 +46,7 @@ import {
   contextGraphQuery,
   queryGraph,
   type GraphDepth,
+  type GraphRelationScope,
   type GraphHistoryMode,
   type GraphNode,
   type GraphQueryPayload,
@@ -2265,13 +2266,16 @@ function ContextReader({
   // neither its latency nor failure participates in body/Inspector loading.
   const [graph, setGraph] = useState<GraphQueryPayload | null>(null);
   const [graphFailed, setGraphFailed] = useState(false);
-  const currentGraphDepthRef = useRef<GraphDepth>(2);
+  const currentGraphDepthRef = useRef<GraphDepth>(1);
+  const currentGraphScopeRef = useRef<GraphRelationScope>("direct");
   useEffect(() => {
-    currentGraphDepthRef.current = 2;
+    currentGraphDepthRef.current = 1;
+    currentGraphScopeRef.current = "direct";
   }, [detail.id, workspaceId]);
   useEffect(() => {
     if (graph?.history.mode === "current") {
       currentGraphDepthRef.current = graph.query.depth === 1 ? 1 : 2;
+      currentGraphScopeRef.current = graph.query.relation_scope ?? "neighbors";
     }
   }, [graph]);
   const graphRequestRef = useRef<{
@@ -2756,17 +2760,18 @@ function ContextReader({
       return;
     }
     await replaceGraphPayload({
-      ...contextGraphQuery(detail.id, mode, currentGraphDepthRef.current),
+      ...contextGraphQuery(detail.id, mode, currentGraphDepthRef.current, currentGraphScopeRef.current),
       seeds: graph.query.seeds,
     });
   }
 
-  async function changeGraphDepth(depth: GraphDepth) {
+  async function changeGraphDepth(depth: GraphDepth, relationScope: GraphRelationScope = "neighbors") {
     if (!workspaceId || !graph || graph.history.mode !== "current") return;
     await replaceGraphPayload({
       ...graph.query,
       cursor: null,
       depth,
+      relation_scope: relationScope,
     });
   }
 
@@ -3243,6 +3248,7 @@ function ContextReader({
               active={tab === "graph"}
               onCollapse={collapseGraphNode}
               onDepthChange={changeGraphDepth}
+              onRefresh={() => replaceGraphPayload(graph.query)}
               onExpand={expandGraphNode}
               onHistoryModeChange={changeGraphHistoryMode}
               payload={graph}

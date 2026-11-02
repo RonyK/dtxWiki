@@ -11,6 +11,9 @@ export type GraphViewport = {
 };
 
 export type GraphRenderNode = {
+  hidden?: boolean;
+  muted?: boolean;
+  highlighted?: boolean;
   id: string;
   label: string;
   canvasLabel?: string;
@@ -28,6 +31,12 @@ export type GraphRenderNode = {
 };
 
 export type GraphRenderEdge = {
+  // Interval topology stays fixed while recorded occurrence counts change.
+  layoutCount?: number;
+  hidden?: boolean;
+  muted?: boolean;
+  highlighted?: boolean;
+  removed?: boolean;
   id: string;
   source: string;
   target: string;
@@ -46,6 +55,7 @@ export type GraphRenderEdge = {
 };
 
 export type GraphRenderScene = {
+  freezeLayout?: boolean;
   nodes: GraphRenderNode[];
   edges: GraphRenderEdge[];
   // Client-only Local selection identity. Projection revision and generated
