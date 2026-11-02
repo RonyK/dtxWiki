@@ -828,8 +828,8 @@ class ActivityService:
 
 # "System" = platform/operations (not user-authored content): authentication,
 # OAuth, automated quality checks (lint.*), workspace settings/admin (settings.*),
-# and background jobs (target_kind=job). The audit-action prefixes; jobs are
-# matched separately in _is_system_activity_item since they are not AuditEvents.
+# and background jobs (target_kind=job), including job-targeted audit events
+# such as admin.jobs.retried. Job rows also classify by their job target.
 _SYSTEM_AUDIT_PREFIXES = ("auth.", "oauth.", "lint.", "settings.")
 
 # These Library transport reads belong in the immutable security audit ledger,
@@ -890,7 +890,7 @@ def _system_audit_event_clause():
     # body=action; coalesce keeps a NULL event_summary from turning the OR into
     # SQL NULL (which would wrongly drop workspace rows under not_()).
     summary = func.coalesce(AuditEvent.event_summary, "")
-    clauses = []
+    clauses = [AuditEvent.target_kind == "job"]
     for prefix in _SYSTEM_AUDIT_PREFIXES:
         clauses.append(AuditEvent.action.like(f"{prefix}%"))
         clauses.append(summary.like(f"{prefix}%"))

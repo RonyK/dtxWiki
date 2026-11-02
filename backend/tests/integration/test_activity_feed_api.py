@@ -1027,18 +1027,20 @@ def test_pending_review_names_its_visible_page_and_narrow_scans_keep_read_runs(
         workspace, client, page, version, chat = _setup(session)
         _call(session, workspace, client, page, version, chat, 0)
         _call(session, workspace, client, page, version, chat, 2)
-        # Between the two reads: a system row the Workspace filter hides.
-        session.add(
-            AuditEvent(
-                workspace_id=workspace.id,
-                actor_kind="human",
-                actor_id="reader",
-                action="auth.login.succeeded",
-                target_kind="workspace",
-                target_id=workspace.id,
-                created_at=BASE - timedelta(seconds=1),
-            )
+        # An admin retry is a System row despite lacking a System action prefix.
+        # Keep it between the reads to cover the same hidden group boundary.
+        retry_audit = AuditEvent(
+            workspace_id=workspace.id,
+            actor_kind="human",
+            actor_id="reader",
+            action="admin.jobs.retried",
+            target_kind="job",
+            target_id=uuid4(),
+            event_summary="A server admin manually retried a failed background job",
+            payload={"job_type": "library_conversion", "retry_count": 1},
+            created_at=BASE - timedelta(seconds=1),
         )
+        session.add(retry_audit)
         hidden = ContextPage(
             workspace_id=workspace.id,
             slug=f"feed-{uuid4()}",
@@ -1074,13 +1076,13 @@ def test_pending_review_names_its_visible_page_and_narrow_scans_keep_read_runs(
                 needs_review=True,
             )
         actor = _actor(workspace)
+        all_activity = _service().list_feed(
+            session, workspace.id, actor=actor, actor_role="owner", period="all"
+        )
+        assert retry_audit.id in {entry.event.id for entry in all_activity.entries}
         pending = [
             entry.event
-            for entry in _service()
-            .list_feed(
-                session, workspace.id, actor=actor, actor_role="owner", period="all"
-            )
-            .entries
+            for entry in all_activity.entries
             if entry.event.lane == "pending"
         ]
         # The page this reader may see names the row; a hidden one keeps the
@@ -1093,18 +1095,20 @@ def test_pending_review_names_its_visible_page_and_narrow_scans_keep_read_runs(
         }
         # A row another filter shows still ends a read run, as in the full
         # stream, so the Workspace scan keeps every source.
+        workspace_activity = _service().list_feed(
+            session,
+            workspace.id,
+            actor=actor,
+            actor_role="owner",
+            period="all",
+            kind="workspace",
+        )
+        assert retry_audit.id not in {
+            entry.event.id for entry in workspace_activity.entries
+        }
         reads = [
             entry.event_count
-            for entry in _service()
-            .list_feed(
-                session,
-                workspace.id,
-                actor=actor,
-                actor_role="owner",
-                period="all",
-                kind="workspace",
-            )
-            .entries
+            for entry in workspace_activity.entries
             if entry.event.operation == "read"
         ]
         assert reads == [1, 1]
@@ -1117,7 +1121,7 @@ def test_pending_review_names_its_visible_page_and_narrow_scans_keep_read_runs(
         connection = session.connection()
         event.listen(connection, "before_cursor_execute", capture)
         try:
-            _service().list_feed(
+            system_activity = _service().list_feed(
                 session,
                 workspace.id,
                 actor=actor,
@@ -1128,6 +1132,7 @@ def test_pending_review_names_its_visible_page_and_narrow_scans_keep_read_runs(
             )
         finally:
             event.remove(connection, "before_cursor_execute", capture)
+        assert [entry.event.id for entry in system_activity.entries] == [retry_audit.id]
         # A system probe can only match audit and job rows, so it neither scans
         # nor hydrates MCP traces and pending reviews.
         assert not [
@@ -1135,3 +1140,14 @@ def test_pending_review_names_its_visible_page_and_narrow_scans_keep_read_runs(
             for statement in statements
             if "FROM mcp_tool_call" in statement or "FROM review_item" in statement
         ]
+        # The Jobs filter classifies the audit by its target, not its source table.
+        job_activity = _service().list_feed(
+            session,
+            workspace.id,
+            actor=actor,
+            actor_role="owner",
+            period="all",
+            kind="system",
+            subtype="jobs",
+        )
+        assert [entry.event.id for entry in job_activity.entries] == [retry_audit.id]

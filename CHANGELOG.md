@@ -41,6 +41,8 @@
   checks ask for one row, and MCP rows load their Context page titles and
   visibility in batches. Read grouping is unchanged: a row hidden by the
   current filter still ends a run of repeated reads.
+- System activity includes job-targeted audit events, including manual job
+  retries, in both the full System feed and its Jobs filter.
 
 ### Index navigation and formatted previews
 

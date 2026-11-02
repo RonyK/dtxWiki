@@ -93,6 +93,8 @@ def _scan_kind(kind: str, group_reads: bool) -> str:
     """
     groupable = any(kind in _SOURCE_KINDS[source] for source in _GROUPABLE_SOURCES)
     return "all" if group_reads and groupable else kind
+
+
 _SUBTYPES = {
     "all": {"all"},
     "workspace": {"all", "library", "context", "agent", "ask", "review", "chat"},
@@ -310,11 +312,7 @@ class ActivityFeedService:
             )
             reserved = [
                 _Entry(
-                    [
-                        _VisibleEvent(
-                            self._event(item, "review", workspace_id), "review"
-                        )
-                    ]
+                    [_VisibleEvent(self._event(item, "review", workspace_id), "review")]
                 )
                 for item in reviews
             ]
@@ -762,7 +760,12 @@ class ActivityFeedService:
             }:
                 actual = "write"
         elif kind == "system":
-            actual = "jobs" if row.source == "job" else (item.body or "").split(".")[0]
+            # Job rows and job-targeted audits share the same Jobs filter.
+            actual = (
+                "jobs"
+                if item.target is not None and item.target.target_kind == "job"
+                else (item.body or "").split(".")[0]
+            )
         elif row.source == "review":
             actual = "review"
         elif row.source == "mcp":
