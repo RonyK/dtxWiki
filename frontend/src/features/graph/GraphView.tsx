@@ -297,9 +297,9 @@ export function GraphView({
   useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
       if (!(event.target instanceof Node)) return;
-      for (const details of graphRegionRef.current?.querySelectorAll<HTMLDetailsElement>(
+      for (const details of Array.from(graphRegionRef.current?.querySelectorAll<HTMLDetailsElement>(
         ".graph-type-comparison[open],.graph-frame-filters[open],.graph-canvas-more[open],.graph-details-more[open]",
-      ) ?? []) if (!details.contains(event.target)) details.open = false;
+      ) ?? [])) if (!details.contains(event.target)) details.open = false;
     };
     document.addEventListener("pointerdown", closeOutside);
     return () => document.removeEventListener("pointerdown", closeOutside);
@@ -454,7 +454,7 @@ export function GraphView({
     selectionOriginRef.current = null;
     setSelectedId(null);
     setFocusedId(null);
-    graphRegionRef.current?.focus();
+    graphRegionRef.current?.focus({ preventScroll: true });
   }
 
   function selectCanvasItem(id: string | null) {
@@ -467,7 +467,7 @@ export function GraphView({
     // The WebGL canvas is intentionally absent from the keyboard tab order.
     // Move focus to the graph region so an immediate Escape remains scoped to
     // this non-modal interaction and can restore the prior graph control.
-    graphRegionRef.current?.focus();
+    graphRegionRef.current?.focus({ preventScroll: true });
   }
 
   function stepTimeline(direction: -1 | 1) {
@@ -1223,6 +1223,11 @@ function GraphDetails({
     if (detailsRef.current) detailsRef.current.scrollTop = 0;
     setSheetExpanded(false);
   }, [node?.id, edge?.id]);
+  useLayoutEffect(() => {
+    // Expanding upward from a scrolled canvas must keep the close control
+    // and the revealed actions within the reader viewport.
+    if (sheetExpanded) detailsRef.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [sheetExpanded]);
   if (!node && !edge) {
     return (
       <aside className="graph-details" aria-labelledby="graph-details-heading" hidden ref={detailsRef} tabIndex={-1}>
@@ -1250,11 +1255,11 @@ function GraphDetails({
   return (
     <aside className={`graph-details ${sheetExpanded ? "is-sheet-expanded" : ""}`} aria-labelledby="graph-details-heading" ref={detailsRef} tabIndex={-1}>
       <div className="graph-details-title-row">
-        <h4 id="graph-details-heading" className="visually-hidden">{t("graph.details.heading")}</h4>
-        <h5>{node?.label ?? edge?.label}</h5>
+        <h4 id="graph-details-heading">{t("graph.details.heading")}</h4>
         <button aria-label={clearLabel} className="graph-details-close" onClick={onClearSelection} type="button"><X size={17} aria-hidden="true" /></button>
       </div>
       <button className="graph-details-sheet-toggle" type="button" aria-expanded={sheetExpanded} onClick={() => setSheetExpanded((value) => !value)}>{t(sheetExpanded ? "graph.details.collapseSheet" : "graph.details.expandSheet")}</button>
+      <h5 className="graph-details-title">{node?.label ?? edge?.label}</h5>
       {historicalOnly ? <p className="graph-history-inactive">{t("graph.historyUi.notPresent")}</p> : null}
       {node ? <p className="graph-details-location">{graphLabel(t, "graphEntityKind", node.entity_kind)}{node.path ? ` · ${node.path}` : ""}</p> : null}
       {nodeActions?.reason ? <p className="graph-action-reason" id={actionReasonId}>{nodeActions.reason}</p> : null}
@@ -1325,8 +1330,13 @@ function GraphDetails({
       <div className="graph-details-footer">
         {href ? <Link className="graph-details-open" to={href}>{t("graph.open")}</Link> : null}
         {node && nodeActions ? <GraphSelectedNodeActions actions={{ ...nodeActions, href: null }} node={node} onCollapse={onCollapse} onExpand={onExpand} reasonId={actionReasonId} /> : null}
-        <details className="graph-details-more"><summary aria-label={t("graph.view.more")}><MoreHorizontal size={17} aria-hidden="true" /></summary><div>
-          <button type="button" onClick={() => onCenter((node ?? edge)!.id)}>{t("graph.details.center")}</button>
+        <details className="graph-details-more" onToggle={(event) => { if (event.currentTarget.open) setSheetExpanded(true); }}><summary aria-label={t("graph.view.more")}><MoreHorizontal size={17} aria-hidden="true" /></summary><div>
+          <button type="button" onClick={(event) => {
+            event.currentTarget.closest("details")?.removeAttribute("open");
+            setSheetExpanded(false);
+            const id = (node ?? edge)!.id;
+            requestAnimationFrame(() => onCenter(id));
+          }}>{t("graph.details.center")}</button>
           {node ? <button type="button" onClick={() => onTogglePin(node)}>{t(pinnedIds.includes(node.id) ? "graph.details.unpin" : "graph.details.pin")}</button> : null}
           {nodeActions?.href ? <Link to={nodeActions.href}>{t("graph.showInKnowledgeMap")}</Link> : null}
         </div></details>

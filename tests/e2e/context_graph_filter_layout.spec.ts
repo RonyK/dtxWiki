@@ -84,12 +84,17 @@ for (const viewport of viewports) {
       const sourceRow = graph.locator(".graph-relationship-list > details > ul > li > button.graph-list-select")
         .filter({ has: page.locator("strong", { hasText: `Graph source ${suffix}` }) });
       await sourceRow.click();
-      await expect(details.locator(".graph-details-title-row h5")).toHaveText(`Graph source ${suffix}`);
+      await expect(details.locator("h5.graph-details-title")).toHaveText(`Graph source ${suffix}`);
       await expect(details.getByRole("link", { name: "Open", exact: true })).toBeVisible();
       await details.locator(".graph-details-more > summary").click();
       await expect(details.getByRole("button", { name: "Center", exact: true })).toBeVisible();
       await details.getByRole("button", { name: "Pin", exact: true }).click();
       await expect(details.getByRole("button", { name: "Unpin", exact: true })).toBeVisible();
+      await details.locator(".graph-details-more > summary").click();
+      // More reveals an expanded mobile sheet; inspect the default sheet
+      // geometry after returning through its visible collapse control.
+      const collapseSheet = details.getByRole("button", { name: "Collapse details", exact: true });
+      if (await collapseSheet.isVisible()) await collapseSheet.click();
       await stage.scrollIntoViewIfNeeded();
       const selectedGeometry = await graph.evaluate((element) => {
         const owner = element.querySelector(".graph-local-stage")!.getBoundingClientRect();
@@ -112,7 +117,7 @@ for (const viewport of viewports) {
       expect(selectedGeometry.painted).toBe(true);
       if (selectedGeometry.stageWidth <= 760) {
         expect(selectedGeometry.panelTop).toBeGreaterThan(geometry.stageHeight * 0.4);
-        expect(selectedGeometry.panelHeight).toBeLessThanOrEqual(geometry.stageHeight * 0.55 + 1);
+        expect(selectedGeometry.panelHeight).toBeLessThanOrEqual(geometry.stageHeight * 0.45 + 1);
       } else {
         expect(selectedGeometry.panelTop).toBe(60);
         expect(selectedGeometry.panelRight).toBe(-12);

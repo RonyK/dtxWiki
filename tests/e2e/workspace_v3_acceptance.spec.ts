@@ -1271,7 +1271,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             .first();
           await relatedRow.locator(":scope > .graph-list-select").click();
           const graphDetails = graphPanel.locator(".graph-details");
-          await expect(graphDetails.locator(".graph-details-title-row h5")).toHaveText(relatedTitle);
+          await expect(graphDetails.locator("h5.graph-details-title")).toHaveText(relatedTitle);
           await expect(
             graphDetails.getByRole("link", { name: "Open", exact: true }),
           ).toHaveAttribute(
@@ -1328,7 +1328,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           }
 
           await relatedRow.locator(":scope > .graph-list-select").click();
-          await expect(graphDetails.locator(".graph-details-title-row h5")).toHaveText(relatedTitle);
+          await expect(graphDetails.locator("h5.graph-details-title")).toHaveText(relatedTitle);
           await graphDetails.locator(".graph-details-more > summary").click();
           await graphDetails.getByRole("button", { name: "Pin", exact: true }).click();
           await graphPanel.locator(".graph-frame-filters > summary").click();
@@ -1343,7 +1343,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await graphPanel.locator(".graph-frame-filters").getByRole("button", { name: "Clear all" }).click();
           await expect(relatedRow).toHaveCount(1);
           await relatedRow.locator(":scope > .graph-list-select").click();
-          await expect(graphDetails.locator(".graph-details-title-row h5")).toHaveText(relatedTitle);
+          await expect(graphDetails.locator("h5.graph-details-title")).toHaveText(relatedTitle);
           await graphDetails.locator(".graph-details-more > summary").click();
           await expect(
             graphDetails.getByRole("button", { name: "Unpin", exact: true }),
@@ -1407,7 +1407,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await relationships.locator("summary").click();
           const createdRow = relationships.getByRole("button", { name: /^Created / }).first();
           await createdRow.click();
-          await expect(graphPanel.locator(".graph-details-title-row h5")).toHaveText("Created");
+          await expect(graphPanel.locator("h5.graph-details-title")).toHaveText("Created");
           await graphPanel.locator(".graph-details-more > summary").click();
           await graphPanel.locator(".graph-details").getByRole("button", { name: "Center", exact: true }).click();
           if (graphScreenshotPrefix) {
@@ -1420,7 +1420,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await expect(historicalFilter).toBeChecked();
           await historicalFilter.uncheck();
           await expect(relationships.getByRole("button", { name: /^Created / })).toHaveCount(0);
-          await expect(graphPanel.locator(".graph-details-title-row h5")).toHaveCount(0);
+          await expect(graphPanel.locator("h5.graph-details-title")).toHaveCount(0);
           await historicalFilter.check();
           await graphPanel.locator(".graph-frame-filters > summary").click();
           await expect(relationships.getByRole("button", { name: /^Created / }).first()).toBeVisible();
@@ -1447,7 +1447,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await timeline.press("End");
           await expect(relatedRow).toHaveCount(1);
           await relatedRow.locator(":scope > .graph-list-select").click();
-          await expect(graphDetails.locator(".graph-details-title-row h5")).toHaveText(relatedTitle);
+          await expect(graphDetails.locator("h5.graph-details-title")).toHaveText(relatedTitle);
           await expect(
             graphDetails.getByRole("link", { name: "Open", exact: true }),
           ).toHaveAttribute("href", `/workspaces/${workspace.id}/context/pages/${related.id}`);

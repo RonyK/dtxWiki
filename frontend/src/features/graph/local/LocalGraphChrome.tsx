@@ -12,7 +12,7 @@ export function GraphPreviewBadge() {
 
 function navigateChoices(event: KeyboardEvent<HTMLButtonElement>) {
   if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
-  const choices = [...(event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('button[role="radio"]:not([data-unavailable="true"])') ?? [])];
+  const choices = Array.from(event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('button[role="radio"]:not([data-unavailable="true"])') ?? []);
   if (!choices.length) return;
   event.preventDefault();
   const index = choices.indexOf(event.target as HTMLButtonElement);
