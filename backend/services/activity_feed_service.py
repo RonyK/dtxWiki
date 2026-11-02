@@ -79,6 +79,20 @@ _SOURCE_KINDS = {
     "mcp": frozenset({"workspace", "mcp"}),
     "review": frozenset({"workspace"}),
 }
+# Sources whose rows can carry a read grouping_key (see _hydrate).
+_GROUPABLE_SOURCES = frozenset({"mcp"})
+
+
+def _scan_kind(kind: str, group_reads: bool) -> str:
+    """The kind a feed scan may narrow its sources and audit rows to.
+
+    Every visible row ends a read run in _entries, including one the filter
+    hides, so a scan that left other kinds' rows out would merge runs the full
+    stream keeps apart. Narrow only when grouping is off or the kind cannot
+    hold a groupable row.
+    """
+    groupable = any(kind in _SOURCE_KINDS[source] for source in _GROUPABLE_SOURCES)
+    return "all" if group_reads and groupable else kind
 _SUBTYPES = {
     "all": {"all"},
     "workspace": {"all", "library", "context", "agent", "ask", "review", "chat"},
@@ -265,7 +279,7 @@ class ActivityFeedService:
             workspace_id,
             actor=actor,
             actor_role=actor_role,
-            kind=kind,
+            kind=_scan_kind(kind, group_reads),
             snapshot=snapshot,
             since=since,
             until=until,

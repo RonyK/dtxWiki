@@ -1015,7 +1015,7 @@ def test_merged_feed_and_group_hydration_isolate_every_source_from_foreign_works
         assert all(event.navigation.target_id == own[2].id for event in members.events)
 
 
-def test_pending_review_names_its_visible_page_and_system_scan_skips_other_sources(
+def test_pending_review_names_its_visible_page_and_narrow_scans_keep_read_runs(
     session_factory,
 ):
     from sqlalchemy import event
@@ -1026,6 +1026,19 @@ def test_pending_review_names_its_visible_page_and_system_scan_skips_other_sourc
     with session_factory.begin() as session:
         workspace, client, page, version, chat = _setup(session)
         _call(session, workspace, client, page, version, chat, 0)
+        _call(session, workspace, client, page, version, chat, 2)
+        # Between the two reads: a system row the Workspace filter hides.
+        session.add(
+            AuditEvent(
+                workspace_id=workspace.id,
+                actor_kind="human",
+                actor_id="reader",
+                action="auth.login.succeeded",
+                target_kind="workspace",
+                target_id=workspace.id,
+                created_at=BASE - timedelta(seconds=1),
+            )
+        )
         hidden = ContextPage(
             workspace_id=workspace.id,
             slug=f"feed-{uuid4()}",
@@ -1078,6 +1091,23 @@ def test_pending_review_names_its_visible_page_and_system_scan_skips_other_sourc
         assert {(event.body, event.decision_summary_code) for event in pending} == {
             (reason, "agent_page_write_requires_review")
         }
+        # A row another filter shows still ends a read run, as in the full
+        # stream, so the Workspace scan keeps every source.
+        reads = [
+            entry.event_count
+            for entry in _service()
+            .list_feed(
+                session,
+                workspace.id,
+                actor=actor,
+                actor_role="owner",
+                period="all",
+                kind="workspace",
+            )
+            .entries
+            if entry.event.operation == "read"
+        ]
+        assert reads == [1, 1]
 
         statements = []
 
