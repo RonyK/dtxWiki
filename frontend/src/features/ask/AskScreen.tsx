@@ -1505,11 +1505,7 @@ function TurnCard({
           body={turn.assistant_message ?? copy.turns.noAnswer}
           renderPolicy="confirmed-links"
           workspaceId={workspaceId}
-          linkTargets={(turn.link_targets ?? []).map(target => ({
-            ...target,
-            href: target.href ?? null,
-            target_page_id: target.target_page_id ?? null,
-          }))}
+          linkTargets={turn.link_targets ?? undefined}
           wikilinkMode="plain"
         />
       </div>

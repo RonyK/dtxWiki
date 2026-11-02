@@ -1188,10 +1188,11 @@ export function PageEditor({
     if (aliasValidationMessage) setShowAdvancedProperties(true);
   }, [aliasValidationMessage]);
   const showPreviewPane = activeEditorMode !== "source";
-  const previewLinkTargets = useLinkTargetPreview({
+  const previewLinks = useLinkTargetPreview({
     actorId,
     body,
     enabled: showPreviewPane && isEditorReady,
+    initialTargets: page?.link_targets,
     sourcePageId: page?.id ?? null,
     sourceVersionId: page?.version_id ?? null,
     workspaceId,
@@ -5400,7 +5401,9 @@ export function PageEditor({
             >
               <MarkdownView
                 body={body}
-                linkTargets={previewLinkTargets}
+                checkingLinkLocators={previewLinks.checking}
+                linkTargets={previewLinks.targets}
+                onLinksToCheck={previewLinks.reportLinks}
                 resolveContextMediaAsset={resolveContextMediaAsset}
                 sourceLineNumbers
                 stripLeadingHeading={title}

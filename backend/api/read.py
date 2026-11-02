@@ -185,6 +185,7 @@ from backend.services.activity_feed_service import (
 )
 from backend.services.actor_visible_read import context_page_id_visible
 from backend.services.ask_service import InvalidUserMessageError
+from backend.services.context_link_targets import markdown_link_targets
 from backend.services.context_media_attachments import (
     attachment_read_projection,
     decode_attachment_cursor,
@@ -2628,29 +2629,47 @@ def get_agent_page(
                 _require_sensitive_agent_page_access(
                     actor, access, resource_workspace_id=workspace_id
                 )
-            data = svc.domain_read.read_agent_page(
-                session=session,
-                workspace_id=workspace_id,
-                agent_page_id=agent_page_id,
-                version_selector=version,
-                actor=reader_actor,
-            )
-            from backend.services.context_link_targets import markdown_link_targets
-
             return {
-                "data": AgentPageRestDetail(
-                    **data.model_dump(),
-                    link_targets=markdown_link_targets(
-                        session,
-                        body=data.body_markdown or "",
-                        workspace_id=workspace_id,
-                        actor=reader_actor,
-                        self_origins=svc.domain_read.context_link_origins,
-                    ),
+                "data": _agent_page_rest_detail(
+                    svc,
+                    session,
+                    workspace_id=workspace_id,
+                    agent_page_id=agent_page_id,
+                    version_selector=version,
+                    actor=reader_actor,
                 )
             }
     except ReadServiceError as exc:
         return read_service_error_response(exc)
+
+
+def _agent_page_rest_detail(
+    svc,
+    session,
+    *,
+    workspace_id: UUID,
+    agent_page_id: UUID,
+    version_selector: str,
+    actor: ActorContext,
+) -> AgentPageRestDetail:
+    """Add browser link targets at the REST boundary; MCP reads the base detail."""
+    data = svc.domain_read.read_agent_page(
+        session=session,
+        workspace_id=workspace_id,
+        agent_page_id=agent_page_id,
+        version_selector=version_selector,
+        actor=actor,
+    )
+    return AgentPageRestDetail(
+        **data.model_dump(),
+        link_targets=markdown_link_targets(
+            session,
+            body=data.body_markdown or "",
+            workspace_id=workspace_id,
+            actor=actor,
+            self_origins=svc.domain_read.context_link_origins,
+        ),
+    )
 
 
 @router.get(
@@ -2778,26 +2797,14 @@ def activate_agent_page(
                 actor_id=actor.actor_id,
                 actor_role=access.role,
             )
-            reader_actor = rebind_actor_to_workspace_access(actor, access)
-            data = svc.domain_read.read_agent_page(
-                session=session,
-                workspace_id=workspace_id,
-                agent_page_id=activation.agent_page_id,
-                version_selector="active",
-                actor=reader_actor,
-            )
-            from backend.services.context_link_targets import markdown_link_targets
-
             return {
-                "data": AgentPageRestDetail(
-                    **data.model_dump(),
-                    link_targets=markdown_link_targets(
-                        session,
-                        body=data.body_markdown or "",
-                        workspace_id=workspace_id,
-                        actor=reader_actor,
-                        self_origins=svc.domain_read.context_link_origins,
-                    ),
+                "data": _agent_page_rest_detail(
+                    svc,
+                    session,
+                    workspace_id=workspace_id,
+                    agent_page_id=activation.agent_page_id,
+                    version_selector="active",
+                    actor=rebind_actor_to_workspace_access(actor, access),
                 )
             }
     except ReadServiceError as exc:

@@ -4606,21 +4606,27 @@ describe("PageEditor", () => {
     expect(helloBodies[0]).toMatchObject({ title: "Hello pending" });
   });
 
-  it("projects internal links in split preview without saving or replacing the editor buffer", async () => {
+  it("checks only new split-preview links without sending or replacing the editor buffer", async () => {
     const locator = "dtxwiki://index/context/cccccccc-cccc-4ccc-8ccc-cccccccccccc";
-    const raw = `# Hello\n\n[Preview reference](${locator})  \nNext line`;
+    // The browser classifies this supported legacy route as unknown; only the
+    // server can resolve it to the source workspace's item.
+    const legacy = "/library?target=dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const legacyHref = `/workspaces/${page.workspace_id}/library/items/dddddddd-dddd-4ddd-8ddd-dddddddddddd`;
+    const raw = `# Hello\n\n[Preview reference](${locator})  \n[Legacy item](${legacy})`;
     const fetchMock = mockEditorPage(raw);
     const fetchPage = fetchMock.getMockImplementation()!;
+    const requests: unknown[] = [];
     fetchMock.mockImplementation(async (input, init) => {
       if (String(input).endsWith("/link-targets/preview")) {
         const request = JSON.parse(String(init?.body));
-        expect(request.body_md).toBe(raw);
-        expect(request.source_page_id).toBe(page.id);
-        expect(request.source_version_id).toBe(page.version_id);
+        requests.push(request);
         return jsonResponse({ data: {
           ...request,
           workspace_id: page.workspace_id,
-          link_targets: [{ locator, href: `/p/${page.workspace_id}/cccccccc-cccc-4ccc-8ccc-cccccccccccc`, state: "ok" }],
+          link_targets: [
+            { locator, href: `/p/${page.workspace_id}/cccccccc-cccc-4ccc-8ccc-cccccccccccc`, state: "ok" },
+            { locator: legacy, href: legacyHref, state: "ok" },
+          ],
         } });
       }
       return fetchPage(input, init);
@@ -4628,9 +4634,16 @@ describe("PageEditor", () => {
     renderWithRouter("/pages/hello/edit", <></>);
     await screen.findByLabelText("Markdown body");
     await typist().click(screen.getByRole("tab", { name: "Split" }));
-    expect(await screen.findByRole("link", { name: "Preview reference" })).toHaveAttribute(
+    // Until the idle check answers, the copied ref is checking, not unavailable.
+    expect(await screen.findByText("Checking link")).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Preview reference" }, { timeout: 3000 })).toHaveAttribute(
       "href", `/p/${page.workspace_id}/cccccccc-cccc-4ccc-8ccc-cccccccccccc`,
     );
+    expect(screen.getByRole("link", { name: "Legacy item" })).toHaveAttribute("href", legacyHref);
+    // Only the unconfirmed links are sent, never the document.
+    expect(requests).toEqual([expect.objectContaining({
+      body_md: `[x](${locator})\n[x](${legacy})`, source_page_id: page.id, source_version_id: page.version_id,
+    })]);
     const source = document.querySelector<HTMLElement>(".cm-editor")!;
     expect(EditorView.findFromDOM(source)?.state.doc.toString()).toBe(raw);
     expect(autosaveCalls(fetchMock)).toHaveLength(0);

@@ -9,6 +9,7 @@ from backend.models.library import LibraryItem
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
+from backend.schemas.read import ContextLinkTarget
 from backend.services.body_preparer import BodyInput, BodyPreparer, WriteContext
 from backend.services.lint import LintContext, LintRegistry
 from backend.services.lint.scopes import findings_for_target
@@ -169,31 +170,16 @@ def test_unresolved_and_healthy_links(session_factory):
             )
         )
         assert prepare_for(owner).body == allowed_body
-        # Budget exception: READ adds two logical folder/actor inputs. A hidden
-        # Agent ancestor must hide its folder ref; save-only checks cannot
-        # expose a reader bypass. Other target kinds reuse the shared resolver.
+        # Budget exception: READ adds one logical folder input. A hidden Agent
+        # ancestor must hide its folder ref; save-only checks cannot expose a
+        # reader bypass. test_read_api covers an allowed folder ref, and other
+        # target kinds reuse the shared resolver.
         from backend.services.context_link_targets import markdown_link_targets
 
-        folder_body = f"[Folder]({folder_ref})\n"
-        denied_targets = {
-            entry.locator: entry for entry in markdown_link_targets(
-                session, body=folder_body, workspace_id=workspace_id, actor=editor,
-            )
-        }
-        assert {entry.locator for entry in denied_targets.values()
-                if entry.state == "unavailable"} == {
-            folder_ref,
-        }
-        assert all(entry.href is None and entry.target_page_id is None
-                   for entry in denied_targets.values())
-        allowed_targets = {
-            entry.locator: entry for entry in markdown_link_targets(
-                session, body=folder_body, workspace_id=workspace_id, actor=owner,
-            )
-        }
-        assert allowed_targets[folder_ref].href == (
-            f"/workspaces/{workspace_id}/agent/folders/{folder.id}"
-        )
+        assert markdown_link_targets(
+            session, body=f"[Folder]({folder_ref})\n",
+            workspace_id=workspace_id, actor=editor,
+        ) == [ContextLinkTarget(locator=folder_ref, state="unavailable")]
         limited = ActorContext(
             actor_kind="human", actor_id="test", workspace_id=workspace_id,
             workspace_role="owner", role="owner", token_kind="api_token",

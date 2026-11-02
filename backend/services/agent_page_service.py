@@ -187,10 +187,14 @@ class AgentPageService:
                     ),
                 ),
             )
+            # One entry per distinct ref, like `unresolved`: repeating a ref in
+            # the body must not repeat it in the MCP result.
             normalization_report = IndexRefNormalizationReport(
                 applied=[
-                    {"before": detail["before"], "after": detail["after"]}
-                    for detail in details
+                    {"before": before, "after": after}
+                    for before, after in dict.fromkeys(
+                        (detail["before"], detail["after"]) for detail in details
+                    )
                 ],
                 unresolved=[{"locator": locator} for locator in unavailable],
             )

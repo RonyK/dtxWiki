@@ -155,11 +155,10 @@ def test_public_read_returns_published_head_without_auth(page_service):
         base_content_hash=created.content_hash,
     )
     # Budget exception: exact refs in historical bodies bypass authored-save
-    # normalization. These three logical inputs independently prove public
-    # exposure, private-Context denial, and non-Context denial; the existing
-    # canonical-URL inputs cannot detect an index-only projection bypass.
+    # normalization. These two logical inputs prove public Context exposure
+    # and non-Context denial; private Context denial shares the exposure branch
+    # of the canonical private_href input above.
     public_ref = format_index_ref("context", public_target.id)
-    private_ref = format_index_ref("context", private_target.id)
     with page_service.session_factory.begin() as session:
         folder_id = session.scalar(
             select(WorkspaceTreeNode.id).where(
@@ -171,8 +170,7 @@ def test_public_read_returns_published_head_without_auth(page_service):
         folder_ref = format_index_ref("folder", folder_id)
         stored = session.get(ContextPageVersion, created.version_id)
         stored.body_md += (
-            f"\n[Public ref]({public_ref}) [Private ref]({private_ref}) "
-            f"[Folder ref]({folder_ref})\n"
+            f"\n[Public ref]({public_ref}) [Folder ref]({folder_ref})\n"
         )
         original_body, original_hash = stored.body_md, stored.content_hash
     anon = _anon_client(page_service)
@@ -211,12 +209,6 @@ def test_public_read_returns_published_head_without_auth(page_service):
     }
     assert targets[public_ref]["href"] == "/w/default/pages/public-link-target"
     assert targets[public_ref]["target_page_id"] is None
-    assert targets[private_ref] == {
-        "locator": private_ref,
-        "href": None,
-        "state": "unavailable",
-        "target_page_id": None,
-    }
     assert targets[folder_ref] == {
         "locator": folder_ref,
         "href": None,

@@ -16,10 +16,12 @@
   and all authored Context saves when the caller can read the target, including
   suggest mode and disabled formatting. Missing and hidden refs retain their
   source with nonblocking diagnostics. Agent draft results include
-  `normalization_report` with applied links and unavailable refs.
+  `normalization_report` with one entry per applied or unavailable ref.
 - Historical and restored refs resolve for the current reader in Context,
   Agent, Ask, Review, and editor previews without changing stored Markdown.
-  Editor previews discard stale results and preserve the unsaved buffer.
+  Editor previews show the opened page's links at once and check only links
+  added since, after typing pauses for a second; a checking link shows a
+  progress mark. The unsaved buffer is never sent or replaced.
   Anonymous readers receive only exposed published Context destinations;
   Library file previews retain their untrusted-content policy. Agent reader
   targets are REST-only; MCP Agent read schemas and payloads stay unchanged.

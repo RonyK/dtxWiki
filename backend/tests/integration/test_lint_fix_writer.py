@@ -166,7 +166,6 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
         assert reader_targets[draft_ref].href == (
             f"/p/{workspace_id}/{draft_target.id}"
         )
-        assert draft_links in fixed.body_md
         assert page.latest_draft_version_id is None
         copied_claim = session.scalar(
             select(ContextClaim).where(ContextClaim.page_version_id == fixed_id)

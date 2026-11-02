@@ -176,7 +176,9 @@ def test_agent_page_draft_service_creates_non_sensitive_draft(session_factory):
                     "# Research Persona\n\nPrefer source-grounded notes in "
                     f"[Context]({format_index_ref('folder', root_id)}), not "
                     f"[gone]({missing_ref}). "
-                    f"[Guide]({format_index_ref('agent', guide_id)})"
+                    f"[Guide]({format_index_ref('agent', guide_id)}) "
+                    # A repeated ref is reported once, like `unresolved`.
+                    f"[Guide again]({format_index_ref('agent', guide_id)})"
                 ),
                 reason="add persona draft",
             ),
@@ -209,9 +211,10 @@ def test_agent_page_draft_service_creates_non_sensitive_draft(session_factory):
     )
     # Budget exception: the Agent service has a separate caller seam from
     # Context preparation. Its real owner/admin scope must not be discarded.
-    assert f"[Guide](/workspaces/{workspace_id}/agent/pages/{guide_id})" in (
-        version.body_markdown
-    )
+    assert (
+        f"[Guide](/workspaces/{workspace_id}/agent/pages/{guide_id}) "
+        f"[Guide again](/workspaces/{workspace_id}/agent/pages/{guide_id})"
+    ) in version.body_markdown
     assert change_set.trigger_type == "agent_page_draft"
     assert change_set.risk_level == "low"
     assert operation.operation == "create_draft"
