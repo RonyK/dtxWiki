@@ -53,6 +53,7 @@ vi.mock("../GraphCanvas", async () => {
       data-edge-labels={scene.edges.filter((edge) => !edge.hidden).map((edge) => edge.label).join("|")}
       data-rendered-edge-ids={buildLocalScene({ ...scene, edges: scene.edges.filter((edge) => !edge.hidden) }).edges.map((edge) => edge.graphId).sort().join("|")}
       data-edges={scene.edges.filter((edge) => !edge.hidden && !edge.removed).length}
+      data-removed-edges={scene.edges.filter((edge) => !edge.hidden && edge.removed).length}
       data-active={String(active)}
       data-focused={focusedId ?? ""}
       data-nodes={scene.nodes.filter((node) => !node.hidden).length}
@@ -63,6 +64,9 @@ vi.mock("../GraphCanvas", async () => {
     >
       <button onClick={() => onSelect("node:ask")} type="button">
         Select Ask from canvas
+      </button>
+      <button onClick={() => onSelect("edge:wikilink")} type="button">
+        Select relationship from canvas
       </button>
       <button onClick={() => onSelect(null)} type="button">
         Clear from canvas stage
@@ -150,6 +154,38 @@ describe("GraphView", () => {
     expect(canvas).toHaveAttribute("data-selected", "");
     expect(details).toHaveAttribute("hidden");
     expect(screen.queryByRole("heading", { name: "Details" })).not.toBeInTheDocument();
+  });
+
+  it("hides external-view controls in fullscreen while keeping node and relationship Details inside the frame", () => {
+    renderGraph({ openContents: false });
+    const graph = screen.getByTestId("graph-view");
+    const frame = graph.querySelector<HTMLElement>(".graph-frame")!;
+    fireEvent.click(frame.querySelector(".graph-canvas-more > summary")!);
+    expect(within(frame).getByRole("button", { name: "View as list" })).toBeVisible();
+    expect(within(frame).getByRole("button", { name: "Open static graph view" })).toBeVisible();
+    const descriptor = Object.getOwnPropertyDescriptor(document, "fullscreenElement");
+    let fullscreenElement: Element | null = frame;
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => fullscreenElement });
+    try {
+      act(() => document.dispatchEvent(new Event("fullscreenchange")));
+      expect(within(frame).queryByRole("button", { name: "View as list" })).not.toBeInTheDocument();
+      expect(within(frame).queryByRole("button", { name: "Open static graph view" })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Select Ask from canvas" }));
+      const details = within(frame).getByRole("complementary", { name: "Details" });
+      expect(within(details).getByRole("heading", { name: "Why was this chosen?" })).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Select relationship from canvas" }));
+      expect(details.querySelector(".graph-edge-summary")).toHaveTextContent("Architecture Notes —Wiki link→ Decision Log");
+      expect(details).toBeVisible();
+      expect(graph.querySelector(".graph-parity-grid")!.parentElement).toBe(graph);
+      expect(graph.querySelector(".graph-static-fallback")!.parentElement).toBe(graph);
+      fullscreenElement = null;
+      act(() => document.dispatchEvent(new Event("fullscreenchange")));
+      expect(within(frame).getByRole("button", { name: "View as list" })).toBeVisible();
+      expect(within(frame).getByRole("button", { name: "Open static graph view" })).toBeVisible();
+    } finally {
+      if (descriptor) Object.defineProperty(document, "fullscreenElement", descriptor);
+      else Reflect.deleteProperty(document, "fullscreenElement");
+    }
   });
 
   it("keeps 250 nodes and 750 relationships at two row Tab entries with highlight-only navigation and keyboard Details handoff", async () => {
@@ -1204,6 +1240,41 @@ describe("GraphView", () => {
       .not.toBeInTheDocument());
   });
 
+  it("keeps the independent direct static scene across neighbor and two-hop canvas queries", async () => {
+    const user = userEvent.setup();
+    const direct = graphFixture();
+    direct.history.mode = "current";
+    direct.query.time = { mode: "current" };
+    direct.query.relation_scope = "direct";
+    const props = {
+      onCollapse: () => Promise.resolve(), onExpand: () => Promise.resolve(),
+      staticPayload: direct, payload: direct,
+    };
+    const { rerender } = render(graphElement(props));
+    await user.click(screen.getByText("Static graph view"));
+    const directSource = screen.getByTestId("mock-markdown-view").textContent;
+    const neighborEdge = { ...direct.edges[0], id: "edge:neighbors", source: "node:related", target: "node:ask", label: "Neighbor-only relationship" };
+    const neighbors = { ...direct, query: { ...direct.query, relation_scope: "neighbors" as const }, edges: [direct.edges[0], neighborEdge] };
+    rerender(graphElement({ ...props, payload: neighbors }));
+    expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-rendered-edge-ids", expect.stringContaining("edge:neighbors"));
+    // The broader query omitted a direct edge under its own budget; the
+    // static view must recover it from its dedicated payload, not trim canvas.
+    expect(screen.getByTestId("mock-markdown-view")).toHaveTextContent("Included");
+    expect(screen.getByTestId("mock-markdown-view").textContent).toBe(directSource);
+
+    const distantNode = { ...direct.nodes[1], id: "node:distant", label: "Second-hop document" };
+    const extended = { ...neighbors, query: { ...neighbors.query, depth: 2 as const },
+      nodes: [...neighbors.nodes, distantNode],
+      edges: [...neighbors.edges, { ...neighborEdge, id: "edge:distant", target: distantNode.id }],
+    };
+    rerender(graphElement({ ...props, payload: extended }));
+    expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-nodes", "4");
+    expect(screen.getByTestId("mock-markdown-view").textContent).toBe(directSource);
+    fireEvent.click(screen.getByLabelText("Ask turn"));
+    expect(screen.getByTestId("mock-markdown-view")).not.toHaveTextContent("Why was this chosen?");
+    expect(screen.getByTestId("mock-markdown-view")).toHaveTextContent("Architecture Notes");
+  });
+
   it.each([501, 750])("uses a complete text fallback for %i relationships instead of invalid Mermaid", (count) => {
     const payload = graphFixture();
     payload.edges = Array.from({ length: count }, (_, index) => ({
@@ -1409,6 +1480,34 @@ describe("GraphView", () => {
     expect(screen.getByRole("slider", { name: "Timeline position" })).toHaveValue("3");
     expect(screen.getByText("The record you were viewing is no longer in the results. Moved to the latest record."))
       .toHaveAttribute("role", "status");
+  });
+
+  it("previews removals from their own filtered prior frame while retaining the later replay cursor", () => {
+    const payload = graphFixture();
+    const current = { ...payload.edges[0], label: "Re-added relationship" };
+    const original = { ...current, label: "Original relationship", provenance: "observed" as const };
+    payload.edges = [current];
+    const event = { ...payload.timeline![1], node_ids: [current.source, current.target] };
+    payload.timeline = [
+      { ...event, id: "original", occurred_at: "2026-08-02T00:00:00Z", sequence: 1, edge_snapshots: [original] },
+      { ...event, id: "removed", operation: "edge_removed", action_kind: "removed", occurred_at: "2026-08-03T00:00:00Z", sequence: 2, edge_snapshots: [] },
+      { ...event, id: "re-added", occurred_at: "2026-08-04T00:00:00Z", sequence: 3, edge_snapshots: [current] },
+    ];
+    renderGraph({ payload, openContents: false });
+    const canvas = screen.getByTestId("mock-graph-canvas");
+    const mark = screen.getByTestId("graph-timeline").querySelector<HTMLButtonElement>('.local-history-mark[aria-label^="2/3"]')!;
+    expect(canvas).toHaveAttribute("data-edges", "1");
+    fireEvent.mouseEnter(mark);
+    expect(canvas).toHaveAttribute("data-removed-edges", "1");
+    expect(screen.getByRole("slider", { name: "Timeline position" })).toHaveValue("3");
+
+    fireEvent.click(screen.getByLabelText("Observed"));
+    expect(canvas).toHaveAttribute("data-removed-edges", "0");
+    expect(canvas).toHaveAttribute("data-edges", "1");
+    fireEvent.click(screen.getByLabelText("Observed"));
+    expect(canvas).toHaveAttribute("data-removed-edges", "1");
+    fireEvent.click(screen.getByRole("button", { name: /Historical relationships/ }));
+    expect(canvas).toHaveAttribute("data-removed-edges", "0");
   });
 
   it("keeps the final recorded snapshot after autoplay completion", () => {
@@ -2162,6 +2261,7 @@ function graphElement({
   onExpand,
   onHistoryModeChange,
   payload,
+  staticPayload,
   workspaceGraphHref,
   workspaceId = "00000000-0000-4000-8000-000000000001",
 }: {
@@ -2172,6 +2272,7 @@ function graphElement({
   onExpand: (node: GraphNode) => Promise<void>;
   onHistoryModeChange?: (mode: GraphHistoryMode) => Promise<void>;
   payload: GraphQueryPayload;
+  staticPayload?: GraphQueryPayload;
   workspaceGraphHref?: (node: GraphNode) => string | null;
   workspaceId?: string | null;
 }) {
@@ -2185,6 +2286,7 @@ function graphElement({
         onExpand={onExpand}
         onHistoryModeChange={onHistoryModeChange ?? (() => Promise.resolve())}
         payload={payload}
+        staticPayload={staticPayload}
         workspaceGraphHref={workspaceGraphHref}
         workspaceId={workspaceId}
       />

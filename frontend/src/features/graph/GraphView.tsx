@@ -56,6 +56,7 @@ type GraphViewProps = {
   onExpand: (node: GraphNode) => Promise<void>;
   onHistoryModeChange: (mode: GraphHistoryMode) => Promise<void>;
   payload: GraphQueryPayload;
+  staticPayload?: GraphQueryPayload;
   workspaceGraphHref?: (node: GraphNode) => string | null;
   // Canonical Context permalinks are workspace-in-path; without the id the
   // list falls back to the query-param form (see searchResultHref).
@@ -75,6 +76,7 @@ export function GraphView({
   onExpand,
   onHistoryModeChange,
   payload,
+  staticPayload = payload,
   workspaceGraphHref,
   workspaceId = null,
 }: GraphViewProps) {
@@ -175,19 +177,36 @@ export function GraphView({
   const historyCatalog = useMemo(() => localizedGraphScene(applyHistoryVisibility(historySceneCatalog(payload, filters)), t),
     [applyHistoryVisibility, filters, payload, t]);
   const sceneNavigation = useMemo(() => buildSceneNavigation(scene), [scene]);
-  const canvasScene = useMemo<GraphRenderScene>(() => ({
-    ...(historical ? renderHistoryScene(withCoAccessLabels(historyCatalog, t), withCoAccessLabels(scene, t),
-      timeline.find((event) => event.id === hoveredEventId) ?? currentEvent, showFuture, payload.history.mode === "action", hoveredEventId !== null,
-      (timeline.find((event) => event.id === hoveredEventId) ?? currentEvent)?.summary)
-      : withCoAccessLabels(scene, t)),
-    scopeKey: canvasScopeKey,
-    freezeLayout: historical,
-  }), [canvasScopeKey, currentEvent, historical, historyCatalog, hoveredEventId, payload.history.mode, scene, showFuture, t, timeline]);
+  const canvasScene = useMemo<GraphRenderScene>(() => {
+    const hoveredIndex = timeline.findIndex((event) => event.id === hoveredEventId);
+    const eventIndex = hoveredIndex >= 0 ? hoveredIndex : visibleCursor;
+    const event = timeline[eventIndex];
+    const previousFrame = historical && event?.operation === "edge_removed"
+      ? localizedGraphScene(applyHistoryVisibility(deriveGraphScene(payload, filters, eventIndex - 1)), t)
+      : { nodes: [], edges: [] };
+    return {
+      ...(historical ? renderHistoryScene(withCoAccessLabels(historyCatalog, t), withCoAccessLabels(scene, t),
+        withCoAccessLabels(previousFrame, t), event, showFuture, payload.history.mode === "action", hoveredIndex >= 0, event?.summary)
+        : withCoAccessLabels(scene, t)),
+      scopeKey: canvasScopeKey,
+      freezeLayout: historical,
+    };
+  }, [applyHistoryVisibility, canvasScopeKey, filters, historical, historyCatalog, hoveredEventId, payload, scene, showFuture, t, timeline, visibleCursor]);
+  const staticScene = useMemo(() => {
+    const staticFacets = graphFacets(staticPayload);
+    // Broader queries can spend their budget on different facets. Only apply
+    // explicit exclusions; direct-only facet values remain visible by default.
+    const staticFilters = Object.fromEntries((Object.keys(filters) as (keyof GraphFilters)[]).map((key) => {
+      const excluded = new Set(facets[key].filter((value) => !(filters[key] as string[]).includes(value)));
+      return [key, staticFacets[key].filter((value) => !excluded.has(value))];
+    })) as GraphFilters;
+    return localizedGraphScene(applyHistoryVisibility(deriveGraphScene(staticPayload, staticFilters, timelineCursor)), t);
+  }, [applyHistoryVisibility, facets, filters, staticPayload, t, timelineCursor]);
   const mermaidSource = useMemo(
-    () => staticOpen && scene.edges.length <= STATIC_DIAGRAM_EDGE_LIMIT
-      ? graphSceneToMermaid(scene)
+    () => staticOpen && staticScene.edges.length <= STATIC_DIAGRAM_EDGE_LIMIT
+      ? graphSceneToMermaid(staticScene)
       : null,
-    [scene, staticOpen],
+    [staticScene, staticOpen],
   );
   const selectedNode = scene.nodes.find((node) => node.id === selectedId)
     ?? (historical ? historyCatalog.nodes.find((node) => node.id === selectedId) : null) ?? null;
@@ -791,7 +810,7 @@ export function GraphView({
               <button className="graph-mobile-fullscreen" type="button" onClick={() => void toggleFullscreen()}><Maximize2 size={16} aria-hidden="true" />{t(fullscreen ? "graph.view.exitFullscreen" : "graph.view.fullscreen")}</button>
               <button type="button" onClick={resetView}><RotateCcw size={16} aria-hidden="true" />{t("graph.resetView")}</button>
               <button type="button" disabled={payload.capabilities?.export === false} onClick={exportFilteredScene}><Download size={16} aria-hidden="true" />{t("graph.export")}</button>
-              <button type="button" onClick={() => { setStaticOpen(true); requestAnimationFrame(() => graphRegionRef.current?.querySelector(".graph-static-fallback")?.scrollIntoView({ block: "nearest" })); }}>{t("graph.view.openStatic")}</button>
+              {!fullscreen ? <button type="button" onClick={() => { setStaticOpen(true); requestAnimationFrame(() => graphRegionRef.current?.querySelector(".graph-static-fallback")?.scrollIntoView({ block: "nearest" })); }}>{t("graph.view.openStatic")}</button> : null}
               <label><input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} />{t("graph.localToolbar.labels")}</label>
               {historical ? <label><input type="checkbox" checked={showFuture} onChange={(e) => setShowFuture(e.target.checked)} />{t("graph.historyUi.showFuture")}</label> : null}
             </div>
@@ -811,7 +830,7 @@ export function GraphView({
           viewportInsets={() => {
             const stage = graphRegionRef.current?.querySelector(".graph-local-stage")?.getBoundingClientRect();
             const detail = graphRegionRef.current?.querySelector(".graph-details:not([hidden])")?.getBoundingClientRect();
-            const sheet = !!stage && !!detail && detail.width > stage.width * .75;
+            const sheet = !fullscreen && !!stage && !!detail && detail.width > stage.width * .75;
             return { top: historical ? 90 : 60, left: 0,
               right: detail && !sheet ? detail.width + 24 : 0,
               bottom: detail && sheet ? detail.height + 12 : 0 };
@@ -886,7 +905,7 @@ export function GraphView({
           <time dateTime={payload.generated_at}>{t("graph.view.fetched", { time: formatVersionTimestamp(payload.generated_at) })}</time>
           {coverageNotice ? <span className="graph-status-omitted">{t("graph.view.omitted")}</span> : null}
           <div className="graph-status-actions">
-            <button type="button" aria-expanded={listOpen} onClick={() => setListOpen((open) => !open)}><List size={15} aria-hidden="true" />{t("graph.view.list")}</button>
+            {!fullscreen ? <button type="button" aria-expanded={listOpen} onClick={() => setListOpen((open) => !open)}><List size={15} aria-hidden="true" />{t("graph.view.list")}</button> : null}
             <button type="button" aria-expanded={legendOpen} onClick={() => setLegendOpen((open) => !open)}><Layers size={15} aria-hidden="true" />{t("graph.view.legend")}</button>
           </div>
         </footer>
@@ -930,7 +949,7 @@ export function GraphView({
               defaultValue: "This scene exceeds the diagram limit of {{limit}} relationships. All nodes and relationships are listed here.",
               limit: STATIC_DIAGRAM_EDGE_LIMIT,
             })}</p>
-            <GraphTextContents scene={scene} />
+            <GraphTextContents scene={staticScene} />
           </>
         ) : null}
       </details>

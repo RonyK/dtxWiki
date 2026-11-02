@@ -16,6 +16,7 @@ from backend.schemas.graph import (
     GraphNode,
     GraphQueryRequest,
     GraphSeed,
+    GraphTimeQuery,
 )
 from backend.services.graph_query_service import (
     GraphQueryService,
@@ -305,6 +306,86 @@ def test_session_relations_cannot_take_an_anchored_share_or_float_free():
 
     assert _connected_to(seed, edges) == {node.id for node in nodes}
     assert sum(edge.edge_kind == "included" for edge in edges) == 2
+
+
+def test_direct_activity_keeps_its_admitted_session_on_the_same_timeline_event():
+    # One activity input covers direct-scope assembly, admission and Timeline
+    # ownership; existing DB tests retain domain retrieval/authorization proof.
+    workspace_id = uuid5(NAMESPACE, "direct-action-workspace")
+    session_id = uuid5(NAMESPACE, "direct-action-session")
+    turn_id = uuid5(NAMESPACE, "direct-action-turn")
+    evidence_id = uuid5(NAMESPACE, "direct-action-citation")
+    occurred_at = datetime(2026, 8, 4, 2, 15, tzinfo=UTC)
+    seed = _node("direct-action-seed", seed=True)
+    request = GraphQueryRequest(
+        seeds=[GraphSeed(kind="context_page", id=seed.entity_id)],
+        relation_scope="direct",
+        direction="in",
+        layers=["action"],
+        time=GraphTimeQuery(mode="action"),
+        budget=GraphBudget(nodes=3, edges=2),
+    )
+    candidates = []
+    assembled_nodes = {seed.id: seed}
+    drafts = []
+    GraphQueryService._append_domain_action(
+        workspace_id,
+        request=request,
+        active_layers={"action"},
+        seed=seed,
+        source_kind="ask_turn",
+        source_id=turn_id,
+        source_label="Direct activity",
+        source_status=None,
+        occurred_at=occurred_at,
+        action_kind="included",
+        evidence_kind="ask_turn_citation",
+        evidence_id=evidence_id,
+        candidates=candidates,
+        nodes=assembled_nodes,
+        timeline=drafts,
+    )
+    turn_node_id = graph_node_id("ask_turn", turn_id)
+    GraphQueryService._append_session_relation(
+        workspace_id,
+        request=request,
+        active_layers={"action"},
+        session_kind="ask_session",
+        session_id=session_id,
+        session_label="Direct activity session",
+        session_status="active",
+        occurred_at=occurred_at,
+        event_node=assembled_nodes[turn_node_id],
+        action_kind="included",
+        evidence_kind="ask_turn_citation",
+        evidence_id=evidence_id,
+        candidates=candidates,
+        nodes=assembled_nodes,
+    )
+    nodes, edges, capped = GraphQueryService._apply_budget(
+        request=request,
+        seed_nodes={seed.id: seed},
+        candidates=candidates,
+        extra_nodes={},
+    )
+    session_node_id = graph_node_id("ask_session", session_id)
+    assert {node.id for node in nodes} == {seed.id, turn_node_id, session_node_id}
+    assert {(edge.source, edge.target) for edge in edges} == {
+        (turn_node_id, seed.id),
+        (session_node_id, turn_node_id),
+    }
+    assert not capped
+
+    timeline, timeline_capped = GraphQueryService._finalize_timeline(
+        drafts, nodes, edges, node_limit=3, edge_limit=2
+    )
+    assert not timeline_capped
+    assert len(timeline) == 1
+    assert set(timeline[0].node_ids) == {node.id for node in nodes}
+    assert set(timeline[0].edge_ids) == {edge.id for edge in edges}
+    assert timeline[0].occurred_at == occurred_at
+    assert timeline[0].evidence is not None
+    assert timeline[0].evidence.kind == "ask_turn_citation"
 
 
 def test_fair_share_uses_every_slot_it_hands_out():

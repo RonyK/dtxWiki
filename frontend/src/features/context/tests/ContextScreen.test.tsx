@@ -2152,31 +2152,57 @@ describe("ContextScreen", () => {
     });
   });
 
-  it("requests and displays the server's current Local depth instead of a client-only filter", async () => {
-    const fetchMock = await renderDecisionLog();
+  it("requests server Local scopes while keeping the static graph on direct relationships", async () => {
+    contextMermaid.render.mockClear();
+    const fetchMock = await renderDecisionLog({
+      graphQueryHandler: (request) => {
+        const payload = contextGraphPayload(PAGE_ID, "current", request.seeds,
+          undefined, request.depth, request.relation_scope);
+        if (request.relation_scope === "neighbors") {
+          // A broad budget can omit a direct neighbor. The static scene must
+          // come from its direct request, not a trimmed broad response.
+          payload.nodes = payload.nodes.filter((node) => node.id !== "node:library-1");
+          payload.edges = payload.edges.filter((edge) => edge.target !== "node:library-1");
+        }
+        return { data: payload };
+      },
+    });
     await userEvent.click(screen.getByRole("treeitem", { name: "Decision Log" }));
     const readerTabs = within(await screen.findByRole("tablist", { name: "Context reader views" }));
     await userEvent.click(readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }));
     const graph = await screen.findByTestId("graph-view");
     const graphUi = within(graph);
     expect(graphUi.getByRole("radio", { name: "Direct connections" })).toHaveAttribute("aria-checked", "true");
+    await userEvent.click(graphUi.getByText("Static graph view", { selector: "summary" }));
+    await waitFor(() => expect(contextMermaid.render).toHaveBeenLastCalledWith(
+      expect.any(String), expect.stringContaining("Deployment Runbook"), expect.any(HTMLElement),
+    ));
     await userEvent.click(graphUi.getByRole("radio", { name: "Neighbor connections" }));
     await waitFor(() => expect(graphUi.getByRole("radio", { name: "Neighbor connections" }))
       .toHaveAttribute("aria-checked", "true"));
     const requests = () => fetchMock.mock.calls.filter(([input]) =>
       String(input).endsWith(`/workspaces/${WORKSPACE_ID}/graph/query`),
     ).map(([, init]) => JSON.parse(String(init?.body)));
-    expect(requests().at(-1)).toMatchObject({
+    expect(requests().at(-2)).toMatchObject({
       seeds: [{ kind: "context_page", id: PAGE_ID }],
-      depth: 1, time: { mode: "current" }, budget: { nodes: 250, edges: 750 },
+      depth: 1, relation_scope: "neighbors", time: { mode: "current" }, budget: { nodes: 250, edges: 750 },
     });
+    expect(requests().at(-1)).toMatchObject({ depth: 1, relation_scope: "direct", cursor: null });
+    expect(screen.getByTestId("context-graph-canvas")).toHaveAttribute("data-nodes", "2");
+    expect(contextMermaid.render).toHaveBeenLastCalledWith(
+      expect.any(String), expect.stringContaining("Deployment Runbook"), expect.any(HTMLElement),
+    );
     await userEvent.click(graphUi.getByRole("radio", { name: "Two-step expansion" }));
     await waitFor(() => expect(graphUi.getByRole("radio", { name: "Two-step expansion" }))
       .toHaveAttribute("aria-checked", "true"));
-    expect(requests().at(-1)).toMatchObject({ depth: 2, time: { mode: "current" } });
+    expect(requests().at(-2)).toMatchObject({ depth: 2, relation_scope: "neighbors", time: { mode: "current" } });
+    expect(requests().at(-1)).toMatchObject({ depth: 1, relation_scope: "direct", time: { mode: "current" } });
+    expect(contextMermaid.render).toHaveBeenLastCalledWith(
+      expect.any(String), expect.stringContaining("Deployment Runbook"), expect.any(HTMLElement),
+    );
     await userEvent.click(readerTabs.getByRole("tab", { name: /^View$/ }));
     await userEvent.click(readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }));
-    expect(requests()).toHaveLength(3);
+    expect(requests()).toHaveLength(5);
   });
 
   it("rebuilds supported history queries while retaining expanded seeds and the user's current depth", async () => {

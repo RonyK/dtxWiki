@@ -2265,6 +2265,7 @@ function ContextReader({
   // scene is loaded only on first activation and stays mounted across tabs;
   // neither its latency nor failure participates in body/Inspector loading.
   const [graph, setGraph] = useState<GraphQueryPayload | null>(null);
+  const [staticGraph, setStaticGraph] = useState<GraphQueryPayload | null>(null);
   const [graphFailed, setGraphFailed] = useState(false);
   const currentGraphDepthRef = useRef<GraphDepth>(1);
   const currentGraphScopeRef = useRef<GraphRelationScope>("direct");
@@ -2641,9 +2642,22 @@ function ContextReader({
       const generation = previous.generation + 1;
       graphRequestRef.current = { controller, generation, pageId };
       try {
-        const incoming = await queryGraph(workspaceId, query, {
+        const incomingRequest = queryGraph(workspaceId, query, {
           signal: controller.signal,
         });
+        // Direct scope spends its display budget before neighbor expansion.
+        // A broader payload cannot recover direct relationships it omitted.
+        const [incoming, incomingStatic] = await Promise.all([
+          incomingRequest,
+          query.relation_scope === "direct" && query.depth === 1
+            ? incomingRequest
+            : queryGraph(workspaceId, {
+                ...query,
+                depth: 1,
+                relation_scope: "direct",
+                cursor: null,
+              }, { signal: controller.signal }),
+        ]);
         const current = graphRequestRef.current;
         if (
           controller.signal.aborted ||
@@ -2656,6 +2670,7 @@ function ContextReader({
         // Each query replaces the full actor-authorized scene. Relationships
         // and visibility may have changed; never merge with an older payload.
         setGraph(incoming);
+        setStaticGraph(incomingStatic);
         setGraphFailed(false);
       } catch (error) {
         const current = graphRequestRef.current;
@@ -2669,6 +2684,8 @@ function ContextReader({
         ) {
           return;
         }
+        // A failed scope must also cancel its paired request.
+        controller.abort();
         throw error;
       } finally {
         const current = graphRequestRef.current;
@@ -2688,6 +2705,7 @@ function ContextReader({
     if (graphMountedPageId !== detail.id || !workspaceId) return;
     let cancelled = false;
     setGraph(null);
+    setStaticGraph(null);
     setGraphFailed(false);
     void replaceGraphPayload(contextGraphQuery(detail.id)).catch(() => {
       if (!cancelled) setGraphFailed(true);
@@ -3252,6 +3270,7 @@ function ContextReader({
               onExpand={expandGraphNode}
               onHistoryModeChange={changeGraphHistoryMode}
               payload={graph}
+              staticPayload={staticGraph ?? graph}
               workspaceId={workspaceId}
               workspaceGraphHref={
                 labsPreferences.knowledgeMap && workspaceGraph.enabled
