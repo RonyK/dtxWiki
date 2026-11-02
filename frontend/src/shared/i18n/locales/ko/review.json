@@ -106,7 +106,9 @@
     "agent_page_write_approved_by_policy": "정책에 따라 승인된 AI 작성 페이지 변경",
     "human_page_write_applied": "바로 반영된 사람 작성 페이지 변경",
     "stale_edit_preserved_as_alternative": "오래된 편집을 대안 초안으로 보존함",
-    "client_llm_draft_requires_review": "클라이언트 AI가 만든 초안이라 사람이 리뷰해야 합니다"
+    "client_llm_draft_requires_review": "클라이언트 AI가 만든 초안이라 사람이 리뷰해야 합니다",
+    "agent_page_activation_requires_review": "민감한 Agent 페이지 초안이라 소유자가 활성화를 리뷰해야 합니다",
+    "context_patch_requires_reconciliation": "갈라진 Context 패치라 충돌을 조정해야 합니다"
   },
   "policy": {
     "title": "리뷰 위험도 정책",

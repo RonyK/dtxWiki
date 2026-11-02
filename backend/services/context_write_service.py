@@ -2643,6 +2643,7 @@ class ContextWriteService:
             risk_level=prepared.risk_resolution.risk_level,
             risk_resolution=prepared.risk_resolution,
             decision_summary="diverged context patch requires conflict reconciliation",
+            decision_summary_code="context_patch_requires_reconciliation",
             review_type="context_reconciliation",
         )
         self.audit_service.emit(
