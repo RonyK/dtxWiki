@@ -290,11 +290,11 @@ export function createWorkspaceCosmosAdapter(
   }
 
   function linkWidth(): number {
-    return keepOverviewContext() ? 1.15 : sparseScene ? 3 : readableScene ? 1.8 : 0.5;
+    return keepOverviewContext() ? 0.8 : readableScene ? 0.9 : 0.5;
   }
 
   function linkTransparencyFloor(): number {
-    return options.forcedColors || sparseScene ? 1 : readableScene ? 0.35 : 0.03;
+    return options.forcedColors ? 1 : sparseScene ? 0.65 : readableScene ? 0.35 : 0.03;
   }
 
   function keepOverviewContext(): boolean {
@@ -399,6 +399,8 @@ export function createWorkspaceCosmosAdapter(
     simulationLinkDistRandomVariationRange: [1, 1],
     simulationCluster: 0,
     linkDefaultWidth: linkWidth(),
+    hoveredLinkWidthIncrease: 0.6,
+    focusedLinkWidthIncrease: 0.6,
     linkDashLength: 7,
     linkDashGap: 4,
     // Native shaders emit straight RGB with faded alpha; source-over blending
@@ -1083,7 +1085,7 @@ export function createWorkspaceCosmosAdapter(
       linkVisibilityDistanceRange: [near * scale, far * scale],
       // Native's fixed-size shader still grows at k>100. Preserve canonical
       // CSS bodies when a smaller native space needs a larger SDK zoom.
-      pointSizeScale: Math.min(4, Math.sqrt(scale))
+      pointSizeScale: Math.min(4, Math.max(1, Math.sqrt(scale)))
         * Math.min(5, Math.max(1, zoom * .01))
         / Math.min(5, Math.max(1, nativeSpace.toNativeZoom(zoom) * .01)),
     });
@@ -1430,8 +1432,12 @@ export function createWorkspaceCosmosAdapter(
       pointGreyoutColor: searchPoints !== null || keepOverviewContext() ? tokens.node.folder : undefined,
       pointGreyoutOpacity: keepOverviewContext() && star ? 0.3
         : searchPoints !== null ? 0.55 : keepOverviewContext() ? 0.3 : undefined,
-      linkGreyoutOpacity: hoveredIndex !== null ? 0 : keepOverviewContext() ? 0.08 : 0.1,
-      linkVisibilityMinTransparency: keepOverviewContext() && star && !options.forcedColors ? .65 : linkTransparencyFloor(),
+      linkGreyoutOpacity: keepOverviewContext() ? 0.08 : 0.1,
+      // Multiply the small-map .45/.4 alphas into .945/.84 for the active
+      // star. Config-only emphasis preserves any native position transition.
+      linkOpacity: star && !keepOverviewContext() && !options.forcedColors ? 2.1 : 1,
+      linkVisibilityMinTransparency: star && !options.forcedColors
+        ? keepOverviewContext() ? .9 : 1 : linkTransparencyFloor(),
     });
     if (keepOverviewContext() && !options.forcedColors) {
       const communities = appliedCommunity?.identityKey === workspaceMapCommunityIdentityKey(columns)

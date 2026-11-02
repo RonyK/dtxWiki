@@ -1123,13 +1123,16 @@ async function downloadVisibleMap(page: Page): Promise<WorkspaceMapExport> {
 }
 
 function waitForOverview(page: Page, budget: { documents: number; relations: number }, workspaceId?: string) {
+  // A cold 10K projection can outlast the global 15s action timeout. Match the
+  // dense/motion lane's bounded loading allowance; this is functional coverage,
+  // not an API latency assertion. Keep the exact request/budget predicate.
   return page.waitForResponse((response) => {
     if (!response.url().includes(OVERVIEW_PATH) || response.request().method() !== "POST") return false;
     if (workspaceId && new URL(response.url()).pathname !== `/api/v1/workspaces/${workspaceId}${OVERVIEW_PATH}`) return false;
     const request = response.request().postDataJSON() as WorkspaceGraphOverviewRequest;
     return request.lens === "combined" && !request.expansion
       && request.budget.documents === budget.documents && request.budget.relations === budget.relations;
-  });
+  }, { timeout: 60_000 });
 }
 
 function expectOverviewRequest(request: Request, workspaceId: string, budget: { documents: number; relations: number }) {

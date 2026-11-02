@@ -512,10 +512,10 @@ test("native 2k hover names its direct neighbors without moving the graph", asyn
   expect(hoverCandidates).toContain(target.id);
   expect(before.highlightedLinks).toEqual([]);
   // Native renderer state must contain exactly the original direct incident
-  // edges. Greyout zero hides every nonincident stroke without deleting or
-  // replacing GPU relation inputs; MouseOut restores the overview config.
+  // edges. Nonincident strokes remain faintly visible as spatial context;
+  // MouseOut restores the overview config without replacing relation inputs.
   expect(hovered.highlightedLinks).toEqual(incidentLinks);
-  expect(hovered.linkGreyoutOpacity).toBe(0);
+  expect(hovered.linkGreyoutOpacity).toBe(.08);
   expect(cleared.highlightedLinks).toEqual(before.highlightedLinks);
   expect(cleared.linkGreyoutOpacity).toBe(before.linkGreyoutOpacity);
   expect(hoverCandidates).toEqual(expect.arrayContaining(neighborIds));
@@ -762,7 +762,7 @@ test("2k Map touch targets, zoom direction/growth, full focused title and backgr
   });
   const out = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
   expect(out.viewport!.zoom).toBeLessThan(fit.viewport!.zoom);
-  expect(out.pointSizeScale).toBeCloseTo(Math.sqrt(1 / 1.2));
+  expect(out.pointSizeScale).toBe(1); // Zooming out retains the minimum visible node diameter.
   await page.evaluate(async () => {
     window.__workspaceMapInteraction!.fit();
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
