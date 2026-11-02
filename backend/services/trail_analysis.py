@@ -165,8 +165,6 @@ def recompute_authority(
 
     if legacy_migration_session(session):
         return recompute_legacy_authority(session, workspace_id, now=now)
-    # The frozen core migration also invokes this function. Select only its
-    # released version columns, since later Workspace settings do not exist yet.
     versions = session.execute(
         select(
             Workspace.edge_projection_version,

@@ -1,7 +1,7 @@
-"""Released reference-based usage semantics for historical migrations.
+"""Preserve v0.1 reference-based usage semantics during migration and downgrade.
 
-This snapshot keeps v0.1 data repair and downgrade independent of runtime
-verb, counter, ranking and projection changes introduced by later releases.
+This migration implementation keeps v0.1 data repair and downgrade independent
+of runtime verb, counter, ranking and projection changes.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from sqlalchemy.engine import Connection
 
 from .co_read_v1 import Read, co_read_pairs
 
-HOT_PATH_MIN_SESSIONS = 5
 ENTITY_KINDS = frozenset(
     {
         "context_page",
@@ -113,8 +112,8 @@ def restore_legacy_usage(
     *,
     now: datetime,
     usage_signals_enabled: bool = True,
-):
-    """Rebuild old decayed edges and authority; return valid Context pair counts."""
+) -> int:
+    """Rebuild v0.1 decayed edges and authority; return the projected edge count."""
     source, edges, workspace, stats = _tables(connection)
     now = _utc(now)
     aggregate = _evidence(connection, source, workspace_id, now)
@@ -194,11 +193,7 @@ def restore_legacy_usage(
             .values(edge_projection_version=workspace.c.edge_projection_version + 1)
         )
     _restore_authority(connection, workspace, edges, stats, workspace_id, now)
-    return {
-        (key[1], key[3]): value[1]
-        for key, value in aggregate.items()
-        if key[0] == key[2] == "context_page"
-    }
+    return len(desired)
 
 
 def _restore_authority(connection, workspace, edges, stats, workspace_id, now):

@@ -1,23 +1,10 @@
-"""Frozen pairing used by the lifetime co-access migration.
+"""Revision-owned co-read pairing independent of runtime extractors.
 
-This revision-owned snapshot must not import the evolving runtime extractor.
-
-Both usage signals that say "these two were read together" -- the co_access
-graph edge and the hot-path lint finding -- pair reads through this one
-function, so the two cannot disagree about what "together" means.
-
-"Together" is a statement about reads adjacent in time, not about a session.
-A session is cut into segments wherever two consecutive reads are more than
-``max_gap`` apart, so a document read at 09:00 and another read at 17:00 are
-never joined. A segment longer than ``max_per_segment`` distinct reads is
-split front to back into sub-segments of that size; nothing is dropped, so
-the first document of a long session pairs just like the last one. Inside a
-sub-segment each read pairs with the next ``window - 1`` reads, which bounds
-a session's pairs linearly in its length instead of quadratically.
-
-The function consumes its input as a stream. It holds one session at a time:
-the open sub-segment, the session's read count per document, and the pairs it
-has already seen in that session. Nothing from an earlier session is kept.
+Read conversations in order, split them at time gaps and the maximum number
+of consecutive-document runs, then pair nearby runs within each segment.
+Each conversation emits a document pair once, retaining its first/last
+observation and each document's total read count. Pairing state is held for
+one conversation at a time as the source stream advances.
 """
 
 from __future__ import annotations
@@ -68,14 +55,6 @@ class _Element:
     entity: EntityRef
     first_at: datetime
     last_at: datetime
-
-
-def max_pairs_per_segment(*, window: int, max_per_segment: int) -> int:
-    """The most pairs one full sub-segment can produce."""
-
-    return sum(
-        min(window - 1, max_per_segment - 1 - index) for index in range(max_per_segment)
-    )
 
 
 def co_read_pairs(

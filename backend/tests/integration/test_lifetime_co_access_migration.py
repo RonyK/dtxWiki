@@ -263,8 +263,12 @@ def test_lifetime_co_access_round_trip_preserves_trace_and_rebuilds_evidence(
                 "id",
             ]
             assert indexes[PAIR_INDEX]["column_names"] == [
-                "workspace_id", "chat_session_id", "resource_kind", "resource_id",
-                "co_access_segment", "co_access_position",
+                "workspace_id",
+                "chat_session_id",
+                "resource_kind",
+                "resource_id",
+                "co_access_segment",
+                "co_access_position",
             ]
             predicate = indexes[VIEW_INDEX]["dialect_options"][f"{dialect}_where"]
             assert "viewed" in str(predicate)
@@ -303,6 +307,32 @@ def test_lifetime_co_access_round_trip_preserves_trace_and_rebuilds_evidence(
                 assert (
                     session.get(Workspace, untouched_id).edge_projection_version
                     == untouched_version
+                )
+                cursor = session.get(McpChatSession, source_session_id).co_access_state
+                assert cursor["version"] == 1 and len(cursor["runs"]) <= 12
+                assert cursor["segment"] == 0
+                positions = session.execute(
+                    select(
+                        McpChatToolCallArtifact.co_access_segment,
+                        McpChatToolCallArtifact.co_access_position,
+                    ).where(McpChatToolCallArtifact.id.in_(viewed_ids))
+                ).all()
+                assert all(
+                    segment is not None and 0 <= position < 12
+                    for segment, position in positions
+                )
+                assert all(
+                    segment is None and position is None
+                    for segment, position in session.execute(
+                        select(
+                            McpChatToolCallArtifact.co_access_segment,
+                            McpChatToolCallArtifact.co_access_position,
+                        ).where(McpChatToolCallArtifact.id.in_(reference_ids))
+                    )
+                )
+                assert (
+                    session.get(Workspace, workspace_id).authority_projection_version
+                    == -1
                 )
                 assert dict(
                     session.execute(
@@ -381,23 +411,6 @@ def test_lifetime_co_access_round_trip_preserves_trace_and_rebuilds_evidence(
 
         command.upgrade(config, REVISION)
         verify_upgrade()
-        with Session(engine) as session:
-            cursor = session.get(McpChatSession, source_session_id).co_access_state
-            assert cursor["version"] == 1 and len(cursor["runs"]) <= 12
-            assert cursor["segment"] == 0
-            positions = session.execute(
-                select(
-                    McpChatToolCallArtifact.co_access_segment,
-                    McpChatToolCallArtifact.co_access_position,
-                ).where(McpChatToolCallArtifact.id.in_(viewed_ids))
-            ).all()
-            assert all(
-                segment is not None and 0 <= position < 12
-                for segment, position in positions
-            )
-            assert (
-                session.get(Workspace, workspace_id).authority_projection_version == -1
-            )
 
         before_downgrade = datetime.now(UTC)
         command.downgrade(config, PARENT)

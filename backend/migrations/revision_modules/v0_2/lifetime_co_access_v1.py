@@ -1,8 +1,8 @@
-"""One-time body-view reclassification and lifetime pair backfill.
+"""One-time body-view reclassification and lifetime pair/cursor backfill.
 
 Every fact comes from persisted per-call provenance. Rollups without that
 provenance remain references; an editing or outline touch never becomes a view.
-This revision owns its pairing snapshot and does not call runtime services.
+This revision owns its pairing implementation independently of runtime services.
 """
 
 from __future__ import annotations
@@ -36,6 +36,17 @@ per_call = sa.table(
     sa.column("verb", sa.Text()),
     sa.column("occurred_at", sa.DateTime(timezone=True)),
 )
+cursor_per_call = sa.table(
+    "mcp_chat_tool_call_artifact",
+    sa.column("id", sa.Uuid()),
+    sa.column("co_access_segment", sa.Integer()),
+    sa.column("co_access_position", sa.Integer()),
+)
+chat_session = sa.table(
+    "mcp_chat_session",
+    sa.column("id", sa.Uuid()),
+    sa.column("co_access_state", sa.JSON()),
+)
 rollup = sa.table(
     "mcp_chat_artifact_link",
     sa.column("id", sa.Uuid()),
@@ -57,6 +68,7 @@ workspace = sa.table(
     sa.column("id", sa.Uuid()),
     sa.column("usage_relation_signals_enabled", sa.Boolean()),
     sa.column("edge_projection_version", sa.Integer()),
+    sa.column("authority_projection_version", sa.Integer()),
 )
 pair_table = sa.table(
     "co_access_pair",
@@ -93,10 +105,14 @@ edges = sa.table(
 def upgrade(connection: Connection) -> None:
     _move_body_views(connection)
     _backfill_pairs(connection)
+    # Stored authority must be recalculated with bounded lifetime weights.
+    connection.execute(workspace.update().values(authority_projection_version=-1))
 
 
 def downgrade(connection: Connection) -> None:
     """Restore reference traces and the old rolling, decayed projection."""
+    # Invalidate before legacy restore even when its edge rows compare equal.
+    connection.execute(workspace.update().values(authority_projection_version=-1))
     groups = list(
         connection.execute(
             sa.select(rollup).where(rollup.c.verb == "viewed")
@@ -154,17 +170,9 @@ def downgrade(connection: Connection) -> None:
         )
 
 
-def _identity(table, key):
+def _focused_reads(verb):
+    """Shared eligibility for reclassification and source replay."""
     return (
-        table.c.workspace_id == key[0],
-        table.c.chat_session_id == key[1],
-        table.c.resource_kind == key[2],
-        table.c.resource_id == key[3],
-    )
-
-
-def _move_body_views(connection: Connection) -> None:
-    eligible = (
         sa.select(per_call)
         .select_from(
             per_call.join(
@@ -176,33 +184,35 @@ def _move_body_views(connection: Connection) -> None:
             )
         )
         .where(
-            per_call.c.verb == "referenced",
+            per_call.c.verb == verb,
+            per_call.c.resource_kind.in_(DOCUMENT_KINDS),
             tool_call.c.tool_name.in_(FOCUSED_READ_TOOLS),
             tool_call.c.result_status == "succeeded",
         )
     )
+
+
+def _move_body_views(connection: Connection) -> None:
+    eligible = _focused_reads("referenced")
     grouped = {}
-    for row in connection.execute(
-        eligible.execution_options(yield_per=5_000)
-    ).mappings():
-        key = (
-            row["workspace_id"],
-            row["chat_session_id"],
-            row["resource_kind"],
-            row["resource_id"],
-        )
-        group = grouped.setdefault(
-            key,
-            {
-                "count": 0,
-                "first": row["occurred_at"],
-                "last": dict(row),
-            },
-        )
-        group["count"] += 1
-        group["first"] = min(group["first"], row["occurred_at"])
-        if _read_order(row) > _read_order(group["last"]):
-            group["last"] = dict(row)
+    source = connection.execute(eligible.execution_options(yield_per=5_000)).mappings()
+    try:
+        for row in source:
+            key = _key(row)
+            group = grouped.setdefault(
+                key,
+                {
+                    "count": 0,
+                    "first": row["occurred_at"],
+                    "last": dict(row),
+                },
+            )
+            group["count"] += 1
+            group["first"] = min(group["first"], row["occurred_at"])
+            if _read_order(row) > _read_order(group["last"]):
+                group["last"] = dict(row)
+    finally:
+        source.close()
     if not grouped:
         return
 
@@ -391,18 +401,80 @@ def _rollup_order(row):
     return row["last_occurred_at"], row["last_mcp_tool_call_id"]
 
 
+def _utc(value):
+    if value is None:
+        return None
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _annotated_reads(connection, source):
+    """Persist bounded cursors while streaming the same reads into pair counts."""
+    session_id = None
+    state = None
+    previous_at = None
+    positions, cursors = [], []
+    for row in source:
+        at = _utc(row["occurred_at"])
+        if row["chat_session_id"] != session_id:
+            if state is not None:
+                cursors.append((session_id, {"co_access_state": state}))
+            session_id = row["chat_session_id"]
+            state = {"version": 1, "segment": 0, "last_key": None, "runs": []}
+            previous_at = None
+        runs = state["runs"]
+        entity = [row["resource_kind"], str(row["resource_id"])]
+        if previous_at is not None and at - previous_at > timedelta(minutes=30):
+            state["segment"] += 1
+            runs = state["runs"] = []
+        if runs and runs[-1][:2] == entity:
+            runs[-1][3] = at.isoformat()
+        else:
+            if len(runs) == 12:
+                state["segment"] += 1
+                runs = state["runs"] = []
+            runs.append([*entity, at.isoformat(), at.isoformat()])
+        state["last_key"] = [
+            at.isoformat(),
+            str(row["mcp_tool_call_id"]),
+            str(row["id"]),
+        ]
+        positions.append(
+            (
+                row["id"],
+                {
+                    "co_access_segment": state["segment"],
+                    "co_access_position": len(runs) - 1,
+                },
+            )
+        )
+        previous_at = at
+        if len(positions) >= 1000:
+            _update_rows(connection, cursor_per_call, positions)
+            positions = []
+        if len(cursors) >= 500:
+            _update_rows(connection, chat_session, cursors)
+            cursors = []
+        yield Read(
+            session_id,
+            (row["resource_kind"], row["resource_id"]),
+            at,
+            row["mcp_tool_call_id"],
+            row["id"],
+        )
+    if state is not None:
+        cursors.append((session_id, {"co_access_state": state}))
+    _update_rows(connection, cursor_per_call, positions)
+    _update_rows(connection, chat_session, cursors)
+
+
 def _backfill_pairs(connection: Connection) -> None:
     now = datetime.now(UTC)
     for workspace_id, enabled in connection.execute(
         sa.select(workspace.c.id, workspace.c.usage_relation_signals_enabled)
     ):
         source = connection.execute(
-            sa.select(per_call)
-            .where(
-                per_call.c.workspace_id == workspace_id,
-                per_call.c.verb == "viewed",
-                per_call.c.resource_kind.in_(DOCUMENT_KINDS),
-            )
+            _focused_reads("viewed")
+            .where(per_call.c.workspace_id == workspace_id)
             .order_by(
                 per_call.c.chat_session_id,
                 per_call.c.occurred_at,
@@ -411,27 +483,23 @@ def _backfill_pairs(connection: Connection) -> None:
             )
             .execution_options(yield_per=5_000)
         ).mappings()
-        reads = (
-            Read(
-                row["chat_session_id"],
-                (row["resource_kind"], row["resource_id"]),
-                row["occurred_at"],
-                row["mcp_tool_call_id"],
-                row["id"],
-            )
-            for row in source
-        )
         aggregate = {}
-        for pair in co_read_pairs(
-            reads, max_gap=timedelta(minutes=30), window=5, max_per_segment=12
-        ):
-            key = (*pair.left, *pair.right)
-            value = aggregate.setdefault(
-                key, [0, pair.first_pair_at, pair.last_pair_at]
-            )
-            value[0] += 1
-            value[1] = min(value[1], pair.first_pair_at)
-            value[2] = max(value[2], pair.last_pair_at)
+        try:
+            for pair in co_read_pairs(
+                _annotated_reads(connection, source),
+                max_gap=timedelta(minutes=30),
+                window=5,
+                max_per_segment=12,
+            ):
+                key = (*pair.left, *pair.right)
+                value = aggregate.setdefault(
+                    key, [0, pair.first_pair_at, pair.last_pair_at]
+                )
+                value[0] += 1
+                value[1] = min(value[1], pair.first_pair_at)
+                value[2] = max(value[2], pair.last_pair_at)
+        finally:
+            source.close()
         rows = (
             dict(
                 id=uuid4(),
@@ -469,8 +537,8 @@ def _backfill_pairs(connection: Connection) -> None:
             ): (
                 row["weight"],
                 row["support_session_count"],
-                row["first_observed_at"],
-                row["occurred_at"],
+                _utc(row["first_observed_at"]),
+                _utc(row["occurred_at"]),
                 row["provenance"],
                 row["source_ref"],
             )

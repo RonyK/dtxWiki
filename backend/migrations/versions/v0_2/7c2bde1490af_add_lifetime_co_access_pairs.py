@@ -12,10 +12,7 @@ the visible graph continues to admit only pairs supported by two or more.
 import sqlalchemy as sa
 from alembic import op
 
-from backend.migrations.revision_modules.v0_2 import (
-    bounded_co_access_v1,
-    lifetime_co_access_v1,
-)
+from backend.migrations.revision_modules.v0_2 import lifetime_co_access_v1
 
 revision = "7c2bde1490af"
 down_revision = "1d8f1c08ca36"
@@ -75,7 +72,6 @@ def upgrade() -> None:
         sqlite_where=sa.text("verb = 'viewed'"),
         postgresql_where=sa.text("verb = 'viewed'"),
     )
-    lifetime_co_access_v1.upgrade(op.get_bind())
     op.add_column(
         "mcp_chat_session", sa.Column("co_access_state", sa.JSON(), nullable=True)
     )
@@ -87,8 +83,9 @@ def upgrade() -> None:
         "mcp_chat_tool_call_artifact",
         sa.Column("co_access_position", sa.Integer(), nullable=True),
     )
-    # Backfill before creating the index to avoid per-row index rewrites.
-    bounded_co_access_v1.upgrade(op.get_bind())
+    # Replay each workspace's views once for pair counts and cursor positions.
+    # Build the position index afterwards to avoid per-row index rewrites.
+    lifetime_co_access_v1.upgrade(op.get_bind())
     op.create_index(
         VIEWED_PAIR_INDEX,
         "mcp_chat_tool_call_artifact",
@@ -106,11 +103,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bounded_co_access_v1.downgrade(op.get_bind())
+    lifetime_co_access_v1.downgrade(op.get_bind())
     op.drop_index(VIEWED_PAIR_INDEX, table_name="mcp_chat_tool_call_artifact")
     op.drop_column("mcp_chat_tool_call_artifact", "co_access_position")
     op.drop_column("mcp_chat_tool_call_artifact", "co_access_segment")
     op.drop_column("mcp_chat_session", "co_access_state")
-    lifetime_co_access_v1.downgrade(op.get_bind())
     op.drop_index(VIEWED_SESSION_INDEX, table_name="mcp_chat_tool_call_artifact")
     op.drop_table("co_access_pair")

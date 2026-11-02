@@ -164,10 +164,8 @@ def co_read_source(session: Session, workspace_id: UUID, **filters) -> Iterator[
     return source(session, workspace_id, **filters)
 
 
-def _co_access_rows(
-    session: Session, workspace_id: UUID, *, now: datetime | None = None
-):
-    """Compatibility seam for rebuilds and released migration callers."""
+def _co_access_rows(session: Session, workspace_id: UUID):
+    """Delegate rebuilds to the current co-access row producer."""
     from backend.services.co_access import co_access_projection_rows
 
     return co_access_projection_rows(session, workspace_id)
@@ -1252,17 +1250,8 @@ def refresh_co_access_edge_projection(
     )
 
     if legacy_migration_session(session):
-        restore_legacy_usage(
+        return restore_legacy_usage(
             session.connection(), workspace_id, now=now or datetime.now(UTC)
-        )
-        from backend.repositories.workspace_scoped import select_in_workspace
-
-        return session.scalar(
-            select_in_workspace(
-                EdgeProjection,
-                workspace_id=workspace_id,
-                conditions=(EdgeProjection.edge_kind == "co_access",),
-            ).with_only_columns(func.count())
         )
     from backend.services.co_access import sync_co_access_projection
 

@@ -346,12 +346,15 @@ def test_core_schema_upgrade_reclassifies_rows_from_the_initial_release(
                 )
                 == "open"
             )
-            assert connection.execute(
-                text(
-                    "SELECT edge_projection_version, authority_projection_version "
-                    "FROM workspace"
-                )
-            ).one() == expected_versions
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT edge_projection_version, authority_projection_version "
+                        "FROM workspace"
+                    )
+                ).one()
+                == expected_versions
+            )
 
     command.upgrade(config, "efcbcf724889")
     assert_reclassified("efcbcf724889", (1, 1))
@@ -359,25 +362,22 @@ def test_core_schema_upgrade_reclassifies_rows_from_the_initial_release(
     # The released core projection can insert and refresh without the graph
     # columns. Isolate storage compatibility from the independently tested
     # co-read source.
-    rows = [
-        {
-            "workspace_id": workspace_id,
-            "source_kind": "context_page",
-            "source_id": uuid4(),
-            "target_kind": "context_page",
-            "target_id": uuid4(),
-            "edge_kind": "co_access",
-            "provenance": "usage",
-            "weight": 2.0,
-            "occurred_at": NOW,
-            "source_ref": {"table": "mcp_chat_tool_call_artifact"},
-            "support_session_count": 2,
-            "first_observed_at": NOW - timedelta(days=1),
-        }
-    ]
+    row = {
+        "workspace_id": workspace_id,
+        "source_kind": "context_page",
+        "source_id": uuid4(),
+        "target_kind": "context_page",
+        "target_id": uuid4(),
+        "edge_kind": "co_access",
+        "provenance": "usage",
+        "weight": 2.0,
+        "occurred_at": NOW,
+        "source_ref": {"table": "mcp_chat_tool_call_artifact"},
+        "support_session_count": 2,
+        "first_observed_at": NOW - timedelta(days=1),
+    }
     from backend.migrations.revision_modules.v0_2 import legacy_usage_v1
 
-    row = rows[0]
     with monkeypatch.context() as co_access, engine.connect() as connection:
         co_access.setattr(
             legacy_usage_v1,
@@ -431,9 +431,7 @@ def test_core_schema_upgrade_reclassifies_rows_from_the_initial_release(
         connection.rollback()
 
     command.upgrade(config, "head")
-    assert_reclassified(
-        ScriptDirectory.from_config(config).get_current_head(), (2, -1)
-    )
+    assert_reclassified(ScriptDirectory.from_config(config).get_current_head(), (2, -1))
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT COUNT(*) FROM graph_observation")) == 0
     engine.dispose()

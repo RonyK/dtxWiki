@@ -703,7 +703,7 @@ def test_co_access_does_not_depend_on_the_fetch_batch(session_factory, monkeypat
                     round(float(row["weight"]), 9),
                     row["occurred_at"],
                 )
-                for row in edge_registry._co_access_rows(session, workspace_id, now=now)
+                for row in edge_registry._co_access_rows(session, workspace_id)
             )
 
     assert results[1]
