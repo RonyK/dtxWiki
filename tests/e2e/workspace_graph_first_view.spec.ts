@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { login } from "./auth";
+import { login, enableKnowledgeMapLab } from "./auth";
 import { isResizeObserverDeferralReport } from "./fixtures";
 
 test.describe("Knowledge Map compact first viewport with real 2k data", () => {
@@ -22,6 +22,7 @@ test.describe("Knowledge Map compact first viewport with real 2k data", () => {
       await page.emulateMedia({ reducedMotion: "reduce" });
       expect((await page.request.get("/health/ready")).ok()).toBe(true);
       await login(page.request, "e2e-graph-2k-owner@example.com");
+      await enableKnowledgeMapLab(page);
       await page.addInitScript((nextLanguage) => localStorage.setItem("dtxwiki.uiLanguage", nextLanguage), language);
       await page.goto("/graph");
       const list = page.getByTestId("workspace-graph-node-list");

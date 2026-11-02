@@ -1,6 +1,6 @@
 import { expect, test, type Locator } from "@playwright/test";
 
-import { currentWorkspace, login } from "./auth";
+import { currentWorkspace, login, enableKnowledgeMapLab } from "./auth";
 
 const GRAPH_OWNER_EMAIL = "e2e-graph-owner@example.com";
 
@@ -39,6 +39,7 @@ for (const width of [1440, 1025]) {
   }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     await login(page.request, GRAPH_OWNER_EMAIL);
+    await enableKnowledgeMapLab(page);
     const workspace = await currentWorkspace(page.request);
     await page.goto("/graph");
 
@@ -73,6 +74,7 @@ test("Knowledge Map item stays inside the mobile navigation drawer", async ({
 }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page.request, GRAPH_OWNER_EMAIL);
+  await enableKnowledgeMapLab(page);
   const workspace = await currentWorkspace(page.request);
   await page.goto("/graph");
   await page.getByRole("button", { name: "Open navigation" }).click();

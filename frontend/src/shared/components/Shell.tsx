@@ -456,7 +456,7 @@ export function Shell({ children }: ShellProps) {
     invalidateWorkspaceGraphCapability();
   }, [signedInUserId]);
   const workspaceGraph = useWorkspaceGraphCapability(
-    isAuthenticated ? workspaceContext?.selectedId : null,
+    isAuthenticated && labsPreferences.knowledgeMap ? workspaceContext?.selectedId : null,
   );
   const canWriteSelectedWorkspace = isEditorRole(selectedRole);
   // /chats is editor-gated end to end (backend + RequireEditor). Keep this
@@ -470,7 +470,7 @@ export function Shell({ children }: ShellProps) {
     language: nextLocaleLabel,
   });
   const navGroups = useMemo(() => {
-    const groups = navGroupsForLabels(shellLabels, workspaceGraph.enabled);
+    const groups = navGroupsForLabels(shellLabels, labsPreferences.knowledgeMap && workspaceGraph.enabled);
     return groups.map((group) => ({
       ...group,
       items: group.items.filter((item) =>
@@ -493,6 +493,7 @@ export function Shell({ children }: ShellProps) {
     navigationWorkspaceId,
     labsPreferences.agent,
     labsPreferences.ask,
+    labsPreferences.knowledgeMap,
     shellLabels,
     workspaceGraph.enabled,
   ]);

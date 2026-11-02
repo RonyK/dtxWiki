@@ -2,19 +2,24 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { WorkspaceGraphCapabilityState } from "../useWorkspaceGraphCapability";
+import { useWorkspaceGraphCapability, type WorkspaceGraphCapabilityState } from "../useWorkspaceGraphCapability";
 import { WorkspaceGraphGate } from "../WorkspaceGraphGate";
 
-const { capabilityState } = vi.hoisted(() => ({
+const { capabilityState, labs } = vi.hoisted(() => ({
   capabilityState: { current: null as unknown as WorkspaceGraphCapabilityState },
+  labs: { knowledgeMap: true },
 }));
 
+vi.mock("../../../shared/hooks/useLabsPreferences", () => ({
+  useLabsPreferences: () => ({ preferences: labs }),
+}));
 vi.mock("../useWorkspaceGraphCapability", () => ({
   invalidateWorkspaceGraphCapability: vi.fn(),
-  useWorkspaceGraphCapability: () => capabilityState.current,
+  useWorkspaceGraphCapability: vi.fn(() => capabilityState.current),
 }));
 vi.mock("../../../shared/workspace/WorkspaceContext", () => ({
   useWorkspaceContext: () => ({ selectedId: "11111111-1111-4111-8111-111111111111" }),
+  useOptionalWorkspaceContext: () => null,
 }));
 
 function ready(
@@ -38,18 +43,43 @@ function ready(
 }
 
 function renderGate() {
-  return render(
+  return render(gateElement());
+}
+
+function gateElement() {
+  return (
     <MemoryRouter>
       <WorkspaceGraphGate>
         <div data-testid="knowledge-map-screen" />
       </WorkspaceGraphGate>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
 describe("WorkspaceGraphGate", () => {
   beforeEach(() => {
+    labs.knowledgeMap = true;
     capabilityState.current = { status: "loading", capability: null, enabled: false };
+  });
+
+  it("blocks direct URLs without Labs opt-in and unmounts the map when opted out", () => {
+    capabilityState.current = ready("enabled", true);
+    labs.knowledgeMap = false;
+    const view = renderGate();
+
+    expect(screen.queryByTestId("knowledge-map-screen")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("We couldn't find that page");
+    expect(useWorkspaceGraphCapability).toHaveBeenLastCalledWith(null);
+
+    labs.knowledgeMap = true;
+    view.rerender(gateElement());
+    expect(screen.getByTestId("knowledge-map-screen")).toBeInTheDocument();
+    expect(useWorkspaceGraphCapability).toHaveBeenLastCalledWith("11111111-1111-4111-8111-111111111111");
+
+    labs.knowledgeMap = false;
+    view.rerender(gateElement());
+    expect(screen.queryByTestId("knowledge-map-screen")).not.toBeInTheDocument();
+    expect(useWorkspaceGraphCapability).toHaveBeenLastCalledWith(null);
   });
 
   it("does not mount the map while the switch is unknown", () => {

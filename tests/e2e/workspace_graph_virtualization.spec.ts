@@ -1,6 +1,6 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
-import { login } from "./auth";
+import { login, enableKnowledgeMapLab } from "./auth";
 import { isResizeObserverDeferralReport } from "./fixtures";
 
 const GRAPH_OWNER_EMAIL = "e2e-graph-owner@example.com";
@@ -22,6 +22,7 @@ test.describe("Workspace Map synthetic 2k list", () => {
       test.setTimeout(120_000);
       await page.emulateMedia({ reducedMotion: "no-preference" });
       await login(page.request, GRAPH_OWNER_EMAIL);
+      await enableKnowledgeMapLab(page);
       const diagnostics = watchBrowserDiagnostics(page);
       const requests = await interceptOverview(page);
 
@@ -194,6 +195,7 @@ test.describe("Workspace Map synthetic 2k list", () => {
       test.setTimeout(90_000);
       await page.emulateMedia({ reducedMotion: "reduce" });
       await login(page.request, GRAPH_OWNER_EMAIL);
+      await enableKnowledgeMapLab(page);
       const diagnostics = watchBrowserDiagnostics(page);
       const requests = await interceptOverview(page);
 

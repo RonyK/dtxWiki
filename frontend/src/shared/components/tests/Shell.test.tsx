@@ -177,9 +177,20 @@ describe("Shell", () => {
     expect(within(sidebar).getByText("Chats").closest("a")?.querySelector(".nav-preview-badge")).toBeNull();
     const agentToggle = await screen.findByRole("button", { name: "Toggle Agent menu" });
     const askToggle = screen.getByRole("button", { name: "Toggle Ask menu" });
+    const graphToggle = screen.getByRole("button", { name: "Toggle Knowledge Map menu" });
     await waitFor(() => expect(agentToggle).toBeEnabled());
     expect(within(sidebar).queryByText("Agent")).not.toBeInTheDocument();
     expect(within(sidebar).queryByText("Ask")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByText("Knowledge Map")).not.toBeInTheDocument();
+
+    await user.click(graphToggle);
+    expect((await within(sidebar).findByText("Knowledge Map")).closest("a")).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/graph");
+    await user.click(screen.getByRole("combobox", { name: "Search workspace" }));
+    expect(screen.getByRole("option", { name: "Knowledge MapKnowledge" })).toBeInTheDocument();
+    await user.click(graphToggle);
+    await user.click(screen.getByRole("combobox", { name: "Search workspace" }));
+    expect(within(sidebar).queryByText("Knowledge Map")).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Knowledge MapKnowledge" })).not.toBeInTheDocument();
 
     await user.click(agentToggle);
     expect(within(sidebar).getByText("Agent").closest("a")).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/agent");
@@ -2056,6 +2067,9 @@ function LabsControlsProbe() {
       <button disabled={!ready} onClick={() => setMenuVisible("ask", !preferences.ask)}>
         Toggle Ask menu
       </button>
+      <button disabled={!ready} onClick={() => setMenuVisible("knowledgeMap", !preferences.knowledgeMap)}>
+        Toggle Knowledge Map menu
+      </button>
     </>
   );
 }
@@ -2105,6 +2119,13 @@ function mockSession(
     }
     if (url === `${BASE}/api/v1/auth/capabilities`) {
       return jsonResponse({ data: capabilities });
+    }
+    if (url.endsWith("/graph/capability")) {
+      return jsonResponse({ data: {
+        workspace_map: { effective_enabled: true, workspace_enabled: true, service_available: true, reason: "enabled" },
+        usage_relation_signals_enabled: true,
+        can_manage: true,
+      } });
     }
     if (url === `${BASE}/api/v1/workspaces` && init?.method === "POST") {
       const inputBody =

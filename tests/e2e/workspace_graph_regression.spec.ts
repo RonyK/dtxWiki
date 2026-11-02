@@ -1,6 +1,6 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
-import { currentWorkspace, login, signUp } from "./auth";
+import { currentWorkspace, login, signUp, enableKnowledgeMapLab } from "./auth";
 import { isResizeObserverDeferralReport } from "./fixtures";
 
 const GRAPH_OWNER_EMAIL = "e2e-graph-owner@example.com";
@@ -44,6 +44,7 @@ test.describe("Workspace Knowledge Map real-route regression", () => {
       const diagnostics = watchBrowserDiagnostics(page);
       await page.emulateMedia({ reducedMotion: "reduce" });
       await login(page.request, GRAPH_OWNER_EMAIL);
+      await enableKnowledgeMapLab(page);
 
       const initialScene = await openKnowledgeMap(page);
       expectKnowledgeRelations(initialScene, "combined");
@@ -164,6 +165,7 @@ test.describe("Workspace Knowledge Map real-route regression", () => {
         page.request,
         `graph-off-${testInfo.project.name}-${testInfo.retry}-${Date.now()}@example.com`,
       );
+      await enableKnowledgeMapLab(page);
       const workspace = await currentWorkspace(page.request);
       const sceneQueries: string[] = [];
       page.on("request", (request) => {
@@ -196,6 +198,7 @@ test.describe("Workspace Knowledge Map real-route regression", () => {
       const diagnostics = watchBrowserDiagnostics(page);
       await page.emulateMedia({ reducedMotion: "reduce" });
       await login(page.request, GRAPH_OWNER_EMAIL);
+      await enableKnowledgeMapLab(page);
 
       const initialScene = await openKnowledgeMap(page);
       expectKnowledgeRelations(initialScene, "combined");
@@ -287,6 +290,7 @@ test.describe("Knowledge Map unified Refine workflow", () => {
         });
         await page.emulateMedia({ reducedMotion: "reduce" });
         await login(page.request, GRAPH_OWNER_EMAIL);
+        await enableKnowledgeMapLab(page);
         await openKnowledgeMap(page);
         const initialRequests = requests.length;
         const refine = page.getByRole("button", { name: "Refine", exact: true });

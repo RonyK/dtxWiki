@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import type { WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
-import { currentWorkspace, login } from "./auth";
+import { currentWorkspace, login, enableKnowledgeMapLab } from "./auth";
 import { createOverviewResponseReader, type OverviewResponseReader } from "./workspace_graph_response_reader";
 import { movedPointCount, readWorkspacePointFrameOnPage, visibleOrdinaryTitleCountOnPage } from "./workspace_graph_point_frame";
 import { captureNativeLongCalls, expectNativeCounts, installNativeDrawMeter, readNativeDraw, readNativeDrawDiagnostics } from "./workspace_graph_native_draw";
@@ -305,6 +305,7 @@ async function waitOverview(page: Page, documents: number): Promise<WorkspaceGra
 
 async function openPc10k(page: Page, email: string, relations: number, before10k?: () => Promise<void>) {
   await login(page.request, email);
+  await enableKnowledgeMapLab(page);
   const workspace = await currentWorkspace(page.request);
   // Keep the existing 64MiB representative bound. Only this known maximum
   // 100K-relations fixture opts into a bounded 192MiB original-body buffer.

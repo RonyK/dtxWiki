@@ -37,6 +37,7 @@ import {
 import { NotFoundScreen } from "../errors/NotFoundScreen";
 import { GraphView } from "../graph/GraphView";
 import { useWorkspaceGraphCapability } from "../graph/useWorkspaceGraphCapability";
+import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
 import { MarkdownView } from "../pages/MarkdownView";
 import { PagePublicShareControl } from "../pages/PagePublicShareControl";
 import { ContextReconciliationWorkbench } from "./ContextReconciliationWorkbench";
@@ -2196,7 +2197,8 @@ function ContextReader({
 }) {
   const { t } = useTranslation("context");
   const { t: tShell } = useTranslation("shell");
-  const workspaceGraph = useWorkspaceGraphCapability(workspaceId);
+  const { preferences: labsPreferences } = useLabsPreferences();
+  const workspaceGraph = useWorkspaceGraphCapability(labsPreferences.knowledgeMap ? workspaceId : null);
   const workspaceContext = useOptionalWorkspaceContext();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
@@ -3246,7 +3248,7 @@ function ContextReader({
               payload={graph}
               workspaceId={workspaceId}
               workspaceGraphHref={
-                workspaceGraph.enabled
+                labsPreferences.knowledgeMap && workspaceGraph.enabled
                   ? (graphNode) => {
                       // The Workspace Knowledge Map is published-head only.
                       // For the current Context page we have authoritative

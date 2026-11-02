@@ -6,24 +6,33 @@ import { useWorkspaceRoute, workspacePath } from "../../shared/lib/workspaceRout
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { useWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
+import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
+import { NotFoundScreen } from "../errors/NotFoundScreen";
 import {
   invalidateWorkspaceGraphCapability,
   useWorkspaceGraphCapability,
 } from "./useWorkspaceGraphCapability";
 
 /**
- * Render the Knowledge Map only where this workspace has it switched on.
+ * Render the Knowledge Map only after Labs opt-in and workspace activation.
  *
- * The route is always registered so a shared /graph link explains itself
- * instead of 404ing. Until the server answers, and whenever the map is off,
- * the children (the lazily loaded canvas and its scene query) never mount.
+ * Without Labs opt-in, use the same unavailable surface as other experiments.
+ * Once opted in, a shared /graph link explains the workspace's availability.
+ * Until both switches are on, the canvas and its scene query never mount.
  */
 export function WorkspaceGraphGate({ children }: { children: ReactNode }) {
   const { t } = useTranslation("graph");
   const { selectedId: ambientWorkspaceId } = useWorkspaceContext();
   const route = useWorkspaceRoute();
   const selectedId = route?.workspaceId ?? ambientWorkspaceId;
-  const { status, capability, enabled } = useWorkspaceGraphCapability(selectedId);
+  const { preferences } = useLabsPreferences();
+  const { status, capability, enabled } = useWorkspaceGraphCapability(
+    preferences.knowledgeMap ? selectedId : null,
+  );
+
+  if (!preferences.knowledgeMap) {
+    return <NotFoundScreen />;
+  }
 
   if (enabled) {
     return <>{children}</>;

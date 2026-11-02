@@ -1,7 +1,7 @@
 import { expect, test, type Page, type Response, type TestInfo } from "@playwright/test";
 
 import type { WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
-import { login } from "./auth";
+import { login, enableKnowledgeMapLab } from "./auth";
 import { isResizeObserverDeferralReport } from "./fixtures";
 
 const OWNER_EMAIL = "e2e-graph-refine-owner@example.com";
@@ -13,6 +13,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await page.setViewportSize(viewport);
     await page.emulateMedia({ reducedMotion: "reduce" });
     await login(page.request, OWNER_EMAIL);
+    await enableKnowledgeMapLab(page);
     const errors: string[] = [];
     const failedReads: number[] = [];
     const posts: unknown[] = [];

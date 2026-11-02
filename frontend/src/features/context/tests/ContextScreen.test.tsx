@@ -47,8 +47,12 @@ const { contextMermaid } = vi.hoisted(() => ({
     }),
   },
 }));
-const { workspaceGraphEnabled } = vi.hoisted(() => ({
+const { workspaceGraphEnabled, labs } = vi.hoisted(() => ({
   workspaceGraphEnabled: { current: false },
+  labs: { knowledgeMap: false },
+}));
+vi.mock("../../../shared/hooks/useLabsPreferences", () => ({
+  useLabsPreferences: () => ({ preferences: labs }),
 }));
 vi.mock(
   "../../../shared/workspace/WorkspaceContext",
@@ -119,6 +123,7 @@ describe("ContextScreen", () => {
     };
     ctxAuth.current = null;
     workspaceGraphEnabled.current = false;
+    labs.knowledgeMap = false;
     setTreeFavoriteActor(null);
   });
 
@@ -2337,7 +2342,7 @@ describe("ContextScreen", () => {
     });
   });
 
-  it("exposes Context-to-Workspace Graph links only when the feature is enabled", async () => {
+  it("exposes Context-to-Workspace Graph links only after Labs opt-in and workspace activation", async () => {
     workspaceGraphEnabled.current = true;
     await renderDecisionLog();
     await userEvent.click(
@@ -2350,7 +2355,13 @@ describe("ContextScreen", () => {
       readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }),
     );
 
-    const graph = await screen.findByTestId("graph-view");
+    let graph = await screen.findByTestId("graph-view");
+    const disabledDetails = await selectGraphNodeDetails(graph, "Decision Log");
+    expect(within(disabledDetails).queryByRole("link", { name: "Show in Knowledge Map" })).not.toBeInTheDocument();
+    labs.knowledgeMap = true;
+    await userEvent.click(readerTabs.getByRole("tab", { name: "View" }));
+    await userEvent.click(readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }));
+    graph = await screen.findByTestId("graph-view");
     for (const [label, focus] of [
       ["Decision Log", PAGE_ID], ["Architecture Notes", SECOND_PAGE_ID], ["Deployment Runbook", "library-1"],
     ]) {
@@ -2363,6 +2374,7 @@ describe("ContextScreen", () => {
 
   it("maps canonical Library version paths to their Library-item Knowledge Map focus", async () => {
     workspaceGraphEnabled.current = true;
+    labs.knowledgeMap = true;
     await renderDecisionLog({ libraryGraphNodeKind: "library_item_version" });
     await userEvent.click(
       screen.getByRole("treeitem", { name: "Decision Log" }),
@@ -2383,6 +2395,7 @@ describe("ContextScreen", () => {
 
   it("does not link an unpublished current Context page to the published-only Knowledge Map", async () => {
     workspaceGraphEnabled.current = true;
+    labs.knowledgeMap = true;
     await renderDecisionLog({ unpublishedSecondPage: true });
     await userEvent.click(
       screen.getByRole("treeitem", { name: "Architecture Notes" }),

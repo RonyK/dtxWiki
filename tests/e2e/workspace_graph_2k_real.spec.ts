@@ -3,7 +3,7 @@ import { writeFile } from "node:fs/promises";
 
 import type { GraphNode, GraphQueryPayload } from "../../frontend/src/shared/api/graph";
 import type { WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
-import { backendBaseUrl, currentWorkspace, login } from "./auth";
+import { backendBaseUrl, currentWorkspace, login, enableKnowledgeMapLab } from "./auth";
 import { isResizeObserverDeferralReport } from "./fixtures";
 
 const GRAPH_2K_OWNER_EMAIL = "e2e-graph-2k-owner@example.com";
@@ -28,6 +28,7 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
     test.setTimeout(180_000);
     await page.emulateMedia({ reducedMotion: "reduce" });
     await login(page.request, GRAPH_2K_OWNER_EMAIL);
+    await enableKnowledgeMapLab(page);
     const diagnostics = watchBrowserDiagnostics(page);
 
     // No page.route() or response fulfillment: the browser reads the corpus
@@ -205,6 +206,7 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
       await page.setViewportSize(viewport);
       await page.emulateMedia({ reducedMotion: "reduce" });
       await login(page.request, GRAPH_2K_OWNER_EMAIL);
+      await enableKnowledgeMapLab(page);
       const diagnostics = watchBrowserDiagnostics(page);
       const failedReads: number[] = [];
       page.on("response", (response) => {
@@ -330,6 +332,7 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
     await page.emulateMedia({ reducedMotion: "reduce", forcedColors: "active" });
     await page.addInitScript(() => localStorage.setItem("dtxwiki.uiLanguage", "ko"));
     await login(page.request, GRAPH_2K_OWNER_EMAIL);
+    await enableKnowledgeMapLab(page);
     const diagnostics = watchBrowserDiagnostics(page);
     const workspace = await currentWorkspace(page.request);
     // Read the same isolated 2K corpus through the production API; this is a
