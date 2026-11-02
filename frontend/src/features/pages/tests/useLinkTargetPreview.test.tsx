@@ -7,6 +7,7 @@ import { LINK_CHECK_IDLE_MS, useLinkTargetPreview } from "../useLinkTargetPrevie
 vi.mock("../../../shared/api/linkTargets", () => ({ previewLinkTargets: vi.fn() }));
 
 const ref = "dtxwiki://index/context/11111111-1111-4111-8111-111111111111";
+const added = "dtxwiki://index/library/22222222-2222-4222-8222-222222222222";
 const opened = { locator: "/p/workspace-1/opened", href: "/p/workspace-1/opened", state: "ok" as const };
 const confirmed = { locator: ref, href: "/p/workspace-1/target", target_page_id: "target", state: "ok" as const };
 const input = {
@@ -57,9 +58,25 @@ describe("useLinkTargetPreview", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(LINK_CHECK_IDLE_MS); });
     expect(result.current.targets).toBe(stable);
     expect(previewLinkTargets).toHaveBeenCalledTimes(1);
+
+    // A new source version abandons a pending check, whose pins belonged to
+    // the old version, and asks again; confirmed links stay without flicker.
+    const withAdded = { ...input, body: `${input.body} [Added](${added})` };
+    rerender(withAdded);
+    act(() => result.current.reportLinks([opened.locator, ref, added]));
+    await act(async () => { await vi.advanceTimersByTimeAsync(LINK_CHECK_IDLE_MS); });
+    const [, oldVersionRequest, oldVersionSignal] = vi.mocked(previewLinkTargets).mock.calls[1];
+    rerender({ ...withAdded, sourceVersionId: "version-2" });
+    expect(oldVersionSignal?.aborted).toBe(true);
+    await act(async () => pending[1](answer(oldVersionRequest, [{ locator: added, href: "/old-pin", state: "ok" }])));
+    expect(result.current.targets).toBe(stable);
+    await act(async () => { await vi.advanceTimersByTimeAsync(LINK_CHECK_IDLE_MS); });
+    expect(vi.mocked(previewLinkTargets).mock.calls[2][1]).toMatchObject({
+      body_md: `[x](${added})`, source_version_id: "version-2",
+    });
   });
 
-  it("drops another scope's results and stops checking after a failed request", async () => {
+  it("drops another scope's results and stops checking after failed requests", async () => {
     const pending: Array<{ resolve: (preview: LinkTargetPreview) => void; reject: (error: Error) => void }> = [];
     vi.mocked(previewLinkTargets).mockImplementation(() => new Promise((resolve, reject) => pending.push({ resolve, reject })));
     const { result, rerender } = renderHook(props => useLinkTargetPreview(props), { initialProps: input });
@@ -77,11 +94,21 @@ describe("useLinkTargetPreview", () => {
     expect([...result.current.checking]).toEqual([opened.locator, ref]);
 
     await act(async () => { await vi.advanceTimersByTimeAsync(LINK_CHECK_IDLE_MS); });
-    await act(async () => pending[1].reject(new Error("offline")));
-    expect(result.current.checking.size).toBe(0);
-    // The next edit followed by a pause retries the same links.
-    rerender({ ...other, body: `${other.body}!` });
+    // A disjoint batch starts while the first is pending. When both fail,
+    // no link may keep spinning without a pending check.
+    const edited = { ...other, body: `${other.body} more` };
+    rerender(edited);
+    act(() => result.current.reportLinks([opened.locator, ref, added]));
     await act(async () => { await vi.advanceTimersByTimeAsync(LINK_CHECK_IDLE_MS); });
-    expect(vi.mocked(previewLinkTargets).mock.calls[2][1].body_md).toBe(`[x](${opened.locator})\n[x](${ref})`);
+    expect(vi.mocked(previewLinkTargets).mock.calls[2][1].body_md).toBe(`[x](${added})`);
+    await act(async () => pending[1].reject(new Error("offline")));
+    await act(async () => pending[2].reject(new Error("offline")));
+    expect(result.current.checking.size).toBe(0);
+    // The next edit followed by a pause retries every failed link.
+    rerender({ ...edited, body: `${edited.body}!` });
+    await act(async () => { await vi.advanceTimersByTimeAsync(LINK_CHECK_IDLE_MS); });
+    expect(vi.mocked(previewLinkTargets).mock.calls[3][1].body_md).toBe(
+      `[x](${opened.locator})\n[x](${ref})\n[x](${added})`,
+    );
   });
 });

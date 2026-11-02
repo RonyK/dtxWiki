@@ -5403,7 +5403,7 @@ export function PageEditor({
                 body={body}
                 checkingLinkLocators={previewLinks.checking}
                 linkTargets={previewLinks.targets}
-                onInternalLinks={previewLinks.reportLinks}
+                onLinksToCheck={previewLinks.reportLinks}
                 resolveContextMediaAsset={resolveContextMediaAsset}
                 sourceLineNumbers
                 stripLeadingHeading={title}

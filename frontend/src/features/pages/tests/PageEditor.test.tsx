@@ -4608,7 +4608,11 @@ describe("PageEditor", () => {
 
   it("checks only new split-preview links without sending or replacing the editor buffer", async () => {
     const locator = "dtxwiki://index/context/cccccccc-cccc-4ccc-8ccc-cccccccccccc";
-    const raw = `# Hello\n\n[Preview reference](${locator})  \nNext line`;
+    // The browser classifies this supported legacy route as unknown; only the
+    // server can resolve it to the source workspace's item.
+    const legacy = "/library?target=dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const legacyHref = `/workspaces/${page.workspace_id}/library/items/dddddddd-dddd-4ddd-8ddd-dddddddddddd`;
+    const raw = `# Hello\n\n[Preview reference](${locator})  \n[Legacy item](${legacy})`;
     const fetchMock = mockEditorPage(raw);
     const fetchPage = fetchMock.getMockImplementation()!;
     const requests: unknown[] = [];
@@ -4619,7 +4623,10 @@ describe("PageEditor", () => {
         return jsonResponse({ data: {
           ...request,
           workspace_id: page.workspace_id,
-          link_targets: [{ locator, href: `/p/${page.workspace_id}/cccccccc-cccc-4ccc-8ccc-cccccccccccc`, state: "ok" }],
+          link_targets: [
+            { locator, href: `/p/${page.workspace_id}/cccccccc-cccc-4ccc-8ccc-cccccccccccc`, state: "ok" },
+            { locator: legacy, href: legacyHref, state: "ok" },
+          ],
         } });
       }
       return fetchPage(input, init);
@@ -4632,9 +4639,10 @@ describe("PageEditor", () => {
     expect(await screen.findByRole("link", { name: "Preview reference" }, { timeout: 3000 })).toHaveAttribute(
       "href", `/p/${page.workspace_id}/cccccccc-cccc-4ccc-8ccc-cccccccccccc`,
     );
-    // Only the unconfirmed link is sent, never the document.
+    expect(screen.getByRole("link", { name: "Legacy item" })).toHaveAttribute("href", legacyHref);
+    // Only the unconfirmed links are sent, never the document.
     expect(requests).toEqual([expect.objectContaining({
-      body_md: `[x](${locator})`, source_page_id: page.id, source_version_id: page.version_id,
+      body_md: `[x](${locator})\n[x](${legacy})`, source_page_id: page.id, source_version_id: page.version_id,
     })]);
     const source = document.querySelector<HTMLElement>(".cm-editor")!;
     expect(EditorView.findFromDOM(source)?.state.doc.toString()).toBe(raw);

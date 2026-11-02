@@ -94,9 +94,9 @@ type MarkdownViewProps = {
   // Editor preview: locators whose server check has not answered yet. A link
   // the browser cannot open on its own shows "checking", not "unavailable".
   checkingLinkLocators?: ReadonlySet<string>;
-  // Editor preview: receives every internal link locator of the rendered body,
-  // so the caller can check only the links it has not confirmed yet.
-  onInternalLinks?: (locators: string[]) => void;
+  // Editor preview: receives every link locator of the rendered body that the
+  // server may resolve, so the caller can check only links not confirmed yet.
+  onLinksToCheck?: (locators: string[]) => void;
   wikilinkTargets?: Array<{
     target_slug: string;
     target_page_id: string | null;
@@ -221,7 +221,7 @@ export function MarkdownView({
   wikilinkTargets = [],
   linkTargets,
   checkingLinkLocators,
-  onInternalLinks,
+  onLinksToCheck,
   wikilinkMode = "internal",
   sourceLineNumbers = false,
   deletedSources = [],
@@ -233,8 +233,8 @@ export function MarkdownView({
   const articleRef = useRef<HTMLElement | null>(null);
   // Filled by the link resolver while ReactMarkdown renders, then reported
   // once per rendered tree from an effect (never during render).
-  const internalLinksRef = useRef<string[]>([]);
-  const collectInternalLinks = Boolean(onInternalLinks);
+  const linksToCheckRef = useRef<string[]>([]);
+  const collectLinksToCheck = Boolean(onLinksToCheck);
   const inRouter = useInRouterContext();
   const pageSourceLineNumbers = renderPolicy === "page" && sourceLineNumbers;
   const parsedBody = renderPolicy === "page" ? parsePageDocument(body).body : body;
@@ -279,8 +279,8 @@ export function MarkdownView({
     allowWorkspaceNavigation:
       renderPolicy === "page" && wikilinkMode === "internal" && allowWorkspaceNavigationLinks,
     checking: checkingLinkLocators,
-    reportInternalLinks: collectInternalLinks
-      ? (locators: string[]) => { internalLinksRef.current = locators; }
+    reportLinksToCheck: collectLinksToCheck
+      ? (locators: string[]) => { linksToCheckRef.current = locators; }
       : undefined,
   }), [
     linkTargets,
@@ -289,7 +289,7 @@ export function MarkdownView({
     renderPolicy,
     allowWorkspaceNavigationLinks,
     checkingLinkLocators,
-    collectInternalLinks,
+    collectLinksToCheck,
   ]);
   const contextMediaPluginOptions = useMemo(
     () => ({ resolveAssetUrl: resolveContextMediaAsset }),
@@ -405,8 +405,8 @@ export function MarkdownView({
   useEffect(() => {
     // ReactMarkdown processes synchronously while it renders, so the resolver
     // has collected this tree's locators before any effect runs.
-    onInternalLinks?.(internalLinksRef.current);
-  }, [markdownContent, onInternalLinks]);
+    onLinksToCheck?.(linksToCheckRef.current);
+  }, [markdownContent, onLinksToCheck]);
 
   return (
     <article className="markdown-body" ref={articleRef}>
@@ -525,7 +525,7 @@ type ContextLinkResolverOptions = {
   confirmedOnly?: boolean;
   allowWorkspaceNavigation?: boolean;
   checking?: ReadonlySet<string>;
-  reportInternalLinks?: (locators: string[]) => void;
+  reportLinksToCheck?: (locators: string[]) => void;
 };
 
 function rehypeWrapRegisteredReferences() {
@@ -590,9 +590,9 @@ function readMarkdownReferenceFromNode(node: unknown): MarkdownAuthoredReference
 
 function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
   const targets = new Map((options.targets ?? []).map((target) => [target.locator, target]));
-  // Markdown-authored internal locators of the current tree, the same strings
-  // the server extracts from a body, so a caller can ask about exactly these.
-  const internalLocators = new Set<string>();
+  // Markdown-authored locators of the current tree that the server may
+  // resolve, as the same strings it extracts from a body.
+  const linksToCheck = new Set<string>();
   const withFragmentPrefix = (href: string) => {
     const index = href.indexOf("#");
     if (index < 0 || index === href.length - 1 || href.slice(index + 1).startsWith(CLOBBER_PREFIX)) return href;
@@ -657,8 +657,11 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
         "page_id", "stable_full", "stable_short", "canonical_route",
         "nav_target", "concept_path", "slug", "resource_uri", "workspace_navigation",
       ].includes(classification.kind);
+      // The server also resolves supported routes the browser classifies as
+      // unknown, such as legacy `/library?target=` links. Ask about them too,
+      // but keep rendering them as authored until a target arrives.
+      if (reference && (internal || classification.kind === "unknown")) linksToCheck.add(locator);
       if (!internal) return [child];
-      if (reference) internalLocators.add(locator);
       delete props.dataContextLinkLocator;
       delete props["data-context-link-locator"];
       const legacyPageId = props.dataInternalPageId ?? props["data-internal-page-id"];
@@ -727,9 +730,9 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
     }) as HastParent["children"];
   }
   return (tree: HastRoot) => {
-    internalLocators.clear();
+    linksToCheck.clear();
     resolve(tree);
-    options.reportInternalLinks?.([...internalLocators]);
+    options.reportLinksToCheck?.([...linksToCheck]);
   };
 }
 

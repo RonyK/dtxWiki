@@ -23,7 +23,7 @@ export type LinkTargetPreview = {
   targets: readonly ContextLinkTarget[];
   /** Links whose check has not answered yet. */
   checking: ReadonlySet<string>;
-  /** Receives the internal link locators of each rendered preview. */
+  /** Receives the link locators of each rendered preview the server may resolve. */
   reportLinks: (locators: string[]) => void;
 };
 
@@ -102,10 +102,13 @@ export function useLinkTargetPreview({
 
   useEffect(() => () => {
     // Leaving a scope abandons its checks; their late answers are ignored.
+    // A new source version (a reload, or the first autosave) does the same
+    // because the server picks link pins by version. Its confirmed results
+    // stay: a reload's page read re-seeds every link of the new body.
     controllers.current.forEach((controller) => controller.abort());
     controllers.current.clear();
     inflight.current.clear();
-  }, [scope]);
+  }, [scope, sourceVersionId]);
 
   useEffect(() => {
     if (!enabled || !scope) return undefined;
@@ -138,14 +141,20 @@ export function useLinkTargetPreview({
       }).catch(() => {
         if (controller.signal.aborted) return;
         // Stop the checking state; the next edit followed by a pause retries.
-        setFailed({ scope, locators: new Set(sendable) });
+        // Batches can overlap, so one failure must not forget another's.
+        setFailed((previous) => ({
+          scope,
+          locators: new Set([...(previous.scope === scope ? previous.locators : []), ...sendable]),
+        }));
       }).finally(() => {
         controllers.current.delete(controller);
         if (!controller.signal.aborted) sendable.forEach((locator) => inflight.current.delete(locator));
       });
     }, LINK_CHECK_IDLE_MS);
     return () => window.clearTimeout(timer);
-  }, [body, enabled, merge, scope]);
+    // A source version change restarts the pause so links whose check it
+    // abandoned are asked again against the new version.
+  }, [body, enabled, merge, scope, sourceVersionId]);
 
   const targets = useMemo(() => {
     const confirmed = [...results.values()].filter((target): target is ContextLinkTarget => target !== null);
