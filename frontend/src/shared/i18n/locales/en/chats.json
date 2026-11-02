@@ -379,7 +379,10 @@
       "scope_denied": "Missing permission scope",
       "not_found": "Target not found",
       "workspace_role_insufficient": "Workspace role too low",
-      "unknown": "Tool call error"
+      "unknown": "Tool call error",
+      "workspace_access_denied": "Workspace access denied",
+      "restricted_library_denied": "Restricted Library item",
+      "unsupported_retrieval_mode": "Unsupported read mode"
     },
     "errorGuidance": {
       "rejected_by_policy": "Workspace policy blocked this call as sent. Retrying it unchanged will not help.",
@@ -399,7 +402,11 @@
       "section_not_found": "No section matched the requested heading. The agent has to choose one of the suggested sections.",
       "scope_denied": "The client's token lacks the permission this tool needs. Retrying will not help; the client needs a token with that scope.",
       "not_found": "The target does not exist in this workspace, or this client cannot see it.",
-      "workspace_role_insufficient": "The connected account's workspace role does not allow this. A workspace admin has to grant the role."
+      "workspace_role_insufficient": "The connected account's workspace role does not allow this. A workspace admin has to grant the role.",
+      "internal_error": "The server failed while handling the call. The agent can call again; if it keeps failing, give an operator the time of the call.",
+      "workspace_access_denied": "The connected account or token cannot open this workspace. A workspace admin has to add the account, or the client needs a token for this workspace.",
+      "restricted_library_denied": "The item is in a restricted Library this client may not read. Retrying will not help unless a workspace admin changes the Library's access.",
+      "unsupported_retrieval_mode": "The tool does not support the requested read mode. The agent has to call again with a supported mode."
     },
     "failure": {
       "unchanged": "No changes made",

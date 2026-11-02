@@ -199,6 +199,7 @@ class ActivityService:
             limit=fetch_limit,
             audience_for=audience_for,
             actor_role=actor_role,
+            actor=actor,
         )
         job_items = self._jobs(
             session=session,
@@ -412,6 +413,7 @@ class ActivityService:
         actor_role: str | None,
         item_ids: list[UUID] | None = None,
         snapshot: datetime | None = None,
+        actor: ActorContext | None = None,
     ) -> list[ActivityItemRead]:
         statement = select(ReviewItem).where(
             ReviewItem.workspace_id == workspace_id,
@@ -443,6 +445,15 @@ class ActivityService:
                 ReviewItem.created_at.desc(), ReviewItem.id.desc()
             ).limit(limit)
         ).all()
+        # The row names the page under review, as this reader may see it (the
+        # Inbox's batched lookup); a hidden or non-page target keeps the reason.
+        page_titles = (
+            self.review_service.review_target_titles(
+                session, workspace_id, list(rows), actor
+            )
+            if actor is not None and rows
+            else {}
+        )
         return [
             ActivityItemRead(
                 id=review.id,
@@ -451,7 +462,8 @@ class ActivityService:
                 event_args={},
                 title=f"Review required: {review.review_type}",
                 body=review.decision_summary,
-                target_title=review.decision_summary,
+                target_title=page_titles.get(review.id) or review.decision_summary,
+                decision_summary_code=review.decision_summary_code,
                 actor=None,
                 target=ActivityTarget(
                     target_kind="change_set",
@@ -816,8 +828,8 @@ class ActivityService:
 
 # "System" = platform/operations (not user-authored content): authentication,
 # OAuth, automated quality checks (lint.*), workspace settings/admin (settings.*),
-# and background jobs (target_kind=job). The audit-action prefixes; jobs are
-# matched separately in _is_system_activity_item since they are not AuditEvents.
+# and background jobs (target_kind=job), including job-targeted audit events
+# such as admin.jobs.retried. Job rows also classify by their job target.
 _SYSTEM_AUDIT_PREFIXES = ("auth.", "oauth.", "lint.", "settings.")
 
 # These Library transport reads belong in the immutable security audit ledger,
@@ -878,7 +890,7 @@ def _system_audit_event_clause():
     # body=action; coalesce keeps a NULL event_summary from turning the OR into
     # SQL NULL (which would wrongly drop workspace rows under not_()).
     summary = func.coalesce(AuditEvent.event_summary, "")
-    clauses = []
+    clauses = [AuditEvent.target_kind == "job"]
     for prefix in _SYSTEM_AUDIT_PREFIXES:
         clauses.append(AuditEvent.action.like(f"{prefix}%"))
         clauses.append(summary.like(f"{prefix}%"))

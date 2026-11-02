@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, timedelta
 from typing import Any, NamedTuple, cast
@@ -9,7 +10,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from pydantic import ValidationError
 from sqlalchemy import and_, case, desc, or_, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, aliased, load_only
+from sqlalchemy.orm import Session, aliased, load_only, selectinload
 
 from backend.domain.input_policy import (
     fit_generated_title,
@@ -1996,15 +1997,9 @@ class McpChatService:
                 workspace_id=workspace_id,
                 resource_id=resource_id,
             )
-            if page is None:
-                return None, None
-            if actor is not None and not context_page_visible(
-                page, actor, workspace_id=workspace_id
-            ):
-                return None, None
-            if shared_only and _author_private_page(page):
-                return None, None
-            return page.title, context_page_url(workspace_id, page.id)
+            return _context_page_title_and_path(
+                page, actor, workspace_id, shared_only=shared_only
+            )
         if resource_kind == McpChatArtifactKind.AGENT_PAGE.value:
             agent_page = get_in_workspace(
                 session,
@@ -2213,19 +2208,83 @@ class _ReaderGate:
                 workspace_id=self.workspace_id,
                 resource_id=version_id,
             )
-            visible = (
-                version is not None
-                and (
-                    self.actor is None
-                    or context_version_is_visible(version, self.actor)
-                )
-                and self.title_and_path(
-                    McpChatArtifactKind.CONTEXT_PAGE.value, version.page_id
-                )[0]
-                is not None
+            self._versions[version_id] = (
+                version if self._version_visible(version) else None
             )
-            self._versions[version_id] = version if visible else None
         return self._versions[version_id]
+
+    def _version_visible(self, version: ContextPageVersion | None) -> bool:
+        return (
+            version is not None
+            and (self.actor is None or context_version_is_visible(version, self.actor))
+            and self.title_and_path(
+                McpChatArtifactKind.CONTEXT_PAGE.value, version.page_id
+            )[0]
+            is not None
+        )
+
+    def prime_context(
+        self, page_ids: Iterable[UUID], version_ids: Iterable[UUID]
+    ) -> None:
+        """Answer many Context page and version questions in bounded batches.
+
+        Fills the memo title_and_path and visible_version read, with the same
+        per-row rules, so a projection batch reads each kind of row once
+        instead of once per tool call. Keys already answered are skipped, and
+        rows outside this workspace stay unanswered as before.
+        """
+
+        page_kind = McpChatArtifactKind.CONTEXT_PAGE.value
+        wanted_versions = [
+            version_id
+            for version_id in dict.fromkeys(version_ids)
+            if version_id not in self._versions
+        ]
+        versions: dict[UUID, ContextPageVersion] = {}
+        for start in range(0, len(wanted_versions), 500):
+            versions.update(
+                (version.id, version)
+                for version in self.session.scalars(
+                    select_in_workspace_by_ids(
+                        ContextPageVersion,
+                        workspace_id=self.workspace_id,
+                        resource_ids=wanted_versions[start : start + 500],
+                    )
+                )
+            )
+        wanted_pages = [
+            page_id
+            for page_id in dict.fromkeys(
+                [*page_ids, *(version.page_id for version in versions.values())]
+            )
+            if (page_kind, page_id) not in self._titles
+        ]
+        for start in range(0, len(wanted_pages), 500):
+            chunk = wanted_pages[start : start + 500]
+            # Visibility reads the page's current and draft rows; load them
+            # with the pages rather than one lazy load per page.
+            pages = {
+                page.id: page
+                for page in self.session.scalars(
+                    select_in_workspace_by_ids(
+                        ContextPage,
+                        workspace_id=self.workspace_id,
+                        resource_ids=chunk,
+                    ).options(
+                        selectinload(ContextPage.current_version),
+                        selectinload(ContextPage.latest_draft_version),
+                    )
+                )
+            }
+            for page_id in chunk:
+                self._titles[(page_kind, page_id)] = _context_page_title_and_path(
+                    pages.get(page_id), self.actor, self.workspace_id
+                )
+        for version_id in wanted_versions:
+            version = versions.get(version_id)
+            self._versions[version_id] = (
+                version if self._version_visible(version) else None
+            )
 
     def prime_input_versions(self, rows: list[MCPToolCall]) -> None:
         """Read missing version labels in bounded batches, without bodies."""
@@ -2475,6 +2534,30 @@ class _ReaderGate:
             from_version_id=parent.id,
             to_version_id=version.id,
         )
+
+
+def _context_page_title_and_path(
+    page: ContextPage | None,
+    actor: ActorContext | None,
+    workspace_id: UUID,
+    *,
+    shared_only: bool = False,
+) -> tuple[str | None, str | None]:
+    """A Context page's label and route, if ``actor`` may see the page.
+
+    ``page`` was loaded by workspace scope; ``actor is None`` is the trusted
+    internal read, and ``shared_only`` additionally hides an author-private page.
+    """
+
+    if page is None:
+        return None, None
+    if actor is not None and not context_page_visible(
+        page, actor, workspace_id=workspace_id
+    ):
+        return None, None
+    if shared_only and _author_private_page(page):
+        return None, None
+    return page.title, context_page_url(workspace_id, page.id)
 
 
 def _author_private_page(page: ContextPage) -> bool:

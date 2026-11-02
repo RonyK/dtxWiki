@@ -18,6 +18,32 @@
 - Reject attempts to disable required publication safeguards through Settings,
   and report a previously stored override for them as enabled.
 
+### Recent activity cards
+
+- Dashboard and Activity cards name the document first and describe what
+  happened beneath it, including MCP requests ("Requested a review"), repeated
+  reads, and failures ("Review request failed · Version conflict"). Pending
+  review cards name the page under review when the reader may see it.
+- Each card is one link: the whole card opens its document or review, with a
+  single focus stop, a hover highlight, and an edge chevron on touch screens;
+  the time keeps its exact-time tooltip and opens the same target. Name chips,
+  call details and read-group controls keep their own actions. The pending
+  "Review required" status is no longer a second link.
+- Badges separate requests from decisions: submissions read "Review
+  requested", and decisions show "Approved", "Requested changes", or
+  "Rejected". The activity feed reports submissions as `request_review`.
+- Dashboard cards omit MCP technical fields and link once to Activity's MCP
+  records. There, "Call details" names the tool, result, duration and a
+  failure's meaning and next step in MCP Chats' wording, with the raw tool ID
+  and error code kept as chips. People-written reasons preview at 120
+  characters and two lines; fixed review reasons carry codes and translate.
+- The Dashboard's system-event check reads only audit and job rows, its setup
+  checks ask for one row, and MCP rows load their Context page titles and
+  visibility in batches. Read grouping is unchanged: a row hidden by the
+  current filter still ends a run of repeated reads.
+- System activity includes job-targeted audit events, including manual job
+  retries, in both the full System feed and its Jobs filter.
+
 ### Index navigation and formatted previews
 
 - MCP indexes use exact `dtxwiki://index/<kind>/<id>` Markdown destinations

@@ -272,6 +272,7 @@ class AgentPageService:
                 decision_summary=(
                     "sensitive AgentPage draft requires owner activation review"
                 ),
+                decision_summary_code="agent_page_activation_requires_review",
             )
             session.add(review)
             session.flush()

@@ -59,14 +59,16 @@ function show(responses: Record<string, unknown>, initial = "/workspaces/0000000
 beforeEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); activityPreferences.role = "editor"; });
 
 describe("ActivityScreen", () => {
-  it("renders three lanes and gives the pending title and footer the same exact review link", async () => {
+  it("renders three lanes and makes the whole pending card one exact review link", async () => {
     show({ [feedUrl()]: data([entry(event("pending", "Review required", { lane: "pending", actor: null, review_item_id: "review-1" })), entry(event("advisory", "Draft created", { lane: "advisory" })), entry(event("history", "Review approved"))]) });
     expect(await screen.findByText("Draft created")).toBeInTheDocument();
     expect(screen.getByText("Review approved")).toBeInTheDocument();
-    const title = screen.getByRole("link", { name: "Open review: Review required" });
-    const chip = screen.getByRole("link", { name: "Review required: Review required" });
+    // No page title from the server: the reason names the card, once.
+    const title = screen.getByRole("link", { name: "Open review: Review required details" });
     expect(title).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/review/review-1");
-    expect(chip).toHaveAttribute("href", title.getAttribute("href"));
+    const card = title.closest("article")!;
+    expect(within(card).getAllByRole("link")).toHaveLength(1);
+    expect(within(card).getByText("Review required").closest("a")).toBeNull();
     expect(screen.queryByRole("button", { name: "Review" })).not.toBeInTheDocument();
   });
 
@@ -175,7 +177,7 @@ describe("ActivityScreen", () => {
   it("pins pending reviews before other pending entries prior to the five-entry cutoff", async () => {
     const entries = [...Array.from({ length: 5 }, (_, n) => entry(event(`job-${5-n}`, `Failed Job ${5-n}`, { lane: "pending" }))), entry(event("review", "Review Decision", { lane: "pending", review_item_id: "review-1" }))];
     show({ [feedUrl()]: data(entries) });
-    const review = await screen.findByText("Review Decision");
+    const review = await screen.findByText("Review Decision details");
     const job = screen.getByText("Failed Job 5");
     expect(screen.queryByText("Failed Job 1")).not.toBeInTheDocument();
     expect(review.compareDocumentPosition(job) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -286,9 +288,9 @@ describe("ActivityScreen", () => {
     const read = event("read", "MCP read succeeded", { operation: "read", result_status: "succeeded", target: { target_kind: "mcp_tool_call", target_id: "call-1" }, navigation: { target_kind: "context_page", target_id: "00000000-0000-4000-8000-000000000105", title: "Guide", href: "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000105" } });
     const { fetch } = show({ [feedUrl()]: data([entry(read, 4)]), [feedUrl({ group_reads: false })]: data(Array.from({ length: 4 }, (_, n) => entry({ ...read, id: `read-${n}` }))) });
     expect((await screen.findAllByText("1 entry · 4 original events")).length).toBeGreaterThan(0);
-    expect(screen.getByRole("link", { name: "Read Guide 4 times" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Guide" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("checkbox", { name: "Group repeated reads" }));
-    expect(await screen.findAllByRole("link", { name: "Read Guide" })).toHaveLength(4);
+    expect(await screen.findAllByRole("link", { name: "Guide" })).toHaveLength(4);
     expect(screen.getAllByText("4 entries · 4 original events").length).toBeGreaterThan(0);
     expect(fetch).toHaveBeenCalledWith(feedUrl({ group_reads: false }), expect.any(Object));
   });
@@ -426,13 +428,13 @@ describe.each([undefined, "history"] as const)("Activity recovery (%s)", lane =>
       throw new Error(`Unexpected request: ${url}`);
     });
     renderRoute();
-    await screen.findByRole("link", { name: "Read Old private title 4 times" });
+    await screen.findByRole("link", { name: "Old private title" });
     await userEvent.click(screen.getByRole("button", { name: "Expand 4 original events" }));
     await waitFor(() => expect(screen.queryByText(/Old private title/)).not.toBeInTheDocument());
     expect(screen.getByText("Other visible activity")).toBeInTheDocument();
     expect(screen.queryByText(/5 original events/)).not.toBeInTheDocument();
     if (visibleCount) {
-      expect(screen.getByRole("link", { name: "Read Visible survivor" })).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/visible-page");
+      expect(screen.getByRole("link", { name: "Visible survivor" })).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/visible-page");
       expect(screen.getAllByText("2 entries · 2 original events").length).toBeGreaterThan(0);
     } else expect(screen.getAllByText("1 entry · 1 original event").length).toBeGreaterThan(0);
     // A re-snapshot would collapse the opened group and drop loaded pages.
@@ -456,17 +458,17 @@ describe.each([undefined, "history"] as const)("Activity recovery (%s)", lane =>
       throw new Error(`Unexpected request: ${url}`);
     });
     renderRoute();
-    await screen.findByRole("link", { name: "Read Known guide 4 times" });
+    await screen.findByRole("link", { name: "Known guide" });
     await userEvent.click(screen.getByRole("button", { name: "Expand 4 original events" }));
     expect(await screen.findByText("Original events could not be loaded. Try again.")).toBeVisible();
     expect(await screen.findByText("The service is temporarily unavailable. Try again shortly.")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Read Known guide 4 times" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Known guide" })).toBeVisible();
     expect(screen.getAllByText("2 entries · 5 original events").length).toBeGreaterThan(0);
     expect(screen.getByText("Other activity")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Original events could not be loaded. Try again.")).toBeVisible();
     expect(await screen.findByText("The service is temporarily unavailable. Try again shortly.")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Read Known guide 4 times" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Known guide" })).toBeVisible();
     expect(screen.getAllByText("2 entries · 5 original events").length).toBeGreaterThan(0);
     expect(detailAttempts).toBe(2);
   });

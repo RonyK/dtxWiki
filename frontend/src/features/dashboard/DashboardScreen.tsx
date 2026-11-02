@@ -45,7 +45,7 @@ import { useActivityGroupLoader } from "../../shared/hooks/useActivityGroupLoade
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
 import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
-import { activityCountLabel, activityEntryCounts, activityHref, parseActivityQuery, reconcileActivityReadGroup } from "../../shared/lib/activityFeed";
+import { activityCountLabel, activityEntryCounts, activityHref, isMcpExecution, parseActivityQuery, reconcileActivityReadGroup } from "../../shared/lib/activityFeed";
 import { iconForActivityLane } from "../../shared/lib/activityLanes";
 import { applyPeriodParam, parsePeriodParam } from "../../shared/lib/urlState";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
@@ -110,8 +110,9 @@ export function DashboardScreen() {
           listReviews(workspaceId, { status: "pending", limit: 20 }),
           listRecentReviewDecisions(workspaceId, { limit: 1 }),
           getSettingsPolicies(workspaceId),
-          listLibraryItems(workspaceId),
-          listContextPages(workspaceId),
+          // Setup progress needs only "is there one?", not a page of rows.
+          listLibraryItems(workspaceId, { limit: 1 }),
+          listContextPages(workspaceId, { limit: 1 }),
         ]);
       return {
         workspaceId,
@@ -373,9 +374,21 @@ export function DashboardScreen() {
               ) : null}
             </div>
           ) : (
-            <div className="operations-list activity-feed-list">
-              {preview.map((entry) => <ActivityEntryRow entry={entry} query={query} loadGroup={loadGroup} key={entry.id} />)}
-            </div>
+            <>
+              <div className="operations-list activity-feed-list">
+                {preview.map((entry) => <ActivityEntryRow entry={entry} query={query} loadGroup={loadGroup} density="summary" key={entry.id} />)}
+              </div>
+              {/* Summary cards omit MCP call details; one link leads to them. */}
+              {preview.some((entry) => isMcpExecution(entry.event)) ? (
+                <p className="activity-feed-footnote">
+                  {t("activity:feed.mcpDetailsHint")}{" "}
+                  <Link to={activityHref({ ...query, kind: "mcp", subtype: "all" }, undefined, routeWorkspaceId)}>
+                    {t("activity:feed.mcpDetailsLink")}
+                    <ChevronRight size={14} aria-hidden="true" />
+                  </Link>
+                </p>
+              ) : null}
+            </>
           )}
         </section>
       </section>

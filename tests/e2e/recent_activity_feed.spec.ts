@@ -31,23 +31,29 @@ async function expectDisjoint(first: Locator, second: Locator) {
   expect(width * height, "activity content and controls must not overlap").toBeLessThan(.1);
 }
 
-async function expandTechnicalGroup(group: Locator) {
+// Dashboard cards are summaries without MCP technical fields; Activity keeps
+// them, so only there do the disclosures share the row with the group controls.
+async function expandTechnicalGroup(group: Locator, withTechnical: boolean) {
   const technical = group.locator(":scope > .activity-entry__layout .activity-entry__technical");
-  await technical.locator("summary").click();
-  await expect(technical).toHaveAttribute("open", "");
   const toggle = group.locator(".activity-read-group__toggle");
-  await expectDisjoint(technical.locator("dl"), toggle);
+  await expect(technical).toHaveCount(withTechnical ? 1 : 0);
+  if (withTechnical) {
+    await technical.locator("summary").click();
+    await expect(technical).toHaveAttribute("open", "");
+    await expectDisjoint(technical.locator(".activity-call-details"), toggle);
+  }
   await toggle.click();
   await expect(group.locator(".activity-read-group__list > li")).toHaveCount(4);
   const members = group.locator(".activity-read-group__members");
-  await expectDisjoint(technical, members);
   await expectDisjoint(toggle, members);
+  if (!withTechnical) return;
+  await expectDisjoint(technical, members);
   const member = group.locator(".activity-read-group__list > li").first();
   const memberTechnical = member.locator(".activity-entry__technical");
   await memberTechnical.locator("summary").click();
   await expect(memberTechnical).toHaveAttribute("open", "");
-  await expectDisjoint(memberTechnical.locator("dl"), member.locator(".activity-entry__title-link"));
-  await expectDisjoint(memberTechnical.locator("dl"), member.locator(".activity-entry__times"));
+  await expectDisjoint(memberTechnical.locator(".activity-call-details"), member.locator(".activity-entry__title-link"));
+  await expectDisjoint(memberTechnical.locator(".activity-call-details"), member.locator(".activity-entry__times"));
 }
 
 async function metrics(page: Page) {
@@ -62,7 +68,7 @@ async function metrics(page: Page) {
       const chip = actor?.querySelector<HTMLElement>(".activity-actor-split,.activity-actor-pill");
       const heading = entry.querySelector<HTMLElement>(".activity-entry__heading");
       const title = entry.querySelector<HTMLElement>(".activity-entry__title-link");
-      const status = entry.querySelector<HTMLElement>(".activity-entry__trailing > .activity-action-badge,.activity-entry__review-link");
+      const status = entry.querySelector<HTMLElement>(".activity-entry__trailing > .activity-action-badge,.activity-entry__review-footer > .activity-action-badge");
       const times = entry.querySelector<HTMLElement>(".activity-entry__times");
       const statusBox = status?.getBoundingClientRect();
       const timeBox = times?.getBoundingClientRect();
@@ -99,7 +105,7 @@ async function metrics(page: Page) {
         actorHeight: actor?.getBoundingClientRect().height, actorWidth: actor?.getBoundingClientRect().width,
         titleHeight: title?.getBoundingClientRect().height,
         footerOverlap,
-        controlHeights: [...entry.querySelectorAll<HTMLElement>(".activity-entry__review-link,.activity-entry__fallback > a,.activity-entry__technical > summary,.activity-read-group__toggle,.activity-read-group__collapse,.activity-read-group__retry")]
+        controlHeights: [...entry.querySelectorAll<HTMLElement>(".activity-entry__fallback > a,.activity-entry__technical > summary,.activity-read-group__toggle,.activity-read-group__collapse,.activity-read-group__retry")]
           .filter(target => target.getClientRects().length).map(target => target.getBoundingClientRect().height),
         titleFont: heading ? getComputedStyle(heading).fontSize : null,
         // Firefox's float32 document coordinates can differ by 0.00003px at
@@ -125,7 +131,10 @@ test("real grouped feed, names, review links and filter navigation", async ({ pa
   const review = recent.locator(".activity-entry__layout--review");
   const reviewHref = workspaceUrl(seed.workspaceId, `review/${seed.review_id}`);
   await expect(review.locator(".activity-entry__title-link")).toHaveAttribute("href", reviewHref);
-  await expect(review.locator(".activity-entry__review-link")).toHaveAttribute("href", reviewHref);
+  // One link per card: the status is a badge, and the card itself is the
+  // target. The time repeats that link for pointers only (tooltip, no tab stop).
+  await expect(review.getByRole("link")).toHaveCount(1);
+  await expect(review.locator("a.activity-entry__times")).toHaveAttribute("href", reviewHref);
   await expect(review.getByRole("button")).toHaveCount(0);
   await expect(recent.locator(".activity-feed-counts")).toHaveText("5 entries · 8 original events");
   await page.getByRole("checkbox", { name: "Group repeated reads" }).uncheck();
@@ -134,7 +143,7 @@ test("real grouped feed, names, review links and filter navigation", async ({ pa
   await page.getByRole("checkbox", { name: "Group repeated reads" }).check();
   await expect(recent.locator('[data-entry-type="read_group"]')).toHaveCount(1);
   await expect(recent.locator(".activity-feed-counts")).toHaveText("5 entries · 8 original events");
-  await review.locator(".activity-entry__review-link").click();
+  await recent.locator("article:has(.activity-entry__layout--review)").click();
   await expect(page).toHaveURL(new RegExp(`/workspaces/${seed.workspaceId}/review/${seed.review_id}$`));
   await expect(page.locator("#review-detail-title")).toBeVisible();
   await page.goBack();
@@ -158,7 +167,7 @@ test("real grouped feed, names, review links and filter navigation", async ({ pa
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
   await expect(names).toHaveCount(0);
-  await expandTechnicalGroup(group);
+  await expandTechnicalGroup(group, false);
   await expect(recent.locator(".activity-feed-counts")).toHaveText("5 entries · 8 original events");
   const expanded = await metrics(page);
   expect(expanded.overflow).toBe(0);
@@ -174,6 +183,7 @@ test("real grouped feed, names, review links and filter navigation", async ({ pa
   await page.locator('.activity-feed-see-all[href*="/activity/history?"]').click();
   await expect(page).toHaveURL(new RegExp(`/workspaces/${seed.workspaceId}/activity/history\\?period=all&kind=workspace&subtype=all&group_reads=1$`));
   await expect(page.locator('[data-entry-type="read_group"]')).toHaveCount(1);
+  await expandTechnicalGroup(page.locator('[data-entry-type="read_group"]'), true);
   await page.getByRole("checkbox", { name: "Group repeated reads" }).uncheck();
   await expect(page).toHaveURL(/group_reads=0/);
   await expect(page.locator('[data-entry-type="read_group"]')).toHaveCount(0);
@@ -226,7 +236,7 @@ for (const [language, width] of [["en", 1440], ["en", 320]] as const) {
         await evidenceLocatorScreenshot(page.locator('[data-entry-type="read_group"]'), info, `${prefix}-light`);
         if (language === "en" && width === 1440 && route.startsWith("/dashboard")) {
           const group = page.locator('[data-entry-type="read_group"]');
-          await expandTechnicalGroup(group);
+          await expandTechnicalGroup(group, false);
           await evidenceLocatorScreenshot(group, info, `${prefix}-expanded-details`);
         }
         await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
@@ -294,7 +304,7 @@ test.describe("touch activity disclosures", () => {
     expect((await group.locator(".activity-read-group__collapse").boundingBox())!.height).toBe(24);
     await group.locator(".activity-read-group__collapse").tap();
     await expect(group.locator(".activity-read-group__members")).toBeHidden();
-    await page.locator(".activity-entry__review-link").tap();
+    await page.locator("article:has(.activity-entry__layout--review)").tap();
     await expect(page).toHaveURL(new RegExp(`/workspaces/${seed.workspaceId}/review/${seed.review_id}$`));
     await expect(page.locator("#review-detail-title")).toBeVisible();
   });

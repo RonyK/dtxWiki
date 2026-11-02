@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { i18n } from "../i18n";
 import type { ActivityFeedEvent } from "./activityFeed";
-import { activityAction, activityCountLabel, activityEntryCounts, activityHref, activityNavigation, parseActivityQuery, presentActivityFeedEvent } from "./activityFeed";
+import { activityAction, activityCountLabel, activityEntryCounts, activityHref, activityNavigation, parseActivityQuery, presentActivityFeedEvent, previewText } from "./activityFeed";
 
 function feedEvent(overrides: Partial<ActivityFeedEvent> = {}): ActivityFeedEvent {
   return { id: "event-1", lane: "history", title: "MCP update_context_edit succeeded", body: "private raw input must not be used", actor: { actor_kind: "mcp_client", display_name: "Codex", credential_owner_display_name: "Owner", actor_id: "actor-1", is_current_user: false }, target: { target_kind: "mcp_tool_call", target_id: "tool-call-not-chat-id" }, target_title: null, review_item_id: null, affordances: [], created_at: "2026-10-20T04:56:00Z", event_key: null, event_args: {}, operation: "edit", result_status: "succeeded", ...overrides };
@@ -28,12 +28,40 @@ describe("activity feed presenter", () => {
     expect(shown.body).toBe("");
     expect(shown.action).toBe("logged");
   });
-  it("uses the same codes for translated titles and repeated-read labels", async () => {
+  it("uses the same codes for translated descriptions and repeated-read labels", async () => {
     const event = feedEvent({ operation: "read", navigation: { target_kind: "context_page", target_id: "00000000-0000-4000-8000-000000000106", title: "Guide", href: "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000106" } });
-    expect(presentActivityFeedEvent(event, 4).title).toBe("Read Guide 4 times");
+    expect(presentActivityFeedEvent(event, 4)).toMatchObject({ title: "Guide", body: "Read 4 times" });
     await i18n.changeLanguage("ko");
-    expect(presentActivityFeedEvent(event, 4).title).toContain("4회 읽었습니다");
+    expect(presentActivityFeedEvent(event, 4)).toMatchObject({ title: "Guide", body: "4회 읽었습니다" });
     expect(presentActivityFeedEvent(event).action).toBe("read");
+  });
+  it("names the document first and keeps what happened, decided or failed beside it", async () => {
+    const guide = { target_kind: "context_page", target_id: "00000000-0000-4000-8000-000000000106", title: "Guide", href: "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000106" };
+    // An agent's review request names its page; the badge says it was requested.
+    expect(presentActivityFeedEvent(feedEvent({ operation: "request_review", navigation: guide }))).toMatchObject({ title: "Guide", body: "Requested a review", action: "requested", typeKey: "context" });
+    // A failure keeps the attempted operation, with or without a known page.
+    expect(presentActivityFeedEvent(feedEvent({ operation: "review", result_status: "conflict", navigation: guide }))).toMatchObject({ title: "Guide", body: "Review request failed · Version conflict", action: "failed" });
+    expect(presentActivityFeedEvent(feedEvent({ result_status: "failed" }))).toMatchObject({ title: "Draft update failed", body: "Could not complete" });
+    // A decision on a page's review is a Context row with its outcome badge.
+    const decision = feedEvent({ event_key: "review.decision", title: "review.decision", body: "review.decision", operation: "review", target: { target_kind: "review_item", target_id: "review-1" }, target_title: "Guide", navigation: { target_kind: "review", target_id: "review-1", title: "Guide", href: "/workspaces/00000000-0000-4000-8000-000000000001/review/review-1" }, details: { page_id: guide.target_id, decision_type: "request_changes", reason: `${"Split the escalation table by tier ".repeat(5)}please.` } });
+    const decided = presentActivityFeedEvent(decision);
+    expect(decided).toMatchObject({ title: "Guide", action: "changes_requested", typeKey: "context" });
+    expect(decided.body).toContain("Split the escalation table by tier Split");
+    expect(decided.body).toMatch(/…$/);
+    // A pending review names its visible page and translates a fixed reason,
+    // including a legacy row stored before the reason had a code.
+    const pending = { lane: "pending" as const, review_item_id: "review-1", target: { target_kind: "change_set", target_id: "change-1" } };
+    expect(presentActivityFeedEvent(feedEvent({ ...pending, body: "agent-authored page write requires human review", target_title: "Guide", decision_summary_code: "agent_page_write_requires_review" }))).toMatchObject({ title: "Guide", body: "AI-written page change requires human review", typeKey: "review" });
+    await i18n.changeLanguage("ko");
+    expect(presentActivityFeedEvent(feedEvent({ ...pending, body: "agent-authored page write requires human review", target_title: "agent-authored page write requires human review" }))).toMatchObject({ title: "AI가 작성한 페이지 변경이라 사람이 리뷰해야 합니다", body: "" });
+  });
+  it("previews people's text at 120 code points, cutting at a nearby space", () => {
+    const words = "word ".repeat(30);
+    expect(previewText("가".repeat(120))).toBe("가".repeat(120));
+    expect(previewText("가".repeat(121))).toBe(`${"가".repeat(120)}…`);
+    expect(previewText(words)).toBe(`${"word ".repeat(23)}word…`);
+    expect(previewText("😀".repeat(121))).toBe(`${"😀".repeat(120)}…`);
+    expect(previewText(`${"Add the links. ".repeat(8)}Then`)).toBe(`${"Add the links. ".repeat(7)}Add the links…`);
   });
   it("requires both a pending lane and a review id for the review action", () => {
     expect(presentActivityFeedEvent(feedEvent({ lane: "pending", review_item_id: "review-1" })).pendingReview).toBe(true);
@@ -45,7 +73,7 @@ describe("activity feed presenter", () => {
       target: { target_kind: "workspace_tree_node", target_id: "node-1" },
       target_title: "Guide", operation: "edit",
       details: {
-        page_id: "00000000-0000-4000-8000-000000000106", reason: "Consolidate runbooks",
+        page_id: "00000000-0000-4000-8000-000000000106", reason: "Consolidate $& runbooks",
         move: {
           before: { path: ["Inbox"], provenance: "recorded" },
           after: { path: ["Operations"], provenance: "recorded" },
@@ -53,7 +81,7 @@ describe("activity feed presenter", () => {
       },
     }));
     expect(shown.title).toBe("Guide");
-    expect(shown.body).toBe("Inbox → Operations · Consolidate runbooks");
+    expect(shown.body).toBe("Inbox → Operations · Consolidate $& runbooks");
   });
 });
 

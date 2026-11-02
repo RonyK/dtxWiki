@@ -4,11 +4,9 @@ import type {
   McpChatSessionRef,
   McpChatTimelineItem,
 } from "../../shared/api/operations";
-import toolPresentationRegistry from "./toolPresentationRegistry.json";
+import { mcpToolTitle } from "../../shared/lib/mcpCallVocabulary";
 
 type ChatPresentation = McpChatSessionRef | McpChatTimelineItem;
-
-const toolTitleKeys: Readonly<Record<string, string>> = toolPresentationRegistry;
 
 export function chatPresentationLine(
   presentation: ChatPresentation,
@@ -63,9 +61,9 @@ export function chatPresentationLine(
   }
 
   const toolName = presentation.primary_tool_name;
-  const titleKey = toolName ? toolTitleKeys[toolName] : undefined;
-  if (presentation.title_source === "tool" && titleKey) {
-    return t(`presentation.toolTitles.${titleKey}`);
+  const toolTitle = toolName ? mcpToolTitle(toolName, t) : null;
+  if (presentation.title_source === "tool" && toolTitle) {
+    return toolTitle;
   }
 
   return t("presentation.genericActivity");
@@ -73,10 +71,7 @@ export function chatPresentationLine(
 
 /** The localized tool title, or the generic "Tool" fallback for an unlisted name. */
 export function toolTitleLabel(toolName: string, t: TFunction<"chats">): string {
-  const titleKey = toolTitleKeys[toolName];
-  return titleKey
-    ? t(`presentation.toolTitles.${titleKey}`)
-    : t("presentation.genericTool");
+  return mcpToolTitle(toolName, t) ?? t("presentation.genericTool");
 }
 
 function subjectKindLabel(kind: string, t: TFunction<"chats">): string {

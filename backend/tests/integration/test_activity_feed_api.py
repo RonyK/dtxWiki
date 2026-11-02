@@ -466,7 +466,7 @@ def test_private_editing_audit_and_mcp_transitions(session_factory):
         assert [entry.event.operation for entry in feed("reader", "mcp")] == [
             "log",
             "delete",
-            "review",
+            "request_review",
         ]
 
 
@@ -1013,3 +1013,141 @@ def test_merged_feed_and_group_hydration_isolate_every_source_from_foreign_works
         )
         assert members.event_count == 2
         assert all(event.navigation.target_id == own[2].id for event in members.events)
+
+
+def test_pending_review_names_its_visible_page_and_narrow_scans_keep_read_runs(
+    session_factory,
+):
+    from sqlalchemy import event
+
+    from backend.services.change_review_audit import ChangeReviewAuditRecorder
+
+    reason = "agent-authored page write requires human review"
+    with session_factory.begin() as session:
+        workspace, client, page, version, chat = _setup(session)
+        _call(session, workspace, client, page, version, chat, 0)
+        _call(session, workspace, client, page, version, chat, 2)
+        # An admin retry is a System row despite lacking a System action prefix.
+        # Keep it between the reads to cover the same hidden group boundary.
+        retry_audit = AuditEvent(
+            workspace_id=workspace.id,
+            actor_kind="human",
+            actor_id="reader",
+            action="admin.jobs.retried",
+            target_kind="job",
+            target_id=uuid4(),
+            event_summary="A server admin manually retried a failed background job",
+            payload={"job_type": "library_conversion", "retry_count": 1},
+            created_at=BASE - timedelta(seconds=1),
+        )
+        session.add(retry_audit)
+        hidden = ContextPage(
+            workspace_id=workspace.id,
+            slug=f"feed-{uuid4()}",
+            title="Archived plan the reader cannot see",
+            page_type="overview",
+            lifecycle_status="archived",
+        )
+        session.add(hidden)
+        session.flush()
+        hidden_version = ContextPageVersion(
+            workspace_id=workspace.id,
+            page_id=hidden.id,
+            version_no=1,
+            body_md="# Hidden",
+            content_hash="b" * 64,
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id="author",
+            version_status="published_snapshot",
+        )
+        session.add(hidden_version)
+        session.flush()
+        for target, target_version in ((page, version), (hidden, hidden_version)):
+            ChangeReviewAuditRecorder().record_context_page_write(
+                session,
+                workspace.id,
+                actor_kind="mcp_client",
+                actor_id=str(client.id),
+                action="page.submit_context_edit_for_review",
+                page_id=target.id,
+                version_id=target_version.id,
+                actor_provenance="mcp_client",
+                needs_review=True,
+            )
+        actor = _actor(workspace)
+        all_activity = _service().list_feed(
+            session, workspace.id, actor=actor, actor_role="owner", period="all"
+        )
+        assert retry_audit.id in {entry.event.id for entry in all_activity.entries}
+        pending = [
+            entry.event
+            for entry in all_activity.entries
+            if entry.event.lane == "pending"
+        ]
+        # The page this reader may see names the row; a hidden one keeps the
+        # reason, and both carry the fixed reason's code for translation.
+        assert sorted(event.target_title for event in pending) == sorted(
+            ["Visible guide", reason]
+        )
+        assert {(event.body, event.decision_summary_code) for event in pending} == {
+            (reason, "agent_page_write_requires_review")
+        }
+        # A row another filter shows still ends a read run, as in the full
+        # stream, so the Workspace scan keeps every source.
+        workspace_activity = _service().list_feed(
+            session,
+            workspace.id,
+            actor=actor,
+            actor_role="owner",
+            period="all",
+            kind="workspace",
+        )
+        assert retry_audit.id not in {
+            entry.event.id for entry in workspace_activity.entries
+        }
+        reads = [
+            entry.event_count
+            for entry in workspace_activity.entries
+            if entry.event.operation == "read"
+        ]
+        assert reads == [1, 1]
+
+        statements = []
+
+        def capture(_connection, _cursor, statement, _parameters, _context, _many):
+            statements.append(statement)
+
+        connection = session.connection()
+        event.listen(connection, "before_cursor_execute", capture)
+        try:
+            system_activity = _service().list_feed(
+                session,
+                workspace.id,
+                actor=actor,
+                actor_role="owner",
+                period="all",
+                kind="system",
+                limit=1,
+            )
+        finally:
+            event.remove(connection, "before_cursor_execute", capture)
+        assert [entry.event.id for entry in system_activity.entries] == [retry_audit.id]
+        # A system probe can only match audit and job rows, so it neither scans
+        # nor hydrates MCP traces and pending reviews.
+        assert not [
+            statement
+            for statement in statements
+            if "FROM mcp_tool_call" in statement or "FROM review_item" in statement
+        ]
+        # The Jobs filter classifies the audit by its target, not its source table.
+        job_activity = _service().list_feed(
+            session,
+            workspace.id,
+            actor=actor,
+            actor_role="owner",
+            period="all",
+            kind="system",
+            subtype="jobs",
+        )
+        assert [entry.event.id for entry in job_activity.entries] == [retry_audit.id]

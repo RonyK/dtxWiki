@@ -23,7 +23,11 @@ from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.audit import AuditEvent
 from backend.models.context import ContextPageVersion
 from backend.models.library import LibraryItemVersion
-from backend.models.mcp_chat import McpChatSession, McpChatToolCallArtifact
+from backend.models.mcp_chat import (
+    McpChatArtifactKind,
+    McpChatSession,
+    McpChatToolCallArtifact,
+)
 from backend.models.mcp_trace import MCPToolCall
 from backend.policy.auth import ActorContext
 from backend.policy.trust_boundaries import actor_can_read_drafts
@@ -297,6 +301,7 @@ def project_mcp_activity_batch(
         workspace_id: _ReaderGate(service, session, workspace_id, actor)
         for workspace_id in workspace_ids
     }
+    _prime_context_targets(calls, edges_by_call, gates)
     return {
         call.id: _project_mcp_activity(
             session,
@@ -308,6 +313,41 @@ def project_mcp_activity_batch(
         )
         for call in calls
     }
+
+
+def _prime_context_targets(calls, edges_by_call, gates) -> None:
+    """Batch the Context page/version reads the per-call checks below make.
+
+    Each call asks about its edge pages, served or written version and named
+    inputs; priming the gate answers those with one read per kind and batch,
+    so a feed of distinct pages no longer costs about three reads per call.
+    """
+
+    from backend.services.mcp_chat_service import _input_target_refs
+
+    context_page = McpChatArtifactKind.CONTEXT_PAGE.value
+    wanted: dict[UUID, tuple[set[UUID], set[UUID]]] = {}
+    for call in calls:
+        page_ids, version_ids = wanted.setdefault(call.workspace_id, (set(), set()))
+        for edge in edges_by_call.get(call.id, []):
+            if edge.verb != "search_match" and edge.resource_kind == context_page:
+                page_ids.add(edge.resource_id)
+        for kind, target_id in _input_target_refs(call.tool_name, call.input_summary):
+            if kind == "context_page":
+                page_ids.add(target_id)
+            elif kind == "context_version":
+                version_ids.add(target_id)
+        detail = call.result_detail if isinstance(call.result_detail, dict) else {}
+        read = validate_read_projection(detail.get("read_projection"))
+        if read is not None and read["resource_kind"] == context_page:
+            version_ids.add(UUID(read["version_id"]))
+        if isinstance(detail.get("version_id"), str):
+            try:
+                version_ids.add(UUID(detail["version_id"]))
+            except ValueError:
+                pass
+    for workspace_id, (page_ids, version_ids) in wanted.items():
+        gates[workspace_id].prime_context(page_ids, version_ids)
 
 
 def _project_mcp_activity(session, call, actor, gate, edges, chats):

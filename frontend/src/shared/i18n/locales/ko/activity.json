@@ -290,6 +290,7 @@
       "restored": "복원됨",
       "deleted": "삭제됨",
       "reviewed": "검토됨",
+      "requested": "검토 요청됨",
       "failed": "실패",
       "partial": "일부 처리",
       "accepted": "접수됨"
@@ -307,6 +308,23 @@
       "cite": "자료를 인용했습니다",
       "guide": "사용 안내를 확인했습니다"
     },
+    "mcpActivity": {
+      "read_one": "읽었습니다",
+      "read_other": "{{count}}회 읽었습니다"
+    },
+    "mcpOperationNames": {
+      "read": "읽기",
+      "search": "검색",
+      "edit": "초안 수정",
+      "create": "항목 생성",
+      "review": "검토 요청",
+      "publish": "게시",
+      "restore": "복원",
+      "delete": "삭제",
+      "cite": "인용",
+      "guide": "사용 안내",
+      "tool": "도구 실행"
+    },
     "mcpResults": {
       "failed": "도구 실행을 완료하지 못했습니다",
       "conflict": "버전 충돌로 요청을 완료하지 못했습니다",
@@ -314,19 +332,27 @@
       "partial": "요청이 일부만 처리되었습니다",
       "accepted": "요청이 접수되었습니다"
     },
+    "mcpFailed": "{{operation}} 실패",
+    "mcpFailureReasons": {
+      "failed": "완료하지 못함",
+      "conflict": "버전 충돌",
+      "rejected_by_policy": "정책에 따라 거절됨"
+    },
     "noTarget": "대상 링크 없음",
     "openMcpActivity": "MCP 활동 보기",
     "openActivity": "활동 목록 보기",
+    "mcpDetailsHint": "도구명·처리 시간·오류 코드:",
+    "mcpDetailsLink": "Activity의 MCP 기록",
     "openReview": "검토 열기: {{title}}",
-    "reviewRequiredFor": "검토필요: {{title}}",
-    "reviewRequired": "검토필요",
+    "reviewRequired": "검토 필요",
     "technical": {
-      "title": "기술 정보",
-      "tool": "도구",
-      "result": "실행 결과",
-      "duration": "소요 시간",
+      "title": "호출 상세",
+      "tool": "실행한 도구",
+      "result": "결과",
+      "duration": "처리 시간",
       "milliseconds": "{{count}}ms",
-      "error": "공개 오류 코드"
+      "seconds": "{{value}}초",
+      "error": "오류 코드"
     },
     "group": {
       "expand": "원본 {{count}}건 펼치기",

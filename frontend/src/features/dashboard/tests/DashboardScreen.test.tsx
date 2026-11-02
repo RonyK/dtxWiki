@@ -251,13 +251,17 @@ describe("DashboardScreen", () => {
       </MemoryRouter>,
     );
 
-    const row = (await screen.findByText(i18n.t("activity:feed.mcpResults.failed"))).closest(
+    // What was attempted stays next to the failure; no target link, so it is the title.
+    const row = (await screen.findByText("Draft update failed")).closest(
       ".activity-feed-entry",
     ) as HTMLElement;
+    expect(within(row).getByText("Could not complete")).toBeInTheDocument();
     expect(within(row).getByText("Failed").closest("[data-action]")).toHaveAttribute("data-action", "failed");
     expect(within(row).queryByText("Edited")).toBeNull();
     expect(row).not.toHaveTextContent("Claude Code; status=failed; Tool call failed.");
-    expect(row.querySelector("details")).not.toBeNull();
+    // Dashboard cards are summaries: MCP technical fields live behind one link.
+    expect(row.querySelector("details")).toBeNull();
+    expect(screen.getByRole("link", { name: "Activity › MCP records" }).getAttribute("href")).toContain("kind=mcp");
   });
 
   it("badges an unclassifiable row with a neutral verb, not its lane name", async () => {
@@ -614,7 +618,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {
         data: policies(),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items?limit=1`]: {
         data: [{ id: "source-1" }],
       },
     });
@@ -655,7 +659,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {
         data: policies(),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items?limit=1`]: {
         data: [{ id: "source-1" }],
       },
     });
@@ -885,7 +889,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {
         data: policies(),
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items?limit=1`]: {
         data: [{ id: "source-1" }],
       },
     });
@@ -947,13 +951,13 @@ describe("DashboardScreen", () => {
       return jsonResponse(dashboardResponse(url));
     });
     render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}><DashboardScreen /></MemoryRouter>);
-    await screen.findByRole("link", { name: "Read Old private title 4 times" });
+    await screen.findByRole("link", { name: "Old private title" });
     await userEvent.click(screen.getByRole("button", { name: "Expand 4 original events" }));
     await vi.waitFor(() => expect(screen.queryByText(/Old private title/)).not.toBeInTheDocument());
     expect(screen.getByText("Other visible activity")).toBeInTheDocument();
     expect(screen.queryByText(/5 original events/)).not.toBeInTheDocument();
     if (visibleCount) {
-      expect(screen.getByRole("link", { name: "Read Visible survivor" })).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/visible-page");
+      expect(screen.getByRole("link", { name: "Visible survivor" })).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/visible-page");
       expect(screen.getAllByText("2 entries · 2 original events")).toHaveLength(2);
     } else expect(screen.getAllByText("1 entry · 1 original event")).toHaveLength(2);
     // The reconciled entry replaces the group in place; nothing re-fetches.
@@ -991,17 +995,17 @@ describe("DashboardScreen", () => {
       return jsonResponse(dashboardResponse(url));
     });
     render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/dashboard"]}><DashboardScreen /></MemoryRouter>);
-    await screen.findByRole("link", { name: "Read Old private title 4 times" });
+    await screen.findByRole("link", { name: "Old private title" });
     await userEvent.click(screen.getByRole("button", { name: "Expand 4 original events" }));
     expect(await screen.findByText("Original events could not be loaded. Try again.")).toBeVisible();
     expect(await screen.findByText("The service is temporarily unavailable. Try again shortly.")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Read Old private title 4 times" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Old private title" })).toBeVisible();
     expect(screen.getAllByText("2 entries · 5 original events")).toHaveLength(2);
     expect(screen.getByText("Other activity")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Original events could not be loaded. Try again.")).toBeVisible();
     expect(await screen.findByText("The service is temporarily unavailable. Try again shortly.")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Read Old private title 4 times" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Old private title" })).toBeVisible();
     expect(screen.getAllByText("2 entries · 5 original events")).toHaveLength(2);
     expect(detailAttempts).toBe(2);
   });
@@ -1046,7 +1050,7 @@ function mockFetch(responses: Record<string, unknown>) {
 }
 
 function defaultDashboardResponse(url: string) {
-  if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items`) {
+  if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items?limit=1`) {
     return { data: [] };
   }
   if (
@@ -1054,7 +1058,7 @@ function defaultDashboardResponse(url: string) {
   ) {
     return { data: [] };
   }
-  if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages`) {
+  if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages?limit=1`) {
     return { data: [] };
   }
   if (

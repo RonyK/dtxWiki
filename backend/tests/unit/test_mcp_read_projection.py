@@ -957,7 +957,9 @@ def test_explicit_other_workspace_version_never_discloses_target(session_factory
         assert project_mcp_activity(session, call, actor).visible is False
 
 
-def test_batch_shares_visibility_and_edge_queries_for_repeated_reads(session_factory):
+def test_batch_shares_visibility_and_edge_queries_for_repeated_and_distinct_reads(
+    session_factory,
+):
     with session_factory.begin() as session:
         workspace, client, page, version, actor = _seed(session)
         token = uuid4()
@@ -965,17 +967,25 @@ def test_batch_shares_visibility_and_edge_queries_for_repeated_reads(session_fac
             _call(session, workspace, client, page, version, chat_token=token)[0]
             for _ in range(20)
         ]
-        statements = []
-
-        def capture(_connection, _cursor, statement, _parameters, _context, _many):
-            statements.append(statement)
-
+        _, _, other_page, other_version, _ = _seed(session)
+        other, *_ = _call(
+            session, workspace, client, other_page, other_version, chat_token=token
+        )
         connection = session.connection()
-        event.listen(connection, "before_cursor_execute", capture)
-        try:
-            projections = project_mcp_activity_batch(session, calls, actor)
-        finally:
-            event.remove(connection, "before_cursor_execute", capture)
+
+        def project(batch):
+            statements = []
+
+            def capture(_connection, _cursor, statement, _params, _context, _many):
+                statements.append(statement)
+
+            event.listen(connection, "before_cursor_execute", capture)
+            try:
+                return project_mcp_activity_batch(session, batch, actor), statements
+            finally:
+                event.remove(connection, "before_cursor_execute", capture)
+
+        projections, statements = project(calls)
         assert len(projections) == 20
         assert (
             len({projection.grouping_key for projection in projections.values()}) == 1
@@ -984,3 +994,9 @@ def test_batch_shares_visibility_and_edge_queries_for_repeated_reads(session_fac
             projection.grouping_key is not None for projection in projections.values()
         )
         assert len(statements) < 10
+        # One read of another page costs no statement: pages and versions load
+        # per batch, not per distinct target (Dashboard feed, Q3). Comparing
+        # with the batch above needs one such page, not a large fixture.
+        mixed, mixed_statements = project([*calls, other])
+        assert mixed[other.id].title == "Visible read title"
+        assert len(mixed_statements) == len(statements)
