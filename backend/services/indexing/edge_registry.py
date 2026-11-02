@@ -170,7 +170,7 @@ def _co_access_rows(
     """Compatibility seam for rebuilds and released migration callers."""
     from backend.services.co_access import co_access_projection_rows
 
-    return co_access_projection_rows(session, workspace_id, now=now)
+    return co_access_projection_rows(session, workspace_id)
 
 
 def _promoted_from_rows(
@@ -1267,56 +1267,6 @@ def refresh_co_access_edge_projection(
     from backend.services.co_access import sync_co_access_projection
 
     return sync_co_access_projection(session, workspace_id, usage_signals_enabled=True)
-
-
-def _refresh_released_co_access_projection(
-    session: Session,
-    workspace_id: UUID,
-    *,
-    rows: list[dict[str, object]],
-    now: datetime | None,
-) -> int:
-    """Repair the released core shape without loading newer ORM fields."""
-
-    table = EdgeProjection.__table__
-    columns = (
-        table.c.source_kind,
-        table.c.source_id,
-        table.c.target_kind,
-        table.c.target_id,
-        table.c.weight,
-        table.c.occurred_at,
-    )
-    connection = session.connection()
-    predicate = (
-        table.c.workspace_id == workspace_id,
-        table.c.edge_kind == "co_access",
-    )
-    existing = {
-        tuple(row) for row in connection.execute(select(*columns).where(*predicate))
-    }
-    projected = {tuple(row[column.name] for column in columns) for row in rows}
-    if existing == projected:
-        return len(rows)
-    connection.execute(table.delete().where(*predicate))
-    if rows:
-        seen_at = now or datetime.now(UTC)
-        connection.execute(
-            table.insert(),
-            [
-                {
-                    **{
-                        key: value
-                        for key, value in row.items()
-                        if key not in {"support_session_count", "first_observed_at"}
-                    },
-                    "last_seen_at": seen_at,
-                }
-                for row in rows
-            ],
-        )
-    bump_edge_version(session, workspace_id)
-    return len(rows)
 
 
 def clear_co_access_edge_projection(session: Session, workspace_id: UUID) -> int:

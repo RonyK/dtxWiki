@@ -37,7 +37,7 @@ def project_inserted_artifact_usage(
         or event.tool_name not in FOCUSED_READ_TOOLS
     ):
         return
-    from backend.services.co_access import record_co_access_read
+    from backend.services.co_access import CoAccessRepairRequired, record_co_access_read
 
     try:
         # begin_nested flushes the original trace before the derived savepoint.
@@ -50,24 +50,26 @@ def project_inserted_artifact_usage(
                     chat_session_id=event.chat_session_id,
                     artifact_id=event.artifact_id,
                 )
+    except CoAccessRepairRequired:
+        pass
     except Exception:
         logger.exception("Co-access projection deferred; original read trace retained")
-        from backend.services.job_queue import JobQueueService
+    else:
+        return
+    from backend.services.job_queue import JobQueueService
 
-        try:
-            with session.begin_nested():
-                JobQueueService().enqueue(
-                    session,
-                    event.workspace_id,
-                    "co_access_repair",
-                    "usage",
-                    idempotency_key=f"co-access:{event.artifact_id}",
-                    target_ref={
-                        "chat_session_id": str(event.chat_session_id),
-                        "artifact_id": str(event.artifact_id),
-                    },
-                )
-        except Exception:
-            logger.exception(
-                "Could not queue co-access repair; source evidence retained"
+    try:
+        with session.begin_nested():
+            JobQueueService().enqueue(
+                session,
+                event.workspace_id,
+                "co_access_repair",
+                "usage",
+                idempotency_key=f"co-access:{event.artifact_id}",
+                target_ref={
+                    "chat_session_id": str(event.chat_session_id),
+                    "artifact_id": str(event.artifact_id),
+                },
             )
+    except Exception:
+        logger.exception("Could not queue co-access repair; source evidence retained")

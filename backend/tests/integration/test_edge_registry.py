@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import event, select
+from sqlalchemy import event, inspect, select
 
 from backend.models.ask import AskSession, AskTurn, AskTurnCitation
 from backend.models.base import Base
@@ -21,7 +21,12 @@ from backend.models.mcp_chat import McpChatArtifactKind
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.services.entity_ref import EntityKind
+from backend.services.graph_cache import lock_edge_projection_workspace
 from backend.services.graph_service import HYDRATORS
+from backend.services.indexing.edge_projection import (
+    EdgeProjectionScope,
+    reconcile_edge_projection_rows,
+)
 from backend.services.indexing.edge_registry import (
     DEFERRED_EDGE_RELATIONS,
     EDGE_BEARING_RELATIONS,
@@ -706,6 +711,36 @@ def test_narrow_wikilink_reconcile_never_mutates_sources_outside_lock_set(
         assert locked_after is not None
         assert locked_after.weight == 2.0
         assert _edge_projection_snapshots(session, outside_edge_ids) == outside_before
+
+        # Reuse these rows to exercise the expired-attribute autoflush path.
+        outside = session.get(EdgeProjection, next(iter(outside_edge_ids)))
+        workspace_state = select(
+            Workspace.edge_projection_version, Workspace.updated_at
+        ).where(Workspace.id == workspace_id)
+        before = session.execute(workspace_state).one()
+        session.expire(outside)
+        locked_after.weight += 1
+        flushes = []
+
+        def before_flush(*_args):
+            flushes.append(True)
+
+        event.listen(session, "before_flush", before_flush)
+        try:
+            lock_edge_projection_workspace(session, workspace_id)
+            assert flushes == [] and inspect(locked_after).modified
+            with pytest.raises(ValueError, match="outside the producer"):
+                reconcile_edge_projection_rows(
+                    session,
+                    scope=EdgeProjectionScope(workspace_id, frozenset({"co_access"})),
+                    existing_rows=[outside],
+                    desired_rows=[],
+                )
+            assert flushes == [] and inspect(locked_after).modified
+            assert not inspect(outside).deleted
+            assert session.connection().execute(workspace_state).one() == before
+        finally:
+            event.remove(session, "before_flush", before_flush)
 
 
 def _edge_projection_snapshots(session, edge_ids):

@@ -1199,6 +1199,7 @@ def test_ppr_cache_uses_database_revision_across_sessions(session_factory):
         assert first_target in {result.entity_id for result in first}
         scores = {result.entity_id: result.score for result in first}
         assert scores[first_target] > scores[usage_target]
+        assert scores[usage_target] / scores[first_target] == pytest.approx(300 / 325)
         # The normalization is an input policy, not a rewrite of evidence.
         assert (
             session.scalar(
@@ -1416,6 +1417,36 @@ def test_ppr_ties_use_context_trust_and_cut_usage_after_curated(
             top_k=10,
             node_budget=4,
         )
+
+        # Once curated candidates are exhausted, SQL must compare usage kinds
+        # with importance weights rather than the lower display ceiling.
+        session.execute(
+            delete(EdgeProjection).where(
+                EdgeProjection.workspace_id == workspace_id,
+                EdgeProjection.provenance == "curated",
+            )
+        )
+        session.add(
+            EdgeProjection(
+                workspace_id=workspace_id,
+                source_kind="context_page",
+                source_id=source.id,
+                target_kind="context_page",
+                target_id=uuid4(),
+                edge_kind="ask_citation",
+                provenance="usage",
+                weight=0.5,
+                source_ref={},
+            )
+        )
+        session.flush()
+        usage_candidates = _frontier_edges(
+            session,
+            workspace_id,
+            {("context_page", source.id)},
+            limit=1,
+        )
+        assert [row.target_id for row in usage_candidates] == [usage_target]
 
     by_id = {result.entity_id: result for result in results}
     assert by_id[human.id].trust_prior > by_id[agent.id].trust_prior

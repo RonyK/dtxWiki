@@ -46,13 +46,13 @@ from backend.services.indexing.edge_projection import (
 PairKey = tuple[EntityRef, EntityRef]
 
 
+class CoAccessRepairRequired(RuntimeError):
+    """Pending history needs worker recovery rather than inline read work."""
+
+
 def lock_co_access_workspace(session: Session, workspace_id: UUID) -> None:
     """Administrative projection/recovery lock; never taken for ordinary views."""
     lock_edge_projection_workspace(session, workspace_id)
-
-
-def _reads(session: Session, workspace_id: UUID, **filters) -> Iterable[Read]:
-    return co_read_source(session, workspace_id, **filters)
 
 
 def _identity(pair: PairKey):
@@ -89,6 +89,22 @@ def _read(row):
         row.occurred_at,
         row.mcp_tool_call_id,
         row.id,
+    )
+
+
+def _has_other_pending_read(session, workspace_id, chat_id, row, *, after_key=None):
+    return (
+        session.scalar(
+            co_read_statement(
+                workspace_id,
+                chat_session_id=chat_id,
+                after_key=after_key,
+                conditions=(McpChatToolCallArtifact.id != row.id,),
+            )
+            .with_only_columns(McpChatToolCallArtifact.id)
+            .limit(1)
+        )
+        is not None
     )
 
 
@@ -199,7 +215,7 @@ def _recount_pair(session, workspace_id, key):
 def _replay_conversation(session, workspace_id, chat):
     """Rebuild only a cold/late conversation, then repair its affected pairs."""
     before = {
-        (p.left, p.right)
+        (p.left, p.right): (p.first_pair_at, p.last_pair_at)
         for p in co_access_pairs(
             co_read_source(
                 session,
@@ -210,8 +226,13 @@ def _replay_conversation(session, workspace_id, chat):
         )
     }
     rows = list(co_read_rows(session, workspace_id, chat_session_id=chat.id))
-    after = {(p.left, p.right) for p in co_access_pairs(_read(row) for row in rows)}
-    keys = before | after
+    after = {
+        (p.left, p.right): (p.first_pair_at, p.last_pair_at)
+        for p in co_access_pairs(_read(row) for row in rows)
+    }
+    keys = {
+        key for key in before.keys() | after.keys() if before.get(key) != after.get(key)
+    }
     if keys:
         try_edge_projection_reader(session, workspace_id)
     state = None
@@ -251,9 +272,14 @@ def _replay_conversation(session, workspace_id, chat):
 
 
 def record_co_access_read(
-    session: Session, *, workspace_id: UUID, chat_session_id: UUID, artifact_id: UUID
+    session: Session,
+    *,
+    workspace_id: UUID,
+    chat_session_id: UUID,
+    artifact_id: UUID,
+    allow_replay: bool = False,
 ) -> None:
-    """Process pending views under a conversation lock, not a workspace row lock."""
+    """Append one view inline; workers may recover deferred history explicitly."""
     chat = session.scalar(
         select_in_workspace(
             McpChatSession,
@@ -274,6 +300,15 @@ def record_co_access_read(
         return
     state = chat.co_access_state
     if state is None:
+        if not _has_other_pending_read(session, workspace_id, chat.id, row):
+            state, _, row.co_access_segment, row.co_access_position = (
+                advance_co_read_state(None, _read(row))
+            )
+            chat.co_access_state = state
+            session.flush()
+            return
+        if not allow_replay:
+            raise CoAccessRepairRequired("cold conversation has pending history")
         changed = _replay_conversation(session, workspace_id, chat)
     else:
         cursor = state["last_key"]
@@ -283,11 +318,21 @@ def record_co_access_read(
             UUID(cursor[2]),
         )
         if _key(row) <= cursor_key:
+            if not allow_replay:
+                raise CoAccessRepairRequired("view predates the conversation cursor")
             changed = _replay_conversation(session, workspace_id, chat)
         else:
+            if not allow_replay and _has_other_pending_read(
+                session, workspace_id, chat.id, row, after_key=cursor_key
+            ):
+                raise CoAccessRepairRequired("conversation has a pending view backlog")
             changed = set()
-            pending = co_read_rows(
-                session, workspace_id, chat_session_id=chat.id, after_key=cursor_key
+            pending = (
+                co_read_rows(
+                    session, workspace_id, chat_session_id=chat.id, after_key=cursor_key
+                )
+                if allow_replay
+                else (row,)
             )
             try:
                 for event in pending:
@@ -320,7 +365,8 @@ def record_co_access_read(
                     chat.co_access_state = state
                 session.flush()
             finally:
-                pending.close()
+                if allow_replay:
+                    pending.close()
     if changed:
         sync_co_access_projection(
             session,
@@ -520,13 +566,9 @@ def rebuild_co_access_pairs(
     )
 
 
-def co_access_projection_rows(session, workspace_id, *, now=None):
+def co_access_projection_rows(session, workspace_id):
     """One shared pair-to-edge producer for maintenance and full reindex."""
     return [
         _projection_row(pair, workspace_id)
         for pair in session.scalars(_pair_statement(workspace_id))
     ]
-
-
-def co_access_reads(session, workspace_id, *, since=None, **filters):
-    return co_read_source(session, workspace_id, since=since, **filters)

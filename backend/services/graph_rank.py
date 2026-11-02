@@ -57,6 +57,9 @@ RANK_PARAMS: dict[str, RankParam] = {
     "ask_citation": RankParam(0.30, 2, 60),
     "co_access": RankParam(0.20, 25, None),
 }
+# Importance compares lifetime support with link strength independently of the
+# display profile. At 25 conversations, co-access contributes half a unit.
+CO_ACCESS_PAGERANK_PARAM = RankParam(1.00, 25, None)
 # Usage producers own any storage-time aging. The shared display profile
 # consumes their supplied weight without applying another age multiplier.
 PREDECAYED_KINDS: frozenset[str] = frozenset()
@@ -147,12 +150,16 @@ def pagerank_weight(edge_kind: str, raw_weight: float) -> float:
     """Bound cumulative usage evidence without changing stored counts or age.
 
     A co-access pair carries lifetime conversation support, not link strength.
-    Reuse its 0.20 ceiling and 25-conversation midpoint for importance inputs;
-    authored and other producer weights retain their existing units.
+    Its importance input approaches 1.0 with a 25-conversation midpoint;
+    authored and other producer weights retain their existing units. Display
+    ranking uses its own, lower ceiling.
     """
     raw = max(float(raw_weight), 0.0)
     if RANK_ALIASES.get(edge_kind, edge_kind) == "co_access":
-        return saturation("co_access", raw)
+        if not (raw > 0 and math.isfinite(raw)):
+            return 0.0
+        param = CO_ACCESS_PAGERANK_PARAM
+        return param.w * raw / (raw + param.k)
     return raw
 
 

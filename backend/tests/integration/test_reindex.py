@@ -14,6 +14,8 @@ from backend.models.context import (
     PageLink,
 )
 from backend.models.graph import CoAccessPair
+from backend.models.job import Job
+from backend.models.mcp_chat import McpChatSession, McpChatToolCallArtifact
 from backend.models.workspace import Workspace
 from backend.services.indexing import (
     CompositeIndexer,
@@ -27,7 +29,10 @@ from backend.services.vector_store import BruteForceVectorStore
 pytestmark = pytest.mark.integration
 
 
-def test_reindex_workspace_indexes_published_pages(session_factory):
+def test_reindex_workspace_indexes_published_pages(session_factory, monkeypatch):
+    from backend.services import co_access
+    from backend.tests.integration.test_co_access_display_contract import _read_pair
+
     provider = DatabaseProvider(None, session_factory=session_factory)
     indexer = CompositeIndexer(
         [
@@ -77,6 +82,26 @@ def test_reindex_workspace_indexes_published_pages(session_factory):
         versions[0].body_md += f"\n\n[Two](/p/{workspace_id}/{pages[1].id})"
         source_id, target_id = sorted(page.id for page in pages)
         at = datetime(2026, 1, 1, tzinfo=UTC)
+        # Recovery belongs to this existing rebuild trajectory: source views
+        # survive failed derived work and terminal jobs; stale counters alone
+        # cannot recover them. No separate DB case is needed.
+        with monkeypatch.context() as failed_projection:
+
+            def fail_derived(*args, **kwargs):
+                raise RuntimeError("maintenance still owns the projection")
+
+            failed_projection.setattr(co_access, "record_co_access_read", fail_derived)
+            _read_pair(session, workspace_id, source_id, target_id, at=at)
+            _read_pair(
+                session, workspace_id, source_id, target_id, at=at + timedelta(days=1)
+            )
+        repair_jobs = list(
+            session.scalars(select(Job).where(Job.job_type == "co_access_repair"))
+        )
+        assert len(repair_jobs) == 4
+        for job in repair_jobs:
+            job.status = "failed"
+            job.retry_count = 3
         session.add(
             CoAccessPair(
                 workspace_id=workspace_id,
@@ -84,7 +109,7 @@ def test_reindex_workspace_indexes_published_pages(session_factory):
                 source_id=source_id,
                 target_kind="context_page",
                 target_id=target_id,
-                support_session_count=2,
+                support_session_count=999,
                 first_observed_at=at,
                 occurred_at=at + timedelta(days=1),
             )
@@ -99,6 +124,16 @@ def test_reindex_workspace_indexes_published_pages(session_factory):
         assert {"wikilink", "co_access"} <= {edge.edge_kind for edge in edges}
         pair = session.scalar(select(CoAccessPair))
         assert pair.support_session_count == 2
+        assert pair.first_observed_at == at + timedelta(minutes=1)
+        assert pair.occurred_at == at + timedelta(days=1, minutes=1)
+        assert all(
+            artifact.co_access_segment is not None
+            for artifact in session.scalars(select(McpChatToolCallArtifact))
+        )
+        assert all(
+            chat.co_access_state is not None
+            for chat in session.scalars(select(McpChatSession))
+        )
         assert len([edge for edge in edges if edge.edge_kind == "co_access"]) == 1
         assert (
             session.get(Workspace, workspace_id).edge_projection_version
@@ -133,17 +168,22 @@ def test_reindex_prunes_orphan_chunks(session_factory):
             select(Workspace).where(Workspace.slug == "default")
         ).id
         page = ContextPage(
-            workspace_id=workspace_id, slug="doomed", title="Doomed",
+            workspace_id=workspace_id,
+            slug="doomed",
+            title="Doomed",
             page_type="concept",
         )
         session.add(page)
         session.flush()
         version = ContextPageVersion(
             workspace_id=workspace_id,
-            page_id=page.id, version_no=1,
+            page_id=page.id,
+            version_no=1,
             body_md="# Doomed\n\nbody content to be orphaned",
-            content_hash=f"h{uuid4().hex[:8]}", actor_type="human",
-            created_by_actor_kind="human", created_by_actor_id="t",
+            content_hash=f"h{uuid4().hex[:8]}",
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id="t",
             version_status="published_snapshot",
         )
         session.add(version)

@@ -14,6 +14,7 @@ from backend.models.mcp_chat import (
     EXPOSURE_VERBS,
     McpChatArtifactVerb,
 )
+from backend.services.indexing.co_read_source import CO_ACCESS_SOURCE_VERB
 from backend.services.indexing.edge_registry import CO_ACCESS_SOURCE_VERBS
 from backend.services.mcp_trace_capture import derive_artifact_links
 
@@ -92,6 +93,7 @@ def test_search_tools_derive_exposure_links_only():
 
 
 def test_projection_filters_only_admit_consumption_verbs():
+    assert CO_ACCESS_SOURCE_VERBS == {CO_ACCESS_SOURCE_VERB}
     for relative_path, expected_count in PROJECTION_SOURCES.items():
         tree = ast.parse((REPO_ROOT / relative_path).read_text(encoding="utf-8"))
         arguments = [
@@ -128,8 +130,7 @@ def test_projection_filters_only_admit_consumption_verbs():
         assert all(
             len(comparison.ops) == 1
             and isinstance(comparison.ops[0], ast.Eq)
-            and _attribute_path(comparison.comparators[0])
-            == "McpChatArtifactVerb.VIEWED"
+            and _attribute_path(comparison.comparators[0]) == "CO_ACCESS_SOURCE_VERB"
             for comparison in direct_filters
         ), relative_path
 

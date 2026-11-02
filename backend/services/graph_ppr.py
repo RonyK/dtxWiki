@@ -16,7 +16,7 @@ from backend.models.graph import KnowledgeNodeStat
 from backend.models.review import ReviewDecision, ReviewItem
 from backend.repositories.workspace_scoped import select_projection_in_workspace
 from backend.services.graph_cache import edge_version
-from backend.services.graph_rank import pagerank_weight, rank_param
+from backend.services.graph_rank import CO_ACCESS_PAGERANK_PARAM, pagerank_weight
 
 NodeRef = tuple[str, UUID]
 PROVENANCE_PRIORITY = {"curated": 3, "derived": 2, "usage": 1}
@@ -269,7 +269,7 @@ def _frontier_edges(
             break
         # Usage candidates need the same units as the PageRank transition
         # input. Preserve index ordering for curated/derived producer weights.
-        param = rank_param("co_access")
+        param = CO_ACCESS_PAGERANK_PARAM
         priority_weight = (
             case(
                 (

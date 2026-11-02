@@ -49,7 +49,8 @@ def test_no_amount_of_co_reading_outranks_one_authored_link():
     assert rank_score("wikilink", 1.0, None, NOW) == 0.25
     # Stored co-access counts are a different unit from an authored link.
     # Importance/PageRank must bound them too, without applying age decay.
-    assert pagerank_weight("co_access", 300) == pytest.approx(0.20 * 300 / 325)
+    assert pagerank_weight("co_access", 300) == pytest.approx(300 / 325)
+    assert pagerank_weight("co_access", 25) == 0.5
     assert pagerank_weight("co_access", 40_000) < pagerank_weight("wikilink", 1)
     assert pagerank_weight("wikilink", 1) == 1
     assert pagerank_weight("co_access", 0) == 0

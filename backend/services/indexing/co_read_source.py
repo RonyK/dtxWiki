@@ -16,6 +16,9 @@ from backend.services.indexing.co_read import Read
 from backend.services.indexing.co_read_policy import CO_ACCESS_SOURCE_BATCH_ROWS
 
 CO_ACCESS_SOURCE_VERBS = frozenset({McpChatArtifactVerb.VIEWED})
+# The singleton equality matches the viewed-session partial index predicate.
+# Unpacking rejects an expanded allowlist until the query/index policy changes.
+(CO_ACCESS_SOURCE_VERB,) = CO_ACCESS_SOURCE_VERBS
 
 
 def co_read_statement(
@@ -27,7 +30,7 @@ def co_read_statement(
     conditions=(),
 ):
     predicates = [
-        McpChatToolCallArtifact.verb == McpChatArtifactVerb.VIEWED,
+        McpChatToolCallArtifact.verb == CO_ACCESS_SOURCE_VERB,
         McpChatToolCallArtifact.resource_kind.in_([kind.value for kind in EntityKind]),
         *conditions,
     ]

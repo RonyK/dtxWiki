@@ -1866,6 +1866,7 @@ class OneShotWorker:
                 workspace_id=job.workspace_id,
                 chat_session_id=UUID(str(job.target_ref["chat_session_id"])),
                 artifact_id=UUID(str(job.target_ref["artifact_id"])),
+                allow_replay=True,
             )
         return {"co_access_repaired": True}
 

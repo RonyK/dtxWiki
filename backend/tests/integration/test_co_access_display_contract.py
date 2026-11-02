@@ -199,7 +199,10 @@ def test_view_trace_updates_lifetime_pairs_atomically_and_repairs_late_reads(
     not four input variants: together they move the original pair beyond the
     five-read adjacency window and require removing that chat's contribution.
     """
+    from backend.app.settings import Settings
     from backend.services import co_access
+    from backend.services.job_queue import JobQueueService
+    from backend.worker.runtime import OneShotWorker
 
     projected_artifacts = []
     record_read = co_access.record_co_access_read
@@ -215,6 +218,16 @@ def test_view_trace_updates_lifetime_pairs_atomically_and_repairs_late_reads(
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         access_timestamp = session.get(Workspace, workspace_id).updated_at
+        worker = OneShotWorker(job_queue=JobQueueService(), settings=Settings())
+
+        def repair_pending():
+            while (
+                worker.dispatch_once(
+                    session, workspace_id=workspace_id, job_types={"co_access_repair"}
+                )
+                is not None
+            ):
+                pass
 
         def pair():
             return session.scalar(
@@ -265,8 +278,30 @@ def test_view_trace_updates_lifetime_pairs_atomically_and_repairs_late_reads(
         first = pair().first_observed_at
         assert first == now - timedelta(days=400, minutes=-1)
 
-        for seconds in (10, 20, 30, 40):
-            view(client, chat, uuid4(), now + timedelta(seconds=seconds))
+        with monkeypatch.context() as late_projection:
+            replay = co_access._replay_conversation
+            inline_replays = []
+
+            def record_replay(*args, **kwargs):
+                inline_replays.append(args[2].id)
+                return replay(*args, **kwargs)
+
+            late_projection.setattr(co_access, "_replay_conversation", record_replay)
+            for seconds in (10, 20, 30, 40):
+                view(client, chat, uuid4(), now + timedelta(seconds=seconds))
+            assert inline_replays == []
+        # Late reads preserve their source immediately; only worker repair
+        # changes the derived relationship, never the MCP response itself.
+        assert pair().support_session_count == edge().weight == 2
+        assert (
+            session.scalar(
+                select(func.count(Job.id)).where(
+                    Job.job_type == "co_access_repair", Job.status == "queued"
+                )
+            )
+            == 4
+        )
+        repair_pending()
         assert pair().support_session_count == 1
         assert edge() is None
 
@@ -379,10 +414,11 @@ def test_view_trace_updates_lifetime_pairs_atomically_and_repairs_late_reads(
 
         # Failure isolation is part of this trace trajectory: two raw views
         # survive a derived-projection failure, and replay repairs them once.
-        from backend.app.settings import Settings
-        from backend.services.job_queue import JobQueueService
-        from backend.worker.runtime import OneShotWorker
-
+        completed_repairs = session.scalar(
+            select(func.count(Job.id)).where(
+                Job.job_type == "co_access_repair", Job.status == "completed"
+            )
+        )
         raw_count = session.scalar(select(func.count(McpChatToolCallArtifact.id)))
         with monkeypatch.context() as failed_projection:
 
@@ -404,13 +440,7 @@ def test_view_trace_updates_lifetime_pairs_atomically_and_repairs_late_reads(
             )
             == 2
         )
-        worker = OneShotWorker(job_queue=JobQueueService(), settings=Settings())
-        worker.dispatch_once(
-            session, workspace_id=workspace_id, job_types={"co_access_repair"}
-        )
-        worker.dispatch_once(
-            session, workspace_id=workspace_id, job_types={"co_access_repair"}
-        )
+        repair_pending()
         assert pair().support_session_count == 4
         assert (
             session.scalar(
@@ -418,5 +448,5 @@ def test_view_trace_updates_lifetime_pairs_atomically_and_repairs_late_reads(
                     Job.job_type == "co_access_repair", Job.status == "completed"
                 )
             )
-            == 2
+            == completed_repairs + 2
         )

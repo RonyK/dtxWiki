@@ -64,9 +64,17 @@ def reindex_workspace(
                     self_origins=configured_self_origins(database_provider.settings),
                 )
                 synced_versions += 1
-        # Lifetime counters are maintained by the view producer. A normal
-        # reindex restores the edge model from those counters, without a
-        # second raw-history replay or intermediate projection/revision.
+        # Reindex is the source-backed recovery path even when derived repair
+        # jobs exhausted their retries. Rebuild counters/cursors first, then
+        # publish all edge kinds together without an intermediate revision.
+        from backend.services.co_access import rebuild_co_access_pairs
+
+        rebuild_co_access_pairs(
+            session,
+            workspace_id,
+            usage_signals_enabled=usage_signals,
+            sync_projection=False,
+        )
         edge_counts = rebuild_edge_projection(
             session, workspace_id, usage_signals_enabled=usage_signals
         )
