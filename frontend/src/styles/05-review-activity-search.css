@@ -2088,8 +2088,9 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
 .activity-feed-reload { min-width: 44px; min-height: 44px; }
 
 :is(.activity-actor-disclosure, .activity-entry__fallback > a, .activity-feed-footnote > a, .activity-read-group__toggle, .activity-read-group__collapse, .activity-read-group__retry):focus-visible { outline: 3px solid var(--info); outline-offset: 2px; }
-/* The card outline above shows the title link's focus. */
-.activity-entry__title-link:focus-visible { outline: none; }
+/* The card outline above shows the title link's focus. Specific enough to
+   override the global :is(a[href], ...):focus-visible ring (0,3,0). */
+.activity-feed-entry > .activity-entry__layout .activity-entry__title-link:focus-visible { outline: none; }
 @media (hover: hover) {
   .activity-feed-entry:has(> .activity-entry__layout .activity-entry__title-link):hover { background: var(--surface-subtle); }
   .activity-feed-entry:hover > .activity-entry__layout > .activity-entry__go { color: var(--ink); }
