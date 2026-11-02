@@ -51,10 +51,6 @@ const POLICY = { lint: { policy: { auto_fix: false, link_fix_mode: "auto", auto_
 
 const WORKSPACE_ID = "00000000-0000-4000-8000-000000000110";
 
-// PR3: +4 collected tests, 11 new logical inputs across new/extended cases:
-// locked safeguard; recovered policy tuple; both reads pending; policies ready
-// before checks; incomplete policy; failed checks read; four failed save keys;
-// and a late response from the previous workspace. Browser captures are separate.
 describe("LintRulesSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -130,6 +126,9 @@ describe("LintRulesSection", () => {
     expect(autofix).toBeDisabled();
     expect(mode).toBeDisabled();
     expect(approval).toBeDisabled();
+    expect(autofix).toHaveProperty("indeterminate", true);
+    expect(approval).toHaveProperty("indeterminate", true);
+    expect(mode).toHaveValue("");
     await user.click(autofix);
     expect(updateSettingsPolicy).not.toHaveBeenCalled();
     await user.click(screen.getByText("Checks"));
@@ -141,6 +140,10 @@ describe("LintRulesSection", () => {
     await user.click(screen.getByRole("button", { name: "Retry options" }));
     await waitFor(() => expect(autofix).toBeEnabled());
     expect(autofix).toBeChecked();
+    expect(autofix).toHaveProperty("indeterminate", false);
+    expect(approval).toHaveProperty("indeterminate", false);
+    expect(screen.getByText(/Safe formatting-only saves may be approved immediately/)).toBeVisible();
+    expect(screen.getByText(/Safe formatting-only saves/).closest("[role='status']")).toBeNull();
     expect(mode).toHaveValue("suggest");
     expect(approval).not.toBeChecked();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -170,6 +173,8 @@ describe("LintRulesSection", () => {
     const autofix = screen.getByRole("checkbox", { name: /auto-fix/i });
     expect(autofix).toBeDisabled();
     expect(screen.getByRole("combobox")).toBeDisabled();
+    expect(screen.getByRole("combobox")).toHaveValue("");
+    expect(autofix).toHaveProperty("indeterminate", true);
     await act(async () => resolvePolicies(POLICY as never));
     expect(autofix).toBeEnabled();
     await act(async () => resolveRules(RULES as never));
@@ -187,14 +192,18 @@ describe("LintRulesSection", () => {
     vi.mocked(getLintRules).mockRejectedValue(new Error("checks offline"));
     renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
     await screen.findByText(/could not be loaded/);
+    expect(screen.getByText("Checks").closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: "Retry checks" })).toBeVisible();
     expect(screen.getByRole("combobox")).toBeDisabled();
     vi.mocked(getSettingsPolicies).mockResolvedValue(POLICY as never);
     await user.click(screen.getByRole("button", { name: "Retry options" }));
     await waitFor(() => expect(screen.getByRole("combobox")).toBeEnabled());
     await user.selectOptions(screen.getByRole("combobox"), "suggest");
-    await user.click(screen.getByText("Checks"));
     vi.mocked(getLintRules).mockResolvedValue(RULES as never);
     await user.click(screen.getByRole("button", { name: "Retry checks" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Retry checks" })).not.toBeInTheDocument());
+    expect(screen.getByText("Checks").closest("details")).not.toHaveAttribute("open");
+    await user.click(screen.getByText("Checks"));
     await screen.findByText("Code fence balance");
     expect(screen.getByRole("combobox")).toHaveValue("suggest");
     expect(getSettingsPolicies).toHaveBeenCalledTimes(2);
@@ -207,18 +216,14 @@ describe("LintRulesSection", () => {
     const autofix = screen.getByRole("checkbox", { name: /auto-fix/i });
     await waitFor(() => expect(autofix).toBeEnabled());
     await user.click(autofix);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Failed to update");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Failed to update the option.");
     expect(autofix).not.toBeChecked();
-    await user.selectOptions(screen.getByRole("combobox"), "suggest");
-    expect(screen.getByRole("combobox")).toHaveValue("auto");
-    const approval = screen.getByRole("checkbox", { name: /Automatically approve safe link fixes/ });
-    await user.click(approval);
-    expect(approval).toBeChecked();
     await user.click(screen.getByText("Checks"));
     const orphan = screen.getByRole("checkbox", { name: "Orphan page" });
     await user.click(orphan);
     await waitFor(() => expect(orphan).toBeEnabled());
     expect(orphan).not.toBeChecked();
+    expect(screen.getByRole("alert")).toHaveTextContent("Failed to update the rule.");
   });
 
   it("discards pending options when the workspace changes", async () => {

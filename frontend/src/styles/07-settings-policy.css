@@ -4390,11 +4390,36 @@ button.history-card {
 }
 
 @media (max-width: 1024px), (any-pointer: coarse) {
+  /* Align the control with the title's hit area, independently of description
+     height. Both remain centred when a long title wraps over several lines. */
+  .lint-rules-card .lint-rule-row > .lint-rule-copy {
+    display: contents;
+  }
+
+  .lint-rules-card .lint-rule-row .lint-rule-label {
+    grid-column: 2;
+    grid-row: 1;
+    min-height: 44px;
+  }
+
+  .lint-rules-card .lint-rule-row .lint-rule-description {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .lint-rules-card .lint-rule-row > input[type="checkbox"],
+  .lint-rules-card .lint-rule-row > .lint-rule-lock {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center;
+    margin-top: 0;
+  }
+
   .lint-rules-card .lint-rule-label label,
-  .lint-rules-card label.lint-rule-copy,
   .lint-rules-card .lint-layer-toggle {
     min-height: 44px;
-    align-content: center;
+    display: inline-flex;
+    align-items: center;
   }
 }
 

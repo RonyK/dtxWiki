@@ -41,9 +41,9 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
   const { t } = useTranslation("settings");
   const { t: lintT } = useTranslation("lint");
   const [rules, setRules] = useState<LintRuleInfo[] | null>(null);
-  const [autoFix, setAutoFix] = useState(false);
-  const [linkFixMode, setLinkFixMode] = useState<"auto" | "suggest">("auto");
-  const [autoApproveLinkFixes, setAutoApproveLinkFixes] = useState(true);
+  const [autoFix, setAutoFix] = useState<boolean | null>(null);
+  const [linkFixMode, setLinkFixMode] = useState<"auto" | "suggest" | null>(null);
+  const [autoApproveLinkFixes, setAutoApproveLinkFixes] = useState<boolean | null>(null);
   const [policyReady, setPolicyReady] = useState(false);
   const [policyError, setPolicyError] = useState(false);
   const [rulesError, setRulesError] = useState(false);
@@ -75,6 +75,9 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
     let cancelled = false;
     setPolicyReady(false);
     setPolicyError(false);
+    setAutoFix(null);
+    setLinkFixMode(null);
+    setAutoApproveLinkFixes(null);
     void getSettingsPolicies(workspaceId).then((policies) => {
       const policy = policies.lint?.policy;
       // Effective defaults belong to the server. A partial response is also
@@ -206,10 +209,10 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
         key: "auto_fix",
         value: !autoFix,
       });
-      setAutoFix((value) => !value);
+      setAutoFix((value) => value === null ? null : !value);
       announceSaved();
     } catch {
-      setError(t("lint.saveError", { defaultValue: "Failed to update the rule." }));
+      setError(t("lint.optionSaveError"));
     } finally {
       markBusy(["auto_fix"], false);
     }
@@ -226,7 +229,7 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
       else setAutoApproveLinkFixes(Boolean(value));
       announceSaved();
     } catch {
-      setError(t("lint.saveError", { defaultValue: "Failed to update the rule." }));
+      setError(t("lint.optionSaveError"));
     } finally {
       markBusy([key], false);
     }
@@ -275,13 +278,24 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
             </button>
           </StatusBanner>
         ) : !policyReady ? <SettingsLoadingRow>{t("lint.policyLoading")}</SettingsLoadingRow> : null}
+        {rulesError ? (
+          <StatusBanner tone="warning">
+            <span>{t("lint.loadError")}</span>{" "}
+            <button className="text-button" type="button" onClick={() => setRulesAttempt((value) => value + 1)}>
+              {t("lint.retryRules")}
+            </button>
+          </StatusBanner>
+        ) : null}
         <div className="lint-settings-group" role="group" aria-labelledby="lint-save-heading">
           <h3 id="lint-save-heading">{t("lint.saveGroup")}</h3>
           <div className="lint-autofix lint-rule-row">
             <input
               id="lint-auto-fix"
               type="checkbox"
-              checked={autoFix}
+              checked={autoFix === true}
+              aria-checked={autoFix === null ? "mixed" : undefined}
+              title={autoFix === null ? t("lint.unknownValue") : undefined}
+              ref={(input) => { if (input) input.indeterminate = autoFix === null; }}
               disabled={readOnly || !policyReady || busy.has("auto_fix")}
               onChange={toggleAutoFix}
             />
@@ -305,10 +319,11 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
             </label>
             <select
               id="lint-link-fix-mode"
-              value={linkFixMode}
+              value={linkFixMode ?? ""}
               disabled={readOnly || !policyReady || busy.has("link_fix_mode")}
               onChange={(event) => void saveLinkPolicy("link_fix_mode", event.target.value)}
             >
+              <option value="" disabled aria-label={t("lint.unknownValue")}>—</option>
               <option value="auto">{t("lint.linkFixAuto")}</option>
               <option value="suggest">{t("lint.linkFixSuggest")}</option>
             </select>
@@ -320,7 +335,10 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
             <input
               id="lint-auto-approve-link-fixes"
               type="checkbox"
-              checked={autoApproveLinkFixes}
+              checked={autoApproveLinkFixes === true}
+              aria-checked={autoApproveLinkFixes === null ? "mixed" : undefined}
+              title={autoApproveLinkFixes === null ? t("lint.unknownValue") : undefined}
+              ref={(input) => { if (input) input.indeterminate = autoApproveLinkFixes === null; }}
               disabled={readOnly || !policyReady || busy.has("auto_approve_link_fixes")}
               onChange={() => void saveLinkPolicy("auto_approve_link_fixes", !autoApproveLinkFixes)}
             />
@@ -331,7 +349,7 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
           </div>
         </div>
         {policyReady ? (
-          <div className="lint-current-effect" role="status">
+          <div className="lint-current-effect">
             <h3>{t("lint.currentEffect")}</h3>
             <p>{t(linkFixMode === "auto" ? "lint.effectLinksAuto" : "lint.effectLinksSuggest")}</p>
             <p>{t(autoFix ? "lint.effectFormatOn" : "lint.effectFormatOff")}</p>
@@ -346,14 +364,7 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
             <span>{t("lint.searchRules")}</span>
             <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} />
           </label>
-          {rulesError ? (
-            <StatusBanner tone="warning">
-              <span>{t("lint.loadError")}</span>{" "}
-              <button className="text-button" type="button" onClick={() => setRulesAttempt((value) => value + 1)}>
-                {t("lint.retryRules")}
-              </button>
-            </StatusBanner>
-          ) : rules === null ? <SettingsLoadingRow>{t("lint.loading")}</SettingsLoadingRow> : null}
+          {rules === null && !rulesError ? <SettingsLoadingRow>{t("lint.loading")}</SettingsLoadingRow> : null}
           {rules !== null && rules.length === 0 ? (
             <SettingsEmptyState
               description={t("lint.emptyHint")}

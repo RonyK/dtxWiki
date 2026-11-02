@@ -11,6 +11,12 @@
   collapsed by default, distinguishing required safeguards and external results.
 - Use the same effective policy defaults for reads and settings revision checks,
   so a newly loaded Lint card can be saved without a false revision conflict.
+- Keep failed checks reads and retries visible when the checks list is collapsed,
+  and show unconfirmed options without guessed values. Align checkbox labels on
+  mobile and touch layouts while preserving their 44px targets.
+- Clarify that safe formatting-only saves can qualify for immediate approval
+  independently of link-fix approval. Reject attempts to disable required
+  publication safeguards through Settings.
 
 ### Index navigation and formatted previews
 

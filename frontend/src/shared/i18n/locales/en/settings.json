@@ -633,15 +633,17 @@
     "currentEffect": "Current effect",
     "effectLinksAuto": "Automatic link fixing also participates in safe repairs of published documents.",
     "effectLinksSuggest": "Ordinary internal links receive suggestions. Link repairs do not start published maintenance.",
-    "effectFormatOn": "Safe formatting runs on authored Context saves and accompanies published link repairs. Formatting alone never starts a published repair.",
+    "effectFormatOn": "Safe formatting runs on authored Context saves and accompanies published link repairs. Safe formatting-only saves may be approved immediately, even when link-fix approval is off; existing review safeguards still apply. Formatting alone never starts a published repair.",
     "effectFormatOff": "Optional formatting cleanup is off, including during published link repairs.",
     "effectApprovalOn": "Safe fix-only changes may be approved immediately when all review safeguards pass. This applies to authored saves and published maintenance.",
-    "effectApprovalOff": "Immediate approval of link fixes is off. Changes follow the normal Review policy, including any configured timed approval.",
+    "effectApprovalOff": "Immediate approval of link fixes is off. Link changes follow the normal Review policy, including any configured timed approval.",
     "indexRefHint": "Exact system references copied from the index become readable addresses on authored saves, even in suggestion mode. Restores and copied versions preserve their original text.",
     "checks": "Checks",
     "checksHint": "Optional checks can be toggled. Required publication safeguards stay on; findings from external sources are read-only.",
     "searchRules": "Search checks",
-    "noMatches": "No matching checks."
+    "noMatches": "No matching checks.",
+    "unknownValue": "Not loaded",
+    "optionSaveError": "Failed to update the option."
   },
   "summary": {
     "workspace": "The name, owner, and default language for this workspace.",

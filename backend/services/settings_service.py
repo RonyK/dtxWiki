@@ -56,7 +56,7 @@ from backend.services.library_policy import (
     LibraryFamilyPolicyService,
     get_default_library_family_policy_service,
 )
-from backend.services.lint import LintPolicy, LintRegistry
+from backend.services.lint import LintPolicy, LintRegistry, LintStage
 from backend.services.mcp_credential_health import binding_key_for_client
 from backend.services.oauth_service import (
     WorkspaceOAuthHealth,
@@ -1191,6 +1191,10 @@ class SettingsService:
         rule = self.lint_registry.rule(key)
         if rule is None:
             raise SettingsPolicyUpdateRejected(f"unknown lint rule_id: {key}")
+        if value is False and LintStage.PUBLISH_FLOOR in rule.stages:
+            raise SettingsPolicyUpdateRejected(
+                f"cannot disable required publication safeguard: {key}"
+            )
         if not getattr(rule, "runtime_checkable", True):
             raise SettingsPolicyUpdateRejected(
                 f"lint rule is supplied externally and cannot be toggled: {key}"
