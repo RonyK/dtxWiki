@@ -13,14 +13,21 @@
 .review-main .review-detail-card > * { margin-bottom: 18px; }
 .review-main .review-detail-card > :last-child { margin-bottom: 0; }
 
+/* The action column has a fixed width instead of sizing to its buttons, so
+   neither the decision state, the locale nor the next review's title moves
+   the title's edge: an auto column let the post-decision cluster squeeze the
+   title to nothing. 24rem holds the widest decision row (Approve, Request
+   changes, Reject); extra buttons wrap inside it. A header with no actions
+   gives the title the whole row. Narrow and touch layouts stack (below). */
 .review-detail-header {
   position: sticky;
   top: -22px;
   z-index: 5;
   background: var(--bg);
   padding-block: 12px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 24rem;
 }
+.review-detail-heading:only-child { grid-column: 1 / -1; }
 
 .review-detail-heading h2 { font-weight: 600; }
 .review-detail-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; font-size: 12px; color: var(--ink-soft); }
@@ -30,6 +37,17 @@
 .review-detail-heading > .eyebrow { margin-bottom: 4px; }
 .review-detail-heading h2:focus { outline: none; }
 .review-action-unavailable { color: var(--ink-muted); font-size: 13px; }
+.review-saved-status { display: inline-flex; align-items: center; align-self: center; gap: 4px; color: var(--ok-strong); font-size: 12px; font-weight: 600; }
+/* Padding widens the hit area to 24px without changing the meta row's
+   height; the negative margin gives the space back. */
+.review-history-link { display: inline-flex; align-items: center; gap: 2px; padding-block: 3px; margin-block: -3px; color: var(--info); font-weight: 600; text-decoration: none; }
+.review-history-link:hover,
+.review-history-link:focus-visible { text-decoration: underline; }
+.review-decided-actions { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: end; row-gap: 6px; min-width: 0; }
+.review-decided-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+/* Truncated, never wrapped or allowed to widen the column; the full title is
+   the Next review button's description and the label's tooltip. */
+.review-next-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-soft); font-size: 12px; }
 
 .review-active-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--ink-muted); font-size: 12px; }
 .review-active-filters .text-button { margin-left: auto; }
@@ -146,9 +164,14 @@
 .review-bulk-outcome-list strong { overflow-wrap: anywhere; }
 .review-bulk-outcome-list p { color: var(--ink-soft); font-size: 12px; }
 
+/* Stacked layouts give the title up to two lines and split Undo and Next
+   review into two equal columns, the next review's title right-aligned below. */
 @container (max-width: 720px) {
   .review-detail-header { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .review-detail-header .review-detail-heading h2 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
   .review-action-bar { justify-content: flex-start; flex-wrap: wrap; }
+  .review-decided-buttons { justify-self: stretch; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .review-decided-buttons > .icon-button { justify-content: center; }
 }
 
 @media (max-width: 1024px), (any-pointer: coarse) {
@@ -163,12 +186,17 @@
   .review-recovery-actions .icon-button,
   .review-bulk-outcomes .icon-button { min-height: 44px; min-width: 44px; }
   .review-detail-header { top: -16px; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .review-detail-header .review-detail-heading h2 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
   .review-action-bar { display: flex; flex-wrap: wrap; justify-content: flex-start; }
-  .review-action-bar .icon-button { min-height: 44px; }
+  .review-action-bar .icon-button,
+  .review-decided-actions .icon-button { min-height: 44px; }
+  .review-decided-buttons { justify-self: stretch; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .review-decided-buttons > .icon-button { justify-content: center; }
+  /* 44px of hit area. It reaches 10px down, no further than the header gap
+     above the actions, and the rest upward over the non-interactive badges. */
+  .review-history-link { padding-block: 16px 10px; margin-block: -16px -10px; }
   .review-bulk-outcome-list li { flex-wrap: wrap; }
 }
-.review-next-action { display: grid; gap: 4px; max-width: 100%; }
-.review-next-action > span { color: var(--ink-soft); font-size: 12px; overflow-wrap: anywhere; }
 .review-recovery-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .review-detail-heading { min-width: 0; }
 .review-detail-heading h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -3299,6 +3299,8 @@ describe("ReviewScreen", () => {
     await user.click(screen.getByRole("button", { name: "Reload queue" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Next review" })).toBeEnabled());
     expect(screen.getByRole("button", { name: "Next review" })).toHaveFocus();
+    // The next review's title sits on its own line, so the button names it.
+    expect(screen.getByRole("button", { name: "Next review" })).toHaveAccessibleDescription(/^Next document/);
     expect(screen.getByRole("tab", { name: /Pending.*1/ })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Next review" }));
     await screen.findByRole("heading", { name: "Next document", level: 2 });
@@ -3331,7 +3333,13 @@ describe("ReviewScreen", () => {
     await screen.findByRole("heading", { name: "Undo target", level: 2 });
     await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Approve" }));
-    await user.click(await screen.findByRole("button", { name: "Undo approval" }));
+    // Undo takes Approve's place, so it ignores the second click of a
+    // double-click before it arms.
+    const undo = await screen.findByRole("button", { name: "Undo approval" });
+    expect(undo).toBeDisabled();
+    expect(undo).toHaveClass("danger");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Undo approval" })).toBeEnabled(), { timeout: 2000 });
+    await user.click(screen.getByRole("button", { name: "Undo approval" }));
     expect(await screen.findByText("Approval undone. The review is waiting again.")).toBeVisible();
     expect(undoCalls).toEqual([`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/review-1/decisions/decision-1/undo`]);
     await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
