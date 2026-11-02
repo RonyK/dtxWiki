@@ -31,7 +31,6 @@ describe("shared activity entry", () => {
     // The document names the card; what happened describes it.
     expect(screen.getByRole("link", { name: "Guide", description: "Read" })).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000106");
     expect(container.querySelectorAll("a")).toHaveLength(1);
-    expect(container.querySelector(".activity-entry__go[aria-hidden='true']")).not.toBeNull();
     expect(container.querySelectorAll("a a, a button, button a, button button")).toHaveLength(0);
     expect(screen.queryByText(/Raw input/)).not.toBeInTheDocument();
   });
@@ -174,22 +173,29 @@ describe("shared activity entry", () => {
     expect(screen.getByRole("link", { name: "View MCP activity" })).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/activity/history?period=all&kind=mcp&subtype=all&group_reads=1");
     expect(screen.getByText("No target link")).toBeVisible();
   });
-  it("keeps only permitted technical metadata in an independent disclosure", async () => {
+  it("keeps only permitted call details in an independent disclosure, named as Chats names them", async () => {
     const user = userEvent.setup();
-    show(entry({ tool_name: "read_context", public_error_code: "validation_failed", duration_ms: 42 }));
-    const disclosure = screen.getByText("Technical information");
+    const failedRead = { tool_name: "read", result_status: "failed", public_error_code: "validation_failed", duration_ms: 1234 };
+    const { container } = show(entry(failedRead));
+    // Closed, the disclosure already says which tool ran.
+    const disclosure = container.querySelector("details.activity-entry__technical > summary")!;
+    expect(disclosure).toHaveTextContent("Call details· Read workspace entity");
     await user.click(disclosure);
     const details = disclosure.closest("details")!;
-    expect(within(details).getByText("read_context")).toBeVisible();
-    expect(within(details).getByText("42ms")).toBeVisible();
-    expect(within(details).getByText("validation_failed")).toBeVisible();
+    // Readable names first; the raw tool ID and error code stay as chips.
+    expect(within(details).getByText("read", { selector: "code" })).toBeVisible();
+    expect(within(details).getByText("Failed")).toHaveAttribute("data-tone", "failure");
+    expect(within(details).getByText("1.2 s")).toBeVisible();
+    expect(within(details).getByText("Invalid request")).toBeVisible();
+    expect(within(details).getByText(/The agent has to fix the named fields/)).toBeVisible();
+    expect(within(details).getByText("validation_failed", { selector: "code" })).toBeVisible();
     expect(details.closest("a")).toBeNull();
     expect(screen.getByRole("button", { name: /^Show full names/ })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText(/Raw input/)).not.toBeInTheDocument();
     // A summary card (Dashboard) leaves these fields to the MCP records.
     cleanup();
-    show(entry({ tool_name: "read_context", public_error_code: "validation_failed", duration_ms: 42 }), undefined, "summary");
-    expect(screen.queryByText("Technical information")).not.toBeInTheDocument();
+    show(entry(failedRead), undefined, "summary");
+    expect(screen.queryByText("Call details")).not.toBeInTheDocument();
   });
 });
 

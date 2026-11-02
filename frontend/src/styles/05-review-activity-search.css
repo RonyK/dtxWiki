@@ -1957,10 +1957,10 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
   line-height: 18px;
   overflow-wrap: anywhere;
 }
-.activity-actor-popover dl, .activity-entry__technical dl { margin: 0; }
-.activity-actor-popover dt, .activity-entry__technical dt { color: var(--ink-muted); font-size: 11px; font-weight: 700; }
-.activity-actor-popover dd, .activity-entry__technical dd { margin: 2px 0 12px; }
-.activity-actor-popover dd:last-child, .activity-entry__technical dd:last-child { margin-bottom: 0; }
+.activity-actor-popover dl { margin: 0; }
+.activity-actor-popover dt { color: var(--ink-muted); font-size: 11px; font-weight: 700; }
+.activity-actor-popover dd { margin: 2px 0 12px; }
+.activity-actor-popover dd:last-child { margin-bottom: 0; }
 
 .activity-entry__title-link, .activity-entry__plain-title {
   grid-column: 1 / 4;
@@ -1978,7 +1978,6 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
 }
 .activity-entry__title-link { width: fit-content; min-height: 24px; border-radius: 5px; }
 .activity-entry__heading { display: inline-flex; align-items: flex-start; gap: 6px; min-width: 0; }
-.activity-entry__heading > svg { flex: none; margin-top: 4px; }
 /* Two lines at most; people's text is also shortened before it reaches here. */
 .activity-entry__description {
   display: -webkit-box;
@@ -2046,13 +2045,35 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
 .activity-entry__fallback > a { min-height: 24px; border-radius: 5px; color: var(--activity-link-ink, var(--context)); }
 /* Secondary controls share one quiet line under the title block. */
 .activity-entry__technical { grid-column: 1; grid-row: 4; margin-top: 8px; color: var(--ink-soft); font-size: 12px; line-height: 18px; }
-.activity-entry__technical > summary { width: fit-content; min-height: 24px; line-height: 24px; cursor: pointer; border-radius: 5px; }
+.activity-entry__technical > summary { display: flex; align-items: center; gap: 6px; width: fit-content; max-width: 100%; min-height: 24px; line-height: 18px; list-style: none; cursor: pointer; border-radius: 5px; }
+.activity-entry__technical > summary::-webkit-details-marker { display: none; }
+.activity-call-details__chevron { flex: none; color: var(--ink-muted); transition: transform 0.15s; }
+.activity-entry__technical[open] .activity-call-details__chevron { transform: rotate(180deg); }
+/* The label never breaks; a long tool title gives way first. */
+.activity-call-details__summary-label { flex: none; white-space: nowrap; }
+.activity-call-details__summary-tool { min-width: 0; overflow: hidden; color: var(--ink-muted); text-overflow: ellipsis; white-space: nowrap; }
 .activity-entry__technical[open] { grid-column: 1 / -1; }
-.activity-entry__technical > dl { margin-top: 6px; padding: 8px 12px; border-radius: 6px; background: var(--surface-subtle); overflow-wrap: anywhere; }
+/* Label column, value column; the failure note spans both. */
+.activity-call-details { display: grid; gap: 8px; max-width: 760px; margin-top: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-subtle); }
+.activity-call-details > dl { display: grid; gap: 8px; margin: 0; }
+.activity-call-details__row { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 12px; align-items: baseline; }
+.activity-call-details__row > dt { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-muted); font-weight: 600; }
+.activity-call-details__row > dt > svg { flex: none; align-self: center; }
+.activity-call-details__row > dd { min-width: 0; margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.activity-call-details__code { margin-left: 6px; padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--ink-muted); font: 11px/16px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.activity-call-details__status { --activity-call-tone: var(--ink-soft); color: var(--activity-call-tone); font-weight: 600; }
+.activity-call-details__status[data-tone="success"] { --activity-call-tone: #166534; }
+.activity-call-details__status[data-tone="partial"] { --activity-call-tone: #92400e; }
+.activity-call-details__status[data-tone="failure"] { --activity-call-tone: #b91c1c; }
+.activity-call-details__failure { --activity-call-tone: #b91c1c; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; padding: 8px 10px; border-left: 3px solid var(--activity-call-tone); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--activity-call-tone) 6%, var(--surface)); }
+.activity-call-details__failure > svg { grid-row: 1 / span 3; margin-top: 1px; color: var(--activity-call-tone); }
+.activity-call-details__failure > strong { color: color-mix(in srgb, var(--activity-call-tone) 85%, var(--ink)); }
+.activity-call-details__failure > p { margin: 0; color: var(--ink-soft); }
+.activity-call-details__failure > span { color: var(--ink-muted); }
 
 .activity-read-group__toggle, .activity-read-group__collapse, .activity-read-group__retry {
   display: inline-flex; align-items: center; gap: 6px; min-height: 24px; margin: 0; padding: 0 8px;
-  border: 0; border-radius: 5px; background: transparent; color: var(--activity-link-ink, var(--context)); font-size: 12px; line-height: 18px; cursor: pointer;
+  border: 0; border-radius: 5px; background: transparent; color: var(--activity-link-ink, var(--context)); font-size: 12px; line-height: 18px; white-space: nowrap; cursor: pointer;
 }
 .activity-read-group__toggle { grid-column: 2; grid-row: 4; justify-self: start; margin-top: 8px; padding: 0; }
 .activity-feed-entry:not(:has(> .activity-entry__layout .activity-entry__technical)) .activity-read-group__toggle { grid-column: 1; }
@@ -2091,9 +2112,10 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
    override the global :is(a[href], ...):focus-visible ring (0,3,0). */
 .activity-feed-entry > .activity-entry__layout .activity-entry__title-link:focus-visible { outline: none; }
 @media (hover: hover) {
-  .activity-feed-entry:has(> .activity-entry__layout .activity-entry__title-link):hover { background: var(--surface-subtle); }
-  .activity-feed-entry:hover > .activity-entry__layout > .activity-entry__go { color: var(--ink); }
-  .activity-feed-entry:has(> .activity-entry__layout .activity-entry__title-link):hover > .activity-entry__layout .activity-entry__heading > span,
+  /* The card is marked only while the pointer is on the card link itself;
+     its own controls and expanded member rows mark themselves instead. */
+  .activity-feed-entry:has(> .activity-entry__layout .activity-entry__title-link):hover:not(:has(:is(.activity-actor-disclosure, .activity-entry__technical, .activity-entry__fallback > a, .activity-read-group__toggle, .activity-read-group__members):hover)) { background: var(--surface-subtle); }
+  .activity-feed-entry:has(> .activity-entry__layout .activity-entry__title-link):hover:not(:has(:is(.activity-actor-disclosure, .activity-entry__technical, .activity-entry__fallback > a, .activity-read-group__toggle, .activity-read-group__members):hover)) > .activity-entry__layout .activity-entry__heading > span,
   .activity-entry__fallback > a:hover,
   .activity-feed-footnote > a:hover,
   .activity-read-group__toggle:hover,
@@ -2103,16 +2125,21 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
 
 @media (max-width: 700px) {
   .activity-feed-entry { padding: 14px 16px; column-gap: 12px; }
-  .activity-feed-list > .activity-feed-entry { padding-right: 40px; }
+  .activity-feed-list > .activity-feed-entry:has(> .activity-entry__layout > .activity-entry__go) { padding-right: 40px; }
   .activity-feed-list > .activity-feed-entry > .activity-entry__layout > .activity-entry__go { display: block; }
+  /* An opened card is being read in place; a mid-height chevron would sit
+     beside its panels rather than mark the card. */
+  .activity-feed-list > .activity-feed-entry:is(:has(> .activity-entry__layout > .activity-entry__body > .activity-entry__technical[open]), :has(> .activity-read-group > .activity-read-group__members:not([hidden]))) > .activity-entry__layout > .activity-entry__go { display: none; }
   .activity-entry__identity,
   .activity-entry__title-link,
   .activity-entry__plain-title,
   .activity-entry__fallback { grid-column: 1 / -1; }
-  /* A wrapped title keeps its chevron after the last word. */
-  .activity-entry__heading { display: inline; }
-  .activity-entry__heading > svg { display: inline; vertical-align: -2px; margin: 0 0 0 4px; }
   /* The plan's mobile footer: status on the left, time on the right. */
+  /* The call details summary names its tool, so it takes the whole row rather
+     than widen the auto columns the status/time footer below shares; a group's
+     toggle moves to the free row under it. */
+  .activity-feed-list > .activity-feed-entry > .activity-entry__layout .activity-entry__technical { grid-column: 1 / -1; }
+  .activity-feed-entry:has(> .activity-entry__layout .activity-entry__technical) > .activity-read-group > .activity-read-group__toggle { grid-column: 1 / -1; grid-row: 5; }
   .activity-entry__trailing > .activity-action-badge,
   .activity-entry__review-footer > .activity-action-badge { grid-column: 1 / 3; grid-row: 6; justify-self: start; align-self: center; margin-top: 8px; }
   .activity-entry__times { grid-column: 3 / -1; grid-row: 6; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; justify-self: end; align-self: center; gap: 0 8px; margin-top: 8px; }
@@ -2126,6 +2153,7 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
   .activity-read-group__list :is(.activity-entry__title-link, .activity-entry__plain-title) { grid-column: 1 / -1; }
   .activity-read-group__list .activity-entry__technical { grid-column: 1; grid-row: 2; }
   .activity-read-group__list .activity-entry__technical[open] { grid-column: 1 / -1; grid-row: 3; }
+  .activity-call-details__row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .activity-read-group__list .activity-entry__times { grid-column: 2; grid-row: 2; align-self: center; }
 }
 
@@ -2155,6 +2183,9 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
 
 [data-theme="dark"] .activity-feed-panel .activity-action-badge {
   color: color-mix(in srgb, var(--activity-action-tone) 40%, var(--ink));
+}
+[data-theme="dark"] .activity-feed-panel :is(.activity-call-details__status, .activity-call-details__failure > svg, .activity-call-details__failure > strong) {
+  color: color-mix(in srgb, var(--activity-call-tone) 40%, var(--ink));
 }
 
 .activity-feed-see-all { display: inline-flex; align-items: center; gap: 5px; min-height: 44px; border-radius: 5px; color: var(--activity-link-ink, var(--context)); font-size: 12px; line-height: 18px; }

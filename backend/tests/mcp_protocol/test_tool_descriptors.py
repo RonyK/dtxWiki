@@ -133,7 +133,7 @@ def test_every_backend_tool_has_frontend_en_and_ko_presentation_coverage():
     frontend_root = repo_root / "frontend" / "src"
     registry = json.loads(
         (
-            frontend_root / "features" / "mcp-chats" / "toolPresentationRegistry.json"
+            frontend_root / "shared" / "lib" / "mcpToolPresentationRegistry.json"
         ).read_text(encoding="utf-8")
     )
     locales = {

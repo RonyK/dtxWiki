@@ -43,6 +43,7 @@ import {
   currentWorkspaceSelection,
   type WorkspaceSummary,
 } from "../../shared/api/workspace";
+import { mcpErrorCodeLabel, mcpErrorGuidance, mcpStatusLabel } from "../../shared/lib/mcpCallVocabulary";
 import { useRouteWorkspaceId, useWorkspaceRoute, workspacePath } from "../../shared/lib/workspaceRoutes";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import { AdvancedSection } from "../../shared/components/AdvancedSection";
@@ -1252,8 +1253,8 @@ function ChatFlowCall({
       <div className="mcp-chat-flow-call-head">
         <StatusPill
           status={item.result_status}
-          label={statusLabel(item.result_status, t)}
-          title={statusLabel(item.result_status, t)}
+          label={mcpStatusLabel(item.result_status, t)}
+          title={mcpStatusLabel(item.result_status, t)}
           compact
         />
         <span className="mcp-chat-flow-call-headline">{headline}</span>
@@ -1310,7 +1311,7 @@ function CallFailureNotice({
   phase: ChatFlowPhase;
 }) {
   const { t } = useTranslation("chats");
-  const guidance = item.error_code ? errorGuidance(item.error_code, t) : null;
+  const guidance = item.error_code ? mcpErrorGuidance(item.error_code, t) : null;
   const message = item.result_summary && !isStatusEcho(item.result_summary, item.result_status)
     ? item.result_summary
     : null;
@@ -1327,8 +1328,8 @@ function CallFailureNotice({
       <p className="mcp-chat-flow-call-failure-head">
         <strong>
           {item.error_code
-            ? errorCodeLabel(item.error_code, t)
-            : statusLabel(item.result_status, t)}
+            ? mcpErrorCodeLabel(item.error_code, t)
+            : mcpStatusLabel(item.result_status, t)}
         </strong>
         {/* Every write path runs in one transaction, so a failed, conflicting
             or refused write left the document exactly as it was. Saying so
@@ -1718,7 +1719,7 @@ function TimelineTabPanel({
       <dl className="mcp-tool-result-meta mcp-chat-metadata-grid">
         <div>
           <dt>{t("detail.fields.status")}</dt>
-          <dd>{statusLabel(item.result_status, t)}</dd>
+          <dd>{mcpStatusLabel(item.result_status, t)}</dd>
         </div>
         <div>
           <dt>{t("detail.fields.started")}</dt>
@@ -1736,7 +1737,7 @@ function TimelineTabPanel({
         </div>
         <div>
           <dt>{t("detail.fields.error")}</dt>
-          <dd>{item.error_code ? errorCodeLabel(item.error_code, t) : "—"}</dd>
+          <dd>{item.error_code ? mcpErrorCodeLabel(item.error_code, t) : "—"}</dd>
         </div>
         <div>
           <dt>{t("detail.fields.schema")}</dt>
@@ -1779,93 +1780,6 @@ function formatSummaryValue(value: unknown): string {
     }
   }
   return String(value);
-}
-
-const KNOWN_CHAT_STATUSES = new Set([
-  "accepted",
-  "succeeded",
-  "partial",
-  "needs_review",
-  "failed",
-  "rejected_by_policy",
-  "conflict",
-  "pending",
-  "running",
-]);
-
-function statusLabel(status: string, t: TFunction<"chats">): string {
-  const normalized = status.trim().toLowerCase();
-  return KNOWN_CHAT_STATUSES.has(normalized)
-    ? t(`detail.statuses.${normalized}`)
-    : t("detail.statuses.unknown");
-}
-
-// Error codes with a localized label. Keep in step with the codes the MCP
-// envelope emits (backend/mcp/envelope.py ERROR_CODE_GUIDANCE) that a reader
-// of Chats is likely to meet; the rest fall through to the raw code below.
-const KNOWN_ERROR_CODES = new Set([
-  "tool_failed",
-  "internal_error",
-  "rejected_by_policy",
-  "conflict",
-  "validation_failed",
-  "stale_base_version",
-  "operation_unsupported",
-  "operations_overlap",
-  "block_reflow",
-  "text_occurrence_mismatch",
-  "text_match_not_found",
-  "text_match_ambiguous",
-  "text_match_low_confidence",
-  "text_not_found",
-  "block_not_found",
-  "block_hash_mismatch",
-  "section_not_found",
-  "scope_denied",
-  "not_found",
-  "workspace_role_insufficient",
-]);
-
-// Codes whose label alone does not say what the agent should do next.
-const ERROR_CODES_WITH_GUIDANCE = new Set([
-  "rejected_by_policy",
-  "conflict",
-  "validation_failed",
-  "stale_base_version",
-  "operation_unsupported",
-  "operations_overlap",
-  "block_reflow",
-  "text_occurrence_mismatch",
-  "text_match_not_found",
-  "text_match_ambiguous",
-  "text_match_low_confidence",
-  "text_not_found",
-  "block_not_found",
-  "block_hash_mismatch",
-  "section_not_found",
-  "scope_denied",
-  "not_found",
-  "workspace_role_insufficient",
-]);
-
-// A machine error code: lowercase snake_case, as every code the envelope
-// emits is. Anything else (a request id, free text) is not echoed.
-const ERROR_CODE_SHAPE = /^[a-z][a-z0-9_]{0,63}$/;
-
-function errorCodeLabel(errorCode: string, t: TFunction<"chats">): string {
-  const code = errorCode.trim();
-  if (KNOWN_ERROR_CODES.has(code)) {
-    return t(`detail.errorCodes.${code}`);
-  }
-  // A code this build has no label for is still a stable identifier the
-  // reader can search for or quote to an operator, which "Tool call error"
-  // was not.
-  return ERROR_CODE_SHAPE.test(code) ? code : t("detail.errorCodes.unknown");
-}
-
-function errorGuidance(errorCode: string, t: TFunction<"chats">): string | null {
-  const code = errorCode.trim();
-  return ERROR_CODES_WITH_GUIDANCE.has(code) ? t(`detail.errorGuidance.${code}`) : null;
 }
 
 function durationBetween(start: string, end: string) {

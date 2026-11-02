@@ -40,7 +40,7 @@ async function expandTechnicalGroup(group: Locator, withTechnical: boolean) {
   if (withTechnical) {
     await technical.locator("summary").click();
     await expect(technical).toHaveAttribute("open", "");
-    await expectDisjoint(technical.locator("dl"), toggle);
+    await expectDisjoint(technical.locator(".activity-call-details"), toggle);
   }
   await toggle.click();
   await expect(group.locator(".activity-read-group__list > li")).toHaveCount(4);
@@ -52,8 +52,8 @@ async function expandTechnicalGroup(group: Locator, withTechnical: boolean) {
   const memberTechnical = member.locator(".activity-entry__technical");
   await memberTechnical.locator("summary").click();
   await expect(memberTechnical).toHaveAttribute("open", "");
-  await expectDisjoint(memberTechnical.locator("dl"), member.locator(".activity-entry__title-link"));
-  await expectDisjoint(memberTechnical.locator("dl"), member.locator(".activity-entry__times"));
+  await expectDisjoint(memberTechnical.locator(".activity-call-details"), member.locator(".activity-entry__title-link"));
+  await expectDisjoint(memberTechnical.locator(".activity-call-details"), member.locator(".activity-entry__times"));
 }
 
 async function metrics(page: Page) {

@@ -346,12 +346,13 @@
     "openReview": "검토 열기: {{title}}",
     "reviewRequired": "검토 필요",
     "technical": {
-      "title": "기술 정보",
-      "tool": "도구",
-      "result": "실행 결과",
-      "duration": "소요 시간",
+      "title": "호출 상세",
+      "tool": "실행한 도구",
+      "result": "결과",
+      "duration": "처리 시간",
       "milliseconds": "{{count}}ms",
-      "error": "공개 오류 코드"
+      "seconds": "{{value}}초",
+      "error": "오류 코드"
     },
     "group": {
       "expand": "원본 {{count}}건 펼치기",

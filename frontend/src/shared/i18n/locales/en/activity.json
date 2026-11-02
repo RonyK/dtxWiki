@@ -346,12 +346,13 @@
     "openReview": "Open review: {{title}}",
     "reviewRequired": "Review required",
     "technical": {
-      "title": "Technical information",
+      "title": "Call details",
       "tool": "Tool",
       "result": "Result",
       "duration": "Duration",
       "milliseconds": "{{count}}ms",
-      "error": "Public error code"
+      "seconds": "{{value}} s",
+      "error": "Error code"
     },
     "group": {
       "expand": "Expand {{count}} original events",
