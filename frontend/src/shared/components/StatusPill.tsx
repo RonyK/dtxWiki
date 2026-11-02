@@ -38,6 +38,7 @@ const TONE_BY_EXACT_STATUS: Record<string, string> = {
   info: "info",
   acknowledged: "info",
   triaged: "info",
+  viewed: "info",
   referenced: "info",
   search_match: "muted",
   warning: "warn",

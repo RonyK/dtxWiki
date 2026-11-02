@@ -48,7 +48,7 @@ def test_no_amount_of_co_reading_outranks_one_authored_link():
     assert rank_score("wikilink", 1.0, None, NOW) == 0.25
 
 
-def test_rank_table_is_the_0822_table_verbatim():
+def test_rank_table_preserves_family_weights_with_lifetime_co_access():
     assert RANK_PARAMS == {
         "wikilink": RankParam(1.00, 3, None),
         "citation_page": RankParam(0.95, 2, None),
@@ -59,7 +59,7 @@ def test_rank_table_is_the_0822_table_verbatim():
         "promoted_from": RankParam(0.50, 1, None),
         "library_sync_version": RankParam(0.35, 1, 180),
         "ask_citation": RankParam(0.30, 2, 60),
-        "co_access": RankParam(0.20, 25, 30),
+        "co_access": RankParam(0.20, 25, None),
     }
 
 
@@ -180,12 +180,16 @@ def test_denominator_kinds_are_exactly_the_kinds_effective_weight_divides():
     assert divided == DENOMINATOR_KINDS
 
 
-def test_co_access_is_not_decayed_twice():
-    """Its stored weight already carries the table's 30-day half-life."""
+def test_co_access_ranks_lifetime_conversation_counts_without_recency():
+    """Cumulative counts stay comparable until recency is enabled separately."""
 
-    assert rank_param("co_access").half_life_days == 30
-    assert rank_score("co_access", 30, NOW - timedelta(days=90), NOW) == rank_score(
+    assert rank_param("co_access").half_life_days is None
+    assert PREDECAYED_KINDS == frozenset()
+    assert rank_score("co_access", 30, NOW - timedelta(days=365), NOW) == rank_score(
         "co_access", 30, None, NOW
+    )
+    assert rank_score("co_access", 30, NOW - timedelta(days=365), NOW) > rank_score(
+        "co_access", 2, NOW, NOW
     )
 
 

@@ -2,9 +2,9 @@ import type { McpChatArtifactLink } from "../../shared/api/operations";
 
 // The server keeps one link row per (artifact, verb) -- graph and trail
 // projections read the verbs separately, so the rows must stay apart there.
-// A document that was found, read, cited and edited therefore arrives as four
-// rows; the Chats list hint counts it once, and the detail section shows it as
-// one card with a pill per verb.
+// A document that was found, viewed, referenced, cited and edited therefore
+// arrives as separate rows; the Chats list hint counts it once, and the detail
+// section shows it as one card with a pill per verb.
 
 export type ArtifactVerb = McpChatArtifactLink["verb"];
 
@@ -15,8 +15,9 @@ const ARTIFACT_VERB_RANK: Record<ArtifactVerb, number> = {
   created: 0,
   edited: 1,
   cited: 2,
-  referenced: 3,
-  search_match: 4,
+  viewed: 3,
+  referenced: 4,
+  search_match: 5,
 };
 
 export function isArtifactVerb(value: string): value is ArtifactVerb {

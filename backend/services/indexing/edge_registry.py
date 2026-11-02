@@ -32,10 +32,10 @@ from backend.models.context import (
 from backend.models.library import LibraryItem, LibraryItemVersion
 from backend.models.mcp_chat import McpChatArtifactVerb, McpChatToolCallArtifact
 from backend.models.tree import WorkspaceTreeNode
+from backend.repositories.workspace_scoped import select_in_workspace
 from backend.services.entity_ref import EntityKind
 from backend.services.graph_cache import bump_edge_version
 from backend.services.graph_observation_service import GraphObservationService
-from backend.services.graph_rank import RANK_PARAMS
 from backend.services.graph_semantics import EDGE_SEMANTICS
 from backend.services.indexing.co_read import (
     CoReadPair,
@@ -44,13 +44,9 @@ from backend.services.indexing.co_read import (
     max_pairs_per_segment,
 )
 
-# Only a focused read is evidence that a document was consumed. CITED is a
-# consumption verb too, but trace capture records one CITED row per citation
-# *candidate* of a write, all at the write's instant, so a single write would
-# pair every candidate with its neighbours. Until capture can tell a candidate
-# from a citation the writer kept, co-reads count REFERENCED only. This is a
-# subset of CONSUMPTION_VERBS (tests/static/test_mcp_chat_verb_classes.py).
-CO_ACCESS_SOURCE_VERBS = frozenset({McpChatArtifactVerb.REFERENCED})
+# Only successful body views qualify; structural/outline/edit-session touches
+# remain REFERENCED and never contribute to co-access.
+CO_ACCESS_SOURCE_VERBS = frozenset({McpChatArtifactVerb.VIEWED})
 # Two consecutive reads further apart than this are not "read together": the
 # session is cut there, so a 09:00 read never pairs with a 17:00 one.
 CO_ACCESS_MAX_GAP = timedelta(minutes=30)
@@ -71,8 +67,6 @@ CO_ACCESS_MAX_PAIRS_PER_SEGMENT = max_pairs_per_segment(
     window=CO_ACCESS_ADJACENCY_WINDOW,
     max_per_segment=CO_ACCESS_MAX_ARTIFACTS_PER_SEGMENT,
 )
-# The history both co-read signals look back over.
-CO_ACCESS_SOURCE_WINDOW = timedelta(days=30)
 # Rows fetched per round trip while streaming that history. Pairing keeps
 # one session's state at a time, so memory follows the largest session and
 # the number of distinct pairs, not the number of rows read.
@@ -255,64 +249,40 @@ def _co_access_rows(
     *,
     now: datetime | None = None,
 ) -> list[dict[str, object]]:
-    """Pair documents read close together, aggregated across sessions."""
+    """Project lifetime counters; this never scans raw MCP history."""
+    from backend.models.graph import CoAccessPair
 
-    now = now or datetime.now(UTC)
-    # Per pair: summed weight, last instant, number of sessions, and first
-    # instant -- never the session ids themselves. The support threshold and
-    # the "read together in N sessions over D days" display need only the
-    # cardinality and the span, and keeping identity here would put the
-    # behavioural trail of one actor into a read model. co_access_pairs
-    # yields a pair at most once per session, so counting yields counts
-    # sessions.
-    aggregates: dict[tuple[tuple[str, UUID], tuple[str, UUID]], list] = {}
-    # The rank table is the one source of the co_access half-life: rank_score
-    # leaves co_access alone because its age is already counted here.
-    half_life = RANK_PARAMS["co_access"].half_life_days
-    reads = co_read_source(session, workspace_id, since=now - CO_ACCESS_SOURCE_WINDOW)
-    for pair in co_access_pairs(reads):
-        occurred_at = pair.last_pair_at
-        age_days = max(0.0, (now - occurred_at).total_seconds() / 86400.0)
-        weight = min(pair.left_reads, pair.right_reads) * (
-            0.5 ** (age_days / half_life)
-        )
-        aggregate = aggregates.get((pair.left, pair.right))
-        if aggregate is None:
-            aggregates[(pair.left, pair.right)] = [
-                weight,
-                occurred_at,
-                1,
-                pair.first_pair_at,
-            ]
-        else:
-            aggregate[0] += weight
-            if occurred_at > aggregate[1]:
-                aggregate[1] = occurred_at
-            aggregate[2] += 1
-            if pair.first_pair_at < aggregate[3]:
-                aggregate[3] = pair.first_pair_at
-
+    # Frozen core upgrade invokes this seam before the new counters exist.
+    # Its read model is superseded by the new revision's frozen backfill.
+    if (
+        session.join_transaction_mode == "rollback_only"
+        and isinstance(session.get_bind(), Connection)
+        and not inspect(session.connection()).has_table("co_access_pair")
+    ):
+        return []
     return [
         _edge(
             workspace_id=workspace_id,
-            source_kind=EntityKind(left[0]),
-            source_id=left[1],
-            target_kind=EntityKind(right[0]),
-            target_id=right[1],
+            source_kind=EntityKind(pair.source_kind),
+            source_id=pair.source_id,
+            target_kind=EntityKind(pair.target_kind),
+            target_id=pair.target_id,
             edge_kind="co_access",
-            source_table="mcp_chat_tool_call_artifact",
-            weight=weight,
-            occurred_at=occurred_at,
-            support_session_count=sessions,
-            first_observed_at=first_observed_at,
+            source_table="co_access_pair",
+            weight=float(pair.support_session_count),
+            occurred_at=pair.occurred_at,
+            support_session_count=pair.support_session_count,
+            first_observed_at=pair.first_observed_at,
         )
-        for (left, right), (
-            weight,
-            occurred_at,
-            sessions,
-            first_observed_at,
-        ) in aggregates.items()
-        if sessions >= CO_ACCESS_MIN_SESSIONS
+        for pair in session.scalars(
+            select_in_workspace(
+                CoAccessPair,
+                workspace_id=workspace_id,
+                conditions=(
+                    CoAccessPair.support_session_count >= CO_ACCESS_MIN_SESSIONS,
+                ),
+            )
+        )
     ]
 
 
@@ -504,7 +474,13 @@ def _apply_edge_projection_values(
     desired: dict[str, object],
 ) -> bool:
     changed = False
-    for attribute in ("provenance", "occurred_at", "source_ref"):
+    for attribute in (
+        "provenance",
+        "occurred_at",
+        "source_ref",
+        "support_session_count",
+        "first_observed_at",
+    ):
         value = desired[attribute]
         if getattr(edge, attribute) != value:
             setattr(edge, attribute, value)
@@ -524,16 +500,10 @@ def _reconcile_edge_projection_rows(
 ) -> EdgeProjectionDelta:
     """Apply a scoped desired edge set without replacing stable identities."""
 
-    desired_by_identity = {
-        _edge_row_identity(row): row
-        for row in desired_rows
-    }
+    desired_by_identity = {_edge_row_identity(row): row for row in desired_rows}
     if len(desired_by_identity) != len(desired_rows):
         raise RuntimeError("edge extractor produced duplicate identities")
-    existing_by_identity = {
-        _stored_edge_identity(edge): edge
-        for edge in existing_rows
-    }
+    existing_by_identity = {_stored_edge_identity(edge): edge for edge in existing_rows}
     if len(existing_by_identity) != len(existing_rows):
         raise RuntimeError("edge projection contains duplicate identities")
 
@@ -1176,8 +1146,7 @@ def refresh_page_edge_projection(
         )
     )
     existing = {
-        _stored_edge_identity(edge): float(edge.weight)
-        for edge in existing_rows
+        _stored_edge_identity(edge): float(edge.weight) for edge in existing_rows
     }
 
     desired_rows: list[dict[str, object]] = []
@@ -1193,10 +1162,7 @@ def refresh_page_edge_projection(
                 continue
             desired_rows.append(row)
 
-    desired = {
-        _edge_row_identity(row): float(row["weight"])
-        for row in desired_rows
-    }
+    desired = {_edge_row_identity(row): float(row["weight"]) for row in desired_rows}
     delta = _reconcile_edge_projection_rows(
         session,
         existing_rows=existing_rows,
@@ -1497,7 +1463,6 @@ def refresh_co_access_edge_projection(
     *,
     now: datetime | None = None,
 ) -> int:
-    rows = _co_access_rows(session, workspace_id, now=now)
     # The frozen core migration calls this runtime seam before Graph View's
     # revision exists. Reflection is confined to its connection-bound Session;
     # ordinary Engine-bound workers and graph requests keep the current path.
@@ -1510,73 +1475,18 @@ def refresh_co_access_edge_projection(
         )
     ):
         return _refresh_released_co_access_projection(
-            session, workspace_id, rows=rows, now=now
+            session,
+            workspace_id,
+            rows=_co_access_rows(session, workspace_id, now=now),
+            now=now,
         )
-    projected = {
-        (
-            str(row["source_kind"]),
-            row["source_id"],
-            str(row["target_kind"]),
-            row["target_id"],
-            float(row["weight"]),
-            row["occurred_at"],
-            row["support_session_count"],
-            row["first_observed_at"],
-        )
-        for row in rows
-    }
-    # The evidence is part of the row: a new supporting session changes the
-    # count or the first observation even where the weight would round equal.
-    existing = {
-        (
-            str(source_kind),
-            source_id,
-            str(target_kind),
-            target_id,
-            float(weight),
-            occurred_at,
-            support_session_count,
-            first_observed_at,
-        )
-        for (
-            source_kind,
-            source_id,
-            target_kind,
-            target_id,
-            weight,
-            occurred_at,
-            support_session_count,
-            first_observed_at,
-        ) in session.execute(
-            select(
-                EdgeProjection.source_kind,
-                EdgeProjection.source_id,
-                EdgeProjection.target_kind,
-                EdgeProjection.target_id,
-                EdgeProjection.weight,
-                EdgeProjection.occurred_at,
-                EdgeProjection.support_session_count,
-                EdgeProjection.first_observed_at,
-            ).where(
-                EdgeProjection.workspace_id == workspace_id,
-                EdgeProjection.edge_kind == "co_access",
-            )
-        ).all()
-    }
-    if existing == projected:
-        return len(rows)
-    session.execute(
-        delete(EdgeProjection).where(
-            EdgeProjection.workspace_id == workspace_id,
-            EdgeProjection.edge_kind == "co_access",
-        )
+    from backend.services.co_access import (
+        lock_co_access_workspace,
+        sync_co_access_projection,
     )
-    seen_at = now or datetime.now(UTC)
-    for row in rows:
-        session.add(EdgeProjection(**row, last_seen_at=seen_at))
-    session.flush()
-    bump_edge_version(session, workspace_id)
-    return len(rows)
+
+    lock_co_access_workspace(session, workspace_id)
+    return sync_co_access_projection(session, workspace_id, usage_signals_enabled=True)
 
 
 def _refresh_released_co_access_projection(
@@ -1636,6 +1546,9 @@ def clear_co_access_edge_projection(session: Session, workspace_id: UUID) -> int
     it back on lets the next refresh rebuild the rows from the same records.
     """
 
+    from backend.services.co_access import lock_co_access_workspace
+
+    lock_co_access_workspace(session, workspace_id)
     removed = session.execute(
         delete(EdgeProjection).where(
             EdgeProjection.workspace_id == workspace_id,

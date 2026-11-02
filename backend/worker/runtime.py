@@ -1877,6 +1877,7 @@ class OneShotWorker:
             job.workspace_id,
             now=self._datetime_target(job=job, key="scheduled_for"),
             usage_signals_enabled=enabled,
+            refresh_usage_projection=job.trigger_type == "settings",
         )
 
     def _business_librarian_tick(

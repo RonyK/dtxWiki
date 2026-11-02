@@ -25,7 +25,7 @@ export function isCountSummary(summary: string) {
 // fixed English word instead, matching what labels.artifactKind.unknown
 // says in the en locale.
 const UNTITLED_ARTIFACT_LABEL = "Artifact";
-const NON_SEMANTIC_ARTIFACT_VERBS = new Set(["referenced", "search_match"]);
+const NON_SEMANTIC_ARTIFACT_VERBS = new Set(["viewed", "referenced", "search_match"]);
 
 // Semantic fallback for legacy count-only summaries: the primary linked
 // artifact as "Verb: Title" (e.g. "Created: Policy Analysis").

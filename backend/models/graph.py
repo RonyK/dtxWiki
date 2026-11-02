@@ -52,6 +52,53 @@ class KnowledgeNodeStat(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     )
 
 
+class CoAccessPair(UuidPrimaryKeyMixin, Base):
+    """Lifetime conversation support for a canonical pair of documents.
+
+    Counts include pairs supported by only one conversation. The visible
+    ``EdgeProjection`` admits a pair after its second supporting conversation.
+    No conversation identifiers or time-decayed scores are stored here.
+    """
+
+    __tablename__ = "co_access_pair"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "source_kind",
+            "source_id",
+            "target_kind",
+            "target_id",
+            name="uq_co_access_pair_identity",
+        ),
+        CheckConstraint(
+            "source_kind < target_kind OR "
+            "(source_kind = target_kind AND source_id < target_id)",
+            name="ck_co_access_pair_canonical_order",
+        ),
+        CheckConstraint(
+            "support_session_count >= 1",
+            name="ck_co_access_pair_positive_support",
+        ),
+        CheckConstraint(
+            "first_observed_at <= occurred_at",
+            name="ck_co_access_pair_observed_span",
+        ),
+    )
+
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    source_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    target_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    target_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    support_session_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    first_observed_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
 class GraphObservation(UuidPrimaryKeyMixin, Base):
     """Append-only event evidence used only when domain rows are insufficient.
 

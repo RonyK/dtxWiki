@@ -51,6 +51,8 @@ from backend.repositories.mcp_chat_repo import (
 )
 from backend.repositories.workspace_scoped import (
     get_in_workspace,
+    join_in_workspace,
+    select_in_workspace,
     select_in_workspace_by_ids,
 )
 from backend.schemas.agent import SENSITIVE_AGENT_PAGE_CATEGORIES
@@ -272,7 +274,7 @@ class ArtifactLinkCandidate:
     verb: McpChatArtifactVerb
     # The conversation base ledger (design doc section 9): exact version
     # evidence from a versioned read or successful non-replayed patch. It is
-    # carried by that call's own CONTEXT_PAGE relation (REFERENCED for a read,
+    # carried by that call's own CONTEXT_PAGE relation (VIEWED for a body read,
     # EDITED for a patch) and is None when no exact version can be resolved.
     version_id: UUID | None = None
     root_hash: str | None = None
@@ -376,6 +378,10 @@ class McpChatService:
         root_hash: str | None = None,
     ) -> McpChatArtifactLink:
         occurred_at = tool_call.completed_at or tool_call.started_at or utc_now()
+        if verb == McpChatArtifactVerb.VIEWED:
+            from backend.services.co_access import lock_co_access_workspace
+
+            lock_co_access_workspace(session, chat_session.workspace_id)
 
         def _advance_read_pointer(existing: McpChatArtifactLink) -> None:
             if version_id is None:
@@ -494,6 +500,7 @@ class McpChatService:
                 McpChatToolCallArtifact.verb == verb.value,
             )
         )
+        inserted_view = None
         if edge is None:
             new_edge = McpChatToolCallArtifact(
                 workspace_id=chat_session.workspace_id,
@@ -508,10 +515,21 @@ class McpChatService:
                 with session.begin_nested():
                     session.add(new_edge)
                     session.flush()
+                if verb == McpChatArtifactVerb.VIEWED:
+                    inserted_view = new_edge
             except IntegrityError:
                 # Concurrent insert of the identical per-call edge
                 # (uq_mcp_chat_tool_call_artifact); idempotent, so ignore.
                 pass
+        if inserted_view is not None:
+            from backend.services.co_access import record_co_access_read
+
+            record_co_access_read(
+                session,
+                workspace_id=chat_session.workspace_id,
+                chat_session_id=chat_session.id,
+                artifact_id=inserted_view.id,
+            )
         self._refresh_chat_labels(session, chat_session)
         return link
 
@@ -1060,14 +1078,18 @@ class McpChatService:
         # already shows as chips (item 4). Falls back to counts only for an
         # otherwise-empty chat.
         link = session.scalar(
-            select(McpChatArtifactLink)
-            .where(
-                McpChatArtifactLink.chat_session_id == chat.id,
-                McpChatArtifactLink.verb.not_in(
-                    (
-                        McpChatArtifactVerb.REFERENCED.value,
-                        McpChatArtifactVerb.SEARCH_MATCH.value,
-                    )
+            select_in_workspace(
+                McpChatArtifactLink,
+                workspace_id=chat.workspace_id,
+                conditions=(
+                    McpChatArtifactLink.chat_session_id == chat.id,
+                    McpChatArtifactLink.verb.not_in(
+                        (
+                            McpChatArtifactVerb.REFERENCED.value,
+                            McpChatArtifactVerb.VIEWED.value,
+                            McpChatArtifactVerb.SEARCH_MATCH.value,
+                        )
+                    ),
                 ),
             )
             .order_by(McpChatArtifactLink.last_occurred_at.desc())
@@ -1427,22 +1449,32 @@ class McpChatService:
         shared_only: bool = False,
     ) -> McpChatPresentationDescriptor | None:
         rows = session.execute(
-            select(
+            join_in_workspace(
+                select_in_workspace(
+                    McpChatToolCallArtifact,
+                    workspace_id=chat.workspace_id,
+                    conditions=(
+                        McpChatToolCallArtifact.chat_session_id == chat.id,
+                        McpChatToolCallArtifact.verb.in_(
+                            (
+                                McpChatArtifactVerb.VIEWED.value,
+                                McpChatArtifactVerb.REFERENCED.value,
+                            )
+                        ),
+                    ),
+                ),
+                McpChatToolCallArtifact,
+                MCPToolCall,
+                workspace_id=chat.workspace_id,
+                on=(MCPToolCall.id == McpChatToolCallArtifact.mcp_tool_call_id)
+                & MCPToolCall.tool_name.in_(FOCUSED_READ_TOOLS)
+                & MCPToolCall.result_status.in_(PRESENTATION_ELIGIBLE_STATUSES),
+            )
+            .with_only_columns(
                 MCPToolCall.id,
                 MCPToolCall.tool_name,
                 McpChatToolCallArtifact.resource_kind,
                 McpChatToolCallArtifact.resource_id,
-            )
-            .join(
-                MCPToolCall,
-                MCPToolCall.id == McpChatToolCallArtifact.mcp_tool_call_id,
-            )
-            .where(
-                McpChatToolCallArtifact.chat_session_id == chat.id,
-                McpChatToolCallArtifact.verb == McpChatArtifactVerb.REFERENCED.value,
-                MCPToolCall.workspace_id == chat.workspace_id,
-                MCPToolCall.tool_name.in_(FOCUSED_READ_TOOLS),
-                MCPToolCall.result_status.in_(PRESENTATION_ELIGIBLE_STATUSES),
             )
             .order_by(
                 MCPToolCall.started_at,
@@ -2303,8 +2335,7 @@ class _ReaderGate:
                     ContextPageVersion,
                     workspace_id=self.workspace_id,
                     resource_ids=ids[start : start + 500],
-                )
-                .options(
+                ).options(
                     load_only(
                         ContextPageVersion.id,
                         ContextPageVersion.page_id,
@@ -3849,6 +3880,7 @@ def _input_display_items(
 
     input_artifact_keys = {
         "referenced": "requested_artifact",
+        "viewed": "requested_artifact",
         "edited": "target_artifact",
         "cited": "citation_source",
     }
@@ -3899,6 +3931,7 @@ def _result_display_items(
         "edited": "updated_artifact",
         "cited": "cited_artifact",
         "referenced": "read_artifact",
+        "viewed": "read_artifact",
         "search_match": "search_match_artifact",
     }
     for artifact in linked_artifacts[:5]:

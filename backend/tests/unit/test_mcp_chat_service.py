@@ -4732,7 +4732,7 @@ def test_focused_read_requires_one_distinct_visible_artifact_across_the_chat(
                 tool_call=call,
                 resource_kind=McpChatArtifactKind.CONTEXT_PAGE,
                 resource_id=first_page.id,
-                verb=McpChatArtifactVerb.REFERENCED,
+                verb=McpChatArtifactVerb.VIEWED,
             )
         focused = service.read_chat(
             session=session,
@@ -4758,7 +4758,7 @@ def test_focused_read_requires_one_distinct_visible_artifact_across_the_chat(
                 tool_call=ambiguous_call,
                 resource_kind=McpChatArtifactKind.CONTEXT_PAGE,
                 resource_id=page.id,
-                verb=McpChatArtifactVerb.REFERENCED,
+                verb=McpChatArtifactVerb.VIEWED,
             )
         assert ambiguous_chat is not None
         ambiguous = service.read_chat(

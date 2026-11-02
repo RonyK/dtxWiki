@@ -62,6 +62,13 @@ def reindex_workspace(
                     self_origins=configured_self_origins(database_provider.settings),
                 )
                 synced_versions += 1
+        # Explicit recovery may replay raw body views. Ordinary reads and
+        # scheduled maintenance never scan lifetime history.
+        from backend.services.co_access import rebuild_co_access_pairs
+
+        rebuild_co_access_pairs(
+            session, workspace_id, usage_signals_enabled=usage_signals
+        )
         edge_counts = rebuild_edge_projection(
             session, workspace_id, usage_signals_enabled=usage_signals
         )

@@ -28,7 +28,8 @@ from backend.models.user import User
 from backend.models.workspace import MCPClient, Workspace
 from backend.policy.auth import ActorContext
 from backend.schemas.read import GraphNeighborEntry, GraphNeighborsPayload
-from backend.services import graph_ppr, graph_rank
+from backend.services import graph_ppr
+from backend.services.co_access import rebuild_co_access_pairs
 from backend.services.eval.harness import (
     LaneMetrics,
     ModeMetrics,
@@ -43,7 +44,6 @@ from backend.services.indexing.edge_registry import (
     CO_ACCESS_MAX_ARTIFACTS_PER_SEGMENT,
     CO_ACCESS_MAX_PAIRS_PER_SEGMENT,
     CO_ACCESS_MIN_SESSIONS,
-    refresh_co_access_edge_projection,
 )
 from backend.services.librarian import _stage_misplaced_pages, run_librarian_tick
 from backend.services.page_service import PageService
@@ -161,7 +161,7 @@ def _seed_touches(
     resource_id,
     *,
     occurred_at,
-    verb="referenced",
+    verb="viewed",
     count=1,
     resource_kind="context_page",
     tool_name="read",
@@ -221,7 +221,7 @@ def _seed_chat_pair(
     right_id,
     *,
     occurred_at,
-    verbs=("referenced", "referenced"),
+    verbs=("viewed", "viewed"),
     tool_name="read",
     owner_user_id=None,
 ):
@@ -247,7 +247,7 @@ def _seed_chat_artifacts(
     artifacts,
     *,
     occurred_at,
-    verb="referenced",
+    verb="viewed",
     step=timedelta(minutes=1),
 ):
     """Read each artifact ``count`` times in list order, ``step`` apart.
@@ -296,7 +296,7 @@ def _seed_read_sequence(session, workspace_id, page_ids, *, occurred_at):
         )
 
 
-def test_co_access_rebuild_decays_and_discards_session_identity(
+def test_co_access_rebuild_counts_lifetime_support_without_session_identity(
     session_factory, page_service
 ):
     left = _publish(page_service, "co-left", "Co Left")
@@ -313,32 +313,24 @@ def test_co_access_rebuild_decays_and_discards_session_identity(
             occurred_at=now - timedelta(days=30),
         )
         before = edge_version(session, workspace_id)
-        assert refresh_co_access_edge_projection(session, workspace_id, now=now) == 1
+        assert rebuild_co_access_pairs(session, workspace_id) == 1
         edge = session.scalar(
             select(EdgeProjection).where(EdgeProjection.edge_kind == "co_access")
         )
         assert edge is not None
-        assert edge.weight == pytest.approx(1.5, rel=0.02)
+        assert edge.weight == 2
         assert edge.provenance == "usage"
-        assert edge.source_ref == {"table": "mcp_chat_tool_call_artifact"}
+        assert edge.source_ref == {"table": "co_access_pair"}
         assert "session" not in json.dumps(edge.source_ref).lower()
         assert edge_version(session, workspace_id) > before
 
 
-def test_co_access_projection_decay_reads_the_rank_table_half_life(
-    session_factory, page_service, monkeypatch
+def test_co_access_projection_is_lifetime_count_and_dates_do_not_decay(
+    session_factory, page_service
 ):
-    """The co_access half-life has one source: the rank table.
-
-    rank_score never decays co_access because projection already did; the
-    two only agree if projection reads the same value.
-    """
-
-    monkeypatch.setitem(
-        graph_rank.RANK_PARAMS, "co_access", graph_rank.RankParam(0.20, 25, 15)
-    )
-    left = _publish(page_service, "co-halflife-left", "Co Half-life Left")
-    right = _publish(page_service, "co-halflife-right", "Co Half-life Right")
+    """Time passing changes neither stored counts nor the graph revision."""
+    left = _publish(page_service, "co-lifetime-left", "Co Lifetime Left")
+    right = _publish(page_service, "co-lifetime-right", "Co Lifetime Right")
     now = datetime.now(UTC)
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
@@ -348,16 +340,24 @@ def test_co_access_projection_decay_reads_the_rank_table_half_life(
             workspace_id,
             left.id,
             right.id,
-            occurred_at=now - timedelta(days=30),
+            occurred_at=now - timedelta(days=365),
         )
-        refresh_co_access_edge_projection(session, workspace_id, now=now)
+        rebuild_co_access_pairs(session, workspace_id)
         edge = session.scalar(
             select(EdgeProjection).where(EdgeProjection.edge_kind == "co_access")
         )
+        assert edge.weight == edge.support_session_count == 2
+        assert edge.first_observed_at == now - timedelta(days=365)
+        revision = edge_version(session, workspace_id)
+        from backend.services.indexing.edge_registry import (
+            refresh_co_access_edge_projection,
+        )
 
-    # One fresh session (1.0) plus one 30-day-old session at a 15-day
-    # half-life (0.25); the literal 30 would give 1.5.
-    assert edge.weight == pytest.approx(1.25, rel=0.02)
+        refresh_co_access_edge_projection(
+            session, workspace_id, now=now + timedelta(days=365)
+        )
+        assert edge.weight == 2
+        assert edge_version(session, workspace_id) == revision
 
 
 @pytest.mark.parametrize("discovery_tool", ["search", "grep_wiki"])
@@ -388,7 +388,7 @@ def test_co_access_ignores_result_lists_from_discovery_tools(
                 verbs=("search_match", "search_match"),
                 tool_name=discovery_tool,
             )
-        assert refresh_co_access_edge_projection(session, workspace_id, now=now) == 0
+        assert rebuild_co_access_pairs(session, workspace_id) == 0
 
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
@@ -401,7 +401,7 @@ def test_co_access_ignores_result_lists_from_discovery_tools(
                 occurred_at=now,
                 tool_name="read",
             )
-        assert refresh_co_access_edge_projection(session, workspace_id, now=now) == 1
+        assert rebuild_co_access_pairs(session, workspace_id) == 1
 
 
 def test_co_access_builds_from_one_person_reading_across_conversations(
@@ -429,7 +429,7 @@ def test_co_access_builds_from_one_person_reading_across_conversations(
                 occurred_at=now,
                 owner_user_id=reader,
             )
-            refresh_co_access_edge_projection(session, workspace_id, now=now)
+            rebuild_co_access_pairs(session, workspace_id)
             edge = session.scalar(
                 select(EdgeProjection).where(EdgeProjection.edge_kind == "co_access")
             )
@@ -463,10 +463,10 @@ def test_co_access_requires_support_from_more_than_one_session(session_factory):
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         _seed_chat_pair(session, workspace_id, left_id, right_id, occurred_at=now)
-        assert refresh_co_access_edge_projection(session, workspace_id, now=now) == 0
+        assert rebuild_co_access_pairs(session, workspace_id) == 0
 
         _seed_chat_pair(session, workspace_id, left_id, right_id, occurred_at=now)
-        assert refresh_co_access_edge_projection(session, workspace_id, now=now) == 1
+        assert rebuild_co_access_pairs(session, workspace_id) == 1
 
 
 def test_co_access_joins_only_reads_adjacent_in_the_session(session_factory):
@@ -485,7 +485,7 @@ def test_co_access_joins_only_reads_adjacent_in_the_session(session_factory):
         workspace_id = _workspace_id(session)
         for _ in range(CO_ACCESS_MIN_SESSIONS):
             _seed_read_sequence(session, workspace_id, page_ids, occurred_at=now)
-        refresh_co_access_edge_projection(session, workspace_id, now=now)
+        rebuild_co_access_pairs(session, workspace_id)
         pairs = {
             frozenset((source_id, target_id))
             for source_id, target_id in session.execute(
@@ -540,7 +540,7 @@ def test_co_access_splits_long_sessions_and_keeps_their_earliest_reads(
                 artifacts,
                 occurred_at=now,
             )
-        emitted = refresh_co_access_edge_projection(session, workspace_id, now=now)
+        emitted = rebuild_co_access_pairs(session, workspace_id)
         pairs = {
             frozenset((source_id, target_id))
             for source_id, target_id in session.execute(
@@ -622,7 +622,7 @@ def test_citation_candidates_of_one_write_are_not_read_together(session_factory)
         for _ in range(max(CO_ACCESS_MIN_SESSIONS, HOT_PATH_MIN_SESSIONS)):
             _seed_citation_fanout(session, workspace_id, page_ids, occurred_at=now)
 
-        assert refresh_co_access_edge_projection(session, workspace_id, now=now) == 0
+        assert rebuild_co_access_pairs(session, workspace_id) == 0
         assert _context_pair_session_counts(session, workspace_id, now=now) == {}
 
 
@@ -657,7 +657,7 @@ def test_hot_paths_and_co_access_separate_pages_the_same_way(session_factory):
                     occurred_at=now - timedelta(minutes=len(sequence) - offset),
                     resource_kind=kind,
                 )
-        refresh_co_access_edge_projection(session, workspace_id, now=now)
+        rebuild_co_access_pairs(session, workspace_id)
         co_access = {
             frozenset((source_id, target_id))
             for source_id, target_id in session.execute(
@@ -693,6 +693,7 @@ def test_co_access_does_not_depend_on_the_fetch_batch(session_factory, monkeypat
             monkeypatch.setattr(
                 edge_registry, "CO_ACCESS_SOURCE_BATCH_ROWS", batch_rows
             )
+            rebuild_co_access_pairs(session, workspace_id)
             results[batch_rows] = sorted(
                 (
                     row["source_id"],
@@ -700,9 +701,7 @@ def test_co_access_does_not_depend_on_the_fetch_batch(session_factory, monkeypat
                     round(float(row["weight"]), 9),
                     row["occurred_at"],
                 )
-                for row in edge_registry._co_access_rows(
-                    session, workspace_id, now=now
-                )
+                for row in edge_registry._co_access_rows(session, workspace_id, now=now)
             )
 
     assert results[1]
@@ -719,16 +718,14 @@ def test_a_failed_refresh_keeps_the_projection_and_a_retry_rebuilds_it(
 
     def weight(session):
         return session.scalar(
-            select(EdgeProjection.weight).where(
-                EdgeProjection.edge_kind == "co_access"
-            )
+            select(EdgeProjection.weight).where(EdgeProjection.edge_kind == "co_access")
         )
 
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         for _ in range(CO_ACCESS_MIN_SESSIONS):
             _seed_chat_pair(session, workspace_id, left_id, right_id, occurred_at=now)
-        refresh_co_access_edge_projection(session, workspace_id, now=now)
+        rebuild_co_access_pairs(session, workspace_id)
         before = weight(session)
         _seed_chat_pair(session, workspace_id, left_id, right_id, occurred_at=now)
 
@@ -743,13 +740,13 @@ def test_a_failed_refresh_keeps_the_projection_and_a_retry_rebuilds_it(
     monkeypatch.setattr(edge_registry, "co_access_pairs", dies_after_one_pair)
     with pytest.raises(RuntimeError, match="tick cancelled"):
         with session_factory.begin() as session:
-            refresh_co_access_edge_projection(session, workspace_id, now=now)
+            rebuild_co_access_pairs(session, workspace_id)
     with session_factory() as session:
         assert weight(session) == pytest.approx(before)
 
     monkeypatch.setattr(edge_registry, "co_access_pairs", real_pairs)
     with session_factory.begin() as session:
-        refresh_co_access_edge_projection(session, workspace_id, now=now)
+        rebuild_co_access_pairs(session, workspace_id)
         assert weight(session) == pytest.approx(before * 1.5)
 
 
@@ -803,7 +800,7 @@ def test_co_access_canonicalizes_pairs_across_reversed_session_rankings(
             occurred_at=now,
         )
 
-        assert refresh_co_access_edge_projection(session, workspace_id, now=now) == 1
+        assert rebuild_co_access_pairs(session, workspace_id) == 1
         edges = session.scalars(
             select(EdgeProjection).where(
                 EdgeProjection.workspace_id == workspace_id,
@@ -820,8 +817,8 @@ def test_co_access_canonicalizes_pairs_across_reversed_session_rankings(
     ("verbs", "expected_edges"),
     # One unconsumed side already rejects the pair; two add no branch.
     [
-        (("referenced", "referenced"), 1),
-        (("referenced", "search_match"), 0),
+        (("viewed", "viewed"), 1),
+        (("viewed", "search_match"), 0),
     ],
 )
 def test_co_access_requires_both_artifacts_to_be_consumed(
@@ -843,15 +840,12 @@ def test_co_access_requires_both_artifacts_to_be_consumed(
                 verbs=verbs,
             )
 
-        assert (
-            refresh_co_access_edge_projection(session, workspace_id, now=now)
-            == expected_edges
-        )
+        assert rebuild_co_access_pairs(session, workspace_id) == expected_edges
 
 
 @pytest.mark.parametrize(
     ("verb", "expected_findings"),
-    [("search_match", 0), ("referenced", 1)],
+    [("search_match", 0), ("viewed", 1)],
 )
 def test_trail_tick_stages_only_consumed_unlinked_repeated_distant_paths(
     session_factory, page_service, verb, expected_findings
@@ -929,9 +923,7 @@ def test_hot_concepts_require_consumption_not_search_exposure(
             occurred_at=now,
             verb="search_match",
         )
-        assert list_hot_concepts(
-            session, workspace_id, actor=_actor(), now=now
-        ) == []
+        assert list_hot_concepts(session, workspace_id, actor=_actor(), now=now) == []
 
         link = session.scalar(
             select(McpChatArtifactLink).where(
@@ -1028,7 +1020,7 @@ def test_hot_concepts_batch_hydrate_and_enforce_actor_visibility(
                     chat_session_id=chat.id,
                     resource_kind=kind,
                     resource_id=entity_id,
-                    verb="referenced",
+                    verb="viewed",
                     first_occurred_at=now,
                     last_occurred_at=now,
                     occurrence_count=count,

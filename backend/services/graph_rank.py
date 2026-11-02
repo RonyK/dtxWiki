@@ -1,7 +1,7 @@
 """One comparable rank for relations whose raw weights mean different things.
 
 ``EdgeProjection.weight`` is in a different unit for every kind: summed link
-occurrences, citation counts, a co-read sum already decayed at projection, or
+occurrences, citation counts, a co-view conversation count, or
 a flat 1.0. Sorting by it lets whichever kind has the biggest numbers crowd
 out the rest. ``rank_score`` maps every kind onto ``[0, w]``: a saturating
 curve in the kind's own unit, ``weight / (weight + k)`` (``k`` is the weight
@@ -54,14 +54,13 @@ RANK_PARAMS: dict[str, RankParam] = {
     "promoted_from": RankParam(0.50, 1, None),
     "library_sync_version": RankParam(0.35, 1, 180),
     "ask_citation": RankParam(0.30, 2, 60),
-    "co_access": RankParam(0.20, 25, 30),
+    "co_access": RankParam(0.20, 25, None),
 }
 # A merge is the same lineage relation as a parent version.
 RANK_ALIASES: dict[str, str] = {"version_merge": "version_parent"}
-# Kinds whose stored weight already carries their half-life: co_access is a
-# sum of co-reads each decayed at projection (edge_registry reads the value
-# from this table). Decaying them again here would count their age twice.
-PREDECAYED_KINDS: frozenset[str] = frozenset({"co_access"})
+# No current relation stores a pre-decayed weight. Co-access stores lifetime
+# conversation support; recency ranking is deliberately a separate follow-up.
+PREDECAYED_KINDS: frozenset[str] = frozenset()
 # The order a seed's queues take turns in: its own links, links to it, then
 # the undirected and unanchored relations.
 ROLE_ORDER: tuple[str, ...] = ("out", "in", "undirected", "context")

@@ -25,7 +25,7 @@ from backend.services.workspace_write import WorkspaceWriteService
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 INITIAL_REVISION = "bd62193d5cf6"
-HEAD_REVISION = "1d8f1c08ca36"
+HEAD_REVISION = "7c2bde1490af"
 CORE_REVISION = "efcbcf724889"
 GRAPH_REVISION = "9aeab6944f25"
 

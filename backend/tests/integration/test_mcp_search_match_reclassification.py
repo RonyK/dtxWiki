@@ -597,7 +597,26 @@ def test_reclassification_refreshes_authority_and_dismisses_invalid_hot_path(
                 last_seen_at=NOW,
             )
         )
-        refresh_co_access_edge_projection(session, workspace.id, now=NOW)
+        # Reproduce the pre-reclassification projection directly. The current
+        # projector intentionally cannot turn search references into co-views.
+        source_id, target_id = sorted((page_a.id, page_b.id), key=str)
+        session.add(
+            EdgeProjection(
+                workspace_id=workspace.id,
+                source_kind="context_page",
+                source_id=source_id,
+                target_kind="context_page",
+                target_id=target_id,
+                edge_kind="co_access",
+                provenance="usage",
+                weight=5.0,
+                occurred_at=NOW + timedelta(minutes=4),
+                support_session_count=5,
+                first_observed_at=NOW,
+                source_ref={"table": "mcp_chat_tool_call_artifact"},
+                last_seen_at=NOW,
+            )
+        )
         recompute_authority(session, workspace.id, now=NOW)
         run = LintRun(
             workspace_id=workspace.id,

@@ -423,7 +423,7 @@ def _project_mcp_activity(session, call, actor, gate, edges, chats):
         and call.result_status == "succeeded"
         and call.error_code is None
         and len(primary_edges) == 1
-        and primary_edges[0].verb == "referenced"
+        and primary_edges[0].verb in {"referenced", "viewed"}
     ):
         edge = primary_edges[0]
         chat = chats.get(edge.chat_session_id)

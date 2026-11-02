@@ -411,7 +411,7 @@ def stale_pages_for_conversation(
 
     visible_head_id = visible_context_version_expression(actor)
     # One conversation can observe the same page through different semantic
-    # relations (for example REFERENCED by a read, then EDITED by a patch).
+    # relations (for example VIEWED by a body read, then EDITED by a patch).
     # Rank the correctness-bearing observations per page so the stale scan is
     # page-based and never emits duplicates or lets an older verb-specific row
     # shadow the conversation's actual latest base.

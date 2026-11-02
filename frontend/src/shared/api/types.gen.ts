@@ -8325,7 +8325,7 @@ export interface components {
              * Verb
              * @enum {string}
              */
-            verb: "created" | "edited" | "cited" | "referenced" | "search_match";
+            verb: "created" | "edited" | "cited" | "referenced" | "viewed" | "search_match";
         };
         /** McpChatArtifactLinksPayload */
         McpChatArtifactLinksPayload: {
@@ -8734,7 +8734,7 @@ export interface components {
              * Verb
              * @enum {string}
              */
-            verb: "created" | "edited" | "cited" | "referenced" | "search_match";
+            verb: "created" | "edited" | "cited" | "referenced" | "viewed" | "search_match";
         };
         /** McpChatProvenancePayload */
         McpChatProvenancePayload: {
@@ -8884,7 +8884,7 @@ export interface components {
              * Verb
              * @enum {string}
              */
-            verb: "created" | "edited" | "cited" | "referenced" | "search_match";
+            verb: "created" | "edited" | "cited" | "referenced" | "viewed" | "search_match";
         };
         /** McpChatTimelineItem */
         McpChatTimelineItem: {
@@ -8924,7 +8924,7 @@ export interface components {
             /** Linked Artifacts */
             linked_artifacts: components["schemas"]["McpChatTimelineArtifact"][];
             /** Linked Verbs */
-            linked_verbs: ("created" | "edited" | "cited" | "referenced" | "search_match")[];
+            linked_verbs: ("created" | "edited" | "cited" | "referenced" | "viewed" | "search_match")[];
             /** Primary Tool Name */
             primary_tool_name: string | null;
             /** Redaction Reason */
@@ -24302,7 +24302,7 @@ export interface operations {
             query?: {
                 since?: string | null;
                 until?: string | null;
-                verb?: ("created" | "edited" | "cited" | "referenced" | "search_match") | null;
+                verb?: ("created" | "edited" | "cited" | "referenced" | "viewed" | "search_match") | null;
                 limit?: number;
                 cursor?: string | null;
             };

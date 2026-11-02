@@ -19,6 +19,7 @@ from backend.services.mcp_trace_capture import derive_artifact_links
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROJECTION_SOURCES = {
+    "backend/services/co_access.py": 2,
     "backend/services/indexing/edge_registry.py": 1,
     "backend/services/trail_analysis.py": 1,
 }
@@ -43,7 +44,8 @@ def test_co_access_reads_only_focused_reads():
 
     assert CO_ACCESS_SOURCE_VERBS <= CONSUMPTION_VERBS
     assert McpChatArtifactVerb.CITED not in CO_ACCESS_SOURCE_VERBS
-    assert McpChatArtifactVerb.REFERENCED in CO_ACCESS_SOURCE_VERBS
+    assert CO_ACCESS_SOURCE_VERBS == {McpChatArtifactVerb.VIEWED}
+    assert McpChatArtifactVerb.REFERENCED not in CO_ACCESS_SOURCE_VERBS
 
 
 @pytest.mark.counterexample(
@@ -87,7 +89,7 @@ def test_search_tools_derive_exposure_links_only():
     assert {link.verb for link in [*search_links, *grep_links]} <= EXPOSURE_VERBS
 
 
-def test_projection_filters_use_the_consumption_allowlist_only():
+def test_projection_filters_only_admit_consumption_verbs():
     for relative_path, expected_count in PROJECTION_SOURCES.items():
         tree = ast.parse((REPO_ROOT / relative_path).read_text(encoding="utf-8"))
         arguments = [
@@ -105,12 +107,29 @@ def test_projection_filters_use_the_consumption_allowlist_only():
             )
             and call.args
         ]
+        direct_filters = [
+            comparison
+            for comparison in ast.walk(tree)
+            if isinstance(comparison, ast.Compare)
+            and _attribute_path(comparison.left).endswith(
+                ("McpChatArtifactLink.verb", "McpChatToolCallArtifact.verb")
+            )
+        ]
 
-        assert len(arguments) == expected_count, relative_path
+        assert len(arguments) + len(direct_filters) == expected_count, relative_path
         assert all(
             isinstance(argument, ast.Name)
             and argument.id in PROJECTION_VERB_ALLOWLISTS
             for argument in arguments
+        ), relative_path
+        # An equality predicate lets SQLite use the partial viewed-session
+        # index; it must remain just as narrow as the co-read allowlist.
+        assert all(
+            len(comparison.ops) == 1
+            and isinstance(comparison.ops[0], ast.Eq)
+            and _attribute_path(comparison.comparators[0])
+            == "McpChatArtifactVerb.VIEWED"
+            for comparison in direct_filters
         ), relative_path
 
 

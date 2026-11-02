@@ -52,9 +52,10 @@ describe("linkedArtifactSummary", () => {
     expect(linkedArtifactSummary([])).toBeNull();
   });
 
-  it("prefers a non-referenced artifact and renders Verb: Title", () => {
+  it("prefers authoring over viewed and referenced artifacts and renders Verb: Title", () => {
     const summary = linkedArtifactSummary([
       artifact({ verb: "referenced", artifact_title: "Read page" }),
+      artifact({ verb: "viewed", artifact_title: "Viewed page" }),
       artifact({ verb: "created", artifact_title: "Policy Analysis" }),
     ]);
     expect(summary).toBe("Created: Policy Analysis");

@@ -54,6 +54,7 @@ def run_trail_tick(
     *,
     now: datetime | None = None,
     usage_signals_enabled: bool,
+    refresh_usage_projection: bool = False,
 ) -> dict[str, int]:
     """One maintenance pass over the workspace's usage trail.
 
@@ -64,8 +65,18 @@ def run_trail_tick(
 
     now = now or datetime.now(UTC)
     if usage_signals_enabled:
+        from backend.services.co_access import co_access_projection_needs_repair
+
         hot_paths = _stage_hot_paths(session, workspace_id, now=now)
-        co_access = refresh_co_access_edge_projection(session, workspace_id, now=now)
+        # Reads maintain lifetime counts transactionally. Policy changes and
+        # recovery from a missed settings job restore only the projection;
+        # neither path recomputes counts or scans raw MCP history.
+        co_access = (
+            refresh_co_access_edge_projection(session, workspace_id, now=now)
+            if refresh_usage_projection
+            or co_access_projection_needs_repair(session, workspace_id)
+            else 0
+        )
     else:
         hot_paths = 0
         co_access = clear_co_access_edge_projection(session, workspace_id)

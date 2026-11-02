@@ -111,6 +111,7 @@ _MCP_ACTIONS = {
     "edited": "edited",
     "cited": "cited",
     "referenced": "referenced",
+    "viewed": "referenced",
 }
 
 

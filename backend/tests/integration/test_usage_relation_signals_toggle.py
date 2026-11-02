@@ -19,7 +19,12 @@ from backend.app.settings import Settings
 from backend.mcp.router import dispatch
 from backend.models.context import ContextPage, EdgeProjection
 from backend.models.job import Job
-from backend.models.mcp_chat import McpChatSession, McpChatToolCallArtifact
+from backend.models.mcp_chat import (
+    McpChatArtifactKind,
+    McpChatArtifactVerb,
+    McpChatSession,
+    McpChatToolCallArtifact,
+)
 from backend.models.mcp_trace import MCPToolCall
 from backend.models.workspace import MCPClient, Workspace
 from backend.policy.auth import ActorContext
@@ -27,6 +32,7 @@ from backend.schemas.graph import GraphBudget, GraphQueryRequest, GraphSeed
 from backend.services import trail_analysis
 from backend.services.graph_query_service import GraphQueryService
 from backend.services.indexing.edge_registry import rebuild_edge_projection
+from backend.services.mcp_chat_service import McpChatService
 from backend.services.trail_analysis import run_trail_tick
 from backend.tests.conftest import (
     authenticate_test_client_in_workspace,
@@ -80,20 +86,19 @@ def _read_pair(session, workspace_id, left_id, right_id, *, at):
             workspace_id=workspace_id,
             request_id=uuid4(),
             tool_name="read",
-            result_status="success",
+            result_status="succeeded",
+            started_at=at + timedelta(minutes=offset),
+            completed_at=at + timedelta(minutes=offset),
         )
         session.add(call)
         session.flush()
-        session.add(
-            McpChatToolCallArtifact(
-                workspace_id=workspace_id,
-                chat_session_id=chat.id,
-                mcp_tool_call_id=call.id,
-                resource_kind="context_page",
-                resource_id=page_id,
-                verb="referenced",
-                occurred_at=at + timedelta(minutes=offset),
-            )
+        McpChatService().link_artifact(
+            session=session,
+            chat_session=chat,
+            tool_call=call,
+            resource_kind=McpChatArtifactKind.CONTEXT_PAGE,
+            resource_id=page_id,
+            verb=McpChatArtifactVerb.VIEWED,
         )
     session.flush()
 
@@ -152,7 +157,13 @@ def test_switching_signals_off_clears_co_access_and_back_on_rebuilds_it(
         session_factory, page_service, now
     )
     with session_factory.begin() as session:
-        run_trail_tick(session, workspace_id, now=now, usage_signals_enabled=True)
+        run_trail_tick(
+            session,
+            workspace_id,
+            now=now,
+            usage_signals_enabled=True,
+            refresh_usage_projection=True,
+        )
         assert _co_access_count(session, workspace_id) == 1
 
     # Off: the Local Graph stops showing the edge at once, before any tick.
@@ -184,7 +195,13 @@ def test_switching_signals_off_clears_co_access_and_back_on_rebuilds_it(
     monkeypatch.undo()
 
     with session_factory.begin() as session:
-        run_trail_tick(session, workspace_id, now=now, usage_signals_enabled=True)
+        run_trail_tick(
+            session,
+            workspace_id,
+            now=now,
+            usage_signals_enabled=True,
+            refresh_usage_projection=True,
+        )
         assert _co_access_count(session, workspace_id) == 1
     with session_factory() as session:
         scene = _co_access_scene(session, workspace_id, left_id, enabled=True)
@@ -281,7 +298,13 @@ def test_policy_opt_out_queues_after_commit_and_clears_rest_and_mcp_neighbors(
     )
     client, _ = _rest_client(page_service)
     with session_factory.begin() as session:
-        run_trail_tick(session, workspace_id, now=now, usage_signals_enabled=True)
+        run_trail_tick(
+            session,
+            workspace_id,
+            now=now,
+            usage_signals_enabled=True,
+            refresh_usage_projection=True,
+        )
         assert _co_access_count(session, workspace_id) == 1
         left_slug = session.get(ContextPage, left_id).slug
         # A prompt settings tick must not remove curated links or another
@@ -657,7 +680,13 @@ def test_the_local_graph_route_reads_the_owner_switch(session_factory, page_serv
         session_factory, page_service, now
     )
     with session_factory.begin() as session:
-        run_trail_tick(session, workspace_id, now=now, usage_signals_enabled=True)
+        run_trail_tick(
+            session,
+            workspace_id,
+            now=now,
+            usage_signals_enabled=True,
+            refresh_usage_projection=True,
+        )
     client, _ = _rest_client(page_service)
     body = {
         "seeds": [{"kind": "context_page", "id": str(left_id)}],

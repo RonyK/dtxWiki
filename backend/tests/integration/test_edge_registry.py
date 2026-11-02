@@ -73,6 +73,9 @@ _GRAPH_FK_TARGET_TABLES = {
     "workspace_tree_node",
 }
 _NON_EDGE_RELATION_SOURCES = {
+    # Lifetime counters feed the registered co_access extractor, not new kinds.
+    "co_access_pair.source_kind+source_id",
+    "co_access_pair.target_kind+target_id",
     # A personal preference is not a shared knowledge-graph relationship.
     "user_favorite.target_kind+target_id",
     # Mutable head pointers and rebuildable lookup/index rows are storage

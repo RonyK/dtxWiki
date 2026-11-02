@@ -30,6 +30,8 @@ describe("StatusPill", () => {
     expect(pill()).toHaveClass("status-pill-warn");
     rerender(<StatusPill status="referenced" />);
     expect(pill()).toHaveClass("status-pill-info");
+    rerender(<StatusPill status="viewed" />);
+    expect(pill()).toHaveClass("status-pill-info");
     rerender(<StatusPill status="failed" />);
     expect(pill()).toHaveClass("status-pill-danger");
     rerender(<StatusPill status="stale" />);
@@ -75,8 +77,12 @@ describe("StatusPill", () => {
   it("self-translates a known enum via the shared status map, en and ko (A3)", async () => {
     const { rerender } = render(<StatusPill status="extract_pending" />);
     expect(screen.getByText("Extraction pending")).toBeInTheDocument();
+    rerender(<StatusPill status="viewed" />);
+    expect(screen.getByText("Viewed")).toBeInTheDocument();
 
     await i18n.changeLanguage("ko");
+    rerender(<StatusPill status="viewed" />);
+    expect(screen.getByText("열람")).toBeInTheDocument();
     rerender(<StatusPill status="extract_pending" />);
     expect(screen.getByText("추출 대기 중")).toBeInTheDocument();
     // The raw enum no longer leaks English into a ko surface.

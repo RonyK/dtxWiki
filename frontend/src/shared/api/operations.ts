@@ -193,6 +193,7 @@ export type McpChatArtifactVerb =
   | "created"
   | "edited"
   | "cited"
+  | "viewed"
   | "referenced"
   | "search_match";
 export type McpChatPeriod = "today" | "week" | "month" | "all";

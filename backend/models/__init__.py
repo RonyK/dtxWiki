@@ -56,6 +56,7 @@ from backend.models.delegated_task import ClientDelegatedTask
 from backend.models.favorite import UserFavorite
 from backend.models.feedback import FeedbackItem
 from backend.models.graph import (
+    CoAccessPair,
     GraphHistoryCoverage,
     GraphObservation,
     KnowledgeNodeStat,
@@ -174,6 +175,7 @@ __all__ = [
     "ChangeOperation",
     "ChangeSet",
     "ClientDelegatedTask",
+    "CoAccessPair",
     "KnowledgeCoverageGap",
     "KnowledgeNodeStat",
     "GraphObservation",
