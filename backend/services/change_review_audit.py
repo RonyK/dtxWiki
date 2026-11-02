@@ -19,22 +19,31 @@ from backend.services.review_risk_policy import (
 from backend.spi.types import AI_PROVENANCES
 from backend.utils.uuid import parse_uuid_or_none
 
+# Fixed-copy review reasons with their stable I18N-08a codes, so clients can
+# localize them; the English prose stays the stored fallback.
+_WRITE_DECISION_SUMMARIES = {
+    (True, True): (
+        "agent-authored page write requires human review",
+        "agent_page_write_requires_review",
+    ),
+    (False, True): ("page write held for review", "page_write_held_for_review"),
+    (True, False): (
+        "agent-authored page write approved by policy",
+        "agent_page_write_approved_by_policy",
+    ),
+    (False, False): ("human page write applied directly", "human_page_write_applied"),
+}
+_STALE_ALTERNATIVE_SUMMARY = (
+    "stale edit preserved as alternative draft",
+    "stale_edit_preserved_as_alternative",
+)
+
 
 def _write_decision_summary(
     ai_authored: bool,
     review_required: bool,
-) -> str:
-    if review_required:
-        return (
-            "agent-authored page write requires human review"
-            if ai_authored
-            else "page write held for review"
-        )
-    return (
-        "agent-authored page write approved by policy"
-        if ai_authored
-        else "human page write applied directly"
-    )
+) -> tuple[str, str]:
+    return _WRITE_DECISION_SUMMARIES[(ai_authored, review_required)]
 
 
 @dataclass(frozen=True)
@@ -144,6 +153,7 @@ class ChangeReviewAuditRecorder:
             diff_summary=action,
             diff_ref=f"context_page_version:{version_id}",
         )
+        summary, summary_code = _write_decision_summary(ai_authored, review_required)
         review = ReviewItem(
             workspace_id=workspace_id,
             change_set_id=change_set.id,
@@ -151,7 +161,8 @@ class ChangeReviewAuditRecorder:
             status="pending" if review_required else "approved",
             risk_level=risk_resolution.risk_level,
             **review_risk_snapshot(risk_resolution),
-            decision_summary=_write_decision_summary(ai_authored, review_required),
+            decision_summary=summary,
+            decision_summary_code=summary_code,
         )
         session.add_all([operation, review])
         session.flush()
@@ -233,7 +244,8 @@ class ChangeReviewAuditRecorder:
             status="pending" if review_required else "approved",
             risk_level=risk_resolution.risk_level,
             **review_risk_snapshot(risk_resolution),
-            decision_summary="stale edit preserved as alternative draft",
+            decision_summary=_STALE_ALTERNATIVE_SUMMARY[0],
+            decision_summary_code=_STALE_ALTERNATIVE_SUMMARY[1],
         )
         session.add_all([operation, review])
         session.flush()

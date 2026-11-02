@@ -24,25 +24,33 @@ function rangeEnds(first: string, last: string): { from: string; to: string; spa
   return { from: spansDays ? from : from.slice(11), to: spansDays ? to : to.slice(11), spansDays };
 }
 
-export function ActivityEntryRow({ entry, query = DEFAULT_ACTIVITY_QUERY, loadGroup }: {
+/**
+ * "summary" (Dashboard) shows what happened to which document; "detail"
+ * (Activity) also offers the MCP call's technical fields, which the feed row
+ * already carries, so neither density costs another request.
+ */
+export type ActivityEntryDensity = "summary" | "detail";
+
+export function ActivityEntryRow({ entry, query = DEFAULT_ACTIVITY_QUERY, loadGroup, density = "detail" }: {
   entry: ActivityFeedEntry;
   query?: ActivityQuery;
   loadGroup?: ActivityGroupLoader;
+  density?: ActivityEntryDensity;
 }) {
   return (
     <article className={`activity-feed-entry${entry.entry_type === "read_group" ? " activity-feed-entry--group" : ""}`} data-entry-type={entry.entry_type}>
-      <ActivityEventContent event={entry.event} query={query} count={entry.event_count} firstOccurredAt={entry.first_occurred_at} lastOccurredAt={entry.last_occurred_at} />
+      <ActivityEventContent event={entry.event} query={query} count={entry.event_count} firstOccurredAt={entry.first_occurred_at} lastOccurredAt={entry.last_occurred_at} density={density} />
       {entry.entry_type === "read_group" && <ActivityReadGroup
         entry={entry}
         loadGroup={loadGroup}
-        renderEvent={(event) => <ActivityEntryRow entry={{ entry_type: "event", id: event.id, event, event_count: 1, first_occurred_at: event.created_at, last_occurred_at: event.created_at }} query={query} />}
+        renderEvent={(event) => <ActivityEntryRow entry={{ entry_type: "event", id: event.id, event, event_count: 1, first_occurred_at: event.created_at, last_occurred_at: event.created_at }} query={query} density={density} />}
       />}
     </article>
   );
 }
 
-function ActivityEventContent({ event, query, count, firstOccurredAt, lastOccurredAt }: {
-  event: ActivityFeedEvent; query: ActivityQuery; count: number; firstOccurredAt: string; lastOccurredAt: string;
+function ActivityEventContent({ event, query, count, firstOccurredAt, lastOccurredAt, density }: {
+  event: ActivityFeedEvent; query: ActivityQuery; count: number; firstOccurredAt: string; lastOccurredAt: string; density: ActivityEntryDensity;
 }) {
   const { t, i18n } = useTranslation("activity");
   const descriptionId = useId();
@@ -59,7 +67,7 @@ function ActivityEventContent({ event, query, count, firstOccurredAt, lastOccurr
       <time dateTime={lastOccurredAt} title={formatVersionTimestamp(lastOccurredAt, "long")}>{rangeTo}</time>
     </span>}
   </div>;
-  const heading = <span className="activity-entry__heading"><span>{presentation.title}</span>{navigation.href && <ChevronRight aria-hidden="true" size={14} />}</span>;
+  const heading = <span className="activity-entry__heading"><span>{presentation.title}</span></span>;
   return (
     <div className={`activity-entry__layout${presentation.pendingReview ? " activity-entry__layout--review" : ""}`}>
       <div className="activity-entry__body">
@@ -77,14 +85,15 @@ function ActivityEventContent({ event, query, count, firstOccurredAt, lastOccurr
         {!navigation.href && <div className="activity-entry__fallback"><span><Unlink aria-hidden="true" size={12} />{t("feed.noTarget")}</span>
           {navigation.fallbackHref && <Link to={navigation.fallbackHref}>{t(isMcpActivityItem(event) ? "feed.openMcpActivity" : "feed.openActivity")}<ChevronRight aria-hidden="true" size={14} /></Link>}
         </div>}
-        {isMcpExecution(event) && <ActivityTechnicalDetails event={event} />}
-        {presentation.pendingReview && navigation.href && <div className="activity-entry__review-footer">
-          <Link className="activity-entry__review-link" to={navigation.href} aria-label={t("feed.reviewRequiredFor", { title: presentation.title })}>
-            <span className="activity-action-badge" data-action="pending"><ClipboardCheck aria-hidden="true" size={12} /><span>{t("feed.reviewRequired")}</span><ChevronRight aria-hidden="true" size={14} /></span>
-          </Link>{times}
+        {density === "detail" && isMcpExecution(event) && <ActivityTechnicalDetails event={event} />}
+        {presentation.pendingReview && <div className="activity-entry__review-footer">
+          {/* A status, not a second link: the whole card already opens the review. */}
+          <span className="activity-action-badge" data-action="pending"><ClipboardCheck aria-hidden="true" size={12} /><span>{t("feed.reviewRequired")}</span></span>{times}
         </div>}
       </div>
       {!presentation.pendingReview && <div className="activity-entry__trailing"><ActivityActionBadge action={presentation.action} count={count} />{times}</div>}
+      {/* The title link stretches over the card; this only marks it as one target. */}
+      {navigation.href && <ChevronRight className="activity-entry__go" aria-hidden="true" size={18} />}
     </div>
   );
 }

@@ -18,6 +18,26 @@
 - Reject attempts to disable required publication safeguards through Settings,
   and report a previously stored override for them as enabled.
 
+### Recent activity cards
+
+- Dashboard and Activity cards name the document first and describe what
+  happened beneath it, including MCP requests ("Requested a review"), repeated
+  reads, and failures ("Review request failed · Version conflict"). Pending
+  review cards name the page under review when the reader may see it.
+- Each card is one link: the whole card opens its document or review, with a
+  single focus stop and an edge chevron; name chips and read-group controls
+  keep their own actions. The pending "Review required" status is no longer a
+  second link.
+- Badges separate requests from decisions: submissions read "Review
+  requested", and decisions show "Approved", "Requested changes", or
+  "Rejected". The activity feed reports submissions as `request_review`.
+- Dashboard cards omit MCP technical fields and link once to Activity's MCP
+  records, where cards still show them. People-written reasons preview at 120
+  characters and two lines; fixed review reasons carry codes and translate.
+- The Dashboard's system-event check reads only audit and job rows, its setup
+  checks ask for one row, and MCP rows load their page titles and visibility in
+  batches, so feed queries no longer grow with each MCP row.
+
 ### Index navigation and formatted previews
 
 - MCP indexes use exact `dtxwiki://index/<kind>/<id>` Markdown destinations

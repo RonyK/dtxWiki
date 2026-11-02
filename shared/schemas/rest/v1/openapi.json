@@ -340,6 +340,17 @@
             "title": "Created At",
             "type": "string"
           },
+          "decision_summary_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Summary Code"
+          },
           "details": {
             "anyOf": [
               {
@@ -613,6 +624,17 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "decision_summary_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Summary Code"
           },
           "details": {
             "anyOf": [

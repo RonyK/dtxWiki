@@ -290,6 +290,7 @@
       "restored": "Restored",
       "deleted": "Deleted",
       "reviewed": "Reviewed",
+      "requested": "Review requested",
       "failed": "Failed",
       "partial": "Partially completed",
       "accepted": "Accepted"
@@ -307,6 +308,23 @@
       "cite": "Cited a resource",
       "guide": "Opened the usage guide"
     },
+    "mcpActivity": {
+      "read_one": "Read",
+      "read_other": "Read {{count}} times"
+    },
+    "mcpOperationNames": {
+      "read": "Read",
+      "search": "Search",
+      "edit": "Draft update",
+      "create": "Item creation",
+      "review": "Review request",
+      "publish": "Publish",
+      "restore": "Restore",
+      "delete": "Delete",
+      "cite": "Citation",
+      "guide": "Guide",
+      "tool": "Tool call"
+    },
     "mcpResults": {
       "failed": "The tool execution could not be completed",
       "conflict": "The request could not be completed due to a version conflict",
@@ -314,11 +332,18 @@
       "partial": "The request was partially completed",
       "accepted": "The request was accepted"
     },
+    "mcpFailed": "{{operation}} failed",
+    "mcpFailureReasons": {
+      "failed": "Could not complete",
+      "conflict": "Version conflict",
+      "rejected_by_policy": "Rejected by policy"
+    },
     "noTarget": "No target link",
     "openMcpActivity": "View MCP activity",
     "openActivity": "View activity list",
+    "mcpDetailsHint": "Tool names, durations and error codes:",
+    "mcpDetailsLink": "Activity › MCP records",
     "openReview": "Open review: {{title}}",
-    "reviewRequiredFor": "Review required: {{title}}",
     "reviewRequired": "Review required",
     "technical": {
       "title": "Technical information",

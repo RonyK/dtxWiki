@@ -3,6 +3,7 @@ import type { ActivityFeedEntry, ActivityFeedEvent, ActivityLane, ActivityPeriod
 export type { ActivityFeedEntry, ActivityFeedEvent } from "../api/operations";
 import { i18n } from "../i18n";
 import { ACTIVITY_SUBTYPES, activityTargetHref, isMcpActivityItem, presentActivityItem } from "./activityLabels";
+import { decisionSummaryCode, localizedDecisionSummary } from "./decisionSummary";
 
 export type ActivityKind = "all" | "workspace" | "mcp" | "system";
 export type ActivityQuery = {
@@ -12,7 +13,7 @@ export type ActivityQuery = {
   group_reads: boolean;
 };
 export type ActivityGroupLoader = (token: string) => Promise<ActivityFeedEvent[]>;
-export type ActivityAction = "edited" | "read" | "search" | "logged" | "created" | "published" | "restored" | "deleted" | "reviewed" | "failed" | "partial" | "accepted";
+export type ActivityAction = "edited" | "read" | "search" | "logged" | "created" | "published" | "restored" | "deleted" | "reviewed" | "requested" | "approved" | "changes_requested" | "rejected" | "failed" | "partial" | "accepted";
 
 const PERIODS: readonly string[] = ["today", "yesterday", "week", "month", "all"];
 const KINDS: readonly string[] = ["all", "workspace", "mcp", "system"];
@@ -49,7 +50,11 @@ export function activityCountLabel(entryCount: number, eventCount: number): stri
 
 const ACTION_BY_OPERATION: Record<string, ActivityAction> = {
   read: "read", search: "search", edit: "edited", create: "created", publish: "published", restore: "restored",
-  delete: "deleted", review: "reviewed",
+  delete: "deleted", review: "reviewed", request_review: "requested",
+};
+// A recorded review decision names its outcome rather than a generic "reviewed".
+const ACTION_BY_DECISION: Record<string, ActivityAction> = {
+  approve: "approved", request_changes: "changes_requested", reject: "rejected",
 };
 export function isMcpExecution(event: ActivityFeedEvent): boolean {
   return event.target?.target_kind === "mcp_tool_call" || Boolean(event.tool_name);
@@ -64,6 +69,8 @@ export function activityAction(event: ActivityFeedEvent): ActivityAction {
   // An unknown explicit outcome must never be rendered as successful editing/creation.
   if (result && result !== "succeeded") return "logged";
   if (isMcpExecution(event) && result !== "succeeded") return "logged";
+  const decision = event.event_key === "review.decision" ? event.details?.decision_type : null;
+  if (decision && Object.hasOwn(ACTION_BY_DECISION, decision)) return ACTION_BY_DECISION[decision];
   const operation = event.operation;
   if (operation) {
     return Object.hasOwn(ACTION_BY_OPERATION, operation) ? ACTION_BY_OPERATION[operation] : "logged";
@@ -77,11 +84,28 @@ export function activityAction(event: ActivityFeedEvent): ActivityAction {
 }
 
 const MCP_OPERATION_KEYS: Record<string, string> = {
-  read: "read", search: "search", edit: "edit", create: "create", review: "review", publish: "publish", restore: "restore", delete: "delete", cite: "cite", guide: "guide",
+  read: "read", search: "search", edit: "edit", create: "create", review: "review", request_review: "review", publish: "publish", restore: "restore", delete: "delete", cite: "cite", guide: "guide",
 };
 const RESULT_KEYS: Record<string, string> = {
   failed: "failed", conflict: "conflict", rejected_by_policy: "rejected_by_policy", rejected: "failed", denied: "rejected_by_policy", error: "failed", cancelled: "failed", partial: "partial", accepted: "accepted", needs_review: "accepted",
 };
+const FAILURE_RESULT_KEYS = new Set(["failed", "conflict", "rejected_by_policy"]);
+const TYPE_KEYS: Record<string, string> = {
+  context_page: "context", agent_page: "agent", source: "library", library_item: "library", mcp_tool_call: "mcp", workspace_tree_node: "tree", change_set: "review", job: "job",
+};
+/** People-written text shown on a card: 120 code points, cut at a nearby space. */
+export const ACTIVITY_PREVIEW_MAX = 120;
+export function previewText(text: string, max = ACTIVITY_PREVIEW_MAX): string {
+  const points = Array.from(text);
+  if (points.length <= max) return text;
+  const head = points.slice(0, max).join("");
+  const space = head.search(/\s\S*$/);
+  // A cut sentence ends in the ellipsis alone, not "end.…".
+  const cut = (space >= Math.floor(max * 0.75) ? head.slice(0, space) : head).trimEnd();
+  return `${cut.replace(/[.,;:!?。、…]+$/u, "")}…`;
+}
+
+/** The card's text: the document it is about first, then what happened to it. */
 export function presentActivityFeedEvent(event: ActivityFeedEvent, count = 1) {
   const action = activityAction(event);
   const pendingReview = event.lane === "pending" && Boolean(event.review_item_id);
@@ -90,17 +114,28 @@ export function presentActivityFeedEvent(event: ActivityFeedEvent, count = 1) {
   if (isMcpExecution(event)) {
     const resultKey = event.result_status && Object.hasOwn(RESULT_KEYS, event.result_status) ? RESULT_KEYS[event.result_status] : null;
     const operationKey = event.operation && Object.hasOwn(MCP_OPERATION_KEYS, event.operation) ? MCP_OPERATION_KEYS[event.operation] : null;
-    const verifiedTarget = event.navigation?.title;
+    const verifiedTarget = event.navigation?.title ?? null;
     const knownSuccess = event.result_status === "succeeded";
-    const target = verifiedTarget ?? i18n.t("activity:feed.resource");
-    const lastCharacter = target.trim().charCodeAt(target.trim().length - 1);
-    const particle = lastCharacter >= 0xac00 && lastCharacter <= 0xd7a3 && (lastCharacter - 0xac00) % 28 !== 0 ? "을" : "를";
-    title = resultKey
-      ? i18n.t(`activity:feed.mcpResults.${resultKey}`)
-      : knownSuccess && operationKey
-        ? i18n.t(`activity:feed.mcpOperations.${operationKey}`, { target, particle, count })
-        : i18n.t("activity:feed.mcpFallback");
-    body = "";
+    if (resultKey && FAILURE_RESULT_KEYS.has(resultKey)) {
+      // What was attempted stays visible next to why it failed.
+      const failed = i18n.t("activity:feed.mcpFailed", { operation: i18n.t(`activity:feed.mcpOperationNames.${operationKey ?? "tool"}`) });
+      const reason = i18n.t(`activity:feed.mcpFailureReasons.${resultKey}`);
+      title = verifiedTarget ?? failed;
+      body = verifiedTarget ? `${failed} · ${reason}` : reason;
+    } else {
+      const activity = resultKey
+        ? i18n.t(`activity:feed.mcpResults.${resultKey}`)
+        : knownSuccess && operationKey === "read"
+          ? i18n.t("activity:feed.mcpActivity.read", { count })
+          : knownSuccess && operationKey
+            ? i18n.t(`activity:feed.mcpOperations.${operationKey}`, mcpTargetValues(verifiedTarget, count))
+            : i18n.t("activity:feed.mcpFallback");
+      title = verifiedTarget
+        ?? (knownSuccess && operationKey && !resultKey
+          ? i18n.t(`activity:feed.mcpOperations.${operationKey}`, mcpTargetValues(null, count))
+          : activity);
+      body = verifiedTarget ? activity : "";
+    }
   } else {
     ({ title, body } = presentActivityItem(event));
     const targetTitle = event.navigation?.title ?? event.target_title;
@@ -108,13 +143,32 @@ export function presentActivityFeedEvent(event: ActivityFeedEvent, count = 1) {
       body = event.details && body ? body : title;
       title = targetTitle;
     }
+    if (pendingReview) {
+      // The server names the page under review when this reader may see it;
+      // otherwise its title is the reason itself, shown once.
+      const carrier = { decision_summary: event.body, decision_summary_code: event.decision_summary_code };
+      const localized = localizedDecisionSummary(carrier) ?? "";
+      const reason = decisionSummaryCode(carrier) ? localized : previewText(localized);
+      const pageTitle = event.target_title && event.target_title !== event.body ? event.target_title : null;
+      title = pageTitle ?? (reason || title);
+      body = pageTitle ? reason : "";
+    } else if (event.details?.reason && body.includes(event.details.reason)) {
+      body = body.replace(event.details.reason, previewText(event.details.reason));
+    }
   }
-  const kind = event.navigation?.target_kind ?? event.target?.target_kind ?? "";
-  const typeKeys: Record<string, string> = {
-    context_page: "context", agent_page: "agent", source: "library", library_item: "library", mcp_tool_call: "mcp", workspace_tree_node: "tree", change_set: "review", job: "job",
-  };
-  const typeKey = pendingReview ? "review" : Object.hasOwn(typeKeys, kind) ? typeKeys[kind] : isMcpActivityItem(event) ? "mcp" : "activity";
+  // The resource the event is about, even when its link opens a review.
+  const kind = [event.navigation?.target_kind, event.target?.target_kind].find(
+    (candidate): candidate is string => Boolean(candidate) && Object.hasOwn(TYPE_KEYS, candidate!),
+  ) ?? (event.details?.page_id ? "context_page" : "");
+  const typeKey = pendingReview ? "review" : kind ? TYPE_KEYS[kind] : isMcpActivityItem(event) ? "mcp" : "activity";
   return { title, body: body === title ? "" : body, action, pendingReview, typeKey, typeLabel: i18n.t(`activity:feed.types.${typeKey}`) };
+}
+
+function mcpTargetValues(verifiedTarget: string | null, count: number) {
+  const target = verifiedTarget ?? i18n.t("activity:feed.resource");
+  const lastCharacter = target.trim().charCodeAt(target.trim().length - 1);
+  const particle = lastCharacter >= 0xac00 && lastCharacter <= 0xd7a3 && (lastCharacter - 0xac00) % 28 !== 0 ? "을" : "를";
+  return { target, particle, count };
 }
 
 /** Accept only exact, same-app resource routes from the permission-filtered projection. */

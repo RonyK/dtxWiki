@@ -69,6 +69,7 @@ import {
   formatVersionTimestamp,
 } from "../../shared/lib/datetime";
 import { domainLabel, humanizeEnum } from "../../shared/lib/domainLabel";
+import { localizedDecisionSummary } from "../../shared/lib/decisionSummary";
 import { i18n } from "../../shared/i18n";
 import { readReviewDraft, reviewDraftKey, writeReviewDraft } from "../../shared/lib/reviewDraftStorage";
 import { formatVersionRange } from "../../shared/lib/versionRange";
@@ -139,21 +140,6 @@ const RESOLVED_STATUS_FILTERS: ReviewResolvedStatusFilter[] = [
 ];
 const SCOPE_FILTERS: ReviewScope[] = ["all", "to_me", "from_me"];
 const EMPTY_RISK_BREAKDOWN = { high: 0, medium: 0, low: 0 };
-const REVIEW_DECISION_SUMMARY_DEFAULTS = {
-  context_draft_requires_review: "Context draft requires review",
-  context_update_requires_review: "Context update draft requires review",
-  context_update_workflow_sequence_incomplete:
-    "Context update draft requires review because the workflow sequence is incomplete",
-  context_ingress_requires_review: "Ask capture requires review",
-  context_draft_restored_after_rejection: "Draft restored after a later draft was rejected",
-} as const;
-// Ask capture reviews used to store their raw reason codes as the summary prose.
-const LEGACY_INGRESS_REASON_SUMMARY = /^(low_confidence|page_type_decision)(,(low_confidence|page_type_decision))*$/;
-type DecisionSummaryCarrier = {
-  decision_summary?: string | null;
-  decision_summary_code?: string | null;
-  review_type?: string | null;
-};
 const EMPTY_REVIEW_COUNTS: ReviewCounts = {
   pending: 0,
   changes_requested: 0,
@@ -725,7 +711,7 @@ export function ReviewScreen() {
       return null;
     }
     const displayed = (lifecycleTab === "pending"
-      ? groupPendingReviewsByPage(state?.reviews ?? [], t)
+      ? groupPendingReviewsByPage(state?.reviews ?? [])
       : groupReviewsByDate(state?.reviews ?? [])).flatMap((group) => group.reviews.map((review) => review.id));
     setNextReviewOrder({ after: displayed.filter((id) => id !== fresh.id), before: [] });
     storeDecisionReceipt(fresh, key, generation);
@@ -780,7 +766,7 @@ export function ReviewScreen() {
     const workspaceId = state.workspaceId;
     const generation = loadMoreGenerationRef.current;
     const order = (lifecycleTab === "pending"
-      ? groupPendingReviewsByPage(state.reviews, t)
+      ? groupPendingReviewsByPage(state.reviews)
       : groupReviewsByDate(state.reviews)).flatMap((group) => group.reviews.map((review) => review.id));
     const at = order.indexOf(selected.id);
     setNextReviewOrder({ after: order.slice(at + 1), before: order.slice(0, Math.max(at, 0)) });
@@ -842,7 +828,7 @@ export function ReviewScreen() {
       const order = nextReviewOrder;
       let nextId = order.after.find((id) => reviews.some((review) => review.id === id));
       if (!order.after.length && !order.before.length) nextId = (lifecycleTab === "pending"
-        ? groupPendingReviewsByPage(reviews, t) : groupReviewsByDate(reviews))[0]?.reviews[0]?.id;
+        ? groupPendingReviewsByPage(reviews) : groupReviewsByDate(reviews))[0]?.reviews[0]?.id;
       // Finish the following cursor pages before wrapping to earlier reviews.
       // A review arriving on the first refreshed page must not jump this order.
       const initialIds = new Set(reviews.map((review) => review.id));
@@ -1371,13 +1357,13 @@ export function ReviewScreen() {
     ?? (!state.nextCursor ? nextReviewOrder.before.find((id) => state.reviews.some((review) => review.id === id)) : undefined);
   const nextQueuedReview = state.reviews.find((review) => review.id === nextQueuedId)
     ?? (!nextReviewOrder.after.length && !nextReviewOrder.before.length
-      ? (lifecycleTab === "pending" ? groupPendingReviewsByPage(state.reviews, t) : groupReviewsByDate(state.reviews))[0]?.reviews[0]
+      ? (lifecycleTab === "pending" ? groupPendingReviewsByPage(state.reviews) : groupReviewsByDate(state.reviews))[0]?.reviews[0]
       : undefined);
   const detailReady = selectedDetail?.key === selectedDetailKey && Boolean(selectedDetail.review);
   const detailError = selectedDetail?.key === selectedDetailKey ? selectedDetail.error : null;
   const showUncertainDecision = uncertainDecision && busyId !== uncertainDecision.reviewId;
   const groupedReviews = lifecycleTab === "pending"
-    ? groupPendingReviewsByPage(state.reviews, t)
+    ? groupPendingReviewsByPage(state.reviews)
     : groupReviewsByDate(state.reviews);
   // Once the rail has pulled every page there is nothing left to arrive, so a
   // group's size IS the page's total and the header can say so. While a cursor
@@ -1789,7 +1775,7 @@ export function ReviewScreen() {
                       onToggle={() => toggleGroupCollapsed(group.key)}
                       selectedCount={selectedCount}
                       allSelected={groupIsComplete && knownIds.length > 0 && knownIds.every((id) => selectedBulkIds.has(id))}
-                      title={group.pageTitle ?? reviewTargetTitle(group.reviews[0], t)}
+                      title={group.pageTitle ?? reviewTargetTitle(group.reviews[0])}
                     >{rows}</ReviewDocumentGroup>
                   ) : lifecycleTab === "pending" ? rows : (
                     <div className="review-date-group" key={group.key}>
@@ -1836,7 +1822,7 @@ export function ReviewScreen() {
                         onClick: () => setReviewParam(null),
                       },
                       {
-                        label: reviewTargetTitle(selectedReview, t),
+                        label: reviewTargetTitle(selectedReview),
                       },
                     ]
                   : [{ label: t("breadcrumb", { defaultValue: "Review" }) }]
@@ -1910,7 +1896,7 @@ export function ReviewScreen() {
                   workspaceId={state.workspaceId}
                   decisionSaved={completedReviewIsCurrent}
                   nextDisabled={refreshFailed || refreshing || Boolean(busyId) || bulkBusy || Boolean(uncertainDecision) || (state.reviews.length === 0 && state.nextCursor === null)}
-                  nextLabel={nextQueuedReview ? `${reviewTargetTitle(nextQueuedReview, t)}${reviewTargetVersionNo(nextQueuedReview) != null ? ` · v${reviewTargetVersionNo(nextQueuedReview)}` : ""}` : null}
+                  nextLabel={nextQueuedReview ? `${reviewTargetTitle(nextQueuedReview)}${reviewTargetVersionNo(nextQueuedReview) != null ? ` · v${reviewTargetVersionNo(nextQueuedReview)}` : ""}` : null}
                   noNextReview={!refreshFailed && state.reviews.length === 0 && state.nextCursor === null}
                   onNextReview={() => void openNextReview()}
                   busy={Boolean(busyId) || bulkBusy}
@@ -2471,12 +2457,12 @@ function ReviewRow({
   // misfiled under their date divider.
   const activityAt = reviewActivityAt(review);
   const target = reviewPrimaryOperation(review);
-  const rawTargetTitle = reviewTargetTitle(review, t);
+  const rawTargetTitle = reviewTargetTitle(review);
   const targetTitle = rawTargetTitle;
   const targetVersionNo = reviewTargetVersionNo(review);
   const candidateState = target?.content?.is_current_candidate;
   const reviewType = domainLabel("review", "reviewType", review.review_type, t);
-  const decisionSummary = localizedDecisionSummary(review, t);
+  const decisionSummary = localizedDecisionSummary(review);
   const secondarySummary =
     decisionSummary && decisionSummary !== rawTargetTitle
       ? decisionSummary
@@ -2805,8 +2791,8 @@ function ReviewDetail({
   const decisionReasonHint = t("detail.reasonHint", {
     defaultValue: "Required for Request changes. Optional for Approve and Reject.",
   });
-  const targetTitle = reviewTargetTitle(review, t);
-  const decisionSummary = localizedDecisionSummary(review, t);
+  const targetTitle = reviewTargetTitle(review);
+  const decisionSummary = localizedDecisionSummary(review);
   const riskInsight = reviewRiskInsight(review);
   const settlement = review.status === "superseded" ? review.settlement : null;
   const decidingReviewId = settlement?.by_review_item_id;
@@ -3574,27 +3560,6 @@ function ChangeSetValue({ changeSetId }: { changeSetId: string }) {
   );
 }
 
-function localizedDecisionSummary(
-  item: DecisionSummaryCarrier,
-  t: TFunction,
-): string | null {
-  const code = item.decision_summary_code
-    ?? (item.review_type === "context_ingress_accept" && LEGACY_INGRESS_REASON_SUMMARY.test(item.decision_summary ?? "")
-      ? "context_ingress_requires_review" : null);
-  if (
-    code
-    && Object.prototype.hasOwnProperty.call(REVIEW_DECISION_SUMMARY_DEFAULTS, code)
-  ) {
-    const knownCode = code as keyof typeof REVIEW_DECISION_SUMMARY_DEFAULTS;
-    return t(`decisionSummary.${knownCode}`, {
-      defaultValue: REVIEW_DECISION_SUMMARY_DEFAULTS[knownCode],
-    });
-  }
-  // Legacy rows, caller-authored free text, and future server codes unknown to
-  // this client keep the stored prose instead of exposing an i18n key.
-  return item.decision_summary ?? null;
-}
-
 function recentDecisionTargetTitle(
   decision: ReviewDecisionRecentItem,
   t: TFunction,
@@ -3602,16 +3567,16 @@ function recentDecisionTargetTitle(
   return (
     decision.target_title
     ?? decision.review_target_title
-    ?? localizedDecisionSummary(decision, t)
+    ?? localizedDecisionSummary(decision)
     ?? t("overview.untitledTarget", { defaultValue: "Untitled review" })
   );
 }
 
-function reviewTargetTitle(review: ReviewItem, t: TFunction) {
+function reviewTargetTitle(review: ReviewItem) {
   const operationTitle = reviewPrimaryOperation(review)?.target_title;
   return (
     operationTitle
-    ?? localizedDecisionSummary(review, t)
+    ?? localizedDecisionSummary(review)
     ?? domainLabel("review", "reviewType", review.review_type)
   );
 }
@@ -3907,7 +3872,6 @@ function pendingPageGroupKey(review: ReviewItem) {
 
 function groupPendingReviewsByPage(
   reviews: ReviewItem[],
-  t: TFunction,
 ): ReviewRailGroup[] {
   const groups: ReviewRailGroup[] = [];
   const pageGroups = new Map<string, ReviewRailGroup>();
@@ -3931,7 +3895,7 @@ function groupPendingReviewsByPage(
       key: pageKey,
       activityAt: reviewActivityAt(review),
       reviews: [review],
-      pageTitle: reviewTargetTitle(review, t),
+      pageTitle: reviewTargetTitle(review),
     };
     pageGroups.set(pageKey, group);
     groups.push(group);
@@ -4133,7 +4097,7 @@ function ReviewRejectImpact({ review }: { review: ReviewItem }) {
   const resulting = effect?.resulting_draft_version_no ?? "—";
   return (
     <div className="evidence-box review-reject-impact">
-      <strong>{reviewTargetTitle(review, t)}</strong>
+      <strong>{reviewTargetTitle(review)}</strong>
       <p>{effect?.candidate_version_no != null ? t("workflow.rejectCandidate", { version: effect.candidate_version_no }) : t("workflow.rejectReviewOnly")}</p>
       {!effect ? <p>{t("workflow.rejectEffectUnavailable")}</p> : effect.effect === "no_head_change" ? (
         <p>{t("workflow.rejectEffects.no_head_change")}</p>

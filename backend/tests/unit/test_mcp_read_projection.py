@@ -957,7 +957,9 @@ def test_explicit_other_workspace_version_never_discloses_target(session_factory
         assert project_mcp_activity(session, call, actor).visible is False
 
 
-def test_batch_shares_visibility_and_edge_queries_for_repeated_reads(session_factory):
+def test_batch_shares_visibility_and_edge_queries_for_repeated_and_distinct_reads(
+    session_factory,
+):
     with session_factory.begin() as session:
         workspace, client, page, version, actor = _seed(session)
         token = uuid4()
@@ -965,6 +967,13 @@ def test_batch_shares_visibility_and_edge_queries_for_repeated_reads(session_fac
             _call(session, workspace, client, page, version, chat_token=token)[0]
             for _ in range(20)
         ]
+        # Reads of distinct pages share the batch too: one Context read per
+        # kind, not about three per call (Dashboard feed, Q3).
+        for _, _, other_page, other_version, _ in [_seed(session) for _ in range(20)]:
+            call, *_ = _call(
+                session, workspace, client, other_page, other_version, chat_token=token
+            )
+            calls.append(call)
         statements = []
 
         def capture(_connection, _cursor, statement, _parameters, _context, _many):
@@ -976,11 +985,12 @@ def test_batch_shares_visibility_and_edge_queries_for_repeated_reads(session_fac
             projections = project_mcp_activity_batch(session, calls, actor)
         finally:
             event.remove(connection, "before_cursor_execute", capture)
-        assert len(projections) == 20
-        assert (
-            len({projection.grouping_key for projection in projections.values()}) == 1
-        )
+        assert len(projections) == 40
+        repeated = [projections[call.id] for call in calls[:20]]
+        assert len({projection.grouping_key for projection in repeated}) == 1
+        assert all(projection.grouping_key is not None for projection in repeated)
         assert all(
-            projection.grouping_key is not None for projection in projections.values()
+            projection.title == "Visible read title"
+            for projection in projections.values()
         )
         assert len(statements) < 10

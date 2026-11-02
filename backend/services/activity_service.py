@@ -199,6 +199,7 @@ class ActivityService:
             limit=fetch_limit,
             audience_for=audience_for,
             actor_role=actor_role,
+            actor=actor,
         )
         job_items = self._jobs(
             session=session,
@@ -412,6 +413,7 @@ class ActivityService:
         actor_role: str | None,
         item_ids: list[UUID] | None = None,
         snapshot: datetime | None = None,
+        actor: ActorContext | None = None,
     ) -> list[ActivityItemRead]:
         statement = select(ReviewItem).where(
             ReviewItem.workspace_id == workspace_id,
@@ -443,6 +445,15 @@ class ActivityService:
                 ReviewItem.created_at.desc(), ReviewItem.id.desc()
             ).limit(limit)
         ).all()
+        # The row names the page under review, as this reader may see it (the
+        # Inbox's batched lookup); a hidden or non-page target keeps the reason.
+        page_titles = (
+            self.review_service.review_target_titles(
+                session, workspace_id, list(rows), actor
+            )
+            if actor is not None and rows
+            else {}
+        )
         return [
             ActivityItemRead(
                 id=review.id,
@@ -451,7 +462,8 @@ class ActivityService:
                 event_args={},
                 title=f"Review required: {review.review_type}",
                 body=review.decision_summary,
-                target_title=review.decision_summary,
+                target_title=page_titles.get(review.id) or review.decision_summary,
+                decision_summary_code=review.decision_summary_code,
                 actor=None,
                 target=ActivityTarget(
                     target_kind="change_set",

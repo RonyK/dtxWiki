@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,8 +15,8 @@ function entry(overrides: Partial<ActivityFeedEvent> = {}): ActivityFeedEntry {
   };
   return { entry_type: "event", id: event.id, event, event_count: 1, first_occurred_at: event.created_at, last_occurred_at: event.created_at };
 }
-function show(value: ActivityFeedEntry, loadGroup?: (token: string) => Promise<ActivityFeedEvent[]>) {
-  return render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/activity"]}><ActivityEntryRow entry={value} loadGroup={loadGroup} /></MemoryRouter>);
+function show(value: ActivityFeedEntry, loadGroup?: (token: string) => Promise<ActivityFeedEvent[]>, density?: "summary" | "detail") {
+  return render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/activity"]}><ActivityEntryRow entry={value} loadGroup={loadGroup} density={density} /></MemoryRouter>);
 }
 afterEach(async () => { await i18n.changeLanguage("en"); });
 
@@ -28,7 +28,10 @@ describe("shared activity entry", () => {
     expect(identity.firstElementChild).toHaveAttribute("data-kind", "context");
     expect(identity.firstElementChild?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(identity.lastElementChild?.tagName).toBe("BUTTON");
-    expect(screen.getByRole("link", { name: "Read Guide" })).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000106");
+    // The document names the card; what happened describes it.
+    expect(screen.getByRole("link", { name: "Guide", description: "Read" })).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000106");
+    expect(container.querySelectorAll("a")).toHaveLength(1);
+    expect(container.querySelector(".activity-entry__go[aria-hidden='true']")).not.toBeNull();
     expect(container.querySelectorAll("a a, a button, button a, button button")).toHaveLength(0);
     expect(screen.queryByText(/Raw input/)).not.toBeInTheDocument();
   });
@@ -120,7 +123,7 @@ describe("shared activity entry", () => {
 
     // A hover preview yields Escape to the focused control: IME composition
     // keeps it open, and dismissal neither moves focus nor cancels the key.
-    const title = screen.getByRole("link", { name: "Read Guide" });
+    const title = screen.getByRole("link", { name: "Guide" });
     expect(title).toHaveFocus();
     fireEvent.keyDown(title, { key: "Escape", isComposing: true });
     expect(screen.getByRole("dialog")).toBeVisible();
@@ -148,21 +151,21 @@ describe("shared activity entry", () => {
     fireEvent.pointerDown(document.body);
     expect(actor).toHaveAttribute("aria-expanded", "false");
   });
-  it("uses the same review URL for the title and lower amber chip, without an extra review button or invented actor", async () => {
+  it("makes the whole pending card one review link with a plain status, without an extra review button or invented actor", async () => {
     await i18n.changeLanguage("ko");
     const { container } = show(entry({ actor: null, lane: "pending", review_item_id: "review-1", operation: "review" }));
     const title = screen.getByRole("link", { name: /^검토 열기:/ });
-    const chip = screen.getByRole("link", { name: /^검토필요:/ });
     expect(title).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/review/review-1");
-    expect(chip).toHaveAttribute("href", title.getAttribute("href"));
-    expect(within(chip).getByText("검토필요")).toBeVisible();
-    expect(chip.querySelector("[data-action=pending]")).toBeInTheDocument();
+    expect(container.querySelectorAll("a")).toHaveLength(1);
+    const status = screen.getByText("검토 필요");
+    expect(status.closest("[data-action=pending]")).toBeInTheDocument();
+    expect(status.closest("a")).toBeNull();
     expect(container.querySelectorAll("button")).toHaveLength(0);
     expect(screen.queryByText(/작성자 정보 없음/)).not.toBeInTheDocument();
   });
   it("does not label a decided review as pending", () => {
     show(entry({ review_item_id: "review-1" }));
-    expect(screen.queryByRole("link", { name: /^Review required:/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Review required")).not.toBeInTheDocument();
   });
   it("retains a neutral unlinked title and scoped fallback for an unknown target", () => {
     show(entry({ navigation: null, operation: "tool", result_status: "unknown" }));
@@ -183,6 +186,10 @@ describe("shared activity entry", () => {
     expect(details.closest("a")).toBeNull();
     expect(screen.getByRole("button", { name: /^Show full names/ })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText(/Raw input/)).not.toBeInTheDocument();
+    // A summary card (Dashboard) leaves these fields to the MCP records.
+    cleanup();
+    show(entry({ tool_name: "read_context", public_error_code: "validation_failed", duration_ms: 42 }), undefined, "summary");
+    expect(screen.queryByText("Technical information")).not.toBeInTheDocument();
   });
 });
 
@@ -199,10 +206,10 @@ describe("repeated read disclosure", () => {
     const expand = screen.getByRole("button", { name: "Expand 4 original events" });
     await user.click(expand);
     expect(await screen.findByRole("alert")).toHaveTextContent("Original events could not be loaded");
-    expect(screen.getByRole("link", { name: "Read Guide 4 times" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Guide", description: "Read 4 times" })).toBeVisible();
     expect(expand).toHaveAttribute("aria-expanded", "true");
     await user.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("link", { name: "Read Guide" })).toBeVisible();
+    expect(await screen.findByRole("link", { name: "Guide", description: "Read" })).toBeVisible();
     expect(load).toHaveBeenNthCalledWith(2, "opaque-token");
     expect(container.querySelectorAll(".activity-feed-entry")).toHaveLength(2);
     const collapse = screen.getAllByRole("button", { name: "Collapse events" });
@@ -210,7 +217,7 @@ describe("repeated read disclosure", () => {
     expect(expand).toHaveFocus();
     expect(expand).toHaveAttribute("aria-expanded", "false");
     await user.click(expand);
-    await waitFor(() => expect(screen.getByRole("link", { name: "Read Guide" })).toBeVisible());
+    await waitFor(() => expect(screen.getByRole("link", { name: "Guide", description: "Read" })).toBeVisible());
     expect(load).toHaveBeenCalledTimes(2);
   });
   it("preserves the group heading and loading status until the request completes", async () => {
@@ -219,8 +226,8 @@ describe("repeated read disclosure", () => {
     show({ ...entry(), entry_type: "read_group", event_count: 4, group_token: "opaque-token" }, load);
     await userEvent.click(screen.getByRole("button", { name: "Expand 4 original events" }));
     expect(screen.getByRole("status")).toHaveTextContent("Loading original events");
-    expect(screen.getByRole("link", { name: "Read Guide 4 times" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Guide", description: "Read 4 times" })).toBeVisible();
     resolve([entry({ id: "member-1" }).event]);
-    expect(await screen.findByRole("link", { name: "Read Guide" })).toBeVisible();
+    expect(await screen.findByRole("link", { name: "Guide", description: "Read" })).toBeVisible();
   });
 });

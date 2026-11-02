@@ -466,7 +466,7 @@ def test_private_editing_audit_and_mcp_transitions(session_factory):
         assert [entry.event.operation for entry in feed("reader", "mcp")] == [
             "log",
             "delete",
-            "review",
+            "request_review",
         ]
 
 
@@ -1013,3 +1013,95 @@ def test_merged_feed_and_group_hydration_isolate_every_source_from_foreign_works
         )
         assert members.event_count == 2
         assert all(event.navigation.target_id == own[2].id for event in members.events)
+
+
+def test_pending_review_names_its_visible_page_and_system_scan_skips_other_sources(
+    session_factory,
+):
+    from sqlalchemy import event
+
+    from backend.services.change_review_audit import ChangeReviewAuditRecorder
+
+    reason = "agent-authored page write requires human review"
+    with session_factory.begin() as session:
+        workspace, client, page, version, chat = _setup(session)
+        _call(session, workspace, client, page, version, chat, 0)
+        hidden = ContextPage(
+            workspace_id=workspace.id,
+            slug=f"feed-{uuid4()}",
+            title="Archived plan the reader cannot see",
+            page_type="overview",
+            lifecycle_status="archived",
+        )
+        session.add(hidden)
+        session.flush()
+        hidden_version = ContextPageVersion(
+            workspace_id=workspace.id,
+            page_id=hidden.id,
+            version_no=1,
+            body_md="# Hidden",
+            content_hash="b" * 64,
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id="author",
+            version_status="published_snapshot",
+        )
+        session.add(hidden_version)
+        session.flush()
+        for target, target_version in ((page, version), (hidden, hidden_version)):
+            ChangeReviewAuditRecorder().record_context_page_write(
+                session,
+                workspace.id,
+                actor_kind="mcp_client",
+                actor_id=str(client.id),
+                action="page.submit_context_edit_for_review",
+                page_id=target.id,
+                version_id=target_version.id,
+                actor_provenance="mcp_client",
+                needs_review=True,
+            )
+        actor = _actor(workspace)
+        pending = [
+            entry.event
+            for entry in _service()
+            .list_feed(
+                session, workspace.id, actor=actor, actor_role="owner", period="all"
+            )
+            .entries
+            if entry.event.lane == "pending"
+        ]
+        # The page this reader may see names the row; a hidden one keeps the
+        # reason, and both carry the fixed reason's code for translation.
+        assert sorted(event.target_title for event in pending) == sorted(
+            ["Visible guide", reason]
+        )
+        assert {(event.body, event.decision_summary_code) for event in pending} == {
+            (reason, "agent_page_write_requires_review")
+        }
+
+        statements = []
+
+        def capture(_connection, _cursor, statement, _parameters, _context, _many):
+            statements.append(statement)
+
+        connection = session.connection()
+        event.listen(connection, "before_cursor_execute", capture)
+        try:
+            _service().list_feed(
+                session,
+                workspace.id,
+                actor=actor,
+                actor_role="owner",
+                period="all",
+                kind="system",
+                limit=1,
+            )
+        finally:
+            event.remove(connection, "before_cursor_execute", capture)
+        # A system probe can only match audit and job rows, so it neither scans
+        # nor hydrates MCP traces and pending reviews.
+        assert not [
+            statement
+            for statement in statements
+            if "FROM mcp_tool_call" in statement or "FROM review_item" in statement
+        ]

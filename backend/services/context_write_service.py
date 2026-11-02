@@ -845,6 +845,7 @@ class ContextWriteService:
         force_new_page: bool = False,
         *,
         actor_provenance: str = "internal",
+        risk_notes_code: str | None = None,
     ) -> WriteDraftResult:
         # B-P1-4 Sprint_6 Fix_4: wrap the entire write_draft body in a
         # SAVEPOINT so a mid-write exception rolls back every partial
@@ -1024,9 +1025,12 @@ class ContextWriteService:
                     request.risk_notes or "context draft requires review"
                 ),
                 # `risk_notes` is caller-supplied free text with no fixed
-                # translation; only the fallback copy gets a code.
+                # translation unless an internal caller names its fixed copy;
+                # the fallback copy always has a code.
                 decision_summary_code=(
-                    None if request.risk_notes else "context_draft_requires_review"
+                    risk_notes_code
+                    if request.risk_notes
+                    else "context_draft_requires_review"
                 ),
             )
             self.audit_service.emit(

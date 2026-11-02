@@ -87,7 +87,8 @@ test("reads review evidence, approves a document group and a single review, and 
   });
   await expect(decisionRow).toHaveCount(1);
   await expect(decisionRow).toBeVisible();
-  await expect(decisionRow.getByText("Reviewed", { exact: true })).toBeVisible();
+  // The badge names the decision, not a generic "Reviewed".
+  await expect(decisionRow.getByText("Approved", { exact: true })).toBeVisible();
   await expect(decisionRow.getByRole("link", { name: second.title, exact: true }))
     .toHaveAttribute("href", workspaceUrl(workspace.id, `review/${decided.id}`));
   await page.getByRole("link", { name: "View all history activity", exact: true }).click();

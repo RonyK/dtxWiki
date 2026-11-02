@@ -3570,6 +3570,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Decision Summary Code */
+            decision_summary_code?: string | null;
             details?: components["schemas"]["ActivityDetails"] | null;
             /** Duration Ms */
             duration_ms?: number | null;
@@ -3635,6 +3637,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Decision Summary Code */
+            decision_summary_code?: string | null;
             details?: components["schemas"]["ActivityDetails"] | null;
             /** Event Args */
             event_args: {

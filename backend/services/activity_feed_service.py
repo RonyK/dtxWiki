@@ -19,7 +19,7 @@ from datetime import UTC, datetime, timedelta
 from itertools import islice
 from uuid import UUID
 
-from sqlalchemy import and_, func, literal, or_, select, union_all
+from sqlalchemy import and_, func, literal, not_, or_, select, union_all
 from sqlalchemy.orm import Session
 
 from backend.models.audit import AuditEvent
@@ -43,6 +43,8 @@ from backend.services.activity_service import (
     _is_review_decision_activity_item,
     _is_system_activity_item,
     _private_editing_visible,
+    _review_decision_audit_event_clause,
+    _system_audit_event_clause,
     period_bounds,
 )
 from backend.services.job_queue import HIDDEN_JOB_TYPES
@@ -67,6 +69,16 @@ _TOKEN_TTL = timedelta(hours=2)
 # Tokens are signed here; tolerate another app node's clock running ahead.
 _CLOCK_SKEW = timedelta(minutes=2)
 _LANES = ("pending", "advisory", "history")
+# The activity kinds each feed source can yield. The scan skips a source that
+# cannot match the requested kind, and the matcher applies the same table, so
+# a kind=system probe never hydrates MCP traces or pending reviews, and a
+# pending review's free-text reason is never read as a system or decision row.
+_SOURCE_KINDS = {
+    "audit": frozenset({"workspace", "system", "review_decision"}),
+    "job": frozenset({"system"}),
+    "mcp": frozenset({"workspace", "mcp"}),
+    "review": frozenset({"workspace"}),
+}
 _SUBTYPES = {
     "all": {"all"},
     "workspace": {"all", "library", "context", "agent", "ask", "review", "chat"},
@@ -93,8 +105,8 @@ _PREFIX_SUBTYPE = {
 _MCP_OPERATIONS = {
     "begin_context_edit": "log",
     "discard_context_edit": "delete",
-    "submit_context_edit_for_review": "review",
-    "submit_revision_for_review": "review",
+    "submit_context_edit_for_review": "request_review",
+    "submit_revision_for_review": "request_review",
 }
 
 
@@ -108,7 +120,7 @@ _AUDIT_OPERATIONS = {
     "page.patch_context_edit": "edit",
     "page.begin_context_edit": "log",
     "page.discard_context_edit": "delete",
-    "page.submit_context_edit_for_review": "review",
+    "page.submit_context_edit_for_review": "request_review",
     "page.publish": "publish",
     "page.unpublish": "edit",
     "page.restore_version": "restore",
@@ -132,7 +144,7 @@ _AUDIT_OPERATIONS = {
     "tree.node.reorder": "edit",
     "tree.node.delete": "delete",
     "workspace.access.updated": "edit",
-    "workspace.join_request.requested": "review",
+    "workspace.join_request.requested": "request_review",
     "workspace.join_request.approved": "review",
     "workspace.join_request.rejected": "review",
     "review.decision": "review",
@@ -253,6 +265,7 @@ class ActivityFeedService:
             workspace_id,
             actor=actor,
             actor_role=actor_role,
+            kind=kind,
             snapshot=snapshot,
             since=since,
             until=until,
@@ -279,6 +292,7 @@ class ActivityFeedService:
                 limit=limit + 1,
                 audience_for=actor.user_id,
                 actor_role=actor_role,
+                actor=actor,
             )
             reserved = [
                 _Entry(
@@ -441,6 +455,7 @@ class ActivityFeedService:
         *,
         actor,
         actor_role,
+        kind="all",
         snapshot,
         since,
         until,
@@ -459,12 +474,22 @@ class ActivityFeedService:
             ),
             ("review", ReviewItem, ReviewItem.created_at),
         ]:
+            if kind != "all" and kind not in _SOURCE_KINDS[source]:
+                continue
             conditions = []
             if source == "audit":
                 conditions.append(~_audit_only_observation_event_clause())
                 # Absent rather than redacted: a private record is not even a
                 # group boundary for another reader.
                 conditions.append(_private_editing_visible(actor))
+                # The same SQL split _audit_history applies, so audit rows of
+                # another kind are not scanned and hydrated only to be dropped.
+                if kind == "system":
+                    conditions.append(_system_audit_event_clause())
+                elif kind == "workspace":
+                    conditions.append(not_(_system_audit_event_clause()))
+                elif kind == "review_decision":
+                    conditions.append(_review_decision_audit_event_clause())
             elif source == "job":
                 conditions.append(Job.job_type.not_in(HIDDEN_JOB_TYPES))
             elif source == "review":
@@ -574,6 +599,7 @@ class ActivityFeedService:
                     item_ids=identifiers,
                     audience_for=actor.user_id,
                     actor_role=actor_role,
+                    actor=actor,
                 )
             else:
                 items = self.activity._mcp_traces(
@@ -690,7 +716,11 @@ class ActivityFeedService:
         item = row.event
         if lane and item.lane != lane:
             return False
-        system = _is_system_activity_item(item)
+        if kind != "all" and kind not in _SOURCE_KINDS[row.source]:
+            return False
+        system = "system" in _SOURCE_KINDS[row.source] and _is_system_activity_item(
+            item
+        )
         if kind == "system" and not system:
             return False
         if kind == "workspace" and system:
@@ -711,6 +741,7 @@ class ActivityFeedService:
                 "create",
                 "edit",
                 "review",
+                "request_review",
                 "publish",
                 "restore",
                 "delete",

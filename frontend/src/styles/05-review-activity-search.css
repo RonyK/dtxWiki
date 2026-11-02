@@ -1854,6 +1854,7 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
 .activity-feed-list > .activity-feed-entry:last-child { border-bottom-left-radius: 9px; border-bottom-right-radius: 9px; }
 
 .activity-feed-entry {
+  position: relative;
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr) auto;
   column-gap: 16px;
@@ -1861,6 +1862,14 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
   padding: 16px 20px;
   background: var(--surface);
 }
+/* Each card is one link target: the title link stretches over the card, its
+   chevron sits at the card edge, and the card's own controls stay above it. */
+.activity-feed-list > .activity-feed-entry { padding-right: 48px; }
+.activity-entry__title-link::after { content: ""; position: absolute; inset: 0; }
+:is(.activity-actor-disclosure, .activity-entry__technical, .activity-entry__fallback > a, .activity-read-group__toggle, .activity-read-group__members) { position: relative; z-index: 1; }
+.activity-entry__go { position: absolute; top: 50%; right: 16px; transform: translateY(-50%); color: var(--ink-muted); pointer-events: none; }
+.activity-read-group__list .activity-entry__go { display: none; }
+.activity-feed-entry:has(> .activity-entry__layout .activity-entry__title-link:focus-visible) { outline: 3px solid var(--info); outline-offset: -3px; }
 .activity-feed-entry :is(.activity-entry__layout, .activity-entry__body, .activity-entry__trailing, .activity-entry__review-footer, .activity-read-group) { display: contents; }
 
 .activity-entry__identity {
@@ -1971,7 +1980,20 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
 .activity-entry__title-link { width: fit-content; min-height: 24px; border-radius: 5px; }
 .activity-entry__heading { display: inline-flex; align-items: flex-start; gap: 6px; min-width: 0; }
 .activity-entry__heading > svg { flex: none; margin-top: 4px; }
-.activity-entry__description { margin: 0; color: var(--ink-soft); font-size: 12px; line-height: 18px; font-weight: 400; }
+/* Two lines at most; people's text is also shortened before it reaches here. */
+.activity-entry__description {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
 .activity-entry__times {
   grid-column: 4;
   grid-row: 2 / span 2;
@@ -2012,11 +2034,14 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
 .activity-action-badge[data-action="published"] { --activity-action-tone: #166534; }
 .activity-action-badge[data-action="restored"] { --activity-action-tone: #7e22ce; }
 .activity-action-badge[data-action="deleted"] { --activity-action-tone: #9f1239; }
-.activity-action-badge[data-action="reviewed"] { --activity-action-tone: #0e7490; }
+.activity-action-badge:is([data-action="reviewed"], [data-action="requested"]) { --activity-action-tone: #0e7490; }
+.activity-action-badge[data-action="approved"] { --activity-action-tone: #166534; }
+.activity-action-badge[data-action="changes_requested"] { --activity-action-tone: #92400e; }
+.activity-action-badge[data-action="rejected"] { --activity-action-tone: #9f1239; }
 .activity-action-badge[data-action="failed"] { --activity-action-tone: #b91c1c; }
 .activity-action-badge:is([data-action="pending"], [data-action="partial"], [data-action="accepted"]) { --activity-action-tone: #92400e; }
-/* A pending review's link takes the status cell every other row uses. */
-.activity-entry__review-link { grid-column: 4; grid-row: 1; justify-self: end; align-self: end; display: inline-flex; align-items: center; min-height: 24px; border-radius: 5px; }
+/* A pending review's status takes the status cell every other row uses. */
+.activity-entry__review-footer > .activity-action-badge { grid-column: 4; grid-row: 1; justify-self: end; align-self: end; }
 .activity-entry__fallback { grid-column: 1 / 4; grid-row: 3; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; color: var(--ink-muted); font-size: 12px; line-height: 18px; }
 .activity-entry__fallback > span, .activity-entry__fallback > a { display: inline-flex; align-items: center; gap: 5px; }
 .activity-entry__fallback > a { min-height: 24px; border-radius: 5px; color: var(--activity-link-ink, var(--context)); }
@@ -2053,6 +2078,8 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
 .activity-read-group__collapse { margin: 0 8px; }
 
 .activity-feed-panel { min-width: 0; }
+.activity-feed-footnote { margin: 8px 2px 0; color: var(--ink-muted); font-size: 12px; line-height: 18px; }
+.activity-feed-footnote > a { display: inline-flex; align-items: center; gap: 2px; min-height: 24px; border-radius: 5px; color: var(--activity-link-ink, var(--context)); }
 .activity-feed-counts { color: var(--ink-soft); font-size: 12px; line-height: 18px; }
 .activity-feed-scope { color: var(--ink-muted); font-size: 11px; line-height: 16px; }
 .activity-feed-summary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; min-width: 0; }
@@ -2060,11 +2087,15 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
 .activity-grouping-control > input { flex: none; width: 16px; height: 16px; accent-color: var(--context); }
 .activity-feed-reload { min-width: 44px; min-height: 44px; }
 
-:is(.activity-actor-disclosure, .activity-entry__title-link, .activity-entry__review-link, .activity-entry__fallback > a, .activity-read-group__toggle, .activity-read-group__collapse, .activity-read-group__retry):focus-visible { outline: 3px solid var(--info); outline-offset: 2px; }
+:is(.activity-actor-disclosure, .activity-entry__fallback > a, .activity-feed-footnote > a, .activity-read-group__toggle, .activity-read-group__collapse, .activity-read-group__retry):focus-visible { outline: 3px solid var(--info); outline-offset: 2px; }
+/* The card outline above shows the title link's focus. */
+.activity-entry__title-link:focus-visible { outline: none; }
 @media (hover: hover) {
-  .activity-entry__title-link:hover .activity-entry__heading > span,
-  .activity-entry__review-link:hover .activity-action-badge > span,
+  .activity-feed-entry:has(> .activity-entry__layout .activity-entry__title-link):hover { background: var(--surface-subtle); }
+  .activity-feed-entry:hover > .activity-entry__layout > .activity-entry__go { color: var(--ink); }
+  .activity-feed-entry:has(> .activity-entry__layout .activity-entry__title-link):hover > .activity-entry__layout .activity-entry__heading > span,
   .activity-entry__fallback > a:hover,
+  .activity-feed-footnote > a:hover,
   .activity-read-group__toggle:hover,
   .activity-read-group__collapse:hover,
   .activity-read-group__retry:hover { text-decoration: underline; text-underline-offset: 3px; }
@@ -2072,6 +2103,8 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
 
 @media (max-width: 700px) {
   .activity-feed-entry { padding: 14px 16px; column-gap: 12px; }
+  .activity-feed-list > .activity-feed-entry { padding-right: 40px; }
+  .activity-entry__go { right: 10px; }
   .activity-entry__identity,
   .activity-entry__title-link,
   .activity-entry__plain-title,
@@ -2081,7 +2114,7 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
   .activity-entry__heading > svg { display: inline; vertical-align: -2px; margin: 0 0 0 4px; }
   /* The plan's mobile footer: status on the left, time on the right. */
   .activity-entry__trailing > .activity-action-badge,
-  .activity-entry__review-link { grid-column: 1 / 3; grid-row: 6; justify-self: start; align-self: center; margin-top: 8px; }
+  .activity-entry__review-footer > .activity-action-badge { grid-column: 1 / 3; grid-row: 6; justify-self: start; align-self: center; margin-top: 8px; }
   .activity-entry__times { grid-column: 3 / -1; grid-row: 6; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; justify-self: end; align-self: center; gap: 0 8px; margin-top: 8px; }
   .activity-read-group__members,
   .activity-feed-entry:has(> .activity-entry__layout .activity-entry__technical[open]) > .activity-read-group > .activity-read-group__members { grid-row: 7; }

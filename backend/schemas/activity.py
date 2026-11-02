@@ -116,6 +116,9 @@ class ActivityItemRead(BaseModel):
     title: str
     body: str | None
     target_title: str | None = None
+    # A pending review's fixed-copy reason code (I18N-08a); None for
+    # caller-written reasons, which the client shows as written.
+    decision_summary_code: str | None = None
     details: ActivityDetails | None = None
     actor: ActivityActor | None
     target: ActivityTarget | None
