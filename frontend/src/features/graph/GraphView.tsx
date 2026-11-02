@@ -104,7 +104,16 @@ export function GraphView({
     document.addEventListener("fullscreenchange", change);
     return () => document.removeEventListener("fullscreenchange", change);
   }, []);
-  const facets = useMemo(() => graphFacets(payload), [payload]);
+  const facets = useMemo(() => {
+    const canvasFacets = graphFacets(payload);
+    if (staticPayload === payload) return canvasFacets;
+    const staticFacets = graphFacets(staticPayload);
+    // Both surfaces share filters. Retain direct-only options when a broader
+    // canvas budget omits them, including the user's explicit exclusions.
+    return Object.fromEntries((Object.keys(canvasFacets) as (keyof GraphFilters)[]).map((key) => [
+      key, [...new Set([...canvasFacets[key], ...staticFacets[key]])].sort(),
+    ])) as GraphFilters;
+  }, [payload, staticPayload]);
   const facetSignature = JSON.stringify(facets);
   const previousFacetsRef = useRef(facets);
   const [filters, setFilters] = useState<GraphFilters>(facets);
@@ -192,16 +201,9 @@ export function GraphView({
       freezeLayout: historical,
     };
   }, [applyHistoryVisibility, canvasScopeKey, filters, historical, historyCatalog, hoveredEventId, payload, scene, showFuture, t, timeline, visibleCursor]);
-  const staticScene = useMemo(() => {
-    const staticFacets = graphFacets(staticPayload);
-    // Broader queries can spend their budget on different facets. Only apply
-    // explicit exclusions; direct-only facet values remain visible by default.
-    const staticFilters = Object.fromEntries((Object.keys(filters) as (keyof GraphFilters)[]).map((key) => {
-      const excluded = new Set(facets[key].filter((value) => !(filters[key] as string[]).includes(value)));
-      return [key, staticFacets[key].filter((value) => !excluded.has(value))];
-    })) as GraphFilters;
-    return localizedGraphScene(applyHistoryVisibility(deriveGraphScene(staticPayload, staticFilters, timelineCursor)), t);
-  }, [applyHistoryVisibility, facets, filters, staticPayload, t, timelineCursor]);
+  const staticScene = useMemo(() => localizedGraphScene(applyHistoryVisibility(
+    deriveGraphScene(staticPayload, filters, timelineCursor)), t),
+  [applyHistoryVisibility, filters, staticPayload, t, timelineCursor]);
   const mermaidSource = useMemo(
     () => staticOpen && staticScene.edges.length <= STATIC_DIAGRAM_EDGE_LIMIT
       ? graphSceneToMermaid(staticScene)
@@ -644,7 +646,7 @@ export function GraphView({
       <h3 className="visually-hidden" id="graph-view-heading">{t("graph.heading")}</h3>
       <GraphTypeSelector mode={payload.history.mode} busy={!active || Boolean(busyAction?.startsWith("mode:"))} onChange={(mode) => void changeHistoryMode(mode)} />
       <div className={`graph-frame ${historical ? "graph-frame-history" : ""}`} ref={frameRef}>
-        {actionError ? <StatusBanner tone="warning">{actionError}{retryAction ? <button type="button" onClick={() => {
+        {actionError ? <StatusBanner tone="warning">{actionError}{retryAction ? <button className="inline-action" type="button" onClick={() => {
           void runAction(retryAction.key, retryAction.action);
         }}>{t("graph.view.retry")}</button> : null}</StatusBanner> : null}
         <div className="graph-frame-header">
@@ -787,7 +789,7 @@ export function GraphView({
           {t("graph.view.loading", { view: busyAction.startsWith("mode:") ? t(`graph.view.${busyAction.slice(5)}.name`) : t(`graph.view.${payload.history.mode}.name`) })}</div> : null}
         {!busyAction && !historical && scene.edges.length === 0 ? <div className="graph-canvas-empty" role="status">
           <p>{t(activeFilters.length ? "graph.view.allHidden" : "graph.view.noRelations")}</p>
-          {activeFilters.length ? <button type="button" onClick={() => setFilters(facets)}>{t("graph.filters.clearAll")}</button> : <small>{t("graph.view.addRelations")}</small>}
+          {activeFilters.length ? <button className="inline-action" type="button" onClick={() => setFilters(facets)}>{t("graph.filters.clearAll")}</button> : <small>{t("graph.view.addRelations")}</small>}
         </div> : null}
         <div className="graph-canvas-context">
           <span className="graph-seed-pill" title={payload.nodes.find((node) => node.is_seed)?.label}>

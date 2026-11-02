@@ -596,6 +596,43 @@ def test_no_button_renders_without_a_visible_treatment():
             "either restore the rule or give those buttons an explicit class"
         )
 
+    # Graph controls deliberately share treatment through their actual owners.
+    # Keep these exceptions scoped to their component, and verify the exact
+    # button rule rather than exempting the GraphView surface as a whole.
+    scoped_parent_rules = {
+        "features/graph/GraphView.tsx": {
+            "graph-canvas-more": ".graph-canvas-more button",
+            "graph-canvas-coverage": ".graph-canvas-coverage > button",
+            "graph-status-actions": ".graph-status-actions button",
+            "graph-item-history": ".graph-item-history li button",
+            "graph-details-more": ".graph-details-more :is(button, a)",
+        },
+        "features/graph/local/LocalGraphChrome.tsx": {
+            "graph-type-options": ".graph-type-options button",
+        },
+        "features/graph/local/LocalGraphTimeline.tsx": {
+            "local-history-controls": ".local-history-controls button",
+            "local-history-group-heading": ".local-history-group-heading > button",
+            "local-history-event": ".local-history-event > button",
+        },
+    }
+    timeline_path = ROOT / "frontend/src/features/graph/local/LocalGraphTimeline.tsx"
+    assert 'import "./LocalGraphTimeline.css";' in timeline_path.read_text(
+        encoding="utf-8"
+    )
+    timeline_styles = timeline_path.with_suffix(".css").read_text(encoding="utf-8")
+    for relative, rules in scoped_parent_rules.items():
+        owner_styles = (
+            timeline_styles
+            if relative.endswith("LocalGraphTimeline.tsx")
+            else stylesheet
+        )
+        for container, selector in rules.items():
+            declarations = declarations_for_selector(owner_styles, selector)
+            assert {"padding", "min-height", "width"} & declarations.keys(), (
+                f"allowlisted owner .{container} has no visible button treatment"
+            )
+
     offenders: list[str] = []
     for path in sorted((ROOT / "frontend/src").rglob("*.tsx")):
         if "/tests/" in path.as_posix() or path.name.endswith(".test.tsx"):
@@ -613,6 +650,14 @@ def test_no_button_renders_without_a_visible_treatment():
                 for container in parent_styled_containers
             ):
                 continue
+            scoped_rules = scoped_parent_rules.get(
+                path.relative_to(ROOT / "frontend/src").as_posix(), {}
+            )
+            if any(
+                inside_styled_container(preceding, container)
+                for container in scoped_rules
+            ):
+                continue
             line = preceding.count("\n") + 1
             offenders.append(f"{path.relative_to(ROOT).as_posix()}:{line}")
 
@@ -620,6 +665,26 @@ def test_no_button_renders_without_a_visible_treatment():
         "unclassed <button> renders as bare text under the base reset: "
         + ", ".join(offenders)
     )
+
+
+def inside_styled_container(preceding: str, container: str) -> bool:
+    """Require an open owner, not a similarly named closed sibling nearby."""
+    for owner in re.finditer(r'<([a-z][\w-]*)\b[^>]*\bclassName="([^"]+)"', preceding):
+        if container not in owner.group(2).split():
+            continue
+        depth = 0
+        for tag in re.finditer(
+            rf"</?{re.escape(owner.group(1))}\b[^>]*>", preceding[owner.start() :]
+        ):
+            if tag.group().startswith("</"):
+                depth -= 1
+            elif not tag.group().endswith("/>"):
+                depth += 1
+            if depth == 0:
+                break
+        else:
+            return True
+    return False
 
 
 def declarations_for_selector(stylesheet: str, selector: str) -> dict[str, str]:
@@ -634,7 +699,11 @@ def selector_bodies(stylesheet: str, selector: str) -> list[str]:
     bodies: list[str] = []
     decommented = re.sub(r"/\*.*?\*/", "", stylesheet, flags=re.S)
     for match in re.finditer(r"([^{}]+)\{([^{}]*)\}", decommented):
-        selector_list = [entry.strip() for entry in match.group(1).split(",")]
+        # Functional selectors such as :is(button, a) contain a comma that
+        # does not separate two CSS rules.
+        selector_list = [
+            entry.strip() for entry in re.split(r",(?![^()]*\))", match.group(1))
+        ]
         if selector in selector_list:
             bodies.append(match.group(2))
     assert bodies, f"selector not found: {selector}"

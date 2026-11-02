@@ -1273,6 +1273,16 @@ describe("GraphView", () => {
     fireEvent.click(screen.getByLabelText("Ask turn"));
     expect(screen.getByTestId("mock-markdown-view")).not.toHaveTextContent("Why was this chosen?");
     expect(screen.getByTestId("mock-markdown-view")).toHaveTextContent("Architecture Notes");
+
+    fireEvent.click(screen.getByLabelText("Ask turn"));
+    rerender(graphElement(props));
+    fireEvent.click(screen.getByLabelText("Usage"));
+    expect(screen.getByTestId("mock-markdown-view")).not.toHaveTextContent("Included");
+    rerender(graphElement({ ...props, payload: neighbors }));
+    expect(screen.getByTestId("mock-markdown-view")).not.toHaveTextContent("Included");
+    expect(screen.getByLabelText("Usage")).not.toBeChecked();
+    fireEvent.click(screen.getByLabelText("Usage"));
+    expect(screen.getByTestId("mock-markdown-view")).toHaveTextContent("Included");
   });
 
   it.each([501, 750])("uses a complete text fallback for %i relationships instead of invalid Mermaid", (count) => {
