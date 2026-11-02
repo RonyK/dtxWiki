@@ -153,7 +153,10 @@ export function presentActivityFeedEvent(event: ActivityFeedEvent, count = 1) {
       title = pageTitle ?? (reason || title);
       body = pageTitle ? reason : "";
     } else if (event.details?.reason && body.includes(event.details.reason)) {
-      body = body.replace(event.details.reason, previewText(event.details.reason));
+      // A function replacer: people's text may hold "$&" or "$$", which a
+      // replacement string would expand.
+      const preview = previewText(event.details.reason);
+      body = body.replace(event.details.reason, () => preview);
     }
   }
   // The resource the event is about, even when its link opens a review.

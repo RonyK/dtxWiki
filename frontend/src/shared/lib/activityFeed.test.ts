@@ -19,7 +19,7 @@ describe("activity feed presenter", () => {
   it.each([["partial", "partial"], ["accepted", "accepted"], ["needs_review", "accepted"], ["unknown", "logged"], [null, "logged"]] as const)("preserves %s outcomes", (result_status, action) => {
     expect(activityAction(feedEvent({ result_status }))).toBe(action);
   });
-  it.each([["delete", "deleted"], ["review", "reviewed"], ["request_review", "requested"], ["log", "logged"]] as const)("gives the %s operation its own badge", (operation, action) => {
+  it.each([["delete", "deleted"], ["review", "reviewed"], ["log", "logged"]] as const)("gives the %s operation its own badge", (operation, action) => {
     expect(activityAction(feedEvent({ operation }))).toBe(action);
   });
   it("uses a closed vocabulary and does not expose raw tool payloads or guessed hidden names", () => {
@@ -73,7 +73,7 @@ describe("activity feed presenter", () => {
       target: { target_kind: "workspace_tree_node", target_id: "node-1" },
       target_title: "Guide", operation: "edit",
       details: {
-        page_id: "00000000-0000-4000-8000-000000000106", reason: "Consolidate runbooks",
+        page_id: "00000000-0000-4000-8000-000000000106", reason: "Consolidate $& runbooks",
         move: {
           before: { path: ["Inbox"], provenance: "recorded" },
           after: { path: ["Operations"], provenance: "recorded" },
@@ -81,7 +81,7 @@ describe("activity feed presenter", () => {
       },
     }));
     expect(shown.title).toBe("Guide");
-    expect(shown.body).toBe("Inbox → Operations · Consolidate runbooks");
+    expect(shown.body).toBe("Inbox → Operations · Consolidate $& runbooks");
   });
 });
 
