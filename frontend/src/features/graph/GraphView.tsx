@@ -8,7 +8,9 @@ import { Link } from "react-router-dom";
 import { MarkdownView } from "../pages/MarkdownView";
 import { LOCAL_EDGE_VISUAL_KIND_ORDER, localEdgeVisualKind } from "./local/edgeKinds";
 import { localNodeVisualKind } from "./local/nodeVisual";
-import { GraphCameraControls, GraphPreviewBadge, GraphScopeSelector, GraphTypeSelector, LocalGraphTimeline, eventInvolves } from "./local/LocalGraphChrome";
+import { GraphCameraControls, GraphPreviewBadge, GraphScopeSelector, GraphTypeSelector, eventInvolves } from "./local/LocalGraphChrome";
+import { LocalGraphTimeline } from "./local/LocalGraphTimeline";
+import { timelinePresentation } from "./local/timelinePresentation";
 import { historySceneCatalog, renderHistoryScene } from "./local/historyScene";
 import { LocalGraphCoverageInfo } from "./local/LocalGraphCoverageInfo";
 import { LocalGraphList, type LocalGraphSelectionOrigin } from "./local/LocalGraphList";
@@ -175,7 +177,8 @@ export function GraphView({
   const sceneNavigation = useMemo(() => buildSceneNavigation(scene), [scene]);
   const canvasScene = useMemo<GraphRenderScene>(() => ({
     ...(historical ? renderHistoryScene(withCoAccessLabels(historyCatalog, t), withCoAccessLabels(scene, t),
-      timeline.find((event) => event.id === hoveredEventId) ?? currentEvent, showFuture, payload.history.mode === "action", hoveredEventId !== null)
+      timeline.find((event) => event.id === hoveredEventId) ?? currentEvent, showFuture, payload.history.mode === "action", hoveredEventId !== null,
+      (timeline.find((event) => event.id === hoveredEventId) ?? currentEvent)?.summary)
       : withCoAccessLabels(scene, t)),
     scopeKey: canvasScopeKey,
     freezeLayout: historical,
@@ -276,7 +279,7 @@ export function GraphView({
         event.preventDefault(); void document.exitFullscreen(); return;
       }
       const target = event.target instanceof Element ? event.target.closest("details[open]") : null;
-      if (target && target.matches(".graph-type-comparison,.graph-frame-filters,.graph-canvas-more,.graph-details-more,.graph-history-cluster,.graph-local-coverage-info")) {
+      if (target && target.matches(".graph-type-comparison,.graph-frame-filters,.graph-canvas-more,.graph-details-more,.graph-local-coverage-info")) {
         target.removeAttribute("open"); target.querySelector("summary")?.focus();
         event.preventDefault(); event.stopPropagation(); return;
       }
@@ -295,7 +298,7 @@ export function GraphView({
     const closeOutside = (event: PointerEvent) => {
       if (!(event.target instanceof Node)) return;
       for (const details of graphRegionRef.current?.querySelectorAll<HTMLDetailsElement>(
-        ".graph-type-comparison[open],.graph-frame-filters[open],.graph-canvas-more[open],.graph-details-more[open],.graph-history-cluster[open]",
+        ".graph-type-comparison[open],.graph-frame-filters[open],.graph-canvas-more[open],.graph-details-more[open]",
       ) ?? []) if (!details.contains(event.target)) details.open = false;
     };
     document.addEventListener("pointerdown", closeOutside);
@@ -811,7 +814,7 @@ export function GraphView({
             const sheet = !!stage && !!detail && detail.width > stage.width * .75;
             return { top: historical ? 90 : 60, left: 0,
               right: detail && !sheet ? detail.width + 24 : 0,
-              bottom: detail && sheet ? detail.height + 12 : 60 };
+              bottom: detail && sheet ? detail.height + 12 : 0 };
           }}
           active={active}
           focusedId={effectiveFocusedId}
@@ -872,13 +875,13 @@ export function GraphView({
         />
       </div>
 
-        {historical ? <LocalGraphTimeline cursor={visibleCursor} onCursorChange={seekEvent}
+        {historical ? <LocalGraphTimeline cursor={visibleCursor} onCursorChange={seekEvent} restoredLatest={!!storedEvent && storedIndex < 0}
           onHoverEvent={setHoveredEventId} onPause={pausePlayback} onPlay={startPlayback}
           onSpeedChange={setPlaybackSpeed} onStep={stepTimeline} onShowEvent={showEventInGraph}
           payload={payload} playing={playing} reducedMotion={reducedMotion} selectedId={selectedId}
           speed={playbackSpeed} timeline={timeline} /> : null}
         <footer className="graph-frame-status">
-          <strong>{t(`graph.range.${range}.name`)} · {t(`graph.range.${range}.description`)}</strong>
+          <strong>{t(`graph.range.${range}.name`)} · {t(payload.history.mode === "action" ? "graph.range.actionDescription" : `graph.range.${range}.description`)}</strong>
           <span className="graph-view-count" aria-live={playing ? "off" : "polite"}>{t("graph.visibleCount", { nodes: scene.nodes.length, edges: scene.edges.length })}</span>
           <time dateTime={payload.generated_at}>{t("graph.view.fetched", { time: formatVersionTimestamp(payload.generated_at) })}</time>
           {coverageNotice ? <span className="graph-status-omitted">{t("graph.view.omitted")}</span> : null}
@@ -1534,6 +1537,7 @@ function localizedGraphTimeline(
     if (edge) {
       return {
         ...event,
+        ...timelinePresentation(event, payload.history.mode, nodes, edges, t),
         visible_change: visibleChange,
         label: t("graph.timeline.edgeEvent", {
           action,
@@ -1550,6 +1554,7 @@ function localizedGraphTimeline(
     const subjectLabels = uniqueSceneValues(subjects.map((node) => node.label));
     return {
       ...event,
+      ...timelinePresentation(event, payload.history.mode, nodes, edges, t),
       visible_change: visibleChange,
       label: subjectLabels.length
         ? t("graph.timeline.entityEvent", {
@@ -1632,6 +1637,11 @@ function graphLabelGroupForFilter(key: keyof GraphFilters): GraphLabelGroup {
 function graphCoverageNotice(payload: GraphQueryPayload, t: TFunction) {
   const omissions = payload.omissions ?? [];
   const codes = [...new Set([...(payload.warnings ?? []), ...(payload.history.warnings ?? [])])];
+  // Partial temporal coverage belongs to the Timeline, not to a missing-item
+  // warning on an otherwise complete graph. Real budgets/privacy limits stay.
+  if (payload.history.mode !== "current" && !payload.truncated && omissions.length === 0
+    && payload.completeness === "complete"
+    && codes.every((code) => code === "history_coverage_partial")) return null;
   const hasCoverageRestriction = payload.truncated
     || payload.completeness !== "complete"
     || payload.history.status !== "complete"

@@ -1295,9 +1295,9 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               return context?.getParameter(context.VERSION) as string | undefined;
             });
           expect(webglVersion).toMatch(/^WebGL [12]\.0/);
-          const depthOne = graphPanel.getByRole("button", { name: "Neighbor connections", exact: true });
-          const depthTwo = graphPanel.getByRole("button", { name: "Two-step expansion", exact: true });
-          await expect(graphPanel.getByRole("button", { name: "Direct connections", exact: true })).toHaveAttribute("aria-pressed", "true");
+          const depthOne = graphPanel.getByRole("radio", { name: "Neighbor connections", exact: true });
+          const depthTwo = graphPanel.getByRole("radio", { name: "Two-step expansion", exact: true });
+          await expect(graphPanel.getByRole("radio", { name: "Direct connections", exact: true })).toHaveAttribute("aria-checked", "true");
           for (const [depth, control] of [[1, depthOne], [2, depthTwo]] as const) {
             const responsePromise = page.waitForResponse((response) =>
               response.url().endsWith(`/api/v1/workspaces/${workspace.id}/graph/query`)
@@ -1311,7 +1311,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             expect((await response.json()).data.query).toMatchObject({
               depth, time: { mode: "current" }, budget: { nodes: 250, edges: 750 },
             });
-            await expect(control).toHaveAttribute("aria-pressed", "true");
+            await expect(control).toHaveAttribute("aria-checked", "true");
           }
           const graphScreenshotPrefix = process.env.DTXWIKI_GRAPH_SCREENSHOT_PREFIX;
           if (graphScreenshotPrefix) {
@@ -1387,9 +1387,12 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             && response.request().method() === "POST"
             && response.request().postDataJSON().time?.mode === "action",
           );
-          await graphPanel.getByRole("button", { name: /Activity history/ }).click();
+          await graphPanel.getByRole("radio", { name: "Current relationships" }).focus();
+          await page.keyboard.press("End");
+          await expect(graphPanel.getByRole("radio", { name: /Activity history/ })).toBeFocused();
           const actionsResponse = await actionsResponsePromise;
           expect(actionsResponse.ok()).toBeTruthy();
+          await expect(graphPanel.getByRole("radio", { name: /Activity history/ })).toBeFocused();
           const actionsPayload = (await actionsResponse.json()).data as GraphQueryPayload;
           const actionOccurrences = actionsPayload.edges.filter((edge) =>
             edge.edge_kind === edge.action_kind,
@@ -1427,13 +1430,13 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             && response.request().method() === "POST"
             && response.request().postDataJSON().time?.mode === "appearance",
           );
-          await graphPanel.getByRole("button", { name: /Change history/ }).click();
+          await graphPanel.getByRole("radio", { name: /Change history/ }).click();
           const appearanceResponse = await appearanceResponsePromise;
           expect(appearanceResponse.ok()).toBeTruthy();
           expect((await appearanceResponse.json()).data.query).toMatchObject({
             depth: 1, time: { mode: "appearance" }, budget: { nodes: 50, edges: 150 },
           });
-          await expect(depthTwo).toBeDisabled();
+          await expect(depthTwo).toHaveAttribute("aria-disabled", "true");
           const timeline = graphPanel.getByRole("slider", {
             name: "Timeline position",
           });

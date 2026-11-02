@@ -94,7 +94,7 @@ class GraphQueryRequest(BaseModel):
     relation_scope: Literal["direct", "neighbors"] = Field(
         default="neighbors",
         description="Direct selects only seed-incident relationships, "
-        "independent of depth. "
+        "independent of depth; action history also retains parent session context. "
         "Neighbors includes induced relationships at the requested depth.",
     )
     time: GraphTimeQuery = Field(default_factory=GraphTimeQuery)

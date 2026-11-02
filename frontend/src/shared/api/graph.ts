@@ -53,8 +53,8 @@ export function contextGraphQuery(
     edge_kinds: [],
     action_kinds: [],
     direction: "both",
-    // Historical observation modes retain their one-hop contract until their
-    // own depth-two scene semantics are implemented server-side.
+    // History stays seed-relative; action history also keeps parent sessions
+    // as activity context, without expanding document neighbors.
     depth: mode === "current" ? depth : 1,
     relation_scope: mode === "current" ? relationScope : "direct",
     time: { mode },

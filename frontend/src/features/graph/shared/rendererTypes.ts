@@ -31,6 +31,7 @@ export type GraphRenderNode = {
 };
 
 export type GraphRenderEdge = {
+  eventCaption?: string;
   // Interval topology stays fixed while recorded occurrence counts change.
   layoutCount?: number;
   hidden?: boolean;

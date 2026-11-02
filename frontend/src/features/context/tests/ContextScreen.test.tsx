@@ -2159,10 +2159,10 @@ describe("ContextScreen", () => {
     await userEvent.click(readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }));
     const graph = await screen.findByTestId("graph-view");
     const graphUi = within(graph);
-    expect(graphUi.getByRole("button", { name: "Direct connections" })).toHaveAttribute("aria-pressed", "true");
-    await userEvent.click(graphUi.getByRole("button", { name: "Neighbor connections" }));
-    await waitFor(() => expect(graphUi.getByRole("button", { name: "Neighbor connections" }))
-      .toHaveAttribute("aria-pressed", "true"));
+    expect(graphUi.getByRole("radio", { name: "Direct connections" })).toHaveAttribute("aria-checked", "true");
+    await userEvent.click(graphUi.getByRole("radio", { name: "Neighbor connections" }));
+    await waitFor(() => expect(graphUi.getByRole("radio", { name: "Neighbor connections" }))
+      .toHaveAttribute("aria-checked", "true"));
     const requests = () => fetchMock.mock.calls.filter(([input]) =>
       String(input).endsWith(`/workspaces/${WORKSPACE_ID}/graph/query`),
     ).map(([, init]) => JSON.parse(String(init?.body)));
@@ -2170,9 +2170,9 @@ describe("ContextScreen", () => {
       seeds: [{ kind: "context_page", id: PAGE_ID }],
       depth: 1, time: { mode: "current" }, budget: { nodes: 250, edges: 750 },
     });
-    await userEvent.click(graphUi.getByRole("button", { name: "Two-step expansion" }));
-    await waitFor(() => expect(graphUi.getByRole("button", { name: "Two-step expansion" }))
-      .toHaveAttribute("aria-pressed", "true"));
+    await userEvent.click(graphUi.getByRole("radio", { name: "Two-step expansion" }));
+    await waitFor(() => expect(graphUi.getByRole("radio", { name: "Two-step expansion" }))
+      .toHaveAttribute("aria-checked", "true"));
     expect(requests().at(-1)).toMatchObject({ depth: 2, time: { mode: "current" } });
     await userEvent.click(readerTabs.getByRole("tab", { name: /^View$/ }));
     await userEvent.click(readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }));
@@ -2186,14 +2186,14 @@ describe("ContextScreen", () => {
       .getByRole("tab", { name: /^Graph, Preview$/ }));
     const graph = await screen.findByTestId("graph-view");
     const graphUi = within(graph);
-    await userEvent.click(graphUi.getByRole("button", { name: "Neighbor connections" }));
-    await waitFor(() => expect(graphUi.getByRole("button", { name: "Neighbor connections" }))
-      .toHaveAttribute("aria-pressed", "true"));
+    await userEvent.click(graphUi.getByRole("radio", { name: "Neighbor connections" }));
+    await waitFor(() => expect(graphUi.getByRole("radio", { name: "Neighbor connections" }))
+      .toHaveAttribute("aria-checked", "true"));
     const relatedDetails = await selectGraphNodeDetails(graph, "Architecture Notes");
     await userEvent.click(within(relatedDetails).getByRole("button", { name: "Expand" }));
     await waitFor(() => expect(within(relatedDetails).getByRole("button", { name: "Collapse" })).toBeEnabled());
-    await userEvent.click(graphUi.getByRole("button", { name: /Change history/ }));
-    await waitFor(() => expect(graphUi.getByRole("button", { name: "Two-step expansion" })).toBeDisabled());
+    await userEvent.click(graphUi.getByRole("radio", { name: /Change history/ }));
+    await waitFor(() => expect(graphUi.getByRole("radio", { name: "Two-step expansion" })).toHaveAttribute("aria-disabled", "true"));
     const requests = () => fetchMock.mock.calls.filter(([input]) =>
       String(input).endsWith(`/workspaces/${WORKSPACE_ID}/graph/query`),
     ).map(([, init]) => JSON.parse(String(init?.body)));
@@ -2201,9 +2201,9 @@ describe("ContextScreen", () => {
     expect(requests().at(-1)).toMatchObject({
       seeds, depth: 1, time: { mode: "appearance" }, budget: { nodes: 50, edges: 150 }, cursor: null,
     });
-    await userEvent.click(graphUi.getByRole("button", { name: "Current relationships" }));
-    await waitFor(() => expect(graphUi.getByRole("button", { name: "Two-step expansion" })).toBeEnabled());
-    expect(graphUi.getByRole("button", { name: "Neighbor connections" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(graphUi.getByRole("radio", { name: "Current relationships" }));
+    await waitFor(() => expect(graphUi.getByRole("radio", { name: "Two-step expansion" })).toHaveAttribute("aria-disabled", "false"));
+    expect(graphUi.getByRole("radio", { name: "Neighbor connections" })).toHaveAttribute("aria-checked", "true");
     expect(requests().at(-1)).toMatchObject({
       seeds, depth: 1, time: { mode: "current" }, budget: { nodes: 250, edges: 750 },
     });
@@ -2226,16 +2226,16 @@ describe("ContextScreen", () => {
       .getByRole("tab", { name: /^Graph, Preview$/ }));
     const graph = await screen.findByTestId("graph-view");
     const graphUi = within(graph);
-    await userEvent.click(graphUi.getByRole("button", { name: "Neighbor connections" }));
+    await userEvent.click(graphUi.getByRole("radio", { name: "Neighbor connections" }));
     await waitFor(() => expect(depthSignal).toBeDefined());
-    await userEvent.click(graphUi.getByRole("button", { name: /Change history/ }));
+    await userEvent.click(graphUi.getByRole("radio", { name: /Change history/ }));
     await waitFor(() => expect(depthSignal?.aborted).toBe(true));
-    await waitFor(() => expect(graphUi.getByRole("button", { name: /Change history/ })).toHaveAttribute("aria-pressed", "true"));
+    await waitFor(() => expect(graphUi.getByRole("radio", { name: /Change history/ })).toHaveAttribute("aria-checked", "true"));
     await act(async () => {
       pendingDepth.resolve({ data: contextGraphPayload(PAGE_ID, "current", undefined, undefined, 1) });
     });
-    expect(graphUi.getByRole("button", { name: /Change history/ })).toHaveAttribute("aria-pressed", "true");
-    expect(graphUi.getByRole("button", { name: "Two-step expansion" })).toBeDisabled();
+    expect(graphUi.getByRole("radio", { name: /Change history/ })).toHaveAttribute("aria-checked", "true");
+    expect(graphUi.getByRole("radio", { name: "Two-step expansion" })).toHaveAttribute("aria-disabled", "true");
   });
 
   it("keeps the newest graph action when an aborted expand settles after a history query", async () => {
@@ -2280,14 +2280,14 @@ describe("ContextScreen", () => {
       within(relatedDetails).getByRole("button", { name: "Expand" }),
     );
     await waitFor(() => expect(expandSignal).toBeDefined());
-    await userEvent.click(screen.getByRole("button", { name: /Change history/ }));
+    await userEvent.click(screen.getByRole("radio", { name: /Change history/ }));
     await waitFor(() => expect(expandSignal?.aborted).toBe(true));
 
     await act(async () => {
       appearance.resolve({ data: contextGraphPayload(PAGE_ID, "appearance") });
     });
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /Change history/ })).toHaveAttribute("aria-pressed", "true"),
+      expect(screen.getByRole("radio", { name: /Change history/ })).toHaveAttribute("aria-checked", "true"),
     );
     // History changes deliberately clear selection. Re-select the exact
     // current row before settling the aborted query, so its selected action
@@ -2304,7 +2304,7 @@ describe("ContextScreen", () => {
       });
     });
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Change history/ })).toBeInTheDocument();
+      expect(screen.getByRole("radio", { name: /Change history/ })).toBeInTheDocument();
       expect(
         within(historyDetails).getByRole("button", { name: "Expand" }),
       ).toBeEnabled();

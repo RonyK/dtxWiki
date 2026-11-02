@@ -280,7 +280,7 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
       await expect(localCanvas.locator("canvas.sigma-nodes")).toBeVisible();
       const expandedRead = page.waitForResponse((response) => response.url().endsWith(`/workspaces/${workspaceId}/graph/query`)
         && response.request().method() === "POST" && response.request().postDataJSON().depth === 2);
-      await graphPanel.getByRole("button", { name: "Two-step expansion", exact: true }).click();
+      await graphPanel.getByRole("radio", { name: "Two-step expansion", exact: true }).click();
       local = (await (await expandedRead).json()).data as GraphQueryPayload;
       await expectLocalSceneNavigation(page, graphPanel, local, workspaceId, testInfo, "en");
       await capture(page, testInfo, `real-api-2k-context-${viewport.width}.png`);
@@ -289,7 +289,7 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
         response.url().endsWith(`/workspaces/${workspaceId}/graph/query`)
         && response.request().method() === "POST"
         && response.request().postDataJSON().time?.mode === "action");
-      await graphPanel.getByRole("button", { name: /Activity history/ }).click();
+      await graphPanel.getByRole("radio", { name: /Activity history/ }).click();
       const actions = await actionsResponse;
       expect(actions.ok()).toBe(true);
       const actionScene = (await actions.json()).data as GraphQueryPayload;

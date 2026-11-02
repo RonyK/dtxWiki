@@ -6911,7 +6911,7 @@ export interface components {
             preset: "linked-knowledge" | "evidence" | "activity" | "all";
             /**
              * Relation Scope
-             * @description Direct selects only seed-incident relationships, independent of depth. Neighbors includes induced relationships at the requested depth.
+             * @description Direct selects only seed-incident relationships, independent of depth; action history also retains parent session context. Neighbors includes induced relationships at the requested depth.
              * @default neighbors
              * @enum {string}
              */

@@ -1917,9 +1917,9 @@ class GraphQueryService:
         candidates: list[_EdgeCandidate],
         nodes: dict[str, GraphNode],
     ) -> None:
-        # Session context is a second hop; the new direct scope keeps only
-        # the activity-to-seed path. Omitted scope retains the legacy context.
-        if request.relation_scope == "direct":
+        # Activity history keeps the session that gives an event its context.
+        # This does not expand document-to-document neighbors in direct scope.
+        if request.relation_scope == "direct" and request.time.mode != "action":
             return
         # This non-seed edge is subordinate to an inbound event -> seed path.
         if request.direction == "out":
@@ -2843,6 +2843,12 @@ class GraphQueryService:
     ) -> tuple[list[GraphTimelineEvent], bool]:
         current_node_ids = {node.id for node in nodes}
         current_edge_ids = {edge.id for edge in edges}
+        session_ids = {
+            node.id
+            for node in nodes
+            if node.entity_kind in {"ask_session", "mcp_chat_session"}
+        }
+        session_edges = [edge for edge in edges if edge.source in session_ids]
         ordered_drafts = sorted(
             drafts,
             key=lambda draft: (
@@ -2856,6 +2862,26 @@ class GraphQueryService:
         events: list[GraphTimelineEvent] = []
         capped = False
         for draft in ordered_drafts:
+            # A session is context for the activity, not a pre-history fact.
+            # Only attach admitted context edges so an omitted session cannot
+            # cause its otherwise visible primary event to disappear.
+            context_edges = [
+                edge for edge in session_edges if edge.target in draft.node_ids
+            ]
+            if context_edges:
+                draft = replace(
+                    draft,
+                    node_ids=tuple(
+                        dict.fromkeys(
+                            (*draft.node_ids, *(edge.source for edge in context_edges))
+                        )
+                    ),
+                    edge_ids=tuple(
+                        dict.fromkeys(
+                            (*draft.edge_ids, *(edge.id for edge in context_edges))
+                        )
+                    ),
+                )
             if len(events) >= edge_limit:
                 capped = True
                 continue

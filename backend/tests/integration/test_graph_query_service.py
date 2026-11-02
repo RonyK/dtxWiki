@@ -953,10 +953,15 @@ def test_domain_action_path_is_seed_relative_inbound_including_session_context(
         )
 
     assert "ask_turn" in {node.entity_kind for node in direct.nodes}
-    assert "ask_session" not in {node.entity_kind for node in direct.nodes}
-    assert all(
-        graph_node_id("context_page", seed_id) in (edge.source, edge.target)
-        for edge in direct.edges
+    assert "ask_session" in {node.entity_kind for node in direct.nodes}
+    assert {edge.id for edge in direct.edges} == {edge.id for edge in inbound.edges}
+    session_ids = {
+        node.id for node in direct.nodes if node.entity_kind == "ask_session"
+    }
+    session_edges = {edge.id for edge in direct.edges if edge.source in session_ids}
+    assert any(
+        session_edges <= set(event.edge_ids) and session_ids <= set(event.node_ids)
+        for event in direct.timeline
     )
     assert any(
         event.evidence and event.evidence.kind == "ask_turn_citation"

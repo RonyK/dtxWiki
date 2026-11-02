@@ -16,8 +16,9 @@ export function historySceneCatalog(payload: GraphQueryPayload, filters: GraphFi
 
 /** Playback changes presentation, never the interval's layout topology. */
 export function renderHistoryScene(catalog: GraphScene, frame: GraphScene, event: GraphTimelineEvent | undefined,
-  showFuture: boolean, actionMode: boolean, preview = false): GraphRenderScene {
+  showFuture: boolean, actionMode: boolean, preview = false, caption?: string): GraphRenderScene {
   const nodes = new Map(frame.nodes.map((node) => [node.id, node]));
+  const seedIds = new Set(catalog.nodes.filter((node) => node.is_seed).map((node) => node.id));
   const edges = new Map(frame.edges.map((edge) => [edge.id, edge]));
   const eventEdges = new Set([...(event?.edge_ids ?? []), ...(event?.edge_snapshots ?? []).map((edge) => edge.id)]);
   const eventNodes = new Set([...(event?.node_ids ?? []), ...(event?.node_snapshots ?? []).map((node) => node.id)]);
@@ -44,9 +45,10 @@ export function renderHistoryScene(catalog: GraphScene, frame: GraphScene, event
       hidden: !edges.has(edge.id) && !removed.has(edge.id) && !showFuture && !(preview && eventEdges.has(edge.id)),
       muted: (!edges.has(edge.id) && !removed.has(edge.id)) || actionMode && !edge.action_kind && !eventEdges.has(edge.id),
       highlighted: eventEdges.has(edge.id),
+      eventCaption: eventEdges.has(edge.id) && (seedIds.has(edge.source) || seedIds.has(edge.target)) ? caption : undefined,
       removed: removed.has(edge.id),
       layoutCount: edge.count ?? 1,
-      label: eventEdges.has(edge.id) && event ? `${event.operation === "edge_removed" ? "−" : "+"} ${event.label}` : edge.label,
+      label: eventEdges.has(edge.id) && event ? caption ?? edge.label : edge.label,
     })),
   };
 }

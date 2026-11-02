@@ -117,7 +117,7 @@ describe("GraphView", () => {
     const stage = frame.querySelector(".graph-local-stage")!;
     expect(graph.querySelector(".graph-type-section")!.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(frame.querySelector(".graph-frame-header")!.compareDocumentPosition(stage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(stage.nextElementSibling).toHaveClass("graph-timeline");
+    expect(stage.nextElementSibling).toHaveClass("local-history");
     expect(stage).toContainElement(screen.getByRole("button", { name: "Fit graph" }));
     expect(stage).toContainElement(screen.getByRole("button", { name: "Refresh graph" }));
     expect(screen.queryByLabelText("History mode")).not.toBeInTheDocument();
@@ -447,7 +447,7 @@ describe("GraphView", () => {
     await user.click(screen.getByLabelText("Ask turn"));
     expect(screen.getByText("2 nodes · 1 edges")).toBeInTheDocument();
     expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-nodes", "2");
-    expect(screen.queryByText("Why was this chosen?")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("graph-view").querySelector<HTMLElement>(".graph-relationship-list")!).queryByText("Why was this chosen?")).not.toBeInTheDocument();
     expect(screen.queryByText("included as evidence")).not.toBeInTheDocument();
     expect(screen.getByText("No visible change under the current filters."))
       .toBeInTheDocument();
@@ -552,30 +552,34 @@ describe("GraphView", () => {
     payload.query.time = { mode: "current" };
     payload.query.depth = 2;
     const { rerender } = renderGraph({ onDepthChange, payload });
-    const toolbar = within(screen.getByRole("group", { name: "Relationship scope" }));
-    expect(toolbar.getByRole("button", { name: "Two-step expansion" })).toHaveAttribute("aria-pressed", "true");
-    await user.click(toolbar.getByRole("button", { name: "Neighbor connections" }));
+    const toolbar = within(screen.getByRole("radiogroup", { name: "Relationship scope" }));
+    expect(toolbar.getByRole("radio", { name: "Two-step expansion" })).toHaveAttribute("aria-checked", "true");
+    toolbar.getByRole("radio", { name: "Two-step expansion" }).focus();
+    await user.keyboard("{ArrowLeft}");
+    expect(toolbar.getByRole("radio", { name: "Neighbor connections" })).toHaveFocus();
     expect(onDepthChange).toHaveBeenCalledWith(1, "neighbors");
-    expect(toolbar.getByRole("button", { name: "Two-step expansion" })).toHaveAttribute("aria-pressed", "true");
-    expect(toolbar.getByRole("button", { name: "Neighbor connections" })).toBeDisabled();
+    expect(toolbar.getByRole("radio", { name: "Two-step expansion" })).toHaveAttribute("aria-checked", "true");
+    expect(toolbar.getByRole("radio", { name: "Neighbor connections" })).toHaveAttribute("aria-disabled", "true");
     await act(async () => { finishRequest(); });
     rerender(graphElement({
       onCollapse: () => Promise.resolve(), onExpand: () => Promise.resolve(),
       onDepthChange, payload: { ...payload, query: { ...payload.query, depth: 1 } },
     }));
-    expect(toolbar.getByRole("button", { name: "Neighbor connections" })).toHaveAttribute("aria-pressed", "true");
-    expect(toolbar.getByRole("button", { name: "Two-step expansion" })).toBeEnabled();
+    expect(toolbar.getByRole("radio", { name: "Neighbor connections" })).toHaveAttribute("aria-checked", "true");
+    expect(toolbar.getByRole("radio", { name: "Neighbor connections" })).toHaveFocus();
+    expect(toolbar.getByRole("radio", { name: "Two-step expansion" })).toHaveAttribute("aria-disabled", "false");
   });
 
   it("explains and disables unsupported two-hop history instead of pretending to offer it", async () => {
     const user = userEvent.setup();
     const onDepthChange = vi.fn(() => Promise.resolve());
     renderGraph({ onDepthChange });
-    const toolbar = within(screen.getByRole("group", { name: "Relationship scope" }));
-    expect(toolbar.getByRole("button", { name: "Direct connections" })).toHaveAttribute("aria-pressed", "true");
-    const unsupported = toolbar.getByRole("button", { name: "Two-step expansion" });
-    expect(unsupported).toBeDisabled();
-    expect(unsupported).toHaveAttribute("title", "History views support direct connections only.");
+    const toolbar = within(screen.getByRole("radiogroup", { name: "Relationship scope" }));
+    expect(toolbar.getByRole("radio", { name: "Direct connections" })).toHaveAttribute("aria-checked", "true");
+    const unsupported = toolbar.getByRole("radio", { name: "Two-step expansion" });
+    expect(unsupported).toHaveAttribute("aria-disabled", "true");
+    expect(unsupported).toHaveAttribute("title", "History views show direct relationships to this document, with session context for activities. Broader scopes are available in Current relationships.");
+    expect(unsupported).toHaveAccessibleDescription("History views show direct relationships to this document, with session context for activities. Broader scopes are available in Current relationships.");
     await user.click(unsupported);
     expect(onDepthChange).not.toHaveBeenCalled();
   });
@@ -587,9 +591,9 @@ describe("GraphView", () => {
     payload.query.time = { mode: "current" };
     payload.query.depth = 2;
     renderGraph({ payload, onDepthChange: () => Promise.reject(new Error("failed")) });
-    await user.click(screen.getByRole("button", { name: "Neighbor connections" }));
+    await user.click(screen.getByRole("radio", { name: "Neighbor connections" }));
     expect(screen.getByText("The graph could not be updated. Try again.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Two-step expansion" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("radio", { name: "Two-step expansion" })).toHaveAttribute("aria-checked", "true");
   });
 
   it("provides operable DOM selection and gates expansion to supported Context-page seeds", async () => {
@@ -1313,7 +1317,8 @@ describe("GraphView", () => {
     expect(screen.getByText("0 / 3")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Next event" }));
-    expect(screen.getByText("Architecture Notes · Created")).toBeInTheDocument();
+    expect(screen.getByTestId("graph-timeline")).toHaveTextContent("Architecture Notes");
+    expect(screen.getByTestId("graph-timeline")).toHaveTextContent("Activity · Created");
     expect(screen.getByText("2 nodes · 0 edges")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Timeline position"), {
@@ -1321,7 +1326,7 @@ describe("GraphView", () => {
     });
     expect(screen.getByText("3 nodes · 2 edges")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Activity history/ }));
+    await user.click(screen.getByRole("radio", { name: /Activity history/ }));
     expect(onHistoryModeChange).toHaveBeenCalledWith("action");
 
     const staticSummary = screen.getByText("Static graph view");
@@ -1348,7 +1353,7 @@ describe("GraphView", () => {
     expect(screen.queryByRole("region", { name: /Timeline/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("slider", { name: "Timeline position" })).not.toBeInTheDocument();
     expect(screen.queryByText("0 / 0")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /Change history/ }));
+    await user.click(screen.getByRole("radio", { name: /Change history/ }));
     expect(onHistoryModeChange).toHaveBeenCalledWith("appearance");
   });
 
@@ -1400,6 +1405,10 @@ describe("GraphView", () => {
     expect(screen.queryByRole("slider", { name: "Timeline position" })).not.toBeInTheDocument();
     view.rerender(graphElement({ ...props, payload: refreshed }));
     expect(screen.getByRole("slider", { name: "Timeline position" })).toHaveValue("3");
+    view.rerender(graphElement({ ...props, payload: { ...refreshed, timeline: refreshed.timeline.filter((event) => event.id !== payload.timeline![1].id) } }));
+    expect(screen.getByRole("slider", { name: "Timeline position" })).toHaveValue("3");
+    expect(screen.getByText("The record you were viewing is no longer in the results. Moved to the latest record."))
+      .toHaveAttribute("role", "status");
   });
 
   it("keeps the final recorded snapshot after autoplay completion", () => {
@@ -1543,11 +1552,10 @@ describe("GraphView", () => {
 
     expect(screen.getAllByText("문서").length).toBeGreaterThan(0);
     expect(screen.getAllByText("지식").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /변화 이력/ })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: /포함됨.*Decision Log/ }))
+    expect(screen.getByRole("radio", { name: /변화 이력/ })).toHaveAttribute("aria-checked", "true");
+    expect(within(screen.getByTestId("graph-timeline")).getByRole("button", { name: /포함됨.*Why was this chosen/ }))
       .toBeInTheDocument();
-    expect(screen.getByText("Decision Log —포함됨→ Why was this chosen?"))
-      .toBeInTheDocument();
+    expect(screen.getByTestId("graph-timeline")).toHaveTextContent("Ask · 포함됨");
     expect(screen.queryByText("Current projection")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("graph-view").querySelector(".graph-canvas-more > summary")!);
@@ -1809,12 +1817,22 @@ describe("GraphView", () => {
     },
   );
 
-  it("retains a real history-scene display budget warning when no omission metadata is available", () => {
+  it("separates partial Timeline coverage from a real history-scene display budget warning", () => {
     const payload = graphFixture();
-    payload.completeness = "capped";
-    payload.truncated = true;
-    payload.warnings = ["graph_budget_applied", "graph_history_source_bounded"];
-    renderGraph({ payload });
+    const noAction = () => Promise.resolve();
+    payload.history.status = "partial";
+    payload.history.warnings = ["history_coverage_partial"];
+    payload.completeness = "complete";
+    payload.truncated = false;
+    payload.warnings = ["history_coverage_partial"];
+    payload.omissions = [];
+    const view = renderGraph({ payload });
+    expect(within(screen.getByTestId("graph-timeline")).getByText("Recorded history only")).toBeVisible();
+    expect(screen.queryByText("Some items omitted")).not.toBeInTheDocument();
+    expect(screen.queryByText("What was left out")).not.toBeInTheDocument();
+
+    view.rerender(graphElement({ onCollapse: noAction, onExpand: noAction, payload: { ...payload, completeness: "capped", truncated: true,
+      warnings: ["graph_budget_applied", "graph_history_source_bounded"] } }));
 
     expect(screen.getByText(/limited to the requested display budget/).closest("[role=alert],[role=status]"))
       .toHaveAttribute("role", "alert");

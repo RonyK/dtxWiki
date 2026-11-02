@@ -360,11 +360,11 @@
       "action": {
         "name": "Activity history",
         "question": "Who or which tools used this document",
-        "description": "Explore edits, reviews, Ask citations, and MCP tool use alongside the timeline. Current relationships remain as a muted background.",
+        "description": "Explore edits, reviews, Ask citations, and MCP usage with their parent sessions. Current relationships remain as a muted background.",
         "nodes": "Versions, reviews, Ask, MCP activity, and connected items",
         "edges": "Editing, approval, and usage events with background relationships",
         "time": "Selected recorded activity",
-        "scope": "Direct connections only",
+        "scope": "Direct activities and their session context",
         "limits": "Recorded activity only; not a complete audit log"
       },
       "omitted": "Some items omitted",
@@ -377,7 +377,7 @@
     },
     "range": {
       "heading": "Relationship scope",
-      "historyOnly": "History views support direct connections only.",
+      "historyOnly": "History views show direct relationships to this document, with session context for activities. Broader scopes are available in Current relationships.",
       "direct": {
         "name": "Direct connections",
         "short": "Direct",
@@ -392,7 +392,8 @@
         "name": "Two-step expansion",
         "short": "Two steps",
         "description": "Extends through neighbors to two steps"
-      }
+      },
+      "actionDescription": "Directly related activities and their session context"
     },
     "historyUi": {
       "records": "{{count}} records",
@@ -412,7 +413,23 @@
       "historyRelations": "Historical relationships",
       "currentRelations": "Current relationships",
       "baseline": "Current relationships without observations remain as background from before the recorded interval.",
-      "notPresent": "This item is not active at the selected recorded moment."
+      "notPresent": "This item is not active at the selected recorded moment.",
+      "addedRelation": "{{kind}} added",
+      "removedRelation": "{{kind}} removed",
+      "versionCreated": "Document version created",
+      "versionEdited": "Document version edited",
+      "kind": {
+        "version": "Version",
+        "review": "Review",
+        "ask": "Ask",
+        "tool": "MCP",
+        "activity": "Activity",
+        "added": "Relationship added",
+        "removed": "Relationship removed"
+      },
+      "restoredLatest": "The record you were viewing is no longer in the results. Moved to the latest record.",
+      "groupRecords": "{{count}} nearby records",
+      "closeGroup": "Close"
     }
   },
   "workspaceGraph": {

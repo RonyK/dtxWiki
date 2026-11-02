@@ -294,7 +294,24 @@ export function createSigmaGraphAdapter(
     hideLabelsOnMove: false,
     // The ordinary-label toggle must not suppress seed/active labels as well.
     renderLabels: true,
-    renderEdgeLabels: false,
+    renderEdgeLabels: true,
+    defaultDrawEdgeLabel: (context, edge, source, target) => {
+      if (!edge.forceLabel || !edge.label || edge.hidden) return;
+      const text = String(edge.label);
+      const x = (source.x + target.x) / 2, y = (source.y + target.y) / 2;
+      context.save();
+      context.font = "600 11px sans-serif";
+      const width = Math.min(180, context.measureText(text).width + 16);
+      context.fillStyle = edge.color;
+      context.beginPath();
+      context.roundRect(x - width / 2, y - 11, width, 22, 7);
+      context.fill();
+      context.fillStyle = tokens.surface;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(text, x, y, width - 12);
+      context.restore();
+    },
     labelColor: { color: ink },
     labelSize: 12,
     labelDensity: 0.8,
@@ -422,9 +439,9 @@ export function createSigmaGraphAdapter(
       return {
         ...data,
         size: presentation?.highlighted ? 2.5 : hoveredId === key ? Number(data.size) * 1.5 : data.size,
-        type: presentation?.removed || presentation?.muted ? "action" : data.type,
+        type: presentation?.removed ? "action" : data.type,
         color: presentation?.removed ? "#dc2626" : presentation?.highlighted ? tokens.edge.action : quiet ? data.quietColor : data.color,
-        forceLabel: presentation?.highlighted ?? false,
+        forceLabel: Boolean(presentation?.eventCaption),
         hidden: presentation?.hidden ?? false,
       };
     },
