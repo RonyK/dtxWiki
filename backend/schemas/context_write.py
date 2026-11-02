@@ -4,11 +4,17 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from backend.schemas.citation import CitationInput
 from backend.schemas.common import DraftReviewReason, RESTErrorBody, RESTResponseBase
+from backend.schemas.document_reference import (
+    DocumentReferenceInput,
+    DocumentReferenceRemoveInput,
+)
 from backend.schemas.input_policy import InputRequest
 from backend.schemas.page import (
     BODY_MD_MAX_LENGTH,
     CONTENT_HASH_PATTERN,
+    CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD,
     PageMetadataPatch,
 )
 
@@ -24,54 +30,6 @@ CONTEXT_PAGE_TYPES = (
     "query",
     "guide",
 )
-
-
-class CitationInput(BaseModel):
-    target_kind: Literal[
-        "context_claim",
-        "context_page_section",
-        "context_page_whole",
-    ] = "context_claim"
-    target_locator: dict[str, Any] | None = None
-    citation_type: Literal["raw_source", "context_page", "derived_artifact"]
-    library_item_version_id: UUID | None = None
-    library_artifact_id: UUID | None = None
-    cited_context_page_version_id: UUID | None = None
-    location: dict[str, Any] | None = None
-    snippet: str | None = None
-    created_via: Literal["cite_tool", "manual_input"] = "cite_tool"
-
-    model_config = ConfigDict(extra="forbid")
-
-    @model_validator(mode="after")
-    def validate_citation_target(self):
-        if self.citation_type == "raw_source":
-            if (
-                self.library_item_version_id is None
-                or self.library_artifact_id is not None
-                or self.cited_context_page_version_id is not None
-            ):
-                raise ValueError(
-                    "raw_source citations require only library_item_version_id"
-                )
-        elif self.citation_type == "derived_artifact":
-            if (
-                self.library_artifact_id is None
-                or self.library_item_version_id is not None
-                or self.cited_context_page_version_id is not None
-            ):
-                raise ValueError(
-                    "derived_artifact citations require only library_artifact_id"
-                )
-        elif (
-            self.cited_context_page_version_id is None
-            or self.library_item_version_id is not None
-            or self.library_artifact_id is not None
-        ):
-            raise ValueError(
-                "context_page citations require only cited_context_page_version_id"
-            )
-        return self
 
 
 _NEEDS_REVIEW_DESCRIPTION = (
@@ -511,52 +469,59 @@ class PublishContextPageResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class CiteRequest(BaseModel):
-    claim_text: str = Field(min_length=1)
-    target_page_id: UUID | None = None
-    source_scope: list[UUID] | None = None
-    desired_citation_type: Literal["raw_source", "context_page", "both"] = "both"
-    limit: int = Field(default=10, ge=1, le=50)
+class ReferenceCommandRequest(BaseModel):
+    """Change only the caller's explicit bibliography on an open Context edit."""
 
-    model_config = ConfigDict(extra="forbid")
-
-
-class CitationCandidate(BaseModel):
-    citation_type: Literal["raw_source", "context_page", "derived_artifact"]
-    library_item_version_id: UUID | None = None
-    library_artifact_id: UUID | None = None
-    cited_context_page_version_id: UUID | None = None
-    location: dict[str, Any] = Field(default_factory=dict)
-    snippet: str
-    support_level: Literal["strong", "partial", "weak", "contradicts", "none"]
-    freshness: Literal["current", "stale", "archived"]
-    recommendation: Literal["use", "do_not_use", "needs_review"]
-    write_citation: CitationInput | None = Field(
-        default=None,
-        description=("Write-ready CitationInput."),
+    version_id: UUID
+    expected_editing_revision: int = Field(ge=1)
+    idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
+    retry_only: bool = False
+    add: list[DocumentReferenceInput] = Field(default_factory=list, max_length=500)
+    remove: list[DocumentReferenceRemoveInput] = Field(
+        default_factory=list, max_length=500
     )
 
+    @model_validator(mode="after")
+    def _validate_delta(self):
+        if not self.add and not self.remove:
+            raise ValueError("provide at least one reference in add or remove")
+        if len(self.add) + len(self.remove) > 500:
+            raise ValueError("a reference command accepts at most 500 targets")
+        added = [(r.target_kind, r.target_id) for r in self.add]
+        removed = [
+            (r.target_kind, r.target_id)
+            if r.reference_id is None
+            else ("reference", r.reference_id)
+            for r in self.remove
+        ]
+        if len(set(added)) != len(added) or len(set(removed)) != len(removed):
+            raise ValueError("a target may occur only once in each reference list")
+        if set(added) & set(removed):
+            raise ValueError("a reference cannot be added and removed together")
+        return self
+
     model_config = ConfigDict(extra="forbid")
 
 
-class SuggestedCitationVerification(BaseModel):
-    candidate_id: UUID
-    supported: Literal["yes", "no", "partial"]
-    confidence: float = Field(ge=0, le=1)
-    rationale: str = Field(max_length=1000)
-
-    model_config = ConfigDict(extra="forbid")
+class CiteRequest(ReferenceCommandRequest):
+    page_id: UUID
 
 
 class CiteResult(BaseModel):
-    citation_candidates: list[CitationCandidate] = Field(default_factory=list)
-    suggested_verification: SuggestedCitationVerification | None = Field(
-        default=None,
-        description=(
-            "Client advisory only; it never mutates persisted citation "
-            "verification_status without a later reviewed write."
-        ),
+    page_id: UUID
+    version_id: UUID
+    editing_revision: int
+    references_hash: str = Field(pattern=CONTENT_HASH_PATTERN)
+    publication_state: Literal["editing"] = "editing"
+    added: list[DocumentReferenceInput] = Field(default_factory=list)
+    removed: list[DocumentReferenceRemoveInput] = Field(default_factory=list)
+    unchanged: list[DocumentReferenceInput | DocumentReferenceRemoveInput] = Field(
+        default_factory=list
     )
+    remaining_inline_occurrences: dict[str, int] = Field(default_factory=dict)
+    receipt_id: UUID
+    audit_event_id: UUID | None = None
+    replayed: bool = False
 
     model_config = ConfigDict(extra="forbid")
 
@@ -800,9 +765,9 @@ class ReviewDecisionUndo(BaseModel):
     # later_changes: something changed after the decision, so undoing it would
     # discard that work. not_recorded and unsupported_effect explain why a
     # decision cannot be reversed even when no later change occurred.
-    reason_code: Literal[
-        "later_changes", "not_recorded", "unsupported_effect"
-    ] | None = None
+    reason_code: (
+        Literal["later_changes", "not_recorded", "unsupported_effect"] | None
+    ) = None
     # While unavailable: the version whose content a new draft can start from
     # instead (the version an approval replaced, or the rejected draft).
     restore_version_id: UUID | None = None

@@ -7,11 +7,12 @@ import {
   currentCompletions,
   startCompletion,
   type CompletionContext,
+  type Completion,
 } from "@codemirror/autocomplete";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createEditorCompletionSource, isLikelyUuid } from "../editorCompletions";
 
@@ -113,7 +114,7 @@ describe("editor completions", () => {
     }
   });
 
-  it("suggests readable citation references and inserts source ids", () => {
+  it("suggests readable citation references and inserts document links", () => {
     const source = createEditorCompletionSource(
       { current: [] },
       {
@@ -122,6 +123,7 @@ describe("editor completions", () => {
           sourceSummary("src-2", "API Design Source", "https://example.com/other"),
         ],
       },
+      { current: "workspace-1" },
     );
 
     const result = source(completionContext("@cite{api design"));
@@ -129,17 +131,15 @@ describe("editor completions", () => {
     expect(result?.from).toBe("@cite{".length);
     expect(result?.options).toContainEqual(
       expect.objectContaining({
-        apply: "src-1}",
-        displayLabel: "API Design Source",
-        detail: "src-1",
-        label: "API Design Source src-1 https://example.com/api",
+        apply: expect.any(Function),
+        detail: "Library",
+        label: "API Design Source",
       }),
     );
     expect(result?.options).toContainEqual(
       expect.objectContaining({
-        apply: "src-2}",
-        displayLabel: "API Design Source",
-        label: "API Design Source src-2 https://example.com/other",
+        apply: expect.any(Function),
+        label: "API Design Source",
       }),
     );
   });
@@ -151,55 +151,23 @@ describe("editor completions", () => {
     expect(isLikelyUuid("")).toBe(false);
   });
 
-  it("never emits UUID-shaped source ids from the @cite picker (proposal C8)", () => {
-    const source = createEditorCompletionSource(
-      { current: [] },
-      {
-        current: [
-          sourceSummary(
-            "550e8400-e29b-41d4-a716-446655440000",
-            "Has UUID id",
-            "https://example.com/u",
-          ),
-          sourceSummary("src-design", "Has kebab id", "https://example.com/k"),
-        ],
-      },
-    );
-
-    const result = source(completionContext("@cite{"));
-
-    const ids = (result?.options ?? []).map((opt) => opt.apply);
-    expect(ids).toContain("src-design}");
-    expect(ids).toContain("has-uuid-id-1tvxtq}");
-    expect(ids.some((id) => typeof id === "string" && id.includes("550e8400"))).toBe(
-      false,
-    );
+  it("uses stable Library document identity across title and URI changes", () => {
+    const sources = { current: [sourceSummary("550e8400-e29b-41d4-a716-446655440000", "Original", "https://example.com/original")] };
+    const source = createEditorCompletionSource({ current: [] }, sources, { current: "workspace-1" });
+    const first = source(completionContext("@cite{"));
+    sources.current = [sourceSummary("550e8400-e29b-41d4-a716-446655440000", "Renamed", "https://example.com/renamed")];
+    const second = source(completionContext("@cite{"));
+    expect(applyCitation(first!.options[0])).toBe("@cite{/workspaces/workspace-1/library/items/550e8400-e29b-41d4-a716-446655440000}");
+    expect(applyCitation(second!.options[0])).toBe(applyCitation(first!.options[0]));
+    expect(second?.options[0].label).toBe("Renamed");
   });
 
-  it("derives stable citation keys for current REST source UUIDs", () => {
-    const source = createEditorCompletionSource(
-      { current: [] },
-      {
-        current: [
-          sourceSummary(
-            "550e8400-e29b-41d4-a716-446655440000",
-            "API Design Source",
-            "https://example.com/api",
-          ),
-        ],
-      },
-    );
-
-    const first = source(completionContext("@cite{api"));
-    const second = source(completionContext("@cite{api"));
-
-    expect(first?.options[0]).toMatchObject({
-      apply: "api-design-source-8hqvik}",
-      detail: "api-design-source-8hqvik",
-      displayLabel: "API Design Source",
-      label: "API Design Source api-design-source-8hqvik https://example.com/api",
-    });
-    expect(second?.options[0]?.apply).toBe(first?.options[0]?.apply);
+  it("offers the shared document picker for the /cite command", () => {
+    const open = vi.fn();
+    const source = createEditorCompletionSource({ current: [] }, { current: [] }, { current: "workspace-1" }, { label: "Choose reference", open });
+    const result = source(completionContext("/cite"));
+    expect(result?.options).toHaveLength(1);
+    expect(result?.options[0].label).toBe("Choose reference");
   });
 });
 
@@ -232,4 +200,13 @@ function sourceSummary(id: string, title: string, uri: string) {
     current_version_id: "v1",
     updated_at: "2026-05-20T00:00:00Z",
   };
+}
+
+function applyCitation(completion: Completion): string {
+  const view = new EditorView({ parent: document.body, state: EditorState.create({ doc: "@cite{}", selection: { anchor: 6 } }) });
+  try {
+    if (typeof completion.apply !== "function") throw new Error("Expected interactive citation completion");
+    completion.apply(view, completion, 6, 6);
+    return view.state.doc.toString();
+  } finally { view.destroy(); view.dom.remove(); }
 }

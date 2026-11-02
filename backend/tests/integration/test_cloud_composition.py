@@ -2370,6 +2370,7 @@ def test_split_provider_public_context_media_serves_from_workspace_plane(tmp_pat
             "reason": "media integration fixture",
             "publish_despite_findings": False,
             "expected_content_hash": saved_data["content_hash"],
+            "expected_references_hash": saved_data["references_hash"],
         },
     )
     assert published.status_code == 200, published.text

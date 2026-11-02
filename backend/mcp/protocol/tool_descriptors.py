@@ -356,14 +356,18 @@ TOOL_META = {
         False,
     ),
     "cite": (
-        "Find citation candidates",
-        "Return policy-allowed source artifact and context page citation candidates "
-        "without writing rows. Each candidate includes write_citation, a write-ready "
-        "object. Preview verification "
-        "is advisory and never changes persisted citation status."
-        "Requires conversation_token: echo one from an earlier envelope or "
-        "pass the literal 'new'.",
+        "Register references",
+        "Add or remove selected Context, Library or Agent document IDs in your "
+        "own open Context edit's References. Use search and read/fetch to choose "
+        "documents first. Requires page_id, version_id, expected_editing_revision "
+        "and idempotency_key; target version IDs are unnecessary. This mutates "
+        "draft metadata only. Published Graph citations change at final publish. "
+        "Removing metadata preserves any remaining inline citations. "
+        "Requires conversation_token: echo one or pass 'new'.",
+        False,
+        False,
         True,
+        False,
     ),
     "submit_feedback": (
         "Submit feedback",

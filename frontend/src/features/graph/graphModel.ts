@@ -250,7 +250,7 @@ export function graphPayloadToNeighbors(
     };
     const group = edge.edge_kind === "co_access"
       ? groups.co_access
-      : edge.edge_kind === "citation_page" || edge.edge_kind === "citation_source"
+      : ["citation_page", "citation_source", "citation_agent"].includes(edge.edge_kind)
         ? groups.citations
         : sourceIsSeed
           ? groups.outbound
@@ -283,6 +283,7 @@ const LEGACY_INSPECTOR_EDGE_KINDS = new Set([
   "wikilink",
   "citation_page",
   "citation_source",
+  "citation_agent",
   "co_access",
 ]);
 

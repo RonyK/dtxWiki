@@ -403,12 +403,26 @@ def resolve_context_concept(
 # --- OKF bundle export (producer) -------------------------------------------
 
 
+def _export_reference_footer(references) -> str:
+    from backend.services.context_links import escape_link_label
+
+    lines = ["", "<!-- dtxwiki:generated-references -->", "## References", ""]
+    for ref in references:
+        label = escape_link_label(ref.title or "Unavailable document")
+        item = f"[{label}]({ref.href})" if ref.href else label
+        note = f" — {escape_link_label(ref.note)}" if ref.note else ""
+        lines.append(f"{ref.number}. {item}{note}")
+    lines.extend(["<!-- /dtxwiki:generated-references -->", ""])
+    return "\n".join(lines)
+
+
 def export_workspace_bundle(
     session: Session,
     workspace_id: UUID,
     *,
     actor: ActorContext | None,
     workspace_slug: str,
+    self_origins: frozenset[str] | None = None,
 ) -> dict[str, str]:
     """Serialize a workspace's visible Context concepts as an OKF bundle
     (``path -> markdown``): an ``index.md`` catalog plus one
@@ -437,9 +451,16 @@ def export_workspace_bundle(
         if version_id is None:
             continue
         version = session.get(ContextPageVersion, version_id)
-        bundle[f"context/{page.slug}.md"] = render_context_concept(
-            page, version, workspace_slug=workspace_slug
-        )
+        markdown = render_context_concept(page, version, workspace_slug=workspace_slug)
+        if version is not None:
+            from backend.services.document_references import read_document_references
+
+            references = read_document_references(
+                session, version=version, actor=actor, self_origins=self_origins
+            )
+            if references:
+                markdown += _export_reference_footer(references)
+        bundle[f"context/{page.slug}.md"] = markdown
     return bundle
 
 
@@ -506,6 +527,7 @@ def render_workspace_bundle_markdown(
     *,
     actor: ActorContext | None,
     workspace_slug: str,
+    self_origins: frozenset[str] | None = None,
 ) -> tuple[str, str, datetime | None]:
     """Whole-workspace CAG bundle: index.md then each concept slug-asc,
     separated by file markers. Returns (markdown, content_hash,
@@ -515,7 +537,11 @@ def render_workspace_bundle_markdown(
     import hashlib
 
     bundle = export_workspace_bundle(
-        session, workspace_id, actor=actor, workspace_slug=workspace_slug
+        session,
+        workspace_id,
+        actor=actor,
+        workspace_slug=workspace_slug,
+        self_origins=self_origins,
     )
     parts: list[str] = [bundle["index.md"]]
     for path in sorted(bundle):

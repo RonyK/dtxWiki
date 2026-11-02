@@ -202,7 +202,7 @@ def _normalize_page_inputs(tool_name: str, payload: dict, ctx: ToolCallContext) 
     if tool_name in _PAGE_ID_CONSISTENCY_TOOLS:
         field = "page_id"
     elif tool_name == "cite":
-        field = "target_page_id"
+        field = "page_id"
     elif tool_name == "fetch" and payload.get("type") == "context_page":
         field = "id"
     elif (

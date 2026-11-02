@@ -4917,3 +4917,35 @@ details.advanced-section summary {
 }
 .workspace-picker-dialog .workspace-scope-option { align-items: start; }
 .workspace-picker-dialog .workspace-scope-check { margin-block-start: 2px; }
+/* References are rendered from version metadata outside the Markdown body. */
+.document-references {
+  border-top: 1px solid var(--border-color, #d6d9df);
+  margin-block-start: 2rem;
+  padding-block-start: 1rem;
+}
+.document-references li,
+.editor-references li { overflow-wrap: anywhere; padding-block: .35rem; }
+.reference-kind,
+.reference-location,
+.reference-note,
+.reference-unused { margin-inline-start: .65rem; font-size: .85em; opacity: .75; }
+.reference-backlink { display: inline-block; margin-inline-start: .65rem; min-width: 2rem; }
+.cite-ref { font-style: normal; font-size: .85em; vertical-align: super; }
+.markdown-body .cite-ref-unresolved { border-style: dashed; }
+.graph-citation-evidence { border-top: 1px solid var(--border); margin-top: 1rem; padding-top: .75rem; }
+.graph-citation-evidence ol { padding-left: 1.25rem; }
+.graph-citation-evidence li + li { margin-top: 1rem; }
+.graph-citation-evidence dd, .graph-citation-evidence code, .graph-citation-evidence blockquote { overflow-wrap: anywhere; white-space: pre-wrap; }
+.graph-citation-evidence dl { margin: .5rem 0; }
+.graph-citation-evidence dd { margin: .1rem 0 .5rem; }
+.editor-references { padding: 1rem; border-top: 1px solid var(--border-color, #d6d9df); }
+.editor-references-header { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+.editor-references-header h2 { flex: 1 1 100%; font-size: 1rem; }
+.editor-references button { min-height: 44px; padding: .4rem .65rem; }
+.editor-references li button { margin-inline-start: .5rem; }
+.editor-references ol { max-height: min(22rem, 40vh); overflow: auto; overscroll-behavior: contain; }
+.reference-picker { display: grid; gap: .65rem; min-width: 0; }
+.reference-picker input,
+.reference-picker select { width: 100%; min-height: 44px; }
+.reference-picker ul { list-style: none; padding: 0; }
+.reference-picker li button { width: 100%; text-align: start; min-height: 44px; padding: .65rem; display: grid; gap: .25rem; }

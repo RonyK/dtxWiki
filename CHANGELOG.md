@@ -44,6 +44,20 @@
 - System activity includes job-targeted audit events, including manual job
   retries, in both the full System feed and its Jobs filter.
 
+### Document references and citations
+
+- People can add Context, Library and Agent references in the Context editor;
+  MCP `cite` registers selected document IDs on the caller's editing version.
+  It requires a draft-write scope, revision check and retry key.
+- Inline `@cite{<internal document address>}` markers and authored references
+  are combined at final publication. Readers show numbered citations and a
+  separate References section. Published Graph relationships use document IDs.
+- The Local Graph inspector reads original citation versions, artifacts and
+  snippets for a selected document relationship, subject to current access.
+- Existing version-specific evidence remains readable. No historical bodies
+  or Chats candidates are backfilled. Refresh cached MCP catalogs after upgrading
+  to tool contract revision 29; old claim-based cite requests are rejected.
+
 ### Index navigation and formatted previews
 
 - MCP indexes use exact `dtxwiki://index/<kind>/<id>` Markdown destinations

@@ -64,7 +64,8 @@
       "library_sync_version": "Library retrieval",
       "version_parent": "Version parent",
       "co_access": "Often read together",
-      "associative": "Associated"
+      "associative": "Associated",
+      "citation_agent": "Agent citation"
     },
     "graphActionKind": {
       "searched": "Searched",
@@ -230,7 +231,8 @@
         "library": "Library material",
         "conversation": "Conversation or activity",
         "folder": "Folder",
-        "seed": "Seed"
+        "seed": "Seed",
+        "agent": "Agent document"
       },
       "edge": {
         "link": "Link",
@@ -307,6 +309,23 @@
       "seedRelationships": "Relationship to the seed",
       "expandSheet": "Expand details",
       "collapseSheet": "Collapse details"
+    },
+    "citationEvidence": {
+      "title": "Retained citation evidence",
+      "currentPublished": "Exact evidence retained on the source document’s current published version.",
+      "sourceVersion": "Source version",
+      "loading": "Loading citation evidence…",
+      "failed": "Citation evidence is unavailable or could not be loaded.",
+      "retry": "Retry citation evidence",
+      "empty": "This relationship has no retained version or artifact evidence.",
+      "type": "Citation type",
+      "status": "Verification status",
+      "contextVersion": "Cited Context version",
+      "libraryVersion": "Cited Library version",
+      "artifact": "Cited artifact",
+      "location": "Original location",
+      "createdVia": "Recorded via",
+      "loadMore": "Load more evidence"
     },
     "coAccess": {
       "sentence": "Read together in {{sessions}} over {{days}} (last {{last}})",
@@ -572,7 +591,8 @@
       "crossFolder": "Cross-folder",
       "recentlyConnected": "Recently connected",
       "apply": "Apply data filters",
-      "chooseKind": "Choose at least one document kind before applying."
+      "chooseKind": "Choose at least one document kind before applying.",
+      "agent": "Agent"
     },
     "metadata": {
       "aria": "Map coverage",
@@ -600,7 +620,8 @@
       "visibleRelationMetric": "Node size: relationships shown in this map (bounded square-root scale).",
       "linksMetric": "Node size: Referenced by N visible documents (bounded square-root scale).",
       "evidenceMetric": "Node size: visible evidence relationship count (bounded square-root scale).",
-      "uniformMetric": "Node size is uniform for this lens; it does not encode importance."
+      "uniformMetric": "Node size is uniform for this lens; it does not encode importance.",
+      "agent": "Agent document"
     },
     "enums": {
       "context": "Context",
@@ -624,7 +645,9 @@
       "capped": "Capped",
       "partial": "Partial",
       "privacy_suppressed": "Privacy suppressed",
-      "unknown": "Other visible relationship"
+      "unknown": "Other visible relationship",
+      "agent": "Agent",
+      "citation_agent": "Agent citation"
     },
     "metrics": {
       "combined": "Visible published links and citation relationships",

@@ -22,6 +22,7 @@ from backend.services.tree_service import TreeService
 from backend.tests.conftest import authenticate_test_client
 
 PUBLIC_FIELDS = {
+    "references",
     "id",
     "slug",
     "title",
@@ -146,7 +147,7 @@ def test_public_read_returns_published_head_without_auth(page_service):
         body_md=(
             "# public-intro\n\nPublished body for public-intro.\n\n"
             f"[Public]({public_href}) [Private]({private_href}) "
-            "[[public-link-target]]"
+            f"[[public-link-target]]\n@cite{{{public_href}}} @cite{{{private_href}}}"
         ),
         actor_kind="human",
         actor_id="dev-local-user",
@@ -173,6 +174,10 @@ def test_public_read_returns_published_head_without_auth(page_service):
             f"\n[Public ref]({public_ref}) [Folder ref]({folder_ref})\n"
         )
         original_body, original_hash = stored.body_md, stored.content_hash
+        # Reuse the same public/private targets for citation projection. The
+        # public target's mutable row can track an unshared draft rename;
+        # anonymous References must derive its title from the exposed version.
+        session.get(ContextPage, public_target.id).title = "Private draft target title"
     anon = _anon_client(page_service)
 
     resp = anon.get("/api/v1/public/w/default/pages/public-intro")
@@ -183,6 +188,11 @@ def test_public_read_returns_published_head_without_auth(page_service):
     assert data["id"] == str(created.id)
     assert data["slug"] == "public-intro"
     assert data["exposure_scope"] == "indexed_web"
+    references = data["references"]
+    assert references[0]["title"] == "public-link-target"
+    assert references[0]["href"] == "/w/default/pages/public-link-target#details"
+    assert references[1]["state"] == "unavailable"
+    assert references[1]["title"] is None and references[1]["target_id"] is None
     assert "Published body for public-intro." in data["body_md"]
     # No internal metadata leaks.
     for field in LEAKED_FIELDS:
@@ -690,8 +700,11 @@ def test_public_read_strips_frontmatter_and_uses_published_timestamp(page_servic
     from datetime import UTC, datetime
 
     from backend.models.context import ContextPageVersion
+    from backend.models.document_reference import ContextPublishedCitation
 
     created = _make_page(page_service, "fm-page", published=True, public=True)
+    private = _make_page(page_service, "fm-private", published=True, public=False)
+    token = f"@cite{{/p/{created.workspace_id}/{private.id}}}"
     with page_service.session_factory.begin() as session:
         page = session.get(ContextPage, created.id)
         version = session.get(ContextPageVersion, page.current_published_version_id)
@@ -703,7 +716,26 @@ def test_public_read_strips_frontmatter_and_uses_published_timestamp(page_servic
             'tags: ["internal", "confidential"]\n'
             'aliases: ["secret-alias"]\n'
             "---\n\n"
-            "# Fm Page\n\nVisible public body.\n"
+            f"# Fm Page\n\nVisible public body. 😀 {token}\n"
+        ).replace("\n", "\r\n")
+        # Stored publication offsets refer to the full source. Anonymous reads
+        # strip frontmatter and normalize newlines before the renderer binds a
+        # redacted target back to this already-authored token.
+        start = version.body_md.index(token)
+        session.add(
+            ContextPublishedCitation(
+                workspace_id=created.workspace_id,
+                source_version_id=version.id,
+                target_kind="context_page",
+                context_page_id=private.id,
+                sort_order=0,
+                inline_count=1,
+                metadata_present=False,
+                legacy_count=0,
+                occurrences=[
+                    {"href": token[6:-1], "start": start, "end": start + len(token)}
+                ],
+            )
         )
         # A published-version timestamp distinct from the (later) page row.
         version.created_at = datetime(2026, 1, 2, tzinfo=UTC)
@@ -721,21 +753,81 @@ def test_public_read_strips_frontmatter_and_uses_published_timestamp(page_servic
         assert leak not in body
     # updated_at is the published version's timestamp, not a page-row value.
     assert data["updated_at"].startswith("2026-01-02")
+    reference = data["references"][0]
+    assert reference["state"] == "unavailable"
+    assert reference["target_id"] is None and reference["title"] is None
+    occurrence = reference["occurrences"][0]
+    assert occurrence["href"] is None
+    assert body[occurrence["start"] : occurrence["end"]] == token
 
 
 def test_public_read_title_from_published_body_not_draft_page_row(page_service):
     # P1: page.title tracks the (possibly unpublished) draft version, so the
     # public title must be derived from the PUBLISHED body's heading — a draft
     # rename must never leak through the public endpoint.
+    from dataclasses import replace
+
+    from backend.domain.document_reference import DocumentRef
     from backend.models.context import ContextPageVersion
+    from backend.policy.auth import ActorContext
+    from backend.services.document_references import resolve_document_targets
+
+    viewer = ActorContext(
+        actor_kind="human",
+        actor_id="00000000-0000-0000-0000-000000000011",
+        workspace_role="viewer",
+        role="viewer",
+        token_kind="session",
+        scopes=("read",),
+    )
+    author_id = "00000000-0000-0000-0000-000000000010"
+    author = replace(viewer, actor_id=author_id, workspace_role="editor", role="editor")
 
     created = _make_page(page_service, "title-page", published=True, public=True)
     with page_service.session_factory.begin() as session:
         page = session.get(ContextPage, created.id)
         version = session.get(ContextPageVersion, page.current_published_version_id)
         version.body_md = "# Published Title\n\nPublished body."
+        session.flush()
+        reference = DocumentRef("context_page", page.id)
+        visible_title = resolve_document_targets(
+            session, page.workspace_id, [reference], viewer
+        )[reference.key].title
         # A later draft rename mutates the page row but not the published head.
         page.title = "Secret Draft Title"
+
+    # The same title boundary applies to authenticated References, including
+    # an editor's private renamed head. Its owner sees the exact staged title;
+    # a viewer continues to see only the published version's title.
+    opened = page_service.begin_context_edit(
+        page_id=created.id,
+        workspace_id=created.workspace_id,
+        actor_kind="human",
+        actor_id=author_id,
+        actor_provenance="browser_session",
+        idempotency_key="reference-title-open",
+    )
+    page_service.autosave_page(
+        page_id=created.id,
+        workspace_id=created.workspace_id,
+        title="Private staged title",
+        body_md="# Private body title\n\nUnpublished body.",
+        actor_kind="human",
+        actor_id=author_id,
+        actor_provenance="browser_session",
+        base_version_id=opened.version_id,
+        base_content_hash=opened.content_hash,
+        expected_editing_revision=opened.editing_revision,
+        editing_version_id=opened.version_id,
+        idempotency_key="reference-title-save",
+    )
+    with page_service.session_factory() as session:
+        assert resolve_document_targets(
+            session, created.workspace_id, [reference], viewer
+        )[reference.key].title == visible_title
+        assert resolve_document_targets(
+            session, created.workspace_id, [reference], author
+        )[reference.key].title == "Private staged title"
 
     anon = _anon_client(page_service)
     resp = anon.get("/api/v1/public/w/default/pages/title-page")

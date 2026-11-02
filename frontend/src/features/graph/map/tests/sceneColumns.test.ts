@@ -196,6 +196,20 @@ describe("Workspace Map visible columns", () => {
     expect(columns.identity.visibleFingerprint).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it("retains an Agent document and its citation as authored map geometry", () => {
+    const scene = visibleScene();
+    scene.nodes = scene.nodes.map((node) => node.grain === "document" && node.entity_kind === "library"
+      ? { ...node, entity_kind: "agent" as const, path: "/workspaces/workspace/agent/pages/item-a" }
+      : node);
+    scene.edges = scene.edges.map((edge) => ({ ...edge, relation_kind: "citation_agent", layer: "evidence" as const }));
+    const columns = buildWorkspaceMapColumns(scene, options);
+    expect(columns.nodeKeys).toContain("agent:item-a");
+    const row = columns.nodeKeys.indexOf("agent:item-a");
+    expect(columns.nodeKinds[row]).toBe(WORKSPACE_MAP_NODE_KIND.agent);
+    expect(columns.edgeIds).toHaveLength(2);
+    expect([...columns.edgeKinds]).toEqual([WORKSPACE_MAP_EDGE_KIND.citation, WORKSPACE_MAP_EDGE_KIND.citation]);
+  });
+
   it("ignores response order, projection IDs and non-layout metadata in the fingerprint", () => {
     const original = visibleScene();
     const changed = visibleScene();

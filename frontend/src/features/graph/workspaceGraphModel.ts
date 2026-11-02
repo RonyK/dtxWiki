@@ -56,7 +56,7 @@ const MIN_VIEWPORT_ZOOM = 0.001;
 
 export const DEFAULT_WORKSPACE_GRAPH_FILTERS: WorkspaceGraphDataFilters = {
   search: "",
-  document_kinds: ["context", "library"],
+  document_kinds: ["context", "library", "agent"],
   time_basis: "document_updated",
   time_from: null,
   time_to: null,
@@ -438,7 +438,7 @@ function renderNode(
     status: "",
     is_seed: false,
     entityKind: node.grain === "document"
-      ? node.entity_kind === "context" ? "context_page" : "library_item"
+      ? node.entity_kind === "context" ? "context_page" : node.entity_kind === "agent" ? "agent_page" : "library_item"
       : "cluster",
     grain: node.grain === "document" ? "document" : node.cluster_kind,
     referenceCount: node.grain === "document" ? node.reference_count : node.relation_count,
@@ -497,7 +497,7 @@ function normalizeStoredState(
       search: typeof storedFilters.search === "string"
         ? storedFilters.search.slice(0, 200)
         : "",
-      document_kinds: documentKinds.length ? documentKinds : ["context", "library"],
+      document_kinds: documentKinds.length ? documentKinds : ["context", "library", "agent"],
       time_basis: storedFilters.time_basis === "relation_observed"
         ? "relation_observed"
         : "document_updated",
@@ -522,7 +522,7 @@ function normalizeStoredState(
 }
 
 function isDocumentKind(value: unknown): value is WorkspaceGraphDocumentKind {
-  return value === "context" || value === "library";
+  return value === "context" || value === "library" || value === "agent";
 }
 
 function isQuickFilter(value: unknown): value is WorkspaceGraphDataFilters["quick_filters"][number] {

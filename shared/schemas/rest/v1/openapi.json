@@ -4490,6 +4490,118 @@
         "title": "ChangeSetEntry",
         "type": "object"
       },
+      "CiteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CiteResult"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "CiteResponse",
+        "type": "object"
+      },
+      "CiteResult": {
+        "additionalProperties": false,
+        "properties": {
+          "added": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentReferenceInput"
+            },
+            "title": "Added",
+            "type": "array"
+          },
+          "audit_event_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit Event Id"
+          },
+          "editing_revision": {
+            "title": "Editing Revision",
+            "type": "integer"
+          },
+          "page_id": {
+            "format": "uuid",
+            "title": "Page Id",
+            "type": "string"
+          },
+          "publication_state": {
+            "const": "editing",
+            "default": "editing",
+            "title": "Publication State",
+            "type": "string"
+          },
+          "receipt_id": {
+            "format": "uuid",
+            "title": "Receipt Id",
+            "type": "string"
+          },
+          "references_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "References Hash",
+            "type": "string"
+          },
+          "remaining_inline_occurrences": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Remaining Inline Occurrences",
+            "type": "object"
+          },
+          "removed": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentReferenceRemoveInput"
+            },
+            "title": "Removed",
+            "type": "array"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "unchanged": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DocumentReferenceInput"
+                },
+                {
+                  "$ref": "#/components/schemas/DocumentReferenceRemoveInput"
+                }
+              ]
+            },
+            "title": "Unchanged",
+            "type": "array"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "page_id",
+          "version_id",
+          "editing_revision",
+          "references_hash",
+          "receipt_id"
+        ],
+        "title": "CiteResult",
+        "type": "object"
+      },
       "CompatibilityReasonCode": {
         "enum": [
           "catalog_app_unavailable",
@@ -6145,6 +6257,19 @@
             "default": false,
             "title": "Reconciliation Pending Count Truncated",
             "type": "boolean"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceView"
+            },
+            "title": "References",
+            "type": "array"
+          },
+          "references_hash": {
+            "default": "",
+            "pattern": "^(?:[a-f0-9]{64})?$",
+            "title": "References Hash",
+            "type": "string"
           },
           "review_item_id": {
             "anyOf": [
@@ -7960,6 +8085,90 @@
         "title": "DiscardContextEditRequest",
         "type": "object"
       },
+      "DocumentReferenceInput": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_kind": {
+            "enum": [
+              "context_page",
+              "library_item",
+              "agent_page"
+            ],
+            "title": "Target Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_kind",
+          "target_id"
+        ],
+        "title": "DocumentReferenceInput",
+        "type": "object"
+      },
+      "DocumentReferenceRemoveInput": {
+        "additionalProperties": false,
+        "properties": {
+          "reference_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Id"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "target_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "context_page",
+                  "library_item",
+                  "agent_page"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Kind"
+          }
+        },
+        "title": "DocumentReferenceRemoveInput",
+        "type": "object"
+      },
       "DraftReviewReason": {
         "additionalProperties": false,
         "description": "One reason a write did not simply publish.\n\nLives here rather than beside either write surface because both use it: the\nMCP result names why a draft went to review, and the REST page payload names\nwhy a save was held from publication.",
@@ -8466,6 +8675,228 @@
           }
         },
         "title": "GraphCapabilities",
+        "type": "object"
+      },
+      "GraphCitationEvidenceItem": {
+        "additionalProperties": false,
+        "properties": {
+          "citation_type": {
+            "title": "Citation Type",
+            "type": "string"
+          },
+          "cited_context_page_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cited Context Page Version Id"
+          },
+          "created_via": {
+            "title": "Created Via",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "library_artifact_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Library Artifact Id"
+          },
+          "library_item_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Library Item Version Id"
+          },
+          "location": {
+            "additionalProperties": true,
+            "title": "Location",
+            "type": "object"
+          },
+          "owner_id": {
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "owner_kind": {
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet"
+          },
+          "source_version_id": {
+            "format": "uuid",
+            "title": "Source Version Id",
+            "type": "string"
+          },
+          "verification_status": {
+            "title": "Verification Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source_version_id",
+          "owner_kind",
+          "owner_id",
+          "citation_type",
+          "verification_status",
+          "created_via"
+        ],
+        "title": "GraphCitationEvidenceItem",
+        "type": "object"
+      },
+      "GraphCitationEvidencePayload": {
+        "additionalProperties": false,
+        "description": "One bounded inspection window; empty items can still have a next cursor.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GraphCitationEvidenceItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "source_page_id": {
+            "format": "uuid",
+            "title": "Source Page Id",
+            "type": "string"
+          },
+          "source_version_id": {
+            "format": "uuid",
+            "title": "Source Version Id",
+            "type": "string"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_kind": {
+            "enum": [
+              "context_page",
+              "library_item",
+              "agent_page"
+            ],
+            "title": "Target Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_page_id",
+          "source_version_id",
+          "target_kind",
+          "target_id",
+          "items"
+        ],
+        "title": "GraphCitationEvidencePayload",
+        "type": "object"
+      },
+      "GraphCitationEvidenceRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor"
+          },
+          "limit": {
+            "default": 20,
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "source_page_id": {
+            "format": "uuid",
+            "title": "Source Page Id",
+            "type": "string"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_kind": {
+            "enum": [
+              "context_page",
+              "library_item",
+              "agent_page"
+            ],
+            "title": "Target Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_page_id",
+          "target_kind",
+          "target_id"
+        ],
+        "title": "GraphCitationEvidenceRequest",
+        "type": "object"
+      },
+      "GraphCitationEvidenceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GraphCitationEvidencePayload"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "GraphCitationEvidenceResponse",
         "type": "object"
       },
       "GraphEdge": {
@@ -12175,6 +12606,13 @@
               "$ref": "#/components/schemas/ContextLinkTarget"
             },
             "title": "Link Targets",
+            "type": "array"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceView"
+            },
+            "title": "References",
             "type": "array"
           },
           "request_id": {
@@ -17028,11 +17466,26 @@
                 "tags",
                 "aliases",
                 "page_type",
-                "placement"
+                "placement",
+                "references"
               ],
               "type": "string"
             },
             "title": "Metadata Changes",
+            "type": "array"
+          },
+          "references_after": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceView"
+            },
+            "title": "References After",
+            "type": "array"
+          },
+          "references_before": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceView"
+            },
+            "title": "References Before",
             "type": "array"
           },
           "to_version_id": {
@@ -17777,6 +18230,13 @@
             "title": "Link Targets",
             "type": "array"
           },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceView"
+            },
+            "title": "References",
+            "type": "array"
+          },
           "slug": {
             "title": "Slug",
             "type": "string"
@@ -17909,6 +18369,19 @@
             "pattern": "^[a-f0-9]{64}$",
             "title": "Expected Content Hash",
             "type": "string"
+          },
+          "expected_references_hash": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required when publishing a mutable editing version; frozen submitted versions already bind their references.",
+            "title": "Expected References Hash"
           },
           "publish_despite_findings": {
             "default": false,
@@ -18698,6 +19171,220 @@
           "data"
         ],
         "title": "RedirectResponseBody",
+        "type": "object"
+      },
+      "ReferenceCommandRequest": {
+        "additionalProperties": false,
+        "description": "Change only the caller's explicit bibliography on an open Context edit.",
+        "properties": {
+          "add": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentReferenceInput"
+            },
+            "maxItems": 500,
+            "title": "Add",
+            "type": "array"
+          },
+          "expected_editing_revision": {
+            "minimum": 1.0,
+            "title": "Expected Editing Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "description": "24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.",
+            "maxLength": 160,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "remove": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentReferenceRemoveInput"
+            },
+            "maxItems": 500,
+            "title": "Remove",
+            "type": "array"
+          },
+          "retry_only": {
+            "default": false,
+            "title": "Retry Only",
+            "type": "boolean"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id",
+          "expected_editing_revision",
+          "idempotency_key"
+        ],
+        "title": "ReferenceCommandRequest",
+        "type": "object"
+      },
+      "ReferenceOccurrence": {
+        "properties": {
+          "end": {
+            "title": "End",
+            "type": "integer"
+          },
+          "href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Href"
+          },
+          "start": {
+            "title": "Start",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "href",
+          "start",
+          "end"
+        ],
+        "title": "ReferenceOccurrence",
+        "type": "object"
+      },
+      "ReferenceView": {
+        "properties": {
+          "href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Href"
+          },
+          "inline_count": {
+            "default": 0,
+            "title": "Inline Count",
+            "type": "integer"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "location_warning": {
+            "anyOf": [
+              {
+                "const": "fragment_unavailable",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Warning"
+          },
+          "metadata_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata Id"
+          },
+          "metadata_present": {
+            "default": false,
+            "title": "Metadata Present",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "occurrences": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceOccurrence"
+            },
+            "title": "Occurrences",
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "available",
+              "unavailable",
+              "unpublished",
+              "deleted"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "target_kind": {
+            "enum": [
+              "context_page",
+              "library_item",
+              "agent_page"
+            ],
+            "title": "Target Kind",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "target_kind",
+          "target_id",
+          "number",
+          "state"
+        ],
+        "title": "ReferenceView",
         "type": "object"
       },
       "ReviewActionAvailability": {
@@ -24186,7 +24873,8 @@
           "entity_kind": {
             "enum": [
               "context",
-              "library"
+              "library",
+              "agent"
             ],
             "title": "Entity Kind",
             "type": "string"
@@ -24628,7 +25316,8 @@
           "source_entity_kind": {
             "enum": [
               "context",
-              "library"
+              "library",
+              "agent"
             ],
             "title": "Source Entity Kind",
             "type": "string"
@@ -24648,7 +25337,8 @@
           "target_entity_kind": {
             "enum": [
               "context",
-              "library"
+              "library",
+              "agent"
             ],
             "title": "Target Entity Kind",
             "type": "string"
@@ -24740,7 +25430,8 @@
           "entity_kind": {
             "enum": [
               "context",
-              "library"
+              "library",
+              "agent"
             ],
             "title": "Entity Kind",
             "type": "string"
@@ -24866,11 +25557,12 @@
             "items": {
               "enum": [
                 "context",
-                "library"
+                "library",
+                "agent"
               ],
               "type": "string"
             },
-            "maxItems": 2,
+            "maxItems": 3,
             "minItems": 1,
             "title": "Document Kinds",
             "type": "array"
@@ -37829,6 +38521,117 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/references": {
+      "post": {
+        "operationId": "update_context_references_api_v1_workspaces__workspace_id__context_pages__page_id__references_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Page Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReferenceCommandRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CiteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTConflictErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Context References",
+        "tags": [
+          "context-pages"
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/restore": {
       "post": {
         "operationId": "restore_page_version_api_v1_workspaces__workspace_id__context_pages__page_id__restore_post",
@@ -39327,6 +40130,108 @@
           }
         ],
         "summary": "Get Workspace Graph Capability",
+        "tags": [
+          "graph"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/graph/citations/evidence/query": {
+      "post": {
+        "description": "Inspect one selected Citation pair without expanding the layout scene.",
+        "operationId": "query_citation_evidence_api_v1_workspaces__workspace_id__graph_citations_evidence_query_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GraphCitationEvidenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphCitationEvidenceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Query Citation Evidence",
         "tags": [
           "graph"
         ]

@@ -32,7 +32,7 @@ WorkspaceGraphLens = Literal[
     "growth",
     "provenance",
 ]
-WorkspaceGraphDocumentKind = Literal["context", "library"]
+WorkspaceGraphDocumentKind = Literal["context", "library", "agent"]
 WorkspaceGraphQuickFilter = Literal[
     "orphans",
     "highly_referenced",
@@ -177,9 +177,9 @@ class WorkspaceGraphOverviewRequest(BaseModel):
     head_mode: Literal["published"] = "published"
     lens: WorkspaceGraphLens = "combined"
     document_kinds: list[WorkspaceGraphDocumentKind] = Field(
-        default_factory=lambda: ["context", "library"],
+        default_factory=lambda: ["context", "library", "agent"],
         min_length=1,
-        max_length=2,
+        max_length=3,
     )
     search: str | None = Field(default=None, min_length=1, max_length=200)
     quick_filters: list[WorkspaceGraphQuickFilter] = Field(
@@ -519,6 +519,7 @@ class WorkspaceGraphScenePayload(BaseModel):
             "wikilink": "knowledge",
             "citation_page": "evidence",
             "citation_source": "evidence",
+            "citation_agent": "evidence",
         }
         relation_facets = self.facet_counts.relation_kinds
         full_kind_counts = {facet.value: facet.count for facet in relation_facets}

@@ -28,7 +28,7 @@ from backend.models.user import User
 from backend.models.workspace import MCPClient, Workspace
 from backend.policy.auth import ActorContext
 from backend.schemas.read import GraphNeighborEntry, GraphNeighborsPayload
-from backend.services import graph_ppr, graph_rank
+from backend.services import graph_ppr
 from backend.services.eval.harness import (
     LaneMetrics,
     ModeMetrics,
@@ -182,7 +182,7 @@ def _seed_touches(
             workspace_id=workspace_id,
             request_id=uuid4(),
             tool_name=tool_name,
-            result_status="success",
+            result_status="succeeded",
         )
         session.add(tool_call)
         session.flush()
@@ -325,17 +325,13 @@ def test_co_access_rebuild_decays_and_discards_session_identity(
         assert edge_version(session, workspace_id) > before
 
 
-def test_co_access_projection_decay_reads_the_rank_table_half_life(
+def test_legacy_co_access_projection_owns_storage_weight_decay(
     session_factory, page_service, monkeypatch
 ):
-    """The co_access half-life has one source: the rank table.
+    """Storage aging is a producer policy, independent of display ranking."""
 
-    rank_score never decays co_access because projection already did; the
-    two only agree if projection reads the same value.
-    """
-
-    monkeypatch.setitem(
-        graph_rank.RANK_PARAMS, "co_access", graph_rank.RankParam(0.20, 25, 15)
+    monkeypatch.setattr(
+        edge_registry, "LEGACY_CO_ACCESS_WEIGHT_HALF_LIFE_DAYS", 15
     )
     left = _publish(page_service, "co-halflife-left", "Co Half-life Left")
     right = _publish(page_service, "co-halflife-right", "Co Half-life Right")

@@ -413,6 +413,22 @@ Python backend, CLI, MCP, worker 코드는 editable install이므로 일반적�
 process는 새 코드를 읽지 않으므로 backend와 worker는 재시작해야 합니다. MCP client가
 tool catalog를 cache했다면 backend 재시작 후 연결을 다시 초기화하세요.
 
+### Graph projection writer 계약
+
+`services/indexing/edge_projection.py`는 typed row, Workspace·edge-kind 소유
+범위와 reconcile 결과를 공통으로 정의합니다. 모든 입력을 변경 전에 검사하며
+기존 row ID, no-op 상태와 usage의 지원 횟수·최초 관찰 시각을 보존합니다.
+관계 추출, 인용 발행, 읽기 pair 집계와 observation은 각 producer가 소유합니다.
+
+Producer는 `graph_cache.lock_edge_projection_workspace()`로 Workspace를
+먼저 잠근 뒤 edge를 조회·수정하고, 같은 트랜잭션에서 필요한 revision을 올립니다.
+잠금 자체는 revision·수정 시각을 바꾸지 않습니다. 읽기 usage hook은 새 per-call
+행의 `viewed + succeeded + focused-read tool`만 처리하며 인용 등록과 구분합니다.
+저장 시 가중치 감쇠는 producer 정책이며 표시 순위 계산에서 중복 적용하지 않습니다.
+
+현재 schema head는 release manifest에서 읽습니다. 독립 migration을 통합할 때는
+원본 revision을 유지하고 merge revision으로 연결한 뒤 schema·model 일치를 검사합니다.
+
 ## 설치 방식별 업데이트 방법
 
 | 설치 방식 | 코드 변경 반영 방법 | 재설치 필요 조건 |
@@ -886,9 +902,17 @@ Keep one edit per task and submit it once. In the same MCP chat,
 `begin_context_edit` after a submit reopens that submission while its review is
 pending, instead of creating a new version.
 Editing commands use `editing_version_id`, `expected_editing_revision`, and an
-operation key to detect conflicting updates. The Context editing tools do not
-currently support attaching citation arrays or metadata-only updates without
-resending the body.
+operation key to detect conflicting updates. Use `cite` with the owning page
+and editing version, `expected_editing_revision`, `idempotency_key`, and explicit
+`add`/`remove` document references. Targets use `target_kind` and document UUID,
+not a target version. Search and read the selected sources before registration.
+The REST editor uses the same reference command service. Inline
+`@cite{<internal document address>}` markers are registered at final publication
+alongside reference metadata. Ordinary Markdown links remain ordinary links.
+References are returned separately from the authored body; do not append a
+second generated copy to the Markdown. Old claim-based cite inputs are rejected,
+and reindex does not discover historical citations or reinterpret Chats records.
+
 
 Structure results are paginated. Follow `next_cursor` for `read_structure_map`;
 for `read_context_outline`, send `outline_next_cursor` back as `outline_cursor`.

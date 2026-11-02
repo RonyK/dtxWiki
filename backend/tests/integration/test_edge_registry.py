@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from backend.models.ask import AskSession, AskTurn, AskTurnCitation
 from backend.models.base import Base
@@ -73,6 +73,21 @@ _GRAPH_FK_TARGET_TABLES = {
     "workspace_tree_node",
 }
 _NON_EDGE_RELATION_SOURCES = {
+    # Authoring metadata and integrity FK components are not published edges.
+    "context_citation_publication.version_id->context_page_version.id",
+    "context_citation_publication.workspace_id->context_page_version.workspace_id",
+    "context_document_reference.agent_page_id->agent_page.id",
+    "context_document_reference.context_page_id->context_page.id",
+    "context_document_reference.library_item_id->library_item.id",
+    "context_document_reference.owner_version_id->context_page_version.id",
+    "context_document_reference.workspace_id->agent_page.workspace_id",
+    "context_document_reference.workspace_id->context_page.workspace_id",
+    "context_document_reference.workspace_id->context_page_version.workspace_id",
+    "context_document_reference.workspace_id->library_item.workspace_id",
+    "context_published_citation.workspace_id->agent_page.workspace_id",
+    "context_published_citation.workspace_id->context_page.workspace_id",
+    "context_published_citation.workspace_id->context_page_version.workspace_id",
+    "context_published_citation.workspace_id->library_item.workspace_id",
     # A personal preference is not a shared knowledge-graph relationship.
     "user_favorite.target_kind+target_id",
     # Mutable head pointers and rebuildable lookup/index rows are storage
@@ -673,11 +688,25 @@ def test_narrow_wikilink_reconcile_never_mutates_sources_outside_lock_set(
         outside_before = _edge_projection_snapshots(session, outside_edge_ids)
 
     with session_factory.begin() as session:
-        delta = reconcile_wikilink_edge_projection(
-            session,
-            workspace_id,
-            source_page_ids=frozenset({locked_source_id}),
-        )
+        statements = []
+        connection = session.connection()
+
+        def capture_statement(_conn, _cursor, statement, *_args):
+            statements.append(statement.lower())
+
+        event.listen(connection, "before_cursor_execute", capture_statement)
+        try:
+            delta = reconcile_wikilink_edge_projection(
+                session,
+                workspace_id,
+                source_page_ids=frozenset({locked_source_id}),
+            )
+        finally:
+            event.remove(connection, "before_cursor_execute", capture_statement)
+        # PostgreSQL writers must acquire the Workspace lock before touching
+        # edge rows; SQLite observes the same portable no-op UPDATE first.
+        assert statements[0].startswith("update workspace set")
+        assert any("edge_projection" in statement for statement in statements[1:])
 
     assert delta.desired_count == 1
     assert delta.inserted == 0

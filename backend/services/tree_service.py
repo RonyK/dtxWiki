@@ -1412,6 +1412,28 @@ def folder_slug(title: str) -> str:
     return "-".join(parts)[:80] or "folder"
 
 
+def _refresh_document_citation_targets(
+    session: Session,
+    workspace_id: UUID,
+    nodes: list[WorkspaceTreeNode],
+) -> None:
+    """Keep incoming citations aligned with target archive/revival atomically."""
+    from backend.services.indexing.edge_registry import (
+        refresh_document_citation_sources,
+    )
+
+    targets = {
+        (node.target_kind, node.target_id)
+        for node in nodes
+        if node.target_kind in {"agent_page", "library_item"}
+        and node.target_id is not None
+    }
+    for target_kind, target_id in sorted(
+        targets, key=lambda target: (target[0], str(target[1]))
+    ):
+        refresh_document_citation_sources(session, workspace_id, target_kind, target_id)
+
+
 def _cascade_archive_to_targets(
     session: Session,
     *,
@@ -1491,6 +1513,7 @@ def _cascade_archive_to_targets(
                 item.lifecycle_status = "archived"
                 sync_library_doc_sources(session, item)
     session.flush()
+    _refresh_document_citation_targets(session, workspace_id, nodes)
 
 
 def _revive_primary_node(
@@ -1641,6 +1664,7 @@ def _revive_primary_node(
             item.lifecycle_status = _revived_library_lifecycle(session, item)
             sync_library_doc_sources(session, item)
     session.flush()
+    _refresh_document_citation_targets(session, workspace_id, [node])
 
 
 def _revived_library_lifecycle(session: Session, item) -> str:

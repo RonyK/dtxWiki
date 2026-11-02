@@ -93,6 +93,7 @@ def test_context_api_creates_updates_and_publishes_draft(page_service):
         json={
             "reason": "publish browser-authored context draft",
             "expected_content_hash": updated_hash,
+            "expected_references_hash": updated_data["references_hash"],
         },
     )
     assert published.status_code == 200

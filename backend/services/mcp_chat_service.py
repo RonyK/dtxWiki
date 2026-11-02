@@ -88,11 +88,21 @@ from backend.services.actor_visible_read import (
     library_item_visible,
 )
 from backend.services.audit_service import AuditService
+from backend.services.mcp_artifact_activity import (
+    ArtifactLinkCandidate as ArtifactLinkCandidate,
+)
+from backend.services.mcp_artifact_activity import (
+    InsertedArtifactUsage,
+)
 from backend.services.mcp_display_text import (
     sanitize_display_text as _sanitize_display_text,
 )
 from backend.services.mcp_display_text import (
     truncate_graphemes as _truncate_graphemes,
+)
+from backend.services.mcp_focused_read_usage import (
+    prepare_artifact_usage,
+    project_inserted_artifact_usage,
 )
 from backend.services.mcp_trace_redaction import (
     PATCH_OPERATION_KINDS,
@@ -265,19 +275,6 @@ _TARGET_SCAN_MAX_ITEMS = 500
 _TARGET_SCAN_MAX_REFS = 200
 
 
-@dataclass(frozen=True)
-class ArtifactLinkCandidate:
-    resource_kind: McpChatArtifactKind
-    resource_id: UUID
-    verb: McpChatArtifactVerb
-    # The conversation base ledger (design doc section 9): exact version
-    # evidence from a versioned read or successful non-replayed patch. It is
-    # carried by that call's own CONTEXT_PAGE relation (REFERENCED for a read,
-    # EDITED for a patch) and is None when no exact version can be resolved.
-    version_id: UUID | None = None
-    root_hash: str | None = None
-
-
 class McpChatService:
     """Aggregates raw MCP tool traces into external chat provenance."""
 
@@ -294,6 +291,8 @@ class McpChatService:
         tool_call: MCPToolCall,
         owner_user_id: UUID | None = None,
     ) -> McpChatSession:
+        from backend.services.citation_trace import citation_write_count
+
         chat = session.scalar(
             select(McpChatSession).where(
                 McpChatSession.workspace_id == workspace_id,
@@ -350,7 +349,13 @@ class McpChatService:
         # Flush immediately: the expression UPDATE expires the counters, so the
         # label/summary refresh below re-reads the post-increment values.
         chat.tool_call_count = McpChatSession.tool_call_count + 1
-        if tool_call.tool_name in WRITE_TOOLS:
+        write_override = citation_write_count(tool_call)
+        count_write = (
+            tool_call.tool_name in WRITE_TOOLS
+            if write_override is None
+            else write_override
+        )
+        if count_write:
             chat.write_count = McpChatSession.write_count + 1
         if tool_call.result_status in ERROR_STATUSES:
             chat.error_count = McpChatSession.error_count + 1
@@ -376,6 +381,13 @@ class McpChatService:
         root_hash: str | None = None,
     ) -> McpChatArtifactLink:
         occurred_at = tool_call.completed_at or tool_call.started_at or utc_now()
+        prepare_artifact_usage(
+            session,
+            workspace_id=chat_session.workspace_id,
+            verb=verb.value,
+            result_status=tool_call.result_status,
+            tool_name=tool_call.tool_name,
+        )
 
         def _advance_read_pointer(existing: McpChatArtifactLink) -> None:
             if version_id is None:
@@ -494,6 +506,7 @@ class McpChatService:
                 McpChatToolCallArtifact.verb == verb.value,
             )
         )
+        inserted_edge = None
         if edge is None:
             new_edge = McpChatToolCallArtifact(
                 workspace_id=chat_session.workspace_id,
@@ -508,10 +521,23 @@ class McpChatService:
                 with session.begin_nested():
                     session.add(new_edge)
                     session.flush()
+                inserted_edge = new_edge
             except IntegrityError:
                 # Concurrent insert of the identical per-call edge
                 # (uq_mcp_chat_tool_call_artifact); idempotent, so ignore.
                 pass
+        if inserted_edge is not None:
+            project_inserted_artifact_usage(
+                session,
+                InsertedArtifactUsage(
+                    workspace_id=inserted_edge.workspace_id,
+                    chat_session_id=inserted_edge.chat_session_id,
+                    artifact_id=inserted_edge.id,
+                    verb=inserted_edge.verb,
+                    result_status=tool_call.result_status,
+                    tool_name=tool_call.tool_name,
+                ),
+            )
         self._refresh_chat_labels(session, chat_session)
         return link
 
@@ -2303,8 +2329,7 @@ class _ReaderGate:
                     ContextPageVersion,
                     workspace_id=self.workspace_id,
                     resource_ids=ids[start : start + 500],
-                )
-                .options(
+                ).options(
                     load_only(
                         ContextPageVersion.id,
                         ContextPageVersion.page_id,
@@ -3766,8 +3791,9 @@ def _intent_from_input(
     the server, so a chat's intent can never be recovered. What *is* recorded is
     the natural-language field the client had to fill in:
     `submit_context_edit_for_review.reason` is required, `search.query` is the
-    literal question asked of the index, and `cite.claim_text` is the sentence
-    being supported.
+    literal question asked of the index. Historical `cite.claim_text` records
+    the sentence sent to the former candidate lookup; new reference commands
+    accept chosen document IDs and have no such text.
 
     The source travels with the text because the screen must not let a reader
     mistake an agent's self-description for something they said themselves.

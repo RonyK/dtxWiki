@@ -187,6 +187,13 @@ def _seed_library_artifact(session, workspace_id, *, trust_level="normal"):
 
 def _cite_artifact(session, page, artifact):
     assert page.current_published_version_id is not None
+    from backend.models.document_reference import ContextCitationPublication
+    # These legacy-evidence regressions model a pre-migration published head.
+    # A v1 publication would register its complete immutable citation set.
+    marker = session.get(ContextCitationPublication, page.current_published_version_id)
+    if marker is not None:
+        session.delete(marker)
+        session.flush()
     citation = ContextCitation(
         workspace_id=page.workspace_id,
         target_kind="context_page_whole",

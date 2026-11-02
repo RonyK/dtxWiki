@@ -913,7 +913,7 @@ def _concept_neighbors(session, ctx, page, actor):
         kind=EntityKind.CONTEXT_PAGE.value,
         entity_id=page.id,
         actor=actor,
-        edge_kinds=("citation_page", "citation_source"),
+        edge_kinds=("citation_page", "citation_source", "citation_agent"),
         direction="out",
         limit=5,
     )

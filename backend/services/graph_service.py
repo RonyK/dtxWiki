@@ -23,6 +23,7 @@ from sqlalchemy import (
     case,
     cast,
     func,
+    inspect,
     literal,
     literal_column,
     or_,
@@ -32,7 +33,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Session, aliased
 
 from backend.models.agent import AgentPage
-from backend.models.context import ContextPage, EdgeProjection
+from backend.models.context import ContextPage
 from backend.models.library import LibraryArtifact, LibraryItem, LibraryItemVersion
 from backend.models.tree import WorkspaceTreeNode
 from backend.policy.auth import ActorContext
@@ -62,6 +63,10 @@ from backend.services.graph_rank import (
     effective_weight,
     kind_order_key,
     rank_score,
+)
+from backend.services.graph_reference_projection import (
+    document_projection_for_workspace,
+    select_document_edges_in_workspace,
 )
 from backend.services.graph_semantics import EDGE_SEMANTICS
 from backend.services.library_canonical import (
@@ -102,7 +107,12 @@ _DENOMINATOR_STATEMENT_LIMIT = 256
 _PARTITION_STATEMENTS: dict[tuple, Any] = {}
 _TREE_CHAIN_PREDICATES: dict[tuple, Any] = {}
 # The kinds whose rank divides by a count taken over the source page.
-_PAGE_DENOMINATOR_KINDS = ("wikilink", "citation_page", "citation_source")
+_PAGE_DENOMINATOR_KINDS = (
+    "wikilink",
+    "citation_page",
+    "citation_source",
+    "citation_agent",
+)
 
 
 @dataclass(frozen=True)
@@ -625,6 +635,7 @@ class GraphService:
         their keyset refill is bounded across both directions. ``scan_capped``
         tells callers when that fallback sample was insufficient.
         """
+        EdgeProjection = document_projection_for_workspace(workspace_id)
 
         if limit <= 0:
             return VisibleProjectionEdges()
@@ -965,7 +976,11 @@ class GraphService:
                 if kind == tree_kind
                 else (
                     ("wikilink", ("wikilink",), False),
-                    ("citation", ("citation_page", "citation_source"), True),
+                    (
+                        "citation",
+                        ("citation_page", "citation_source", "citation_agent"),
+                        True,
+                    ),
                 )
             )
             for offset in range(0, len(large), RANK_DENOMINATOR_CAPPED_BATCH_SIZE):
@@ -1007,6 +1022,7 @@ class GraphService:
         folder_chunks: int,
     ) -> list[tuple[Any, tuple[str, ...]]]:
         """The grouped denominator statements for this reader, built once."""
+        EdgeProjection = document_projection_for_workspace(workspace_id)
 
         key = (
             workspace_id,
@@ -1089,8 +1105,13 @@ class GraphService:
         The inner, index-only count keeps a large source out of the grouped
         read, where it would cost a visibility check per stored relation.
         """
+        EdgeProjection = document_projection_for_workspace(workspace_id)
 
-        stored = aliased(EdgeProjection)
+        stored = aliased(
+            EdgeProjection,
+            inspect(EdgeProjection).selectable.alias(),
+            adapt_on_names=True,
+        )
         fits = (
             select(stored.source_id)
             .where(
@@ -1103,8 +1124,9 @@ class GraphService:
             # Bound at execution, so a reused statement follows the cap.
             .having(func.count() <= bindparam("row_cap", type_=Integer))
         )
-        return (
-            select(
+        return select_document_edges_in_workspace(
+            workspace_id=workspace_id,
+            columns=(
                 EdgeProjection.source_kind,
                 EdgeProjection.source_id,
                 func.count(
@@ -1115,7 +1137,11 @@ class GraphService:
                         case(
                             (
                                 EdgeProjection.edge_kind.in_(
-                                    ("citation_page", "citation_source")
+                                    (
+                                        "citation_page",
+                                        "citation_source",
+                                        "citation_agent",
+                                    )
                                 ),
                                 EdgeProjection.weight,
                             )
@@ -1126,16 +1152,14 @@ class GraphService:
                 func.count(
                     case((EdgeProjection.edge_kind == "tree", literal_column("1")))
                 ).label("children"),
-            )
-            .where(
-                EdgeProjection.workspace_id == workspace_id,
+            ),
+            predicates=(
                 EdgeProjection.source_kind == source_kind,
                 EdgeProjection.source_id.in_(fits),
                 EdgeProjection.edge_kind.in_(edge_kinds),
                 visible,
-            )
-            .group_by(EdgeProjection.source_kind, EdgeProjection.source_id)
-        )
+            ),
+        ).group_by(EdgeProjection.source_kind, EdgeProjection.source_id)
 
     @staticmethod
     def _stored_relation_counts(
@@ -1150,18 +1174,21 @@ class GraphService:
 
         Only picks the statement that counts a source; never a count itself.
         """
+        EdgeProjection = document_projection_for_workspace(workspace_id)
 
         counts: dict[UUID, int] = {}
         for offset in range(0, len(source_ids), RANK_DENOMINATOR_BATCH_SIZE):
             chunk = source_ids[offset : offset + RANK_DENOMINATOR_BATCH_SIZE]
             counts.update(
                 session.execute(
-                    select(EdgeProjection.source_id, func.count())
-                    .where(
-                        EdgeProjection.workspace_id == workspace_id,
-                        EdgeProjection.source_kind == source_kind,
-                        EdgeProjection.source_id.in_(chunk),
-                        EdgeProjection.edge_kind.in_(edge_kinds),
+                    select_document_edges_in_workspace(
+                        workspace_id=workspace_id,
+                        columns=(EdgeProjection.source_id, func.count()),
+                        predicates=(
+                            EdgeProjection.source_kind == source_kind,
+                            EdgeProjection.source_id.in_(chunk),
+                            EdgeProjection.edge_kind.in_(edge_kinds),
+                        ),
                     )
                     .group_by(EdgeProjection.source_id)
                     .execution_options(graph_rank_phase="rank_denominators")
@@ -1187,6 +1214,7 @@ class GraphService:
         ``summed`` adds the rows' weights (citation instances) instead of
         counting them, over the same capped rows in a fixed order.
         """
+        EdgeProjection = document_projection_for_workspace(workspace_id)
 
         rows = (
             select(EdgeProjection.weight.label("weight"))
@@ -1488,6 +1516,7 @@ class GraphService:
         overflowing partition keeps, and survives rebuilds that recreate row
         ids.
         """
+        EdgeProjection = document_projection_for_workspace(workspace_id)
 
         if orientation == "out":
             anchor_kind, anchor_id = (
@@ -1828,7 +1857,7 @@ class GraphService:
             kind=EntityKind.CONTEXT_PAGE.value,
             entity_id=page_id,
             actor=actor,
-            edge_kinds=("citation_page", "citation_source"),
+            edge_kinds=("citation_page", "citation_source", "citation_agent"),
             direction="out",
             limit=5,
             hydration_context=ctx,
@@ -1966,7 +1995,12 @@ class GraphService:
             workspace_id,
             visible_ids,
             direction="out",
-            edge_kinds=("wikilink", "citation_page", "citation_source"),
+            edge_kinds=(
+                "wikilink",
+                "citation_page",
+                "citation_source",
+                "citation_agent",
+            ),
             actor=actor,
         )
         rows = [*inbound, *outbound]
@@ -1997,7 +2031,7 @@ class GraphService:
             )
             bucket = (
                 "citations"
-                if edge_kind in {"citation_page", "citation_source"}
+                if edge_kind in {"citation_page", "citation_source", "citation_agent"}
                 else direction
             )
             groups[seed_id][bucket].append(edge)
@@ -2148,6 +2182,7 @@ def _bounded_context_edge_rows(
     edge_kinds: tuple[str, ...],
     actor: ActorContext | None,
 ) -> list[tuple[UUID, str, UUID, str, float, str]]:
+    EdgeProjection = document_projection_for_workspace(workspace_id)
     if direction == "out":
         seed_column = EdgeProjection.source_id
         neighbor_kind = EdgeProjection.target_kind
@@ -2243,6 +2278,7 @@ def graph_visibility_signature(actor: ActorContext | None) -> tuple:
 
 def _denominator_visibility(workspace_id: UUID, actor: ActorContext | None):
     """The relation-target and folder-child predicates the counts use."""
+    EdgeProjection = document_projection_for_workspace(workspace_id)
 
     visible_target = graph_neighbor_visibility_predicate(
         EdgeProjection.target_kind,
@@ -2429,6 +2465,7 @@ def _tree_chain_visibility_predicate(
     within the same 64-hop bound used by the hydrator. This is intentionally
     in SQL so invisible rows cannot spend a LIMIT applied outside the query.
     """
+    EdgeProjection = document_projection_for_workspace(workspace_id)
 
     endpoint = (
         "source"

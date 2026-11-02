@@ -79,9 +79,13 @@ import { UnavailableReference } from "./UnavailableReference";
 import { WorkspaceLinkBadge } from "./WorkspaceLinkBadge";
 import { hasUnsafeCss, resolveMermaidStylesheet } from "./mermaidStylesheet";
 import { parsePageDocument } from "./pageFrontmatter";
+import type { ReferenceView } from "../../shared/api/references";
+import { ReferencesSection } from "./ReferencesSection";
+import { bindReferenceOccurrencesToSource, inlineCitationOccurrences, kindLabel } from "./documentReferences";
 
 type MarkdownViewProps = {
   body: string;
+  references?: ReferenceView[];
   comments?: PageInlineComment[];
   stripLeadingHeading?: string;
   wikilinkPages?: Array<{
@@ -215,6 +219,7 @@ const HIGHLIGHT_LANGUAGES = {
 
 export function MarkdownView({
   body,
+  references = [],
   comments = [],
   stripLeadingHeading,
   wikilinkPages = [],
@@ -230,6 +235,10 @@ export function MarkdownView({
   workspaceId,
   allowWorkspaceNavigationLinks = false,
 }: MarkdownViewProps) {
+  const { t } = useTranslation("pages");
+  const renderedReferences = useMemo(() => bindReferenceOccurrencesToSource(references, body), [references, body]);
+  const referenceLabels = useMemo(() => new Map(renderedReferences.filter((item) => item.state !== "unavailable").map((item) => [item.number, `${item.title ?? ""} · ${t(`references.kinds.${kindLabel(item.target_kind)}`)}`])), [renderedReferences, t]);
+  const referenceAnchorPrefix = `dtx-reference-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const articleRef = useRef<HTMLElement | null>(null);
   // Filled by the link resolver while ReactMarkdown renders, then reported
   // once per rendered tree from an effect (never during render).
@@ -248,6 +257,7 @@ export function MarkdownView({
         ? parsedBody
         : stripDuplicateLeadingHeading(parsedBody, stripLeadingHeading)
       : body;
+  const eligibleCitationOffsets = useMemo(() => new Set(inlineCitationOccurrences(markdownBody).map((item) => item.start)), [markdownBody]);
   const sourceLineCount = Math.max(1, markdownBody.split(/\r?\n/).length);
   const anchorPluginOptions = useMemo(
     () => ({ highlights: inlineCommentAnchorHighlights(comments, body) }),
@@ -262,6 +272,12 @@ export function MarkdownView({
       resolveDeletedSource: buildDeletedSourceResolver(deletedSources),
       sourceLineNumbers: pageSourceLineNumbers,
       workspaceId,
+      references: renderedReferences,
+      referenceLabels,
+      unresolvedCitationLabel: t("references.unresolved"),
+      referenceAnchorPrefix,
+      source: markdownBody,
+      eligibleCitationOffsets,
     }),
     [
       wikilinkPages,
@@ -269,6 +285,12 @@ export function MarkdownView({
       deletedSources,
       pageSourceLineNumbers,
       workspaceId,
+      renderedReferences,
+      referenceLabels,
+      t,
+      referenceAnchorPrefix,
+      markdownBody,
+      eligibleCitationOffsets,
     ],
   );
   const contextLinkPluginOptions = useMemo(() => ({
@@ -423,6 +445,7 @@ export function MarkdownView({
           <MarkdownRouteStateProvider>{markdownContent}</MarkdownRouteStateProvider>
         ) : markdownContent}
       </MarkdownLinkBehaviorContext.Provider>
+      {renderPolicy === "page" ? <ReferencesSection references={renderedReferences} anchorPrefix={referenceAnchorPrefix} checkingLocators={checkingLinkLocators} /> : null}
       {pageSourceLineNumbers ? (
         <span
           aria-hidden="true"
@@ -867,6 +890,13 @@ type DtxInline = {
 };
 
 type DtxTokenOptions = {
+  references?: ReferenceView[];
+  referenceLabels?: ReadonlyMap<number, string>;
+  unresolvedCitationLabel?: string;
+  referenceAnchorPrefix?: string;
+  citationUses?: Map<number, number>;
+  source?: string;
+  eligibleCitationOffsets?: ReadonlySet<number>;
   resolveWikilinkTarget?: (rawTarget: string) => WikilinkResolution;
   // Maps an `@cite{...}` slug to a tombstone label when its source was deleted.
   resolveDeletedSource?: (sourceId: string) => string | undefined;
@@ -897,6 +927,7 @@ function buildDeletedSourceResolver(
 
 function remarkDtxTokens(options: DtxTokenOptions = {}) {
   return (tree: Root) => {
+    options = { ...options, citationUses: new Map() };
     transformFencedBlocks(tree, options.sourceLineNumbers ?? false);
     transformInlineTokens(tree as unknown as DtxParent, options);
   };
@@ -1096,9 +1127,16 @@ function shouldSkipInlineTransform(type: string) {
 }
 
 function tokenizeTextNode(node: Text, options: DtxTokenOptions): DtxNode[] {
-  const pattern = /\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]|@cite\{([A-Za-z0-9][A-Za-z0-9._:-]*(?:#[A-Za-z0-9._:-]+)?)\}|==([^=\n]+?)==|(^|[\s([{])#([A-Za-z][A-Za-z0-9_-]{0,47})\b/g;
+  const pattern = /\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]|@cite\{([^\s{}]+)\}|==([^=\n]+?)==|(^|[\s([{])#([A-Za-z][A-Za-z0-9_-]{0,47})\b/g;
   const nodes: DtxNode[] = [];
   let cursor = 0;
+  const rawText = options.source?.slice(node.position?.start.offset, node.position?.end.offset);
+  const rawCitations = rawText === undefined ? null : [...rawText.matchAll(/@cite\{([^\s{}]+)\}/g)].map((candidate) => {
+    const prefix = rawText.slice(0, candidate.index);
+    const escapes = /\\+$/.exec(prefix)?.[0].length ?? 0;
+    return { href: candidate[1], escaped: escapes % 2 === 1, start: (node.position?.start.offset ?? 0) + candidate.index! };
+  });
+  let citationIndex = 0;
   let match = pattern.exec(node.value);
   while (match) {
     const tokenStart = match[6] ? match.index + (match[5]?.length ?? 0) : match.index;
@@ -1120,7 +1158,10 @@ function tokenizeTextNode(node: Text, options: DtxTokenOptions): DtxNode[] {
       }
       nodes.push(wikilinkNode(match[1], match[2], options, match[0]));
     } else if (match[3]) {
-      nodes.push(citationNode(match[3], options));
+      const original = rawCitations?.[citationIndex++];
+      nodes.push(rawCitations && (!original || original.escaped || original.href !== match[3] || options.eligibleCitationOffsets && !options.eligibleCitationOffsets.has(original.start))
+        ? textNode(match[0])
+        : citationNode(match[3], options));
     } else if (match[4]) {
       nodes.push(highlightNode(match[4]));
     } else if (match[6]) {
@@ -1283,6 +1324,24 @@ function wikilinkAliasKey(value: string) {
 }
 
 function citationNode(rawSourceId: string, options: DtxTokenOptions): DtxInline {
+  const reference = options.references?.find((item) => item.occurrences?.some((occurrence) => occurrence.href === rawSourceId));
+  if (reference) {
+    const use = (options.citationUses?.get(reference.number) ?? 0) + 1;
+    options.citationUses?.set(reference.number, use);
+    const prefix = options.referenceAnchorPrefix ?? "dtx-reference";
+    return {
+      type: "dtxCitation",
+      data: {
+        hName: "a",
+        hProperties: {
+          className: ["cite-ref"], href: `#${prefix}-${reference.number}`,
+          id: `${prefix}-${reference.number}-use-${use}`,
+          title: options.referenceLabels?.get(reference.number),
+        },
+      },
+      children: [textNode(`[${reference.number}]`)],
+    };
+  }
   const [libraryItemId, anchor] = rawSourceId.split("#", 2);
   const safeSourceId = sanitizeTokenAttribute(libraryItemId) || "unknown-source";
   const safeAnchor = sanitizeTokenAttribute(anchor);
@@ -1309,7 +1368,8 @@ function citationNode(rawSourceId: string, options: DtxTokenOptions): DtxInline 
     data: {
       hName: "cite",
       hProperties: {
-        className: ["cite-ref"],
+        className: ["cite-ref", "cite-ref-unresolved"],
+        title: options.unresolvedCitationLabel,
         "data-source-id": safeSourceId,
         ...(safeAnchor ? { "data-source-anchor": safeAnchor } : {}),
       },
@@ -2839,7 +2899,7 @@ const markdownSanitizeSchema = {
       ...mergeAttributeAllowlists(
         defaultSchema.attributes?.a,
         "className",
-        ["anchor", "wikilink", "wikilink-broken", "inline-tag"],
+        ["anchor", "wikilink", "wikilink-broken", "inline-tag", "cite-ref"],
       ),
       "data-internal",
       "data-tag",

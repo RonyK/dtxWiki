@@ -10,6 +10,7 @@ import { formatContextPageMarkdown } from "../../shared/lib/contextLinks";
 
 import type { PageSummary } from "../../shared/api/pages";
 import type { LibraryItemSummary } from "../../shared/api/library";
+import type { EditorView } from "@codemirror/view";
 
 type CompletionDataRef<T> = {
   current: T[];
@@ -19,6 +20,7 @@ export function createEditorCompletionSource(
   pagesRef: CompletionDataRef<PageSummary>,
   sourcesRef: CompletionDataRef<LibraryItemSummary>,
   workspaceRef: { current: string | null } = { current: null },
+  citationSearch?: { label: string; open: (view: EditorView, from: number, to: number, query?: string) => void },
 ) {
   return (context: CompletionContext): CompletionResult | null => {
     const wikilink = context.matchBefore(/\[\[[^\]\n|]*$/);
@@ -30,16 +32,41 @@ export function createEditorCompletionSource(
       };
     }
 
-    const citation = context.matchBefore(/@cite\{[^}\n]*$/);
+    const citation = context.matchBefore(/@cite\{[^}\n]*$/) ?? context.matchBefore(/\/cite$/);
     if (citation && (context.explicit || citation.from < citation.to)) {
+      const tokenPrefix = citation.text.startsWith("@cite{") ? "@cite{" : "/cite";
+      const options: Completion[] = workspaceRef.current ? [
+        ...pagesRef.current.map((page) => citationCompletion(`/p/${workspaceRef.current}/${page.id}`, page.title, "Context")),
+        ...sourcesRef.current.map((source) => citationCompletion(`/workspaces/${workspaceRef.current}/library/items/${source.id}`, source.title || source.uri, "Library")),
+      ] : [];
+      const query = citation.text.slice(tokenPrefix.length);
+      if (citationSearch) options.unshift({
+        label: query ? `${citationSearch.label} ${query}` : citationSearch.label,
+        displayLabel: citationSearch.label,
+        boost: 99,
+        apply(view, _completion, _from, to) {
+          const end = view.state.sliceDoc(to, to + 1) === "}" ? to + 1 : to;
+          citationSearch.open(view, citation.from, end, query);
+        },
+      });
       return {
-        from: citation.from + "@cite{".length,
-        options: sourceCompletionOptions(sourcesRef.current),
+        from: citation.from + tokenPrefix.length,
+        options: tokenPrefix === "/cite" ? options.filter((item) => item.label === citationSearch?.label) : options,
         validFor: /^[^}\n]*$/,
       };
     }
 
     return null;
+  };
+}
+
+function citationCompletion(href: string, title: string, detail: string): Completion {
+  return {
+    label: title, detail,
+    apply(view, completion, from, to) {
+      const end = view.state.sliceDoc(to, to + 1) === "}" ? to + 1 : to;
+      view.dispatch({ ...insertCompletionText(view.state, `${href}}`, from, end), annotations: pickedCompletion.of(completion) });
+    },
   };
 }
 
@@ -63,48 +90,13 @@ function pageCompletionOptions(pages: PageSummary[], workspaceId: string): Compl
   }));
 }
 
-// Proposal C8: `source-id` inside `@cite{...}` must be a stable kebab/short
-// identifier — never a UUID (UUIDs are internal FKs only). Current REST source
-// summaries still expose UUID primary keys, so derive a deterministic
-// URI-backed key until the backend ships a first-class citation key.
+// Read-only compatibility for old deleted-source tombstones. New citations
+// always use canonical document links above; no new slug/hash keys are emitted.
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-let warnedAboutUuidSources = false;
-
 export function isLikelyUuid(value: string): boolean {
   return UUID_PATTERN.test(value);
-}
-
-function sourceCompletionOptions(sources: LibraryItemSummary[]): Completion[] {
-  const options: Completion[] = [];
-  let derivedUuid = 0;
-  for (const source of sources) {
-    const citationId = citationIdForSource(source);
-    if (!citationId) {
-      continue;
-    }
-    if (citationId !== source.id && isLikelyUuid(source.id)) {
-      derivedUuid += 1;
-    }
-    options.push({
-      apply: `${citationId}}`,
-      displayLabel: source.title || citationId,
-      detail: citationId,
-      info: source.uri,
-      label: [source.title, citationId, source.uri].filter(Boolean).join(" "),
-      sortText: source.title || citationId,
-      type: "constant",
-    });
-  }
-  if (derivedUuid > 0 && !warnedAboutUuidSources) {
-    warnedAboutUuidSources = true;
-    console.warn(
-      `editorCompletions: ${derivedUuid} source(s) used derived @cite{} keys — ` +
-        "their id is a UUID but proposal C8 requires kebab/short stable ids.",
-    );
-  }
-  return options;
 }
 
 // Exported so render-time consumers (e.g. the deleted-source tombstone in
@@ -121,10 +113,6 @@ export function citationKeyForSource(source: {
   const stem = slugifyCitationStem(source.title || source.uri || "source");
   const suffix = stableBase36Hash(source.uri || source.id);
   return sanitizeCitationId(`${stem}-${suffix}`);
-}
-
-function citationIdForSource(source: LibraryItemSummary): string | null {
-  return citationKeyForSource(source);
 }
 
 function sanitizeCitationId(value: string): string | null {

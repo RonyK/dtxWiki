@@ -74,7 +74,7 @@
     "toolTitles": {
       "begin_context_edit": "컨텍스트 편집 시작",
       "build_agent_input_bundle": "에이전트 입력 번들 만들기",
-      "cite": "인용 후보 찾기",
+      "cite": "참고문헌 등록",
       "create_context_page": "컨텍스트 페이지 만들기",
       "discard_context_edit": "컨텍스트 편집 폐기",
       "fetch": "검색 결과 가져오기",

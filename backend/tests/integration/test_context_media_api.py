@@ -441,9 +441,7 @@ def test_canonical_context_media_editing_upload_is_idempotent_and_format_complet
     editing_page = _create_editing_page(client, workspace_id)
     marker = uuid4()
 
-    first = _upload_editing_png(
-        client, page=editing_page, marker_uuid=marker
-    )
+    first = _upload_editing_png(client, page=editing_page, marker_uuid=marker)
     assert first.status_code == 200, first.text
     payload = first.json()["data"]
     assert payload == {
@@ -457,9 +455,7 @@ def test_canonical_context_media_editing_upload_is_idempotent_and_format_complet
         "bytes": len(PNG_BYTES),
         "sha256": __import__("hashlib").sha256(PNG_BYTES).hexdigest(),
     }
-    retry = _upload_editing_png(
-        client, page=editing_page, marker_uuid=marker
-    )
+    retry = _upload_editing_png(client, page=editing_page, marker_uuid=marker)
     assert retry.status_code == 200
     assert retry.json()["data"] == payload
 
@@ -653,6 +649,7 @@ def _publish_editing(client: TestClient, page: dict, *, body_md: str) -> dict:
             "reason": "media integration fixture",
             "publish_despite_findings": False,
             "expected_content_hash": saved["content_hash"],
+            "expected_references_hash": saved["references_hash"],
         },
     )
     assert response.status_code == 200, response.text
@@ -898,8 +895,7 @@ def test_context_media_http_vertical_editing_preview_public_and_delete(
         )
 
     public_url = (
-        f"/api/v1/public/w/default/pages/{page['slug']}/media/"
-        f"{used['asset_id']}"
+        f"/api/v1/public/w/default/pages/{page['slug']}/media/{used['asset_id']}"
     )
     public_read = client.get(public_url)
     assert public_read.status_code == 200
@@ -951,6 +947,7 @@ def test_context_media_http_vertical_editing_preview_public_and_delete(
             "reason": "publish retained media",
             "publish_despite_findings": False,
             "expected_content_hash": draft["content_hash"],
+            "expected_references_hash": draft["references_hash"],
         },
     )
     assert published.status_code == 200, published.text
@@ -1141,8 +1138,7 @@ def test_security_blocker_hides_context_private_public_and_editing_content(
     version_url = _version_content_url(client, page, page_asset)
     preview_url = page_asset["content_url"]
     public_url = (
-        f"/api/v1/public/w/default/pages/{page['slug']}/media/"
-        f"{page_asset['asset_id']}"
+        f"/api/v1/public/w/default/pages/{page['slug']}/media/{page_asset['asset_id']}"
     )
     private_url = private_asset["content_url"]
     authorized_etags = {}
@@ -1187,7 +1183,9 @@ def test_security_blocker_hides_context_private_public_and_editing_content(
 
 
 def test_context_media_save_rolls_back_on_foreign_reference(
-    session_factory, tmp_path, monkeypatch,
+    session_factory,
+    tmp_path,
+    monkeypatch,
 ) -> None:
     # Claim no longer exists: a rejected save must preserve the existing
     # page, private editing row, upload ownership, and empty usage set.
@@ -1199,7 +1197,8 @@ def test_context_media_save_rolls_back_on_foreign_reference(
     uploaded = _upload_png(client, page=page, filename="rollback.png")
     rejected = client.post(
         f"{_pages_url(client)}/{page['id']}/autosave",
-        json={"idempotency_key": "t-6",
+        json={
+            "idempotency_key": "t-6",
             "title": "Context Media",
             "body_md": f"![foreign](dtx-media://asset/{uuid4()})",
             "base_version_id": page["version_id"],
@@ -1229,7 +1228,9 @@ def test_context_media_save_rolls_back_on_foreign_reference(
 
 
 def test_upload_rejects_closed_foreign_and_wrong_page_editing_versions(
-    session_factory, tmp_path, monkeypatch,
+    session_factory,
+    tmp_path,
+    monkeypatch,
 ) -> None:
     # Replaces session-claim conflicts with direct registration's version
     # ownership, scope, and open-state contract.
@@ -1241,8 +1242,11 @@ def test_upload_rejects_closed_foreign_and_wrong_page_editing_versions(
     other_page = _create_editing_page(client, workspace_id)
     other_editor = TestClient(client.app)
     authenticate_test_client_in_workspace(
-        other_editor, session_factory, email="foreign-upload-editor@example.com",
-        workspace_slug="default", role="editor",
+        other_editor,
+        session_factory,
+        email="foreign-upload-editor@example.com",
+        workspace_slug="default",
+        role="editor",
     )
     foreign = _upload_editing_png(other_editor, page=page, marker_uuid=uuid4())
     assert foreign.status_code == 404, foreign.text
@@ -1259,7 +1263,8 @@ def test_upload_rejects_closed_foreign_and_wrong_page_editing_versions(
     saved = _autosave(client, page, body_md="# closed\n")
     submitted = client.post(
         f"{_pages_url(client)}/{page['id']}/submit-for-review",
-        json={"idempotency_key": "t-7",
+        json={
+            "idempotency_key": "t-7",
             "version_id": saved["version_id"],
             "expected_editing_revision": saved["editing_revision"],
         },
@@ -1276,7 +1281,10 @@ def test_upload_rejects_closed_foreign_and_wrong_page_editing_versions(
 
 @pytest.mark.parametrize("close_version", [False, True])
 def test_asset_delete_enforces_editing_author_before_usage_token(
-    session_factory, tmp_path, monkeypatch, close_version,
+    session_factory,
+    tmp_path,
+    monkeypatch,
+    close_version,
 ) -> None:
     monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("DTXWIKI_LIBRARY_BLOB_ROOT", str(tmp_path / "library"))
@@ -1292,9 +1300,7 @@ def test_asset_delete_enforces_editing_author_before_usage_token(
         workspace_slug="default",
         role="editor",
     )
-    url = (
-        f"/api/v1/workspaces/{workspace_id}/context/media/assets/{asset['asset_id']}"
-    )
+    url = f"/api/v1/workspaces/{workspace_id}/context/media/assets/{asset['asset_id']}"
     denied = editor.delete(url, headers={"If-Match": "stale"})
     assert denied.status_code == 403, denied.text
     assert denied.json()["error_code"] == "media_owner_mismatch"
@@ -1305,7 +1311,8 @@ def test_asset_delete_enforces_editing_author_before_usage_token(
         saved = _autosave(owner, page, body_md="# closed\n")
         submitted = owner.post(
             f"{_pages_url(owner)}/{page['id']}/submit-for-review",
-            json={"idempotency_key": "t-8",
+            json={
+                "idempotency_key": "t-8",
                 "version_id": saved["version_id"],
                 "expected_editing_revision": saved["editing_revision"],
             },
@@ -1322,7 +1329,9 @@ def test_asset_delete_enforces_editing_author_before_usage_token(
 
 
 def test_page_media_listing_hides_another_authors_private_editing_uploads(
-    session_factory, tmp_path, monkeypatch,
+    session_factory,
+    tmp_path,
+    monkeypatch,
 ) -> None:
     """P8.4: an "editing" row's uninserted uploads are private to its author.
 
@@ -1394,9 +1403,7 @@ def test_page_media_listing_hides_another_authors_private_editing_uploads(
 
     owner_listing = owner.get(f"{media_url}?usage=unused")
     assert owner_listing.status_code == 200, owner_listing.text
-    assert [item["id"] for item in owner_listing.json()["data"]] == [
-        asset["asset_id"]
-    ]
+    assert [item["id"] for item in owner_listing.json()["data"]] == [asset["asset_id"]]
 
     foreign_listing = editor.get(f"{media_url}?usage=unused")
     assert foreign_listing.status_code == 200, foreign_listing.text

@@ -14,10 +14,8 @@ from backend.models.graph import GraphHistoryCoverage
 from backend.repositories import context_page_repo
 from backend.services.db_write_intent import acquire_workspace_write_intent
 from backend.services.graph_cache import bump_edge_version, edge_version
-from backend.services.indexing.edge_registry import (
-    EdgeProjectionDelta,
-    reconcile_wikilink_edge_projection,
-)
+from backend.services.indexing.edge_projection import EdgeProjectionDelta
+from backend.services.indexing.edge_registry import reconcile_wikilink_edge_projection
 from backend.services.page_service import (
     PageLinkProjectionDelta,
     prune_stale_page_link_projections,

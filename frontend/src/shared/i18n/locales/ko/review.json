@@ -509,7 +509,8 @@
     "draftChange": "이 초안의 변경 (v{{parent}} → v{{candidate}})",
     "publishingChange": "게시되면 바뀌는 내용 (게시본 v{{baseline}} → v{{candidate}})",
     "publishingEmptyChange": "게시되면 바뀌는 내용 (빈 문서 → v{{candidate}})",
-    "draftParentBaseline": "직전 초안 v{{version}}"
+    "draftParentBaseline": "직전 초안 v{{version}}",
+    "metadataReferences": "참고문헌"
   },
   "undo": {
     "action": {

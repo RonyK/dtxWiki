@@ -29,9 +29,15 @@ from backend.models import (
     Workspace,
     WorkspaceMediaWriteIntent,
 )
+from backend.models.agent import AgentPage
 from backend.models.audit import AuditEvent
 from backend.models.base import Base
 from backend.models.context import ContextPageVersion
+from backend.models.document_reference import (
+    ContextCitationPublication,
+    ContextDocumentReference,
+    ContextPublishedCitation,
+)
 from backend.models.mcp_chat import McpChatSession
 from backend.models.workspace import MCPClient
 from backend.policy.auth import ActorContext
@@ -177,6 +183,43 @@ def _seed_contents(session, workspace_id, *, public: bool = False):
     session.flush()
     item.current_version_id = item_version.id
     item.current_ready_version_id = item_version.id
+
+    # The new children RESTRICT-reference Library/Agent targets as well as
+    # their owner version. Keep them in the existing FK-enforced purge graph;
+    # the metadata-derived order must delete them before either parent.
+    agent = session.scalar(
+        select(AgentPage).where(AgentPage.workspace_id == workspace_id)
+    )
+    session.add_all(
+        [
+            ContextDocumentReference(
+                workspace_id=workspace_id,
+                owner_version_id=version.id,
+                target_kind="library_item",
+                library_item_id=item.id,
+            ),
+            ContextPublishedCitation(
+                workspace_id=workspace_id,
+                source_version_id=version.id,
+                target_kind="library_item",
+                library_item_id=item.id,
+                metadata_present=True,
+            ),
+            ContextCitationPublication(
+                workspace_id=workspace_id, version_id=version.id, fingerprint="a" * 64
+            ),
+        ]
+    )
+    if agent is not None:
+        session.add(
+            ContextDocumentReference(
+                workspace_id=workspace_id,
+                owner_version_id=version.id,
+                target_kind="agent_page",
+                agent_page_id=agent.id,
+                sort_order=1,
+            )
+        )
 
     change_set = ChangeSet(
         workspace_id=workspace_id,

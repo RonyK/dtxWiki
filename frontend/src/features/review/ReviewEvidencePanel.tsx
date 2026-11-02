@@ -366,9 +366,10 @@ function ExactContextContent({
     : t("content.reviewVersion", { version, defaultValue: "Review version v{{version}}" });
   const retry = () => setReload((value) => value + 1);
   const hasBody = original.status === "ready"
-    && Boolean(parsePageDocument(original.data.body_md).body.trim());
+    && Boolean(parsePageDocument(original.data.body_md).body.trim() || original.data.references?.length);
   const compareFailure = comparison.status === "unavailable" ? comparison.reason : null;
   const metadataLabels = {
+    references: t("content.metadataReferences", { defaultValue: "References" }),
     title: t("content.metadata.title", { defaultValue: "Title" }),
     tags: t("content.metadata.tags", { defaultValue: "Tags" }),
     aliases: t("content.metadata.aliases", { defaultValue: "Aliases" }),
@@ -426,6 +427,7 @@ function ExactContextContent({
             ) : hasBody ? (
               <MarkdownView
                 body={original.data.body_md}
+                references={original.data.references}
                 linkTargets={original.data.link_targets}
                 resolveContextMediaAsset={resolveContextMediaAsset}
                 wikilinkTargets={(original.data.wikilink_targets ?? []).map((target) => ({ ...target, target_page_id: target.target_page_id ?? null, current_slug: target.current_slug ?? null }))}

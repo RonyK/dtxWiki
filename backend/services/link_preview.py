@@ -11,6 +11,7 @@ from backend.services.actor_visible_read import (
     resolve_visible_context_version,
 )
 from backend.services.context_link_targets import markdown_link_targets
+from backend.services.document_references import preview_document_references
 from backend.services.read_errors import ReadNotFoundError
 
 
@@ -38,8 +39,7 @@ def preview_link_targets(
             or version is None
             or not context_page_visible(page, actor, workspace_id=workspace_id)
             or (
-                request.source_page_id is not None
-                and page.id != request.source_page_id
+                request.source_page_id is not None and page.id != request.source_page_id
             )
         ):
             raise ReadNotFoundError("Context source not found")
@@ -49,6 +49,13 @@ def preview_link_targets(
         source_page_id=request.source_page_id,
         source_version_id=request.source_version_id,
         request_id=request.request_id,
+        references=preview_document_references(
+            session,
+            workspace_id=workspace_id,
+            body=request.body_md,
+            actor=actor,
+            self_origins=self_origins,
+        ),
         link_targets=markdown_link_targets(
             session,
             body=request.body_md,

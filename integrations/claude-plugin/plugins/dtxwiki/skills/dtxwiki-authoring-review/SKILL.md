@@ -20,19 +20,17 @@ Never write against a base you did not read. `update_context_edit` and `patch_co
    - Call `patch_context_edit` with typed operations addressed by block or row id and hash -- this tool always applies against your own open row, never a shared reconciled head, so there is no conflict-resolution operation to send.
    - Requires the `expected_editing_revision` you last saw as a CAS input; a stale value returns a conflict rather than silently overwriting a newer save.
    - The response does not repeat the body. Take the next `editing_revision` and the new block ids and hashes (`edit_receipt.changed_blocks`) from it, and check the result in `edit_receipt.changes`, which quotes each replaced region as stored. Do not re-read the page after a successful patch; read it with `version='my_edit'` only when `changes` is null or `changes_omitted_count` or `changed_blocks_omitted_count` is above 0.
-4. Use `update_context_edit` for a full-document autosave -- title/body/tags/aliases/placement together, always sending the complete `body_md`. There is no metadata-only or citation-only write mode: changing tags, aliases, or placement without also resending the full body currently requires `update_context_edit` with the unchanged body included.
+4. Use `update_context_edit` for a full-document autosave -- title/body/tags/aliases/placement together, always sending the complete `body_md`. Changing tags, aliases, or placement requires the unchanged body too. Use `cite` for reference-only additions, note changes, or removals; it does not rewrite the body.
 5. Call `submit_context_edit_for_review` once, when the whole task is ready for human review ("Save draft"), not after each change. To change it again from the same chat before it is reviewed, call `begin_context_edit`: it reopens that same version (no new version), and the next submit replaces its review. An edit you never submit stays private and is never reviewed. A submission never publishes on its own; read `data.publish_blocked_reasons` to learn why human review was required.
 6. Call `discard_context_edit` to abandon your own open editing session (terminal, not a hard-delete: audit/History is preserved). A page with no prior published/submitted history is archived when its only version is discarded; a previously published/shared page keeps its existing head.
 
-## Turn evidence into citations
+## Register document references
 
-`cite` finds policy-allowed candidates and returns a write-ready `write_citation` object per candidate. **Known gap:** the current Context-editing-state-machine tools (`create_context_page`/`update_context_edit`/`patch_context_edit`) have no `citations` field to attach that object to. Use this flow to select evidence and cite it in prose (a Markdown link/reference to the source) until a structured attachment path exists:
-
-1. Find relevant evidence with the retrieval workflow.
-2. Read the complete evidence before relying on it.
-3. Call `cite` for the claim that needs support.
-4. Evaluate the returned candidates and select only evidence that supports the claim under the live citation policy.
-5. Reference the selected evidence in the page body itself (do not manufacture citation identifiers, upgrade a weak recommendation, or describe preview verification as persisted citation status).
+1. Search for relevant Context, Library or Agent documents and read them before relying on them.
+2. Create or open your own Context editing version.
+3. Call `cite` with the owning page/version, its latest editing revision, an idempotency key, and explicit `add` or `remove` document references. Targets use document IDs, not target version IDs. The tool records your selection; it does not search or judge support.
+4. For inline use, write `@cite{<canonical internal document address>}` in the body. Plain Markdown links are ordinary links. Inline citations and registered references are combined only at final publication.
+5. Read back the body and separate `references` metadata, then submit once for review. Readers display numbered citations and References outside the stored body. Do not paste a generated footer into the body. A registration in Chats is an editing action, not proof that the citing document was published.
 
 ## Use the safe image flow
 

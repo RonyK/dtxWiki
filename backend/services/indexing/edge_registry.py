@@ -9,8 +9,7 @@ guards against duplicates).
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Iterator
-from dataclasses import dataclass
+from collections.abc import Collection, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import UUID
@@ -21,8 +20,6 @@ from sqlalchemy.orm import Session
 
 from backend.models.ask import AskSession, AskTurn, AskTurnCitation
 from backend.models.context import (
-    ContextCitation,
-    ContextClaim,
     ContextPage,
     ContextPageVersion,
     EdgeProjection,
@@ -33,15 +30,61 @@ from backend.models.library import LibraryItem, LibraryItemVersion
 from backend.models.mcp_chat import McpChatArtifactVerb, McpChatToolCallArtifact
 from backend.models.tree import WorkspaceTreeNode
 from backend.services.entity_ref import EntityKind
-from backend.services.graph_cache import bump_edge_version
+from backend.services.graph_cache import (
+    bump_edge_version,
+    lock_edge_projection_workspace,
+)
 from backend.services.graph_observation_service import GraphObservationService
-from backend.services.graph_rank import RANK_PARAMS
 from backend.services.graph_semantics import EDGE_SEMANTICS
+from backend.services.indexing.citation_edges import (
+    citation_agent_rows as _citation_agent_rows,
+)
+from backend.services.indexing.citation_edges import (
+    citation_page_rows as _citation_page_rows,
+)
+from backend.services.indexing.citation_edges import (
+    citation_source_rows as _citation_source_rows,
+)
+from backend.services.indexing.citation_edges import (
+    document_citation_source_ids,
+)
 from backend.services.indexing.co_read import (
-    CoReadPair,
     Read,
-    co_read_pairs,
-    max_pairs_per_segment,
+)
+from backend.services.indexing.co_read_policy import (
+    CO_ACCESS_ADJACENCY_WINDOW as CO_ACCESS_ADJACENCY_WINDOW,
+)
+from backend.services.indexing.co_read_policy import (
+    CO_ACCESS_MAX_ARTIFACTS_PER_SEGMENT as CO_ACCESS_MAX_ARTIFACTS_PER_SEGMENT,
+)
+from backend.services.indexing.co_read_policy import (
+    CO_ACCESS_MAX_GAP as CO_ACCESS_MAX_GAP,
+)
+from backend.services.indexing.co_read_policy import (
+    CO_ACCESS_MAX_PAIRS_PER_SEGMENT as CO_ACCESS_MAX_PAIRS_PER_SEGMENT,
+)
+from backend.services.indexing.co_read_policy import (
+    CO_ACCESS_MIN_SESSIONS as CO_ACCESS_MIN_SESSIONS,
+)
+from backend.services.indexing.co_read_policy import (
+    CO_ACCESS_SOURCE_BATCH_ROWS as CO_ACCESS_SOURCE_BATCH_ROWS,
+)
+from backend.services.indexing.co_read_policy import (
+    co_access_pairs as co_access_pairs,
+)
+from backend.services.indexing.edge_projection import (
+    EdgeProjectionDelta as EdgeProjectionDelta,
+)
+from backend.services.indexing.edge_projection import (
+    EdgeProjectionScope,
+    build_edge_row,
+    reconcile_edge_projection_rows,
+)
+from backend.services.indexing.edge_projection import (
+    edge_row_identity as _edge_row_identity,
+)
+from backend.services.indexing.edge_projection import (
+    stored_edge_identity as _stored_edge_identity,
 )
 
 # Only a focused read is evidence that a document was consumed. CITED is a
@@ -51,41 +94,14 @@ from backend.services.indexing.co_read import (
 # from a citation the writer kept, co-reads count REFERENCED only. This is a
 # subset of CONSUMPTION_VERBS (tests/static/test_mcp_chat_verb_classes.py).
 CO_ACCESS_SOURCE_VERBS = frozenset({McpChatArtifactVerb.REFERENCED})
-# Two consecutive reads further apart than this are not "read together": the
-# session is cut there, so a 09:00 read never pairs with a 17:00 one.
-CO_ACCESS_MAX_GAP = timedelta(minutes=30)
-# Reads pair only with their neighbours in the read order, never across the
-# whole session: under a clique the first and last document of a long session
-# are joined however unrelated they are, and the pair count grows
-# quadratically.
-CO_ACCESS_ADJACENCY_WINDOW = 5
-# A segment longer than this many distinct reads is split front to back into
-# sub-segments of this size. Nothing is dropped: the first read of a long
-# session pairs just like the last one.
-CO_ACCESS_MAX_ARTIFACTS_PER_SEGMENT = 12
-# The contract the window and segment size jointly guarantee for one
-# sub-segment. Derived rather than written down so a change to either
-# constant moves the bound with it instead of leaving a stale literal behind
-# for a test to enshrine.
-CO_ACCESS_MAX_PAIRS_PER_SEGMENT = max_pairs_per_segment(
-    window=CO_ACCESS_ADJACENCY_WINDOW,
-    max_per_segment=CO_ACCESS_MAX_ARTIFACTS_PER_SEGMENT,
-)
-# The history both co-read signals look back over.
+# The legacy rolling-history adapter retains its own source window.
 CO_ACCESS_SOURCE_WINDOW = timedelta(days=30)
-# Rows fetched per round trip while streaming that history. Pairing keeps
-# one session's state at a time, so memory follows the largest session and
-# the number of distinct pairs, not the number of rows read.
-CO_ACCESS_SOURCE_BATCH_ROWS = 5_000
-# A pair seen in exactly one session is the weakest evidence there is, and in
-# a long-tailed read distribution it is most of the rows. This is a signal and
-# volume control, not a privacy one: it counts sessions, not people, so one
-# person returning to the same two documents in a second conversation is
-# exactly the case it is meant to admit.
-CO_ACCESS_MIN_SESSIONS = 2
+# Compatibility with the rolling-history producer; display ranking does not
+# determine how a producer stores its evidence weights.
+LEGACY_CO_ACCESS_WEIGHT_HALF_LIFE_DAYS = 30
 _ENTITY_KIND_VALUES = frozenset(kind.value for kind in EntityKind)
 PAGE_EDGE_OBSERVATION_EXTRACTOR_VERSION = "page-edge-write-through.v1"
-PAGE_EDGE_KINDS = ("wikilink", "citation_page", "citation_source")
+PAGE_EDGE_KINDS = ("wikilink", "citation_page", "citation_source", "citation_agent")
 
 
 class EdgeExtractor(Protocol):
@@ -94,21 +110,6 @@ class EdgeExtractor(Protocol):
     ) -> list[dict[str, object]]:
         """Return edge_projection row dicts for one workspace."""
         ...
-
-
-@dataclass(frozen=True)
-class EdgeProjectionDelta:
-    """Content changes made by a narrow edge-projection reconciliation."""
-
-    desired_count: int
-    inserted: int
-    updated: int
-    deleted: int
-    affected_source_ids: frozenset[UUID]
-
-    @property
-    def changed(self) -> bool:
-        return bool(self.inserted or self.updated or self.deleted)
 
 
 PROVENANCE_BY_KIND: dict[str, str] = {
@@ -133,20 +134,20 @@ def _edge(
     support_session_count: int | None = None,
     first_observed_at: datetime | None = None,
 ) -> dict[str, object]:
-    return {
-        "workspace_id": workspace_id,
-        "source_kind": source_kind.value,
-        "source_id": source_id,
-        "target_kind": target_kind.value,
-        "target_id": target_id,
-        "edge_kind": edge_kind,
-        "provenance": PROVENANCE_BY_KIND[edge_kind],
-        "weight": weight,
-        "occurred_at": occurred_at,
-        "support_session_count": support_session_count,
-        "first_observed_at": first_observed_at,
-        "source_ref": {"table": source_table},
-    }
+    return build_edge_row(
+        workspace_id=workspace_id,
+        source_kind=source_kind,
+        source_id=source_id,
+        target_kind=target_kind,
+        target_id=target_id,
+        edge_kind=edge_kind,
+        provenance=PROVENANCE_BY_KIND[edge_kind],
+        source_table=source_table,
+        weight=weight,
+        occurred_at=occurred_at,
+        support_session_count=support_session_count,
+        first_observed_at=first_observed_at,
+    )
 
 
 def _ask_citation_rows(session: Session, workspace_id: UUID) -> list[dict[str, object]]:
@@ -172,21 +173,6 @@ def _ask_citation_rows(session: Session, workspace_id: UUID) -> list[dict[str, o
         )
         for turn_id, target_kind, target_id in rows
     ]
-
-
-def co_access_pairs(reads: Iterable[Read]) -> Iterator[CoReadPair]:
-    """Pair ordered reads with the co_access gap, window and segment size.
-
-    The co_access edge and the hot-path finding both go through this, so the
-    graph and the lint rule agree on which documents were read together.
-    """
-
-    return co_read_pairs(
-        reads,
-        max_gap=CO_ACCESS_MAX_GAP,
-        window=CO_ACCESS_ADJACENCY_WINDOW,
-        max_per_segment=CO_ACCESS_MAX_ARTIFACTS_PER_SEGMENT,
-    )
 
 
 def co_read_source(
@@ -266,9 +252,7 @@ def _co_access_rows(
     # yields a pair at most once per session, so counting yields counts
     # sessions.
     aggregates: dict[tuple[tuple[str, UUID], tuple[str, UUID]], list] = {}
-    # The rank table is the one source of the co_access half-life: rank_score
-    # leaves co_access alone because its age is already counted here.
-    half_life = RANK_PARAMS["co_access"].half_life_days
+    half_life = LEGACY_CO_ACCESS_WEIGHT_HALF_LIFE_DAYS
     reads = co_read_source(session, workspace_id, since=now - CO_ACCESS_SOURCE_WINDOW)
     for pair in co_access_pairs(reads):
         occurred_at = pair.last_pair_at
@@ -441,6 +425,7 @@ def reconcile_wikilink_edge_projection(
     caller already locked, so a page committed during the run is never mistaken
     for stale state. The caller owns the workspace revision bump.
     """
+    lock_edge_projection_workspace(session, workspace_id)
 
     locked_source_ids = frozenset(source_page_ids)
     desired_rows = [
@@ -461,120 +446,11 @@ def reconcile_wikilink_edge_projection(
         )
         if edge.source_id in locked_source_ids
     ]
-    return _reconcile_edge_projection_rows(
+    return reconcile_edge_projection_rows(
         session,
+        scope=EdgeProjectionScope(workspace_id, frozenset({"wikilink"})),
         existing_rows=existing_rows,
         desired_rows=desired_rows,
-    )
-
-
-def _edge_row_identity(
-    row: dict[str, object],
-) -> tuple[str, UUID, str, UUID, str]:
-    source_kind = row["source_kind"]
-    source_id = row["source_id"]
-    target_kind = row["target_kind"]
-    target_id = row["target_id"]
-    edge_kind = row["edge_kind"]
-    if not (
-        isinstance(source_kind, str)
-        and isinstance(source_id, UUID)
-        and isinstance(target_kind, str)
-        and isinstance(target_id, UUID)
-        and isinstance(edge_kind, str)
-    ):
-        raise RuntimeError("edge extractor returned an invalid identity")
-    return source_kind, source_id, target_kind, target_id, edge_kind
-
-
-def _stored_edge_identity(
-    edge: EdgeProjection,
-) -> tuple[str, UUID, str, UUID, str]:
-    return (
-        edge.source_kind,
-        edge.source_id,
-        edge.target_kind,
-        edge.target_id,
-        edge.edge_kind,
-    )
-
-
-def _apply_edge_projection_values(
-    edge: EdgeProjection,
-    desired: dict[str, object],
-) -> bool:
-    changed = False
-    for attribute in ("provenance", "occurred_at", "source_ref"):
-        value = desired[attribute]
-        if getattr(edge, attribute) != value:
-            setattr(edge, attribute, value)
-            changed = True
-    weight = float(desired["weight"])
-    if float(edge.weight) != weight:
-        edge.weight = weight
-        changed = True
-    return changed
-
-
-def _reconcile_edge_projection_rows(
-    session: Session,
-    *,
-    existing_rows: Collection[EdgeProjection],
-    desired_rows: Collection[dict[str, object]],
-) -> EdgeProjectionDelta:
-    """Apply a scoped desired edge set without replacing stable identities."""
-
-    desired_by_identity = {
-        _edge_row_identity(row): row
-        for row in desired_rows
-    }
-    if len(desired_by_identity) != len(desired_rows):
-        raise RuntimeError("edge extractor produced duplicate identities")
-    existing_by_identity = {
-        _stored_edge_identity(edge): edge
-        for edge in existing_rows
-    }
-    if len(existing_by_identity) != len(existing_rows):
-        raise RuntimeError("edge projection contains duplicate identities")
-
-    inserted = 0
-    updated = 0
-    deleted = 0
-    affected_source_ids: set[UUID] = set()
-    for identity, edge in existing_by_identity.items():
-        desired = desired_by_identity.get(identity)
-        if desired is None:
-            session.delete(edge)
-            deleted += 1
-            affected_source_ids.add(edge.source_id)
-            continue
-        if _apply_edge_projection_values(edge, desired):
-            updated += 1
-            affected_source_ids.add(edge.source_id)
-
-    # Flush removals before inserts so a stale row can never occupy the unique
-    # identity while its replacement is inserted by the same unit of work.
-    session.flush()
-    observed_at = datetime.now(UTC)
-    for identity in sorted(
-        desired_by_identity.keys() - existing_by_identity.keys(),
-        key=lambda value: tuple(str(part) for part in value),
-    ):
-        session.add(
-            EdgeProjection(
-                **desired_by_identity[identity],
-                last_seen_at=observed_at,
-            )
-        )
-        inserted += 1
-        affected_source_ids.add(identity[1])
-    session.flush()
-    return EdgeProjectionDelta(
-        desired_count=len(desired_rows),
-        inserted=inserted,
-        updated=updated,
-        deleted=deleted,
-        affected_source_ids=frozenset(affected_source_ids),
     )
 
 
@@ -654,154 +530,6 @@ def _tree_edge_row(
     )
 
 
-def _citation_scope(statement, citing_page_id: UUID | None):
-    """Restrict citations to one page's current published version.
-
-    ``CitationInput`` stores claim ids for claim-scoped citations and version
-    ids for whole/section citations. Legacy page/version target kinds remain
-    readable, but draft and superseded-version evidence never projects into
-    the viewer-visible graph.
-    """
-    if citing_page_id is None:
-        return statement
-    published_version_ids = select(ContextPage.current_published_version_id).where(
-        ContextPage.id == citing_page_id,
-        ContextPage.current_published_version_id.is_not(None),
-    )
-    claim_ids = select(ContextClaim.id).where(
-        ContextClaim.page_version_id.in_(published_version_ids)
-    )
-    return statement.where(
-        or_(
-            and_(
-                ContextCitation.target_kind == "context_page",
-                ContextCitation.target_id == citing_page_id,
-            ),
-            and_(
-                ContextCitation.target_kind.in_(
-                    (
-                        "context_page_version",
-                        "context_page_whole",
-                        "context_page_section",
-                    )
-                ),
-                ContextCitation.target_id.in_(published_version_ids),
-            ),
-            and_(
-                ContextCitation.target_kind == "context_claim",
-                ContextCitation.target_id.in_(claim_ids),
-            ),
-        )
-    )
-
-
-def _aggregate_citation_edges(
-    session: Session,
-    workspace_id: UUID,
-    edge_kind: str,
-    per_citation: list[tuple[ContextCitation, EntityKind, UUID]],
-) -> list[dict[str, object]]:
-    """Collapse citation instances onto identity edges.
-
-    A page can cite the same target more than once (two claims in one draft,
-    or citations carried across revisions — ContextCitation has no
-    uniqueness), and uq_edge_projection_identity would reject duplicate rows
-    mid-publish. Weight = instance count, occurred_at = latest evidence.
-    """
-    citing_by_citation = _citing_page_map(
-        session, [citation for citation, _kind, _id in per_citation]
-    )
-    workspace_pages = _workspace_page_ids(
-        session, set(citing_by_citation.values()), workspace_id
-    )
-    aggregated: dict[tuple[UUID, EntityKind, UUID], list] = {}
-    for citation, target_kind, target_id in per_citation:
-        citing_page_id = citing_by_citation.get(citation.id)
-        if citing_page_id is None or citing_page_id not in workspace_pages:
-            continue
-        key = (citing_page_id, target_kind, target_id)
-        entry = aggregated.get(key)
-        if entry is None:
-            aggregated[key] = [1, citation.created_at]
-        else:
-            entry[0] += 1
-            if citation.created_at and (
-                entry[1] is None or citation.created_at > entry[1]
-            ):
-                entry[1] = citation.created_at
-    return [
-        _edge(
-            workspace_id=workspace_id,
-            source_kind=EntityKind.CONTEXT_PAGE,
-            source_id=citing_page_id,
-            target_kind=target_kind,
-            target_id=target_id,
-            edge_kind=edge_kind,
-            source_table="context_citation",
-            weight=float(count),
-            occurred_at=latest,
-        )
-        for (citing_page_id, target_kind, target_id), (
-            count,
-            latest,
-        ) in aggregated.items()
-    ]
-
-
-def _citation_page_rows(
-    session: Session,
-    workspace_id: UUID,
-    citing_page_id: UUID | None = None,
-) -> list[dict[str, object]]:
-    """Curated page->page citations (ContextCitation XOR: cited page arm)."""
-    statement = (
-        select(
-            ContextCitation,
-            ContextPageVersion.page_id,
-        )
-        .join(
-            ContextPageVersion,
-            ContextCitation.cited_context_page_version_id == ContextPageVersion.id,
-        )
-        .where(ContextCitation.cited_context_page_version_id.is_not(None))
-    )
-    rows = session.execute(_citation_scope(statement, citing_page_id)).all()
-    return _aggregate_citation_edges(
-        session,
-        workspace_id,
-        "citation_page",
-        [
-            (citation, EntityKind.CONTEXT_PAGE, cited_page_id)
-            for citation, cited_page_id in rows
-        ],
-    )
-
-
-def _citation_source_rows(
-    session: Session,
-    workspace_id: UUID,
-    citing_page_id: UUID | None = None,
-) -> list[dict[str, object]]:
-    """Curated page->library citations (artifact / item-version arms)."""
-    statement = select(ContextCitation).where(
-        (ContextCitation.library_artifact_id.is_not(None))
-        | (ContextCitation.library_item_version_id.is_not(None))
-    )
-    citations = session.scalars(_citation_scope(statement, citing_page_id)).all()
-    per_citation: list[tuple[ContextCitation, EntityKind, UUID]] = []
-    for citation in citations:
-        if citation.library_artifact_id is not None:
-            target_kind = EntityKind.LIBRARY_ARTIFACT
-            target_id = citation.library_artifact_id
-        else:
-            target_kind = EntityKind.LIBRARY_ITEM_VERSION
-            target_id = citation.library_item_version_id
-        per_citation.append((citation, target_kind, target_id))
-    return _aggregate_citation_edges(
-        session, workspace_id, "citation_source", per_citation
-    )
-
-
 def _version_parent_rows(
     session: Session, workspace_id: UUID
 ) -> list[dict[str, object]]:
@@ -863,113 +591,6 @@ def _version_merge_rows(
     ]
 
 
-def _citing_page_map(
-    session: Session, citations: list[ContextCitation]
-) -> dict[UUID, UUID]:
-    """Map citations to a page only when they belong to its published head."""
-    version_targets = {
-        citation.target_id
-        for citation in citations
-        if citation.target_kind
-        in (
-            "context_page_version",
-            "context_page_whole",
-            "context_page_section",
-        )
-    }
-    version_owners: dict[UUID, tuple[UUID, UUID]] = {}
-    if version_targets:
-        version_owners = {
-            version_id: (page_id, version_id)
-            for version_id, page_id in session.execute(
-                select(ContextPageVersion.id, ContextPageVersion.page_id).where(
-                    ContextPageVersion.id.in_(version_targets)
-                )
-            ).all()
-        }
-
-    claim_targets = {
-        citation.target_id
-        for citation in citations
-        if citation.target_kind == "context_claim"
-    }
-    claim_owners: dict[UUID, tuple[UUID, UUID]] = {}
-    if claim_targets:
-        claim_owners = {
-            claim_id: (page_id, version_id)
-            for claim_id, version_id, page_id in session.execute(
-                select(
-                    ContextClaim.id,
-                    ContextPageVersion.id,
-                    ContextPageVersion.page_id,
-                )
-                .join(
-                    ContextPageVersion,
-                    ContextClaim.page_version_id == ContextPageVersion.id,
-                )
-                .where(ContextClaim.id.in_(claim_targets))
-            ).all()
-        }
-
-    page_targets = {
-        citation.target_id
-        for citation in citations
-        if citation.target_kind == "context_page"
-    }
-    owner_by_citation: dict[UUID, tuple[UUID, UUID | None]] = {}
-    for citation in citations:
-        if citation.target_kind in (
-            "context_page_version",
-            "context_page_whole",
-            "context_page_section",
-        ):
-            owner = version_owners.get(citation.target_id)
-        elif citation.target_kind == "context_claim":
-            owner = claim_owners.get(citation.target_id)
-        elif citation.target_kind == "context_page":
-            owner = (citation.target_id, None)
-        else:
-            owner = None
-        if owner is not None:
-            owner_by_citation[citation.id] = owner
-
-    page_ids = page_targets | {
-        page_id for page_id, _version_id in owner_by_citation.values()
-    }
-    published_by_page: dict[UUID, UUID | None] = {}
-    if page_ids:
-        published_by_page = dict(
-            session.execute(
-                select(ContextPage.id, ContextPage.current_published_version_id).where(
-                    ContextPage.id.in_(page_ids)
-                )
-            ).all()
-        )
-
-    mapping: dict[UUID, UUID] = {}
-    for citation_id, (page_id, version_id) in owner_by_citation.items():
-        published_version_id = published_by_page.get(page_id)
-        if published_version_id is not None and (
-            version_id is None or version_id == published_version_id
-        ):
-            mapping[citation_id] = page_id
-    return mapping
-
-
-def _workspace_page_ids(
-    session: Session, page_ids: set[UUID], workspace_id: UUID
-) -> set[UUID]:
-    if not page_ids:
-        return set()
-    return set(
-        session.scalars(
-            select(ContextPage.id)
-            .where(ContextPage.id.in_(page_ids))
-            .where(ContextPage.workspace_id == workspace_id)
-        ).all()
-    )
-
-
 # Registry: edge_kind -> extractor. New edge-bearing relations must register
 # here (the completeness test fails otherwise).
 EDGE_EXTRACTORS: dict[str, EdgeExtractor] = {}
@@ -994,6 +615,7 @@ _register("wikilink", _wikilink_rows)
 _register("tree", _tree_rows)
 _register("citation_page", _citation_page_rows)
 _register("citation_source", _citation_source_rows)
+_register("citation_agent", _citation_agent_rows)
 _register("version_parent", _version_parent_rows)
 _register("version_merge", _version_merge_rows)
 _register("co_access", _co_access_rows)
@@ -1027,13 +649,19 @@ EDGE_BEARING_RELATIONS: dict[str, tuple[str, ...]] = {
         "ask_turn.recommended_placement_tree_node_id->workspace_tree_node.id",
         "context_ingress_proposal.proposed_parent_tree_node_id->workspace_tree_node.id",
     ),
-    "citation_owner": ("context_citation.target_kind+target_id",),
+    "citation_owner": (
+        "context_citation.target_kind+target_id",
+        "context_published_citation.source_version_id->context_page_version.id",
+    ),
+    "citation_agent": ("context_published_citation.agent_page_id->agent_page.id",),
     "citation_page": (
         "context_citation.cited_context_page_version_id->context_page_version.id",
+        "context_published_citation.context_page_id->context_page.id",
     ),
     "citation_source": (
         "context_citation.library_artifact_id->library_artifact.id",
         "context_citation.library_item_version_id->library_item_version.id",
+        "context_published_citation.library_item_id->library_item.id",
     ),
     "version_parent": (
         "context_page_version.parent_version_id->context_page_version.id",
@@ -1148,6 +776,16 @@ DEFERRED_EDGE_RELATIONS.update(
 )
 
 
+def refresh_document_citation_sources(session, workspace_id, target_kind, target_id):
+    """Compatibility entrypoint; the Citation adapter owns incoming discovery."""
+    for source_id in document_citation_source_ids(
+        session, workspace_id, target_kind, target_id
+    ):
+        if target_kind == "context_page" and source_id == target_id:
+            continue
+        refresh_page_edge_projection(session, workspace_id, source_id)
+
+
 def refresh_page_edge_projection(
     session: Session,
     workspace_id: UUID,
@@ -1162,6 +800,7 @@ def refresh_page_edge_projection(
     transaction while preserving stable row identity and avoiding no-op
     revision changes (failure fails the publish, like other projections).
     """
+    lock_edge_projection_workspace(session, workspace_id)
     existing_rows = list(
         session.scalars(
             select(EdgeProjection)
@@ -1176,8 +815,7 @@ def refresh_page_edge_projection(
         )
     )
     existing = {
-        _stored_edge_identity(edge): float(edge.weight)
-        for edge in existing_rows
+        _stored_edge_identity(edge): float(edge.weight) for edge in existing_rows
     }
 
     desired_rows: list[dict[str, object]] = []
@@ -1185,6 +823,7 @@ def refresh_page_edge_projection(
         ("wikilink", _wikilink_rows),
         ("citation_page", _citation_page_rows),
         ("citation_source", _citation_source_rows),
+        ("citation_agent", _citation_agent_rows),
     ):
         # Scoped extraction: a publish must not pay O(workspace) citation
         # scans; the extractors restrict to this page's link/citation rows.
@@ -1193,12 +832,10 @@ def refresh_page_edge_projection(
                 continue
             desired_rows.append(row)
 
-    desired = {
-        _edge_row_identity(row): float(row["weight"])
-        for row in desired_rows
-    }
-    delta = _reconcile_edge_projection_rows(
+    desired = {_edge_row_identity(row): float(row["weight"]) for row in desired_rows}
+    delta = reconcile_edge_projection_rows(
         session,
+        scope=EdgeProjectionScope(workspace_id, frozenset(PAGE_EDGE_KINDS)),
         existing_rows=existing_rows,
         desired_rows=desired_rows,
     )
@@ -1371,6 +1008,7 @@ def refresh_tree_node_edge_projection(
     """
     if not node_ids:
         return
+    lock_edge_projection_workspace(session, workspace_id)
     nodes = session.scalars(
         select(WorkspaceTreeNode).where(
             WorkspaceTreeNode.workspace_id == workspace_id,
@@ -1479,6 +1117,7 @@ def refresh_tree_edge_projection(session: Session, workspace_id: UUID) -> None:
     an O(workspace) rebuild. A tripwire test asserts production paths do not
     reach here; keep it that way.
     """
+    lock_edge_projection_workspace(session, workspace_id)
     session.execute(
         delete(EdgeProjection)
         .where(EdgeProjection.workspace_id == workspace_id)
@@ -1497,7 +1136,6 @@ def refresh_co_access_edge_projection(
     *,
     now: datetime | None = None,
 ) -> int:
-    rows = _co_access_rows(session, workspace_id, now=now)
     # The frozen core migration calls this runtime seam before Graph View's
     # revision exists. Reflection is confined to its connection-bound Session;
     # ordinary Engine-bound workers and graph requests keep the current path.
@@ -1510,8 +1148,13 @@ def refresh_co_access_edge_projection(
         )
     ):
         return _refresh_released_co_access_projection(
-            session, workspace_id, rows=rows, now=now
+            session,
+            workspace_id,
+            rows=_co_access_rows(session, workspace_id, now=now),
+            now=now,
         )
+    lock_edge_projection_workspace(session, workspace_id)
+    rows = _co_access_rows(session, workspace_id, now=now)
     projected = {
         (
             str(row["source_kind"]),
@@ -1635,6 +1278,7 @@ def clear_co_access_edge_projection(session: Session, workspace_id: UUID) -> int
     This is what the owner's usage-signal switch does when it is off. Turning
     it back on lets the next refresh rebuild the rows from the same records.
     """
+    lock_edge_projection_workspace(session, workspace_id)
 
     removed = session.execute(
         delete(EdgeProjection).where(
@@ -1661,6 +1305,7 @@ def rebuild_edge_projection(
     ``usage_signals_enabled`` is the owner's switch and has no default: with
     it off, co_access rows are removed like every other kind but not rebuilt.
     """
+    lock_edge_projection_workspace(session, workspace_id)
 
     session.execute(
         delete(EdgeProjection)

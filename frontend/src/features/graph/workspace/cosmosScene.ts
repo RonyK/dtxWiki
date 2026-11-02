@@ -169,12 +169,13 @@ export function buildCosmosSceneBuffers(
   const pointSizes = new Float32Array(count);
   const context = rgb(tokens.node.context);
   const library = rgb(tokens.node.library);
+  const agent = rgb(tokens.node.agent);
   const folder = rgb(tokens.node.folder);
   const overviewScale = count > 1_000 ? 0.8 : 2;
   for (let node = 0; node < count; node += 1) {
     const kind = columns.nodeKinds[node];
-    if (kind > 2) throw new Error("Unknown Workspace Map node kind");
-    writeColor(pointColors, node, kind === 0 ? context : kind === 1 ? library : folder, 1);
+    if (kind > 2 && kind !== 4) throw new Error("Unknown Workspace Map node kind");
+    writeColor(pointColors, node, kind === 0 ? context : kind === 1 ? library : kind === 4 ? agent : folder, 1);
     pointShapes[node] = kind === 1 ? 1 : 0; // Library square, Context/aggregate circle
     // At a 2k-node fit, full-size points cover their short intra-community
     // links. Retain the degree ordering but reserve enough pixel space for

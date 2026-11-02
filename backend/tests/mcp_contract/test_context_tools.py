@@ -1,33 +1,21 @@
-from uuid import uuid4
-
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import func, select
 
-from backend.app.settings import Settings
-from backend.mcp import context_tools
 from backend.mcp.router import dispatch
 from backend.models.audit import AuditEvent
 from backend.models.change import ChangeSet
-from backend.models.context import ContextCitation, ContextPage, ContextPageVersion
+from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.feedback import FeedbackItem
 from backend.models.review import ReviewItem
-from backend.models.user import User
 from backend.models.workspace import Workspace
-from backend.policy.auth import ActorContext
-from backend.policy.rbac import grant_workspace_membership
 from backend.schemas.context_edit import PatchDraftRequest
 from backend.schemas.context_write import (
-    CitationCandidate,
-    CiteResult,
     UpdateDraftRequest,
     WriteDraftRequest,
 )
-from backend.services.citation_service import CitationService
 from backend.services.context_editing import section_content_hash
 from backend.services.context_write_service import ContextWriteService
-from backend.services.extraction_service import ExtractionService
-from backend.services.library_service import LibraryService
 from backend.services.read_errors import (
     RejectedByPolicyError,
     RevisionSubmissionRequiredError,
@@ -790,300 +778,51 @@ def test_mcp_metadata_patch_rejects_invalid_values_without_writing(
         )
 
 
-def test_mcp_cite_returns_typed_candidates(
-    page_service, actor, media_installer_factory
-):
-    workspace_id = _workspace(page_service)
-    with page_service.session_factory.begin() as session:
-        registration = LibraryService().register_library_item(
-            session=session,
-            workspace_id=workspace_id,
-            canonical_uri="https://example.com/mcp-cite",
-            title="MCP Cite Source",
-            raw_text="MCP cite tool returns typed candidates.",
-        )
-        artifact = ExtractionService(
-            media_installer_factory=media_installer_factory
-        ).extract_library_item_version(
-            session=session,
-            library_item_version_id=registration.version.id,
-        )
-
+def test_mcp_cite_registers_selected_document_ids(page_service, actor):
+    # Budget exception: the service lifecycle cannot detect a stale MCP request
+    # schema or dispatch binding. This transport case replaces the discovery
+    # contracts and proves legacy-input rejection plus the actual write result.
     response = dispatch(
         "cite",
+        {"workspace_id": str(_workspace(page_service)), "claim_text": "old discovery"},
+        actor=actor,
+        page_service=page_service,
+    )
+    assert response.envelope.result_status == "failed"
+    assert response.envelope.error_code == "validation_failed"
+    created = dispatch(
+        "create_context_page",
         {
-            "workspace_id": str(workspace_id),
-            "claim_text": "cite tool returns typed candidates",
-            "desired_citation_type": "raw_source",
+            "workspace_id": str(_workspace(page_service)),
+            "title": "Cite owner",
+            "body_md": "# Cite owner",
+        },
+        actor=actor,
+        page_service=page_service,
+    ).data
+    target = dispatch(
+        "create_context_page",
+        {
+            "workspace_id": str(_workspace(page_service)),
+            "title": "Cite target",
+            "body_md": "# Cite target",
+        },
+        actor=actor,
+        page_service=page_service,
+    ).data
+    saved = dispatch(
+        "cite",
+        {
+            "workspace_id": str(_workspace(page_service)),
+            "page_id": str(created.id),
+            "version_id": str(created.version_id),
+            "expected_editing_revision": created.editing_revision,
+            "idempotency_key": "mcp-reference-register",
+            "add": [{"target_kind": "context_page", "target_id": str(target.id)}],
         },
         actor=actor,
         page_service=page_service,
     )
-
-    assert response.envelope.result_status == "succeeded"
-    assert response.data.citation_candidates[0].library_artifact_id == artifact.id
-    assert response.data.citation_candidates[0].write_citation.model_dump(
-        exclude_none=True
-    ) == {
-        "target_kind": "context_claim",
-        "citation_type": "derived_artifact",
-        "library_artifact_id": artifact.id,
-        "location": artifact.conversion_detail.location_model,
-        "snippet": response.data.citation_candidates[0].snippet,
-        "created_via": "cite_tool",
-    }
-    assert response.input_required is None
-
-
-def test_mcp_cite_hides_restricted_library_candidates(
-    page_service, media_installer_factory
-):
-    workspace_id = _workspace(page_service)
-    with page_service.session_factory.begin() as session:
-        editor = User(
-            email="cite-editor@example.com",
-            password_hash="unused",
-            display_name="Cite Editor",
-        )
-        session.add(editor)
-        session.flush()
-        grant_workspace_membership(
-            session,
-            user_id=editor.id,
-            workspace_id=workspace_id,
-            role="editor",
-        )
-        registration = LibraryService().register_library_item(
-            session=session,
-            workspace_id=workspace_id,
-            canonical_uri="https://example.com/mcp-cite-restricted",
-            title="Restricted MCP cite source",
-            trust_level="restricted",
-            raw_text="restricted-cite-marker must remain private",
-        )
-        artifact = ExtractionService(
-            media_installer_factory=media_installer_factory
-        ).extract_library_item_version(
-            session=session,
-            library_item_version_id=registration.version.id,
-        )
-        editor_id = editor.id
-
-    editor_actor = ActorContext(
-        actor_kind="human",
-        actor_id=str(editor_id),
-        scopes=("mcp:write", "cite"),
-        user_id=editor_id,
-        token_kind="mcp_client",
-    )
-
-    response = dispatch(
-        "cite",
-        {
-            "workspace_id": str(workspace_id),
-            "claim_text": "restricted-cite-marker",
-            "desired_citation_type": "raw_source",
-        },
-        actor=editor_actor,
-        page_service=page_service,
-    )
-
-    assert response.envelope.result_status == "succeeded"
-    assert all(
-        candidate.library_artifact_id != artifact.id
-        for candidate in response.data.citation_candidates
-    )
-
-
-def test_mcp_cite_preview_stages_verification_without_mutating_citations(
-    page_service, actor, monkeypatch, media_installer_factory
-):
-    workspace_id = _workspace(page_service)
-    with page_service.session_factory.begin() as session:
-        registration = LibraryService().register_library_item(
-            session=session,
-            workspace_id=workspace_id,
-            canonical_uri="https://example.com/mcp-cite-preview",
-            title="MCP Cite Preview Source",
-            raw_text="Preview citation verification supports this exact claim.",
-        )
-        artifact = ExtractionService(
-            media_installer_factory=media_installer_factory
-        ).extract_library_item_version(
-            session=session,
-            library_item_version_id=registration.version.id,
-        )
-        citation = ContextCitation(
-            workspace_id=workspace_id,
-            target_kind="context_page",
-            target_id=uuid4(),
-            target_location={},
-            library_artifact_id=artifact.id,
-            citation_type="derived_artifact",
-            location={},
-            verification_status="weak",
-        )
-        session.add(citation)
-        session.flush()
-        citation_id = citation.id
-        citation_count = session.scalar(select(func.count(ContextCitation.id)))
-    monkeypatch.setattr(
-        context_tools,
-        "get_settings",
-        lambda: Settings(
-            session_secret="cite-preview-secret",
-            mcp_preview_2026_07_28=True,
-        ),
-    )
-    request = {
-        "workspace_id": str(workspace_id),
-        "claim_text": "Preview citation verification supports this exact claim",
-        "desired_citation_type": "raw_source",
-        "wire": "mrtr_preview",
-    }
-
-    first = dispatch("cite", request, actor=actor, page_service=page_service)
-    assert first.input_required["inputRequests"][0]["id"] == "cite_verify"
-    second = dispatch(
-        "cite",
-        {
-            **request,
-            "resume_token": first.input_required["requestState"],
-            "input_responses": {
-                "cite_verify": {
-                    "candidate_id": str(artifact.id),
-                    "supported": "yes",
-                    "confidence": 0.95,
-                    "rationale": "The extracted sentence directly supports the claim.",
-                }
-            },
-        },
-        actor=actor,
-        page_service=page_service,
-    )
-    assert second.envelope.result_status == "succeeded"
-    assert second.data.suggested_verification.candidate_id == artifact.id
-    assert second.data.suggested_verification.supported == "yes"
-    with page_service.session_factory() as session:
-        assert session.scalar(select(func.count(ContextCitation.id))) == citation_count
-        assert session.get(ContextCitation, citation_id).verification_status == "weak"
-
-    tampered = first.input_required["requestState"][:-1] + "x"
-    rejected = dispatch(
-        "cite",
-        {
-            **request,
-            "resume_token": tampered,
-            "input_responses": {
-                "cite_verify": {
-                    "candidate_id": str(artifact.id),
-                    "supported": "yes",
-                    "confidence": 1,
-                    "rationale": "forged",
-                }
-            },
-        },
-        actor=actor,
-        page_service=page_service,
-    )
-    assert rejected.envelope.error_code == "client_state_invalid"
-
-
-def test_mcp_cite_preview_signs_only_the_eight_exposed_candidates(
-    page_service, actor, monkeypatch
-):
-    workspace_id = _workspace(page_service)
-    candidate_ids = [uuid4() for _ in range(10)]
-
-    def many_candidates(*_args, **_kwargs):
-        return CiteResult(
-            citation_candidates=[
-                CitationCandidate(
-                    citation_type="derived_artifact",
-                    library_artifact_id=candidate_id,
-                    snippet=f"Candidate {index}",
-                    support_level="partial",
-                    freshness="current",
-                    recommendation="needs_review",
-                )
-                for index, candidate_id in enumerate(candidate_ids)
-            ]
-        )
-
-    monkeypatch.setattr(CitationService, "cite", many_candidates)
-    monkeypatch.setattr(
-        context_tools,
-        "get_settings",
-        lambda: Settings(
-            session_secret="cite-top-eight-secret",
-            mcp_preview_2026_07_28=True,
-        ),
-    )
-    request = {
-        "workspace_id": str(workspace_id),
-        "claim_text": "Candidate cap claim",
-        "desired_citation_type": "raw_source",
-        "wire": "mrtr_preview",
-    }
-
-    first = dispatch("cite", request, actor=actor, page_service=page_service)
-    exposed = first.input_required["inputRequests"][0]["candidates"]
-    assert [item["id"] for item in exposed] == [
-        str(candidate_id) for candidate_id in candidate_ids[:8]
-    ]
-
-    rejected_hidden = dispatch(
-        "cite",
-        {
-            **request,
-            "resume_token": first.input_required["requestState"],
-            "input_responses": {
-                "cite_verify": {
-                    "candidate_id": str(candidate_ids[8]),
-                    "supported": "yes",
-                    "confidence": 1,
-                    "rationale": "This candidate was not exposed.",
-                }
-            },
-        },
-        actor=actor,
-        page_service=page_service,
-    )
-    assert rejected_hidden.envelope.result_status == "failed"
-    assert rejected_hidden.envelope.error_code == "validation_failed"
-
-
-def test_cite_enforces_workspace_accepted_citation_types(
-    page_service, actor, media_installer_factory
-):
-    workspace_id = _workspace(page_service)
-    with page_service.session_factory.begin() as session:
-        workspace = session.get(Workspace, workspace_id)
-        workspace.citation_policy = {
-            "strictness": "standard",
-            "accepted_citation_types": ["context_page"],
-        }
-        registration = LibraryService().register_library_item(
-            session=session,
-            workspace_id=workspace_id,
-            canonical_uri="https://example.com/disallowed-citation",
-            title="Disallowed source type",
-            raw_text="policy scoped citation candidate",
-        )
-        ExtractionService(media_installer_factory=media_installer_factory).extract_library_item_version(
-            session=session,
-            library_item_version_id=registration.version.id,
-        )
-
-    response = dispatch(
-        "cite",
-        {
-            "workspace_id": str(workspace_id),
-            "claim_text": "policy scoped citation candidate",
-            "desired_citation_type": "raw_source",
-        },
-        actor=actor,
-        page_service=page_service,
-    )
-    assert response.envelope.result_status == "succeeded"
-    assert response.data.citation_candidates == []
+    assert saved.envelope.result_status == "succeeded"
+    assert saved.data.added[0].target_id == target.id
+    assert saved.data.editing_revision == created.editing_revision + 1

@@ -10,6 +10,7 @@ from backend.schemas.common import (
     RetrievalMode,
     SearchScope,
 )
+from backend.schemas.document_reference import ReferenceView
 from backend.schemas.input_policy import InputRequest
 from backend.spi.types import (
     RankedResult as RankedResult,
@@ -433,6 +434,8 @@ class AgentPageRestDetail(AgentPageDetail):
 
 
 class ContextPageDetail(ContextPageSummary):
+    references: list["ReferenceView"] = Field(default_factory=list)
+    references_hash: str = ""
     body_markdown: str | None = None
     version_info: VersionInfo | None = None
     published_version_info: PublishedVersionInfo | None = None

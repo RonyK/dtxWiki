@@ -571,5 +571,52 @@
     "copyUnavailable": "참조를 복사할 수 없습니다.",
     "close": "설명 닫기",
     "infoLabel": "이 항목을 열 수 없는 이유"
+  },
+  "references": {
+    "title": "참고문헌",
+    "add": "+ 참고문헌 추가",
+    "insert": "본문에 인용",
+    "convertLink": "선택 링크를 인용으로 표시",
+    "remove": "참고문헌 삭제",
+    "notCited": "본문 미인용",
+    "unavailable": "접근할 수 없는 문서",
+    "unresolved": "해석할 수 없는 인용입니다. 참고문헌에서 문서를 선택해 이 토큰을 교체하세요.",
+    "unpublished": "미발행 문서",
+    "backToCitation": "인용 {{number}}, {{occurrence}}번째 위치로 돌아가기",
+    "inlineCount_one": "본문 인용 {{count}}곳",
+    "inlineCount_other": "본문 인용 {{count}}곳",
+    "empty": "작성에 참고한 문서를 추가하세요.",
+    "choose": "참고문헌 선택",
+    "search": "문서 검색",
+    "kind": "문서 종류",
+    "allKinds": "모든 문서 종류",
+    "searching": "검색 중…",
+    "noResults": "일치하는 문서가 없습니다.",
+    "searchFailed": "문서를 검색하지 못했습니다.",
+    "close": "닫기",
+    "selectLink": "인용으로 표시할 내부 문서 링크를 선택하세요.",
+    "added": "이 편집본에 참고문헌을 추가했습니다.",
+    "removed": "참고문헌 등록을 삭제했습니다. 본문 인용은 직접 제거할 때까지 유지됩니다.",
+    "saveFailed": "참고문헌을 저장하지 못했습니다.",
+    "kinds": {
+      "context": "컨텍스트",
+      "library": "라이브러리",
+      "agent": "에이전트"
+    },
+    "changes": "참고문헌 변경",
+    "changeAdded": "추가",
+    "changeRemoved": "삭제",
+    "changeEdited": "수정",
+    "deleted": "삭제된 출처",
+    "note": "메모 (선택)",
+    "savedReloadFailed": "참고문헌은 저장했지만 목록을 다시 읽지 못했습니다. 목록을 보려면 새로고침하세요.",
+    "suggestionsUnavailable": "참고문헌 추천 목록을 불러오지 못했습니다. 문서 선택기에서 참고문헌을 검색하세요.",
+    "fragmentUnavailable": "인용 위치를 찾을 수 없습니다. 문서는 열 수 있습니다.",
+    "loadMore": "문서 더 보기",
+    "retry": "참고문헌 변경 다시 시도",
+    "retryRequired": "저장하거나 발행하기 전에 참고문헌 변경을 다시 시도하세요."
+  },
+  "checkingReference": {
+    "label": "문서 연결 확인 중"
   }
 }

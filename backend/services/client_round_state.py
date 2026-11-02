@@ -14,7 +14,6 @@ CLIENT_ROUND_STATE_VERSION = 1
 MAINTENANCE_STATE_KIND = "dtxwiki-maintenance-state-v1"
 RERANK_STATE_KIND = "dtxwiki-rerank-state-v1"
 QUERY_REWRITE_STATE_KIND = "dtxwiki-query-rewrite-state-v1"
-CITE_VERIFY_STATE_KIND = "dtxwiki-cite-verify-state-v1"
 
 
 @dataclass(frozen=True)

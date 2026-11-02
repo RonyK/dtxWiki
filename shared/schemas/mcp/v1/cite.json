@@ -1,11 +1,104 @@
 {
   "input": {
+    "$defs": {
+      "DocumentReferenceInput": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Note"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_kind": {
+            "enum": [
+              "context_page",
+              "library_item",
+              "agent_page"
+            ],
+            "title": "Target Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_kind",
+          "target_id"
+        ],
+        "title": "DocumentReferenceInput",
+        "type": "object"
+      },
+      "DocumentReferenceRemoveInput": {
+        "additionalProperties": false,
+        "properties": {
+          "reference_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reference Id"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Id"
+          },
+          "target_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "context_page",
+                  "library_item",
+                  "agent_page"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Kind"
+          }
+        },
+        "title": "DocumentReferenceRemoveInput",
+        "type": "object"
+      }
+    },
     "additionalProperties": false,
     "properties": {
-      "claim_text": {
-        "minLength": 1,
-        "title": "Claim Text",
-        "type": "string"
+      "add": {
+        "items": {
+          "$ref": "#/$defs/DocumentReferenceInput"
+        },
+        "maxItems": 500,
+        "title": "Add",
+        "type": "array"
       },
       "conversation_token": {
         "anyOf": [
@@ -22,91 +115,43 @@
         "description": "Opaque MCP conversation token. Omit or pass 'new' to start a new dtxWiki MCP chat; echo the returned envelope value to append.",
         "title": "Conversation Token"
       },
-      "desired_citation_type": {
-        "default": "both",
-        "enum": [
-          "raw_source",
-          "context_page",
-          "both"
-        ],
-        "title": "Desired Citation Type",
-        "type": "string"
-      },
-      "input_responses": {
-        "anyOf": [
-          {
-            "additionalProperties": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "object"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Input Responses"
-      },
-      "limit": {
-        "default": 10,
-        "maximum": 50,
+      "expected_editing_revision": {
         "minimum": 1,
-        "title": "Limit",
+        "title": "Expected Editing Revision",
         "type": "integer"
       },
-      "resume_token": {
-        "anyOf": [
-          {
-            "maxLength": 4096,
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Resume Token"
+      "idempotency_key": {
+        "description": "24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.",
+        "maxLength": 160,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9._:-]+$",
+        "title": "Idempotency Key",
+        "type": "string"
       },
-      "source_scope": {
-        "anyOf": [
-          {
-            "items": {
-              "format": "uuid",
-              "type": "string"
-            },
-            "type": "array"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Source Scope"
+      "page_id": {
+        "description": "Context page UUID or stable_url: /p/<workspace_id>/<page_id> or /p/<page_id> in this workspace.",
+        "maxLength": 512,
+        "minLength": 1,
+        "pattern": "^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|/p/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?:/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?(?:#[^\\s]*)?)$",
+        "title": "Page Id",
+        "type": "string"
       },
-      "target_page_id": {
-        "anyOf": [
-          {
-            "description": "Context page UUID or stable_url: /p/<workspace_id>/<page_id> or /p/<page_id> in this workspace.",
-            "maxLength": 512,
-            "minLength": 1,
-            "pattern": "^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|/p/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?:/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?(?:#[^\\s]*)?)$",
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Target Page Id"
+      "remove": {
+        "items": {
+          "$ref": "#/$defs/DocumentReferenceRemoveInput"
+        },
+        "maxItems": 500,
+        "title": "Remove",
+        "type": "array"
       },
-      "wire": {
-        "default": "stable",
-        "enum": [
-          "stable",
-          "mrtr_preview"
-        ],
-        "title": "Wire",
+      "retry_only": {
+        "default": false,
+        "title": "Retry Only",
+        "type": "boolean"
+      },
+      "version_id": {
+        "format": "uuid",
+        "title": "Version Id",
         "type": "string"
       },
       "workspace_id": {
@@ -116,7 +161,10 @@
       }
     },
     "required": [
-      "claim_text",
+      "version_id",
+      "expected_editing_revision",
+      "idempotency_key",
+      "page_id",
       "workspace_id"
     ],
     "title": "CiteInput",
@@ -124,257 +172,189 @@
   },
   "output": {
     "$defs": {
-      "CitationCandidate": {
-        "additionalProperties": false,
-        "properties": {
-          "citation_type": {
-            "enum": [
-              "raw_source",
-              "context_page",
-              "derived_artifact"
-            ],
-            "title": "Citation Type",
-            "type": "string"
-          },
-          "cited_context_page_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Cited Context Page Version Id"
-          },
-          "freshness": {
-            "enum": [
-              "current",
-              "stale",
-              "archived"
-            ],
-            "title": "Freshness",
-            "type": "string"
-          },
-          "library_artifact_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Library Artifact Id"
-          },
-          "library_item_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Library Item Version Id"
-          },
-          "location": {
-            "additionalProperties": true,
-            "title": "Location",
-            "type": "object"
-          },
-          "recommendation": {
-            "enum": [
-              "use",
-              "do_not_use",
-              "needs_review"
-            ],
-            "title": "Recommendation",
-            "type": "string"
-          },
-          "snippet": {
-            "title": "Snippet",
-            "type": "string"
-          },
-          "support_level": {
-            "enum": [
-              "strong",
-              "partial",
-              "weak",
-              "contradicts",
-              "none"
-            ],
-            "title": "Support Level",
-            "type": "string"
-          },
-          "write_citation": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/CitationInput"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "Write-ready CitationInput."
-          }
-        },
-        "required": [
-          "citation_type",
-          "snippet",
-          "support_level",
-          "freshness",
-          "recommendation"
-        ],
-        "title": "CitationCandidate",
-        "type": "object"
-      },
-      "CitationInput": {
-        "additionalProperties": false,
-        "properties": {
-          "citation_type": {
-            "enum": [
-              "raw_source",
-              "context_page",
-              "derived_artifact"
-            ],
-            "title": "Citation Type",
-            "type": "string"
-          },
-          "cited_context_page_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Cited Context Page Version Id"
-          },
-          "created_via": {
-            "default": "cite_tool",
-            "enum": [
-              "cite_tool",
-              "manual_input"
-            ],
-            "title": "Created Via",
-            "type": "string"
-          },
-          "library_artifact_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Library Artifact Id"
-          },
-          "library_item_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Library Item Version Id"
-          },
-          "location": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Location"
-          },
-          "snippet": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Snippet"
-          },
-          "target_kind": {
-            "default": "context_claim",
-            "enum": [
-              "context_claim",
-              "context_page_section",
-              "context_page_whole"
-            ],
-            "title": "Target Kind",
-            "type": "string"
-          },
-          "target_locator": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Target Locator"
-          }
-        },
-        "required": [
-          "citation_type"
-        ],
-        "title": "CitationInput",
-        "type": "object"
-      },
       "CiteResult": {
         "additionalProperties": false,
         "properties": {
-          "citation_candidates": {
+          "added": {
             "items": {
-              "$ref": "#/$defs/CitationCandidate"
+              "$ref": "#/$defs/DocumentReferenceInput"
             },
-            "title": "Citation Candidates",
+            "title": "Added",
             "type": "array"
           },
-          "suggested_verification": {
+          "audit_event_id": {
             "anyOf": [
               {
-                "$ref": "#/$defs/SuggestedCitationVerification"
+                "format": "uuid",
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
             "default": null,
-            "description": "Client advisory only; it never mutates persisted citation verification_status without a later reviewed write."
+            "title": "Audit Event Id"
+          },
+          "editing_revision": {
+            "title": "Editing Revision",
+            "type": "integer"
+          },
+          "page_id": {
+            "format": "uuid",
+            "title": "Page Id",
+            "type": "string"
+          },
+          "publication_state": {
+            "const": "editing",
+            "default": "editing",
+            "title": "Publication State",
+            "type": "string"
+          },
+          "receipt_id": {
+            "format": "uuid",
+            "title": "Receipt Id",
+            "type": "string"
+          },
+          "references_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "References Hash",
+            "type": "string"
+          },
+          "remaining_inline_occurrences": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Remaining Inline Occurrences",
+            "type": "object"
+          },
+          "removed": {
+            "items": {
+              "$ref": "#/$defs/DocumentReferenceRemoveInput"
+            },
+            "title": "Removed",
+            "type": "array"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "unchanged": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/DocumentReferenceInput"
+                },
+                {
+                  "$ref": "#/$defs/DocumentReferenceRemoveInput"
+                }
+              ]
+            },
+            "title": "Unchanged",
+            "type": "array"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
           }
         },
+        "required": [
+          "page_id",
+          "version_id",
+          "editing_revision",
+          "references_hash",
+          "receipt_id"
+        ],
         "title": "CiteResult",
+        "type": "object"
+      },
+      "DocumentReferenceInput": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Note"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_kind": {
+            "enum": [
+              "context_page",
+              "library_item",
+              "agent_page"
+            ],
+            "title": "Target Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_kind",
+          "target_id"
+        ],
+        "title": "DocumentReferenceInput",
+        "type": "object"
+      },
+      "DocumentReferenceRemoveInput": {
+        "additionalProperties": false,
+        "properties": {
+          "reference_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reference Id"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Id"
+          },
+          "target_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "context_page",
+                  "library_item",
+                  "agent_page"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Kind"
+          }
+        },
+        "title": "DocumentReferenceRemoveInput",
         "type": "object"
       },
       "EnvelopeWarning": {
@@ -778,44 +758,6 @@
         "title": "MCPResultEnvelope",
         "type": "object"
       },
-      "SuggestedCitationVerification": {
-        "additionalProperties": false,
-        "properties": {
-          "candidate_id": {
-            "format": "uuid",
-            "title": "Candidate Id",
-            "type": "string"
-          },
-          "confidence": {
-            "maximum": 1,
-            "minimum": 0,
-            "title": "Confidence",
-            "type": "number"
-          },
-          "rationale": {
-            "maxLength": 1000,
-            "title": "Rationale",
-            "type": "string"
-          },
-          "supported": {
-            "enum": [
-              "yes",
-              "no",
-              "partial"
-            ],
-            "title": "Supported",
-            "type": "string"
-          }
-        },
-        "required": [
-          "candidate_id",
-          "supported",
-          "confidence",
-          "rationale"
-        ],
-        "title": "SuggestedCitationVerification",
-        "type": "object"
-      },
       "TextMatchCandidate": {
         "additionalProperties": false,
         "description": "Where replace_text's old_text nearly matched, by position only.\n\nEvidence for a refused match, so the caller can re-address one block\ninstead of re-reading the page. It deliberately carries no text: the\ncandidate is page content, and echoing it would put authored text into\nserver guidance and the durable trace.",
@@ -883,19 +825,6 @@
       },
       "envelope": {
         "$ref": "#/$defs/MCPResultEnvelope"
-      },
-      "input_required": {
-        "anyOf": [
-          {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Input Required"
       }
     },
     "required": [

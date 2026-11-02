@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -43,19 +43,8 @@ CONVERSATION_TOKEN_FIELD = Field(
 
 class CiteInput(CiteRequest):
     workspace_id: UUID
-    target_page_id: MCPPageInput | None = None
+    page_id: MCPPageInput
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
-    wire: Literal["stable", "mrtr_preview"] = "stable"
-    resume_token: str | None = Field(default=None, max_length=4096)
-    input_responses: dict[str, dict[str, Any]] | None = None
-
-    @model_validator(mode="after")
-    def _validate_resume_pair(self):
-        if (self.resume_token is None) != (self.input_responses is None):
-            raise ValueError(
-                "resume_token and input_responses must be provided together"
-            )
-        return self
 
     model_config = ConfigDict(extra="forbid")
 
@@ -63,7 +52,6 @@ class CiteInput(CiteRequest):
 class CiteToolOutput(BaseModel):
     envelope: MCPResultEnvelope
     data: CiteResult | None = None
-    input_required: dict[str, Any] | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -283,6 +271,7 @@ class PatchContextEditInput(BaseModel):
             '"content": "New paragraph."}].'
         ),
     )
+
     expected_editing_revision: int = Field(
         ge=1,
         description=(

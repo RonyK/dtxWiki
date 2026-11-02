@@ -571,5 +571,52 @@
     "copyUnavailable": "Could not copy the reference.",
     "close": "Close explanation",
     "infoLabel": "Why can’t I open this item?"
+  },
+  "references": {
+    "title": "References",
+    "add": "+ Add reference",
+    "insert": "Cite in text",
+    "convertLink": "Mark selected link as citation",
+    "remove": "Remove reference",
+    "notCited": "Not cited in text",
+    "unavailable": "Document unavailable",
+    "unresolved": "Unresolved citation. Replace this token by choosing a document from References.",
+    "unpublished": "Unpublished document",
+    "backToCitation": "Back to citation {{number}}, occurrence {{occurrence}}",
+    "inlineCount_one": "{{count}} citation in text",
+    "inlineCount_other": "{{count}} citations in text",
+    "empty": "Add documents you used as references.",
+    "choose": "Choose a reference",
+    "search": "Search documents",
+    "kind": "Document type",
+    "allKinds": "All document types",
+    "searching": "Searching…",
+    "noResults": "No matching documents.",
+    "searchFailed": "Could not search documents.",
+    "close": "Close",
+    "selectLink": "Select an internal document link to mark it as a citation.",
+    "added": "Reference added to this draft.",
+    "removed": "Reference registration removed. In-text citations remain until you remove them.",
+    "saveFailed": "Could not save references.",
+    "kinds": {
+      "context": "Context",
+      "library": "Library",
+      "agent": "Agent"
+    },
+    "changes": "Reference changes",
+    "changeAdded": "Added",
+    "changeRemoved": "Removed",
+    "changeEdited": "Edited",
+    "deleted": "Deleted source",
+    "note": "Note (optional)",
+    "savedReloadFailed": "References were saved, but the list could not be reloaded. Reload to view it.",
+    "suggestionsUnavailable": "Reference suggestions could not be loaded. Use the document picker to search references.",
+    "fragmentUnavailable": "Citation location is unavailable; the document can still be opened.",
+    "loadMore": "Load more documents",
+    "retry": "Retry reference change",
+    "retryRequired": "Retry the reference change before saving or publishing."
+  },
+  "checkingReference": {
+    "label": "Checking reference"
   }
 }

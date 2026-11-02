@@ -13,6 +13,7 @@ import { LocalGraphTimeline } from "./local/LocalGraphTimeline";
 import { timelinePresentation } from "./local/timelinePresentation";
 import { historySceneCatalog, renderHistoryScene } from "./local/historyScene";
 import { LocalGraphCoverageInfo } from "./local/LocalGraphCoverageInfo";
+import { CitationEvidenceSection, type CitationPair } from "./shared/CitationEvidenceSection";
 import { LocalGraphList, type LocalGraphSelectionOrigin } from "./local/LocalGraphList";
 import { localSceneScopeKey } from "./local/sceneScope";
 import { buildSceneNavigation, type SceneNavigation } from "./sceneNavigation";
@@ -871,6 +872,8 @@ export function GraphView({
         )}
         <GraphDetails
           active={active}
+          citationEvidenceActive={active && !historical && timelineCursor === null}
+          citationEvidenceRevision={payload.projection_revision}
           historyEvents={historical ? timeline : undefined}
           historyEdges={historyCatalog.edges}
           historicalOnly={historical && !!selectedId && !scene.nodes.some((node) => node.id === selectedId) && !scene.edges.some((edge) => edge.id === selectedId)}
@@ -1037,7 +1040,7 @@ function GraphLegend({ nodeVisuals, scene }: { nodeVisuals: LocalNodeVisuals; sc
   const { t } = useTranslation("graph");
   const { tokens, forcedColors } = nodeVisuals;
   const visibleNodeKinds = new Set(scene.nodes.map((node) => localNodeVisualKind(node.entity_kind, node.family)));
-  const nodeKinds = (["context", "library", "conversation", "folder"] as const)
+  const nodeKinds = (["context", "library", "agent", "conversation", "folder"] as const)
     .filter((kind) => visibleNodeKinds.has(kind));
   const visibleEdgeKinds = new Set(scene.edges.map((edge) => localEdgeVisualKind(edge.edge_kind)));
   const edgeVisualKinds = LOCAL_EDGE_VISUAL_KIND_ORDER.filter((kind) => visibleEdgeKinds.has(kind));
@@ -1188,6 +1191,8 @@ function GraphDetails({
   historicalOnly,
   currentEventId,
   onSeekEvent,
+  citationEvidenceActive,
+  citationEvidenceRevision,
   busyAction,
   edge,
   node,
@@ -1215,6 +1220,8 @@ function GraphDetails({
   historicalOnly: boolean;
   currentEventId?: string;
   onSeekEvent: (id: string) => void;
+  citationEvidenceActive: boolean;
+  citationEvidenceRevision: number;
   busyAction: string | null;
   edge: GraphEdge | null;
   node: GraphNode | null;
@@ -1272,6 +1279,11 @@ function GraphDetails({
     target: nodeLabels.get(edge.target) ?? edge.target,
   }) : null;
   const coAccess = edge ? coAccessSentence(edge, t) : null;
+  const citationSource = edge && ["citation_page", "citation_source", "citation_agent"].includes(edge.edge_kind)
+    ? nodes.find((item) => item.id === edge.source && item.entity_kind === "context_page") : undefined;
+  const citationTarget = citationSource && edge ? nodes.find((item) => item.id === edge.target) : undefined;
+  const citationPair: CitationPair | null = citationSource && citationTarget && (citationTarget.entity_kind === "context_page" || citationTarget.entity_kind === "library_item" || citationTarget.entity_kind === "agent_page")
+    ? { source_page_id: citationSource.entity_id, target_kind: citationTarget.entity_kind, target_id: citationTarget.entity_id } : null;
   const nodeActions = node ? selectedNodeActions({
     busyAction, node, querySeeds, supportsExpand, t, workspaceGraphHref,
   }) : null;
@@ -1310,6 +1322,7 @@ function GraphDetails({
         {(node?.occurred_at || edge?.occurred_at) ? <GraphDetail label={t("graph.details.time", { defaultValue: "Time" })} value={formatVersionTimestamp((node?.occurred_at ?? edge?.occurred_at)!, "long")} /> : null}
         {evidence ? <><GraphDetail label={t("graph.details.evidence", { defaultValue: "Evidence" })} value={evidence.label ?? graphLabel(t, "graphEvidenceKind", evidence.kind)} /><GraphDetail label={t("graph.details.evidenceRef", { defaultValue: "Evidence reference" })} value={evidence.available ? evidence.ref ?? evidence.id ?? t("graph.details.available", { defaultValue: "Available" }) : t("graph.details.unavailable", { defaultValue: "Unavailable" })} /></> : null}
       </dl>
+      {workspaceId && citationPair ? <CitationEvidenceSection active={citationEvidenceActive} pair={citationPair} revision={citationEvidenceRevision} workspaceId={workspaceId} /> : null}
       {node ? <>
         <GraphSceneNodeList
           active={active}

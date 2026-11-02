@@ -57,6 +57,11 @@ from backend.schemas.context_reconciliation import (
     ContextReconciliationRequest,
     ContextReconciliationResultResponse,
 )
+from backend.schemas.context_write import (
+    CiteRequest,
+    CiteResponse,
+    ReferenceCommandRequest,
+)
 from backend.schemas.page import (
     PAGE_LIST_CURSOR_MAX_LENGTH,
     PAGE_LIST_CURSOR_PATTERN,
@@ -249,9 +254,42 @@ def create_context_page(
         )
     except PageServiceError as exc:
         return service_error_response(exc)
+    except ReadServiceError as exc:
+        return read_service_error_response(exc)
     return page_write_response(
         _to_detail(page), lint_registry=page_service.lint_registry
     )
+
+
+@router.post(
+    "/{page_id}/references",
+    response_model=CiteResponse,
+    responses=REST_WRITE_ERROR_RESPONSES,
+)
+def update_context_references(
+    request: Request,
+    workspace_id: UUID,
+    page_id: UUID,
+    request_body: ReferenceCommandRequest,
+    actor: RestActorDep,
+):
+    services = get_container_from_app(request).get_services()
+    try:
+        actor, page_service = _workspace_page_service(
+            request, actor, workspace_id, required_role="editor"
+        )
+        with page_service.session_factory.begin() as session:
+            data = services.citation.cite(
+                session=session,
+                workspace_id=workspace_id,
+                request=CiteRequest(page_id=page_id, **request_body.model_dump()),
+                actor=actor,
+            )
+    except PageServiceError as exc:
+        return service_error_response(exc)
+    except ReadServiceError as exc:
+        return read_service_error_response(exc)
+    return {"data": data}
 
 
 @router.get(
@@ -287,9 +325,11 @@ def get_context_page(
     except PageServiceError as exc:
         return service_error_response(exc)
     detail = ContextPageDetail(
-        **payload.model_dump(),
-        latest_draft_version_id=latest_draft_version_id,
-        **enrichment,
+        **{
+            **payload.model_dump(),
+            "latest_draft_version_id": latest_draft_version_id,
+            **enrichment,
+        }
     )
     return page_write_response(
         detail, write_operation=False, lint_registry=page_service.lint_registry
@@ -461,6 +501,7 @@ def publish_page_version(
             actor_id=actor.actor_id,
             actor_provenance=actor.provenance,
             expected_content_hash=request_body.expected_content_hash,
+            expected_references_hash=request_body.expected_references_hash,
         )
     except PageServiceError as exc:
         return service_error_response(exc)

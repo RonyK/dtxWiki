@@ -1125,6 +1125,7 @@ describe("WorkspaceGraphScreen", () => {
     expect(apply).toBeEnabled();
     await userEvent.click(ui.getByRole("checkbox", { name: "Context" }));
     await userEvent.click(ui.getByRole("checkbox", { name: "Library" }));
+    await userEvent.click(ui.getByRole("checkbox", { name: "Agent" }));
     expect(ui.getByRole("alert")).toHaveTextContent("Choose at least one document kind before applying.");
     expect(apply).toBeDisabled();
     fireEvent.click(apply);
@@ -1184,7 +1185,7 @@ describe("WorkspaceGraphScreen", () => {
     await waitFor(() => expect(queryWorkspaceGraphMock.mock.calls.length).toBeGreaterThan(oldRequestCount));
     for (const [, nextRequest] of queryWorkspaceGraphMock.mock.calls.slice(oldRequestCount)) {
       expect(nextRequest).not.toHaveProperty("search");
-      expect(nextRequest).toMatchObject({ lens: "combined", document_kinds: ["context", "library"], quick_filters: [] });
+      expect(nextRequest).toMatchObject({ lens: "combined", document_kinds: ["context", "library", "agent"], quick_filters: [] });
     }
     expect(window.sessionStorage.getItem(key)).toBeNull();
     await screen.findByRole("heading", { name: "Searchable relationship list" });
@@ -1891,7 +1892,7 @@ describe("WorkspaceGraphScreen", () => {
 
     expect(queryWorkspaceGraphMock.mock.calls[0]?.[1]).toMatchObject({
       focus_entity_id: focusId,
-      document_kinds: ["context", "library"],
+      document_kinds: ["context", "library", "agent"],
       folders: { include: [], exclude: [], only: [] },
       quick_filters: [],
       time: { basis: "document_updated" },
@@ -1943,7 +1944,7 @@ describe("WorkspaceGraphScreen", () => {
         lens: "links",
         dataFilters: {
           search: "",
-          document_kinds: ["context", "library"],
+          document_kinds: ["context", "library", "agent"],
           time_basis: "document_updated",
           time_from: null,
           time_to: null,

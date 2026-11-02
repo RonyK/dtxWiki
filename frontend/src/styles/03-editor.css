@@ -779,6 +779,7 @@ body[data-focus-mode="true"] .main-surface {
   --graph-surface: #0f172a;
   --graph-node-context: #8b5cf6;
   --graph-node-library: #0d9488;
+  --graph-node-agent: #60a5fa;
   --graph-node-folder: #94a3b8;
   --graph-edge-link: #64748b;
   --graph-edge-citation: #0d9488;
@@ -1931,6 +1932,9 @@ body[data-focus-mode="true"] .main-surface {
   border-radius: 2px;
 }
 
+.workspace-graph-node-cue.is-agent,
+.workspace-map-member-dot.is-agent { background: var(--graph-node-agent, #2563eb); }
+
 .workspace-graph-node-cue.is-cluster {
   width: 20px;
   height: 20px;
@@ -2871,7 +2875,9 @@ p.workspace-graph-list-window-hint {
   }
 
   .workspace-map-member-dot,
-  .workspace-map-member-dot.is-library {
+  .workspace-map-member-dot.is-library,
+  .workspace-map-member-dot.is-agent,
+  .workspace-graph-node-cue.is-agent {
     background: CanvasText;
     border: 1px solid CanvasText;
     forced-color-adjust: none;

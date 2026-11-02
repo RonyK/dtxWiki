@@ -64,7 +64,8 @@
       "library_sync_version": "라이브러리 검색",
       "version_parent": "상위 버전",
       "co_access": "함께 읽음",
-      "associative": "연관 관계"
+      "associative": "연관 관계",
+      "citation_agent": "Agent 인용"
     },
     "graphActionKind": {
       "searched": "검색됨",
@@ -230,7 +231,8 @@
         "library": "Library 자료",
         "conversation": "대화·활동",
         "folder": "폴더",
-        "seed": "씨앗"
+        "seed": "씨앗",
+        "agent": "Agent 문서"
       },
       "edge": {
         "link": "링크",
@@ -307,6 +309,23 @@
       "seedRelationships": "기준 문서와의 관계",
       "expandSheet": "상세 펼치기",
       "collapseSheet": "상세 접기"
+    },
+    "citationEvidence": {
+      "title": "보존된 인용 근거",
+      "currentPublished": "출발 문서의 현재 발행본에 보존된 정확한 인용 근거입니다.",
+      "sourceVersion": "출발 문서 버전",
+      "loading": "인용 근거를 불러오는 중…",
+      "failed": "인용 근거에 접근할 수 없거나 불러오지 못했습니다.",
+      "retry": "인용 근거 다시 불러오기",
+      "empty": "이 관계에는 보존된 버전 또는 artifact 근거가 없습니다.",
+      "type": "인용 유형",
+      "status": "검증 상태",
+      "contextVersion": "인용한 Context 버전",
+      "libraryVersion": "인용한 Library 버전",
+      "artifact": "인용한 artifact",
+      "location": "원본 위치",
+      "createdVia": "기록 경로",
+      "loadMore": "인용 근거 더 불러오기"
     },
     "coAccess": {
       "sentence": "{{sessions}}에서 {{days}}에 걸쳐 함께 조회됨 (최근 {{last}})",
@@ -572,7 +591,8 @@
       "crossFolder": "폴더 간",
       "recentlyConnected": "최근 연결",
       "apply": "데이터 필터 적용",
-      "chooseKind": "적용하기 전에 문서 종류를 하나 이상 선택하세요."
+      "chooseKind": "적용하기 전에 문서 종류를 하나 이상 선택하세요.",
+      "agent": "에이전트"
     },
     "metadata": {
       "aria": "지도 표시 범위",
@@ -600,7 +620,8 @@
       "visibleRelationMetric": "노드 크기: 이 지도에 표시된 관계 수(제한된 제곱근 척도).",
       "linksMetric": "노드 크기: 표시 가능한 문서의 참조 수(제한된 제곱근 척도).",
       "evidenceMetric": "노드 크기: 표시 가능한 근거 관계 수(제한된 제곱근 척도).",
-      "uniformMetric": "이 렌즈에서는 노드 크기가 동일하며 중요도를 나타내지 않습니다."
+      "uniformMetric": "이 렌즈에서는 노드 크기가 동일하며 중요도를 나타내지 않습니다.",
+      "agent": "Agent 문서"
     },
     "enums": {
       "context": "컨텍스트",
@@ -624,7 +645,9 @@
       "capped": "상한 적용",
       "partial": "부분",
       "privacy_suppressed": "개인정보 보호로 제한",
-      "unknown": "기타 표시 가능한 관계"
+      "unknown": "기타 표시 가능한 관계",
+      "agent": "에이전트",
+      "citation_agent": "Agent 인용"
     },
     "metrics": {
       "combined": "표시 가능한 게시된 링크와 인용 관계",

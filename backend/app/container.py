@@ -956,7 +956,7 @@ class ServiceRegistry:
     def citation(self):
         from backend.services.citation_service import CitationService
 
-        return CitationService()
+        return CitationService(self_origins=self.body_preparer.self_origins)
 
     @cached_property
     def feedback(self):
@@ -1057,6 +1057,19 @@ class ServiceRegistry:
         from backend.services.graph_query_service import GraphQueryService
 
         return GraphQueryService(graph_service=self.graph_service)
+
+    @cached_property
+    def citation_evidence(self):
+        from backend.services.citation_evidence import CitationEvidenceService
+
+        secret = (
+            self.settings.effective_session_secret
+            if self.settings is not None
+            else "dtxwiki-development-session-secret"
+        )
+        return CitationEvidenceService(
+            cursor_secret=secret, read_service=self.domain_read
+        )
 
     @cached_property
     def workspace_graph(self):

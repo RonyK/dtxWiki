@@ -200,6 +200,9 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     workspace UUIDs and no cross-plane FK: 87 = 86 + 1, insertable 30 = 29 + 1.
     Its recipient lifecycle table also uses bare UUIDs: 88 = 87 + 1 and
     insertable 31 = 30 + 1, without adding a control-plane FK edge.
+    Bibliography metadata, publication rows and its completion marker add
+    three workspace-only tables: resident 91, insertable 34. Their composite
+    FKs remain on the workspace plane; the cross-plane edge census stays 60.
     """
 
     edges = workspace_to_control_fk_edges()
@@ -216,7 +219,7 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     ]
 
     resident = WORKSPACE_PLANE_TABLES | MIXED_PLANE_TABLES
-    assert len(resident) == 88
+    assert len(resident) == 91
 
     by_parent = {
         parent: [edge for edge in edges if edge.parent == parent]
@@ -234,7 +237,7 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     blocked = shard_blocked_tables()
     assert set(blocked) <= resident
     assert len(blocked) == 57
-    assert len(resident) - len(blocked) == 31
+    assert len(resident) - len(blocked) == 34
 
     assert (
         frozenset(edge.label for edge in edges if edge.all_columns_nullable)

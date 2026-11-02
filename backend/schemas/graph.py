@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import (
@@ -15,6 +15,7 @@ from pydantic import (
     model_validator,
 )
 
+from backend.domain.document_reference import DocumentKind
 from backend.schemas.common import RESTResponseBase
 
 GraphNodeFamily = Literal[
@@ -300,4 +301,46 @@ class GraphQueryPayload(BaseModel):
 class GraphQueryResponse(RESTResponseBase):
     data: GraphQueryPayload
 
+    model_config = ConfigDict(extra="forbid")
+
+
+class GraphCitationEvidenceRequest(BaseModel):
+    source_page_id: UUID
+    target_kind: DocumentKind
+    target_id: UUID
+    cursor: str | None = Field(default=None, max_length=4096)
+    limit: int = Field(default=20, ge=1, le=50)
+    model_config = ConfigDict(extra="forbid")
+
+
+class GraphCitationEvidenceItem(BaseModel):
+    id: UUID
+    source_version_id: UUID
+    owner_kind: str
+    owner_id: UUID
+    citation_type: str
+    library_item_version_id: UUID | None = None
+    library_artifact_id: UUID | None = None
+    cited_context_page_version_id: UUID | None = None
+    location: dict[str, Any] = Field(default_factory=dict)
+    snippet: str | None = None
+    verification_status: str
+    created_via: str
+    model_config = ConfigDict(extra="forbid")
+
+
+class GraphCitationEvidencePayload(BaseModel):
+    """One bounded inspection window; empty items can still have a next cursor."""
+
+    source_page_id: UUID
+    source_version_id: UUID
+    target_kind: DocumentKind
+    target_id: UUID
+    items: list[GraphCitationEvidenceItem]
+    next_cursor: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
+
+class GraphCitationEvidenceResponse(RESTResponseBase):
+    data: GraphCitationEvidencePayload
     model_config = ConfigDict(extra="forbid")

@@ -35,7 +35,7 @@ from backend.services.mcp_chat_service import (
     _as_utc,
     _is_legacy_count_title,
 )
-from backend.services.mcp_trace_capture import derive_artifact_links
+from backend.services.mcp_trace_capture import _result_detail, derive_artifact_links
 from backend.services.read_errors import ReadNotFoundError
 
 
@@ -132,6 +132,22 @@ def test_mcp_chat_service_upserts_and_rolls_up_artifact_links(session_factory):
             tool_name="cite",
             request_id=uuid4(),
         )
+        opaque_id = uuid4()
+        second_call.result_detail = _result_detail(
+            "cite",
+            {
+                "envelope": {"result_status": "succeeded"},
+                "data": {
+                    "receipt_id": str(uuid4()),
+                    "page_id": str(page.id),
+                    "version_id": str(uuid4()),
+                    "removed": [{"reference_id": str(opaque_id), "note": "private"}],
+                },
+            },
+        )
+        assert second_call.result_detail["reference_changes"]["removed"] == [
+            {"reference_id": str(opaque_id)}
+        ]
         session.add_all([first_call, second_call])
         session.flush()
 
@@ -177,8 +193,7 @@ def test_mcp_chat_service_upserts_and_rolls_up_artifact_links(session_factory):
     assert detail.write_count == 2
     assert detail.linked_artifacts[0].artifact_title == "MCP Linked Page"
     assert detail.linked_artifacts[0].navigation_path == (
-        f"/workspaces/{page.workspace_id}"
-        f"/context/pages/{page.id}"
+        f"/workspaces/{page.workspace_id}/context/pages/{page.id}"
     )
     assert detail.linked_artifacts[0].occurrence_count == 2
     assert detail.title_source == "artifact"
@@ -1007,15 +1022,11 @@ def test_media_asset_link_sql_predicate_matches_python_gate(session_factory):
     assert python_visible_ids == expected
     assert listed_titles[page_visible_asset.id] == "diagram.png"
     assert listed_paths[page_visible_asset.id] == (
-        f"/workspaces/{visible_page.workspace_id}"
-        f"/context/pages/{visible_page.id}"
+        f"/workspaces/{visible_page.workspace_id}/context/pages/{visible_page.id}"
     )
     assert listed_titles[owned_editing_asset.id] == "diagram.png"
-    assert (
-        listed_paths[owned_editing_asset.id] == (
-            f"/workspaces/{visible_page.workspace_id}"
-            f"/context/pages/{visible_page.id}"
-        )
+    assert listed_paths[owned_editing_asset.id] == (
+        f"/workspaces/{visible_page.workspace_id}/context/pages/{visible_page.id}"
     )
 
 
@@ -1183,8 +1194,7 @@ def test_media_asset_title_lookup_is_workspace_scoped_for_colliding_ids(
     assert payload is not None
     assert payload.artifact_title == "a.png"
     assert payload.navigation_path == (
-        f"/workspaces/{page_a.workspace_id}"
-        f"/context/pages/{page_a.id}"
+        f"/workspaces/{page_a.workspace_id}/context/pages/{page_a.id}"
     )
 
 
@@ -2187,13 +2197,8 @@ def test_trace_capture_normalizes_nested_resource_ids_to_surface_ids(
         source.id,
         McpChatArtifactVerb.SEARCH_MATCH,
     ) in _link_keys(search_links)
-    assert _link_keys(citation_links) == {
-        (
-            McpChatArtifactKind.LIBRARY_ITEM,
-            source.id,
-            McpChatArtifactVerb.CITED,
-        )
-    }
+    # Historical discovery payloads do not establish a chosen reference.
+    assert _link_keys(citation_links) == set()
 
 
 def test_trace_capture_uses_content_chunk_document_id_for_search_links(
@@ -2285,6 +2290,18 @@ def _tool_call(
         ),
         result_status="succeeded",
         result_summary="Tool call succeeded.",
+        result_detail=(
+            {
+                "reference_receipt_id": str(request_id),
+                "reference_changes": {
+                    "added": [
+                        {"target_kind": "context_page", "target_id": str(request_id)}
+                    ]
+                },
+            }
+            if tool_name == "cite"
+            else None
+        ),
         warnings=[],
         provider="unknown",
         model_id="unknown",
@@ -3157,7 +3174,7 @@ def test_upsert_session_counters_increment_atomically(session_factory):
             client_id=client.id,
             workspace_id=workspace.id,
             mcp_session_id=uuid4(),
-            tool_name="cite",
+            tool_name="update_context_edit",
             request_id=uuid4(),
         )
         first_call.result_status = "failed"
@@ -3181,7 +3198,7 @@ def test_upsert_session_counters_increment_atomically(session_factory):
             client_id=client.id,
             workspace_id=workspace.id,
             mcp_session_id=uuid4(),
-            tool_name="cite",
+            tool_name="update_context_edit",
             request_id=uuid4(),
         )
         second_call.result_status = "failed"
@@ -3950,6 +3967,7 @@ def test_actor_bound_detail_and_export_redact_unlinked_error_calls(
     gated_export_chat = next(item for item in gated_export.chats if item.id == gated.id)
     owned_export_chat = next(item for item in owned_export.chats if item.id == owned.id)
     markers = {spec[-1] for spec in specs}
+
     def assert_shape_only(entry, spec) -> None:
         status, _tool, id_field, _target, _marker = spec
         assert entry.result_status == status
