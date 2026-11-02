@@ -47,8 +47,15 @@ test("reads review evidence, approves a document group and a single review, and 
   await expect(page.getByText(/outside the current queue filters/)).toHaveCount(0);
   const secondGroup = rail.getByRole("region", { name: second.title, exact: true });
   await expect(secondGroup).toBeVisible();
+  // A review queued after `second` brings up Next review and its title once
+  // `second` is decided. In a two-column header that cluster used to squeeze
+  // the title column to a few pixels; it must keep its pre-decision width.
+  await pendingPage(page.request, workspace.id, "Follow-up review with a title long enough to label Next review");
+  await page.setViewportSize({ width: 1551, height: 970 });
   await page.goto(workspaceUrl(workspace.id, `review/${second.review_item_id}`));
   await expect(detail.locator("#review-detail-title")).toHaveText(second.title);
+  const titleColumnWidth = () => detail.locator(".review-detail-heading").evaluate((node) => node.getBoundingClientRect().width);
+  const undecidedTitleWidth = await titleColumnWidth();
   await detail.getByText("Add a decision reason (optional)", { exact: true }).click();
   await detail.getByLabel("Decision reason").fill("Cross-screen workflow reviewed");
   const decisionResponsePromise = page.waitForResponse((response) => response.request().method() === "POST"
@@ -56,6 +63,8 @@ test("reads review evidence, approves a document group and a single review, and 
   await detail.getByRole("button", { name: "Approve", exact: true }).click();
   const decided = await responseData<{ id: string }>(await decisionResponsePromise);
   expect(decided.id).toBe(second.review_item_id);
+  await expect(detail.getByRole("button", { name: "Next review", exact: true })).toBeVisible();
+  expect(Math.abs(await titleColumnWidth() - undecidedTitleWidth)).toBeLessThanOrEqual(1);
   await expect(secondGroup).toHaveCount(0);
   const feedResponsePromise = page.waitForResponse((response) => response.request().method() === "GET"
     && new URL(response.url()).pathname === `/api/v1/workspaces/${workspace.id}/activity/feed`);

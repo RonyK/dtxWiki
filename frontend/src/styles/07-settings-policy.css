@@ -1096,14 +1096,13 @@ button.history-card {
   border-color: var(--border-strong);
 }
 
-/* Two fixed columns rather than a wrapping row: the decision buttons stay in
-   the top-right corner whatever the title's length. A wrapping row let a long
+/* Two columns rather than a wrapping row: the decision buttons stay in the
+   top-right corner whatever the title's length. A wrapping row let a long
    title push the whole cluster onto a line of its own, so where Approve sat
-   depended on how the page happened to be named. The title column keeps a
-   floor so the actions cannot squeeze it away on a narrow pane. */
+   depended on how the page happened to be named. The column widths live in
+   features/review/review-workflow.css. */
 .review-detail-header {
   display: grid;
-  grid-template-columns: minmax(min(100%, 200px), 1fr) auto;
   align-items: start;
   gap: 12px;
   padding-bottom: 12px;

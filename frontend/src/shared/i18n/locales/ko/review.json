@@ -330,7 +330,7 @@
     "publicationNotice": "승인 시 검토 버전 v{{version}}가 게시됩니다.",
     "reviewOrdinal": "리뷰 {{number}}번",
     "decisionSaved": "결정이 저장되었습니다",
-    "nextReview": "다음 리뷰 보기",
+    "nextReview": "다음 리뷰",
     "savedRefreshFailed": "결정은 저장됐지만 목록을 갱신하지 못했습니다. 목록만 다시 불러오세요.",
     "refreshQueue": "목록 다시 불러오기",
     "outsideFilters": "이 리뷰는 현재 목록의 필터 밖에 있습니다. 목록의 조건과 개수는 유지됩니다.",

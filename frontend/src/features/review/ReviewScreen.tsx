@@ -1,5 +1,6 @@
 import { inputTextError, textInputLimit } from "../../shared/lib/inputPolicy";
 import {
+  ArrowDown,
   Check,
   ChevronDown,
   ChevronRight,
@@ -2644,6 +2645,10 @@ function ReconciliationProvenanceMeta({ review }: { review: ReviewItem }) {
   );
 }
 
+// Longer than the gap between the two clicks of a double-click (500ms is the
+// common OS limit) yet short enough not to be noticed as a wait.
+const UNDO_ARM_DELAY_MS = 500;
+
 function ReviewDetail({
   review,
   workspaceId,
@@ -2773,8 +2778,21 @@ function ReviewDetail({
   const [routingReason, setRoutingReason] = useState("");
   const [routingError, setRoutingError] = useState<string | null>(null);
   const nextButtonRef = useRef<HTMLButtonElement>(null);
-  const savedStatusRef = useRef<HTMLDivElement>(null);
+  const nextLabelId = useId();
+  const savedStatusRef = useRef<HTMLSpanElement>(null);
   const savedFocusRef = useRef(false);
+  // Undo appears where the decision buttons just were (on a narrow screen,
+  // exactly where Approve was) and reverts without a confirmation, so it stays
+  // disabled briefly: the second click of a double-click, or a double tap,
+  // must not undo the decision the first one saved. Keyed so the render that
+  // first shows Undo is already disabled.
+  const undoShownKey = `${review.id}:${decisionSaved}`;
+  const [armedUndoKey, setArmedUndoKey] = useState<string | null>(null);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setArmedUndoKey(undoShownKey), UNDO_ARM_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [undoShownKey]);
+  const undoArmed = armedUndoKey === undoShownKey;
   useEffect(() => {
     if (!decisionSaved || busy || rejectOpen || routingOpen || savedFocusRef.current) return;
     const target = !noNextReview && !nextDisabled ? nextButtonRef.current : savedStatusRef.current;
@@ -2930,10 +2948,9 @@ function ReviewDetail({
             {domainLabel("review", "reviewType", review.review_type, t)}
           </p>
           <h2 id="review-detail-title" tabIndex={-1}>{targetTitle}</h2>
-          {/* Risk and status describe the review, so they belong with its
-              metadata. Keeping them in the action cluster made that cluster
-              wide enough that a long title pushed the decision buttons off
-              the heading row entirely. */}
+          {/* Risk, status and the saved-decision receipt describe the review,
+              so they belong with its metadata. Keeping them in the action
+              cluster made that cluster wide enough to squeeze the title. */}
           <div className="review-detail-badges">
             <StatusPill status={review.risk_level} compact />
             <StatusPill
@@ -2941,10 +2958,25 @@ function ReviewDetail({
               label={statusPillLabel(review.status, t)}
               compact
             />
+            {decisionSaved ? (
+              <span className="review-saved-status" role="status" ref={savedStatusRef} tabIndex={-1}>
+                <Check size={14} aria-hidden="true" />
+                {t("workflow.savedDecision", { version: reviewTargetVersionNo(review) != null ? `v${reviewTargetVersionNo(review)}` : "", decision: t(`overview.decisionType.${review.decisions[0]?.decision_type ?? "approve"}`) })}
+              </span>
+            ) : null}
           </div>
           <div className="review-detail-meta">
             {reviewTargetVersionNo(review) != null ? <span>v{reviewTargetVersionNo(review)}</span> : null}
             <time dateTime={review.updated_at}>{formatVersionTimestamp(review.updated_at)}</time>
+            {/* An in-page jump, so a link in the metadata rather than a
+                button competing with the decisions. */}
+            <a className="review-history-link" href="#review-decision-history" onClick={(event) => {
+              event.preventDefault();
+              const history = document.getElementById("review-decision-history");
+              history?.scrollIntoView({ block: "start" }); history?.focus({ preventScroll: true });
+            }}>
+              {t("detail.decisionHistory")}<ArrowDown size={12} aria-hidden="true" />
+            </a>
             {publication ? (
               <span className="review-publication-notice">
                 {publication.baseline_kind === "empty"
@@ -3032,31 +3064,42 @@ function ReviewDetail({
             <span>{t("actions.reject", { defaultValue: "Reject" })}</span>
           </button>
           {review.undo?.available ? (
-            <button className="icon-button" disabled={busy} onClick={() => onUndo(review.undo!)} type="button">
+            <button className="icon-button danger" disabled={busy} onClick={() => onUndo(review.undo!)} type="button">
               <Undo2 size={15} aria-hidden="true" />{t(`undo.action.${review.undo.decision_type}`)}
             </button>
           ) : null}
           </div>
         ) : null}
-        {decisionSaved || (isReadOnly && review.undo) ? (
-          <div className="detail-heading-actions review-action-bar" role="status" ref={savedStatusRef} tabIndex={-1}>
-            {decisionSaved ? <span className="reader-action-status">{t("workflow.savedDecision", { version: reviewTargetVersionNo(review) != null ? `v${reviewTargetVersionNo(review)}` : "", decision: t(`overview.decisionType.${review.decisions[0]?.decision_type ?? "approve"}`) })}</span> : null}
-            {review.undo?.available ? (
-              <button className="icon-button" disabled={busy} onClick={() => onUndo(review.undo!)} type="button">
-                <Undo2 size={15} aria-hidden="true" />{t(`undo.action.${review.undo.decision_type}`)}
-              </button>
+        {/* After a decision the column holds Undo and Next review side by
+            side, with the next review's title on the line below them. */}
+        {decisionSaved || (isReadOnly && review.undo?.available) ? (
+          <div className="review-decided-actions">
+            {review.undo?.available || (decisionSaved && !noNextReview) ? (
+              <div className="review-decided-buttons">
+                {review.undo?.available ? (
+                  <button className="icon-button danger" disabled={busy || !undoArmed} onClick={() => onUndo(review.undo!)} type="button">
+                    <Undo2 size={15} aria-hidden="true" />{t(`undo.action.${review.undo.decision_type}`)}
+                  </button>
+                ) : null}
+                {decisionSaved && !noNextReview ? (
+                  <button
+                    aria-describedby={nextLabel ? nextLabelId : undefined}
+                    className="icon-button primary"
+                    disabled={nextDisabled}
+                    onClick={onNextReview}
+                    ref={nextButtonRef}
+                    type="button"
+                  >
+                    {t("workflow.nextReview")}<ChevronRight size={15} aria-hidden="true" />
+                  </button>
+                ) : null}
+              </div>
             ) : null}
-            {decisionSaved ? noNextReview ? <span>{t("workflow.queueComplete")}</span> : <div className="review-next-action">
-              <button className="icon-button primary" disabled={nextDisabled} onClick={onNextReview} ref={nextButtonRef} type="button">
-                {t("workflow.nextReview")}<ChevronRight size={15} aria-hidden="true" />
-              </button>
-              {nextLabel ? <span>{nextLabel}</span> : null}
-            </div> : null}
-            <a className="icon-button" href="#review-decision-history" onClick={(event) => {
-              event.preventDefault();
-              const history = document.getElementById("review-decision-history");
-              history?.scrollIntoView({ block: "start" }); history?.focus({ preventScroll: true });
-            }}>{t("detail.decisionHistory")}</a>
+            {decisionSaved && noNextReview ? (
+              <span className="review-next-label">{t("workflow.queueComplete")}</span>
+            ) : decisionSaved && nextLabel ? (
+              <span className="review-next-label" id={nextLabelId} title={nextLabel}>{nextLabel}</span>
+            ) : null}
           </div>
         ) : null}
       </header>
