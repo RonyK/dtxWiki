@@ -190,12 +190,15 @@ export function GraphView({
     const hoveredIndex = timeline.findIndex((event) => event.id === hoveredEventId);
     const eventIndex = hoveredIndex >= 0 ? hoveredIndex : visibleCursor;
     const event = timeline[eventIndex];
-    const previousFrame = historical && event?.operation === "edge_removed"
-      ? localizedGraphScene(applyHistoryVisibility(deriveGraphScene(payload, filters, eventIndex - 1)), t)
+    // Resolve previews at the event's cursor, independently of playback.
+    // Removals use the prior frame; other operations use their resulting frame.
+    const eventFrame = historical && event
+      ? localizedGraphScene(applyHistoryVisibility(deriveGraphScene(payload, filters,
+        eventIndex - (event.operation === "edge_removed" ? 1 : 0))), t)
       : { nodes: [], edges: [] };
     return {
       ...(historical ? renderHistoryScene(withCoAccessLabels(historyCatalog, t), withCoAccessLabels(scene, t),
-        withCoAccessLabels(previousFrame, t), event, showFuture, payload.history.mode === "action", hoveredIndex >= 0, event?.summary)
+        withCoAccessLabels(eventFrame, t), event, showFuture, payload.history.mode === "action", hoveredIndex >= 0, event?.summary)
         : withCoAccessLabels(scene, t)),
       scopeKey: canvasScopeKey,
       freezeLayout: historical,

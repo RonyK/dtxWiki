@@ -15,43 +15,42 @@ export function historySceneCatalog(payload: GraphQueryPayload, filters: GraphFi
 }
 
 /** Playback changes presentation, never the interval's layout topology. */
-export function renderHistoryScene(catalog: GraphScene, frame: GraphScene, previousFrame: GraphScene, event: GraphTimelineEvent | undefined,
+export function renderHistoryScene(catalog: GraphScene, frame: GraphScene, eventFrame: GraphScene, event: GraphTimelineEvent | undefined,
   showFuture: boolean, actionMode: boolean, preview = false, caption?: string): GraphRenderScene {
   const nodes = new Map(frame.nodes.map((node) => [node.id, node]));
-  const previousNodes = new Map(previousFrame.nodes.map((node) => [node.id, node]));
   const seedIds = new Set(catalog.nodes.filter((node) => node.is_seed).map((node) => node.id));
   const edges = new Map(frame.edges.map((edge) => [edge.id, edge]));
   const rawEventEdges = new Set([...(event?.edge_ids ?? []), ...(event?.edge_snapshots ?? []).map((edge) => edge.id)]);
-  // Removed relationships are a separate ghost overlay, absent from frame
-  // counts, exports, and the accessible list of active relationships.
-  // The filtered pre-removal frame owns both their metadata and visibility.
-  // The interval catalog may contain a later re-add of the same stable ID.
+  // Every event uses its own filtered frame: before a removal, after other
+  // operations. The replay cursor and interval catalog may hold different
+  // metadata for the same stable ID, so neither can authorize a preview.
   const removalEvent = event?.operation === "edge_removed";
-  const removed = new Map((removalEvent
-    ? previousFrame.edges.filter((edge) => rawEventEdges.has(edge.id))
-    : []).map((edge) => [edge.id, edge]));
-  const eventEdges = removalEvent ? new Set(removed.keys()) : rawEventEdges;
-  const eventNodes = new Set(removalEvent ? [] : [...(event?.node_ids ?? []), ...(event?.node_snapshots ?? []).map((node) => node.id)]);
-  for (const edge of removalEvent ? removed.values() : catalog.edges) {
-    if (eventEdges.has(edge.id)) { eventNodes.add(edge.source); eventNodes.add(edge.target); }
+  const eventEdges = new Map(eventFrame.edges.filter((edge) => rawEventEdges.has(edge.id)).map((edge) => [edge.id, edge]));
+  const eventNodeIds = new Set(removalEvent ? [] : [...(event?.node_ids ?? []), ...(event?.node_snapshots ?? []).map((node) => node.id)]);
+  for (const edge of eventEdges.values()) {
+    eventNodeIds.add(edge.source); eventNodeIds.add(edge.target);
   }
-  const ghostNodes = new Set([...removed.values()].flatMap((edge) => [edge.source, edge.target]));
+  const eventNodes = new Map(eventFrame.nodes.filter((node) => eventNodeIds.has(node.id)).map((node) => [node.id, node]));
+  // Removal ghosts stay outside active counts, exports, and accessible lists.
+  const ghostNodes = new Set(removalEvent ? eventNodes.keys() : []);
   return {
     nodes: catalog.nodes.map((node) => ({
-      ...((ghostNodes.has(node.id) ? previousNodes.get(node.id) : undefined) ?? nodes.get(node.id) ?? node),
+      ...(((removalEvent || preview) ? eventNodes.get(node.id) : undefined) ?? nodes.get(node.id) ?? node),
       hidden: !nodes.has(node.id) && !ghostNodes.has(node.id) && !showFuture && !(preview && eventNodes.has(node.id)),
       muted: !nodes.has(node.id) && !ghostNodes.has(node.id),
       highlighted: eventNodes.has(node.id),
     })),
     edges: catalog.edges.map((edge) => {
-      const displayed = removed.get(edge.id) ?? edges.get(edge.id) ?? edge;
+      const eventEdge = eventEdges.get(edge.id);
+      const removed = removalEvent && Boolean(eventEdge);
+      const displayed = ((removed || preview) ? eventEdge : undefined) ?? edges.get(edge.id) ?? edge;
       return {
         ...displayed,
-        hidden: !edges.has(edge.id) && !removed.has(edge.id) && !showFuture && !(preview && eventEdges.has(edge.id)),
-        muted: (!edges.has(edge.id) && !removed.has(edge.id)) || actionMode && !edge.action_kind && !eventEdges.has(edge.id),
+        hidden: !edges.has(edge.id) && !removed && !showFuture && !(preview && eventEdge),
+        muted: (!edges.has(edge.id) && !removed) || actionMode && !displayed.action_kind && !eventEdge,
         highlighted: eventEdges.has(edge.id),
-        eventCaption: eventEdges.has(edge.id) && (seedIds.has(edge.source) || seedIds.has(edge.target)) ? caption : undefined,
-        removed: removed.has(edge.id),
+        eventCaption: eventEdge && (seedIds.has(displayed.source) || seedIds.has(displayed.target)) ? caption : undefined,
+        removed,
         layoutCount: edge.count ?? 1,
         label: eventEdges.has(edge.id) && event ? caption ?? displayed.label : displayed.label,
       };

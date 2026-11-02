@@ -51,6 +51,7 @@ vi.mock("../GraphCanvas", async () => {
     return (
     <div
       data-edge-labels={scene.edges.filter((edge) => !edge.hidden).map((edge) => edge.label).join("|")}
+      data-edge-counts={scene.edges.filter((edge) => !edge.hidden).map((edge) => edge.count ?? 1).join("|")}
       data-rendered-edge-ids={buildLocalScene({ ...scene, edges: scene.edges.filter((edge) => !edge.hidden) }).edges.map((edge) => edge.graphId).sort().join("|")}
       data-edges={scene.edges.filter((edge) => !edge.hidden && !edge.removed).length}
       data-removed-edges={scene.edges.filter((edge) => !edge.hidden && edge.removed).length}
@@ -1492,10 +1493,10 @@ describe("GraphView", () => {
       .toHaveAttribute("role", "status");
   });
 
-  it("previews removals from their own filtered prior frame while retaining the later replay cursor", () => {
+  it("previews creation and removal from their own filtered event frames without moving the replay cursor", () => {
     const payload = graphFixture();
-    const current = { ...payload.edges[0], label: "Re-added relationship" };
-    const original = { ...current, label: "Original relationship", provenance: "observed" as const };
+    const current = { ...payload.edges[0], label: "Re-added relationship", count: 17 };
+    const original = { ...current, label: "Original relationship", count: 9, provenance: "observed" as const };
     payload.edges = [current];
     const event = { ...payload.timeline![1], node_ids: [current.source, current.target] };
     payload.timeline = [
@@ -1516,7 +1517,23 @@ describe("GraphView", () => {
     expect(canvas).toHaveAttribute("data-edges", "1");
     fireEvent.click(screen.getByLabelText("Observed"));
     expect(canvas).toHaveAttribute("data-removed-edges", "1");
+    fireEvent.mouseLeave(mark);
+    fireEvent.change(screen.getByRole("slider", { name: "Timeline position" }), { target: { value: "2" } });
+    fireEvent.click(screen.getByLabelText("Observed"));
+    const creation = screen.getByTestId("graph-timeline").querySelector<HTMLButtonElement>('.local-history-mark[aria-label^="1/3"]')!;
+    fireEvent.mouseEnter(creation);
+    expect(canvas).toHaveAttribute("data-edges", "0");
+    expect(canvas).toHaveAttribute("data-removed-edges", "0");
+    expect(screen.getByRole("slider", { name: "Timeline position" })).toHaveValue("2");
+    fireEvent.mouseLeave(creation);
+    fireEvent.focus(creation);
+    expect(canvas).toHaveAttribute("data-edges", "0");
+    fireEvent.click(screen.getByLabelText("Observed"));
+    expect(canvas).toHaveAttribute("data-edges", "1");
+    expect(canvas).toHaveAttribute("data-edge-counts", "9");
+    expect(screen.getByRole("slider", { name: "Timeline position" })).toHaveValue("2");
     fireEvent.click(screen.getByRole("button", { name: /Historical relationships/ }));
+    expect(canvas).toHaveAttribute("data-edges", "0");
     expect(canvas).toHaveAttribute("data-removed-edges", "0");
   });
 
