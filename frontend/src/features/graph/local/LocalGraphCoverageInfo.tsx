@@ -4,9 +4,12 @@ import { useTranslation } from "react-i18next";
 
 /** Disclosure state only: coverage classification remains owned by GraphView. */
 export function LocalGraphCoverageInfo({
-  active, descriptions, heading, messages, payload, workspaceId,
+  active, descriptions, heading, messages, payload, workspaceId, folderOnly = true, tone = "info", budgetNote,
 }: {
   active: boolean;
+  folderOnly?: boolean;
+  tone?: "info" | "warning";
+  budgetNote?: string;
   descriptions: readonly string[];
   heading: string;
   messages: readonly string[];
@@ -74,23 +77,21 @@ export function LocalGraphCoverageInfo({
     };
   }, []);
 
-  return <>
-    <div aria-atomic="true" className="visually-hidden" role="status">
-      {heading}{messages.length ? ` ${messages.join(" ")}` : ""}
-    </div>
+  return <div role={tone === "warning" ? "alert" : "status"}>
+    <strong className="visually-hidden">{heading}</strong>
     <details className="graph-local-coverage-info" ref={detailsRef}>
       <summary aria-controls={panelId} tabIndex={0}>
         <Info aria-hidden="true" size={16} />
-        {t("graph.omissions.folderChip")}
+        {folderOnly ? t("graph.omissions.folderChip") : t("graph.omissions.heading")}
       </summary>
       {/* Keyboard users must be able to scroll the bounded explanation region. */}
       {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
       <div aria-label={t("graph.omissions.heading")} className="graph-local-coverage-panel" id={panelId} role="region" tabIndex={0}>
-        <strong>{heading}</strong>
         {messages.length ? <p>{messages.join(" ")}</p> : null}
         <ul>{descriptions.map((description) => <li key={description}>{description}</li>)}</ul>
+        {budgetNote ? <p>{budgetNote}</p> : null}
         <p>{t("graph.omissions.noCounts")}</p>
       </div>
     </details>
-  </>;
+  </div>;
 }

@@ -303,7 +303,10 @@
       "evidenceRef": "Evidence reference",
       "available": "Available",
       "unavailable": "Unavailable",
-      "edgeSentence": "{{source}} —{{action}}→ {{target}}"
+      "edgeSentence": "{{source}} —{{action}}→ {{target}}",
+      "seedRelationships": "Relationship to the seed",
+      "expandSheet": "Expand details",
+      "collapseSheet": "Collapse details"
     },
     "coAccess": {
       "sentence": "Read together in {{sessions}} over {{days}} (last {{last}})",
@@ -311,6 +314,122 @@
       "sessions_other": "{{count}} sessions",
       "days_one": "{{count}} day",
       "days_other": "{{count}} days"
+    },
+    "view": {
+      "heading": "Graph view",
+      "compare": "Compare views",
+      "seed": "Seed",
+      "refresh": "Refresh graph",
+      "fullscreen": "Graph fullscreen",
+      "exitFullscreen": "Exit fullscreen",
+      "more": "More graph options",
+      "utilities": "Graph tools",
+      "fullscreenUnavailable": "Fullscreen is unavailable in this browser.",
+      "dismissNotice": "Dismiss coverage notice",
+      "fetched": "Fetched {{time}}",
+      "list": "View as list",
+      "legend": "Legend",
+      "rows": {
+        "question": "Question",
+        "nodes": "Nodes",
+        "edges": "Relationships",
+        "time": "Time basis",
+        "scope": "Scope",
+        "limits": "Limitations"
+      },
+      "current": {
+        "name": "Current relationships",
+        "question": "What is connected now",
+        "description": "Explore current links, citations, read-together signals, and folder membership. There is no time navigation.",
+        "nodes": "Documents, sources, folders, and connected items",
+        "edges": "Currently valid relationships",
+        "time": "Time of query",
+        "scope": "Direct / Neighbor connections / Two-step expansion",
+        "limits": "Display limits may omit relationships"
+      },
+      "appearance": {
+        "name": "Change history",
+        "question": "When relationships appeared or changed",
+        "description": "Replay document versions and relationship additions or removals on the timeline. Only recorded history is available.",
+        "nodes": "Documents, sources, folders, and document versions",
+        "edges": "Recorded additions/removals and unobserved background relationships",
+        "time": "Selected recorded event",
+        "scope": "Direct connections only",
+        "limits": "History may be partial; removals are shown separately"
+      },
+      "action": {
+        "name": "Activity history",
+        "question": "Who or which tools used this document",
+        "description": "Explore edits, reviews, Ask citations, and MCP usage with their parent sessions. Current relationships remain as a muted background.",
+        "nodes": "Versions, reviews, Ask, MCP activity, and connected items",
+        "edges": "Editing, approval, and usage events with background relationships",
+        "time": "Selected recorded activity",
+        "scope": "Direct activities and their session context",
+        "limits": "Recorded activity only; not a complete audit log"
+      },
+      "omitted": "Some items omitted",
+      "retry": "Retry",
+      "loading": "Loading {{view}}…",
+      "allHidden": "All relationships are hidden by the current filters.",
+      "noRelations": "This document has no connections yet.",
+      "addRelations": "Add a document link or citation to connect it.",
+      "openStatic": "Open static graph view"
+    },
+    "range": {
+      "heading": "Relationship scope",
+      "historyOnly": "History views show direct relationships to this document, with session context for activities. Broader scopes are available in Current relationships.",
+      "direct": {
+        "name": "Direct connections",
+        "short": "Direct",
+        "description": "Only relationships touching a seed"
+      },
+      "neighbors": {
+        "name": "Neighbor connections",
+        "short": "Neighbors",
+        "description": "Includes relationships between direct neighbors"
+      },
+      "extended": {
+        "name": "Two-step expansion",
+        "short": "Two steps",
+        "description": "Extends through neighbors to two steps"
+      },
+      "actionDescription": "Directly related activities and their session context"
+    },
+    "historyUi": {
+      "records": "{{count}} records",
+      "partial": "Recorded history only",
+      "latest": "Latest",
+      "authoring": "Edits & reviews",
+      "tools": "AI & tool usage",
+      "versions": "Document versions",
+      "relations": "Relationship changes",
+      "group": "Expand {{count}} records",
+      "showInGraph": "Show in graph",
+      "recordedAt": "Recorded at",
+      "showFuture": "Show later records dimmed",
+      "itemRecords": "Records for this item",
+      "seek": "View this moment",
+      "noItemRecords": "No records for this item in the queried interval.",
+      "historyRelations": "Historical relationships",
+      "currentRelations": "Current relationships",
+      "baseline": "Current relationships without observations remain as background from before the recorded interval.",
+      "notPresent": "This item is not active at the selected recorded moment.",
+      "addedRelation": "{{kind}} added",
+      "removedRelation": "{{kind}} removed",
+      "versionCreated": "Document version created",
+      "versionEdited": "Document version edited",
+      "kind": {
+        "version": "Version",
+        "review": "Review",
+        "ask": "Ask",
+        "tool": "MCP",
+        "activity": "Activity",
+        "added": "Relationship added",
+        "removed": "Relationship removed"
+      },
+      "restoredLatest": "The record you were viewing is no longer in the results. Moved to the latest record.",
+      "groupRecords": "{{count}} nearby records",
+      "closeGroup": "Close"
     }
   },
   "workspaceGraph": {

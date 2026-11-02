@@ -15,6 +15,8 @@ export type GraphTimelineEvent = components["schemas"]["GraphTimelineEvent"];
 
 export type GraphHistoryMode = NonNullable<GraphQueryRequest["time"]>["mode"];
 export type GraphDepth = 1 | 2;
+export type GraphRelationScope = "direct" | "neighbors";
+export type GraphRange = "direct" | "neighbors" | "extended";
 export type GraphNodeFamily = GraphNode["family"];
 export type GraphLayer = GraphEdge["layer"];
 
@@ -37,7 +39,8 @@ export async function queryGraph(
 export function contextGraphQuery(
   pageId: string,
   mode: GraphHistoryMode = "current",
-  depth: GraphDepth = 2,
+  depth: GraphDepth = 1,
+  relationScope: GraphRelationScope = "direct",
 ): GraphQueryRequest {
   return {
     schema_version: "dtxwiki.graph-query.v1",
@@ -50,9 +53,10 @@ export function contextGraphQuery(
     edge_kinds: [],
     action_kinds: [],
     direction: "both",
-    // Historical observation modes retain their one-hop contract until their
-    // own depth-two scene semantics are implemented server-side.
+    // History stays seed-relative; action history also keeps parent sessions
+    // as activity context, without expanding document neighbors.
     depth: mode === "current" ? depth : 1,
+    relation_scope: mode === "current" ? relationScope : "direct",
     time: { mode },
     budget: mode === "current"
       ? { nodes: 250, edges: 750 }

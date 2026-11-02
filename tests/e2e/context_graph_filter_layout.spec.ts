@@ -12,7 +12,7 @@ for (const viewport of viewports) {
   test.describe(`Context Graph filter layout ${viewport.key}`, () => {
     test.use({ viewport });
 
-    test("puts the live canvas before closed advanced filters and keeps them operable", async ({
+    test("keeps controls in the graph frame and advanced filters operable", async ({
       page,
     }, testInfo) => {
       test.setTimeout(120_000);
@@ -47,7 +47,7 @@ for (const viewport of viewports) {
       await expect(filters.locator(".graph-filter-options-grid")).toBeHidden();
       await expect(details).toBeHidden();
 
-      await graph.locator(".graph-view-header").evaluate((element) => {
+      await graph.locator(".graph-type-section").evaluate((element) => {
         element.scrollIntoView({ block: "start" });
       });
       const geometry = await graph.evaluate((element) => {
@@ -66,7 +66,7 @@ for (const viewport of viewports) {
         };
       });
       expect(geometry.canvasTop).toBeLessThan(viewport.height * 0.75);
-      expect(geometry.filterTop).toBeGreaterThanOrEqual(geometry.stageBottom - 1);
+      expect(geometry.filterTop).toBeLessThan(geometry.canvasTop + 64);
       expect(geometry.documentOverflow).toBeLessThanOrEqual(1);
       expect(geometry.canvasWidth).toBe(geometry.stageWidth);
       expect(geometry.canvasHeight).toBe(geometry.stageHeight);
@@ -80,14 +80,21 @@ for (const viewport of viewports) {
         if (request.method() === "POST" && /\/graph\/query(?:\?|$)/.test(request.url())) graphQueries += 1;
       });
       const nativeCanvas = await graph.locator("canvas.sigma-nodes").elementHandle();
+      await graph.getByRole("button", { name: "View as list" }).click();
       const sourceRow = graph.locator(".graph-relationship-list > details > ul > li > button.graph-list-select")
         .filter({ has: page.locator("strong", { hasText: `Graph source ${suffix}` }) });
       await sourceRow.click();
-      await expect(details.locator("h5")).toHaveText(`Graph source ${suffix}`);
+      await expect(details.locator("h5.graph-details-title")).toHaveText(`Graph source ${suffix}`);
       await expect(details.getByRole("link", { name: "Open", exact: true })).toBeVisible();
+      await details.locator(".graph-details-more > summary").click();
       await expect(details.getByRole("button", { name: "Center", exact: true })).toBeVisible();
       await details.getByRole("button", { name: "Pin", exact: true }).click();
       await expect(details.getByRole("button", { name: "Unpin", exact: true })).toBeVisible();
+      await details.locator(".graph-details-more > summary").click();
+      // More reveals an expanded mobile sheet; inspect the default sheet
+      // geometry after returning through its visible collapse control.
+      const collapseSheet = details.getByRole("button", { name: "Collapse details", exact: true });
+      if (await collapseSheet.isVisible()) await collapseSheet.click();
       await stage.scrollIntoViewIfNeeded();
       const selectedGeometry = await graph.evaluate((element) => {
         const owner = element.querySelector(".graph-local-stage")!.getBoundingClientRect();
@@ -109,10 +116,10 @@ for (const viewport of viewports) {
       expect(selectedGeometry.panelBottom).toBeLessThanOrEqual(1);
       expect(selectedGeometry.painted).toBe(true);
       if (selectedGeometry.stageWidth <= 760) {
-        expect(selectedGeometry.panelTop).toBeGreaterThan(geometry.stageHeight / 2);
+        expect(selectedGeometry.panelTop).toBeGreaterThan(geometry.stageHeight * 0.4);
         expect(selectedGeometry.panelHeight).toBeLessThanOrEqual(geometry.stageHeight * 0.45 + 1);
       } else {
-        expect(selectedGeometry.panelTop).toBe(12);
+        expect(selectedGeometry.panelTop).toBe(60);
         expect(selectedGeometry.panelRight).toBe(-12);
       }
       await page.screenshot({ path: testInfo.outputPath(`${viewport.key}-graph-selected-details.png`) });
@@ -121,6 +128,7 @@ for (const viewport of viewports) {
       await expect(details).toBeHidden();
       await expect(graph).toBeFocused();
       await sourceRow.click();
+      await details.locator(".graph-details-more > summary").click();
       await expect(details.getByRole("button", { name: "Unpin", exact: true })).toBeVisible();
       await details.getByRole("button", { name: "Clear selection", exact: true }).click();
       await expect(details).toBeHidden();

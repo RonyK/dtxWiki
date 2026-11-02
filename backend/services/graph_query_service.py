@@ -670,6 +670,16 @@ class GraphQueryService:
 
         seeds = dict(sorted(seed_nodes.items(), key=lambda item: _entity_key(item[1])))
         seed_ids = set(seeds)
+        if request.relation_scope == "direct":
+            return self._direct_projection_scene(
+                session,
+                workspace_id,
+                request=request,
+                seeds=seeds,
+                candidates=candidates,
+                active_layers=active_layers,
+                hydration_context=hydration_context,
+            )
         reserve = min(20, max(0, request.budget.nodes - len(seeds)) // 5)
         document_slots = request.budget.nodes - len(seeds) - reserve
         h1_target = (
@@ -1086,6 +1096,103 @@ class GraphQueryService:
             projected=projected,
             now=now,
         )
+
+    def _direct_projection_scene(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        *,
+        request: GraphQueryRequest,
+        seeds: dict[str, GraphNode],
+        candidates: list[_EdgeCandidate],
+        active_layers: set[str],
+        hydration_context: GraphHydrationContext,
+    ) -> tuple[list[GraphNode], list[GraphEdge], bool, bool, list[GraphOmission]]:
+        # Apply the scope before spending any display budget. Trimming an
+        # induced scene afterwards cannot recover seed spokes it excluded.
+        direct = [
+            candidate
+            for candidate in candidates
+            if candidate.edge.source in seeds or candidate.edge.target in seeds
+        ]
+        cap_before = hydration_context.source_cap_events
+        if (
+            "knowledge" in active_layers
+            and request.direction in {"in", "both"}
+            and (not request.edge_kinds or "tree" in request.edge_kinds)
+            and (not request.node_families or "structural" in request.node_families)
+            and (not request.node_kinds or "workspace_tree_node" in request.node_kinds)
+            and request.time.from_ is None
+            and request.time.to is None
+        ):
+            folders, memberships, placed = self._primary_placement_folders(
+                session,
+                workspace_id,
+                nodes=seeds,
+                hydration_context=hydration_context,
+            )
+            # A primary placement supersedes stale/fallback projected folders.
+            direct = [
+                candidate
+                for candidate in direct
+                if candidate.edge.edge_kind != "tree"
+                or candidate.edge.target not in placed
+            ]
+            for folder_id, document_ids in sorted(memberships.items()):
+                folder = folders[folder_id]
+                for document_id in sorted(document_ids):
+                    document = seeds[document_id]
+                    direct.append(
+                        _EdgeCandidate(
+                            edge=GraphEdge(
+                                id=graph_edge_id(
+                                    workspace_id,
+                                    folder.id,
+                                    document.id,
+                                    "tree",
+                                    "current",
+                                ),
+                                source=folder.id,
+                                target=document.id,
+                                edge_kind="tree",
+                                label=edge_semantic("tree").label,
+                                layer="knowledge",
+                                provenance="derived",
+                            ),
+                            nodes=(folder, document),
+                            priority=0,
+                            semantic_identity=(folder.id, document.id, "tree", None),
+                            anchor=document.id,
+                            role="in",
+                        )
+                    )
+        nodes, edges, capped = self._apply_budget(
+            request=request,
+            seed_nodes=seeds,
+            candidates=direct,
+            extra_nodes={},
+        )
+        node_ids = {node.id for node in nodes}
+        edge_ids = {edge.id for edge in edges}
+        omissions: list[GraphOmission] = []
+        if any(
+            node.id not in node_ids for candidate in direct for node in candidate.nodes
+        ):
+            omissions.append(GraphOmission(scope="node", reason="node_quota", hop=1))
+        if capped and any(
+            candidate.edge.id not in edge_ids
+            and all(node.id in node_ids for node in candidate.nodes)
+            for candidate in direct
+        ):
+            omissions.append(
+                GraphOmission(
+                    scope="relation", reason="relation_quota", relation_class="seed"
+                )
+            )
+        folder_capped = hydration_context.source_cap_events > cap_before
+        if folder_capped:
+            omissions.append(GraphOmission(scope="node", reason="folder_source_cap"))
+        return nodes, edges, capped, folder_capped, omissions
 
     @staticmethod
     def _primary_placement_folders(
@@ -1810,6 +1917,10 @@ class GraphQueryService:
         candidates: list[_EdgeCandidate],
         nodes: dict[str, GraphNode],
     ) -> None:
+        # Activity history keeps the session that gives an event its context.
+        # This does not expand document-to-document neighbors in direct scope.
+        if request.relation_scope == "direct" and request.time.mode != "action":
+            return
         # This non-seed edge is subordinate to an inbound event -> seed path.
         if request.direction == "out":
             return
@@ -2732,6 +2843,12 @@ class GraphQueryService:
     ) -> tuple[list[GraphTimelineEvent], bool]:
         current_node_ids = {node.id for node in nodes}
         current_edge_ids = {edge.id for edge in edges}
+        session_ids = {
+            node.id
+            for node in nodes
+            if node.entity_kind in {"ask_session", "mcp_chat_session"}
+        }
+        session_edges = [edge for edge in edges if edge.source in session_ids]
         ordered_drafts = sorted(
             drafts,
             key=lambda draft: (
@@ -2745,6 +2862,26 @@ class GraphQueryService:
         events: list[GraphTimelineEvent] = []
         capped = False
         for draft in ordered_drafts:
+            # A session is context for the activity, not a pre-history fact.
+            # Only attach admitted context edges so an omitted session cannot
+            # cause its otherwise visible primary event to disappear.
+            context_edges = [
+                edge for edge in session_edges if edge.target in draft.node_ids
+            ]
+            if context_edges:
+                draft = replace(
+                    draft,
+                    node_ids=tuple(
+                        dict.fromkeys(
+                            (*draft.node_ids, *(edge.source for edge in context_edges))
+                        )
+                    ),
+                    edge_ids=tuple(
+                        dict.fromkeys(
+                            (*draft.edge_ids, *(edge.id for edge in context_edges))
+                        )
+                    ),
+                )
             if len(events) >= edge_limit:
                 capped = True
                 continue

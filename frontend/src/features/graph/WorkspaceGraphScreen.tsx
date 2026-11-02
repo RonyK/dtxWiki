@@ -3,6 +3,7 @@ import {
   FileText,
   ListPlus,
   Maximize2,
+  Scan,
   Pause,
   Play,
   RotateCcw,
@@ -2549,7 +2550,7 @@ function WorkspaceGraphCanvasToolbar({
     <div aria-label={t("workspaceGraph.canvas.aria")} className="graph-canvas-toolbar" role="toolbar">
       <GraphControlButton label={t("workspaceGraph.canvas.zoomIn")} onClick={() => canvasRef.current?.zoomIn()}><ZoomIn aria-hidden="true" size={17} /></GraphControlButton>
       <GraphControlButton label={t("workspaceGraph.canvas.zoomOut")} onClick={() => canvasRef.current?.zoomOut()}><ZoomOut aria-hidden="true" size={17} /></GraphControlButton>
-      <GraphControlButton label={t("workspaceGraph.canvas.fit")} onClick={() => canvasRef.current?.fit()}><Maximize2 aria-hidden="true" size={17} /></GraphControlButton>
+      <GraphControlButton label={t("workspaceGraph.canvas.fit")} onClick={() => canvasRef.current?.fit()}><Scan aria-hidden="true" size={17} /></GraphControlButton>
       <GraphControlButton
         disabled={reducedMotion || staticLayout}
         label={t(staticLayout

@@ -177,6 +177,10 @@ describe("Local Sigma interactions", () => {
     expect(state.setCameraState).not.toHaveBeenCalled();
     expect(state.animateCamera).not.toHaveBeenCalled();
     expect(state.sigma.graph.nodes().map((key) => ({ ...state.sigma.graph.getNodeAttributes(key) }))).toEqual(positions);
+    adapter.replaceScene({ ...scene, edges: scene.edges.map((edge) => ({ ...edge, muted: true })) });
+    const muted = reducer("relation", state.sigma.graph.getEdgeAttributes("relation"));
+    expect(muted).toMatchObject({ hidden: false, type: "link" });
+    expect(muted.color).not.toBe(data.color);
   });
 
   it("edge hover does not replace a selected node's neighborhood", () => {

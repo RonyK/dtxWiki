@@ -3,11 +3,12 @@ import { describe, expect, it } from "vitest";
 import { contextGraphQuery } from "../graph";
 
 describe("contextGraphQuery", () => {
-  it("requests the current two-hop Local scene with the bounded UI budget", () => {
+  it("requests direct connections on first entry with the bounded UI budget", () => {
     expect(contextGraphQuery("page-id")).toMatchObject({
       seeds: [{ kind: "context_page", id: "page-id" }],
       scope: "local",
-      depth: 2,
+      depth: 1,
+      relation_scope: "direct",
       time: { mode: "current" },
       budget: { nodes: 250, edges: 750 },
     });

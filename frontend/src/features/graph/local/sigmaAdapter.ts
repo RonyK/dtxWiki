@@ -25,6 +25,8 @@ export type SigmaGraphAdapterOptions = {
   initialViewport?: GraphViewport | null;
   positions: Record<string, GraphPoint>;
   reducedMotion: boolean;
+  freezeLayout?: boolean;
+  viewportInsets?: () => { top: number; right: number; bottom: number; left: number };
   showLabels?: boolean;
 };
 
@@ -122,7 +124,10 @@ export function createSigmaGraphAdapter(
   const ink = getComputedStyle(container).color || "#0f172a";
   const graph = new Graph({ multi: true, type: "mixed" });
   let localScene = buildLocalScene(initialScene);
+  let nodePresentation = new Map(initialScene.nodes.map((node) => [node.id, node]));
+  let edgePresentation = new Map(initialScene.edges.map((edge) => [edge.id, edge]));
   let localScopeKey = initialScene.scopeKey ?? null;
+  let freezeLayout = options.freezeLayout ?? false;
   // Construction coordinates are a restore snapshot, not ongoing pin authority.
   // Keep our own live pins so unpin/reset and later drags survive scene changes
   // without mutating (or rereading) the caller's original snapshot.
@@ -215,6 +220,9 @@ export function createSigmaGraphAdapter(
   });
 
   const loadScene = (scene: GraphRenderScene): LocalSceneUpdate => {
+    freezeLayout = scene.freezeLayout ?? options.freezeLayout ?? false;
+    nodePresentation = new Map(scene.nodes.map((node) => [node.id, node]));
+    edgePresentation = new Map(scene.edges.map((edge) => [edge.id, edge]));
     const nextLocalScene = buildLocalScene(scene);
     const nextScopeKey = scene.scopeKey ?? null;
     const edgeLabels = new Map(scene.edges.map((edge) => [edge.id, edge.label]));
@@ -246,7 +254,7 @@ export function createSigmaGraphAdapter(
     layout = createLocalLayout(localScene.layout, {
       fixedPositions: visiblePositions(localScene, pinnedPositions),
       onTick: applyPositions,
-      reducedMotion: options.reducedMotion,
+      reducedMotion: options.reducedMotion || freezeLayout,
     });
     const positions = layout.getPositions();
     for (const node of localScene.nodes) {
@@ -286,7 +294,24 @@ export function createSigmaGraphAdapter(
     hideLabelsOnMove: false,
     // The ordinary-label toggle must not suppress seed/active labels as well.
     renderLabels: true,
-    renderEdgeLabels: false,
+    renderEdgeLabels: true,
+    defaultDrawEdgeLabel: (context, edge, source, target) => {
+      if (!edge.forceLabel || !edge.label || edge.hidden) return;
+      const text = String(edge.label);
+      const x = (source.x + target.x) / 2, y = (source.y + target.y) / 2;
+      context.save();
+      context.font = "600 11px sans-serif";
+      const width = Math.min(180, context.measureText(text).width + 16);
+      context.fillStyle = edge.color;
+      context.beginPath();
+      context.roundRect(x - width / 2, y - 11, width, 22, 7);
+      context.fill();
+      context.fillStyle = tokens.surface;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(text, x, y, width - 12);
+      context.restore();
+    },
     labelColor: { color: ink },
     labelSize: 12,
     labelDensity: 0.8,
@@ -393,25 +418,31 @@ export function createSigmaGraphAdapter(
     maxCameraRatio: 5,
     defaultDrawNodeHover: () => undefined,
     nodeReducer: (key, data) => {
-      const quiet = highlightedStar !== null && !highlightedStar.nodes.has(key);
       const id = localScene.graphIdByKey.get(key);
+      const presentation = id ? nodePresentation.get(id) : undefined;
+      const quiet = presentation?.muted || highlightedStar !== null && !highlightedStar.nodes.has(key);
       const importantLabel = Boolean(data.isSeed || (id && [selectedId, focusedId, hoveredId].includes(id)));
       return {
         ...data,
-        hidden: false,
+        hidden: presentation?.hidden ?? false,
+        type: presentation?.highlighted ? "seed" : data.type,
+        size: presentation?.highlighted ? Number(data.size) + 2 : data.size,
         color: quiet ? data.quietColor : data.color,
-        borderColor: quiet ? data.quietBorderColor : data.borderColor,
+        borderColor: presentation?.highlighted ? tokens.edge.action : quiet ? data.quietBorderColor : data.borderColor,
         label: importantLabel || (showOrdinaryLabels && !quiet) ? data.label : null,
         forceLabel: importantLabel,
       };
     },
     edgeReducer: (key, data) => {
-      const quiet = highlightedStar !== null && !highlightedStar.edges.has(key);
+      const presentation = edgePresentation.get(key);
+      const quiet = presentation?.muted || highlightedStar !== null && !highlightedStar.edges.has(key);
       return {
         ...data,
-        size: hoveredId === key ? Number(data.size) * 1.5 : data.size,
-        color: quiet ? data.quietColor : data.color,
-        hidden: false,
+        size: presentation?.highlighted ? 2.5 : hoveredId === key ? Number(data.size) * 1.5 : data.size,
+        type: presentation?.removed ? "action" : data.type,
+        color: presentation?.removed ? "#dc2626" : presentation?.highlighted ? tokens.edge.action : quiet ? data.quietColor : data.color,
+        forceLabel: Boolean(presentation?.eventCaption),
+        hidden: presentation?.hidden ?? false,
       };
     },
   });
@@ -632,7 +663,14 @@ export function createSigmaGraphAdapter(
         ? { x: (source.x + target.x) / 2, y: (source.y + target.y) / 2 }
         : null);
       if (!center) return;
-      const targetState = { x: center.x, y: center.y };
+      const insets = options.viewportInsets?.();
+      const camera = sigma.getCamera();
+      const cameraState = camera.getState();
+      const visibleCenter = insets ? sigma.viewportToFramedGraph({
+        x: (container.clientWidth + insets.left - insets.right) / 2,
+        y: (container.clientHeight + insets.top - insets.bottom) / 2,
+      }) : cameraState;
+      const targetState = { x: center.x + cameraState.x - visibleCenter.x, y: center.y + cameraState.y - visibleCenter.y };
       // Sigma's animate(0) can evaluate 0 / 0 on its first frame. Immediate
       // centering must leave a finite camera, even before another RAF runs.
       if (options.reducedMotion) sigma.getCamera().setState(targetState);
@@ -658,7 +696,17 @@ export function createSigmaGraphAdapter(
     },
     fit() {
       if (destroyed || contextLost) return;
-      sigma.getCamera().setState({ x: 0.5, y: 0.5, angle: 0, ratio: 1 });
+      const camera = sigma.getCamera();
+      const insets = options.viewportInsets?.();
+      const width = container.clientWidth, height = container.clientHeight;
+      const ratio = insets ? Math.max(width / Math.max(1, width - insets.left - insets.right),
+        height / Math.max(1, height - insets.top - insets.bottom)) : 1;
+      camera.setState({ x: 0.5, y: 0.5, angle: 0, ratio: insets ? camera.getBoundedRatio(ratio) : 1 });
+      if (insets && width && height) {
+        const center = sigma.viewportToFramedGraph({ x: (width + insets.left - insets.right) / 2,
+          y: (height + insets.top - insets.bottom) / 2 });
+        camera.setState({ x: 1 - center.x, y: 1 - center.y });
+      }
       sigma.refresh();
     },
     focus(id) {

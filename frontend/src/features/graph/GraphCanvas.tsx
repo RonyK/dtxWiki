@@ -29,6 +29,7 @@ export type GraphCanvasHandle = {
 export type RendererStatus = "loading" | "ready" | "error";
 
 type GraphCanvasProps = {
+  viewportInsets?: () => { top: number; right: number; bottom: number; left: number };
   active: boolean;
   focusedId: string | null;
   forcedColors: boolean;
@@ -71,6 +72,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       selectedId,
       showLabels = true,
       viewport,
+      viewportInsets,
     },
     ref,
   ) {
@@ -84,6 +86,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       onRendererStatusChange,
       onSelect,
       onViewport,
+      viewportInsets,
     });
     const positionsRef = useRef(pinnedPositions);
     const pinnedIdsRef = useRef(pinnedIds);
@@ -105,6 +108,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     const generationRef = useRef(0);
     sceneRef.current = scene;
     callbacksRef.current = {
+      viewportInsets,
       onHover,
       onPin,
       onRendererStatusChange,
@@ -164,6 +168,8 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
               initialViewport: viewportRef.current,
               positions: positionsRef.current,
               reducedMotion,
+              ...(callbacksRef.current.viewportInsets ? { viewportInsets: () => callbacksRef.current.viewportInsets!() } : {}),
+              ...(sceneRef.current.freezeLayout ? { freezeLayout: true } : {}),
               showLabels: showLabelsRef.current,
               callbacks: {
                 onHover: (id) => callbacksRef.current.onHover(id),

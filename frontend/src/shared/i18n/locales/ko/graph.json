@@ -117,7 +117,7 @@
   "graph": {
     "heading": "관계 그래프",
     "description": "문서, 대화, 액션과 이를 연결하는 근거를 탐색합니다.",
-    "visibleCount": "노드 {{nodes}}개 · 엣지 {{edges}}개",
+    "visibleCount": "노드 {{nodes}}개 · 관계 {{edges}}개",
     "coverageWarning": "이 그래프의 범위가 제한되었거나 일부만 포함합니다.",
     "omissions": {
       "heading": "제외된 항목의 사유",
@@ -186,8 +186,8 @@
     "openNode": "{{label}} 열기",
     "pinNode": "{{label}} 고정",
     "unpinNode": "{{label}} 고정 해제",
-    "expand": "확장",
-    "collapse": "축소",
+    "expand": "연결 펼치기",
+    "collapse": "연결 접기",
     "expandUnavailable": "Context 페이지만 확장할 수 있습니다.",
     "expandUnsupported": "이 그래프 프로젝션은 확장을 지원하지 않습니다.",
     "primarySeed": "기본 시드는 그래프에 유지됩니다.",
@@ -303,7 +303,10 @@
       "evidenceRef": "근거 참조",
       "available": "사용 가능",
       "unavailable": "사용 불가",
-      "edgeSentence": "{{source}} —{{action}}→ {{target}}"
+      "edgeSentence": "{{source}} —{{action}}→ {{target}}",
+      "seedRelationships": "기준 문서와의 관계",
+      "expandSheet": "상세 펼치기",
+      "collapseSheet": "상세 접기"
     },
     "coAccess": {
       "sentence": "{{sessions}}에서 {{days}}에 걸쳐 함께 조회됨 (최근 {{last}})",
@@ -311,6 +314,122 @@
       "sessions_other": "{{count}}개 세션",
       "days_one": "{{count}}일",
       "days_other": "{{count}}일"
+    },
+    "view": {
+      "heading": "그래프 보기",
+      "compare": "보기 차이",
+      "seed": "기준",
+      "refresh": "그래프 새로고침",
+      "fullscreen": "그래프 전체 화면",
+      "exitFullscreen": "전체 화면 종료",
+      "more": "더 보기",
+      "utilities": "그래프 도구",
+      "fullscreenUnavailable": "이 브라우저에서 전체 화면을 열 수 없습니다.",
+      "dismissNotice": "생략 안내 접기",
+      "fetched": "{{time}} 조회",
+      "list": "목록으로 보기",
+      "legend": "범례",
+      "rows": {
+        "question": "알 수 있는 것",
+        "nodes": "노드",
+        "edges": "관계",
+        "time": "시간 기준",
+        "scope": "관계 범위",
+        "limits": "한계"
+      },
+      "current": {
+        "name": "현재 관계",
+        "question": "지금 연결된 문서·자료·폴더",
+        "description": "링크·인용·함께 읽음·폴더 소속처럼 현재 유효한 관계를 봅니다. 시간 이동은 없습니다.",
+        "nodes": "문서·자료·폴더와 연결된 항목",
+        "edges": "현재 유효한 연결",
+        "time": "조회 시점",
+        "scope": "직접 연결 / 이웃 간 연결 / 2단계 확장",
+        "limits": "표시 한도로 일부 관계가 생략될 수 있음"
+      },
+      "appearance": {
+        "name": "변화 이력",
+        "question": "관계가 언제 생기고 바뀌었는지",
+        "description": "문서 버전과 관계 추가·삭제 기록을 타임라인과 함께 재생합니다. 기록된 범위만 보여줍니다.",
+        "nodes": "문서·자료·폴더·문서 버전",
+        "edges": "추가·삭제된 관계와 기록 이전의 배경 관계",
+        "time": "선택한 기록 시점",
+        "scope": "직접 연결만 지원",
+        "limits": "전체 변경 이력이 아닐 수 있으며 삭제는 별도 표시"
+      },
+      "action": {
+        "name": "활동 이력",
+        "question": "누가·어떤 도구가 이 문서를 다뤘는지",
+        "description": "편집·리뷰, Ask 인용, MCP 사용 기록과 해당 세션 맥락을 함께 봅니다. 현재 관계는 흐린 배경으로 남습니다.",
+        "nodes": "버전·리뷰·Ask·MCP 활동과 연결된 항목",
+        "edges": "편집·승인·활용 기록과 배경 관계",
+        "time": "선택한 활동 기록 시점",
+        "scope": "직접 연결된 활동과 해당 세션 맥락",
+        "limits": "관측된 활동만 표시하며 완전한 감사 로그는 아님"
+      },
+      "omitted": "일부 생략",
+      "retry": "다시 시도",
+      "loading": "{{view}} 불러오는 중…",
+      "allHidden": "현재 필터로 모든 관계가 숨겨졌습니다.",
+      "noRelations": "이 문서에는 아직 연결이 없습니다.",
+      "addRelations": "문서 링크나 인용을 추가하면 관계가 표시됩니다.",
+      "openStatic": "정적 그래프 보기 열기"
+    },
+    "range": {
+      "heading": "관계 범위",
+      "historyOnly": "이력은 기준 문서의 직접 관계를 보여주며, 활동에는 관련 세션 맥락도 포함됩니다. 범위 확장은 현재 관계에서 선택할 수 있습니다.",
+      "direct": {
+        "name": "직접 연결",
+        "short": "직접",
+        "description": "기준 문서에 직접 닿는 관계만"
+      },
+      "neighbors": {
+        "name": "이웃 간 연결",
+        "short": "이웃 간",
+        "description": "직접 연결된 항목끼리의 관계 포함"
+      },
+      "extended": {
+        "name": "2단계 확장",
+        "short": "2단계",
+        "description": "이웃의 연결까지 두 단계로 확장"
+      },
+      "actionDescription": "직접 관련된 활동과 해당 세션 맥락"
+    },
+    "historyUi": {
+      "records": "기록 {{count}}건",
+      "partial": "기록된 범위만 표시",
+      "latest": "최신",
+      "authoring": "편집·리뷰",
+      "tools": "AI·도구 활용",
+      "versions": "문서 버전",
+      "relations": "관계 변화",
+      "group": "기록 {{count}}건 펼치기",
+      "showInGraph": "그래프에서 보기",
+      "recordedAt": "기록 시점",
+      "showFuture": "이후 기록 흐리게 보기",
+      "itemRecords": "이 항목의 기록",
+      "seek": "이 시점 보기",
+      "noItemRecords": "현재 조회 범위에 이 항목의 기록이 없습니다.",
+      "historyRelations": "이력 관계",
+      "currentRelations": "현재 관계",
+      "baseline": "관측 기록이 없는 현재 관계는 기록 이전부터의 배경으로 남습니다.",
+      "notPresent": "이 기록 시점의 활성 항목이 아닙니다.",
+      "addedRelation": "{{kind}} 추가",
+      "removedRelation": "{{kind}} 삭제",
+      "versionCreated": "문서 버전 생성",
+      "versionEdited": "문서 버전 편집",
+      "kind": {
+        "version": "문서 버전",
+        "review": "리뷰",
+        "ask": "Ask",
+        "tool": "MCP",
+        "activity": "활동",
+        "added": "관계 추가",
+        "removed": "관계 삭제"
+      },
+      "restoredLatest": "보던 기록이 새 조회 결과에 없어 최신 기록으로 이동했습니다.",
+      "groupRecords": "가까운 기록 {{count}}건",
+      "closeGroup": "닫기"
     }
   },
   "workspaceGraph": {
