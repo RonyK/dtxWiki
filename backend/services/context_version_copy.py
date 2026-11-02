@@ -11,10 +11,9 @@ from sqlalchemy.orm import Session
 from backend.models.context import (
     ContextCitation,
     ContextClaim,
-    ContextPage,
     ContextPageVersion,
 )
-from backend.repositories.workspace_scoped import get_in_workspace, select_in_workspace
+from backend.repositories.workspace_scoped import select_in_workspace
 
 
 @dataclass(frozen=True)
@@ -130,29 +129,12 @@ def copy_context_version_references(
         location = claim.location_in_page or {}
         if not unchanged and location and location != {"kind": "whole_page"}:
             anchors_preserved = False
-    source_page = get_in_workspace(
-        session,
-        ContextPage,
-        workspace_id=source.workspace_id,
-        resource_id=source.page_id,
-    )
-    page_owned = (
-        source_page is not None
-        and source_page.workspace_id == source.workspace_id
-        and source_page.current_published_version_id == source.id
-    )
-    ownership = or_(
-        (ContextCitation.target_kind == "context_claim")
-        & ContextCitation.target_id.in_(claim_ids),
-        (ContextCitation.target_kind != "context_claim")
-        & (ContextCitation.target_id == source.id),
-    )
-    if page_owned:
-        ownership = or_(
-            ownership,
-            (ContextCitation.target_kind == "context_page")
-            & (ContextCitation.target_id == source.page_id),
-        )
+    from backend.services.document_references import legacy_citation_owner_condition
+
+    # Page-owned legacy evidence applies only until the selected source first
+    # receives a publication manifest. Later versions already own its copied
+    # evidence; importing the page-owned originals again multiplies instances.
+    ownership = legacy_citation_owner_condition(session, source)
     citations = list(
         session.scalars(
             select_in_workspace(

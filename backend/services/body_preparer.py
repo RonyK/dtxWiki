@@ -248,6 +248,17 @@ class BodyPreparer:
             else:
                 validate_body(body)
             validate_markdown_media_policy(body)
+            from backend.services.document_references import (
+                validate_document_reference_input,
+            )
+
+            validate_document_reference_input(
+                body,
+                workspace_id=ctx.workspace.id,
+                session=ctx.session,
+                version=ctx.version,
+                self_origins=self.self_origins,
+            )
         findings = tuple(
             finding
             for rule in self.registry.rules_for(

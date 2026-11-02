@@ -116,6 +116,12 @@ def upgrade():
             ondelete="CASCADE",
         ),
     )
+    for table, prefix in (
+        ("context_document_reference", "context_doc_ref"),
+        ("context_published_citation", "context_pub_cite"),
+    ):
+        for column in ("context_page_id", "library_item_id", "agent_page_id"):
+            op.create_index(f"ix_{prefix}_{column}", table, ["workspace_id", column])
 
 
 def downgrade():

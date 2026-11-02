@@ -9,6 +9,7 @@ from backend.models.audit import AuditEvent
 from backend.models.base import utc_now
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.document_reference import ContextDocumentReference
 from backend.models.review import ReviewDecision, ReviewItem
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
@@ -1014,6 +1015,16 @@ def test_rejected_draft_restarts_on_the_head_the_rejection_left(session_factory)
             _write(session, workspace.id, title, f"# D{number}\n\nDraft.")
             for number in (1, 2)
         )
+        session.add(
+            ContextDocumentReference(
+                workspace_id=workspace.id,
+                owner_version_id=d2.draft_version_id,
+                target_kind="context_page",
+                context_page_id=published.page_id,
+                note="Selected on the rejected draft",
+            )
+        )
+        session.flush()
         _reject(session, workspace.id, d2.review_item_id)
         rejected = session.get(ContextPageVersion, d2.draft_version_id)
 
@@ -1036,6 +1047,14 @@ def test_rejected_draft_restarts_on_the_head_the_rejection_left(session_factory)
         restarted = restart()
         version = session.get(ContextPageVersion, restarted.draft_version_id)
         assert version.parent_version_id == d1.draft_version_id
+        inherited = session.scalar(
+            select(ContextDocumentReference).where(
+                ContextDocumentReference.owner_version_id == version.id,
+            )
+        )
+        assert inherited is not None
+        assert inherited.note == "Selected on the rejected draft"
+        assert inherited.context_page_id == published.page_id
         page = session.get(ContextPage, published.page_id)
         assert page.latest_draft_version_id == version.id
         # The head moved on, so the rejected bytes no longer restart here.

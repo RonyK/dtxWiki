@@ -3071,6 +3071,7 @@ class ContextWriteService:
                 session=session,
                 page=page,
                 parent_version_id=restart_parent_id,
+                reference_source_version=base_version,
                 body=prepared_body,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
@@ -3632,7 +3633,10 @@ class ContextWriteService:
                 reason=request.reason,
             )
             self._enqueue_embed(
-                session, page=page, version=version, marker="published",
+                session,
+                page=page,
+                version=version,
+                marker="published",
                 decision_id=review_decision_id,
             )
             return PublishContextPageResult(
@@ -3844,6 +3848,7 @@ class ContextWriteService:
         identity_seed: str | None = None,
         explicit_block_replacements: dict[str, str] | None = None,
         prepared_block_map: list[dict] | None = None,
+        reference_source_version: ContextPageVersion | None = None,
     ) -> ContextPageVersion:
         try:
             return insert_version(
@@ -3865,6 +3870,7 @@ class ContextWriteService:
                 identity_seed=identity_seed,
                 explicit_block_replacements=explicit_block_replacements,
                 prepared_block_map=prepared_block_map,
+                reference_source_version=reference_source_version,
             )
         except MarkdownMediaPolicyError as exc:
             raise RejectedByPolicyError(str(exc), error_code=exc.error_code) from exc
@@ -4287,6 +4293,7 @@ class ContextWriteService:
         session: Session,
         page: ContextPage,
         parent_version_id: UUID | None,
+        reference_source_version: ContextPageVersion,
         body: PreparedBody,
         actor_kind: str,
         actor_id: str,
@@ -4311,6 +4318,7 @@ class ContextWriteService:
             session=session,
             page=page,
             parent_version_id=parent_version_id,
+            reference_source_version=reference_source_version,
             body=body,
             actor_kind=actor_kind,
             actor_id=actor_id,

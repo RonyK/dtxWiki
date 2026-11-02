@@ -28,6 +28,8 @@ from backend.models import (
     WorkspaceTreeNode,
 )
 from backend.models.base import utc_now
+from backend.models.document_reference import ContextDocumentReference
+from backend.models.library import LibraryItemTombstone
 from backend.schemas.context_write import ReviewDecisionRequest, WriteDraftRequest
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.services.context_write_service import ContextWriteService
@@ -199,6 +201,38 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         session.add(private_version)
         session.flush()
         private_version_id = private_version.id
+        for owner, note in (
+            (private_version_id, "Unsubmitted private reference note"),
+            (version_id, "Retained shared reference note"),
+        ):
+            session.add(
+                ContextDocumentReference(
+                    workspace_id=shared_id,
+                    owner_version_id=owner,
+                    target_kind="context_page",
+                    context_page_id=page_id,
+                    note=note,
+                )
+            )
+        deleted_reference = LibraryItemTombstone(
+            workspace_id=shared_id,
+            library_item_id=uuid4(),
+            uri="https://example.com/deleted-reference",
+            citations=[
+                {
+                    "citation_type": "document_reference",
+                    "target_id": str(owner),
+                    "note": note,
+                }
+                for owner, note in (
+                    (private_version_id, "Private deleted reference note"),
+                    (version_id, "Shared deleted reference note"),
+                )
+            ],
+        )
+        session.add(deleted_reference)
+        session.flush()
+        deleted_reference_id = deleted_reference.id
         page.current_published_version_id = version_id
         page.latest_draft_version_id = private_version_id
         page.current_version_id = private_version_id
@@ -729,6 +763,25 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         private_version = session.get(ContextPageVersion, private_version_id)
         assert private_version.version_status == "discarded"
         assert private_version.body_md == ""
+        assert not session.scalars(
+            select(ContextDocumentReference).where(
+                ContextDocumentReference.owner_version_id == private_version_id
+            )
+        ).all()
+        assert (
+            session.scalar(
+                select(ContextDocumentReference.note).where(
+                    ContextDocumentReference.owner_version_id == version_id
+                )
+            )
+            == "Retained shared reference note"
+        )
+        assert [
+            entry["note"]
+            for entry in session.get(
+                LibraryItemTombstone, deleted_reference_id
+            ).citations
+        ] == ["Shared deleted reference note"]
         assert session.get(ContextPage, page_id).current_version_id == version_id
         assert (
             session.get(

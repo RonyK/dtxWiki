@@ -133,24 +133,22 @@ class LintFixWriter:
         key = f"lint-fix:{run_id}:{page_id}:{base_version_id}"
 
         def execute() -> LintFixResult:
-            # Keep media intent before page locks. Share-lock the policy row
-            # in between so a settings update cannot invalidate this proof
-            # before publication. The lock remains until the caller's whole
-            # transaction ends; concurrent maintenance SHARE locks coexist,
-            # while settings UPDATE locks must wait for the lint run to end.
+            # Match ordinary Context publication: media intent, Page, then
+            # exclusive Workspace policy/projection lock. SHARE would need an
+            # UPDATE upgrade at publication and deadlock concurrent lint runs.
             service._lock_context_media_usage_intent(session, workspace_id)
-            workspace = session.scalar(
-                select(Workspace)
-                .where(Workspace.id == workspace_id)
-                .with_for_update(read=True)
-                .execution_options(populate_existing=True)
-            )
             page = session.scalar(
                 select_in_workspace(
                     ContextPage,
                     workspace_id=workspace_id,
                     conditions=(ContextPage.id == page_id,),
                 )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            workspace = session.scalar(
+                select(Workspace)
+                .where(Workspace.id == workspace_id)
                 .with_for_update()
                 .execution_options(populate_existing=True)
             )

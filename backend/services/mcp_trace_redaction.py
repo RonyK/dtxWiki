@@ -288,6 +288,9 @@ def redact_tool_arguments(
     if isinstance(arguments, _RedactedToolArguments):
         return copy.deepcopy(arguments)
 
+    if tool_name == "cite":
+        return _redact_reference_arguments(arguments)
+
     body_field = _WRITE_BODY_FIELDS.get(tool_name)
     if body_field is not None:
         budget = _PreviewBudget()
@@ -346,6 +349,96 @@ def redact_tool_arguments(
     return summary
 
 
+_REFERENCE_ARGUMENT_FIELDS = frozenset(
+    {
+        "workspace_id",
+        "conversation_token",
+        "page_id",
+        "version_id",
+        "expected_editing_revision",
+        "idempotency_key",
+        "retry_only",
+    }
+)
+_REFERENCE_TARGET_FIELDS = frozenset({"target_kind", "target_id", "reference_id"})
+_REFERENCE_TARGET_KINDS = frozenset({"context_page", "library_item", "agent_page"})
+_REFERENCE_TRACE_TARGET_LIMIT = 500
+
+
+def _valid_reference_metadata(field: str, value: Any) -> bool:
+    if field == "target_kind":
+        return isinstance(value, str) and value in _REFERENCE_TARGET_KINDS
+    if field in {"target_id", "reference_id"}:
+        return _valid_patch_context_edit_top_level_metadata("page_id", value)
+    if field in {"idempotency_key", "conversation_token"}:
+        return (
+            (value is None and field == "conversation_token")
+            or isinstance(value, str)
+            and 1 <= len(value) <= 160
+            and not re.search(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff]", value)
+        )
+    return _valid_patch_context_edit_top_level_metadata(field, value)
+
+
+def _redact_reference_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Capture bounded identities and digests even before request validation."""
+    summary = _RedactedToolArguments()
+    for field in _REFERENCE_ARGUMENT_FIELDS:
+        if field not in arguments:
+            continue
+        value = arguments[field]
+        if _valid_reference_metadata(field, value):
+            summary[field] = copy.deepcopy(value)
+        else:
+            summary[f"{field}_digest"] = _value_digest(value)
+    unknown = {
+        key: value
+        for key, value in arguments.items()
+        if key not in _REFERENCE_ARGUMENT_FIELDS and key not in {"add", "remove"}
+    }
+    if unknown:
+        summary["unknown_fields_digest"] = _canonical_value_digest(unknown)
+    remaining = _REFERENCE_TRACE_TARGET_LIMIT
+    for action in ("add", "remove"):
+        if action not in arguments:
+            continue
+        values = arguments[action]
+        if not isinstance(values, list):
+            summary[f"{action}_digest"] = _value_digest(values)
+            continue
+        captured = []
+        for item in values[:remaining]:
+            if not isinstance(item, dict):
+                captured.append({"item_digest": _value_digest(item)})
+                continue
+            entry = {}
+            for field in _REFERENCE_TARGET_FIELDS:
+                if field not in item:
+                    continue
+                value = item[field]
+                if _valid_reference_metadata(field, value):
+                    entry[field] = copy.deepcopy(value)
+                else:
+                    entry[f"{field}_digest"] = _value_digest(value)
+            if "note" in item:
+                entry["note_digest"] = _value_digest(item["note"])
+            extra = {
+                key: value
+                for key, value in item.items()
+                if key not in _REFERENCE_TARGET_FIELDS and key != "note"
+            }
+            if extra:
+                entry["unknown_fields_digest"] = _canonical_value_digest(extra)
+            captured.append(entry)
+        summary[action] = captured
+        remaining -= len(captured)
+        omitted = len(values) - len(captured)
+        if omitted:
+            summary[f"{action}_omitted"] = omitted
+            summary[f"{action}_digest"] = _canonical_value_digest(values)
+    return summary
+
+
 def _redact_body_field(
     arguments: dict[str, Any],
     body_field: str,
@@ -369,7 +462,7 @@ def _redact_body_field(
     summary.pop(preview_field, None)
     body = summary.pop(body_field, None)
     if isinstance(body, str):
-        encoded = body.encode("utf-8")
+        encoded = body.encode("utf-8", errors="surrogatepass")
         summary[digest_field] = {
             "sha256": hashlib.sha256(encoded).hexdigest(),
             "chars": len(body),
@@ -574,7 +667,7 @@ def _text_digest(value: str) -> dict[str, Any]:
     dropping the original field the way that helper drops ``body_field``.
     """
 
-    encoded = value.encode("utf-8")
+    encoded = value.encode("utf-8", errors="surrogatepass")
     return {
         "sha256": hashlib.sha256(encoded).hexdigest(),
         "chars": len(value),
@@ -621,7 +714,7 @@ def _canonical_value_digest(value: Any) -> dict[str, Any]:
         # Preserve fail-closed behavior without hashing repr(value), which may
         # itself contain the secret this boundary exists to remove.
         encoded_text = f"<non-json:{type(value).__module__}.{type(value).__qualname__}>"
-    encoded = encoded_text.encode("utf-8")
+    encoded = encoded_text.encode("utf-8", errors="surrogatepass")
     return {
         "sha256": hashlib.sha256(encoded).hexdigest(),
         "chars": len(encoded_text),
@@ -894,9 +987,7 @@ def _overlap_conflict(message: Any) -> dict[str, Any] | None:
     match = _OVERLAP_MESSAGE_RE.search(message)
     if match is None:
         return None
-    left, left_first, left_last, right, right_first, right_last, kind = (
-        match.groups()
-    )
+    left, left_first, left_last, right, right_first, right_last, kind = match.groups()
     return {
         "left_op_index": int(left),
         "right_op_index": int(right),

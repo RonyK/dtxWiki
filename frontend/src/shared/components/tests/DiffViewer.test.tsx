@@ -6,6 +6,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
+import type { ReferenceView } from "../../api/references";
 import { buildSplitRows, DiffViewer } from "../DiffViewer";
 
 // jsdom never applies authored stylesheets, so getComputedStyle cannot tell
@@ -127,8 +128,16 @@ describe("DiffViewer", () => {
       additions: 0,
       deletions: 0,
       metadata_changes: ["title", "tags"],
+      // Opaque source-owned IDs differ after a version copy; this is not an
+      // added/removed hidden target and no references change was reported.
+      references_before: [{ target_kind: "context_page", target_id: null, metadata_id: "old", number: 1, state: "unavailable", metadata_present: true, inline_count: 0, occurrences: [] }] as ReferenceView[],
+      references_after: [{ target_kind: "context_page", target_id: null, metadata_id: "new", number: 1, state: "unavailable", metadata_present: true, inline_count: 0, occurrences: [] }] as ReferenceView[],
     };
-    render(<DiffViewer diff={metadataDiff} />);
+    const { rerender } = render(<DiffViewer diff={metadataDiff} />);
+    expect(screen.queryByRole("region", { name: "Reference changes" })).toBeNull();
+    rerender(<DiffViewer diff={{ ...metadataDiff, metadata_changes: ["references"] }} />);
+    expect(screen.getByText("Reference metadata changed. Details for unavailable documents are omitted.")).toBeInTheDocument();
+    expect(screen.queryByText(/Added:|Removed:/)).toBeNull();
 
     expect(
       screen.getByText(

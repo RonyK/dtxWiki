@@ -59,8 +59,9 @@ void main() {
   float diameter = min(body.r * sizeScale * zoom, maxPointSize);
   if (diameter <= 0.0) return;
   // Preserve the existing ${targetPx} CSS-pixel accessible target, plus the actual
-  // rendered circle/square when zoom makes its body larger than that target.
+  // rendered circle/square/diamond when zoom makes its body larger than that target.
   bool onBody = body.g == 1.0 ? all(lessThanEqual(abs(delta), vec2(diameter * 0.4)))
+    : body.g == 3.0 ? abs(delta.x) + abs(delta.y) / 1.2 <= diameter * 0.4
     : distanceSquared <= diameter * diameter * 0.25;
   if (distanceSquared > ${(targetPx ** 2).toFixed(1)} && !onBody) return;
   // All candidates rasterize the same pixel. Depth ranks absolute center
@@ -119,7 +120,7 @@ export function projectNativePoint(frame: CosmosPointPickFrame, position: readon
 
 /**
  * Whether the vertex shader would still keep this point as a candidate for the
- * frame's pointer: within the target, or on its rendered circle/square.
+ * frame's pointer: within the target, or on its rendered circle/square/diamond.
  * Matches the shader to float precision, not bit for bit.
  */
 export function nativePointTargetsPointer(
@@ -129,6 +130,7 @@ export function nativePointTargetsPointer(
   const squared = dx * dx + dy * dy, diameter = renderedDiameter(frame, size);
   if (!(diameter > 0)) return false;
   const onBody = shape === 1 ? Math.abs(dx) <= diameter * .4 && Math.abs(dy) <= diameter * .4
+    : shape === 3 ? Math.abs(dx) + Math.abs(dy) / 1.2 <= diameter * .4
     : squared <= diameter * diameter * .25;
   return squared <= TARGET_SQUARED || onBody;
 }
@@ -143,7 +145,7 @@ export function createWorkspaceNativePointPicker(
 ): CosmosPointPicker {
   if (!sizes.length || sizes.length !== shapes.length || sizes.length > 2 ** 24
     || !sizes.every(value => Number.isFinite(value) && value >= 0)
-    || !shapes.every(value => value === 0 || value === 1)) throw new Error("Invalid native picking geometry");
+    || !shapes.every(value => value === 0 || value === 1 || value === 3)) throw new Error("Invalid native picking geometry");
   const diameters = sizes.slice(), kinds = shapes.slice();
   const maximumDiameter = diameters.reduce((maximum, diameter) => Math.max(maximum, diameter), 0);
   let gl: WebGL2RenderingContext | null = null, program: WebGLProgram | null = null;

@@ -94,6 +94,8 @@ def _aggregate_citation_edges(
     uniqueness), and uq_edge_projection_identity would reject duplicate rows
     mid-publish. Weight = instance count, occurred_at = latest evidence.
     """
+    if not per_citation:
+        return []
     citing_by_citation = _citing_page_map(
         session, [citation for citation, _kind, _id in per_citation], workspace_id
     )
@@ -106,20 +108,28 @@ def _aggregate_citation_edges(
     )
 
     materialized_pages = set()
-    if document_reference_schema_available(session):
-        registered_versions = select_in_workspace(
-            ContextCitationPublication,
-            workspace_id=workspace_id,
-        ).with_only_columns(ContextCitationPublication.version_id)
+    if workspace_pages and document_reference_schema_available(session):
+        registered_version = (
+            select_in_workspace(
+                ContextCitationPublication,
+                workspace_id=workspace_id,
+                conditions=(
+                    ContextCitationPublication.version_id
+                    == ContextPage.current_published_version_id,
+                ),
+            )
+            .with_only_columns(ContextCitationPublication.version_id)
+            .correlate(ContextPage)
+            .exists()
+        )
         materialized_pages = set(
             session.scalars(
                 select_in_workspace(
                     ContextPage,
                     workspace_id=workspace_id,
                     conditions=(
-                        ContextPage.current_published_version_id.in_(
-                            registered_versions
-                        ),
+                        ContextPage.id.in_(workspace_pages),
+                        registered_version,
                     ),
                 ).with_only_columns(ContextPage.id)
             )
@@ -131,6 +141,7 @@ def _aggregate_citation_edges(
             citing_page_id is None
             or citing_page_id not in workspace_pages
             or citing_page_id in materialized_pages
+            or (target_kind == EntityKind.CONTEXT_PAGE and target_id == citing_page_id)
         ):
             continue
         key = (citing_page_id, target_kind, target_id)
@@ -180,6 +191,7 @@ def _published_document_citation_rows(
         target_filters = (
             target_model.current_published_version_id.is_not(None),
             target_model.lifecycle_status != "archived",
+            target_model.id != ContextPage.id,
         )
     elif target_kind == "library_item":
         target_model, target_column = (

@@ -68,6 +68,18 @@ def test_body_preparer_is_idempotent_and_honors_injected_modules_and_policy():
         preparer.prepare(BodyInput(legacy, metadata=metadata), ctx)
     with pytest.raises(InputPolicyError):
         preparer.prepare(BodyInput("body\x00invalid"), ctx)
+    from backend.services.read_errors import ReadValidationError
+
+    with pytest.raises(ReadValidationError, match="inline citation"):
+        preparer.prepare(BodyInput("# Body\n\n@cite{}"), ctx)
+    citation_legacy = "# Body\n\n@cite{rfc-9110}"
+    preserved = preparer.prepare(BodyInput(citation_legacy), ctx)
+    assert preserved.body == citation_legacy
+    assert any(
+        finding.rule_id == "link.unresolved"
+        and "permanent document address" in finding.suggested_action
+        for finding in preserved.findings
+    )
     assert preparer.preview(raw, ctx).body == fixed
     # Explicit formatting also accepts an unsaved image placeholder, as the
     # pre-extraction endpoint did; save-time media policy is a different gate.

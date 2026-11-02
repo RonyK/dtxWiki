@@ -168,12 +168,22 @@ describe("editor completions", () => {
     const result = source(completionContext("/cite"));
     expect(result?.options).toHaveLength(1);
     expect(result?.options[0].label).toBe("Choose reference");
+    const view = new EditorView({ parent: document.body, state: EditorState.create({ doc: "/cite", selection: { anchor: 5 } }) });
+    try {
+      const completion = result!.options[0];
+      if (typeof completion.apply !== "function") throw new Error("Expected picker completion");
+      completion.apply(view, completion, result!.from, 5);
+      expect(open).toHaveBeenCalledWith(view, 0, 5, "");
+      expect(view.state.doc.toString()).toBe("/cite");
+    } finally { view.destroy(); view.dom.remove(); }
+    expect(source(completionContext("https://example.test/cite"))).toBeNull();
   });
 });
 
 function completionContext(text: string) {
   return {
     explicit: false,
+    state: EditorState.create({ doc: text }),
     matchBefore(pattern: RegExp) {
       const match = pattern.exec(text);
       if (!match) {

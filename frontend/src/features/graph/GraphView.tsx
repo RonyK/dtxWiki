@@ -1119,6 +1119,7 @@ function LocalNodeSwatch({ color, forcedColors, kind, surface }: {
   return (
     <svg aria-hidden="true" className="graph-local-node-cue" data-node-visual-kind={kind} height="16" viewBox="0 0 16 16" width="16">
       {kind === "library" ? <rect fill={color} height="11" width="11" x="2.5" y="2.5" />
+        : kind === "agent" ? <polygon fill={color} points="8,1.4 13.5,8 8,14.6 2.5,8" />
         : kind === "folder" ? <circle cx="8" cy="8" fill="none" r="5.5" stroke={color} strokeWidth="2.64" />
         : <circle cx="8" cy="8" fill={color} r="5.5" />}
       {kind === "conversation" && forcedColors ? (

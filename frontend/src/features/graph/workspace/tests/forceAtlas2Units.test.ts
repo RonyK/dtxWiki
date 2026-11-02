@@ -43,7 +43,7 @@ describe("scene-owned ForceAtlas2 physical units", () => {
     const units = buildWorkspaceForceAtlas2Units(scene());
     expect(isReusableWorkspaceForceAtlas2Units(Object.freeze({ ...units, ...overrides }), 2)).toBe(false);
   });
-  it("uses actual native circle and square envelopes rather than the whole square sprite", () => {
+  it("uses actual native circle, square and diamond envelopes rather than the whole square sprite", () => {
     const units = buildWorkspaceForceAtlas2Units(scene());
     expect(units.nominalRadiusCss[0]).toBe(5);
     expect(units.nominalRadiusCss[1]).toBeCloseTo(4 * Math.SQRT2, 14);
@@ -52,6 +52,8 @@ describe("scene-owned ForceAtlas2 physical units", () => {
     expect(units.nominalRadiusCss[1]).toBeLessThan(5 * Math.SQRT2);
     expect(units.referenceZoom).toBe(1.68);
     expect(units.rendererUnitsPerModelUnit).toBe(1);
+    const diamond = buildWorkspaceForceAtlas2Units(scene({ pointShapes: [0, 3] }));
+    expect(diamond.nominalRadiusCss[1]).toBe(4.8);
   });
 
   it.each([0, 1, 4])("splits the %s CSS-pixel pair gap equally between both protected radii", (pairGapCss) => {

@@ -636,6 +636,31 @@ class LintService:
                 )
             )
         }
+        fix_policy = LintPolicy(workspace)
+        fixable_rules = {
+            rule_id
+            for module in self.lint_registry.fixers_for_maintenance(fix_policy)
+            if module.maintenance_role == "trigger"
+            for rule_id in module.fixable_rule_ids
+        }
+        if fixable_rules and observed_heads:
+            # The batch retains its first fix's Workspace lock. Acquire every
+            # Page first, in ordinary writer order, before findings or repairs
+            # can lock projections belonging to a later page in this run.
+            if self.context_media_repository_factory is not None:
+                self.context_media_repository_factory(session).lock_workspace_for_usage(
+                    workspace_id
+                )
+            session.scalars(
+                select_in_workspace(
+                    ContextPage,
+                    workspace_id=workspace_id,
+                    conditions=(ContextPage.id.in_(observed_heads),),
+                )
+                .with_only_columns(ContextPage.id)
+                .order_by(ContextPage.id)
+                .with_for_update()
+            ).all()
         result = self.run_lint(
             session,
             workspace_id,
@@ -646,13 +671,6 @@ class LintService:
             run=lint_run,
             actor=self._system_run_actor(workspace_id),
         )
-        fix_policy = LintPolicy(workspace)
-        fixable_rules = {
-            rule_id
-            for module in self.lint_registry.fixers_for_maintenance(fix_policy)
-            if module.maintenance_role == "trigger"
-            for rule_id in module.fixable_rule_ids
-        }
         if fixable_rules and observed_heads:
             from backend.services.lint_fix_writer import LintFixWriter
 

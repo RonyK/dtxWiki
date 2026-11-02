@@ -6277,7 +6277,11 @@ def sync_page_projections(
         refresh_page_edge_projection,
     )
 
-    if version is None or version.id == page.current_published_version_id:
+    if (
+        version is None
+        or page.current_published_version_id is None
+        or version.id == page.current_published_version_id
+    ):
         refresh_page_edge_projection(
             session,
             page.workspace_id,

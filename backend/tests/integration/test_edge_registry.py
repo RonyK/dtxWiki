@@ -8,11 +8,16 @@ from sqlalchemy import event, select
 from backend.models.ask import AskSession, AskTurn, AskTurnCitation
 from backend.models.base import Base
 from backend.models.context import (
+    ContextCitation,
     ContextPage,
     ContextPageVersion,
     EdgeProjection,
     PageLink,
     PageProvenance,
+)
+from backend.models.document_reference import (
+    ContextCitationPublication,
+    ContextPublishedCitation,
 )
 from backend.models.graph import GraphObservation
 from backend.models.library import LibraryItem, LibraryItemVersion
@@ -340,10 +345,33 @@ def test_page_edge_refresh_fixed_point_preserves_projection_state(
             workspace.id,
             "fixed-point-source",
         )
-        target, _target_version = _seed_page(
+        target, target_version = _seed_page(
             session,
             workspace.id,
             "fixed-point-target",
+        )
+        session.add_all(
+            [
+                ContextCitationPublication(
+                    workspace_id=workspace.id,
+                    version_id=source_version.id,
+                    fingerprint="registered-source",
+                ),
+                ContextPublishedCitation(
+                    workspace_id=workspace.id,
+                    source_version_id=source_version.id,
+                    target_kind="context_page",
+                    context_page_id=target.id,
+                    legacy_count=1,
+                ),
+                ContextCitation(
+                    workspace_id=workspace.id,
+                    target_kind="context_page_version",
+                    target_id=source_version.id,
+                    citation_type="context_page",
+                    cited_context_page_version_id=target_version.id,
+                ),
+            ]
         )
         session.add(
             PageLink(
@@ -388,7 +416,42 @@ def test_page_edge_refresh_fixed_point_preserves_projection_state(
         )
 
     with session_factory.begin() as session:
-        refresh_page_edge_projection(session, workspace_id, source_id)
+        statements, marker_plans = [], []
+        connection = session.connection()
+
+        def capture_statement(_conn, cursor, statement, parameters, *_args):
+            lowered = statement.lower()
+            statements.append(lowered)
+            if (
+                _conn.dialect.name == "sqlite"
+                and "select context_page.id" in lowered
+                and "context_citation_publication" in lowered
+            ):
+                cursor.execute("EXPLAIN QUERY PLAN " + statement, parameters)
+                marker_plans.extend(row[3] for row in cursor.fetchall())
+
+        event.listen(connection, "before_cursor_execute", capture_statement)
+        try:
+            refresh_page_edge_projection(session, workspace_id, source_id)
+        finally:
+            event.remove(connection, "before_cursor_execute", capture_statement)
+        # One page's refresh must never enumerate every published manifest.
+        marker_scans = [
+            statement
+            for statement in statements
+            if "select context_page.id" in statement
+            and "context_citation_publication" in statement
+        ]
+        assert marker_scans
+        assert all("context_page.id in" in statement for statement in marker_scans)
+        if connection.dialect.name == "sqlite":
+            assert any(
+                "SEARCH context_citation_publication" in plan for plan in marker_plans
+            )
+            assert not any(
+                "SCAN context_citation_publication" in plan or "LIST SUBQUERY" in plan
+                for plan in marker_plans
+            )
 
     with session_factory() as session:
         edge = session.get(EdgeProjection, edge_id)

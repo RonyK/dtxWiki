@@ -47,6 +47,11 @@ from backend.models import (
     WorkspaceTreeNode,
 )
 from backend.models.base import utc_now
+from backend.models.document_reference import (
+    ContextDocumentReference,
+    ContextPublishedCitation,
+)
+from backend.models.library import LibraryItemTombstone
 from backend.models.user_attribution import (
     USER_ATTRIBUTIONS,
     UserAttribution,
@@ -1240,6 +1245,31 @@ class UserDeletionService:
                 session, workspace_id, version.page_id, version_id=version.id
             )
         if private_ids:
+            for model, owner in (
+                (ContextDocumentReference, ContextDocumentReference.owner_version_id),
+                (ContextPublishedCitation, ContextPublishedCitation.source_version_id),
+            ):
+                session.execute(
+                    delete_in_workspace(
+                        model,
+                        workspace_id=workspace_id,
+                        conditions=(owner.in_(private_ids),),
+                    )
+                )
+            private_owner_ids = {str(version_id) for version_id in private_ids}
+            for tombstone in session.scalars(
+                select_in_workspace(LibraryItemTombstone, workspace_id=workspace_id)
+            ):
+                retained = [
+                    entry
+                    for entry in tombstone.citations or []
+                    if not (
+                        entry.get("citation_type") == "document_reference"
+                        and entry.get("target_id") in private_owner_ids
+                    )
+                ]
+                if retained != (tombstone.citations or []):
+                    tombstone.citations = retained
             session.execute(
                 delete_in_workspace(
                     ContextMediaUsage,

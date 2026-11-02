@@ -614,9 +614,12 @@
     "fragmentUnavailable": "Citation location is unavailable; the document can still be opened.",
     "loadMore": "Load more documents",
     "retry": "Retry reference change",
-    "retryRequired": "Retry the reference change before saving or publishing."
-  },
-  "checkingReference": {
-    "label": "Checking reference"
+    "retryRequired": "Retry the reference change before saving or publishing.",
+    "itemAction": "{{action}} {{number}}: {{title}}",
+    "reconcile": "Check status and finish reference request",
+    "ambiguous": "The server may have saved this reference change. Retry it, or check its current status to continue saving your writing.",
+    "reconciled": "Reference status checked. Your current writing is preserved and can be saved. Review the list for the server’s final reference state.",
+    "reconcileFailed": "Could not check reference status. Your writing remains in this editor. Retry when the connection is restored.",
+    "hiddenChanges": "Reference metadata changed. Details for unavailable documents are omitted."
   }
 }

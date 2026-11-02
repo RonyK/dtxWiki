@@ -986,8 +986,17 @@ export function PageEditor({
     },
     [mediaContentUrls, page?.id, page?.version_id, page?.workspace_id],
   );
-  const inlineReferences = useMemo(() => inlineCitationOccurrences(body), [body]);
   const referenceCacheScope = JSON.stringify([actorId, workspaceId, mode, slug, page?.id ?? null]);
+  const [parsedCitations, setParsedCitations] = useState<{ scope: string; body: string; occurrences: ReturnType<typeof inlineCitationOccurrences> }>({ scope: "", body: "", occurrences: [] });
+  useEffect(() => {
+    if (!body.includes("@cite{")) return;
+    const timer = window.setTimeout(() => {
+      setParsedCitations({ scope: referenceCacheScope, body, occurrences: inlineCitationOccurrences(body) });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [body, referenceCacheScope]);
+  const citationBody = body.includes("@cite{") && parsedCitations.scope === referenceCacheScope ? parsedCitations.body : body;
+  const inlineReferences = useMemo(() => body.includes("@cite{") && parsedCitations.scope === referenceCacheScope ? parsedCitations.occurrences : [], [body, parsedCitations, referenceCacheScope]);
   referenceCacheScopeRef.current = referenceCacheScope;
   const editorReferences = useMemo(() => {
     const stored = page?.references ?? [];
@@ -996,8 +1005,8 @@ export function PageEditor({
       const previous = merged.get(referenceKey(cached));
       merged.set(referenceKey(cached), { ...cached, metadata_present: previous?.metadata_present ?? cached.metadata_present, note: previous?.note ?? cached.note, metadata_id: previous?.metadata_id });
     }
-    return workspaceId ? previewReferences(body, [...merged.values()], workspaceId, page?.body_md, inlineReferences) : [];
-  }, [body, page?.references, page?.body_md, inlineReferenceCache, inlineReferences, workspaceId, referenceCacheScope]);
+    return workspaceId ? previewReferences(citationBody, [...merged.values()], workspaceId, page?.body_md, inlineReferences) : [];
+  }, [citationBody, page?.references, page?.body_md, inlineReferenceCache, inlineReferences, workspaceId, referenceCacheScope]);
   referenceSearchRef.current = (_view, from, to, query = "") => {
     referenceRangeRef.current = { from, to };
     setReferenceQuery(query);
@@ -4167,6 +4176,35 @@ export function PageEditor({
     }
   }
 
+  async function reconcileReferenceCommand() {
+    const pending = pendingReferenceCommandRef.current;
+    if (!pending || !workspaceId || savingRef.current || referenceBusy) return;
+    const owner = { scope: referenceCommandScopeRef.current };
+    referenceCommandOwnerRef.current = owner;
+    const isCurrent = () => referenceCommandOwnerRef.current === owner && referenceCommandScopeRef.current === owner.scope && isEditorMountedRef.current;
+    savingRef.current = true;
+    setIsSaving(true);
+    setReferenceBusy(true);
+    try {
+      const refreshed = await readPage(workspaceId, pending.page.id, pending.page.version_id);
+      if (!isCurrent()) return;
+      // Reconcile concurrency metadata only. Writing done after the failed
+      // request remains in CodeMirror and retains its unacknowledged revision.
+      setPage(refreshed);
+      pendingReferenceCommandRef.current = null;
+      setReferenceRetryAvailable(false);
+      setStatus(t("references.reconciled"));
+    } catch {
+      if (isCurrent()) setStatus(t("references.reconcileFailed"));
+    } finally {
+      if (referenceCommandOwnerRef.current === owner) {
+        referenceCommandOwnerRef.current = null;
+        savingRef.current = false;
+        if (isEditorMountedRef.current) { setIsSaving(false); setReferenceBusy(false); }
+      }
+    }
+  }
+
   function openCommentPreview(view = editorViewRef.current) {
     if (!view) {
       return false;
@@ -5622,6 +5660,7 @@ export function PageEditor({
               <MarkdownView
                 body={body}
                 references={editorReferences}
+                referenceOffsets="utf16"
                 checkingLinkLocators={previewLinks.checking}
                 onLinksToCheck={reportPreviewLinks}
                 linkTargets={previewLinkTargets}
@@ -5641,6 +5680,7 @@ export function PageEditor({
             const pending = pendingReferenceCommandRef.current;
             if (pending) void mutateReferences(pending.target, pending.operation);
           } : undefined}
+          onReconcile={referenceRetryAvailable ? () => { void reconcileReferenceCommand(); } : undefined}
           onAdd={() => { setReferenceQuery(""); openReferencePicker("metadata"); }}
           onInsert={(reference) => {
             referenceRangeRef.current = null;

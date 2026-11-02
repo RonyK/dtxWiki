@@ -14,7 +14,11 @@ from sqlalchemy.orm import aliased, registry
 
 from backend.models.context import EdgeProjection
 from backend.models.library import LibraryArtifact, LibraryItem, LibraryItemVersion
-from backend.repositories.workspace_scoped import join_correlated_workspace_projection
+from backend.repositories.workspace_scoped import (
+    join_correlated_workspace_projection,
+    join_in_workspace,
+    select_in_workspace,
+)
 from backend.services.library_canonical import LEGACY_READY_PROCESSING_STATUSES
 
 
@@ -26,9 +30,7 @@ def _document_edges(workspace_id, source_ids=None, source_kinds=None):
     item = aliased(LibraryItem)
     library_citation = and_(
         raw.c.edge_kind == "citation_source",
-        raw.c.target_kind.in_(
-            ("library_item_version", "library_artifact")
-        ),
+        raw.c.target_kind.in_(("library_item_version", "library_artifact")),
     )
     from sqlalchemy import case
 
@@ -172,3 +174,64 @@ def select_document_edges_in_workspace(*, workspace_id, columns, predicates=()):
     """Scope a read-only document projection without classifying it as a table."""
     projection = document_projection_for_workspace(workspace_id)
     return select(*columns).where(projection.workspace_id == workspace_id, *predicates)
+
+
+def document_citation_identities(session, workspace_id, identities):
+    """Normalize legacy observation identities without rewriting evidence.
+
+    This only maps bounded, already authorized endpoints to their document.
+    Callers retain exact-version authorization and current projection admission;
+    mapping an ID by itself never grants visibility or canonical eligibility.
+    """
+    identities = list(identities)
+    targets = {
+        (identity[2], identity[3])
+        for identity in identities
+        if identity[4] == "citation_source"
+        and identity[2] in {"library_item_version", "library_artifact"}
+    }
+    documents = {}
+    for kind in ("library_item_version", "library_artifact"):
+        ids = [target_id for target_kind, target_id in targets if target_kind == kind]
+        for start in range(0, len(ids), 400):
+            batch = ids[start : start + 400]
+            if kind == "library_item_version":
+                statement = select_in_workspace(
+                    LibraryItemVersion,
+                    workspace_id=workspace_id,
+                    conditions=(LibraryItemVersion.id.in_(batch),),
+                ).with_only_columns(
+                    LibraryItemVersion.id, LibraryItemVersion.library_item_id
+                )
+            else:
+                statement = join_in_workspace(
+                    select_in_workspace(
+                        LibraryArtifact,
+                        workspace_id=workspace_id,
+                        conditions=(LibraryArtifact.id.in_(batch),),
+                    ),
+                    LibraryArtifact,
+                    LibraryItemVersion,
+                    workspace_id=workspace_id,
+                    on=LibraryItemVersion.id == LibraryArtifact.library_item_version_id,
+                ).with_only_columns(
+                    LibraryArtifact.id, LibraryItemVersion.library_item_id
+                )
+            documents.update(
+                {
+                    (kind, target_id): item_id
+                    for target_id, item_id in session.execute(statement)
+                }
+            )
+    return {
+        identity: (
+            identity[0],
+            identity[1],
+            "library_item",
+            documents[identity[2:4]],
+            identity[4],
+        )
+        if identity[4] == "citation_source" and identity[2:4] in documents
+        else identity
+        for identity in identities
+    }

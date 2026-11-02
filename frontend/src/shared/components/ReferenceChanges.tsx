@@ -5,6 +5,11 @@ const referenceKey = (item: ReferenceView) => `${item.target_kind}:${item.target
 
 export function ReferenceChanges({ before, after }: { before: ReferenceView[]; after: ReferenceView[] }) {
   const { t } = useTranslation("pages");
+  const hasUnavailable = [...before, ...after].some((item) => !item.target_id);
+  // Source-owned opaque row IDs change on a version copy. They cannot prove
+  // that a hidden document was added or removed across those versions.
+  before = before.filter((item) => item.target_id);
+  after = after.filter((item) => item.target_id);
   const old = new Map(before.map((item) => [referenceKey(item), item]));
   const next = new Map(after.map((item) => [referenceKey(item), item]));
   const removed = before.filter((item) => !next.has(referenceKey(item)));
@@ -13,10 +18,11 @@ export function ReferenceChanges({ before, after }: { before: ReferenceView[]; a
     const previous = old.get(referenceKey(item));
     return previous && ((previous.note ?? "") !== (item.note ?? "") || previous.metadata_present !== item.metadata_present);
   });
-  if (!removed.length && !added.length && !changed.length) return null;
+  if (!removed.length && !added.length && !changed.length && !hasUnavailable) return null;
   return (
     <section aria-label={t("references.changes")} className="reference-changes">
       <h3>{t("references.changes")}</h3>
+      {hasUnavailable ? <p>{t("references.hiddenChanges")}</p> : null}
       <ul>
         {removed.map((item) => <li key={`removed:${referenceKey(item)}`}>− {t("references.changeRemoved")}: {item.title ?? t("references.unavailable")}</li>)}
         {added.map((item) => <li key={`added:${referenceKey(item)}`}>+ {t("references.changeAdded")}: {item.title ?? t("references.unavailable")}{item.note ? ` — ${item.note}` : ""}</li>)}

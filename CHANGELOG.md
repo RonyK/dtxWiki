@@ -57,6 +57,9 @@
 - Existing version-specific evidence remains readable. No historical bodies
   or Chats candidates are backfilled. Refresh cached MCP catalogs after upgrading
   to tool contract revision 29; old claim-based cite requests are rejected.
+- Preserve legacy citation display tokens with replacement warnings. Validate
+  new citation syntax and the combined reference limit when saving, and retain
+  valid references when reading older bodies containing malformed tokens.
 
 ### Index navigation and formatted previews
 

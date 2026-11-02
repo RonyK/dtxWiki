@@ -39,13 +39,20 @@ from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.schemas.context_write import CitationInput
-from backend.schemas.graph import GraphCitationEvidenceRequest
+from backend.schemas.graph import (
+    GraphCitationEvidenceRequest,
+    GraphQueryRequest,
+    GraphSeed,
+    GraphTimeQuery,
+)
 from backend.services.actor_visible_read import library_item_visible
 from backend.services.bundle_service import AgentInputBundleService
 from backend.services.citation_evidence import CitationEvidenceService
 from backend.services.context_write_service import ContextWriteService
 from backend.services.coverage_service import coverage_candidate_visible
 from backend.services.domain_read import DomainReadService
+from backend.services.graph_observation_service import GraphObservationService
+from backend.services.graph_query_service import GraphQueryService, graph_node_id
 from backend.services.graph_service import GraphService
 from backend.services.library_service import LibraryService
 from backend.services.maintenance_rounds import TASK_BUILDERS
@@ -518,8 +525,51 @@ def test_graph_hydrates_only_ready_version_and_selected_attempt(
             snippet="Unselected evidence must stay private",
         )
         session.add_all([raw, derived, hidden])
+        observed_at = datetime(2025, 8, 4, tzinfo=UTC)
+        GraphObservationService().record(
+            session,
+            workspace_id,
+            operation="edge_created",
+            source_kind="context_page",
+            source_id=page_id,
+            target_kind="library_item_version",
+            target_id=seeded.ready_version.id,
+            edge_kind="citation_source",
+            occurred_at=observed_at,
+            idempotency_key="legacy-library-document-history",
+            weight_delta=1.0,
+        )
+        GraphObservationService().record(
+            session,
+            workspace_id,
+            operation="edge_created",
+            source_kind="context_page",
+            source_id=page_id,
+            target_kind="library_artifact",
+            target_id=seeded.selected_artifact.id,
+            edge_kind="citation_source",
+            occurred_at=observed_at,
+            idempotency_key="legacy-library-artifact-history",
+            weight_delta=1.0,
+        )
 
     with session_factory() as session:
+        period_scene = GraphQueryService().query(
+            session,
+            workspace_id,
+            request=GraphQueryRequest(
+                seeds=[GraphSeed(kind="context_page", id=page_id)],
+                layers=["evidence"],
+                edge_kinds=["citation_source"],
+                time=GraphTimeQuery(mode="current", from_=observed_at, to=observed_at),
+            ),
+            actor=_actor(workspace_id),
+            usage_signals_enabled=False,
+        )
+        assert [(edge.edge_kind, edge.target) for edge in period_scene.edges] == [
+            ("citation_source", graph_node_id("library_item", seeded.item.id)),
+        ]
+        assert period_scene.edges[0].weight == 2.0
         neighbors = GraphService().neighbors(
             session,
             workspace_id,

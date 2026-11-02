@@ -19,6 +19,7 @@ import {
   RoutedPageEditor,
 } from "../PageEditor";
 import { getMarkdownCommandState } from "../editorCommands";
+import { parsePageDocument } from "../pageFrontmatter";
 import { resetCodeMirrorStyleRegistry } from "./codeMirrorStyleRegistry";
 
 const authState = vi.hoisted(() => ({
@@ -339,7 +340,7 @@ describe("PageEditor", () => {
     Reflect.deleteProperty(window.navigator, "sendBeacon");
   });
 
-  it("registers a picked document as draft metadata without altering the body or publishing", async () => {
+  it("retries a reference command exactly and reconciles ambiguous results without losing newer writing", async () => {
     const fetchMock = mockPublicationFlow();
     const baseFetch = fetchMock.getMockImplementation()!;
     const targetId = "33333333-3333-4333-8333-333333333333";
@@ -350,10 +351,9 @@ describe("PageEditor", () => {
       const url = String(input);
       if (url.endsWith("/search")) return jsonResponse({ data: { ranked_results: [{ type: "context_page", id: targetId, title: "Research source", location: ["Plan"] }] } });
       if (url.endsWith("/begin-edit")) return jsonResponse({ data: { ...page, version_id: "v2", version_status: "editing", editing_revision: 1 } });
-      if (url.endsWith("/references")) return new Promise<Response>((resolve, reject) => {
+      if (url.endsWith("/references")) return new Promise<Response>((_resolve, reject) => {
         referenceAttempts += 1;
-        finishReference = referenceAttempts === 1 ? () => reject(new TypeError("Connection lost after the server committed"))
-          : () => resolve(jsonResponse({ data: { page_id: page.id, version_id: "v2", editing_revision: 3, references_hash: "c".repeat(64), publication_state: "editing", added: [{ target_kind: "context_page", target_id: targetId }], removed: [], unchanged: [] } }));
+        finishReference = () => reject(new TypeError("Connection lost after the server committed"));
       });
       if (url.endsWith("?version_id=v2")) return jsonResponse({ data: { ...page, version_id: "v2", version_status: "editing", editing_revision: 3, references_hash: "c".repeat(64), references: [{ target_kind: "context_page", target_id: targetId, number: 1, href, title: "Research source", state: "available", note: "Background", inline_count: 0, metadata_present: true, occurrences: [] }] } });
       return baseFetch(input, init);
@@ -379,7 +379,17 @@ describe("PageEditor", () => {
     expect(attempts[1][1]?.body).toBe(attempts[0][1]?.body);
     expect(autosaveCalls(fetchMock)).toHaveLength(1);
     expect(codeMirrorView().state.doc.toString()).toBe("# Hello");
-    expect(screen.getByText("Research source")).toBeInTheDocument();
+    const newerBody = "# Hello\n\nWriting after the lost reference response";
+    replaceEditorSelection(codeMirrorView(), newerBody);
+    expect(publicationActions().getByRole("button", { name: "Save draft" })).toHaveAttribute("aria-disabled", "true");
+    await typist().click(await screen.findByRole("button", { name: "Check status and finish reference request" }));
+    expect(codeMirrorView().state.doc.toString()).toBe(newerBody);
+    await waitFor(() => expect(publicationActions().getByRole("button", { name: "Save draft" })).toBeEnabled());
+    await typist().click(publicationActions().getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(autosaveCalls(fetchMock)).toHaveLength(2));
+    const saved = JSON.parse(String(autosaveCalls(fetchMock)[1][1]?.body));
+    expect(saved.expected_editing_revision).toBe(3);
+    expect(parsePageDocument(saved.body_md).body).toBe(newerBody);
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/publish"))).toBe(false);
   });
 
@@ -399,8 +409,8 @@ describe("PageEditor", () => {
     });
     renderWithRouter("/pages/hello/edit", <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />);
     await findTitleEditor();
-    await typist().click(screen.getByRole("button", { name: "Remove reference" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Remove reference" })).not.toBeInTheDocument());
+    await typist().click(screen.getByRole("button", { name: /Remove reference/ }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Remove reference/ })).not.toBeInTheDocument());
     const calls = fetchMock.mock.calls;
     const begin = calls.findIndex(([input]) => String(input).endsWith("/begin-edit"));
     const remove = calls.findIndex(([input]) => String(input).endsWith("/references"));

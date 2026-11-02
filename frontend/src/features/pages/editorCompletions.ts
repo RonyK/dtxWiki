@@ -32,7 +32,10 @@ export function createEditorCompletionSource(
       };
     }
 
-    const citation = context.matchBefore(/@cite\{[^}\n]*$/) ?? context.matchBefore(/\/cite$/);
+    const inlineCitation = context.matchBefore(/@cite\{[^}\n]*$/);
+    const slashCitation = context.matchBefore(/\/cite$/);
+    const slashBoundary = slashCitation && (slashCitation.from === 0 || /\s/.test(context.state.sliceDoc(slashCitation.from - 1, slashCitation.from)));
+    const citation = inlineCitation ?? (slashBoundary ? slashCitation : null);
     if (citation && (context.explicit || citation.from < citation.to)) {
       const tokenPrefix = citation.text.startsWith("@cite{") ? "@cite{" : "/cite";
       const options: Completion[] = workspaceRef.current ? [

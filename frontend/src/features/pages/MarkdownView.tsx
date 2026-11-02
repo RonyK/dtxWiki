@@ -50,6 +50,7 @@ import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
 import remarkGithubBlockquoteAlert from "remark-github-blockquote-alert";
 import remarkMath from "remark-math";
+import { decodeString } from "micromark-util-decode-string";
 import { Link, useInRouterContext, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -81,11 +82,12 @@ import { hasUnsafeCss, resolveMermaidStylesheet } from "./mermaidStylesheet";
 import { parsePageDocument } from "./pageFrontmatter";
 import type { ReferenceView } from "../../shared/api/references";
 import { ReferencesSection } from "./ReferencesSection";
-import { bindReferenceOccurrencesToSource, inlineCitationOccurrences, kindLabel } from "./documentReferences";
+import { citationOccurrencesFromTree, renderedReferenceOccurrences, kindLabel } from "./documentReferences";
 
 type MarkdownViewProps = {
   body: string;
   references?: ReferenceView[];
+  referenceOffsets?: "codepoint" | "utf16";
   comments?: PageInlineComment[];
   stripLeadingHeading?: string;
   wikilinkPages?: Array<{
@@ -220,6 +222,7 @@ const HIGHLIGHT_LANGUAGES = {
 export function MarkdownView({
   body,
   references = [],
+  referenceOffsets = "codepoint",
   comments = [],
   stripLeadingHeading,
   wikilinkPages = [],
@@ -236,8 +239,6 @@ export function MarkdownView({
   allowWorkspaceNavigationLinks = false,
 }: MarkdownViewProps) {
   const { t } = useTranslation("pages");
-  const renderedReferences = useMemo(() => bindReferenceOccurrencesToSource(references, body), [references, body]);
-  const referenceLabels = useMemo(() => new Map(renderedReferences.filter((item) => item.state !== "unavailable").map((item) => [item.number, `${item.title ?? ""} · ${t(`references.kinds.${kindLabel(item.target_kind)}`)}`])), [renderedReferences, t]);
   const referenceAnchorPrefix = `dtx-reference-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const articleRef = useRef<HTMLElement | null>(null);
   // Filled by the link resolver while ReactMarkdown renders, then reported
@@ -257,7 +258,8 @@ export function MarkdownView({
         ? parsedBody
         : stripDuplicateLeadingHeading(parsedBody, stripLeadingHeading)
       : body;
-  const eligibleCitationOffsets = useMemo(() => new Set(inlineCitationOccurrences(markdownBody).map((item) => item.start)), [markdownBody]);
+  const renderedReferences = useMemo(() => renderedReferenceOccurrences(references, body, markdownBody, referenceOffsets), [references, body, markdownBody, referenceOffsets]);
+  const referenceLabels = useMemo(() => new Map(renderedReferences.filter((item) => item.state !== "unavailable").map((item) => [item.number, `${item.title ?? ""} · ${t(`references.kinds.${kindLabel(item.target_kind)}`)}`])), [renderedReferences, t]);
   const sourceLineCount = Math.max(1, markdownBody.split(/\r?\n/).length);
   const anchorPluginOptions = useMemo(
     () => ({ highlights: inlineCommentAnchorHighlights(comments, body) }),
@@ -277,7 +279,6 @@ export function MarkdownView({
       unresolvedCitationLabel: t("references.unresolved"),
       referenceAnchorPrefix,
       source: markdownBody,
-      eligibleCitationOffsets,
     }),
     [
       wikilinkPages,
@@ -290,7 +291,6 @@ export function MarkdownView({
       t,
       referenceAnchorPrefix,
       markdownBody,
-      eligibleCitationOffsets,
     ],
   );
   const contextLinkPluginOptions = useMemo(() => ({
@@ -886,7 +886,7 @@ type DtxInline = {
     hName: "a" | "cite" | "mark";
     hProperties: Properties;
   };
-  children: Text[];
+  children: DtxNode[];
 };
 
 type DtxTokenOptions = {
@@ -894,7 +894,6 @@ type DtxTokenOptions = {
   referenceLabels?: ReadonlyMap<number, string>;
   unresolvedCitationLabel?: string;
   referenceAnchorPrefix?: string;
-  citationUses?: Map<number, number>;
   source?: string;
   eligibleCitationOffsets?: ReadonlySet<number>;
   resolveWikilinkTarget?: (rawTarget: string) => WikilinkResolution;
@@ -927,7 +926,7 @@ function buildDeletedSourceResolver(
 
 function remarkDtxTokens(options: DtxTokenOptions = {}) {
   return (tree: Root) => {
-    options = { ...options, citationUses: new Map() };
+    options = { ...options, eligibleCitationOffsets: new Set(citationOccurrencesFromTree(options.source ?? "", tree).map((item) => item.start)) };
     transformFencedBlocks(tree, options.sourceLineNumbers ?? false);
     transformInlineTokens(tree as unknown as DtxParent, options);
   };
@@ -1126,17 +1125,24 @@ function shouldSkipInlineTransform(type: string) {
   return ["code", "inlineCode", "link", "linkReference", "definition"].includes(type);
 }
 
-function tokenizeTextNode(node: Text, options: DtxTokenOptions): DtxNode[] {
+type SourceCitation = { href: string; escaped: boolean; start: number };
+function tokenizeTextNode(node: Text, options: DtxTokenOptions, sourceCitations?: ReadonlyMap<number, SourceCitation>, valueOffset = 0): DtxNode[] {
   const pattern = /\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]|@cite\{([^\s{}]+)\}|==([^=\n]+?)==|(^|[\s([{])#([A-Za-z][A-Za-z0-9_-]{0,47})\b/g;
   const nodes: DtxNode[] = [];
   let cursor = 0;
-  const rawText = options.source?.slice(node.position?.start.offset, node.position?.end.offset);
-  const rawCitations = rawText === undefined ? null : [...rawText.matchAll(/@cite\{([^\s{}]+)\}/g)].map((candidate) => {
-    const prefix = rawText.slice(0, candidate.index);
-    const escapes = /\\+$/.exec(prefix)?.[0].length ?? 0;
-    return { href: candidate[1], escaped: escapes % 2 === 1, start: (node.position?.start.offset ?? 0) + candidate.index! };
-  });
-  let citationIndex = 0;
+  if (!sourceCitations) {
+    const rawText = options.source?.slice(node.position?.start.offset, node.position?.end.offset);
+    const citations = new Map<number, SourceCitation>();
+    let rawCursor = 0, decodedCursor = 0;
+    for (const candidate of rawText?.matchAll(/@cite\{([^\s{}]+)\}/g) ?? []) {
+      decodedCursor += decodeString(`${rawText!.slice(rawCursor, candidate.index)}@`).replace(/\r\n?/g, "\n").length - 1;
+      const escapes = /\\+$/.exec(rawText!.slice(0, candidate.index))?.[0].length ?? 0;
+      citations.set(decodedCursor, { href: candidate[1], escaped: escapes % 2 === 1, start: (node.position?.start.offset ?? 0) + candidate.index! });
+      decodedCursor += decodeString(candidate[0]).length;
+      rawCursor = candidate.index! + candidate[0].length;
+    }
+    sourceCitations = citations;
+  }
   let match = pattern.exec(node.value);
   while (match) {
     const tokenStart = match[6] ? match.index + (match[5]?.length ?? 0) : match.index;
@@ -1158,12 +1164,12 @@ function tokenizeTextNode(node: Text, options: DtxTokenOptions): DtxNode[] {
       }
       nodes.push(wikilinkNode(match[1], match[2], options, match[0]));
     } else if (match[3]) {
-      const original = rawCitations?.[citationIndex++];
-      nodes.push(rawCitations && (!original || original.escaped || original.href !== match[3] || options.eligibleCitationOffsets && !options.eligibleCitationOffsets.has(original.start))
+      const original = sourceCitations.get(valueOffset + match.index);
+      nodes.push(!original || original.escaped || decodeString(original.href) !== match[3] || !options.eligibleCitationOffsets?.has(original.start)
         ? textNode(match[0])
-        : citationNode(match[3], options));
+        : citationNode(original.href, options, original.start));
     } else if (match[4]) {
-      nodes.push(highlightNode(match[4]));
+      nodes.push(highlightNode(tokenizeTextNode(textNode(match[4]), options, sourceCitations, valueOffset + match.index + 2)));
     } else if (match[6]) {
       nodes.push(inlineTagNode(match[6], options.workspaceId));
     }
@@ -1323,11 +1329,10 @@ function wikilinkAliasKey(value: string) {
   return value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
 
-function citationNode(rawSourceId: string, options: DtxTokenOptions): DtxInline {
-  const reference = options.references?.find((item) => item.occurrences?.some((occurrence) => occurrence.href === rawSourceId));
+function citationNode(rawSourceId: string, options: DtxTokenOptions, sourceStart: number): DtxInline {
+  const reference = options.references?.find((item) => item.occurrences?.some((occurrence) => occurrence.href === rawSourceId && occurrence.start === sourceStart));
   if (reference) {
-    const use = (options.citationUses?.get(reference.number) ?? 0) + 1;
-    options.citationUses?.set(reference.number, use);
+    const use = (reference.occurrences?.findIndex((item) => item.start === sourceStart) ?? 0) + 1;
     const prefix = options.referenceAnchorPrefix ?? "dtx-reference";
     return {
       type: "dtxCitation",
@@ -1378,7 +1383,7 @@ function citationNode(rawSourceId: string, options: DtxTokenOptions): DtxInline 
   };
 }
 
-function highlightNode(value: string): DtxInline {
+function highlightNode(children: DtxNode[]): DtxInline {
   return {
     type: "dtxHighlight",
     data: {
@@ -1387,7 +1392,7 @@ function highlightNode(value: string): DtxInline {
         className: ["markdown-highlight"],
       },
     },
-    children: [textNode(value)],
+    children,
   };
 }
 

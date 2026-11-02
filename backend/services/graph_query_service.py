@@ -68,6 +68,7 @@ from backend.services.graph_rank import (
     round_robin_take,
 )
 from backend.services.graph_reference_projection import (
+    document_citation_identities,
     document_projection_for_workspace,
     select_document_edges_in_workspace,
 )
@@ -2462,6 +2463,30 @@ class GraphQueryService:
             elif _observation_valid_at(observation, at):
                 active[identity] = observation
 
+        # Stored observations keep their original version/artifact evidence.
+        # Scenes compare and render the same stable document endpoints as the
+        # current projection; otherwise a period filter drops old Library cites.
+        normalized_active = {}
+        normalized_weights: dict[_ObservationIdentity, float] = defaultdict(float)
+        document_identities = document_citation_identities(
+            session, workspace_id, active
+        )
+        for identity, observation in active.items():
+            normalized = document_identities[identity]
+            # Several original version/artifact edges can support the same
+            # document. Preserve their total while keeping the latest event's
+            # date/sequence, just as the current document projection sums rows.
+            normalized_weights[normalized] += max(
+                0.0, float(observation.weight_delta or 1.0)
+            )
+            previous = normalized_active.get(normalized)
+            if previous is None or (
+                observation.occurred_at,
+                observation.workspace_sequence,
+            ) > (previous.occurred_at, previous.workspace_sequence):
+                normalized_active[normalized] = observation
+        active = normalized_active
+
         if request.time.mode == "current":
             # A surviving relationship belongs to its latest creation/re-add
             # occurrence, not an older creation or its later removal. The
@@ -2475,13 +2500,8 @@ class GraphQueryService:
                 session, workspace_id, actor=actor, active=active
             )
 
-        endpoint_refs = {
-            (observation.source_kind, observation.source_id)
-            for observation in active.values()
-        } | {
-            (observation.target_kind, observation.target_id)
-            for observation in active.values()
-            if observation.target_kind is not None and observation.target_id is not None
+        endpoint_refs = {identity[:2] for identity in active} | {
+            identity[2:4] for identity in active
         }
         hydrated = self.graph_service.hydrate_entities(
             session,
@@ -2536,7 +2556,7 @@ class GraphQueryService:
                 layer=semantic.layer,
                 provenance="observed",
                 direction="directed" if semantic.directed else "undirected",
-                weight=max(0.0, float(observation.weight_delta or 1.0)),
+                weight=normalized_weights[identity],
                 occurred_at=observation.occurred_at,
                 sequence=observation.workspace_sequence,
                 evidence=evidence,

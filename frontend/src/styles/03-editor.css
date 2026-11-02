@@ -1933,7 +1933,11 @@ body[data-focus-mode="true"] .main-surface {
 }
 
 .workspace-graph-node-cue.is-agent,
-.workspace-map-member-dot.is-agent { background: var(--graph-node-agent, #2563eb); }
+.workspace-map-member-dot.is-agent {
+  background: var(--graph-node-agent, #2563eb);
+  border-radius: 0;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
 
 .workspace-graph-node-cue.is-cluster {
   width: 20px;

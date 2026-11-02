@@ -10,7 +10,6 @@ import hashlib
 import json
 import re
 from bisect import bisect_right
-from collections import defaultdict
 from dataclasses import asdict
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
@@ -56,6 +55,7 @@ from backend.services.actor_visible_read import (
 from backend.services.citation_parser import (
     CitationSyntaxError,
     extract_inline_citations,
+    is_legacy_citation_key,
 )
 from backend.services.context_links import (
     classify,
@@ -450,7 +450,7 @@ def _reference_digest(payload) -> str:
     ).hexdigest()
 
 
-def document_references_hash(session, version) -> str:
+def document_references_hash(session, version, *, _deleted=None) -> str:
     if version is None:
         return _reference_digest({"references": [], "legacy": [], "deleted": []})
     values = [
@@ -468,9 +468,12 @@ def document_references_hash(session, version) -> str:
         )
         for row, ref in legacy_document_references(session, version)
     ]
+    deleted_inputs = (
+        deleted_document_references(session, version) if _deleted is None else _deleted
+    )
     deleted = sorted(
         (str(stone.library_item_id), value.get("note"), value.get("sort_order", 0))
-        for stone, value in deleted_document_references(session, version).values()
+        for stone, value in deleted_inputs.values()
         if value.get("metadata_present", value.get("registration_origin") == "metadata")
     )
     legacy.sort(key=lambda value: json.dumps(value, sort_keys=True))
@@ -504,26 +507,24 @@ def replace_authored_document_references(
             raise ValueError("A document can only appear once in the bibliography")
         desired[key] = value
 
-    if len(desired) > MAX_DOCUMENT_REFERENCES:
-        raise ValueError("A document supports at most 500 references")
+    inline_entries = inline_document_references(
+        version.body_md or "",
+        version.workspace_id,
+        strict=False,
+        self_origins=self_origins,
+    )
+    union_keys = (
+        set(desired)
+        | inline_entries.keys()
+        | {ref.key for _row, ref in legacy_document_references(session, version)}
+    )
+    if len(union_keys) > MAX_DOCUMENT_REFERENCES:
+        raise CitationSyntaxError("A document supports at most 500 unique references")
     current = {
-        row.reference.key: row
-        for row in authored_document_references(session, version)
+        row.reference.key: row for row in authored_document_references(session, version)
     }
     deleted = deleted_document_references(session, version)
-    try:
-        occurrences = extract_inline_citations(version.body_md or "")
-    except CitationSyntaxError:
-        occurrences = ()
-    inline = defaultdict(list)
-    for occurrence in occurrences:
-        try:
-            key = document_ref_from_href(
-                occurrence.href, version.workspace_id, self_origins=self_origins
-            ).key
-        except ReadNotFoundError:
-            continue
-        inline[key].append(asdict(occurrence))
+    inline = {key: entry["occurrences"] for key, entry in inline_entries.items()}
 
     for key, row in current.items():
         if key not in desired or not isinstance(desired[key], ContextDocumentReference):
@@ -586,27 +587,26 @@ def replace_authored_document_references(
     session.flush()
 
 
-def _input_union(session, version, *, strict, self_origins=None):
+def inline_document_references(body, workspace_id, *, strict=True, self_origins=None):
+    """Validate address grammar without fetching or disclosing any target."""
     entries = {}
-    try:
-        occurrences = extract_inline_citations(version.body_md or "")
-    except CitationSyntaxError:
-        if strict:
-            raise
-        occurrences = ()
-    for occurrence in occurrences:
+    for occurrence in extract_inline_citations(body, strict=strict):
+        if is_legacy_citation_key(occurrence.href):
+            continue
         try:
-            ref = document_ref_from_href(
-                occurrence.href, version.workspace_id, self_origins=self_origins
+            reference = document_ref_from_href(
+                occurrence.href, workspace_id, self_origins=self_origins
             )
-        except ReadNotFoundError:
+        except ReadNotFoundError as error:
             if strict:
-                raise
+                raise CitationSyntaxError(
+                    "An inline citation needs a permanent internal document address"
+                ) from error
             continue
         entry = entries.setdefault(
-            ref.key,
+            reference.key,
             {
-                "ref": ref,
+                "ref": reference,
                 "occurrences": [],
                 "metadata_present": False,
                 "legacy_count": 0,
@@ -614,6 +614,48 @@ def _input_union(session, version, *, strict, self_origins=None):
             },
         )
         entry["occurrences"].append(asdict(occurrence))
+    return entries
+
+
+def validate_document_reference_input(
+    body, *, workspace_id, session=None, version=None, self_origins=None
+):
+    """Cheap admission: syntax and the complete union budget, without target reads."""
+    keys = set(
+        inline_document_references(body, workspace_id, self_origins=self_origins)
+    )
+    if (
+        keys
+        and session is not None
+        and version is not None
+        and document_reference_schema_available(session)
+    ):
+        keys.update(
+            row.reference.key for row in authored_document_references(session, version)
+        )
+        keys.update(
+            ref.key for _row, ref in legacy_document_references(session, version)
+        )
+        keys.update(
+            key
+            for key, (_stone, value) in deleted_document_references(
+                session, version
+            ).items()
+            if value.get(
+                "metadata_present", value.get("registration_origin") == "metadata"
+            )
+        )
+    if len(keys) > MAX_DOCUMENT_REFERENCES:
+        raise CitationSyntaxError("A document supports at most 500 unique references")
+
+
+def _input_union(session, version, *, strict, self_origins=None, _deleted=None):
+    entries = inline_document_references(
+        version.body_md or "",
+        version.workspace_id,
+        strict=strict,
+        self_origins=self_origins,
+    )
     for row in authored_document_references(session, version):
         entry = entries.setdefault(
             row.reference.key,
@@ -639,7 +681,10 @@ def _input_union(session, version, *, strict, self_origins=None):
         )
         entry["legacy_count"] += 1
         entry.setdefault("metadata_id", legacy_row.id)
-    for key, (_stone, value) in deleted_document_references(session, version).items():
+    deleted_inputs = (
+        deleted_document_references(session, version) if _deleted is None else _deleted
+    )
+    for key, (_stone, value) in deleted_inputs.items():
         reference = DocumentRef(key[0], key[1])
         if (
             not value.get(
@@ -666,7 +711,7 @@ def _input_union(session, version, *, strict, self_origins=None):
                 note=value.get("note"),
                 metadata_id=value.get("reference_id") or value.get("citation_id"),
             )
-    if len(entries) > MAX_DOCUMENT_REFERENCES:
+    if strict and len(entries) > MAX_DOCUMENT_REFERENCES:
         raise CitationSyntaxError("A document supports at most 500 unique references")
     return entries
 
@@ -809,9 +854,10 @@ def _ancestor_registration_keys(session, *, version, reference_ids, current_keys
             if key not in current_keys:
                 continue
             for entry in stone.citations or []:
-                if entry.get("citation_type") != "document_reference" or entry.get(
-                    "target_id"
-                ) not in ancestor_ids:
+                if (
+                    entry.get("citation_type") != "document_reference"
+                    or entry.get("target_id") not in ancestor_ids
+                ):
                     continue
                 try:
                     opaque_id = UUID(
@@ -824,9 +870,7 @@ def _ancestor_registration_keys(session, *, version, reference_ids, current_keys
     return result
 
 
-def apply_reference_delta(
-    session, *, version, add, remove, actor, self_origins=None
-):
+def apply_reference_delta(session, *, version, add, remove, actor, self_origins=None):
     _require_reference_policy(session, version, add)
     additions = {_ref(value).key: value for value in add}
     existing_rows = authored_document_references(session, version)
@@ -869,25 +913,35 @@ def apply_reference_delta(
     resolved = resolve_document_targets(session, version.workspace_id, add, actor)
     if any(value.state == "unavailable" for value in resolved.values()):
         raise ReadNotFoundError("citation document not found")
+    from backend.domain.input_policy import validate_text
+
+    for value in add:
+        if getattr(value, "note", None) is not None:
+            validate_text(value.note, field="note", max_length=2000)
+    inline_entries = inline_document_references(
+        version.body_md or "",
+        version.workspace_id,
+        strict=False,
+        self_origins=self_origins,
+    )
+    retained_metadata = (
+        set(existing)
+        | {ref.key for _row, ref in legacy_rows}
+        | {
+            key
+            for key, (_stone, value) in deleted.items()
+            if value.get(
+                "metadata_present", value.get("registration_origin") == "metadata"
+            )
+        }
+    ) - removals.keys()
     if (
-        len((existing.keys() - removals.keys()) | additions.keys())
+        len(retained_metadata | additions.keys() | inline_entries.keys())
         > MAX_DOCUMENT_REFERENCES
     ):
-        raise ValueError("A document supports at most 500 references")
+        raise CitationSyntaxError("A document supports at most 500 unique references")
     added, removed, unchanged = [], [], []
-    inline_by_key = defaultdict(list)
-    try:
-        input_occurrences = extract_inline_citations(version.body_md or "")
-    except CitationSyntaxError:
-        input_occurrences = ()
-    for occurrence in input_occurrences:
-        try:
-            reference = document_ref_from_href(
-                occurrence.href, version.workspace_id, self_origins=self_origins
-            )
-        except ReadNotFoundError:
-            continue
-        inline_by_key[reference.key].append(asdict(occurrence))
+    inline_by_key = {key: entry["occurrences"] for key, entry in inline_entries.items()}
     for key, output in removals.items():
         row = existing.get(key)
         found = False
@@ -948,17 +1002,13 @@ def apply_reference_delta(
         added.append({"target_kind": key[0], "target_id": key[1], "note": note})
     session.flush()
     counts = {
-        f"{kind}:{target_id}": len(values)
-        for (kind, target_id), values in inline_by_key.items()
+        (
+            f"reference_id:{output['reference_id']}"
+            if "reference_id" in output
+            else f"{key[0]}:{key[1]}"
+        ): len(inline_by_key.get(key, ()))
+        for key, output in removals.items()
     }
-    private_counts = {}
-    for key, output in removals.items():
-        if "reference_id" in output:
-            raw_key = f"{key[0]}:{key[1]}"
-            private_counts[f"reference_id:{output['reference_id']}"] = counts.pop(
-                raw_key, 0
-            )
-    counts.update(private_counts)
     return {
         "changed": bool(added or removed),
         "added": added,
@@ -968,19 +1018,28 @@ def apply_reference_delta(
     }
 
 
-def publish_document_references(session, *, version, actor, self_origins=None) -> None:
+def publish_document_references(
+    session, *, version, actor, self_origins=None, _deleted=None
+) -> None:
     """Materialize once inside the caller's final publish transaction."""
     if not document_reference_schema_available(session):
         # Old migration guards write ordinary links through today's writer.
         # New citation syntax must never be silently published on that schema.
-        if extract_inline_citations(version.body_md or ""):
+        if inline_document_references(
+            version.body_md or "", version.workspace_id, self_origins=self_origins
+        ):
             raise RejectedByPolicyError(
                 "Upgrade the database before publishing inline citations"
             )
         return
     if _publication_record(session, version) is not None:
         return
-    entries = _input_union(session, version, strict=True, self_origins=self_origins)
+    deleted = dict(
+        deleted_document_references(session, version) if _deleted is None else _deleted
+    )
+    entries = _input_union(
+        session, version, strict=True, self_origins=self_origins, _deleted=deleted
+    )
     _require_reference_policy(
         session,
         version,
@@ -996,7 +1055,6 @@ def publish_document_references(session, *, version, actor, self_origins=None) -
         [entry["ref"] for entry in entries.values()],
         actor,
     )
-    deleted = deleted_document_references(session, version)
     for key, (stone, _snapshot) in list(deleted.items()):
         if key not in entries:
             stone.citations = [
@@ -1019,7 +1077,7 @@ def publish_document_references(session, *, version, actor, self_origins=None) -
         (
             (version.body_md or "")
             + "\0"
-            + document_references_hash(session, version)
+            + document_references_hash(session, version, _deleted=deleted)
             + "\0v1"
         ).encode()
     ).hexdigest()
@@ -1051,9 +1109,12 @@ def publish_document_references(session, *, version, actor, self_origins=None) -
 
 
 def read_document_references(
-    session, *, version, actor=None, public=False, self_origins=None
+    session, *, version, actor=None, public=False, self_origins=None, _deleted=None
 ) -> list[ReferenceView]:
     marker = _publication_record(session, version)
+    deleted = (
+        deleted_document_references(session, version) if _deleted is None else _deleted
+    )
     if marker is not None:
         rows = session.scalars(
             select_in_workspace(
@@ -1102,15 +1163,15 @@ def read_document_references(
                 )
                 seen.add(ref.key)
     else:
-        try:
-            entries = list(
-                _input_union(
-                    session, version, strict=False, self_origins=self_origins
-                ).values()
-            )
-        except CitationSyntaxError:
-            entries = []
-    deleted = deleted_document_references(session, version)
+        entries = list(
+            _input_union(
+                session,
+                version,
+                strict=False,
+                self_origins=self_origins,
+                _deleted=deleted,
+            ).values()
+        )
     known = {entry["ref"].key: entry for entry in entries}
     for key, (_stone, value) in deleted.items():
         if (
@@ -1216,10 +1277,7 @@ def preview_document_references(
     """Resolve only citations explicitly requested by the editor, without writes."""
     from backend.services.read_errors import ReadValidationError
 
-    try:
-        occurrences = extract_inline_citations(body)
-    except CitationSyntaxError as error:
-        raise ReadValidationError(str(error)) from error
+    occurrences = extract_inline_citations(body, strict=False)
     entries = {}
     for occurrence in occurrences:
         try:

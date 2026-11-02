@@ -176,7 +176,7 @@ export function buildCosmosSceneBuffers(
     const kind = columns.nodeKinds[node];
     if (kind > 2 && kind !== 4) throw new Error("Unknown Workspace Map node kind");
     writeColor(pointColors, node, kind === 0 ? context : kind === 1 ? library : kind === 4 ? agent : folder, 1);
-    pointShapes[node] = kind === 1 ? 1 : 0; // Library square, Context/aggregate circle
+    pointShapes[node] = kind === 1 ? 1 : kind === 4 ? 3 : 0; // Native Library square, Agent diamond, Context/aggregate circle
     // At a 2k-node fit, full-size points cover their short intra-community
     // links. Retain the degree ordering but reserve enough pixel space for
     // relationships in the overview; focused zoom can show the full scene.

@@ -170,7 +170,7 @@ describe("pointer motion while a native query is in flight", () => {
   // node's own size and shape (not node 0's, not the largest node's), as the shader does.
   it.each([
     ["a 40 px square answered beside a 3 px circle reaches its corner", [3, 40], [0, 1], 1, [16, 16], true],
-    ["a 40 px circle drops the corner that a square of the same size keeps", [40, 40], [1, 0], 1, [16, 16], false],
+    ["a 40 px Agent diamond drops the corner that a square of the same size keeps", [40, 40], [1, 3], 1, [16, 16], false],
     ["a 40 px circle is still hit inside its body, past 12 px", [40, 3], [0, 0], 0, [14, 14], true],
     ["a 3 px circle beside a 40 px node has only the 12 px target", [40, 3], [0, 0], 1, [13, 0], false],
     // The GPU clamps the rendered size to maxPointSize (64 here): a 100 px square reaches 25.6 px, not 40 px.

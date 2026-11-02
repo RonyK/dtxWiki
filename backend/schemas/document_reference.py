@@ -3,9 +3,10 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from backend.domain.document_reference import DocumentKind
+from backend.domain.input_policy import validate_text
 
 
 class DocumentReferenceInput(BaseModel):
@@ -13,6 +14,13 @@ class DocumentReferenceInput(BaseModel):
     target_id: UUID
     note: str | None = Field(default=None, max_length=2000)
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("note")
+    @classmethod
+    def validate_note(cls, value):
+        if value is not None:
+            validate_text(value, field="note", max_length=2000)
+        return value
 
 
 class DocumentReferenceRemoveInput(BaseModel):

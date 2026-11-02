@@ -6,7 +6,7 @@ import { apiErrorMessage } from "../../shared/api/client";
 import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
 import { kindLabel, referenceKey } from "./documentReferences";
 
-export function ReferenceEditor({ references, disabled, onAdd, onInsert, onRemove, onConvertLink, onLocate, checkingLocators, onRetry, retryDisabled }: {
+export function ReferenceEditor({ references, disabled, onAdd, onInsert, onRemove, onConvertLink, onLocate, checkingLocators, onRetry, onReconcile, retryDisabled }: {
   references: ReferenceView[];
   disabled: boolean;
   onAdd: () => void;
@@ -16,6 +16,7 @@ export function ReferenceEditor({ references, disabled, onAdd, onInsert, onRemov
   onLocate: (offset: number) => void;
   checkingLocators?: ReadonlySet<string>;
   onRetry?: () => void;
+  onReconcile?: () => void;
   retryDisabled?: boolean;
 }) {
   const { t } = useTranslation("pages");
@@ -27,7 +28,9 @@ export function ReferenceEditor({ references, disabled, onAdd, onInsert, onRemov
         <button className="icon-button text-button" disabled={disabled} onClick={() => onInsert()} type="button">{t("references.insert")}</button>
         <button className="icon-button text-button" disabled={disabled} onClick={onConvertLink} type="button">{t("references.convertLink")}</button>
         {onRetry ? <button className="icon-button text-button" disabled={retryDisabled} onClick={onRetry} type="button">{t("references.retry")}</button> : null}
+        {onReconcile ? <button className="icon-button text-button" disabled={retryDisabled} onClick={onReconcile} type="button">{t("references.reconcile")}</button> : null}
       </div>
+      {onRetry ? <p role="status">{t("references.ambiguous")}</p> : null}
       {references.length ? <ol>{references.map((reference) => (
         <li key={referenceKey(reference)} value={reference.number}>
           <span>{reference.state === "unavailable" ? t(reference.occurrences?.some((item) => item.href && checkingLocators?.has(item.href)) ? "checkingReference.label" : "references.unavailable") : reference.title}</span>
@@ -36,12 +39,12 @@ export function ReferenceEditor({ references, disabled, onAdd, onInsert, onRemov
           {reference.state !== "unavailable" && reference.location_warning ? <span>{t("references.fragmentUnavailable")}</span> : null}
           {reference.state !== "unavailable" && reference.note ? <span>{reference.note}</span> : null}
           {reference.inline_count === 0 ? <span>{t("references.notCited")}</span> : (
-            <button className="icon-button text-button" disabled={!reference.occurrences?.length} onClick={() => onLocate(reference.occurrences![0].start)} type="button">
+            <button aria-label={t("references.itemAction", { action: t("references.inlineCount", { count: reference.inline_count }), number: reference.number, title: reference.state === "unavailable" ? t("references.unavailable") : reference.title })} className="icon-button text-button" disabled={!reference.occurrences?.length} onClick={() => onLocate(reference.occurrences![0].start)} type="button">
               {t("references.inlineCount", { count: reference.inline_count })}
             </button>
           )}
-          <button className="icon-button text-button" disabled={disabled || !reference.href || !reference.target_id} onClick={() => onInsert(reference)} type="button">{t("references.insert")}</button>
-          {reference.metadata_present || reference.metadata_id ? <button className="icon-button text-button" disabled={disabled} onClick={() => onRemove(reference)} type="button">{t("references.remove")}</button> : null}
+          <button aria-label={t("references.itemAction", { action: t("references.insert"), number: reference.number, title: reference.state === "unavailable" ? t("references.unavailable") : reference.title })} className="icon-button text-button" disabled={disabled || !reference.href || !reference.target_id} onClick={() => onInsert(reference)} type="button">{t("references.insert")}</button>
+          {reference.metadata_present || reference.metadata_id ? <button aria-label={t("references.itemAction", { action: t("references.remove"), number: reference.number, title: reference.state === "unavailable" ? t("references.unavailable") : reference.title })} className="icon-button text-button" disabled={disabled} onClick={() => onRemove(reference)} type="button">{t("references.remove")}</button> : null}
         </li>
       ))}</ol> : <p>{t("references.empty")}</p>}
     </section>

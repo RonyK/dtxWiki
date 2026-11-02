@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     ForeignKeyConstraint,
+    Index,
     Integer,
     Text,
     UniqueConstraint,
@@ -47,6 +48,10 @@ def _constraints(table: str, owner: str):
             "OR (target_kind = 'agent_page' AND agent_page_id IS NOT NULL "
             "AND context_page_id IS NULL AND library_item_id IS NULL)",
             name=f"ck_{table}_target",
+        ),
+        *(
+            Index(f"ix_{table}_{column}", "workspace_id", column)
+            for column in ("context_page_id", "library_item_id", "agent_page_id")
         ),
         *(
             UniqueConstraint(owner, column, name=f"uq_{table}_{column}")

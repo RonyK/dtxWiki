@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from backend.models.audit import AuditEvent
 from backend.models.base import utc_now
-from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.context import ContextPage, ContextPageVersion, EdgeProjection
 from backend.models.lint import LintFinding, LintRun
 from backend.models.review import ReviewDecision, ReviewItem
 from backend.models.tree import WorkspaceTreeNode
@@ -149,11 +149,31 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
         ]
 
         # Undoing a first publication withdraws the page again.
-        first = _write(session, workspace.id, "Undo first", "# First\n\nBody.")
+        first = _write(
+            session,
+            workspace.id,
+            "Undo first",
+            f"# First\n\nSee @cite{{/p/{workspace.id}/{page_id}}}.",
+        )
         first_before = _states(session, first.page_id)
         approved = _approve(session, workspace.id, first.review_item_id)
+        assert (
+            session.scalar(
+                select(EdgeProjection.id).where(
+                    EdgeProjection.source_id == first.page_id,
+                    EdgeProjection.edge_kind == "citation_page",
+                )
+            )
+            is not None
+        )
         since = utc_now()
         _undo(session, workspace.id, first.review_item_id, approved.undo.decision_id)
+        assert not session.scalar(
+            select(EdgeProjection.id).where(
+                EdgeProjection.source_id == first.page_id,
+                EdgeProjection.edge_kind == "citation_page",
+            )
+        )
         assert _states(session, first.page_id) == first_before
         first_page = session.get(ContextPage, first.page_id)
         assert resolve_version_as_of(session, first_page, utc_now()) is None

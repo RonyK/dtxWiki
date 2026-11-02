@@ -653,6 +653,11 @@ class ActivityFeedService:
                         else None
                     )
                     operation = _MCP_OPERATIONS.get(tool_name, projection.operation)
+                    if tool_name == "cite" and (call.result_detail or {}).get(
+                        "reference_receipt_id"
+                    ):
+                        # Historical candidate lookup calls retain read meaning.
+                        operation = "edit"
                     event = event.model_copy(
                         update={
                             "title": "MCP tool execution",

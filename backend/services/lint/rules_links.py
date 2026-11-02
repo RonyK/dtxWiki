@@ -121,6 +121,30 @@ class _LinkRule:
                     fingerprint=f"{self.rule_id}|{locator.key}",
                 )
             )
+        if self.rule_id == "link.unresolved" and ctx.stage != LintStage.READ:
+            from backend.services.citation_parser import (
+                extract_inline_citations,
+                is_legacy_citation_key,
+            )
+
+            for occurrence in extract_inline_citations(body, strict=False):
+                if not is_legacy_citation_key(occurrence.href):
+                    continue
+                findings.append(
+                    LintFindingDraft(
+                        rule_id=self.rule_id,
+                        severity="warning",
+                        target_type="context_page",
+                        target_id=getattr(ctx.page, "id", None),
+                        suggested_action=(
+                            "Replace this legacy citation key with a permanent "
+                            "document address."
+                        ),
+                        message_key=self.rule_id,
+                        message_args={"citation_legacy_key": True},
+                        fingerprint=f"citation.legacy-key|{occurrence.href}",
+                    )
+                )
         return findings
 
 

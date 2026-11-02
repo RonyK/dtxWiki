@@ -536,6 +536,77 @@ def test_non_write_tool_arguments_remain_an_exact_deepcopy() -> None:
     assert summary["nested"] is not arguments["nested"]
 
 
+def test_reference_notes_are_digest_only_and_reentry_is_idempotent(monkeypatch):
+    arguments = {
+        "workspace_id": "00000000-0000-0000-0000-000000000001",
+        "page_id": "00000000-0000-0000-0000-000000000002",
+        "expected_editing_revision": 1,
+        "retry_only": True,
+        "add": [
+            {
+                "target_kind": "context_page",
+                "target_id": "00000000-0000-0000-0000-000000000003",
+                "note": "private reference note",
+                "note_digest": "forged",
+            }
+        ],
+    }
+    first = redact_tool_arguments("cite", arguments)
+    assert "private reference note" not in json.dumps(first)
+    assert (
+        first["add"][0]["note_digest"]["sha256"]
+        == hashlib.sha256(b"private reference note").hexdigest()
+    )
+    assert redact_tool_arguments("cite", first) == first
+    assert arguments["add"][0]["note"] == "private reference note"
+    assert first["page_id"] == arguments["page_id"]
+    assert first["expected_editing_revision"] == 1 and first["retry_only"]
+
+    from backend.services import mcp_trace_redaction
+
+    monkeypatch.setattr(mcp_trace_redaction, "_REFERENCE_TRACE_TARGET_LIMIT", 2)
+    broken_note = "invalid\ud800note"
+    invalid = {
+        "page_id": {"private": "private page text"},
+        "expected_editing_revision": True,
+        "idempotency_key": {"private": "private key"},
+        "claim_text": "private legacy claim",
+        "add": [
+            {**arguments["add"][0], "note": broken_note},
+            {
+                "target_kind": {"private": "private kind"},
+                "target_id": "private invalid UUID",
+                "note": {"nested": "private nested note"},
+            },
+            {"note": "private omitted note"},
+        ],
+        "remove": [{"reference_id": {"private": "private ID"}}],
+    }
+    redacted = redact_tool_arguments("cite", invalid)
+    assert "private" not in json.dumps(redacted)
+    assert "page_id" not in redacted and redacted["page_id_digest"]
+    assert "expected_editing_revision" not in redacted
+    assert len(redacted["add"]) == 2 and redacted["add_omitted"] == 1
+    assert redacted["remove"] == [] and redacted["remove_omitted"] == 1
+    assert (
+        redacted["add"][0]["note_digest"]["sha256"]
+        == hashlib.sha256(
+            broken_note.encode("utf-8", errors="surrogatepass")
+        ).hexdigest()
+    )
+    assert redact_tool_arguments("cite", redacted) == redacted
+    # Failed old-shaped commands are redacted even without add/remove fields.
+    assert "private" not in json.dumps(
+        redact_tool_arguments(
+            "cite",
+            {
+                "claim_text": "private legacy claim",
+                "note": "private invalid note",
+            },
+        )
+    )
+
+
 def test_body_preview_skips_frontmatter_and_leading_media_embeds() -> None:
     asset = "dtx-media://asset/33333333-3333-3333-3333-333333333333"
     body = (

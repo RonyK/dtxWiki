@@ -658,7 +658,8 @@ head가 하나여야 하며, 모든 신규 경로가 고정된 core revision
 `efcbcf724889`를 거쳐야 합니다. 패키지 검증기는 이 그래프와 고정 파일의 해시를
 함께 확인합니다.
 
-현재 0.2.0 head는 `1d8f1c08ca36`입니다. `af62c98d0731`에서 갈라진
+현재 0.2.0 head는 `release_manifest.json`의 `schema_releases["0.2.0"].head`로
+확인합니다. `1d8f1c08ca36`은 `af62c98d0731`에서 갈라진
 Graph revision `9aeab6944f25`와 Inbox 수신자 revision `6f4a9f50c046`을
 병합한 revision이며, 두 기존 revision의 ID와 내용은 유지합니다.
 
@@ -909,6 +910,10 @@ not a target version. Search and read the selected sources before registration.
 The REST editor uses the same reference command service. Inline
 `@cite{<internal document address>}` markers are registered at final publication
 alongside reference metadata. Ordinary Markdown links remain ordinary links.
+Saving checks citation syntax and the combined 500-document budget without
+registering Graph edges. Historical `@cite{source-key}` display tokens remain
+unchanged and receive an unresolved-link warning; replace them with permanent
+document addresses to register citations.
 References are returned separately from the authored body; do not append a
 second generated copy to the Markdown. Old claim-based cite inputs are rejected,
 and reindex does not discover historical citations or reinterpret Chats records.

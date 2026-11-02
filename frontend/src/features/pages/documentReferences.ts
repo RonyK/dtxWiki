@@ -11,14 +11,27 @@ export function referenceKey(ref: { target_kind: DocumentReferenceKind; target_i
   return `${ref.target_kind}:${ref.target_id ?? ref.metadata_id ?? `unavailable-${ref.number}`}`;
 }
 
-export function bindReferenceOccurrencesToSource(references: ReferenceView[], body: string): ReferenceView[] {
-  if (!references.some((item) => item.occurrences?.some((occurrence) => !occurrence.href))) return references;
-  const characters = Array.from(body);
-  return references.map((item) => ({ ...item, occurrences: item.occurrences?.map((occurrence) => {
-    if (occurrence.href) return occurrence;
-    const token = characters.slice(occurrence.start, occurrence.end).join("");
-    const authoredHref = /^@cite\{([^\s{}]+)\}$/.exec(token)?.[1];
-    return { ...occurrence, href: authoredHref ?? null };
+export function renderedReferenceOccurrences(references: ReferenceView[], body: string, renderedBody: string, offsets: "codepoint" | "utf16"): ReferenceView[] {
+  if (!references.some((reference) => reference.occurrences?.length)) return references;
+  const wanted = new Set(references.flatMap((reference) => (reference.occurrences ?? []).flatMap((item) => [item.start, item.end])));
+  const positions = new Map<number, { raw: number; rendered: number }>();
+  const normalized = body.replace(/\r\n?/g, "\n");
+  const prefix = normalized.endsWith(renderedBody) ? normalized.length - renderedBody.length : 0;
+  let raw = 0, codepoints = 0, rendered = 0, previous = "";
+  for (const character of body) {
+    const index = offsets === "codepoint" ? codepoints : raw;
+    if (wanted.has(index)) positions.set(index, { raw, rendered: rendered - prefix });
+    if (character !== "\n" || previous !== "\r") rendered += character.length;
+    raw += character.length;
+    codepoints += 1;
+    previous = character;
+  }
+  positions.set(offsets === "codepoint" ? codepoints : raw, { raw, rendered: rendered - prefix });
+  return references.map((reference) => ({ ...reference, occurrences: (reference.occurrences ?? []).flatMap((item) => {
+    const start = positions.get(item.start), end = positions.get(item.end);
+    if (!start || !end || start.rendered < 0 || end.rendered > renderedBody.length) return [];
+    const authored = /^@cite\{([^\s{}]+)\}$/.exec(body.slice(start.raw, end.raw));
+    return authored ? [{ href: authored[1], start: start.rendered, end: end.rendered }] : [];
   }) }));
 }
 
@@ -29,6 +42,11 @@ export function referenceHref(workspaceId: string, ref: Pick<ReferenceView, "tar
 }
 
 export function referenceTarget(href: string, workspaceId: string): DocumentReferenceTarget | null {
+  const exact = /^dtxwiki:\/\/index\/(context|library|agent)\/([0-9a-f-]+)$/.exec(href);
+  if (exact && isContextId(exact[2])) return {
+    target_kind: exact[1] === "context" ? "context_page" : exact[1] === "library" ? "library_item" : "agent_page",
+    target_id: exact[2],
+  };
   const context = classifyContextLink(href, { workspaceId, allowWorkspaceNavigation: true });
   if (context.pageId && (context.workspaceId ?? workspaceId) === workspaceId) {
     return { target_kind: "context_page", target_id: context.pageId };
@@ -52,6 +70,10 @@ function citationMarkdown(body: string) {
   }
   const parseBody = body.slice(0, prefix).replace(/[^\r\n]/g, " ") + body.slice(prefix);
   const root = unified().use(remarkParse).use(remarkMath).parse(parseBody) as Root;
+  return root;
+}
+
+function citationExclusions(body: string, root: Root) {
   const opaque = new Uint8Array(body.length);
   const excluded = new Uint8Array(body.length);
   function mark(node: Root | RootContent) {
@@ -66,7 +88,7 @@ function citationMarkdown(body: string) {
   // including inline tags whose contents are separate Markdown text nodes.
   const stack: Array<{ tag: string; start: number }> = [];
   const voidTags = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
-  for (const match of parseBody.matchAll(/<!--[\s\S]*?(?:-->|$)|<\/?([A-Za-z][\w:-]*)(?=\s|\/?>)(?:"[^"]*"|'[^']*'|[^'"<>])*?>/g)) {
+  for (const match of body.matchAll(/<!--[\s\S]*?(?:-->|$)|<\/?([A-Za-z][\w:-]*)(?=\s|\/?>)(?:"[^"]*"|'[^']*'|[^'"<>])*?>/g)) {
     const start = match.index!;
     const end = start + match[0].length;
     if (opaque[start]) continue;
@@ -80,13 +102,22 @@ function citationMarkdown(body: string) {
     } else if (!voidTags.has(tag) && !match[0].endsWith("/>")) stack.push({ tag, start });
   }
   for (const open of stack) excluded.fill(1, open.start);
-  return { root, excluded };
+  for (const match of body.matchAll(/\[\[[^\]\n]*\]\]/g)) {
+    if (!opaque[match.index!]) excluded.fill(1, match.index!, match.index! + match[0].length);
+  }
+  return excluded;
 }
 
 // The editor previews syntax locally; authorization remains a server decision.
 // Parse Markdown text nodes so code, images and links never create references.
 export function inlineCitationOccurrences(body: string): Array<{ href: string; start: number; end: number }> {
-  const { root, excluded } = citationMarkdown(body);
+  if (!body.includes("@cite{")) return [];
+  return citationOccurrencesFromTree(body, citationMarkdown(body));
+}
+
+export function citationOccurrencesFromTree(body: string, root: Root): Array<{ href: string; start: number; end: number }> {
+  if (!body.includes("@cite{")) return [];
+  const excluded = citationExclusions(body, root);
   const result: Array<{ href: string; start: number; end: number }> = [];
   function visit(node: Root | RootContent) {
     if (["code", "inlineCode", "math", "inlineMath", "link", "linkReference", "definition", "image", "html", "yaml"].includes(node.type)) return;
@@ -151,7 +182,8 @@ export function previewReferences(body: string, known: ReferenceView[], workspac
 }
 
 export function selectedDocumentLink(body: string, from: number, to: number): { href: string; label: string; from: number; to: number } | null {
-  const { root: tree, excluded } = citationMarkdown(body);
+  const tree = citationMarkdown(body);
+  const excluded = citationExclusions(body, tree);
   const definitions = new Map(tree.children.filter((node) => node.type === "definition").map((node) => [node.identifier.toLowerCase(), node.url]));
   let result: { href: string; label: string; from: number; to: number } | null = null;
   function visit(node: Root | RootContent) {

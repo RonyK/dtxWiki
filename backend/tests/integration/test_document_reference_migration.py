@@ -101,6 +101,16 @@ def test_reference_schema_round_trip_preserves_sources_without_backfill(
             )
         command.upgrade(config, REVISION)
         assert TABLES <= set(sa.inspect(engine).get_table_names())
+        for table in ("context_document_reference", "context_published_citation"):
+            indexes = sa.inspect(engine).get_indexes(table)
+            assert {
+                tuple(index["column_names"])
+                for index in indexes
+                if index["column_names"][0] == "workspace_id"
+            } == {
+                ("workspace_id", column)
+                for column in ("context_page_id", "library_item_id", "agent_page_id")
+            }
         with Session(engine) as session, session.begin():
             assert (
                 session.scalar(

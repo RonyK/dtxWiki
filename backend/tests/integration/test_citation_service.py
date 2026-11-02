@@ -8,7 +8,6 @@ from sqlalchemy import select
 
 from backend.models.context import (
     ContextCitation,
-    ContextClaim,
     ContextPage,
     ContextPageVersion,
 )
@@ -29,7 +28,11 @@ from backend.services.document_references import (
 )
 from backend.services.mcp_trace_capture import derive_artifact_links
 from backend.services.page_service import PageConflictError
-from backend.services.read_errors import ReadNotFoundError, RejectedByPolicyError
+from backend.services.read_errors import (
+    ReadNotFoundError,
+    ReadValidationError,
+    RejectedByPolicyError,
+)
 
 ACTOR = ActorContext(
     actor_kind="mcp_client",
@@ -41,11 +44,29 @@ ACTOR = ActorContext(
 )
 
 
-def test_reference_command_keeps_metadata_cas_receipt_and_trace_atomic(session_factory):
+def test_reference_command_keeps_metadata_cas_receipt_and_trace_atomic(
+    session_factory, monkeypatch
+):
     # This replaces the removed recommender integration cases. One DB lifecycle
     # is required to observe the command's shared metadata/revision/receipt
     # transaction; a parser or mock cannot prove partial-write rollback.
     service = CitationService()
+
+    def version(page, number, status, *, parent=None):
+        return ContextPageVersion(
+            workspace_id=page.workspace_id,
+            page_id=page.id,
+            version_no=number,
+            body_md=f"# {page.title}",
+            content_hash="a" * 64,
+            actor_type=ACTOR.actor_kind,
+            created_by_actor_kind=ACTOR.actor_kind,
+            created_by_actor_id=ACTOR.actor_id,
+            version_status=status,
+            editing_revision=1,
+            parent_version_id=parent.id if parent else None,
+        )
+
     with session_factory.begin() as session:
         ws = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         source = ContextPage(
@@ -62,29 +83,8 @@ def test_reference_command_keeps_metadata_cas_receipt_and_trace_atomic(session_f
         )
         session.add_all([source, target])
         session.flush()
-        edit = ContextPageVersion(
-            workspace_id=ws.id,
-            page_id=source.id,
-            version_no=1,
-            body_md="# Owner",
-            content_hash="a" * 64,
-            actor_type="mcp_client",
-            created_by_actor_kind=ACTOR.actor_kind,
-            created_by_actor_id=ACTOR.actor_id,
-            version_status="editing",
-            editing_revision=1,
-        )
-        published = ContextPageVersion(
-            workspace_id=ws.id,
-            page_id=target.id,
-            version_no=1,
-            body_md="# Target",
-            content_hash="b" * 64,
-            actor_type="human",
-            created_by_actor_kind="human",
-            created_by_actor_id="owner",
-            version_status="published_snapshot",
-        )
+        edit = version(source, 1, "editing")
+        published = version(target, 1, "published_snapshot")
         session.add_all([edit, published])
         session.flush()
         source.current_version_id = edit.id
@@ -100,6 +100,23 @@ def test_reference_command_keeps_metadata_cas_receipt_and_trace_atomic(session_f
         add=[reference],
     )
     with session_factory.begin() as session:
+        from backend.services import document_references
+
+        # The command must admit the same metadata+inline union as publication.
+        # An existing malformed historical token cannot erase its valid sibling.
+        edit = session.get(ContextPageVersion, edit_id)
+        extra_id = uuid4()
+        edit.body_md = f"@cite{{dtxwiki://index/context/{extra_id}}} @cite{{}}"
+        session.flush()
+        assert len(read_document_references(session, version=edit, actor=ACTOR)) == 1
+        with monkeypatch.context() as limit:
+            limit.setattr(document_references, "MAX_DOCUMENT_REFERENCES", 1)
+            with pytest.raises(ReadValidationError, match="500 unique"):
+                service.cite(session, ws_id, command, actor=ACTOR)
+        assert edit.editing_revision == 1
+        assert not list(session.scalars(select(ContextDocumentReference)))
+        edit.body_md = "# Owner"
+        session.flush()
         first = service.cite(session, ws_id, command, actor=ACTOR)
         assert first.editing_revision == 2
         assert first.added[0].target_id == target_id
@@ -183,6 +200,13 @@ def test_reference_command_keeps_metadata_cas_receipt_and_trace_atomic(session_f
                 actor=ACTOR,
             )
         assert session.get(ContextPageVersion, edit_id).editing_revision == 2
+        edit = session.get(ContextPageVersion, edit_id)
+        edit.body_md = (
+            f"@cite{{dtxwiki://index/context/{target_id}}} "
+            f"@cite{{dtxwiki://index/context/{extra_id}}} @cite{{}}"
+        )
+        session.flush()
+        assert len(read_document_references(session, version=edit, actor=ACTOR)) == 2
         remove = service.cite(
             session,
             ws_id,
@@ -196,7 +220,9 @@ def test_reference_command_keeps_metadata_cas_receipt_and_trace_atomic(session_f
             actor=ACTOR,
         )
         assert remove.editing_revision == 3 and remove.removed[0].target_id == target_id
+        assert remove.remaining_inline_occurrences == {f"context_page:{target_id}": 1}
         assert not list(session.scalars(select(ContextDocumentReference)))
+        edit.body_md = "# Owner"
     with pytest.raises(ValidationError):
         CiteRequest.model_validate({"claim_text": "old discovery must never mutate"})
 
@@ -219,13 +245,6 @@ def test_reference_command_keeps_metadata_cas_receipt_and_trace_atomic(session_f
         )
         session.add(hidden)
         session.flush()
-        claim = ContextClaim(
-            workspace_id=ws_id,
-            page_version_id=old.id,
-            claim_text="Existing source-owned legacy evidence",
-        )
-        session.add(claim)
-        session.flush()
         authored = ContextDocumentReference(
             workspace_id=ws_id,
             owner_version_id=old.id,
@@ -235,8 +254,8 @@ def test_reference_command_keeps_metadata_cas_receipt_and_trace_atomic(session_f
         )
         legacy = ContextCitation(
             workspace_id=ws_id,
-            target_kind="context_claim",
-            target_id=claim.id,
+            target_kind="context_page_version",
+            target_id=old.id,
             citation_type="context_page",
             cited_context_page_version_id=published.id,
         )
@@ -247,56 +266,31 @@ def test_reference_command_keeps_metadata_cas_receipt_and_trace_atomic(session_f
                 ContextCitationPublication(
                     workspace_id=ws_id, version_id=old.id, fingerprint="published"
                 ),
-                ContextPublishedCitation(
-                    workspace_id=ws_id,
-                    source_version_id=old.id,
-                    target_kind="context_page",
-                    context_page_id=hidden.id,
-                    metadata_present=True,
-                    sort_order=0,
-                ),
-                ContextPublishedCitation(
-                    workspace_id=ws_id,
-                    source_version_id=old.id,
-                    target_kind="context_page",
-                    context_page_id=target_id,
-                    metadata_present=False,
-                    legacy_count=1,
-                    sort_order=1,
-                ),
             ]
         )
+        for order, (target, metadata) in enumerate(
+            ((hidden.id, True), (target_id, False))
+        ):
+            session.add(
+                ContextPublishedCitation(
+                    workspace_id=ws_id,
+                    source_version_id=old.id,
+                    target_kind="context_page",
+                    context_page_id=target,
+                    metadata_present=metadata,
+                    legacy_count=0 if metadata else 1,
+                    sort_order=order,
+                )
+            )
         session.flush()
         refs = read_document_references(session, version=old, actor=ACTOR)
         assert {row.metadata_id for row in refs} == {authored.id, legacy.id}
         assert all(row.target_id is None and row.metadata_present for row in refs)
         public = read_document_references(session, version=old, actor=None, public=True)
         assert all(row.metadata_id is None for row in public)
-        next_edit = ContextPageVersion(
-            workspace_id=ws_id,
-            page_id=page_id,
-            parent_version_id=old.id,
-            version_no=2,
-            body_md=old.body_md,
-            content_hash=old.content_hash,
-            actor_type=ACTOR.actor_kind,
-            created_by_actor_kind=ACTOR.actor_kind,
-            created_by_actor_id=ACTOR.actor_id,
-            version_status="editing",
-        )
-        sibling = ContextPageVersion(
-            workspace_id=ws_id,
-            page_id=page_id,
-            parent_version_id=old.id,
-            version_no=3,
-            body_md=old.body_md,
-            content_hash=old.content_hash,
-            actor_type=ACTOR.actor_kind,
-            created_by_actor_kind=ACTOR.actor_kind,
-            created_by_actor_id=ACTOR.actor_id,
-            version_status="draft",
-            graph_status="branched",
-        )
+        next_edit = version(source, 2, "editing", parent=old)
+        sibling = version(source, 3, "draft", parent=old)
+        sibling.graph_status = "branched"
         session.add_all([next_edit, sibling])
         session.flush()
         copy_document_references(session, source=old, target=next_edit)

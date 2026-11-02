@@ -125,10 +125,14 @@ export function useLinkTargetPreview({
       const unknown = current.wanted.filter(
         (locator) => (!current.results.has(locator) || current.citationLocators.includes(locator) && !current.checkedCitations.has(locator)) && !inflight.current.has(locator),
       );
-      const sendable = unknown.filter(roundTripsAsMarkdownLink);
-      const unsendable = unknown.filter((locator) => !roundTripsAsMarkdownLink(locator));
+      const canSend = (locator: string) => current.citationLocators.includes(locator) ? /^[^\s{}]+$/.test(locator) : roundTripsAsMarkdownLink(locator);
+      const sendable = unknown.filter(canSend);
+      const unsendable = unknown.filter((locator) => !canSend(locator));
       // Unusual destinations keep the browser's own rendering, as before.
-      if (unsendable.length) merge(scope, unsendable.map((locator) => [locator, null] as const));
+      if (unsendable.length) {
+        merge(scope, unsendable.map((locator) => [locator, null] as const));
+        setCitationChecks((previous) => ({ scope, locators: new Set([...(previous.scope === scope ? previous.locators : []), ...unsendable]) }));
+      }
       if (!sendable.length) return;
       setFailed((previous) => (previous.scope === scope && previous.locators.size === 0
         ? previous
@@ -185,5 +189,5 @@ function roundTripsAsMarkdownLink(locator: string) {
 
 function linksOnlyMarkdown(locators: readonly string[], citations: readonly string[] = NO_LOCATORS) {
   const citationSet = new Set(citations);
-  return locators.map((locator) => `${locator.startsWith("[[") ? locator : `[x](${locator})`}${citationSet.has(locator) ? `\n@cite{${locator}}` : ""}`).join("\n");
+  return locators.map((locator) => citationSet.has(locator) ? `@cite{${locator}}` : locator.startsWith("[[") ? locator : `[x](${locator})`).join("\n");
 }

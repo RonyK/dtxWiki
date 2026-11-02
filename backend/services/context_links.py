@@ -408,9 +408,7 @@ class LinkResolutionBatch:
                         ),
                     )
                 )
-                self.node_page_ids.update(
-                    (node.id, node.target_id) for node in nodes
-                )
+                self.node_page_ids.update((node.id, node.target_id) for node in nodes)
 
         page_ids = {
             locator.page_id for locator in eligible if locator.page_id is not None
@@ -448,9 +446,7 @@ class LinkResolutionBatch:
                 self._add_page(page)
 
         missing_aliases = {
-            slug
-            for slug in direct_slugs
-            if not self.pages_by_slug.get(slug)
+            slug for slug in direct_slugs if not self.pages_by_slug.get(slug)
         }
         alias_names: dict[str, set[str]] = {}
         for slug in missing_aliases:
@@ -460,9 +456,7 @@ class LinkResolutionBatch:
             for name_chunk in _chunks(alias_name_list):
                 rows = ctx.session.execute(
                     join_in_workspace(
-                        select_in_workspace(
-                            ContextPage, workspace_id=ctx.workspace_id
-                        ),
+                        select_in_workspace(ContextPage, workspace_id=ctx.workspace_id),
                         ContextPage,
                         PageNameIndex,
                         workspace_id=ctx.workspace_id,
@@ -634,8 +628,7 @@ class LinkResolutionBatch:
             version is not None
             and version.workspace_id == self.workspace_id
             and version.page_id == page.id
-            and version.version_status
-            in {"published_snapshot", "superseded_snapshot"}
+            and version.version_status in {"published_snapshot", "superseded_snapshot"}
         )
 
 
@@ -937,6 +930,11 @@ def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
 
     rendered, offset = _rendered_page_body(body)
     masked = _code_mask(rendered)
+    # Citation addresses are owned by the citation parser, including malformed
+    # historical tokens. Rewriting an inner autolink would corrupt the marker.
+    from backend.services.citation_parser import citation_token_spans
+
+    citation_spans = citation_token_spans(rendered)
     math_mask = _math_mask(rendered)
     for index, value in enumerate(math_mask):
         if value:
@@ -1019,6 +1017,7 @@ def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
     while f"dtxlinkprobe{salt}" in rendered:
         salt += "x"
     cursor = 0
+    citation_index = 0
     while cursor < len(rendered):
         definition_end = next(
             (end for start, end in definition_ranges if start <= cursor < end), None
@@ -1028,6 +1027,17 @@ def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
             continue
         if masked[cursor] or _is_escaped(rendered, cursor):
             cursor += 1
+            continue
+        while (
+            citation_index < len(citation_spans)
+            and citation_spans[citation_index][1] <= cursor
+        ):
+            citation_index += 1
+        if (
+            citation_index < len(citation_spans)
+            and citation_spans[citation_index][0] <= cursor
+        ):
+            cursor = citation_spans[citation_index][1]
             continue
         if rendered.startswith("![", cursor):
             image = _parse_image_use(rendered, cursor, masked)
@@ -1129,7 +1139,18 @@ def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
             )
 
     literals = []
+    citation_index = 0
     for match in _GFM_AUTOLINK_LITERAL.finditer(rendered):
+        while (
+            citation_index < len(citation_spans)
+            and citation_spans[citation_index][1] <= match.start()
+        ):
+            citation_index += 1
+        if (
+            citation_index < len(citation_spans)
+            and citation_spans[citation_index][0] <= match.start()
+        ):
+            continue
         if any(masked[match.start() : match.end()]):
             continue
         # The last candidate has GFM punctuation/entity trimming applied.
@@ -1464,10 +1485,14 @@ def decide_link(
         )
         if ref.kind != "context":
             target = _visible_index_route(ctx, ref.kind, ref.target_id, batch=batch)
-            return locator, None, (
-                LinkDecision("fix", target, "link.internal-noncanonical")
-                if target is not None
-                else LinkDecision("finding", finding="link.unresolved")
+            return (
+                locator,
+                None,
+                (
+                    LinkDecision("fix", target, "link.internal-noncanonical")
+                    if target is not None
+                    else LinkDecision("finding", finding="link.unresolved")
+                ),
             )
     else:
         locator = classify(href, ctx.self_origins)
@@ -1501,10 +1526,14 @@ def decide_link(
     if locator.kind == "unknown":
         handled, target = _workspace_route(href, ctx, batch=batch)
         if handled:
-            return locator, None, (
-                LinkDecision("keep")
-                if target is not None
-                else LinkDecision("finding", finding="link.unresolved")
+            return (
+                locator,
+                None,
+                (
+                    LinkDecision("keep")
+                    if target is not None
+                    else LinkDecision("finding", finding="link.unresolved")
+                ),
             )
     resolution = resolve(locator, ctx, batch=batch)
     return (
