@@ -608,6 +608,7 @@ def load_projection(
     shared_only: bool = False,
     include_search_matches: bool = False,
     load_clients: bool = True,
+    include_client_catalog: bool = False,
 ) -> ChatPageProjection:
     """Load one request's evidence; constructing cards afterwards needs no SQL."""
 
@@ -625,7 +626,17 @@ def load_projection(
         result.clients = {
             client.id: client
             for client in session.scalars(
-                select_projection_in_workspace(MCPClient, workspace_id=workspace_id)
+                select_projection_in_workspace(
+                    MCPClient,
+                    workspace_id=workspace_id,
+                    # Only list/search responses need the complete filter
+                    # catalog. Other projections need their chats' clients.
+                    predicates=(
+                        ()
+                        if include_client_catalog
+                        else (MCPClient.id.in_({chat.client_id for chat in chats}),)
+                    ),
+                )
                 .order_by(MCPClient.name)
                 .options(
                     load_only(

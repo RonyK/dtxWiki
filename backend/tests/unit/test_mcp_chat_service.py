@@ -3108,6 +3108,7 @@ def test_chat_keeps_first_client_and_timeline_spans_clients(session_factory):
         first_client = session.scalar(
             select(MCPClient).where(MCPClient.workspace_id == workspace.id)
         )
+        first_client.scopes = ["mcp:read", "mcp:draft-write"]
         second_client = MCPClient(
             workspace_id=workspace.id,
             name="second-chat-client",
@@ -3116,6 +3117,24 @@ def test_chat_keeps_first_client_and_timeline_spans_clients(session_factory):
             status="active",
         )
         session.add(second_client)
+        unrelated_clients = [
+            MCPClient(
+                workspace_id=workspace.id,
+                name=f"unrelated-chat-client-{index}",
+                client_type="generic",
+                scopes=["mcp:read"],
+                status="active",
+            )
+            for index in range(8)
+        ]
+        session.add_all(unrelated_clients)
+        page = ContextPage(
+            workspace_id=workspace.id,
+            slug="first-client-provenance",
+            title="First client provenance",
+            page_type="overview",
+        )
+        session.add(page)
         session.flush()
         session_uuid = uuid4()
         first_call = _tool_call(
@@ -3149,14 +3168,86 @@ def test_chat_keeps_first_client_and_timeline_spans_clients(session_factory):
             tool_call=second_call,
         )
         assert chat.client_id == first_client.id
-
-        detail = service.read_chat(
+        service.link_artifact(
             session=session,
-            workspace_id=workspace.id,
-            chat_session_id=chat.id,
+            chat_session=chat,
+            tool_call=first_call,
+            resource_kind=McpChatArtifactKind.CONTEXT_PAGE,
+            resource_id=page.id,
+            verb=McpChatArtifactVerb.REFERENCED,
         )
-        assert detail.tool_call_count == 2
-        assert {row.id for row in detail.timeline} == {first_call.id, second_call.id}
+        workspace_id, chat_id, page_id = workspace.id, chat.id, page.id
+        first_client_id = first_client.id
+        catalog_ids = {first_client.id, second_client.id} | {
+            client.id for client in unrelated_clients
+        }
+        expected_scopes = list(first_client.scopes)
+
+    def read_with_client_ids(read):
+        # Fresh sessions expose every materialized client, including temporary
+        # rows that an ORM identity-map snapshot after the read would miss.
+        loaded_ids = set()
+
+        def record_client(_session, instance):
+            if isinstance(instance, MCPClient):
+                loaded_ids.add(instance.id)
+
+        with session_factory() as session:
+            event.listen(session, "loaded_as_persistent", record_client)
+            result = read(session)
+        return result, loaded_ids
+
+    detail, detail_client_ids = read_with_client_ids(
+        lambda session: service.read_chat(
+            session=session, workspace_id=workspace_id, chat_session_id=chat_id
+        )
+    )
+    assert detail.tool_call_count == 2
+    assert {row.id for row in detail.timeline} == {first_call.id, second_call.id}
+    assert detail.client.id == first_client_id
+    assert detail.client.scopes == expected_scopes
+    assert detail_client_ids == {first_client_id}
+
+    provenance, provenance_client_ids = read_with_client_ids(
+        lambda session: service.list_artifact_provenance(
+            session=session,
+            workspace_id=workspace_id,
+            resource_kind="context_page",
+            resource_id=page_id,
+        )
+    )
+    assert provenance.items[0].chat_session.client.id == first_client_id
+    assert provenance.items[0].chat_session.client.scopes == []
+    assert provenance_client_ids == {first_client_id}
+
+    exported, export_client_ids = read_with_client_ids(
+        lambda session: service.export_chats(session=session, workspace_id=workspace_id)
+    )
+    assert exported.chats[0].client.id == first_client_id
+    assert exported.chats[0].client.scopes == expected_scopes
+    assert export_client_ids == {first_client_id}
+
+    listed, list_client_ids = read_with_client_ids(
+        lambda session: service.list_chats(
+            session=session, workspace_id=workspace_id, client_id=first_client_id
+        )
+    )
+    assert listed.items[0].client.id == first_client_id
+    assert {client.id for client in listed.clients} == list_client_ids == catalog_ids
+    assert all(client.scopes == [] for client in listed.clients)
+
+    searched, search_client_ids = read_with_client_ids(
+        lambda session: service.list_chats(
+            session=session,
+            workspace_id=workspace_id,
+            q="no matching chat",
+            actor=ActorContext(actor_kind="human", actor_id="reader"),
+        )
+    )
+    assert searched.items == []
+    assert (
+        {client.id for client in searched.clients} == search_client_ids == catalog_ids
+    )
 
 
 def test_link_artifact_rollup_recovers_from_concurrent_insert(

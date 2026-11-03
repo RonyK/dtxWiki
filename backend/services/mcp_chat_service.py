@@ -621,7 +621,11 @@ class McpChatService:
         else:
             rows = session.scalars(stmt.offset(offset).limit(limit + 1)).all()
             projection = self._load_projection(
-                session, workspace_id, rows[:limit], actor
+                session,
+                workspace_id,
+                rows[:limit],
+                actor,
+                include_client_catalog=True,
             )
             items = [
                 self._build_session_ref(row, projection, actor) for row in rows[:limit]
@@ -659,7 +663,11 @@ class McpChatService:
         candidate_limit = min(limit, ACTOR_SEARCH_CANDIDATE_BUDGET)
         rows = session.scalars(stmt.offset(offset).limit(candidate_limit + 1)).all()
         projection = self._load_projection(
-            session, workspace_id, rows[:candidate_limit], actor
+            session,
+            workspace_id,
+            rows[:candidate_limit],
+            actor,
+            include_client_catalog=True,
         )
         matches: list[McpChatSessionRef] = []
         for row in rows[:candidate_limit]:
@@ -979,6 +987,7 @@ class McpChatService:
         shared_only: bool = False,
         include_search_matches: bool = False,
         load_clients: bool = True,
+        include_client_catalog: bool = False,
     ) -> ChatPageProjection:
         return load_projection(
             session,
@@ -989,6 +998,7 @@ class McpChatService:
             shared_only=shared_only,
             include_search_matches=include_search_matches,
             load_clients=load_clients,
+            include_client_catalog=include_client_catalog,
         )
 
     def _refresh_chat_labels(self, session: Session, chat: McpChatSession) -> None:

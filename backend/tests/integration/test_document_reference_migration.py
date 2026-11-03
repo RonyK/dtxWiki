@@ -14,6 +14,7 @@ from backend.models.document_reference import (
     ContextPublishedCitation,
 )
 from backend.scripts.seed_dev import seed_default_workspace
+from backend.services.ops.alembic_migration_graph import schema_release_head
 from backend.tests.integration.test_release_schema_migration import _config
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
@@ -47,7 +48,7 @@ def test_reference_schema_round_trip_preserves_sources_without_backfill(
     # traversal. XOR, duplicate and workspace isolation share its seeded rows.
     if dialect == "sqlite":
         url = shared_templates(tmp_path_factory).clone(
-            "head", tmp_path / "references.sqlite"
+            "rev_efcbcf724889", tmp_path / "references.sqlite"
         )
     else:
         url = os.getenv("DTXWIKI_POSTGRES_MIGRATION_TEST_DATABASE_URL")
@@ -64,10 +65,16 @@ def test_reference_schema_round_trip_preserves_sources_without_backfill(
     try:
         if dialect == "postgresql":
             assert not (set(sa.inspect(engine).get_table_names()) - {"alembic_version"})
-            command.upgrade(config, PARENT)
-        else:
-            command.downgrade(config, PARENT)
+        # Start on this revision's own ancestry. Downgrading a merged head
+        # would leave the independent Chats index branch stamped alongside
+        # PARENT, correctly triggering the production multiple-head guard.
+        command.upgrade(config, PARENT)
         migrated = True
+        assert TABLES.isdisjoint(sa.inspect(engine).get_table_names())
+        with engine.connect() as connection:
+            assert set(
+                connection.scalars(sa.text("SELECT version_num FROM alembic_version"))
+            ) == {PARENT}
         with Session(engine) as session, session.begin():
             workspace = seed_default_workspace(session)
             foreign = seed_default_workspace(session, slug="foreign-references")
@@ -204,6 +211,15 @@ def test_reference_schema_round_trip_preserves_sources_without_backfill(
                 assert (
                     session.scalar(sa.select(sa.func.count()).select_from(model)) == 0
                 )
+        # The same traversal must still converge with the parallel index
+        # branch to the declared single head without rewriting source bytes.
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            assert set(
+                connection.scalars(sa.text("SELECT version_num FROM alembic_version"))
+            ) == {schema_release_head("0.2.0")}
+        with Session(engine) as session:
+            assert session.get(ContextPageVersion, version_id).body_md == "# Source\n"
     finally:
         try:
             if dialect == "postgresql" and migrated:
