@@ -1,10 +1,10 @@
 import os
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import event, func, select, update
+from sqlalchemy import event, func, insert, select, update
 
 from backend.mcp.conversation import resolve_conversation_token
 from backend.models.agent import AgentPage
@@ -629,6 +629,26 @@ def test_artifact_link_sql_visibility_matches_canonical_actor_policy(session_fac
         session.add(context_version)
         session.flush()
         visible_context.latest_draft_version_id = context_version.id
+        blob_id, inspection_id = _seed_media_blob(session, workspace.id, salt="b")
+        visible_media = ContextMediaAsset(
+            workspace_id=workspace.id,
+            id=uuid4(),
+            page_id=visible_context.id,
+            created_for_version_id=context_version.id,
+            blob_id=blob_id,
+            blob_epoch=1,
+            inspection_id=inspection_id,
+            kind="image",
+            original_filename="visible-diagram.png",
+            canonical_media_type="image/png",
+            logical_bytes=68,
+            policy_revision="context-mvp-v1",
+            association_state="active",
+            created_by_actor_kind="human",
+            created_by_actor_id="tester",
+        )
+        session.add(visible_media)
+        session.flush()
 
         call = _tool_call(
             client_id=client.id,
@@ -654,9 +674,10 @@ def test_artifact_link_sql_visibility_matches_canonical_actor_policy(session_fac
             (McpChatArtifactKind.LIBRARY_ITEM, visible_library.id),
             (McpChatArtifactKind.LIBRARY_ITEM, restricted_library.id),
             (McpChatArtifactKind.LIBRARY_ITEM, foreign_library.id),
+            (McpChatArtifactKind.CONTEXT_MEDIA_ASSET, visible_media.id),
         )
         for resource_kind, resource_id in linked:
-            service.link_artifact(
+            link = service.link_artifact(
                 session=session,
                 chat_session=chat,
                 tool_call=call,
@@ -664,6 +685,8 @@ def test_artifact_link_sql_visibility_matches_canonical_actor_policy(session_fac
                 resource_id=resource_id,
                 verb=McpChatArtifactVerb.REFERENCED,
             )
+            if resource_id == visible_media.id:
+                link.last_occurred_at = call.started_at + timedelta(seconds=1)
 
         editor_id = uuid4()
         editor = ActorContext(
@@ -698,10 +721,34 @@ def test_artifact_link_sql_visibility_matches_canonical_actor_policy(session_fac
             actor=owner,
         )
 
+    # Mixed resource kinds must stay bounded in a new session; the seeding
+    # session's identity map must not hide per-artifact or per-version reads.
+    chat_pages = []
+    statements = []
+
+    def record_statement(_conn, _cursor, statement, *_args):
+        statements.append(statement)
+
+    for actor in (editor, owner):
+        statements.clear()
+        with session_factory() as session:
+            engine = session.get_bind()
+            event.listen(engine, "before_cursor_execute", record_statement)
+            try:
+                chat_pages.append(
+                    service.list_chats(
+                        session=session, workspace_id=workspace.id, actor=actor
+                    )
+                )
+            finally:
+                event.remove(engine, "before_cursor_execute", record_statement)
+        assert len(statements) <= 12
+
     assert {item.resource_id for item in editor_page.items} == {
         visible_context.id,
         visible_agent.id,
         visible_library.id,
+        visible_media.id,
     }
     assert {item.resource_id for item in owner_page.items} == {
         visible_context.id,
@@ -709,11 +756,20 @@ def test_artifact_link_sql_visibility_matches_canonical_actor_policy(session_fac
         owner_agent.id,
         visible_library.id,
         restricted_library.id,
+        visible_media.id,
     }
     for page in (editor_page, owner_page):
         assert archived_context.id not in {item.resource_id for item in page.items}
         assert foreign_library.id not in {item.resource_id for item in page.items}
         assert page.next_cursor is None
+    for chat_page, artifact_page in zip(
+        chat_pages, (editor_page, owner_page), strict=True
+    ):
+        links = chat_page.items[0].linked_artifacts
+        assert visible_media.id in {link.resource_id for link in links}
+        assert {link.resource_id for link in links} <= {
+            link.resource_id for link in artifact_page.items
+        }
 
 
 def _seed_media_blob(session, workspace_id: UUID, *, salt: str) -> tuple[UUID, UUID]:
@@ -971,7 +1027,7 @@ def test_media_asset_link_sql_predicate_matches_python_gate(session_factory):
             foreign_editing_asset.id,
         )
         for resource_id in linked:
-            service.link_artifact(
+            link = service.link_artifact(
                 session=session,
                 chat_session=chat,
                 tool_call=call,
@@ -979,6 +1035,8 @@ def test_media_asset_link_sql_predicate_matches_python_gate(session_factory):
                 resource_id=resource_id,
                 verb=McpChatArtifactVerb.CREATED,
             )
+            if resource_id == foreign_editing_asset.id:
+                link.last_occurred_at = call.started_at + timedelta(seconds=1)
 
         # 1) End-to-end: the actual read path a gated reader hits.
         listed = service.list_artifact_links(
@@ -1016,10 +1074,41 @@ def test_media_asset_link_sql_predicate_matches_python_gate(session_factory):
         listed_titles = {item.resource_id: item.artifact_title for item in listed.items}
         listed_paths = {item.resource_id: item.navigation_path for item in listed.items}
 
+        # Discarding a private edit must not expose its upload. This transition
+        # independently catches a SQL/batch gate that recognizes only editing
+        # while the canonical Python policy also protects discarded content.
+        editing_chat = service.list_chats(
+            session=session, workspace_id=workspace.id, actor=reader
+        )
+        foreign_editing_version.version_status = "discarded"
+        session.flush()
+        discarded_sql_ids = set(
+            session.scalars(
+                select(McpChatArtifactLink.resource_id).where(
+                    McpChatArtifactLink.chat_session_id == chat.id,
+                    predicate,
+                )
+            )
+        )
+        discarded_python_ids = {
+            link.resource_id
+            for link in links
+            if service._artifact_payload(session, link, reader, workspace.id)
+            is not None
+        }
+        discarded_chat = service.list_chats(
+            session=session, workspace_id=workspace.id, actor=reader
+        )
+
     expected = {page_visible_asset.id, owned_editing_asset.id}
     assert listed_ids == expected
     assert sql_visible_ids == expected
     assert python_visible_ids == expected
+    assert discarded_sql_ids == discarded_python_ids == expected
+    assert discarded_chat == editing_chat
+    assert foreign_editing_asset.id not in {
+        link.resource_id for link in discarded_chat.items[0].linked_artifacts
+    }
     assert listed_titles[page_visible_asset.id] == "diagram.png"
     assert listed_paths[page_visible_asset.id] == (
         f"/workspaces/{visible_page.workspace_id}/context/pages/{visible_page.id}"
@@ -3464,71 +3553,169 @@ def test_the_list_card_does_not_name_a_page_the_reader_cannot_see(session_factor
     assert detail.subject is None
 
 
-def test_the_summary_lookup_does_not_load_every_call_in_the_chat(
-    session_factory, monkeypatch
-):
-    """`input_summary` holds the full arguments, `body_markdown` included, so
-    materializing them all to look at the first was megabytes per chat -- and
-    the list did it twice for every chat on the page."""
+def test_the_summary_lookup_does_not_load_every_call_in_the_chat(session_factory):
+    """Many chats and repeated reads must use bounded, scalar list queries.
+
+    Captured arguments and receipts can contain document-sized text; checking
+    the selected result columns catches loading them even for the first call.
+    """
 
     service = McpChatService()
-    loaded_all = []
-    original = McpChatService._tool_calls_for_chat
-
-    def _spy(self, session, chat):
-        rows = original(self, session, chat)
-        loaded_all.append(len(rows))
-        return rows
-
-    monkeypatch.setattr(McpChatService, "_tool_calls_for_chat", _spy)
-
+    base = datetime(2026, 8, 5, 7, 0, tzinfo=UTC)
     with session_factory.begin() as session:
         workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         client = session.scalar(
             select(MCPClient).where(MCPClient.workspace_id == workspace.id)
         )
+        page = ContextPage(
+            workspace_id=workspace.id,
+            slug="bounded-chat-summary",
+            title="Shared summary page",
+            page_type="overview",
+            lifecycle_status="published",
+        )
+        session.add(page)
+        session.flush()
+        version = ContextPageVersion(
+            workspace_id=workspace.id,
+            page_id=page.id,
+            version_no=1,
+            body_md="x" * 20_000,
+            content_hash="bounded-chat-summary-v1",
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id="tester",
+            version_status="published_snapshot",
+        )
+        session.add(version)
+        session.flush()
+        page.current_version_id = page.current_published_version_id = version.id
+        workspace_id = workspace.id
+        client_id = client.id
+        chats, calls, edges, links = [], [], [], []
+        for chat_index in range(5):
+            chat_id, mcp_session_id = uuid4(), uuid4()
+            chats.append(
+                dict(
+                    id=chat_id,
+                    workspace_id=workspace_id,
+                    client_id=client_id,
+                    mcp_session_id=str(mcp_session_id),
+                    started_at=base,
+                    last_activity_at=base + timedelta(seconds=chat_index),
+                    tool_call_count=5,
+                    write_count=0,
+                    error_count=0,
+                )
+            )
+            for call_index in range(5):
+                call_id = uuid4()
+                occurred_at = base + timedelta(seconds=call_index)
+                calls.append(
+                    dict(
+                        id=call_id,
+                        client_id=client_id,
+                        workspace_id=workspace_id,
+                        mcp_session_id=mcp_session_id,
+                        request_id=uuid4(),
+                        tool_name="read",
+                        input_summary={
+                            "target_type": "context_page",
+                            "target_id": str(page.id),
+                        },
+                        result_status="succeeded",
+                        started_at=occurred_at,
+                    )
+                )
+                edges.append(
+                    dict(
+                        id=uuid4(),
+                        workspace_id=workspace_id,
+                        chat_session_id=chat_id,
+                        mcp_tool_call_id=call_id,
+                        resource_kind="context_page",
+                        resource_id=page.id,
+                        verb="referenced",
+                        occurred_at=occurred_at,
+                    )
+                )
+            links.append(
+                dict(
+                    id=uuid4(),
+                    workspace_id=workspace_id,
+                    chat_session_id=chat_id,
+                    resource_kind="context_page",
+                    resource_id=page.id,
+                    verb="referenced",
+                    occurrence_count=5,
+                    last_mcp_tool_call_id=call_id,
+                )
+            )
+        session.flush()
+        session.execute(insert(McpChatSession), chats)
+        session.execute(insert(MCPToolCall), calls)
+        session.execute(insert(McpChatToolCallArtifact), edges)
+        session.execute(insert(McpChatArtifactLink), links)
         mcp_session_id = uuid4()
         for index in range(6):
             call = _tool_call(
-                client_id=client.id,
-                workspace_id=workspace.id,
+                client_id=client_id,
+                workspace_id=workspace_id,
                 mcp_session_id=mcp_session_id,
                 tool_name="write_draft",
                 request_id=uuid4(),
                 input_summary={"title": f"Call {index}", "body_markdown": "x" * 20_000},
             )
+            call.result_detail = {"preview": "x" * 20_000}
             session.add(call)
             session.flush()
             service.upsert_session_from_tool_call(
                 session=session,
-                workspace_id=workspace.id,
-                client_id=client.id,
+                workspace_id=workspace_id,
+                client_id=client_id,
                 mcp_session_id=str(mcp_session_id),
                 tool_call=call,
             )
-        session.flush()
 
-        viewer = ActorContext(
-            actor_kind="human",
-            actor_id="viewer",
-            token_kind="session",
-            scopes=("read",),
-            workspace_id=workspace.id,
-            workspace_role="viewer",
-            role="viewer",
-        )
-        loaded_all.clear()
-        listed = service.list_chats(
-            session=session,
-            workspace_id=workspace.id,
-            actor=viewer,
-        )
+    viewer = ActorContext(
+        actor_kind="human",
+        actor_id="viewer",
+        token_kind="session",
+        scopes=("read",),
+        workspace_id=workspace_id,
+        workspace_role="viewer",
+        role="viewer",
+    )
+    statements = []
+    selected_columns = set()
 
-    assert listed.items
-    # The list card derives its title and summary from the chat's first call.
-    # Reaching that through the full materializer is the defect; the bounded
-    # single-row lookup is the fix.
-    assert loaded_all == [], f"list_chats materialized {loaded_all} tool calls"
+    def observe_query(_conn, _cursor, statement, _parameters, context, _many):
+        statements.append(statement)
+        if context.compiled is not None:
+            selected_columns.update(
+                entry.keyname for entry in context.compiled._result_columns
+            )
+
+    # A fresh session prevents seeded ORM instances from masking lazy reads.
+    with session_factory() as session:
+        engine = session.get_bind()
+        event.listen(engine, "before_cursor_execute", observe_query)
+        try:
+            listed = service.list_chats(
+                session=session,
+                workspace_id=workspace_id,
+                actor=viewer,
+                limit=100,
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", observe_query)
+
+    assert len(listed.items) == 6
+    assert {item.subject for item in listed.items} == {page.title, "Call 0"}
+    assert len(statements) <= 8
+    assert not selected_columns.intersection(
+        {"input_summary", "result_detail", "body_md", "body_markdown"}
+    )
 
 
 SECRET_REASON = "record why the Bluebird terms changed"
@@ -4305,7 +4492,7 @@ def test_actor_search_query_and_latency_benchmark_for_1000_chats(
 
     assert page.items == []
     assert page.next_cursor == "chat-search-v1:20"
-    assert statement_count <= 260
+    assert statement_count <= 8
     assert elapsed < 1.5
 
 

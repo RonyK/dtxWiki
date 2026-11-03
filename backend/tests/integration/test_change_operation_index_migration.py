@@ -8,6 +8,7 @@ from sqlalchemy import MetaData, Table, create_engine, inspect, select, text
 from sqlalchemy.orm import Session
 
 from backend.models.change import ChangeOperation, ChangeSet
+from backend.services.ops.alembic_migration_graph import schema_release_head
 from backend.tests.integration.test_release_schema_migration import _config
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
@@ -27,6 +28,10 @@ DELETION_COLUMNS = {
 }
 HOLD_COLUMN = "account_deletion_user_id"
 HOLD_INDEX = "ix_workspace_account_deletion_user_id"
+TRACE_INDEX_PARENT = "1d8f1c08ca36"
+TRACE_INDEX_REVISION = "b1d98889a4ad"
+TRACE_INDEX_NAME = "ix_mcp_tool_call_workspace_session_started"
+TRACE_INDEX_COLUMNS = ["workspace_id", "mcp_session_id", "started_at", "id"]
 
 
 @pytest.mark.parametrize(
@@ -243,6 +248,124 @@ def test_change_operation_index_round_trip_preserves_existing_rows(
             assert connection.scalar(
                 text("SELECT version_num FROM alembic_version")
             ) == (DELETION_REVISION)
+
+        # Reuse this dialect's traversal for the Chats lookup index. Calls
+        # from two conversations exercise the page-wide IN predicate; calls
+        # in one conversation also share a timestamp to retain the ID tie-break.
+        command.upgrade(config, TRACE_INDEX_PARENT)
+        assert TRACE_INDEX_NAME not in {
+            index["name"] for index in inspect(engine).get_indexes("mcp_tool_call")
+        }
+        clients = Table("mcp_client", MetaData(), autoload_with=engine)
+        calls = Table("mcp_tool_call", MetaData(), autoload_with=engine)
+        client_id = uuid4()
+        conversation_ids = [uuid4(), uuid4()]
+        database_workspace_id = workspace_id.hex if sqlite else workspace_id
+        with engine.begin() as connection:
+            connection.execute(
+                clients.insert().values(
+                    id=client_id.hex if sqlite else client_id,
+                    workspace_id=database_workspace_id,
+                    name="Chats index migration",
+                    client_type="generic",
+                    scopes=["read"],
+                    status="active",
+                    token_metadata={},
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            connection.execute(
+                calls.insert(),
+                [
+                    {
+                        "id": call_id.hex if sqlite else call_id,
+                        "workspace_id": database_workspace_id,
+                        "client_id": client_id.hex if sqlite else client_id,
+                        "mcp_session_id": (
+                            conversation_id.hex if sqlite else conversation_id
+                        ),
+                        "request_id": request_id.hex if sqlite else request_id,
+                        "schema_version": "llmwiki.mcp.v1",
+                        "tool_name": "read",
+                        "input_summary": {"target_type": "context_page"},
+                        "result_status": "succeeded",
+                        "warnings": [],
+                        "provider": "unknown",
+                        "model_id": "unknown",
+                        "params_summary": {},
+                        "client_self_reported": False,
+                        "started_at": now,
+                    }
+                    for conversation_id, call_id, request_id in (
+                        (conversation_ids[0], uuid4(), uuid4()),
+                        (conversation_ids[0], uuid4(), uuid4()),
+                        (conversation_ids[1], uuid4(), uuid4()),
+                    )
+                ],
+            )
+        trace_rows_query = select(calls).order_by(calls.c.id)
+        with engine.connect() as connection:
+            original_trace_rows = connection.execute(trace_rows_query).all()
+        assert len(original_trace_rows) == 3
+
+        for revision, index_expected in (
+            (TRACE_INDEX_REVISION, True),
+            (TRACE_INDEX_PARENT, False),
+            (TRACE_INDEX_REVISION, True),
+        ):
+            if index_expected:
+                command.upgrade(config, revision)
+            else:
+                command.downgrade(config, revision)
+            indexes = {
+                index["name"]: index
+                for index in inspect(engine).get_indexes("mcp_tool_call")
+            }
+            assert (TRACE_INDEX_NAME in indexes) is index_expected
+            if index_expected:
+                assert indexes[TRACE_INDEX_NAME]["column_names"] == TRACE_INDEX_COLUMNS
+                assert not indexes[TRACE_INDEX_NAME]["unique"]
+            with engine.connect() as connection:
+                assert connection.scalar(
+                    text("SELECT version_num FROM alembic_version")
+                ) == revision
+                assert connection.execute(trace_rows_query).all() == original_trace_rows
+                if sqlite and index_expected:
+                    plan = connection.execute(
+                        text(
+                            "EXPLAIN QUERY PLAN SELECT id, mcp_session_id, started_at "
+                            "FROM mcp_tool_call WHERE workspace_id = :workspace_id "
+                            "AND mcp_session_id IN (:first_session, :second_session) "
+                            "ORDER BY started_at, id"
+                        ),
+                        {
+                            "workspace_id": database_workspace_id,
+                            "first_session": conversation_ids[0].hex,
+                            "second_session": conversation_ids[1].hex,
+                        },
+                    ).all()
+                    details = " ".join(str(row[-1]) for row in plan)
+                    assert TRACE_INDEX_NAME in details, plan
+                    assert "workspace_id=? AND mcp_session_id=?" in details, plan
+
+        # This branch and the independently appended document-reference chain
+        # must converge without reparenting either revision or losing traces.
+        # Reuse the same database rather than adding a second parent traversal.
+        command.upgrade(config, "head")
+        assert {
+            "co_access_pair",
+            "context_document_reference",
+            "context_published_citation",
+        } <= set(inspect(engine).get_table_names())
+        assert TRACE_INDEX_NAME in {
+            index["name"] for index in inspect(engine).get_indexes("mcp_tool_call")
+        }
+        with engine.connect() as connection:
+            assert connection.execute(trace_rows_query).all() == original_trace_rows
+            assert connection.scalar(
+                text("SELECT version_num FROM alembic_version")
+            ) == schema_release_head("0.2.0")
     finally:
         try:
             if dialect == "postgresql" and migrated:
