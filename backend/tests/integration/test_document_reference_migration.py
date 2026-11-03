@@ -17,7 +17,7 @@ from backend.scripts.seed_dev import seed_default_workspace
 from backend.tests.integration.test_release_schema_migration import _config
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
-PARENT = "1d8f1c08ca36"
+PARENT = "7c2bde1490af"
 REVISION = "c58f1d2e890a"
 TABLES = {
     "context_document_reference",
@@ -191,6 +191,8 @@ def test_reference_schema_round_trip_preserves_sources_without_backfill(
             )
         command.downgrade(config, PARENT)
         assert TABLES.isdisjoint(sa.inspect(engine).get_table_names())
+        # Rolling back references must retain the preceding co-access schema.
+        assert "co_access_pair" in sa.inspect(engine).get_table_names()
         command.upgrade(config, REVISION)
         with Session(engine) as session:
             assert session.get(ContextPageVersion, version_id).body_md == "# Source\n"

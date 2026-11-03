@@ -671,8 +671,9 @@ head가 하나여야 하며, 모든 신규 경로가 고정된 core revision
 `efcbcf724889`를 거쳐야 합니다. 패키지 검증기는 이 그래프와 고정 파일의 해시를
 함께 확인합니다.
 
-현재 0.2.0 head는 `7c2bde1490af`입니다. `1d8f1c08ca36`에서 이어지는
-Graph co-access migration이며, 집계와 cursor schema 및 backfill을 함께 적용합니다.
+현재 0.2.0 head는 `c58f1d2e890a`입니다. Graph co-access revision
+`7c2bde1490af` 뒤에 이어지며, 버전별 참고문헌과 발행 citation projection schema를
+추가합니다.
 
 ### Migration 테스트 수 제한
 

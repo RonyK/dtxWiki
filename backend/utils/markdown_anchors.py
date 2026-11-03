@@ -1,7 +1,7 @@
 """Conservative reader heading-anchor inspection on the common Markdown parse.
 
-The reader applies GitHub-style heading slugs. HTML/math/custom nodes may
-supply additional IDs, so an unknown representation is never reported missing.
+The reader applies GitHub-style heading slugs. HTML/footnote/math/custom nodes
+may supply additional IDs, so unknown representations are never reported missing.
 """
 
 import unicodedata
@@ -17,7 +17,11 @@ def markdown_fragment_statuses(body: str, fragments) -> dict[str, bool | None]:
     anchors, used = set(), set()
     uncertain = False
     for index, token in enumerate(tokens):
-        if token.type in {"html_inline", "html_block"}:
+        if token.type in {"html_inline", "html_block"} or token.type.startswith(
+            "footnote_"
+        ):
+            # The reader generates footnote IDs from labels, while this
+            # parser's footnote renderer uses a different naming scheme.
             uncertain = True
         if token.type != "heading_open":
             continue
@@ -31,7 +35,10 @@ def markdown_fragment_statuses(body: str, fragments) -> dict[str, bool | None]:
             if child.type in {"text", "code_inline"}
         )
         if (
-            any(child.type == "html_inline" for child in inline.children or ())
+            any(
+                child.type in {"html_inline", "footnote_ref"}
+                for child in inline.children or ()
+            )
             or any(value in text for value in ("$", "@cite{", "[[", "[^"))
             or any(
                 ord(char) > 0xFFFF or unicodedata.category(char) in {"Cf", "No"}

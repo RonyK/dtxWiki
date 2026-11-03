@@ -75,21 +75,29 @@ def _sole_editing_titles(session, workspace_id, pages, visible_versions):
     using its page metadata. Even a discarded or foreign private sibling
     invalidates that proof; inherited and published rows never use it.
     """
+    candidates = {
+        version_id: page_id
+        for page_id, version_id in visible_versions.items()
+        if getattr(pages[page_id], "current_published_version_id", None) is None
+        and getattr(pages[page_id], "current_version_id", None) == version_id
+    }
     roots = {}
-    for page_id, version_id in visible_versions.items():
-        page = pages[page_id]
-        current = getattr(page, "current_version", None)
-        if (
-            getattr(page, "current_published_version_id", None) is None
-            and getattr(page, "current_version_id", None) == version_id
-            and current is not None
-            and current.id == version_id
-            and current.page_id == page_id
-            and current.workspace_id == workspace_id
-            and current.version_status == "editing"
-            and current.parent_version_id is None
-        ):
-            roots[version_id] = page_id
+    version_ids = list(candidates)
+    for start in range(0, len(version_ids), 400):
+        rows = session.execute(
+            select_in_workspace(
+                ContextPageVersion,
+                workspace_id=workspace_id,
+                conditions=(
+                    ContextPageVersion.id.in_(version_ids[start : start + 400]),
+                    ContextPageVersion.version_status == "editing",
+                    ContextPageVersion.parent_version_id.is_(None),
+                ),
+            ).with_only_columns(ContextPageVersion.id, ContextPageVersion.page_id)
+        )
+        for version_id, page_id in rows:
+            if candidates.get(version_id) == page_id:
+                roots[version_id] = page_id
     page_ids = list(roots.values())
     counts = {}
     for start in range(0, len(page_ids), 400):
@@ -124,10 +132,19 @@ def context_reference_titles(
     """
     titles = {}
     if not public:
-        titles = {
-            **_sole_editing_titles(session, workspace_id, pages, visible_versions),
-            **_metadata_titles(session, workspace_id, visible_versions),
-        }
+        titles = _metadata_titles(session, workspace_id, visible_versions)
+        titles.update(
+            _sole_editing_titles(
+                session,
+                workspace_id,
+                pages,
+                {
+                    page_id: version_id
+                    for page_id, version_id in visible_versions.items()
+                    if version_id not in titles
+                },
+            )
+        )
     missing = [value for value in visible_versions.values() if value not in titles]
     verified = set()
     for start in range(0, len(missing), 400):

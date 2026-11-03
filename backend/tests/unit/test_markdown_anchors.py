@@ -15,3 +15,15 @@ def test_heading_fragments_keep_duplicate_ids_and_ignore_fenced_headings():
         "section-1": True,
         "fenced": False,
     }
+    # Footnote IDs and footnote-bearing heading slugs depend on the reader's
+    # generated markup. This additional parser input covers that independent
+    # token path while keeping provable headings available in the same batch.
+    assert markdown_fragment_statuses(
+        "# Title\n\n## Section[^1]\n\n[^1]: Footnote text.",
+        {"title", "section", "user-content-fn-1", "user-content-fnref-1"},
+    ) == {
+        "title": True,
+        "section": None,
+        "user-content-fn-1": None,
+        "user-content-fnref-1": None,
+    }

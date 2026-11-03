@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from backend.context_media.domain import ContextMediaError
 from backend.domain.input_policy import InputPolicyError
 from backend.models.change import ChangeOperation, ChangeSet
-from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.context import ContextPage, ContextPageVersion, EdgeProjection
 from backend.models.review import ReviewItem
 from backend.models.workspace import Workspace
 from backend.repositories.workspace_scoped import (
@@ -26,6 +26,7 @@ from backend.services.audit_service import AuditService
 from backend.services.body_preparer import BodyInput, BodyPreparer, WriteContext
 from backend.services.context_version_copy import copy_context_version_references
 from backend.services.db_write_intent import acquire_write_intent
+from backend.services.graph_cache import try_lock_edge_projection_workspace
 from backend.services.lint import LintPolicy, LintRegistry
 from backend.services.mcp_write_idempotency import (
     execute_idempotent_write,
@@ -120,6 +121,9 @@ class LintFixWriter:
             lint_registry=self.registry,
             context_media_repository_factory=self.context_media_repository_factory,
         )
+        # Take media intent before the idempotency claim can acquire a
+        # Workspace FK lock and invert workspace deletion's intent-first order.
+        service._lock_context_media_usage_intent(session, workspace_id)
         actor = {
             "actor_kind": "system",
             "actor_id": "lint-autofix",
@@ -128,22 +132,45 @@ class LintFixWriter:
         key = f"lint-fix:{run_id}:{page_id}:{base_version_id}"
 
         def execute() -> LintFixResult:
-            # Match Context publication lock order to avoid lock upgrades.
-            service._lock_context_media_usage_intent(session, workspace_id)
+            # Media intent stays first for workspace deletion. Maintenance
+            # refuses contention before it could wait across an ordinary
+            # writer's Page -> projection -> Workspace lock order.
+            try_lock_edge_projection_workspace(session, workspace_id)
+            # Publication also marks incoming dependent Pages stale. The
+            # projection guard keeps that dependency set stable while these
+            # NOWAIT locks prevent implicit updates from waiting on a writer.
+            dependents = select_in_workspace(
+                EdgeProjection,
+                workspace_id=workspace_id,
+                conditions=(
+                    EdgeProjection.source_kind == "context_page",
+                    EdgeProjection.target_kind == "context_page",
+                    EdgeProjection.target_id == page_id,
+                ),
+            ).with_only_columns(EdgeProjection.source_id)
+            session.scalars(
+                select_in_workspace(
+                    ContextPage,
+                    workspace_id=workspace_id,
+                    conditions=(
+                        or_(ContextPage.id == page_id, ContextPage.id.in_(dependents)),
+                    ),
+                )
+                .with_only_columns(ContextPage.id)
+                .order_by(ContextPage.id)
+                .with_for_update(nowait=True)
+            ).all()
+            workspace = session.scalar(
+                select(Workspace)
+                .where(Workspace.id == workspace_id)
+                .execution_options(populate_existing=True)
+            )
             page = session.scalar(
                 select_in_workspace(
                     ContextPage,
                     workspace_id=workspace_id,
                     conditions=(ContextPage.id == page_id,),
-                )
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-            workspace = session.scalar(
-                select(Workspace)
-                .where(Workspace.id == workspace_id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
+                ).execution_options(populate_existing=True)
             )
             if page is None or workspace is None or page.lifecycle_status == "archived":
                 return LintFixResult(state="skipped")

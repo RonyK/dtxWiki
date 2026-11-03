@@ -131,6 +131,8 @@ _NON_EDGE_RELATION_SOURCES = {
     "context_media_asset.workspace_id->context_page_version.workspace_id",
     "context_media_usage.page_id->context_page_version.page_id",
     "context_media_usage.page_version_id->context_page_version.id",
+    # The publication completion marker owns no document relationship.
+    "context_citation_publication.version_id->context_page_version.id",
     "content_chunk.document_kind+document_id",
     "edge_projection.source_kind+source_id",
     "edge_projection.target_kind+target_id",
@@ -249,6 +251,15 @@ _NON_EDGE_RELATION_SOURCES = {
     "library_semantic_overlay.workspace_id->library_artifact.workspace_id",
     "library_item.workspace_id->library_item_version.workspace_id",
     "context_media_usage.workspace_id->context_page_version.workspace_id",
+    "context_document_reference.workspace_id->context_page_version.workspace_id",
+    "context_document_reference.workspace_id->context_page.workspace_id",
+    "context_document_reference.workspace_id->library_item.workspace_id",
+    "context_document_reference.workspace_id->agent_page.workspace_id",
+    "context_published_citation.workspace_id->context_page_version.workspace_id",
+    "context_published_citation.workspace_id->context_page.workspace_id",
+    "context_published_citation.workspace_id->library_item.workspace_id",
+    "context_published_citation.workspace_id->agent_page.workspace_id",
+    "context_citation_publication.workspace_id->context_page_version.workspace_id",
     "mcp_tool_call.workspace_id->audit_event.workspace_id",
 }
 

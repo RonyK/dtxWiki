@@ -33,6 +33,7 @@ from backend.schemas.lint import (
 )
 from backend.services.audit_service import AuditService
 from backend.services.delegated_tasks import produce_folder_summary_tasks
+from backend.services.graph_cache import try_lock_edge_projection_workspace
 from backend.services.job_queue import JobQueueService
 from backend.services.lint import (
     LintContext,
@@ -580,6 +581,12 @@ class LintService:
         actor_kind: str = "system",
         actor_id: str = "lint-worker",
     ) -> LintRunRead:
+        # A periodic run inserts its LintRun below. Acquire media intent before
+        # that insert's Workspace FK lock, preserving deletion's lock order.
+        if self.context_media_repository_factory is not None:
+            self.context_media_repository_factory(session).lock_workspace_for_usage(
+                workspace_id
+            )
         lint_run = session.get(LintRun, run_id) if run_id is not None else None
         if run_id is not None and lint_run is None:
             raise ReadNotFoundError("lint run not found")
@@ -644,22 +651,20 @@ class LintService:
             for rule_id in module.fixable_rule_ids
         }
         if fixable_rules and observed_heads:
-            # The batch retains its first fix's Workspace lock. Acquire every
-            # Page first, in ordinary writer order, before findings or repairs
-            # can lock projections belonging to a later page in this run.
-            if self.context_media_repository_factory is not None:
-                self.context_media_repository_factory(session).lock_workspace_for_usage(
-                    workspace_id
-                )
+            # Maintenance never waits while retaining locks ordinary writers
+            # acquire in another order. A busy projection, policy row or Page
+            # aborts the whole run so its owner can retry after rollback.
+            try_lock_edge_projection_workspace(session, workspace_id)
+            # Include dependencies published since observed_heads was read;
+            # a repair can update their stale-candidate state implicitly.
             session.scalars(
                 select_in_workspace(
                     ContextPage,
                     workspace_id=workspace_id,
-                    conditions=(ContextPage.id.in_(observed_heads),),
                 )
                 .with_only_columns(ContextPage.id)
                 .order_by(ContextPage.id)
-                .with_for_update()
+                .with_for_update(nowait=True)
             ).all()
         result = self.run_lint(
             session,
