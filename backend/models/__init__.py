@@ -53,6 +53,11 @@ from backend.models.context_media import (
 )
 from backend.models.coverage import KnowledgeCoverageGap
 from backend.models.delegated_task import ClientDelegatedTask
+from backend.models.document_reference import (
+    ContextCitationPublication,
+    ContextDocumentReference,
+    ContextPublishedCitation,
+)
 from backend.models.favorite import UserFavorite
 from backend.models.feedback import FeedbackItem
 from backend.models.graph import (
@@ -186,6 +191,9 @@ __all__ = [
     "AskTurn",
     "AskTurnCitation",
     "ContextCitation",
+    "ContextCitationPublication",
+    "ContextDocumentReference",
+    "ContextPublishedCitation",
     "ContextClaim",
     "ContextIngressProposal",
     "ProposalSourceItem",

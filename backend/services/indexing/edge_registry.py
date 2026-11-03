@@ -782,6 +782,18 @@ EDGE_BEARING_RELATIONS: dict[str, tuple[str, ...]] = {
         "context_citation.library_artifact_id->library_artifact.id",
         "context_citation.library_item_version_id->library_item_version.id",
     ),
+    "document_reference": (
+        "context_document_reference.owner_version_id->context_page_version.id",
+        "context_document_reference.context_page_id->context_page.id",
+        "context_document_reference.library_item_id->library_item.id",
+        "context_document_reference.agent_page_id->agent_page.id",
+    ),
+    "published_document_citation": (
+        "context_published_citation.source_version_id->context_page_version.id",
+        "context_published_citation.context_page_id->context_page.id",
+        "context_published_citation.library_item_id->library_item.id",
+        "context_published_citation.agent_page_id->agent_page.id",
+    ),
     "version_parent": (
         "context_page_version.parent_version_id->context_page_version.id",
         "library_item_version.previous_version_id->library_item_version.id",
@@ -879,6 +891,16 @@ DEFERRED_EDGE_RELATIONS: dict[str, str] = {
 }
 DEFERRED_EDGE_RELATIONS.update(
     {
+        "document_reference": (
+            "Version-owned bibliography storage only. Authored references must "
+            "not project draft metadata as current graph edges; publication "
+            "must first resolve them into final citation rows."
+        ),
+        "published_document_citation": (
+            "Storage foundation awaiting the publication writer and a "
+            "current-published-head extractor. ContextCitation remains the "
+            "active citation graph source until that cutover is implemented."
+        ),
         "graph_observation": (
             "Append-only temporal evidence queried directly by GraphQueryService; "
             "it must never be folded into the rebuildable current projection."

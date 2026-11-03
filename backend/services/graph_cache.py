@@ -7,6 +7,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from backend.models.workspace import Workspace
+from backend.services.db_write_intent import acquire_write_intent
 
 
 def _projection_lock_key(workspace_id: UUID) -> int:
@@ -32,6 +33,30 @@ def try_edge_projection_reader(session: Session, workspace_id: UUID) -> None:
         )
     ):
         raise BlockingIOError("edge maintenance in progress; retry derived co-access")
+
+
+def try_lock_edge_projection_workspace(session: Session, workspace_id: UUID) -> None:
+    """Acquire maintenance guards without waiting behind page-first writers.
+
+    Callers must also acquire their page locks with NOWAIT. A busy guard or
+    page aborts the caller's entire transaction so the worker can retry it;
+    retaining partial repairs or waiting while holding these guards can
+    deadlock ordinary page writers, sharing, or projection rebuilds.
+    """
+    acquire_write_intent(session)
+    with session.no_autoflush:
+        if session.get_bind().dialect.name == "postgresql" and not session.scalar(
+            select(func.pg_try_advisory_xact_lock(_projection_lock_key(workspace_id)))
+        ):
+            raise BlockingIOError("edge projection busy; retry maintenance transaction")
+        workspace = session.scalar(
+            select(Workspace.id)
+            .where(Workspace.id == workspace_id)
+            # NO KEY UPDATE protects policy fields while permitting FK checks.
+            .with_for_update(key_share=True, nowait=True)
+        )
+    if workspace is None:
+        raise ValueError("workspace not found while locking edge projection")
 
 
 def lock_edge_projection_workspace(

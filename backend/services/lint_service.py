@@ -33,6 +33,7 @@ from backend.schemas.lint import (
 )
 from backend.services.audit_service import AuditService
 from backend.services.delegated_tasks import produce_folder_summary_tasks
+from backend.services.graph_cache import try_lock_edge_projection_workspace
 from backend.services.job_queue import JobQueueService
 from backend.services.lint import (
     LintContext,
@@ -580,6 +581,12 @@ class LintService:
         actor_kind: str = "system",
         actor_id: str = "lint-worker",
     ) -> LintRunRead:
+        # A periodic run inserts its LintRun below. Acquire media intent before
+        # that insert's Workspace FK lock, preserving deletion's lock order.
+        if self.context_media_repository_factory is not None:
+            self.context_media_repository_factory(session).lock_workspace_for_usage(
+                workspace_id
+            )
         lint_run = session.get(LintRun, run_id) if run_id is not None else None
         if run_id is not None and lint_run is None:
             raise ReadNotFoundError("lint run not found")
@@ -636,6 +643,29 @@ class LintService:
                 )
             )
         }
+        fix_policy = LintPolicy(workspace)
+        fixable_rules = {
+            rule_id
+            for module in self.lint_registry.fixers_for_maintenance(fix_policy)
+            if module.maintenance_role == "trigger"
+            for rule_id in module.fixable_rule_ids
+        }
+        if fixable_rules and observed_heads:
+            # Maintenance never waits while retaining locks ordinary writers
+            # acquire in another order. A busy projection, policy row or Page
+            # aborts the whole run so its owner can retry after rollback.
+            try_lock_edge_projection_workspace(session, workspace_id)
+            # Include dependencies published since observed_heads was read;
+            # a repair can update their stale-candidate state implicitly.
+            session.scalars(
+                select_in_workspace(
+                    ContextPage,
+                    workspace_id=workspace_id,
+                )
+                .with_only_columns(ContextPage.id)
+                .order_by(ContextPage.id)
+                .with_for_update(nowait=True)
+            ).all()
         result = self.run_lint(
             session,
             workspace_id,
@@ -646,13 +676,6 @@ class LintService:
             run=lint_run,
             actor=self._system_run_actor(workspace_id),
         )
-        fix_policy = LintPolicy(workspace)
-        fixable_rules = {
-            rule_id
-            for module in self.lint_registry.fixers_for_maintenance(fix_policy)
-            if module.maintenance_role == "trigger"
-            for rule_id in module.fixable_rule_ids
-        }
         if fixable_rules and observed_heads:
             from backend.services.lint_fix_writer import LintFixWriter
 

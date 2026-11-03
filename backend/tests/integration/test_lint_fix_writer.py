@@ -3,7 +3,7 @@
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
 
 from backend.models.audit import AuditEvent
 from backend.models.change import ChangeOperation, ChangeSet
@@ -136,9 +136,31 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
         )
         session.add(citation)
     with page_service.session_factory.begin() as session:
-        run = LintService(lint_registry=registry).execute_queued_run(
-            session, workspace_id=workspace_id, run_id=None, trigger_type="manual"
-        )
+        locks = []
+
+        def capture_lock(execute_state):
+            statement = execute_state.statement
+            lock = getattr(statement, "_for_update_arg", None)
+            columns = getattr(statement, "column_descriptions", ())
+            if lock is not None and columns:
+                entity = columns[0].get("entity")
+                if entity in (ContextPage, Workspace):
+                    locks.append((entity, lock.read, lock.key_share, lock.nowait))
+
+        event.listen(session, "do_orm_execute", capture_lock)
+        try:
+            run = LintService(lint_registry=registry).execute_queued_run(
+                session, workspace_id=workspace_id, run_id=None, trigger_type="manual"
+            )
+        finally:
+            event.remove(session, "do_orm_execute", capture_lock)
+        # Both maintenance locks refuse contention. NO KEY UPDATE permits
+        # ordinary writers' Workspace FK checks before lint tries the Page.
+        assert locks[:2] == [
+            (Workspace, False, True, True),
+            (ContextPage, False, False, True),
+        ]
+        assert all(not read for entity, read, _, _ in locks if entity is Workspace)
         run_id = run.id
     with page_service.session_factory() as session:
         page = session.get(ContextPage, source.id)
@@ -229,14 +251,24 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
         # Check a fresh request as well as the completed receipt above: mocked
         # planning cannot prove that its durable idempotency claim is absent.
         no_change_run_id = uuid4()
-        no_change = writer.fix_page(
-            session,
-            workspace_id=workspace_id,
-            run_id=no_change_run_id,
-            page_id=source.id,
-            base_version_id=fixed_id,
-            base_content_hash=fixed.content_hash,
-        )
+        locks.clear()
+        event.listen(session, "do_orm_execute", capture_lock)
+        try:
+            no_change = writer.fix_page(
+                session,
+                workspace_id=workspace_id,
+                run_id=no_change_run_id,
+                page_id=source.id,
+                base_version_id=fixed_id,
+                base_content_hash=fixed.content_hash,
+            )
+        finally:
+            event.remove(session, "do_orm_execute", capture_lock)
+        # Direct repairs need the same order without a queued batch pre-lock.
+        assert locks[:2] == [
+            (Workspace, False, True, True),
+            (ContextPage, False, False, True),
+        ]
         assert no_change.state == "skipped"
         assert (
             session.scalar(
