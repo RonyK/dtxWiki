@@ -432,10 +432,12 @@ Workspace의 일반 `updated_at`을 바꾸지 않습니다.
 읽기 집계는 원본 trace를 flush한 뒤 savepoint에서 새 열람 한 건만 처리합니다.
 Cursor 이전 시각의 지연 열람이나 미처리 backlog는 요청 안에서 재생하지 않고,
 원본 기록을 보존한 채 repair job으로 넘겨 worker가 재생·복구합니다. maintenance
-충돌이나 집계 오류도 같은 방식으로 파생 집계를 복구합니다. Reindex는 저장된 원본
-열람으로 pair counter와 대화 cursor를 한 번 재구축한 뒤 전체 edge projection을
-한 번 반영합니다. 누적 지원 횟수는 저장 시 감쇠하지 않으며, 표시 순위와 중요도
-계산에서 각각 정한 포화 함수를 적용합니다.
+충돌이나 집계 오류도 같은 방식으로 파생 집계를 복구합니다. Reindex는 처음 잠근
+대화 집합에 속한 동일한 원본 스트림으로 pair counter와 cursor·ordinal을 재구축한
+뒤 전체 edge projection을 한 번 반영합니다. 잠금 집합 확정 후 생긴 대화는 이
+집계에서 제외하며, 보존된 원본을 일반 열람·repair 경로에서 처리합니다. 대화별
+재처리도 한 번 가져온 원본으로 변경 전후를 계산합니다. 누적 지원 횟수는 저장 시
+감쇠하지 않으며, 표시 순위와 중요도 계산에서 각각 정한 포화 함수를 적용합니다.
 
 현재 schema head는 release manifest에서 읽습니다. 독립 migration을 통합할 때는
 원본 revision을 유지하고 merge revision으로 연결한 뒤 schema·model 일치를 검사합니다.

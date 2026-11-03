@@ -450,3 +450,77 @@ def test_view_trace_updates_lifetime_pairs_atomically_and_repairs_late_reads(
             )
             == completed_repairs + 2
         )
+
+        # Reuse this recovery trajectory to pin the rebuild cohort boundary.
+        # Insert a new chat after the lock set is captured but before its source
+        # query. Its first view is processed; the second persists for repair.
+        # Neither can contribute to this rebuild, even if that query sees them.
+        session.get(Workspace, workspace_id).usage_relation_signals_enabled = True
+        session.flush()
+        raced_left, raced_right = sorted((uuid4(), uuid4()))
+        source_rows = co_access.co_read_rows
+        late_chat_id = None
+
+        def source_with_new_chat(*args, **kwargs):
+            nonlocal late_chat_id
+            if late_chat_id is None:
+                calls = 0
+
+                def defer_second_view(*read_args, **read_kwargs):
+                    nonlocal calls
+                    calls += 1
+                    if calls == 2:
+                        raise co_access.CoAccessRepairRequired("maintenance owns graph")
+                    return record_read(*read_args, **read_kwargs)
+
+                with monkeypatch.context() as new_chat_capture:
+                    new_chat_capture.setattr(
+                        co_access, "record_co_access_read", defer_second_view
+                    )
+                    _client, late_chat = _read_pair(
+                        session,
+                        workspace_id,
+                        raced_left,
+                        raced_right,
+                        at=now + timedelta(days=4),
+                    )
+                late_chat_id = late_chat.id
+            return source_rows(*args, **kwargs)
+
+        with monkeypatch.context() as concurrent_rebuild:
+            concurrent_rebuild.setattr(co_access, "co_read_rows", source_with_new_chat)
+            rebuild_co_access_pairs(session, workspace_id)
+
+        def raced_pair():
+            return session.scalar(
+                select(CoAccessPair)
+                .where(
+                    CoAccessPair.source_id == raced_left,
+                    CoAccessPair.target_id == raced_right,
+                )
+                .execution_options(populate_existing=True)
+            )
+
+        assert late_chat_id is not None
+        assert raced_pair() is None
+        assert session.execute(
+            select(
+                McpChatToolCallArtifact.co_access_segment,
+                McpChatToolCallArtifact.co_access_position,
+            )
+            .where(McpChatToolCallArtifact.chat_session_id == late_chat_id)
+            .order_by(McpChatToolCallArtifact.occurred_at)
+        ).all() == [(0, 0), (None, None)]
+        repair_pending()
+        assert raced_pair().support_session_count == 1
+        assert pair().support_session_count == 4
+        assert (
+            session.scalar(
+                select(EdgeProjection.id).where(
+                    EdgeProjection.edge_kind == "co_access",
+                    EdgeProjection.source_id == raced_left,
+                    EdgeProjection.target_id == raced_right,
+                )
+            )
+            is None
+        )

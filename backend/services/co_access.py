@@ -92,6 +92,27 @@ def _read(row):
     )
 
 
+def _annotate_locked_reads(rows, chats):
+    """Yield only evidence annotated for the captured, locked conversation set.
+
+    A workspace lock does not prevent a new conversation's first view. Its
+    rows may appear in a later source snapshot, so never consume an unlocked
+    conversation for either cursor state or aggregate support.
+    """
+    states = {}
+    for row in rows:
+        if row.chat_session_id not in chats:
+            continue
+        read = _read(row)
+        state, _, row.co_access_segment, row.co_access_position = advance_co_read_state(
+            states.get(row.chat_session_id), read
+        )
+        states[row.chat_session_id] = state
+        yield read
+    for chat_id, chat in chats.items():
+        chat.co_access_state = states.get(chat_id)
+
+
 def _has_other_pending_read(session, workspace_id, chat_id, row, *, after_key=None):
     return (
         session.scalar(
@@ -214,33 +235,29 @@ def _recount_pair(session, workspace_id, key):
 
 def _replay_conversation(session, workspace_id, chat):
     """Rebuild only a cold/late conversation, then repair its affected pairs."""
+    source = co_read_rows(session, workspace_id, chat_session_id=chat.id)
+    try:
+        rows = list(source)
+    finally:
+        source.close()
     before = {
         (p.left, p.right): (p.first_pair_at, p.last_pair_at)
         for p in co_access_pairs(
-            co_read_source(
-                session,
-                workspace_id,
-                chat_session_id=chat.id,
-                conditions=(McpChatToolCallArtifact.co_access_segment.is_not(None),),
-            )
+            _read(row) for row in rows if row.co_access_segment is not None
         )
     }
-    rows = list(co_read_rows(session, workspace_id, chat_session_id=chat.id))
-    after = {
-        (p.left, p.right): (p.first_pair_at, p.last_pair_at)
-        for p in co_access_pairs(_read(row) for row in rows)
-    }
-    keys = {
-        key for key in before.keys() | after.keys() if before.get(key) != after.get(key)
-    }
-    if keys:
-        try_edge_projection_reader(session, workspace_id)
-    state = None
-    for row in rows:
-        state, _, row.co_access_segment, row.co_access_position = advance_co_read_state(
-            state, _read(row)
-        )
-    chat.co_access_state = state
+    with session.no_autoflush:
+        after = {
+            (p.left, p.right): (p.first_pair_at, p.last_pair_at)
+            for p in co_access_pairs(_annotate_locked_reads(rows, {chat.id: chat}))
+        }
+        keys = {
+            key
+            for key in before.keys() | after.keys()
+            if before.get(key) != after.get(key)
+        }
+        if keys:
+            try_edge_projection_reader(session, workspace_id)
     session.flush()
     for key in sorted(keys):
         # Obtain/create the canonical pair lock before querying contributors.
@@ -510,7 +527,7 @@ def co_access_projection_needs_repair(session, workspace_id):
 def rebuild_co_access_pairs(
     session, workspace_id, *, usage_signals_enabled=True, sync_projection=True
 ):
-    """Explicit administrative recovery; normal reindex trusts these counters."""
+    """Rebuild counters and cursors from one source snapshot during reindex."""
     lock_co_access_workspace(session, workspace_id)
     chats = {
         chat.id: chat
@@ -522,24 +539,18 @@ def rebuild_co_access_pairs(
     }
     aggregates = {}
     rows = co_read_rows(session, workspace_id)
-    states = {}
     try:
-        for row in rows:
-            state, _, row.co_access_segment, row.co_access_position = (
-                advance_co_read_state(states.get(row.chat_session_id), _read(row))
+        for pair in co_access_pairs(_annotate_locked_reads(rows, chats)):
+            key = (pair.left, pair.right)
+            value = aggregates.setdefault(
+                key, [0, pair.first_pair_at, pair.last_pair_at]
             )
-            states[row.chat_session_id] = state
-        for chat_id, state in states.items():
-            chats[chat_id].co_access_state = state
+            value[0] += 1
+            value[1] = min(value[1], pair.first_pair_at)
+            value[2] = max(value[2], pair.last_pair_at)
         session.flush()
     finally:
         rows.close()
-    for pair in co_access_pairs(co_read_source(session, workspace_id)):
-        key = (pair.left, pair.right)
-        value = aggregates.setdefault(key, [0, pair.first_pair_at, pair.last_pair_at])
-        value[0] += 1
-        value[1] = min(value[1], pair.first_pair_at)
-        value[2] = max(value[2], pair.last_pair_at)
     session.execute(delete_in_workspace(CoAccessPair, workspace_id=workspace_id))
     for key, (count, first, last) in aggregates.items():
         session.add(
