@@ -234,6 +234,10 @@ describe("TreePickerDropdown", () => {
     await user.click(toggle);
     expect(toggle).toHaveFocus();
     expect(toggle).toHaveAttribute("aria-expanded", "true");
+    // Popup placement can move a child under the pointer while the clicked
+    // chevron retains native focus. Keyboard navigation still owns that row.
+    await user.hover(screen.getByText("Child", { exact: true }));
+    expect(toggle).toHaveFocus();
 
     await user.keyboard("{ArrowLeft}");
     expect(toggle).toHaveAttribute("aria-expanded", "false");

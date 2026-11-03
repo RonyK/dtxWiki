@@ -5705,11 +5705,17 @@ describe("PageEditor", () => {
     });
     const view = codeMirrorView();
     mockEditorGeometry(view);
+    // A selection on the first source line must not float over the ActionBar
+    // above this pane, even when there is space above it in the viewport.
+    vi.spyOn(view.dom.closest(".source-pane")!, "getBoundingClientRect").mockReturnValue(
+      domRect({ left: 80, top: 120, width: 640, height: 400 }),
+    );
     view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
 
     const inlineToolbar = await screen.findByRole("toolbar", {
       name: "Selection formatting toolbar",
     });
+    expect(Number.parseFloat(inlineToolbar.style.top)).toBeGreaterThanOrEqual(120);
     expect(within(inlineToolbar).getByRole("button", { name: "Bold" }))
       .toBeInTheDocument();
     expect(within(inlineToolbar).getByRole("button", { name: "Comment" }))

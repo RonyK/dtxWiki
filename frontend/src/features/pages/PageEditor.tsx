@@ -4380,6 +4380,12 @@ export function PageEditor({
       INLINE_TOOLBAR_MARGIN,
       viewportWidth - INLINE_TOOLBAR_ESTIMATED_WIDTH - INLINE_TOOLBAR_MARGIN,
     );
+    // Keep the floating selection controls inside the source pane so a
+    // first-line selection cannot cover the persistent ActionBar above it.
+    const minTop = Math.max(
+      INLINE_TOOLBAR_MARGIN,
+      sourcePane.getBoundingClientRect().top + INLINE_TOOLBAR_MARGIN,
+    );
     const selectionTop = selectionBox.top;
     const topAboveSelection =
       selectionTop - INLINE_TOOLBAR_ESTIMATED_HEIGHT - INLINE_TOOLBAR_MARGIN;
@@ -4391,9 +4397,9 @@ export function PageEditor({
     setInlineToolbar({
       visible: true,
       left: clamp(selectionBox.left, INLINE_TOOLBAR_MARGIN, maxLeft),
-      top: topAboveSelection >= INLINE_TOOLBAR_MARGIN
+      top: topAboveSelection >= minTop
         ? topAboveSelection
-        : clamp(topBelowSelection, INLINE_TOOLBAR_MARGIN, maxTop),
+        : clamp(topBelowSelection, minTop, Math.max(minTop, maxTop)),
     });
   }
 
