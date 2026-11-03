@@ -52,6 +52,8 @@
 - Inline `@cite{<internal document address>}` markers and authored references
   are combined at final publication. Readers show numbered citations and a
   separate References section. Published Graph relationships use document IDs.
+- The Local and Workspace Graph inspectors read retained citation versions,
+  artifacts and snippets for a selected relationship, subject to current access.
 - Existing version-specific evidence remains readable. No historical bodies
   or Chats candidates are backfilled. Refresh cached MCP catalogs after upgrading
   to tool contract revision 29; old claim-based cite requests are rejected.

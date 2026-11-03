@@ -310,6 +310,23 @@
       "expandSheet": "Expand details",
       "collapseSheet": "Collapse details"
     },
+    "citationEvidence": {
+      "title": "Retained citation evidence",
+      "currentPublished": "Exact evidence retained on the source document’s current published version.",
+      "sourceVersion": "Source version",
+      "loading": "Loading citation evidence…",
+      "failed": "Citation evidence is unavailable or could not be loaded.",
+      "retry": "Retry citation evidence",
+      "empty": "This relationship has no retained version or artifact evidence.",
+      "type": "Citation type",
+      "status": "Verification status",
+      "contextVersion": "Cited Context version",
+      "libraryVersion": "Cited Library version",
+      "artifact": "Cited artifact",
+      "location": "Original location",
+      "createdVia": "Recorded via",
+      "loadMore": "Load more evidence"
+    },
     "coAccess": {
       "sentence": "Read together in {{sessions}} over {{days}} (last {{last}})",
       "sessions_one": "{{count}} session",

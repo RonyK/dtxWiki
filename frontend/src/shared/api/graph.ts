@@ -20,6 +20,22 @@ export type GraphRange = "direct" | "neighbors" | "extended";
 export type GraphNodeFamily = GraphNode["family"];
 export type GraphLayer = GraphEdge["layer"];
 
+export type GraphCitationEvidenceItem = components["schemas"]["GraphCitationEvidenceItem"];
+export type GraphCitationEvidenceRequest = components["schemas"]["GraphCitationEvidenceRequest"];
+export type GraphCitationEvidencePayload = components["schemas"]["GraphCitationEvidencePayload"];
+
+export async function queryGraphCitationEvidence(
+  workspaceId: string,
+  request: GraphCitationEvidenceRequest,
+  signal?: AbortSignal,
+) {
+  const response = await apiRequest<{ data: GraphCitationEvidencePayload }>(
+    `/api/v1/workspaces/${workspaceId}/graph/citations/evidence/query`,
+    { method: "POST", body: JSON.stringify(request), signal },
+  );
+  return response.data;
+}
+
 export async function queryGraph(
   workspaceId: string,
   request: GraphQueryRequest,

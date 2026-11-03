@@ -26,6 +26,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { CitationEvidenceSection } from "./shared/CitationEvidenceSection";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
@@ -1377,6 +1378,9 @@ export function WorkspaceGraphScreen() {
                   expanding={selectedNode?.grain === "cluster" && expandingClusterId === selectedNode.id}
                   labels={nodeLabels}
                   node={selectedNode}
+                  nodes={scene.nodes}
+                  revision={scene.graph_revision}
+                  workspaceId={workspaceId}
                   onCenter={(id) => canvasRef.current?.centerOn(id)}
                   onExpand={(clusterId) => expandCluster(clusterId)}
                   onNavigate={handleDocumentNavigation}
@@ -2594,6 +2598,9 @@ function WorkspaceGraphDetails({
   expanding,
   labels,
   node,
+  nodes,
+  revision,
+  workspaceId,
   onCenter,
   onExpand,
   onNavigate,
@@ -2604,11 +2611,19 @@ function WorkspaceGraphDetails({
   expanding: boolean;
   labels: ReadonlyMap<string, string>;
   node: WorkspaceGraphNode | null;
+  nodes: WorkspaceGraphNode[];
+  revision: string;
+  workspaceId: string;
   onCenter?: (id: string) => void;
   onExpand: (clusterId: string) => void;
   onNavigate: WorkspaceGraphDocumentNavigation;
 }) {
   const { t } = useTranslation("graph");
+  const source = edge && ["citation_page", "citation_source", "citation_agent"].includes(edge.relation_kind)
+    ? nodes.find((item) => item.id === edge.source && item.grain === "document" && item.entity_kind === "context") : undefined;
+  const target = source && edge ? nodes.find((item) => item.id === edge.target && item.grain === "document") : undefined;
+  const pair = source?.grain === "document" && target?.grain === "document"
+    ? { source_page_id: source.entity_id, target_kind: target.entity_kind === "context" ? "context_page" as const : target.entity_kind === "library" ? "library_item" as const : "agent_page" as const, target_id: target.entity_id } : null;
   return (
     <section aria-labelledby="workspace-graph-details-title" className="workspace-graph-details">
       <h2 id="workspace-graph-details-title">{t("workspaceGraph.details.title")}</h2>
@@ -2637,6 +2652,7 @@ function WorkspaceGraphDetails({
           </dl>
         </>
       ) : null}
+      {pair ? <CitationEvidenceSection pair={pair} revision={revision} workspaceId={workspaceId} /> : null}
     </section>
   );
 }

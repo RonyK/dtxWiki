@@ -4,6 +4,8 @@ import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import { i18n } from "../../../shared/i18n";
+import * as graphApi from "../../../shared/api/graph";
+import * as authContext from "../../../shared/auth/AuthContext";
 import type {
   GraphHistoryMode,
   GraphNode,
@@ -1611,6 +1613,60 @@ describe("GraphView", () => {
     const details = screen.getByRole("heading", { name: "Details" }).closest("aside");
     expect(within(details!).getByText("Decision Log —Included→ Why was this chosen?", { selector: ".graph-edge-summary" }))
       .toBeInTheDocument();
+  });
+
+  it("loads retained citation evidence only for a selected pair and discards another reader's pending page", async () => {
+    // The inspector's asynchronous, actor-bound pagination has a separate
+    // failure mechanism from layout geometry; keep it in one UI lifecycle.
+    const user = userEvent.setup();
+    const pending: Array<{ request: graphApi.GraphCitationEvidenceRequest; signal?: AbortSignal; resolve: (value: graphApi.GraphCitationEvidencePayload) => void }> = [];
+    const query = vi.spyOn(graphApi, "queryGraphCitationEvidence").mockImplementation((_workspace, request, signal) => new Promise((resolve) => { pending.push({ request, signal, resolve }); }));
+    const auth = vi.spyOn(authContext, "useOptionalAuth").mockReturnValue({ user: { user_id: "evidence-reader-one" } } as ReturnType<typeof authContext.useOptionalAuth>);
+    try {
+      const payload = graphFixture();
+      payload.history.mode = "current";
+      payload.query.time = { mode: "current" };
+      const targetId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+      payload.nodes.push({ ...payload.nodes[1], id: "node:source", entity_kind: "library_item", entity_id: targetId, label: "Source document" });
+      payload.edges.push({ ...payload.edges[0], id: "edge:legacy-citation", source: "node:seed", target: "node:source", edge_kind: "citation_source", layer: "evidence" });
+      const props = { payload, onCollapse: (_node: GraphNode) => Promise.resolve(), onExpand: (_node: GraphNode) => Promise.resolve() };
+      const view = renderGraph(props);
+      expect(query).not.toHaveBeenCalled();
+      await user.click(screen.getByText("Relationships (3)"));
+      await user.click(screen.getByRole("button", { name: /Source citation.*Decision Log.*Source document/i }));
+      expect(query).toHaveBeenCalledTimes(1);
+      expect(pending[0].request).toMatchObject({ source_page_id: payload.nodes[0].entity_id, target_kind: "library_item", target_id: targetId, limit: 20, cursor: null });
+      const item = { id: "evidence-one", owner_kind: "context_page_version", owner_id: "source-published-version", source_version_id: "source-published-version", citation_type: "derived_artifact", library_item_version_id: "original-library-version", library_artifact_id: "original-artifact", snippet: "First retained quotation", verification_status: "strong", created_via: "manual_input" };
+      const answer = { ...pending[0].request, source_version_id: "source-published-version", items: [item], next_cursor: "page-two" } as graphApi.GraphCitationEvidencePayload;
+      await act(async () => { pending[0].resolve(answer); });
+      expect(screen.getByText("original-artifact")).toBeInTheDocument();
+      expect(screen.getByText("original-library-version")).toBeInTheDocument();
+      expect(screen.getByText("First retained quotation")).toBeInTheDocument();
+      expect(screen.getByText("Strong")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Load more evidence" }));
+      expect(pending[1].request.cursor).toBe("page-two");
+      await act(async () => { pending[1].resolve({ ...answer, items: [{ ...item, id: "evidence-two", snippet: "Second retained quotation" }], next_cursor: "page-three" }); });
+      expect(screen.getByText("First retained quotation")).toBeInTheDocument();
+      expect(screen.getByText("Second retained quotation")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Load more evidence" }));
+      auth.mockReturnValue({ user: { user_id: "evidence-reader-two" } } as ReturnType<typeof authContext.useOptionalAuth>);
+      view.rerender(graphElement(props));
+      expect(screen.queryByText("First retained quotation")).not.toBeInTheDocument();
+      expect(pending[2].signal?.aborted).toBe(true);
+      await act(async () => { pending[2].resolve({ ...answer, items: [{ ...item, id: "evidence-late", snippet: "Private late quotation" }] }); });
+      expect(screen.queryByText("Private late quotation")).not.toBeInTheDocument();
+      await act(async () => { pending[3].resolve({ ...answer, items: [], next_cursor: "continue-visible-scan" }); });
+      expect(screen.queryByText("This relationship has no retained version or artifact evidence.")).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Load more evidence" }));
+      await act(async () => { pending[4].resolve({ ...answer, items: [], next_cursor: null }); });
+      expect(screen.getByText("This relationship has no retained version or artifact evidence.")).toBeInTheDocument();
+      view.rerender(graphElement({ ...props, payload: { ...payload, history: { ...payload.history, mode: "appearance" }, query: { ...payload.query, time: { mode: "appearance" } } } }));
+      expect(screen.queryByText("Retained citation evidence")).not.toBeInTheDocument();
+      expect(query).toHaveBeenCalledTimes(5);
+    } finally {
+      query.mockRestore();
+      auth.mockRestore();
+    }
   });
 
   it("says what a read-together relationship rests on", async () => {

@@ -310,6 +310,23 @@
       "expandSheet": "상세 펼치기",
       "collapseSheet": "상세 접기"
     },
+    "citationEvidence": {
+      "title": "보존된 인용 근거",
+      "currentPublished": "출발 문서의 현재 발행본에 보존된 정확한 인용 근거입니다.",
+      "sourceVersion": "출발 문서 버전",
+      "loading": "인용 근거를 불러오는 중…",
+      "failed": "인용 근거에 접근할 수 없거나 불러오지 못했습니다.",
+      "retry": "인용 근거 다시 불러오기",
+      "empty": "이 관계에는 보존된 버전 또는 artifact 근거가 없습니다.",
+      "type": "인용 유형",
+      "status": "검증 상태",
+      "contextVersion": "인용한 Context 버전",
+      "libraryVersion": "인용한 Library 버전",
+      "artifact": "인용한 artifact",
+      "location": "원본 위치",
+      "createdVia": "기록 경로",
+      "loadMore": "인용 근거 더 불러오기"
+    },
     "coAccess": {
       "sentence": "{{sessions}}에서 {{days}}에 걸쳐 함께 조회됨 (최근 {{last}})",
       "sessions_one": "{{count}}개 세션",
