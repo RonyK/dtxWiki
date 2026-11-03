@@ -1059,6 +1059,19 @@ class ServiceRegistry:
         return GraphQueryService(graph_service=self.graph_service)
 
     @cached_property
+    def citation_evidence(self):
+        from backend.services.citation_evidence import CitationEvidenceService
+
+        secret = (
+            self.settings.effective_session_secret
+            if self.settings is not None
+            else "dtxwiki-development-session-secret"
+        )
+        return CitationEvidenceService(
+            cursor_secret=secret, read_service=self.domain_read
+        )
+
+    @cached_property
     def workspace_graph(self):
         from backend.services.workspace_graph_service import WorkspaceGraphService
 

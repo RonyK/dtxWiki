@@ -4931,6 +4931,12 @@ details.advanced-section summary {
 .reference-backlink { display: inline-block; margin-inline-start: .65rem; min-width: 2rem; }
 .cite-ref { font-style: normal; font-size: .85em; vertical-align: super; }
 .markdown-body .cite-ref-unresolved { border-style: dashed; }
+.graph-citation-evidence { border-top: 1px solid var(--border); margin-top: 1rem; padding-top: .75rem; }
+.graph-citation-evidence ol { padding-left: 1.25rem; }
+.graph-citation-evidence li + li { margin-top: 1rem; }
+.graph-citation-evidence dd, .graph-citation-evidence code, .graph-citation-evidence blockquote { overflow-wrap: anywhere; white-space: pre-wrap; }
+.graph-citation-evidence dl { margin: .5rem 0; }
+.graph-citation-evidence dd { margin: .1rem 0 .5rem; }
 /* Editor references: one header button; the list floats over the editor so
    opening it never takes height from the editing surface. */
 .editor-references-trigger {

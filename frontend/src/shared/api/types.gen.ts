@@ -2103,6 +2103,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/graph/citations/evidence/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Query Citation Evidence
+         * @description Inspect one selected Citation pair without expanding the layout scene.
+         */
+        post: operations["query_citation_evidence_api_v1_workspaces__workspace_id__graph_citations_evidence_query_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/graph/overview/query": {
         parameters: {
             query?: never;
@@ -6717,6 +6737,104 @@ export interface components {
              * @default false
              */
             timeline: boolean;
+        };
+        /** GraphCitationEvidenceItem */
+        GraphCitationEvidenceItem: {
+            /** Citation Type */
+            citation_type: string;
+            /** Cited Context Page Version Id */
+            cited_context_page_version_id?: string | null;
+            /** Created Via */
+            created_via: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Library Artifact Id */
+            library_artifact_id?: string | null;
+            /** Library Item Version Id */
+            library_item_version_id?: string | null;
+            /** Location */
+            location?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Owner Id
+             * Format: uuid
+             */
+            owner_id: string;
+            /** Owner Kind */
+            owner_kind: string;
+            /** Snippet */
+            snippet?: string | null;
+            /**
+             * Source Version Id
+             * Format: uuid
+             */
+            source_version_id: string;
+            /** Verification Status */
+            verification_status: string;
+        };
+        /**
+         * GraphCitationEvidencePayload
+         * @description One bounded inspection window; empty items can still have a next cursor.
+         */
+        GraphCitationEvidencePayload: {
+            /** Items */
+            items: components["schemas"]["GraphCitationEvidenceItem"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /**
+             * Source Page Id
+             * Format: uuid
+             */
+            source_page_id: string;
+            /**
+             * Source Version Id
+             * Format: uuid
+             */
+            source_version_id: string;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Target Kind
+             * @enum {string}
+             */
+            target_kind: "context_page" | "library_item" | "agent_page";
+        };
+        /** GraphCitationEvidenceRequest */
+        GraphCitationEvidenceRequest: {
+            /** Cursor */
+            cursor?: string | null;
+            /**
+             * Limit
+             * @default 20
+             */
+            limit: number;
+            /**
+             * Source Page Id
+             * Format: uuid
+             */
+            source_page_id: string;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Target Kind
+             * @enum {string}
+             */
+            target_kind: "context_page" | "library_item" | "agent_page";
+        };
+        /** GraphCitationEvidenceResponse */
+        GraphCitationEvidenceResponse: {
+            data: components["schemas"]["GraphCitationEvidencePayload"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** GraphEdge */
         GraphEdge: {
@@ -21719,6 +21837,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceGraphCapabilityResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    query_citation_evidence_api_v1_workspaces__workspace_id__graph_citations_evidence_query_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GraphCitationEvidenceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphCitationEvidenceResponse"];
                 };
             };
             /** @description Unauthorized */

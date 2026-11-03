@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "../../../shared/i18n";
 import { isWorkspaceGraphResponse, type WorkspaceGraphScene } from "../../../shared/api/workspaceGraph";
 import { ApiError } from "../../../shared/api/client";
+import * as graphApi from "../../../shared/api/graph";
 import { clearLegacyWorkspaceGraphStorage, clearWorkspaceGraphStorage, workspaceGraphStorageEpoch, workspaceGraphStorageScope } from "../../../shared/lib/workspaceGraphStorage";
 import { WorkspaceGraphScreen } from "../WorkspaceGraphScreen";
 import { WorkspaceGraphGate } from "../WorkspaceGraphGate";
@@ -598,18 +599,44 @@ describe("WorkspaceGraphScreen", () => {
   });
 
   it("keeps selected authoritative Map details available while search narrows the list to zero", async () => {
-    queryWorkspaceGraphMock.mockResolvedValue(baseScene());
-    renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
-    fireEvent.click(within(screen.getByTestId("workspace-graph-node-list"))
-      .getByRole("button", { name: /^Alpha/ }));
-    expect(screen.getByRole("heading", { name: "Alpha" })).toBeInTheDocument();
-    fireEvent.change(screen.getByRole("searchbox", { name: "Find in visible map" }), {
-      target: { value: "no matching document" },
+    const scene = baseScene();
+    const targetId = "00000000-0000-4000-8000-000000000002";
+    scene.nodes[1] = documentNode("context:beta", "Beta", targetId);
+    scene.edges[0] = { ...scene.edges[0], target: "context:beta", relation_kind: "citation_page", label: "cites", layer: "evidence", aggregate: false, relation_count: 1 };
+    scene.counts.rendered_documents = 2;
+    scene.counts.rendered_clusters = 0;
+    const query = vi.spyOn(graphApi, "queryGraphCitationEvidence").mockResolvedValue({
+      source_page_id: scene.nodes[0].grain === "document" ? scene.nodes[0].entity_id : "",
+      source_version_id: "source-published-version", target_kind: "context_page", target_id: targetId,
+      items: [], next_cursor: null,
     });
-    expect(document.querySelectorAll("[data-graph-node-id]")).toHaveLength(0);
-    expect(screen.getByRole("heading", { name: "Alpha" })).toBeInTheDocument();
-    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-selected-id", "context:alpha");
+    queryWorkspaceGraphMock.mockResolvedValue(scene);
+    try {
+      renderScreen();
+      await screen.findByRole("heading", { name: "Searchable relationship list" });
+      fireEvent.click(within(screen.getByTestId("workspace-graph-node-list"))
+        .getByRole("button", { name: /^Alpha/ }));
+      expect(screen.getByRole("heading", { name: "Alpha" })).toBeInTheDocument();
+      fireEvent.change(screen.getByRole("searchbox", { name: "Find in visible map" }), {
+        target: { value: "no matching document" },
+      });
+      expect(document.querySelectorAll("[data-graph-node-id]")).toHaveLength(0);
+      expect(screen.getByRole("heading", { name: "Alpha" })).toBeInTheDocument();
+      expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-selected-id", "context:alpha");
+      expect(query).not.toHaveBeenCalled();
+      // The Map converts its document kinds into the same evidence API pair as
+      // Local Graph; selecting a node alone must never trigger that fetch.
+      fireEvent.change(screen.getByRole("searchbox", { name: "Find in visible map" }), { target: { value: "" } });
+      const edge = screen.getByTestId("workspace-graph-edge-list").querySelector("[data-graph-edge-id] button")!;
+      fireEvent.click(edge);
+      await screen.findByText("This relationship has no retained version or artifact evidence.");
+      expect(query).toHaveBeenCalledExactlyOnceWith("workspace-one", {
+        source_page_id: "00000000-0000-4000-8000-000000000001",
+        target_kind: "context_page", target_id: targetId, cursor: null, limit: 20,
+      }, expect.any(AbortSignal));
+    } finally {
+      query.mockRestore();
+    }
   });
 
   it("keeps a synthetic 2k/4.7k Map list DOM bounded and keyboard-operable", async () => {

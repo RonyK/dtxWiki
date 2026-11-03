@@ -13,7 +13,12 @@ from backend.api.deps import (
     read_service_error_response,
 )
 from backend.api.read import REST_ERROR_RESPONSES
-from backend.schemas.graph import GraphQueryRequest, GraphQueryResponse
+from backend.schemas.graph import (
+    GraphCitationEvidenceRequest,
+    GraphCitationEvidenceResponse,
+    GraphQueryRequest,
+    GraphQueryResponse,
+)
 from backend.schemas.workspace_graph import (
     WorkspaceGraphCapability,
     WorkspaceGraphCapabilityResponse,
@@ -28,6 +33,35 @@ from backend.services.workspace_graph_capability import (
 )
 
 router = APIRouter(prefix="/workspaces", tags=["graph"])
+
+
+@router.post(
+    "/{workspace_id}/graph/citations/evidence/query",
+    response_model=GraphCitationEvidenceResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def query_citation_evidence(
+    svc: ServicesDep,
+    workspace_id: UUID,
+    request_body: GraphCitationEvidenceRequest,
+    actor: RestActorDep,
+    _access: WorkspaceViewerAccessDep,
+    session_factory: WorkspaceSessionFactoryDep,
+):
+    """Inspect one selected Citation pair without expanding the layout scene."""
+    try:
+        with session_factory() as session:
+            acquire_consistent_read_snapshot(session)
+            return {
+                "data": svc.citation_evidence.query(
+                    session,
+                    workspace_id=workspace_id,
+                    request=request_body,
+                    actor=actor,
+                )
+            }
+    except ReadServiceError as exc:
+        return read_service_error_response(exc)
 
 
 @router.post(

@@ -40,12 +40,14 @@ from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.schemas.context_write import CitationInput
 from backend.schemas.graph import (
+    GraphCitationEvidenceRequest,
     GraphQueryRequest,
     GraphSeed,
     GraphTimeQuery,
 )
 from backend.services.actor_visible_read import library_item_visible
 from backend.services.bundle_service import AgentInputBundleService
+from backend.services.citation_evidence import CitationEvidenceService
 from backend.services.context_write_service import ContextWriteService
 from backend.services.coverage_service import coverage_candidate_visible
 from backend.services.domain_read import DomainReadService
@@ -55,7 +57,7 @@ from backend.services.graph_service import GraphService
 from backend.services.library_service import LibraryService
 from backend.services.maintenance_rounds import TASK_BUILDERS
 from backend.services.mcp_chat_service import McpChatService
-from backend.services.read_errors import ReadNotFoundError
+from backend.services.read_errors import ReadNotFoundError, ReadValidationError
 from backend.services.tree_projection import TreeProjectionService
 from backend.services.tree_service import _revived_library_lifecycle
 from backend.tests.conftest import authenticate_test_client_in_workspace
@@ -460,7 +462,9 @@ def test_rest_detail_and_direct_artifact_route_hide_unselected_attempt(
     assert unselected.json()["error_code"] == "not_found"
 
 
-def test_graph_hydrates_only_ready_version_and_selected_attempt(session_factory):
+def test_graph_hydrates_only_ready_version_and_selected_attempt(
+    session_factory, page_service
+):
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         seeded = _seed_canonical_fixture(session, workspace_id)
@@ -486,8 +490,9 @@ def test_graph_hydrates_only_ready_version_and_selected_attempt(session_factory)
                 )
             )
         page_id = page.id
-        # Normalize selected legacy version/artifact endpoints to their document.
-        # Unselected evidence must not increase its citation weight.
+        # The normalized document endpoint retains exact old evidence only in
+        # an on-demand inspector. Reuse this selected/unselected lineage to
+        # prove pagination and ACL without adding a separate DB lifecycle.
         raw = ContextCitation(
             id=UUID(int=401),
             workspace_id=workspace_id,
@@ -581,6 +586,86 @@ def test_graph_hydrates_only_ready_version_and_selected_attempt(session_factory)
     # Only the ready version and its selected artifact contribute. Pending
     # versions/unselected attempts must not raise the document's weight.
     assert len(neighbors) == 1 and neighbors[0].weight == 2.0
+    # Exercise the same pair once through the real authenticated REST route;
+    # service-only assertions cannot prove its composition and scope registry.
+    with TestClient(
+        create_app(
+            settings=Settings(
+                database_url="sqlite+pysqlite:///:memory:",
+                session_secret="inspector-test-secret",
+            ),
+            page_service=page_service,
+        )
+    ) as client:
+        authenticate_test_client_in_workspace(
+            client,
+            page_service.session_factory,
+            email="graph-inspector-reader@example.com",
+            workspace_slug="default",
+        )
+        response = client.post(
+            f"/api/v1/workspaces/{workspace_id}/graph/citations/evidence/query",
+            json={
+                "source_page_id": str(page_id),
+                "target_kind": "library_item",
+                "target_id": str(seeded.item.id),
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert {row["id"] for row in response.json()["data"]["items"]} == {
+            str(raw.id),
+            str(derived.id),
+        }
+    reader = _actor(workspace_id)
+    inspector = CitationEvidenceService(
+        cursor_secret="legacy-inspector-test", read_service=DomainReadService()
+    )
+    request = GraphCitationEvidenceRequest(
+        source_page_id=page_id,
+        target_kind="library_item",
+        target_id=seeded.item.id,
+        limit=1,
+    )
+    with session_factory.begin() as session:
+        first = inspector.query(
+            session, workspace_id=workspace_id, request=request, actor=reader
+        )
+        assert (
+            first.items[0].id == raw.id
+            and first.items[0].library_item_version_id == seeded.ready_version.id
+        )
+        assert first.items[0].snippet == "Original raw evidence" and first.items[
+            0
+        ].location == {"page": 2}
+        assert first.next_cursor is not None
+        second = inspector.query(
+            session,
+            workspace_id=workspace_id,
+            request=request.model_copy(update={"cursor": first.next_cursor}),
+            actor=reader,
+        )
+        assert (
+            second.items[0].id == derived.id
+            and second.items[0].library_artifact_id == seeded.selected_artifact.id
+        )
+        assert (
+            second.items[0].verification_status == "strong"
+            and second.next_cursor is None
+        )
+        with pytest.raises(ReadValidationError):
+            inspector.query(
+                session,
+                workspace_id=workspace_id,
+                request=request.model_copy(update={"cursor": first.next_cursor}),
+                actor=_actor(workspace_id),
+            )
+        target = session.get(LibraryItem, seeded.item.id)
+        target.trust_level = "restricted"
+        session.flush()
+        with pytest.raises(ReadNotFoundError):
+            inspector.query(
+                session, workspace_id=workspace_id, request=request, actor=reader
+            )
 
 
 def test_tree_projection_and_revival_use_selected_ready_artifacts(session_factory):
