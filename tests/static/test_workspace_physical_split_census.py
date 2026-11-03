@@ -16,11 +16,11 @@ Against the measured census that understates the edges by more than 20x
 (61 against 3) and the unwritable tables by 29x (58 against 2).
 Measured on this tree:
 
-- 89 shard-resident tables (88 WORKSPACE_PLANE + 1 MIXED_PLANE), carrying
+- 92 shard-resident tables (91 WORKSPACE_PLANE + 1 MIXED_PLANE), carrying
   61 FK constraints into control-plane parents. All 61 are single-column.
 - By parent: ``workspace`` 58 edges, ``users`` 3 edges.
-- 58 of those 89 tables are BLOCKED (at least one control-plane FK parent):
-  ``workspace`` blocks 58, ``users`` blocks 2. Only 31 are insertable.
+- 58 of those 92 tables are BLOCKED (at least one control-plane FK parent):
+  ``workspace`` blocks 58, ``users`` blocks 2. Only 34 are insertable.
 - 4 of the 61 edges have all-nullable local columns
   (``audit_event.workspace_id``, ``mcp_chat_session.owner_user_id``,
   ``mcp_client.created_by``, ``mcp_client.issued_to_user_id``).
@@ -164,10 +164,10 @@ EXPECTED_ALL_NULLABLE_EDGES: frozenset[str] = frozenset(
 
 
 def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
-    """Pin the census edge-by-edge: 60 edges, 57 of 88 tables blocked.
+    """Pin the census edge-by-edge: 61 edges, 58 of 92 tables blocked.
 
-    Measured here, not copied: ``workspace`` 57 edges / 57 blocked tables,
-    ``users`` 3 edges / 2 blocked tables, 31 of the 88 shard-resident tables
+    Measured here, not copied: ``workspace`` 58 edges / 58 blocked tables,
+    ``users`` 3 edges / 2 blocked tables, 34 of the 92 shard-resident tables
     insertable, 4 edges all-nullable. Adding, removing or re-pointing any
     cross-plane FK changes ``labels`` and fails this test, which is the point
     -- the inventory is not allowed to move without a reviewer seeing it.
@@ -204,6 +204,9 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     insertable 31 = 30 + 1, without adding a control-plane FK edge.
     Lifetime co-access adds one workspace-owned aggregate with a workspace
     FK: 89 resident, 61 edges and 58 blocked; insertable remains 31.
+    Bibliography metadata, publication rows and its completion marker add
+    three workspace-only tables: resident 92, insertable 34. Their composite
+    FKs remain on the workspace plane; the cross-plane edge census stays 61.
     """
 
     edges = workspace_to_control_fk_edges()
@@ -220,7 +223,7 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     ]
 
     resident = WORKSPACE_PLANE_TABLES | MIXED_PLANE_TABLES
-    assert len(resident) == 89
+    assert len(resident) == 92
 
     by_parent = {
         parent: [edge for edge in edges if edge.parent == parent]
@@ -238,7 +241,7 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     blocked = shard_blocked_tables()
     assert set(blocked) <= resident
     assert len(blocked) == 58
-    assert len(resident) - len(blocked) == 31
+    assert len(resident) - len(blocked) == 34
 
     assert (
         frozenset(edge.label for edge in edges if edge.all_columns_nullable)

@@ -3,7 +3,7 @@
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
 
 from backend.models.audit import AuditEvent
 from backend.models.change import ChangeOperation, ChangeSet
@@ -136,9 +136,28 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
         )
         session.add(citation)
     with page_service.session_factory.begin() as session:
-        run = LintService(lint_registry=registry).execute_queued_run(
-            session, workspace_id=workspace_id, run_id=None, trigger_type="manual"
-        )
+        locks = []
+
+        def capture_lock(execute_state):
+            statement = execute_state.statement
+            lock = getattr(statement, "_for_update_arg", None)
+            columns = getattr(statement, "column_descriptions", ())
+            if lock is not None and columns:
+                entity = columns[0].get("entity")
+                if entity in (ContextPage, Workspace):
+                    locks.append((entity, lock.read))
+
+        event.listen(session, "do_orm_execute", capture_lock)
+        try:
+            run = LintService(lint_registry=registry).execute_queued_run(
+                session, workspace_id=workspace_id, run_id=None, trigger_type="manual"
+            )
+        finally:
+            event.remove(session, "do_orm_execute", capture_lock)
+        # PostgreSQL must not upgrade shared Workspace policy locks after
+        # taking per-page locks. The queued batch locks its Page set first.
+        assert locks[0] == (ContextPage, False)
+        assert (Workspace, False) in locks and (Workspace, True) not in locks
         run_id = run.id
     with page_service.session_factory() as session:
         page = session.get(ContextPage, source.id)
