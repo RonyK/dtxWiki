@@ -3530,11 +3530,6 @@ button.history-card {
     flex-wrap: wrap;
   }
 
-  .editor-title-tags {
-    flex-basis: 100%;
-    max-width: none;
-  }
-
   .reader-actions {
     justify-content: flex-start;
   }

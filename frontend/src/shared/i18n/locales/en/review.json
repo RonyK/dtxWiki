@@ -509,7 +509,8 @@
     "draftChange": "This draft's change (v{{parent}} → v{{candidate}})",
     "publishingChange": "What publishing changes (published v{{baseline}} → v{{candidate}})",
     "publishingEmptyChange": "What publishing changes (empty document → v{{candidate}})",
-    "draftParentBaseline": "Previous draft v{{version}}"
+    "draftParentBaseline": "Previous draft v{{version}}",
+    "metadataReferences": "References"
   },
   "undo": {
     "action": {

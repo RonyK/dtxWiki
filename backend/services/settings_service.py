@@ -34,6 +34,11 @@ from backend.schemas.settings import (
     SettingsPolicies,
 )
 from backend.services.audit_service import AuditService
+from backend.services.citation_policy import (
+    CitationPolicyError,
+    coerce_document_kinds,
+    normalized_citation_policy,
+)
 from backend.services.context_media_policy import (
     resolve_context_media_policy,
     validate_retention_hours,
@@ -669,7 +674,7 @@ class SettingsService:
             citation=_policy_card(
                 name="citation",
                 title="Citation policy",
-                policy=workspace.citation_policy,
+                policy=normalized_citation_policy(workspace.citation_policy),
             ),
             context_write=_policy_card(
                 name="context_write",
@@ -847,6 +852,8 @@ class SettingsService:
                 previous_library_policy = dict(policy)
             elif group == "review":
                 policy = normalized_review_policy(policy)
+            elif group == "citation":
+                policy = normalized_citation_policy(policy)
 
             ordered_changes = list(changes.items())
             if group == "review":
@@ -861,6 +868,10 @@ class SettingsService:
                 }
                 ordered_changes.sort(key=lambda item: library_order.get(item[0], 3))
             for key, value in ordered_changes:
+                if key == "accepted_document_kinds" and group != "citation":
+                    raise SettingsPolicyUpdateRejected(
+                        "accepted_document_kinds belongs to citation policy"
+                    )
                 if group == "library" and key in RETIRED_LIBRARY_SOURCE_RULE_KEYS:
                     raise LibrarySourceRulesRetired(
                         "Library source rules are retired until URL ingestion "
@@ -877,7 +888,9 @@ class SettingsService:
                 if group == "review" and key == "preset":
                     policy = apply_review_preset(policy, str(policy["preset"]))
 
-            if group == "review":
+            if group == "citation":
+                policy = normalized_citation_policy(policy)
+            elif group == "review":
                 policy = normalized_review_policy(policy)
             elif group == "library":
                 policy = normalized_library_policy(
@@ -969,6 +982,8 @@ class SettingsService:
             )
         if group == "review":
             return normalized_review_policy(policy)
+        if group == "citation":
+            return normalized_citation_policy(policy)
         return policy
 
     def update_mcp_client_status(
@@ -1538,6 +1553,11 @@ def _coerce_policy_value(key: str, value):
         raise LibrarySourceRulesRetired(
             "Library source rules are retired until URL ingestion is enforced."
         )
+    if key == "accepted_document_kinds":
+        try:
+            return coerce_document_kinds(value)
+        except CitationPolicyError as exc:
+            raise SettingsPolicyUpdateRejected(str(exc)) from exc
     if key == "accepted_citation_types":
         return _coerce_citation_types(value)
     if key in LITERAL_OPTIONS:

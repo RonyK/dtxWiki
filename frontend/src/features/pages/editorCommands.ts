@@ -28,7 +28,7 @@ export type TextMutationCommandId =
   | "bulleted-list"
   | "task-list"
   | "quote";
-export type ModalMutationCommandId = "link" | "emoji" | "math" | "table";
+export type ModalMutationCommandId = "link" | "emoji" | "math" | "table" | "citation";
 export type AsyncAttachmentCommandId = "image" | "attach";
 export type ExternalEffectCommandId = "undo" | "redo" | "comment";
 export type EditorCommandId =
@@ -73,7 +73,7 @@ export type ModalMutationCommand = EditorCommandBase<
   ModalMutationCommandId,
   "modal-mutation"
 > & {
-  modal: "emoji-picker" | "link-dialog" | "math-dialog" | "table-dialog";
+  modal: "emoji-picker" | "link-dialog" | "math-dialog" | "table-dialog" | "reference-picker";
 };
 
 export type AsyncAttachmentCommand = EditorCommandBase<
@@ -298,8 +298,8 @@ export const EDITOR_COMMANDS = [
   },
   {
     id: "citation",
-    kind: "text-mutation",
-    mutation: "citation",
+    kind: "modal-mutation",
+    modal: "reference-picker",
     labelKey: "editor.commands.citation",
     fallbackLabel: "Citation",
     modes: EDITING_MODES,
@@ -532,7 +532,7 @@ const FIXED_INLINE_DEFINITIONS: Partial<
     suffix: "~~",
   },
   wikilink: { placeholder: "page-slug", prefix: "[[", suffix: "]]" },
-  citation: { placeholder: "source-id", prefix: "@cite{", suffix: "}" },
+  citation: { placeholder: "", prefix: "@cite{", suffix: "}" },
 };
 
 export function planMarkdownMutation({

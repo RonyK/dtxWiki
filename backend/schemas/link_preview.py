@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.domain.input_policy import BODY_MAX, validate_body
 from backend.schemas.common import RESTResponseBase
+from backend.schemas.document_reference import ReferenceView
 from backend.schemas.read import ContextLinkTarget
 
 
@@ -29,6 +30,7 @@ class LinkPreviewPayload(BaseModel):
     source_version_id: UUID | None
     request_id: str
     link_targets: list[ContextLinkTarget] = Field(default_factory=list)
+    references: list[ReferenceView] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 

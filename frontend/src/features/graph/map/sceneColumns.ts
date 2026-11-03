@@ -9,6 +9,7 @@ export const WORKSPACE_MAP_NODE_KIND = {
   context: 0,
   library: 1,
   cluster: 2,
+  agent: 4,
 } as const;
 
 export const WORKSPACE_MAP_EDGE_KIND = {
@@ -84,7 +85,7 @@ function nodeKind(node: WorkspaceGraphNode): number {
   if (node.grain === "cluster") return WORKSPACE_MAP_NODE_KIND.cluster;
   return node.entity_kind === "context"
     ? WORKSPACE_MAP_NODE_KIND.context
-    : WORKSPACE_MAP_NODE_KIND.library;
+    : node.entity_kind === "agent" ? WORKSPACE_MAP_NODE_KIND.agent : WORKSPACE_MAP_NODE_KIND.library;
 }
 
 function relationKind(kind: string): number | null {
@@ -93,6 +94,7 @@ function relationKind(kind: string): number | null {
       return WORKSPACE_MAP_EDGE_KIND.link;
     case "citation_page":
     case "citation_source":
+    case "citation_agent":
     case "ask_citation":
       return WORKSPACE_MAP_EDGE_KIND.citation;
     default:

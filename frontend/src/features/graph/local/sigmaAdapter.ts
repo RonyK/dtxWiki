@@ -58,6 +58,14 @@ class LocalSquareNodeProgram extends NodeSquareProgram {
     (context, data, settings) => settings.defaultDrawNodeLabel(context, data, settings);
 }
 
+/** Rotate the square mesh: a distinct Agent glyph in every color mode. */
+class LocalDiamondNodeProgram extends LocalSquareNodeProgram {
+  override getDefinition(): ReturnType<NodeSquareProgram["getDefinition"]> {
+    const definition = super.getDefinition();
+    return { ...definition, CONSTANT_DATA: definition.CONSTANT_DATA.map(([angle]) => [angle - Math.PI / 4]) };
+  }
+}
+
 const FolderNodeProgram = createNodeBorderProgram({
   borders: [
     { size: { value: 0.24 }, color: { attribute: "color" } },
@@ -207,6 +215,7 @@ export function createSigmaGraphAdapter(
       label: node.label,
       type: node.isSeed ? "seed"
         : kind === "library" ? "square"
+        : kind === "agent" ? "diamond"
         : kind === "folder" ? "folder"
         : kind === "conversation" && mode === "forced" ? "conversation" : "circle",
     };
@@ -283,6 +292,7 @@ export function createSigmaGraphAdapter(
     nodeProgramClasses: {
       circle: NodeCircleProgram,
       square: LocalSquareNodeProgram,
+      diamond: LocalDiamondNodeProgram,
       seed: SeedNodeProgram,
       folder: FolderNodeProgram,
       conversation: ConversationNodeProgram,

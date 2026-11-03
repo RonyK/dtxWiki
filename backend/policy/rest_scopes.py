@@ -112,6 +112,10 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
         "GET",
         "/api/v1/workspaces/{workspace_id}/graph/capability",
     ): ("read",),
+    (
+        "POST",
+        "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/references",
+    ): ("draft-write",),
     ("POST", "/api/v1/workspaces/{workspace_id}/context/pages"): ("draft-write",),
     (
         "PATCH",

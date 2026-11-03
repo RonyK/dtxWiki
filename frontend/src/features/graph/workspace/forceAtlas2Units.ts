@@ -37,11 +37,12 @@ function canonicalReferenceZoom(positions: ArrayLike<number>, width: number, hei
   return Math.max(.001, Math.min(width * .84 / (dx === 0 ? 1 : dx), height * .84 / (dy === 0 ? 1 : dy)));
 }
 
-/** Shared native Circle/Square nominal geometry for CPU and GPU collision inputs. */
+/** Shared native Circle/Square/Diamond nominal geometry for CPU and GPU collision inputs. */
 export function workspaceNominalGlyphRadiusCss(diameter: number, shape: number): number {
   requirePositiveFloat32(diameter, "Native CSS diameter");
-  if (shape !== 0 && shape !== 1) throw new Error("Unknown native glyph shape");
-  return diameter * (shape === 0 ? .5 : .4 * Math.SQRT2);
+  if (shape !== 0 && shape !== 1 && shape !== 3) throw new Error("Unknown native glyph shape");
+  // Native diamond SDF: abs(x) + abs(y) / 1.2 <= .8 in half-diameter units.
+  return diameter * (shape === 0 ? .5 : shape === 3 ? .48 : .4 * Math.SQRT2);
 }
 
 /**

@@ -1891,6 +1891,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Update Context References */
+        post: operations["update_context_references_api_v1_workspaces__workspace_id__context_pages__page_id__references_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/restore": {
         parameters: {
             query?: never;
@@ -5052,6 +5069,56 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** CiteResponse */
+        CiteResponse: {
+            data: components["schemas"]["CiteResult"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** CiteResult */
+        CiteResult: {
+            /** Added */
+            added?: components["schemas"]["DocumentReferenceInput"][];
+            /** Audit Event Id */
+            audit_event_id?: string | null;
+            /** Editing Revision */
+            editing_revision: number;
+            /**
+             * Page Id
+             * Format: uuid
+             */
+            page_id: string;
+            /**
+             * Publication State
+             * @default editing
+             * @constant
+             */
+            publication_state: "editing";
+            /**
+             * Receipt Id
+             * Format: uuid
+             */
+            receipt_id: string;
+            /** References Hash */
+            references_hash: string;
+            /** Remaining Inline Occurrences */
+            remaining_inline_occurrences?: {
+                [key: string]: number;
+            };
+            /** Removed */
+            removed?: components["schemas"]["DocumentReferenceRemoveInput"][];
+            /**
+             * Replayed
+             * @default false
+             */
+            replayed: boolean;
+            /** Unchanged */
+            unchanged?: (components["schemas"]["DocumentReferenceInput"] | components["schemas"]["DocumentReferenceRemoveInput"])[];
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+        };
         /** @enum {string} */
         CompatibilityReasonCode: "catalog_app_unavailable" | "transport_unavailable" | "server_oauth_unavailable" | "endpoint_unreachable" | "platform_required" | "platform_unsupported" | "shell_required" | "shell_unsupported" | "app_version_required" | "app_version_too_old";
         /** @enum {string} */
@@ -5709,6 +5776,13 @@ export interface components {
              * @default false
              */
             reconciliation_pending_count_truncated: boolean;
+            /** References */
+            references?: components["schemas"]["ReferenceView"][];
+            /**
+             * References Hash
+             * @default
+             */
+            references_hash: string;
             /** Review Item Id */
             review_item_id?: string | null;
             /** Slug */
@@ -6383,6 +6457,30 @@ export interface components {
              * Format: uuid
              */
             version_id: string;
+        };
+        /** DocumentReferenceInput */
+        DocumentReferenceInput: {
+            /** Note */
+            note?: string | null;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Target Kind
+             * @enum {string}
+             */
+            target_kind: "context_page" | "library_item" | "agent_page";
+        };
+        /** DocumentReferenceRemoveInput */
+        DocumentReferenceRemoveInput: {
+            /** Reference Id */
+            reference_id?: string | null;
+            /** Target Id */
+            target_id?: string | null;
+            /** Target Kind */
+            target_kind?: ("context_page" | "library_item" | "agent_page") | null;
         };
         /**
          * DraftReviewReason
@@ -7882,6 +7980,8 @@ export interface components {
         LinkPreviewPayload: {
             /** Link Targets */
             link_targets?: components["schemas"]["ContextLinkTarget"][];
+            /** References */
+            references?: components["schemas"]["ReferenceView"][];
             /** Request Id */
             request_id: string;
             /** Source Page Id */
@@ -9535,7 +9635,11 @@ export interface components {
             /** Lines */
             lines?: string[];
             /** Metadata Changes */
-            metadata_changes?: ("title" | "tags" | "aliases" | "page_type" | "placement")[];
+            metadata_changes?: ("title" | "tags" | "aliases" | "page_type" | "placement" | "references")[];
+            /** References After */
+            references_after?: components["schemas"]["ReferenceView"][];
+            /** References Before */
+            references_before?: components["schemas"]["ReferenceView"][];
             /**
              * To Version Id
              * Format: uuid
@@ -9860,6 +9964,8 @@ export interface components {
             id: string;
             /** Link Targets */
             link_targets?: components["schemas"]["ContextLinkTarget"][];
+            /** References */
+            references?: components["schemas"]["ReferenceView"][];
             /** Slug */
             slug: string;
             /** Title */
@@ -9910,6 +10016,11 @@ export interface components {
         PublishPageVersionRequest: {
             /** Expected Content Hash */
             expected_content_hash: string;
+            /**
+             * Expected References Hash
+             * @description Required when publishing a mutable editing version; frozen submitted versions already bind their references.
+             */
+            expected_references_hash?: string | null;
             /**
              * Publish Despite Findings
              * @default false
@@ -10172,6 +10283,83 @@ export interface components {
         /** RedirectResponseBody */
         RedirectResponseBody: {
             data: components["schemas"]["RedirectData"];
+        };
+        /**
+         * ReferenceCommandRequest
+         * @description Change only the caller's explicit bibliography on an open Context edit.
+         */
+        ReferenceCommandRequest: {
+            /** Add */
+            add?: components["schemas"]["DocumentReferenceInput"][];
+            /** Expected Editing Revision */
+            expected_editing_revision: number;
+            /**
+             * Idempotency Key
+             * @description 24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.
+             */
+            idempotency_key: string;
+            /** Remove */
+            remove?: components["schemas"]["DocumentReferenceRemoveInput"][];
+            /**
+             * Retry Only
+             * @default false
+             */
+            retry_only: boolean;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+        };
+        /** ReferenceOccurrence */
+        ReferenceOccurrence: {
+            /** End */
+            end: number;
+            /** Href */
+            href: string | null;
+            /** Start */
+            start: number;
+        };
+        /** ReferenceView */
+        ReferenceView: {
+            /** Href */
+            href?: string | null;
+            /**
+             * Inline Count
+             * @default 0
+             */
+            inline_count: number;
+            /** Location */
+            location?: string | null;
+            /** Location Warning */
+            location_warning?: "fragment_unavailable" | null;
+            /** Metadata Id */
+            metadata_id?: string | null;
+            /**
+             * Metadata Present
+             * @default false
+             */
+            metadata_present: boolean;
+            /** Note */
+            note?: string | null;
+            /** Number */
+            number: number;
+            /** Occurrences */
+            occurrences?: components["schemas"]["ReferenceOccurrence"][];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "available" | "unavailable" | "unpublished" | "deleted";
+            /** Target Id */
+            target_id: string | null;
+            /**
+             * Target Kind
+             * @enum {string}
+             */
+            target_kind: "context_page" | "library_item" | "agent_page";
+            /** Title */
+            title?: string | null;
         };
         /** ReviewActionAvailability */
         ReviewActionAvailability: {
@@ -12193,7 +12381,7 @@ export interface components {
              * Entity Kind
              * @enum {string}
              */
-            entity_kind: "context" | "library";
+            entity_kind: "context" | "library" | "agent";
             /**
              * Evidence Count
              * @default 0
@@ -12382,14 +12570,14 @@ export interface components {
              * Source Entity Kind
              * @enum {string}
              */
-            source_entity_kind: "context" | "library";
+            source_entity_kind: "context" | "library" | "agent";
             /** Source Folder Id */
             source_folder_id?: string | null;
             /**
              * Target Entity Kind
              * @enum {string}
              */
-            target_entity_kind: "context" | "library";
+            target_entity_kind: "context" | "library" | "agent";
             /** Target Folder Id */
             target_folder_id?: string | null;
         };
@@ -12408,7 +12596,7 @@ export interface components {
              * Entity Kind
              * @enum {string}
              */
-            entity_kind: "context" | "library";
+            entity_kind: "context" | "library" | "agent";
             /** Folder Id */
             folder_id?: string | null;
             /** Member Count */
@@ -12459,7 +12647,7 @@ export interface components {
         WorkspaceGraphOverviewRequest: {
             budget?: components["schemas"]["WorkspaceGraphBudget"];
             /** Document Kinds */
-            document_kinds?: ("context" | "library")[];
+            document_kinds?: ("context" | "library" | "agent")[];
             expansion?: components["schemas"]["WorkspaceGraphExpansion"] | null;
             /** Focus Entity Id */
             focus_entity_id?: string | null;
@@ -20538,6 +20726,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ContextPageDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTConflictErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    update_context_references_api_v1_workspaces__workspace_id__context_pages__page_id__references_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                page_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferenceCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CiteResponse"];
                 };
             };
             /** @description Unauthorized */

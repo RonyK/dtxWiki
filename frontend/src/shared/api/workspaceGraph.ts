@@ -28,7 +28,7 @@ export type WorkspaceGraphAvailableLens = Exclude<
   WorkspaceGraphLens,
   "growth" | "provenance"
 >;
-export type WorkspaceGraphDocumentKind = "context" | "library";
+export type WorkspaceGraphDocumentKind = "context" | "library" | "agent";
 export type WorkspaceGraphQuickFilter =
   | "orphans"
   | "highly_referenced"
@@ -343,7 +343,7 @@ function isGraphNode(value: unknown): value is WorkspaceGraphNode {
       && isNonnegativeCount(value.relation_count);
   }
   return value.grain === "document"
-    && (value.entity_kind === "context" || value.entity_kind === "library")
+    && (value.entity_kind === "context" || value.entity_kind === "library" || value.entity_kind === "agent")
     && typeof value.entity_id === "string"
     && typeof value.path === "string"
     && (value.primary_folder_id === null || typeof value.primary_folder_id === "string")
@@ -390,7 +390,7 @@ function isFolderId(value: unknown): value is string | null {
 }
 
 function isDocumentKind(value: unknown): value is WorkspaceGraphDocumentKind {
-  return value === "context" || value === "library";
+  return value === "context" || value === "library" || value === "agent";
 }
 
 function membershipKey(nodeId: string, folderId: string | null, kind: string): string {

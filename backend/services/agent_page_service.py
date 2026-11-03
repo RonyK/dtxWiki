@@ -430,6 +430,11 @@ class AgentPageService:
 
         sync_agent_page_doc_sources(session, page)
         session.flush()
+        from backend.services.indexing.edge_registry import (
+            refresh_document_citation_sources,
+        )
+
+        refresh_document_citation_sources(session, workspace_id, "agent_page", page.id)
 
         operation = ChangeOperation(
             workspace_id=change_set.workspace_id,

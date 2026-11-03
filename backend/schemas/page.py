@@ -17,6 +17,7 @@ from backend.schemas.common import (
     RESTResponseBase,
 )
 from backend.schemas.context_ingress import ContextPageType
+from backend.schemas.document_reference import ReferenceView
 from backend.schemas.edit_receipt import EditReceipt
 from backend.schemas.input_policy import InputRequest
 from backend.schemas.read import (
@@ -93,6 +94,8 @@ class PageSummary(BaseModel):
 
 
 class PagePayload(PageSummary):
+    references: list[ReferenceView] = Field(default_factory=list)
+    references_hash: str = Field(default="", pattern=r"^(?:[a-f0-9]{64})?$")
     # Explicit permalinks (`/p/{workspace_id}/{page_id}`) can open while a
     # different Workspace is selected. The authorized read response therefore
     # carries the owning Workspace identity so the client can switch before
@@ -155,6 +158,7 @@ class PublicPagePayload(BaseModel):
     updated_at: datetime
     exposure_scope: Literal["indexed_web", "unlisted_web"]
     link_targets: list[ContextLinkTarget] = Field(default_factory=list)
+    references: list[ReferenceView] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -179,6 +183,14 @@ class PublishPageVersionRequest(InputRequest):
     # write lock and call PageService.publish_draft directly, which keeps its
     # own optional parameter -- they never construct this request model.
     expected_content_hash: str = Field(pattern=CONTENT_HASH_PATTERN)
+    expected_references_hash: str | None = Field(
+        default=None,
+        pattern=CONTENT_HASH_PATTERN,
+        description=(
+            "Required when publishing a mutable editing version; "
+            "frozen submitted versions already bind their references."
+        ),
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -308,6 +320,8 @@ class PageVersionEntry(BaseModel):
 
 
 class PageVersionDiff(BaseModel):
+    references_before: list[ReferenceView] = Field(default_factory=list)
+    references_after: list[ReferenceView] = Field(default_factory=list)
     baseline: Literal["version", "empty"] = "version"
     from_version_id: UUID | None = None
     to_version_id: UUID
@@ -317,7 +331,7 @@ class PageVersionDiff(BaseModel):
     additions: int = Field(ge=0)
     deletions: int = Field(ge=0)
     metadata_changes: list[
-        Literal["title", "tags", "aliases", "page_type", "placement"]
+        Literal["title", "tags", "aliases", "page_type", "placement", "references"]
     ] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")

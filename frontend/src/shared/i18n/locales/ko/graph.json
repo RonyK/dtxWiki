@@ -64,7 +64,8 @@
       "library_sync_version": "라이브러리 검색",
       "version_parent": "상위 버전",
       "co_access": "함께 읽음",
-      "associative": "연관 관계"
+      "associative": "연관 관계",
+      "citation_agent": "Agent 인용"
     },
     "graphActionKind": {
       "searched": "검색됨",
@@ -230,7 +231,8 @@
         "library": "Library 자료",
         "conversation": "대화·활동",
         "folder": "폴더",
-        "seed": "씨앗"
+        "seed": "씨앗",
+        "agent": "Agent 문서"
       },
       "edge": {
         "link": "링크",
@@ -572,7 +574,8 @@
       "crossFolder": "폴더 간",
       "recentlyConnected": "최근 연결",
       "apply": "데이터 필터 적용",
-      "chooseKind": "적용하기 전에 문서 종류를 하나 이상 선택하세요."
+      "chooseKind": "적용하기 전에 문서 종류를 하나 이상 선택하세요.",
+      "agent": "에이전트"
     },
     "metadata": {
       "aria": "지도 표시 범위",
@@ -600,7 +603,8 @@
       "visibleRelationMetric": "노드 크기: 이 지도에 표시된 관계 수(제한된 제곱근 척도).",
       "linksMetric": "노드 크기: 표시 가능한 문서의 참조 수(제한된 제곱근 척도).",
       "evidenceMetric": "노드 크기: 표시 가능한 근거 관계 수(제한된 제곱근 척도).",
-      "uniformMetric": "이 렌즈에서는 노드 크기가 동일하며 중요도를 나타내지 않습니다."
+      "uniformMetric": "이 렌즈에서는 노드 크기가 동일하며 중요도를 나타내지 않습니다.",
+      "agent": "Agent 문서"
     },
     "enums": {
       "context": "컨텍스트",
@@ -624,7 +628,9 @@
       "capped": "상한 적용",
       "partial": "부분",
       "privacy_suppressed": "개인정보 보호로 제한",
-      "unknown": "기타 표시 가능한 관계"
+      "unknown": "기타 표시 가능한 관계",
+      "agent": "에이전트",
+      "citation_agent": "Agent 인용"
     },
     "metrics": {
       "combined": "표시 가능한 게시된 링크와 인용 관계",

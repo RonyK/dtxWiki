@@ -966,14 +966,14 @@ class DomainReadService:
                     ContextPage,
                     workspace_id=workspace_id,
                     on=ContextPage.id == PageLink.source_page_id,
-                )
-                .with_only_columns(func.count(func.distinct(PageLink.source_page_id)))
+                ).with_only_columns(func.count(func.distinct(PageLink.source_page_id)))
             )
             or 0
         )
         wikilink_targets = (
             legacy_wikilink_targets(session, page=page, version=version, actor=actor)
-            if version is not None else []
+            if version is not None
+            else []
         )
         # M1: lint the EXACT version being displayed (version-aware), so warnings
         # match the body in the response. Skipped on internal existence-check
@@ -1093,7 +1093,23 @@ class DomainReadService:
                         version=draft_version,
                         self_origins=self.context_link_origins,
                     )
+        from backend.services.document_references import (
+            document_references_hash,
+            read_document_references,
+        )
+
         return {
+            "references": read_document_references(
+                session,
+                version=version,
+                actor=actor,
+                self_origins=self.context_link_origins,
+            )
+            if version
+            else [],
+            "references_hash": document_references_hash(session, version)
+            if version
+            else "",
             "published_version_info": (
                 PublishedVersionInfo(
                     version_id=published_version.id,
@@ -1118,10 +1134,14 @@ class DomainReadService:
             "wikilink_targets": wikilink_targets,
             "link_targets": (
                 context_link_targets(
-                    session, page=page, version=version, actor=actor,
+                    session,
+                    page=page,
+                    version=version,
+                    actor=actor,
                     self_origins=self.context_link_origins,
                 )
-                if version is not None else []
+                if version is not None
+                else []
             ),
             "warnings": warnings,
             "pending_draft_version_id": pending_draft_version_id,
@@ -1208,6 +1228,16 @@ class DomainReadService:
             )
         raise ReadNotFoundError("target not found")
 
+    def _references_for_version(self, session, version, actor):
+        from backend.services.document_references import read_document_references
+
+        return read_document_references(
+            session,
+            version=version,
+            actor=actor,
+            self_origins=self.context_link_origins,
+        )
+
     def fetch_target(
         self,
         session: Session,
@@ -1287,6 +1317,7 @@ class DomainReadService:
                 "id": page.id,
                 "title": page.title,
                 "text": version.body_md,
+                "references": self._references_for_version(session, version, actor),
                 "url": context_page_url(workspace_id, page.id),
                 "metadata": {
                     "type": entity_type,
@@ -1882,6 +1913,13 @@ class DomainReadService:
             ],
         }
 
+    def citation_visibility_map(self, session, workspace_id, citations, actor):
+        from backend.services.citation_visibility import legacy_citation_visibility
+
+        return legacy_citation_visibility(
+            session, workspace_id=workspace_id, citations=citations, actor=actor
+        )
+
     def _citation_is_visible(
         self,
         session: Session,
@@ -1889,80 +1927,9 @@ class DomainReadService:
         citation: ContextCitation,
         actor: ActorContext | None,
     ) -> bool:
-        if citation.target_kind == "context_claim":
-            claim = get_in_workspace(
-                session,
-                ContextClaim,
-                workspace_id=workspace_id,
-                resource_id=citation.target_id,
-            )
-            target_version = (
-                get_in_workspace(
-                    session,
-                    ContextPageVersion,
-                    workspace_id=workspace_id,
-                    resource_id=claim.page_version_id,
-                )
-                if claim is not None
-                else None
-            )
-        else:
-            # ContextCitation stores the owning ContextPageVersion id for all
-            # page/section/whole target variants; only context_claim points to
-            # a claim row.
-            target_version = get_in_workspace(
-                session,
-                ContextPageVersion,
-                workspace_id=workspace_id,
-                resource_id=citation.target_id,
-            )
-        target_page = (
-            get_in_workspace(
-                session,
-                ContextPage,
-                workspace_id=workspace_id,
-                resource_id=target_version.page_id,
-            )
-            if target_version is not None
-            else None
-        )
-        if target_page is None or not context_version_is_visible(target_version, actor):
-            return False
-        if citation.library_item_version_id is not None:
-            try:
-                self.get_library_item_version(
-                    session=session,
-                    workspace_id=workspace_id,
-                    version_id=citation.library_item_version_id,
-                    actor=actor,
-                )
-            except (ReadNotFoundError, RejectedByPolicyError):
-                return False
-            return True
-        if citation.library_artifact_id is not None:
-            try:
-                self.get_library_artifact(
-                    session=session,
-                    workspace_id=workspace_id,
-                    artifact_id=citation.library_artifact_id,
-                    actor=actor,
-                )
-            except (ReadNotFoundError, RejectedByPolicyError):
-                return False
-            return True
-        if citation.cited_context_page_version_id is not None:
-            try:
-                self._read_context_page_version(
-                    session=session,
-                    workspace_id=workspace_id,
-                    version_id=citation.cited_context_page_version_id,
-                    actor=actor,
-                    include_warnings=False,  # existence check only; skip lint work
-                )
-            except ReadNotFoundError:
-                return False
-            return True
-        return False
+        return self.citation_visibility_map(
+            session, workspace_id, [citation], actor
+        ).get(citation.id, False)
 
     @staticmethod
     def _select_agent_version(

@@ -18,6 +18,10 @@ from backend.models.context import (
     ContextPage,
     ContextPageVersion,
 )
+from backend.models.document_reference import (
+    ContextDocumentReference,
+    ContextPublishedCitation,
+)
 from backend.models.job import Job
 from backend.models.library import (
     LibraryArtifact,
@@ -39,6 +43,7 @@ from backend.repositories.media_blob_reference import (
     SqlAlchemyBlobReferenceLedger,
     lock_workspace_blob_reference_intent,
 )
+from backend.repositories.workspace_scoped import join_in_workspace, select_in_workspace
 from backend.services.actor_visible_read import actor_can_read_library_trust_level
 from backend.services.audit_service import AuditService
 from backend.services.change_review_audit import ChangeReviewAuditRecorder
@@ -120,6 +125,18 @@ class LibraryService:
             raise ReadNotFoundError("library item not found")
         citations = self._citations_for_item(session, item)
         pages = self._citing_pages(session, citations)
+        document_rows = self._document_reference_rows(session, item)
+        pages = list(
+            {
+                page.id: page
+                for page in [
+                    *pages,
+                    *self._document_reference_pages(
+                        session, item.workspace_id, document_rows, actor=actor
+                    ),
+                ]
+            }.values()
+        )
         return [
             {"id": str(page.id), "title": page.title, "slug": page.slug}
             for page in pages
@@ -189,11 +206,27 @@ class LibraryService:
         )
 
         citations = self._citations_for_item(session, item)
-        citing_pages = self._citing_pages(session, citations) if citations else []
+        document_rows = self._document_reference_rows(session, item)
+        citing_pages = list(
+            {
+                page.id: page
+                for page in [
+                    *self._citing_pages(session, citations),
+                    *self._document_reference_pages(
+                        session, workspace_id, document_rows
+                    ),
+                ]
+            }.values()
+        )
         citing_page_refs = [(page.id, page.title) for page in citing_pages]
         # Codex #14: capture per-citation provenance BEFORE the rows are deleted
         # so review/stale/audit/export lineage survives the hard delete.
         citation_provenance = self._serialize_citation_provenance(session, citations)
+        citation_provenance.extend(
+            self._serialize_document_reference_provenance(
+                session, workspace_id, document_rows
+            )
+        )
 
         self._record_tombstone(
             session=session,
@@ -213,6 +246,8 @@ class LibraryService:
         # block the ordered deletes below.
         for citation in citations:
             session.delete(citation)
+        for reference in document_rows:
+            session.delete(reference)
         session.flush()
 
         node = session.scalar(
@@ -418,6 +453,15 @@ class LibraryService:
         session.delete(item)
         session.flush()
 
+        # Citation relations are write-through projections. Removing source
+        # references must remove their edges in the same authorized delete,
+        # without waiting for reindex or reparsing the old Context body.
+        from backend.services.indexing.edge_registry import refresh_page_edge_projection
+
+        session.flush()
+        for page_id, _page_title in citing_page_refs:
+            refresh_page_edge_projection(session, workspace_id, page_id)
+
         # Raise an FYI review notice on each citing page now the source is gone.
         for page_id, _page_title in citing_page_refs:
             self.change_review_audit.record_library_item_deleted(
@@ -452,6 +496,115 @@ class LibraryService:
             },
         )
         session.flush()
+
+    @staticmethod
+    def _document_reference_rows(session: Session, item: LibraryItem) -> list:
+        return [
+            row
+            for model in (ContextDocumentReference, ContextPublishedCitation)
+            for row in session.scalars(
+                select_in_workspace(
+                    model,
+                    workspace_id=item.workspace_id,
+                    conditions=(model.library_item_id == item.id,),
+                )
+            )
+        ]
+
+    @staticmethod
+    def _document_reference_pages(
+        session: Session,
+        workspace_id: UUID,
+        references: list,
+        *,
+        actor: ActorContext | None = None,
+    ) -> list[ContextPage]:
+        version_ids = {
+            row.owner_version_id
+            if isinstance(row, ContextDocumentReference)
+            else row.source_version_id
+            for row in references
+        }
+        if not version_ids:
+            return []
+        from backend.services.context_visibility import (
+            visible_context_version_expression,
+        )
+
+        visible_versions = (
+            (ContextPageVersion.id == visible_context_version_expression(actor),)
+            if actor is not None
+            else ()
+        )
+        return list(
+            session.scalars(
+                join_in_workspace(
+                    select_in_workspace(
+                        ContextPage,
+                        workspace_id=workspace_id,
+                        conditions=(
+                            ContextPageVersion.id.in_(version_ids),
+                            *visible_versions,
+                        ),
+                    ),
+                    ContextPage,
+                    ContextPageVersion,
+                    workspace_id=workspace_id,
+                    on=ContextPageVersion.page_id == ContextPage.id,
+                ).distinct()
+            )
+        )
+
+    @staticmethod
+    def _serialize_document_reference_provenance(
+        session: Session, workspace_id: UUID, references: list
+    ) -> list[dict]:
+        owner_ids = {
+            row.owner_version_id
+            if isinstance(row, ContextDocumentReference)
+            else row.source_version_id
+            for row in references
+        }
+        owners = (
+            {
+                row.id: row.page_id
+                for row in session.scalars(
+                    select_in_workspace(
+                        ContextPageVersion,
+                        workspace_id=workspace_id,
+                        conditions=(ContextPageVersion.id.in_(owner_ids),),
+                    )
+                )
+            }
+            if owner_ids
+            else {}
+        )
+        return [
+            {
+                "citation_id": str(row.id),
+                "citation_type": "document_reference",
+                "reference_id": str(row.id),
+                "registration_origin": "metadata"
+                if isinstance(row, ContextDocumentReference)
+                else "published",
+                "target_kind": "context_page_version",
+                "target_id": str(owner_id),
+                "source_page_id": str(owners[owner_id]),
+                "library_item_id": str(row.library_item_id),
+                "inline_count": getattr(row, "inline_count", 0),
+                "occurrences": getattr(row, "occurrences", []),
+                "metadata_present": getattr(row, "metadata_present", True),
+                "note": row.note,
+                "sort_order": row.sort_order,
+            }
+            for row in references
+            if (
+                owner_id := row.owner_version_id
+                if isinstance(row, ContextDocumentReference)
+                else row.source_version_id
+            )
+            in owners
+        ]
 
     @staticmethod
     def _serialize_citation_provenance(

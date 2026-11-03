@@ -19,8 +19,6 @@ from sqlalchemy.orm import Session
 
 from backend.models.ask import AskSession, AskTurn, AskTurnCitation
 from backend.models.context import (
-    ContextCitation,
-    ContextClaim,
     ContextPage,
     ContextPageVersion,
     EdgeProjection,
@@ -36,6 +34,18 @@ from backend.services.graph_cache import (
 )
 from backend.services.graph_observation_service import GraphObservationService
 from backend.services.graph_semantics import EDGE_SEMANTICS
+from backend.services.indexing.citation_edges import (
+    citation_agent_rows as _citation_agent_rows,
+)
+from backend.services.indexing.citation_edges import (
+    citation_page_rows as _citation_page_rows,
+)
+from backend.services.indexing.citation_edges import (
+    citation_source_rows as _citation_source_rows,
+)
+from backend.services.indexing.citation_edges import (
+    document_citation_source_ids,
+)
 from backend.services.indexing.co_read import (
     Read,
 )
@@ -83,7 +93,7 @@ from backend.services.indexing.edge_projection import (
 
 _ENTITY_KIND_VALUES = frozenset(kind.value for kind in EntityKind)
 PAGE_EDGE_OBSERVATION_EXTRACTOR_VERSION = "page-edge-write-through.v1"
-PAGE_EDGE_KINDS = ("wikilink", "citation_page", "citation_source")
+PAGE_EDGE_KINDS = ("wikilink", "citation_page", "citation_source", "citation_agent")
 
 
 class EdgeExtractor(Protocol):
@@ -401,154 +411,6 @@ def _tree_edge_row(
     )
 
 
-def _citation_scope(statement, citing_page_id: UUID | None):
-    """Restrict citations to one page's current published version.
-
-    ``CitationInput`` stores claim ids for claim-scoped citations and version
-    ids for whole/section citations. Legacy page/version target kinds remain
-    readable, but draft and superseded-version evidence never projects into
-    the viewer-visible graph.
-    """
-    if citing_page_id is None:
-        return statement
-    published_version_ids = select(ContextPage.current_published_version_id).where(
-        ContextPage.id == citing_page_id,
-        ContextPage.current_published_version_id.is_not(None),
-    )
-    claim_ids = select(ContextClaim.id).where(
-        ContextClaim.page_version_id.in_(published_version_ids)
-    )
-    return statement.where(
-        or_(
-            and_(
-                ContextCitation.target_kind == "context_page",
-                ContextCitation.target_id == citing_page_id,
-            ),
-            and_(
-                ContextCitation.target_kind.in_(
-                    (
-                        "context_page_version",
-                        "context_page_whole",
-                        "context_page_section",
-                    )
-                ),
-                ContextCitation.target_id.in_(published_version_ids),
-            ),
-            and_(
-                ContextCitation.target_kind == "context_claim",
-                ContextCitation.target_id.in_(claim_ids),
-            ),
-        )
-    )
-
-
-def _aggregate_citation_edges(
-    session: Session,
-    workspace_id: UUID,
-    edge_kind: str,
-    per_citation: list[tuple[ContextCitation, EntityKind, UUID]],
-) -> list[dict[str, object]]:
-    """Collapse citation instances onto identity edges.
-
-    A page can cite the same target more than once (two claims in one draft,
-    or citations carried across revisions — ContextCitation has no
-    uniqueness), and uq_edge_projection_identity would reject duplicate rows
-    mid-publish. Weight = instance count, occurred_at = latest evidence.
-    """
-    citing_by_citation = _citing_page_map(
-        session, [citation for citation, _kind, _id in per_citation]
-    )
-    workspace_pages = _workspace_page_ids(
-        session, set(citing_by_citation.values()), workspace_id
-    )
-    aggregated: dict[tuple[UUID, EntityKind, UUID], list] = {}
-    for citation, target_kind, target_id in per_citation:
-        citing_page_id = citing_by_citation.get(citation.id)
-        if citing_page_id is None or citing_page_id not in workspace_pages:
-            continue
-        key = (citing_page_id, target_kind, target_id)
-        entry = aggregated.get(key)
-        if entry is None:
-            aggregated[key] = [1, citation.created_at]
-        else:
-            entry[0] += 1
-            if citation.created_at and (
-                entry[1] is None or citation.created_at > entry[1]
-            ):
-                entry[1] = citation.created_at
-    return [
-        _edge(
-            workspace_id=workspace_id,
-            source_kind=EntityKind.CONTEXT_PAGE,
-            source_id=citing_page_id,
-            target_kind=target_kind,
-            target_id=target_id,
-            edge_kind=edge_kind,
-            source_table="context_citation",
-            weight=float(count),
-            occurred_at=latest,
-        )
-        for (citing_page_id, target_kind, target_id), (
-            count,
-            latest,
-        ) in aggregated.items()
-    ]
-
-
-def _citation_page_rows(
-    session: Session,
-    workspace_id: UUID,
-    citing_page_id: UUID | None = None,
-) -> list[dict[str, object]]:
-    """Curated page->page citations (ContextCitation XOR: cited page arm)."""
-    statement = (
-        select(
-            ContextCitation,
-            ContextPageVersion.page_id,
-        )
-        .join(
-            ContextPageVersion,
-            ContextCitation.cited_context_page_version_id == ContextPageVersion.id,
-        )
-        .where(ContextCitation.cited_context_page_version_id.is_not(None))
-    )
-    rows = session.execute(_citation_scope(statement, citing_page_id)).all()
-    return _aggregate_citation_edges(
-        session,
-        workspace_id,
-        "citation_page",
-        [
-            (citation, EntityKind.CONTEXT_PAGE, cited_page_id)
-            for citation, cited_page_id in rows
-        ],
-    )
-
-
-def _citation_source_rows(
-    session: Session,
-    workspace_id: UUID,
-    citing_page_id: UUID | None = None,
-) -> list[dict[str, object]]:
-    """Curated page->library citations (artifact / item-version arms)."""
-    statement = select(ContextCitation).where(
-        (ContextCitation.library_artifact_id.is_not(None))
-        | (ContextCitation.library_item_version_id.is_not(None))
-    )
-    citations = session.scalars(_citation_scope(statement, citing_page_id)).all()
-    per_citation: list[tuple[ContextCitation, EntityKind, UUID]] = []
-    for citation in citations:
-        if citation.library_artifact_id is not None:
-            target_kind = EntityKind.LIBRARY_ARTIFACT
-            target_id = citation.library_artifact_id
-        else:
-            target_kind = EntityKind.LIBRARY_ITEM_VERSION
-            target_id = citation.library_item_version_id
-        per_citation.append((citation, target_kind, target_id))
-    return _aggregate_citation_edges(
-        session, workspace_id, "citation_source", per_citation
-    )
-
-
 def _version_parent_rows(
     session: Session, workspace_id: UUID
 ) -> list[dict[str, object]]:
@@ -610,113 +472,6 @@ def _version_merge_rows(
     ]
 
 
-def _citing_page_map(
-    session: Session, citations: list[ContextCitation]
-) -> dict[UUID, UUID]:
-    """Map citations to a page only when they belong to its published head."""
-    version_targets = {
-        citation.target_id
-        for citation in citations
-        if citation.target_kind
-        in (
-            "context_page_version",
-            "context_page_whole",
-            "context_page_section",
-        )
-    }
-    version_owners: dict[UUID, tuple[UUID, UUID]] = {}
-    if version_targets:
-        version_owners = {
-            version_id: (page_id, version_id)
-            for version_id, page_id in session.execute(
-                select(ContextPageVersion.id, ContextPageVersion.page_id).where(
-                    ContextPageVersion.id.in_(version_targets)
-                )
-            ).all()
-        }
-
-    claim_targets = {
-        citation.target_id
-        for citation in citations
-        if citation.target_kind == "context_claim"
-    }
-    claim_owners: dict[UUID, tuple[UUID, UUID]] = {}
-    if claim_targets:
-        claim_owners = {
-            claim_id: (page_id, version_id)
-            for claim_id, version_id, page_id in session.execute(
-                select(
-                    ContextClaim.id,
-                    ContextPageVersion.id,
-                    ContextPageVersion.page_id,
-                )
-                .join(
-                    ContextPageVersion,
-                    ContextClaim.page_version_id == ContextPageVersion.id,
-                )
-                .where(ContextClaim.id.in_(claim_targets))
-            ).all()
-        }
-
-    page_targets = {
-        citation.target_id
-        for citation in citations
-        if citation.target_kind == "context_page"
-    }
-    owner_by_citation: dict[UUID, tuple[UUID, UUID | None]] = {}
-    for citation in citations:
-        if citation.target_kind in (
-            "context_page_version",
-            "context_page_whole",
-            "context_page_section",
-        ):
-            owner = version_owners.get(citation.target_id)
-        elif citation.target_kind == "context_claim":
-            owner = claim_owners.get(citation.target_id)
-        elif citation.target_kind == "context_page":
-            owner = (citation.target_id, None)
-        else:
-            owner = None
-        if owner is not None:
-            owner_by_citation[citation.id] = owner
-
-    page_ids = page_targets | {
-        page_id for page_id, _version_id in owner_by_citation.values()
-    }
-    published_by_page: dict[UUID, UUID | None] = {}
-    if page_ids:
-        published_by_page = dict(
-            session.execute(
-                select(ContextPage.id, ContextPage.current_published_version_id).where(
-                    ContextPage.id.in_(page_ids)
-                )
-            ).all()
-        )
-
-    mapping: dict[UUID, UUID] = {}
-    for citation_id, (page_id, version_id) in owner_by_citation.items():
-        published_version_id = published_by_page.get(page_id)
-        if published_version_id is not None and (
-            version_id is None or version_id == published_version_id
-        ):
-            mapping[citation_id] = page_id
-    return mapping
-
-
-def _workspace_page_ids(
-    session: Session, page_ids: set[UUID], workspace_id: UUID
-) -> set[UUID]:
-    if not page_ids:
-        return set()
-    return set(
-        session.scalars(
-            select(ContextPage.id)
-            .where(ContextPage.id.in_(page_ids))
-            .where(ContextPage.workspace_id == workspace_id)
-        ).all()
-    )
-
-
 # Registry: edge_kind -> extractor. New edge-bearing relations must register
 # here (the completeness test fails otherwise).
 EDGE_EXTRACTORS: dict[str, EdgeExtractor] = {}
@@ -741,6 +496,7 @@ _register("wikilink", _wikilink_rows)
 _register("tree", _tree_rows)
 _register("citation_page", _citation_page_rows)
 _register("citation_source", _citation_source_rows)
+_register("citation_agent", _citation_agent_rows)
 _register("version_parent", _version_parent_rows)
 _register("version_merge", _version_merge_rows)
 _register("co_access", _co_access_rows)
@@ -774,25 +530,25 @@ EDGE_BEARING_RELATIONS: dict[str, tuple[str, ...]] = {
         "ask_turn.recommended_placement_tree_node_id->workspace_tree_node.id",
         "context_ingress_proposal.proposed_parent_tree_node_id->workspace_tree_node.id",
     ),
-    "citation_owner": ("context_citation.target_kind+target_id",),
+    "citation_owner": (
+        "context_citation.target_kind+target_id",
+        "context_published_citation.source_version_id->context_page_version.id",
+    ),
+    "citation_agent": ("context_published_citation.agent_page_id->agent_page.id",),
     "citation_page": (
         "context_citation.cited_context_page_version_id->context_page_version.id",
+        "context_published_citation.context_page_id->context_page.id",
     ),
     "citation_source": (
         "context_citation.library_artifact_id->library_artifact.id",
         "context_citation.library_item_version_id->library_item_version.id",
+        "context_published_citation.library_item_id->library_item.id",
     ),
     "document_reference": (
         "context_document_reference.owner_version_id->context_page_version.id",
         "context_document_reference.context_page_id->context_page.id",
         "context_document_reference.library_item_id->library_item.id",
         "context_document_reference.agent_page_id->agent_page.id",
-    ),
-    "published_document_citation": (
-        "context_published_citation.source_version_id->context_page_version.id",
-        "context_published_citation.context_page_id->context_page.id",
-        "context_published_citation.library_item_id->library_item.id",
-        "context_published_citation.agent_page_id->agent_page.id",
     ),
     "version_parent": (
         "context_page_version.parent_version_id->context_page_version.id",
@@ -896,11 +652,6 @@ DEFERRED_EDGE_RELATIONS.update(
             "not project draft metadata as current graph edges; publication "
             "must first resolve them into final citation rows."
         ),
-        "published_document_citation": (
-            "Storage foundation awaiting the publication writer and a "
-            "current-published-head extractor. ContextCitation remains the "
-            "active citation graph source until that cutover is implemented."
-        ),
         "graph_observation": (
             "Append-only temporal evidence queried directly by GraphQueryService; "
             "it must never be folded into the rebuildable current projection."
@@ -915,6 +666,16 @@ DEFERRED_EDGE_RELATIONS.update(
         ),
     }
 )
+
+
+def refresh_document_citation_sources(session, workspace_id, target_kind, target_id):
+    """Compatibility entrypoint; the Citation adapter owns incoming discovery."""
+    for source_id in document_citation_source_ids(
+        session, workspace_id, target_kind, target_id
+    ):
+        if target_kind == "context_page" and source_id == target_id:
+            continue
+        refresh_page_edge_projection(session, workspace_id, source_id)
 
 
 def refresh_page_edge_projection(
@@ -954,6 +715,7 @@ def refresh_page_edge_projection(
         ("wikilink", _wikilink_rows),
         ("citation_page", _citation_page_rows),
         ("citation_source", _citation_source_rows),
+        ("citation_agent", _citation_agent_rows),
     ):
         # Scoped extraction: a publish must not pay O(workspace) citation
         # scans; the extractors restrict to this page's link/citation rows.

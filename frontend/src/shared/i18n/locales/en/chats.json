@@ -74,7 +74,7 @@
     "toolTitles": {
       "begin_context_edit": "Begin context edit",
       "build_agent_input_bundle": "Build agent input bundle",
-      "cite": "Find citation candidates",
+      "cite": "Register references",
       "create_context_page": "Create context page",
       "discard_context_edit": "Discard context edit",
       "fetch": "Fetch search result",

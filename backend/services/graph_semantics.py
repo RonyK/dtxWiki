@@ -55,6 +55,15 @@ EDGE_SEMANTICS: dict[str, GraphSemantic] = {
         "cited",
         provenance="curated",
     ),
+    "citation_agent": GraphSemantic(
+        "citation_agent",
+        "cites agent guidance",
+        "cited by",
+        "evidence",
+        "cited",
+        provenance="curated",
+        rank_alias="citation_source",
+    ),
     "ask_citation": GraphSemantic(
         "ask_citation",
         "included as evidence",

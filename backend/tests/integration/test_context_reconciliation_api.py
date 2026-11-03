@@ -14,6 +14,7 @@ from backend.models.audit import AuditEvent
 from backend.models.base import utc_now
 from backend.models.change import ChangeSet
 from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.document_reference import ContextDocumentReference
 from backend.models.mcp_chat import McpChatSession
 from backend.models.review import ReviewItem
 from backend.models.workspace import MCPClient, Workspace
@@ -918,6 +919,65 @@ def test_reconciliation_convergent_change_becomes_zero_conflict_and_commits(
             actor_id="00000000-0000-0000-0000-000000000010",
         )
     branch_id = diverged.alternative_draft_id
+    # Extend this existing body-convergence traversal: reference changes made
+    # on a private source before the body fork must survive even when the
+    # body's merge is a no-op. Its metadata base is the shared ancestor, not
+    # the branch's immediate source parent. Seed that historical fork without
+    # another transport/DB case or an unrelated editor lifecycle.
+    with page_service.session_factory.begin() as session:
+        root = session.get(ContextPageVersion, base.version_id)
+        branch = session.get(ContextPageVersion, branch_id)
+        latest = session.get(ContextPageVersion, reverted.draft_version_id)
+        private_source = ContextPageVersion(
+            workspace_id=workspace_id,
+            page_id=base.id,
+            version_no=latest.version_no + 1,
+            parent_version_id=root.id,
+            body_md=root.body_md,
+            content_hash=root.content_hash,
+            block_map=deepcopy(root.block_map),
+            actor_type="mcp_client",
+            created_by_actor_kind="mcp_client",
+            created_by_actor_id="metadata-source-client",
+            version_status="draft",
+            graph_status="discarded",
+        )
+        targets = [
+            ContextPage(
+                workspace_id=workspace_id,
+                slug=f"reconciliation-reference-{name}",
+                title=name,
+                page_type="overview",
+            )
+            for name in ("source", "head", "shared")
+        ]
+        session.add_all([private_source, *targets])
+        session.flush()
+        source_target, head_target, shared_target = [target.id for target in targets]
+        branch.parent_version_id = private_source.id
+        manifest = deepcopy(branch.reconcile_manifest)
+        manifest["base"]["version_id"] = str(private_source.id)
+        manifest["branch"]["parent_version_id"] = str(private_source.id)
+        branch.reconcile_manifest = manifest
+        for owner, target_id, note in (
+            (private_source, source_target, "source addition"),
+            (branch, source_target, "source addition"),
+            (latest, head_target, "head addition"),
+            (root, shared_target, "original note"),
+            (private_source, shared_target, "source note"),
+            (branch, shared_target, "source note"),
+            (latest, shared_target, "competing head note"),
+        ):
+            session.add(
+                ContextDocumentReference(
+                    workspace_id=workspace_id,
+                    owner_version_id=owner.id,
+                    target_kind="context_page",
+                    context_page_id=target_id,
+                    note=note,
+                    sort_order=0,
+                )
+            )
     client = _client(page_service, email="zero-conflict-owner@example.com")
     route = (
         f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}/versions/{branch_id}/reconciliation"
@@ -930,24 +990,51 @@ def test_reconciliation_convergent_change_becomes_zero_conflict_and_commits(
     assert detail["conflicts"] == []
     assert detail["clean_changes"] == []
 
-    committed = client.post(
-        route,
-        json={
-            "expected_head_version_id": str(reverted.draft_version_id),
-            "reconciles": [str(branch_id)],
-            "resolutions": [],
-            "excluded_clean_change_ids": [],
-            "reason": "close the converged branch",
-            "idempotency_key": "zero-conflict-one-click",
-            "dry_run": False,
-        },
-    )
+    payload = {
+        "expected_head_version_id": str(reverted.draft_version_id),
+        "reconciles": [str(branch_id)],
+        "resolutions": [],
+        "excluded_clean_change_ids": [],
+        "reason": "close the converged branch",
+        "idempotency_key": "zero-conflict-one-click",
+        "dry_run": False,
+    }
+    conflict = client.post(route, json=payload)
+    assert conflict.status_code == 422, conflict.text
+    assert conflict.json()["error_code"] == "reconcile_reference_conflict"
+    with page_service.session_factory.begin() as session:
+        assert session.get(ContextPageVersion, branch_id).graph_status == "branched"
+        assert session.get(ContextPage, base.id).latest_draft_version_id == (
+            reverted.draft_version_id
+        )
+        head_reference = session.scalar(
+            select(ContextDocumentReference).where(
+                ContextDocumentReference.owner_version_id == reverted.draft_version_id,
+                ContextDocumentReference.context_page_id == shared_target,
+            )
+        )
+        # An explicit References edit on the current head resolves the
+        # competing metadata choice; retrying the same body request is safe.
+        head_reference.note = "source note"
+    preview = client.post(route, json={**payload, "dry_run": True})
+    assert preview.status_code == 200, preview.text
+    committed = client.post(route, json=payload)
     assert committed.status_code == 200, committed.text
     merged_id = UUID(committed.json()["data"]["commit"]["draft_version_id"])
     with page_service.session_factory() as session:
         merged = session.get(ContextPageVersion, merged_id)
         assert merged.parent_version_id == reverted.draft_version_id
         assert merged.body_md == "alpha on branch\n\nbeta\n"
+        references = session.scalars(
+            select(ContextDocumentReference).where(
+                ContextDocumentReference.owner_version_id == merged_id
+            )
+        ).all()
+        assert {row.target_id: row.note for row in references} == {
+            source_target: "source addition",
+            head_target: "head addition",
+            shared_target: "source note",
+        }
 
 
 def test_reconciliation_api_exposes_and_keeps_current_table_row(page_service):

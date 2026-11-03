@@ -956,7 +956,7 @@ class ServiceRegistry:
     def citation(self):
         from backend.services.citation_service import CitationService
 
-        return CitationService()
+        return CitationService(self_origins=self.body_preparer.self_origins)
 
     @cached_property
     def feedback(self):

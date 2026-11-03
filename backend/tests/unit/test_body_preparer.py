@@ -68,6 +68,21 @@ def test_body_preparer_is_idempotent_and_honors_injected_modules_and_policy():
         preparer.prepare(BodyInput(legacy, metadata=metadata), ctx)
     with pytest.raises(InputPolicyError):
         preparer.prepare(BodyInput("body\x00invalid"), ctx)
+    # An incomplete marker is text: saving keeps it and Lint explains it.
+    incomplete = preparer.prepare(BodyInput("# Body\n\n@cite{}"), ctx)
+    assert incomplete.body == "# Body\n\n@cite{}"
+    assert any(
+        finding.message_key == "link.unresolved_citation"
+        for finding in incomplete.findings
+    )
+    citation_legacy = "# Body\n\n@cite{rfc-9110}"
+    preserved = preparer.prepare(BodyInput(citation_legacy), ctx)
+    assert preserved.body == citation_legacy
+    assert any(
+        finding.rule_id == "link.unresolved"
+        and "permanent document address" in finding.suggested_action
+        for finding in preserved.findings
+    )
     assert preparer.preview(raw, ctx).body == fixed
     # Explicit formatting also accepts an unsaved image placeholder, as the
     # pre-extraction endpoint did; save-time media policy is a different gate.

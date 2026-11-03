@@ -17,6 +17,7 @@ from backend.schemas.common import (
     SearchScope,
 )
 from backend.schemas.context_edit import SectionAddress
+from backend.schemas.document_reference import ReferenceView
 from backend.schemas.mcp.context_projection import (
     MCPContextCandidate,
     MCPGuidePayload,
@@ -134,6 +135,7 @@ class FetchInput(MCPConversationInput):
 
 
 class FetchOutput(BaseModel):
+    references: list[ReferenceView] = Field(default_factory=list)
     envelope: MCPResultEnvelope
     id: UUID | None = None
     title: str | None = None

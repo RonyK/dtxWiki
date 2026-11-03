@@ -270,7 +270,7 @@ const ALL_BLOCK_MENU_ENTRIES: BlockMenuEntry[] = [
     label: "Citation",
     labelKey: "blocks.entries.citation",
     keywords: ["cite", "source", "reference"],
-    template: "@cite{{{cursor}}source-id}",
+    template: "@cite{{{cursor}}}",
   },
   {
     id: "decision",

@@ -25,6 +25,7 @@ from uuid import UUID
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session, aliased
 
+from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.context import (
     ContextCitation,
     ContextClaim,
@@ -32,9 +33,14 @@ from backend.models.context import (
     ContextPageVersion,
     PageLink,
 )
+from backend.models.document_reference import (
+    ContextCitationPublication,
+    ContextPublishedCitation,
+)
 from backend.models.library import LibraryArtifact, LibraryItem, LibraryItemVersion
 from backend.models.tree import WorkspaceTreeNode
 from backend.policy.auth import ActorContext
+from backend.repositories.workspace_scoped import join_in_workspace, select_in_workspace
 from backend.schemas.workspace_graph import (
     WORKSPACE_GRAPH_FOLDER_TOPOLOGY_ROW_LIMIT,
     WorkspaceGraphCapabilities,
@@ -57,10 +63,15 @@ from backend.schemas.workspace_graph import (
 )
 from backend.services.actor_visible_read import (
     PUBLISHED_CONTEXT_VERSION_STATUSES,
+    agent_page_visible,
     library_item_visible,
 )
 from backend.services.read_errors import ReadValidationError
-from backend.services.workspace_urls import context_page_url, library_item_url
+from backend.services.workspace_urls import (
+    agent_page_url,
+    context_page_url,
+    library_item_url,
+)
 
 ALGORITHM_VERSION = "visible-component-pack.v3"
 VISIBILITY_POLICY_VERSION = "published-document-visibility.v1"
@@ -96,6 +107,15 @@ class _LibraryVisibilityItem:
     trust_level: str
     current_ready_version_id: UUID | None
     current_version_id: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class _AgentVisibilityPage:
+    workspace_id: UUID
+    lifecycle_status: str
+    category: str
+    sensitivity: str
+    current_active_version_id: UUID | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -710,6 +730,47 @@ class WorkspaceGraphService:
                 updated_at=_aware(updated_at),
                 selected_conversion_attempt_id=selected_conversion_attempt_id,
             )
+        agent_statement = join_in_workspace(
+            select_in_workspace(AgentPage, workspace_id=workspace_id),
+            AgentPage,
+            AgentPageVersion,
+            workspace_id=workspace_id,
+            on=AgentPageVersion.id == AgentPage.current_active_version_id,
+        ).with_only_columns(
+            AgentPage.id,
+            AgentPage.title,
+            AgentPage.workspace_id,
+            AgentPage.lifecycle_status,
+            AgentPage.category,
+            AgentPage.sensitivity,
+            AgentPage.current_active_version_id,
+            AgentPageVersion.created_at,
+        )
+        for (
+            agent_id,
+            title,
+            owner_workspace,
+            status,
+            category,
+            sensitivity,
+            head_id,
+            created_at,
+        ) in session.execute(agent_statement):
+            visible_page = _AgentVisibilityPage(
+                owner_workspace, status, category, sensitivity, head_id
+            )
+            if not agent_page_visible(visible_page, actor, workspace_id=workspace_id):
+                continue
+            key = ("agent", agent_id)
+            documents[key] = _Document(
+                key=key,
+                entity_id=agent_id,
+                entity_kind="agent",
+                label=title,
+                path=agent_page_url(workspace_id, agent_id),
+                head_id=head_id,
+                updated_at=_aware(created_at),
+            )
         return documents
 
     def _attach_tree_placements(
@@ -794,6 +855,11 @@ class WorkspaceGraphService:
             ):
                 initially_visible.add(node.id)
             elif (
+                node.target_kind == "agent_page"
+                and ("agent", node.target_id) in documents
+            ):
+                initially_visible.add(node.id)
+            elif (
                 node.target_kind == "library_item"
                 and (
                     "library",
@@ -836,6 +902,9 @@ class WorkspaceGraphService:
                 continue
             if node.target_kind == "context_page":
                 key = ("context", node.target_id)
+                priority = 0
+            elif node.target_kind == "agent_page":
+                key = ("agent", node.target_id)
                 priority = 0
             elif node.target_kind == "library_item":
                 key = ("library", node.target_id)
@@ -1235,6 +1304,65 @@ class WorkspaceGraphService:
                 if target is not None:
                     add_relation(source, target, kind, citation["created_at"])
 
+        materialized_heads = set(
+            session.scalars(
+                select_in_workspace(
+                    ContextCitationPublication,
+                    workspace_id=workspace_id,
+                ).with_only_columns(ContextCitationPublication.version_id)
+            )
+        )
+        # Existing legacy queries above are retained for untouched published
+        # versions only. A completed empty publication must erase old edges.
+        materialized_sources = {
+            doc.key for doc in documents.values() if doc.head_id in materialized_heads
+        }
+        relations = {
+            key: rel
+            for key, rel in relations.items()
+            if not (
+                rel.source in materialized_sources
+                and rel.kind in {"citation_page", "citation_source", "citation_agent"}
+            )
+        }
+        published_statement = join_in_workspace(
+            select_in_workspace(ContextPublishedCitation, workspace_id=workspace_id),
+            ContextPublishedCitation,
+            ContextPage,
+            workspace_id=workspace_id,
+            on=ContextPage.current_published_version_id
+            == ContextPublishedCitation.source_version_id,
+        ).with_only_columns(ContextPublishedCitation, ContextPage.id)
+        published = session.execute(published_statement)
+        for row, page_id in published:
+            source_document = context_by_id.get(page_id)
+            if (
+                source_document is None
+                or source_document.head_id != row.source_version_id
+            ):
+                continue
+            target = (
+                {
+                    "context_page": "context",
+                    "library_item": "library",
+                    "agent_page": "agent",
+                }[row.target_kind],
+                row.target_id,
+            )
+            kind = {
+                "context_page": "citation_page",
+                "library_item": "citation_source",
+                "agent_page": "citation_agent",
+            }[row.target_kind]
+            add_relation(
+                source_document.key,
+                target,
+                kind,
+                row.created_at,
+                max(
+                    1, row.inline_count, row.legacy_count if not row.inline_count else 0
+                ),
+            )
         return [relations[key] for key in sorted(relations, key=_relation_sort_key)]
 
     @staticmethod
@@ -1245,11 +1373,26 @@ class WorkspaceGraphService:
         lens: str,
     ) -> list[_Relation]:
         relation_kinds = {
-            "combined": {"wikilink", "citation_page", "citation_source"},
+            "combined": {
+                "wikilink",
+                "citation_page",
+                "citation_source",
+                "citation_agent",
+            },
             "links": {"wikilink"},
-            "evidence": {"citation_page", "citation_source"},
-            "compare": {"wikilink", "citation_page", "citation_source"},
-            "growth": {"wikilink", "citation_page", "citation_source"},
+            "evidence": {"citation_page", "citation_source", "citation_agent"},
+            "compare": {
+                "wikilink",
+                "citation_page",
+                "citation_source",
+                "citation_agent",
+            },
+            "growth": {
+                "wikilink",
+                "citation_page",
+                "citation_source",
+                "citation_agent",
+            },
             "directory": set(),
             "provenance": set(),
         }[lens]
@@ -2948,7 +3091,7 @@ def _focus_key(
 
     if entity_id is None:
         return None
-    for kind in ("context", "library"):
+    for kind in ("context", "library", "agent"):
         key = (kind, entity_id)
         if key in documents:
             return key
@@ -3162,6 +3305,7 @@ def _relation_label(kind: str) -> str:
         "wikilink": "links to",
         "citation_page": "cites",
         "citation_source": "cites source",
+        "citation_agent": "cites agent guidance",
     }.get(kind, kind.replace("_", " "))
 
 

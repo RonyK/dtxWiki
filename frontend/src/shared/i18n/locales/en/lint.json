@@ -140,6 +140,11 @@
       "message": "This internal document link is unavailable.",
       "description": "Flags a missing, archived, or inaccessible target in this workspace."
     },
+    "link_unresolved_citation": {
+      "label": "Unresolved citation",
+      "message": "This citation names no document of this workspace, so it is not registered as a reference.",
+      "description": "Shows @cite markers whose address names no document of this workspace."
+    },
     "link_broken-slug": {
       "label": "Stale wiki-link slug",
       "message": "The wiki link [[{{written_slug}}]] still works, but the target is now [[{{current_slug}}]].",

@@ -13,6 +13,12 @@ from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models.audit import AuditEvent
 from backend.models.chunk import ContentChunk
+from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.document_reference import (
+    ContextCitationPublication,
+    ContextDocumentReference,
+    ContextPublishedCitation,
+)
 from backend.models.job import Job
 from backend.models.library import (
     LibraryArtifact,
@@ -20,6 +26,7 @@ from backend.models.library import (
     LibraryAttempt,
     LibraryAttemptConversionDetail,
     LibraryItem,
+    LibraryItemTombstone,
     LibraryItemVersion,
     LibraryRun,
     LibraryRunConversionDetail,
@@ -574,6 +581,60 @@ def test_library_delete_breaks_overlay_pointer_and_removes_owned_row(
         overlay_id = saved.overlay_id
         assert overlay_id is not None
 
+        # Target RESTRICT references are a separate deletion failure from the
+        # semantic-overlay pointer. Observe both in the one existing delete
+        # transaction instead of adding another database/transport scenario.
+        page = ContextPage(
+            workspace_id=workspace_id,
+            slug="deleted-citation-owner",
+            title="Source reader",
+            page_type="overview",
+        )
+        session.add(page)
+        session.flush()
+        owner = ContextPageVersion(
+            workspace_id=workspace_id,
+            page_id=page.id,
+            version_no=1,
+            body_md="# Source reader",
+            content_hash="e" * 64,
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id="reader",
+            version_status="published_snapshot",
+        )
+        session.add(owner)
+        session.flush()
+        page.current_version_id = page.current_published_version_id = owner.id
+        page.lifecycle_status = "published"
+        metadata = ContextDocumentReference(
+            workspace_id=workspace_id,
+            owner_version_id=owner.id,
+            target_kind="library_item",
+            library_item_id=item.id,
+        )
+        published_reference = ContextPublishedCitation(
+            workspace_id=workspace_id,
+            source_version_id=owner.id,
+            target_kind="library_item",
+            library_item_id=item.id,
+            metadata_present=True,
+        )
+        session.add_all(
+            [
+                metadata,
+                published_reference,
+                ContextCitationPublication(
+                    workspace_id=workspace_id, version_id=owner.id, fingerprint="f" * 64
+                ),
+            ]
+        )
+        session.flush()
+        references = library_service.list_item_references(
+            session, workspace_id, item.id, actor=actor
+        )
+        assert [entry["id"] for entry in references] == [str(page.id)]
+
         library_service.delete_library_item(
             session=session,
             workspace_id=workspace_id,
@@ -585,3 +646,16 @@ def test_library_delete_breaks_overlay_pointer_and_removes_owned_row(
 
         assert session.get(LibrarySemanticOverlay, overlay_id) is None
         assert session.get(LibraryItem, item.id) is None
+        assert not list(session.scalars(select(ContextDocumentReference)))
+        assert not list(session.scalars(select(ContextPublishedCitation)))
+        tombstone = session.scalar(
+            select(LibraryItemTombstone).where(
+                LibraryItemTombstone.library_item_id == item.id
+            )
+        )
+        assert tombstone is not None
+        assert {entry["registration_origin"] for entry in tombstone.citations} == {
+            "metadata",
+            "published",
+        }
+        assert all(entry["target_id"] == str(owner.id) for entry in tombstone.citations)

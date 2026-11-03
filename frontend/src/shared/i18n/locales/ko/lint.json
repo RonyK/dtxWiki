@@ -140,6 +140,11 @@
       "message": "이 내부 문서 링크를 열 수 없습니다.",
       "description": "이 Workspace에서 없거나 보관되었거나 접근할 수 없는 대상을 표시합니다."
     },
+    "link_unresolved_citation": {
+      "label": "해석되지 않은 인용",
+      "message": "이 인용은 이 Workspace의 문서를 가리키지 않아 참고문헌에 등록되지 않습니다.",
+      "description": "이 Workspace의 문서를 가리키지 않는 @cite 표시를 보여 줍니다."
+    },
     "link_broken-slug": {
       "label": "오래된 위키 링크 슬러그",
       "message": "위키 링크 [[{{written_slug}}]]은 작동하지만 대상의 현재 슬러그는 [[{{current_slug}}]]입니다.",

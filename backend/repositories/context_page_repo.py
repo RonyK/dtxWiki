@@ -21,6 +21,7 @@ from backend.repositories.context_visibility import (
     PUBLISHED_CONTEXT_VERSION_STATUSES,
     visible_context_version_expression,
 )
+from backend.repositories.workspace_scoped import get_in_workspace
 from backend.utils.actor_display import resolve_actor_display_name
 from backend.utils.block_identity import (
     BlockOperationProvenance,
@@ -593,12 +594,13 @@ def insert_version(
     identity_seed: str | None = None,
     explicit_block_replacements: dict[str, str] | None = None,
     prepared_block_map: list[dict] | None = None,
+    reference_source_version: ContextPageVersion | None = None,
 ) -> ContextPageVersion:
     """Insert new authored bytes only after the shared body preparation gate."""
 
     if not isinstance(body, PreparedBody):
         raise TypeError("insert_version requires a PreparedBody")
-    return _insert_version_raw(
+    version = _insert_version_raw(
         session,
         page_id=page_id,
         parent_version_id=parent_version_id,
@@ -615,6 +617,20 @@ def insert_version(
         explicit_block_replacements=explicit_block_replacements,
         prepared_block_map=prepared_block_map,
     )
+    if reference_source_version is not None or parent_version_id is not None:
+        source = reference_source_version or get_in_workspace(
+            session,
+            ContextPageVersion,
+            workspace_id=version.workspace_id,
+            resource_id=parent_version_id,
+        )
+        if source is not None:
+            if source.workspace_id != version.workspace_id or source.page_id != page_id:
+                raise ValueError("Reference source must belong to the destination page")
+            from backend.repositories.document_reference import copy_document_references
+
+            copy_document_references(session, source=source, target=version)
+    return version
 
 
 def insert_version_copy(
@@ -640,7 +656,7 @@ def insert_version_copy(
         source_version, ContextPageVersion
     ):
         raise TypeError("insert_version_copy requires a stored ContextPageVersion")
-    return _insert_version_raw(
+    version = _insert_version_raw(
         session,
         page_id=page_id,
         parent_version_id=parent_version_id,
@@ -661,6 +677,11 @@ def insert_version_copy(
         explicit_block_replacements=explicit_block_replacements,
         prepared_block_map=prepared_block_map,
     )
+    if source_version is not None:
+        from backend.repositories.document_reference import copy_document_references
+
+        copy_document_references(session, source=source_version, target=version)
+    return version
 
 
 def _insert_version_raw(

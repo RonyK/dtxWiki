@@ -87,6 +87,7 @@ import {
 } from "../../shared/api/operations";
 import {
   autosavePage,
+  beginPageEdit,
   createPage,
   createPageComment,
   diffPageVersions,
@@ -190,6 +191,9 @@ import {
 } from "./codeFenceBalance";
 import { PagePublicShareControl } from "./PagePublicShareControl";
 import { useLinkTargetPreview } from "./useLinkTargetPreview";
+import { ReferencePicker, ReferencesControl, type ReferenceAction, type ReferenceChoice } from "./ReferenceEditor";
+import { inlineCitationOccurrences, previewReferences, referenceHref, referenceKey, referenceTarget, selectedDocumentLink, unresolvedCitations } from "./documentReferences";
+import { changePageReferences, type ReferenceRemoval, type ReferenceView } from "../../shared/api/references";
 import {
   cancelAllImageUploads,
   canRetryImageUpload,
@@ -469,6 +473,12 @@ export function PageEditor({
   const [pages, setPages] = useState<PageSummary[]>([]);
   const [page, setPage] = useState<PagePayload | null>(null);
   const [sourceSuggestions, setSourceSuggestions] = useState<LibraryItemSummary[]>([]);
+  const [referencePickerMode, setReferencePickerMode] = useState<"metadata" | "inline" | null>(null);
+  const [referenceQuery, setReferenceQuery] = useState("");
+  const [referenceBusy, setReferenceBusy] = useState(false);
+  const [referenceRetryAvailable, setReferenceRetryAvailable] = useState(false);
+  const [referencesOpen, setReferencesOpen] = useState(false);
+  const [inlineReferenceCache, setInlineReferenceCache] = useState<{ scope: string; entries: ReferenceView[] }>({ scope: "", entries: [] });
   const [title, setTitle] = useState("");
   const [pageSlug, setPageSlug] = useState(mode === "create" ? "" : slug);
   const [body, setBody] = useState("");
@@ -583,6 +593,31 @@ export function PageEditor({
     propertiesDestinationMenuRef.current = element;
   }, []);
   const editorViewRef = useRef<EditorViewType | null>(null);
+  const referenceCommandOwnerRef = useRef<{ scope: string } | null>(null);
+  const pendingReferenceCommandRef = useRef<{
+    scope: string; page: PagePayload; request: Parameters<typeof changePageReferences>[2];
+    target: ReferenceRemoval; operation: "add" | "remove";
+  } | null>(null);
+  const referenceCommandScope = JSON.stringify([actorId, mode, slug, workspaceId]);
+  const referenceCommandScopeRef = useRef(referenceCommandScope);
+  referenceCommandScopeRef.current = referenceCommandScope;
+  useLayoutEffect(() => {
+    if (pendingReferenceCommandRef.current?.scope !== referenceCommandScope) {
+      pendingReferenceCommandRef.current = null;
+      setReferenceRetryAvailable(false);
+    }
+    const owner = referenceCommandOwnerRef.current;
+    if (owner && owner.scope !== referenceCommandScope) {
+      referenceCommandOwnerRef.current = null;
+      savingRef.current = false;
+      setIsSaving(false);
+      setReferenceBusy(false);
+    }
+  }, [referenceCommandScope]);
+  const referenceRangeRef = useRef<{ from: number; to: number } | null>(null);
+  const referenceCacheScopeRef = useRef("");
+  const referencePickerScopeRef = useRef("");
+  const referenceSearchRef = useRef<(view: EditorViewType, from: number, to: number, query?: string) => void>(() => {});
   const previewPaneRef = useRef<HTMLDivElement | null>(null);
   const editorGridRef = useRef<HTMLDivElement | null>(null);
   const splitSeparatorRef = useRef<HTMLDivElement | null>(null);
@@ -952,6 +987,43 @@ export function PageEditor({
     },
     [mediaContentUrls, page?.id, page?.version_id, page?.workspace_id],
   );
+  const referenceCacheScope = JSON.stringify([actorId, workspaceId, mode, slug, page?.id ?? null]);
+  const [parsedCitations, setParsedCitations] = useState<{ scope: string; body: string; occurrences: ReturnType<typeof inlineCitationOccurrences> }>({ scope: "", body: "", occurrences: [] });
+  useEffect(() => {
+    if (!body.includes("@cite{")) return;
+    const timer = window.setTimeout(() => {
+      setParsedCitations({ scope: referenceCacheScope, body, occurrences: inlineCitationOccurrences(body) });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [body, referenceCacheScope]);
+  const citationBody = body.includes("@cite{") && parsedCitations.scope === referenceCacheScope ? parsedCitations.body : body;
+  const inlineReferences = useMemo(() => body.includes("@cite{") && parsedCitations.scope === referenceCacheScope ? parsedCitations.occurrences : [], [body, parsedCitations, referenceCacheScope]);
+  referenceCacheScopeRef.current = referenceCacheScope;
+  const knownReferences = useMemo(() => {
+    const stored = page?.references ?? [];
+    const merged = new Map<string, ReferenceView>(stored.map((ref) => [referenceKey(ref), ref]));
+    for (const cached of inlineReferenceCache.scope === referenceCacheScope ? inlineReferenceCache.entries : []) {
+      const previous = merged.get(referenceKey(cached));
+      merged.set(referenceKey(cached), { ...cached, metadata_present: previous?.metadata_present ?? cached.metadata_present, note: previous?.note ?? cached.note, metadata_id: previous?.metadata_id });
+    }
+    return [...merged.values()];
+  }, [page?.references, inlineReferenceCache, referenceCacheScope]);
+  const editorReferences = useMemo(
+    () => workspaceId ? previewReferences(citationBody, knownReferences, workspaceId, page?.body_md, inlineReferences) : [],
+    [citationBody, page?.body_md, knownReferences, inlineReferences, workspaceId],
+  );
+  const unresolvedInlineCitations = useMemo(
+    () => workspaceId ? unresolvedCitations(knownReferences, workspaceId, inlineReferences) : [],
+    [knownReferences, inlineReferences, workspaceId],
+  );
+  // A reference change that may have reached the server blocks saving until
+  // it is retried or reconciled; the list holding those actions opens itself.
+  useEffect(() => { if (referenceRetryAvailable) setReferencesOpen(true); }, [referenceRetryAvailable]);
+  referenceSearchRef.current = (_view, from, to, query = "") => {
+    referenceRangeRef.current = { from, to };
+    setReferenceQuery(query);
+    openReferencePicker("inline");
+  };
   const extensions = useMemo(
     () => [
       history(),
@@ -975,7 +1047,10 @@ export function PageEditor({
         base: markdownLanguage,
       }),
       autocompletion({
-        override: [createEditorCompletionSource(pagesRef, sourceSuggestionsRef, workspaceIdRef)],
+        override: [createEditorCompletionSource(pagesRef, sourceSuggestionsRef, workspaceIdRef, {
+          label: t("references.choose"),
+          open: (view, from, to, query) => referenceSearchRef.current(view, from, to, query),
+        })],
       }),
       createEditorPasteHandlers(imageUploadOptions),
       // CodeMirror's parsed `Mod-/` key descriptor is not dispatched by
@@ -1038,7 +1113,7 @@ export function PageEditor({
         ...historyKeymap,
       ]),
     ],
-    [bodyAriaLabel, imageUploadOptions],
+    [bodyAriaLabel, imageUploadOptions, t],
   );
   const contextActiveNodeId = useMemo(
     () => contextTree.find((node) => node.target_id === page?.id)?.id ?? null,
@@ -1135,6 +1210,7 @@ export function PageEditor({
   );
   const canSave =
     isEditorReady &&
+    !referenceRetryAvailable &&
     title.trim().length > 0 &&
     !inputTextError(title, TITLE_MAX_LENGTH) &&
     normalizedSlug.length > 0 &&
@@ -1155,7 +1231,7 @@ export function PageEditor({
         : null;
   const missingDestination =
     mode === "create" && destinationOptions.length > 0 && !destinationNodeId;
-  const saveBlockedReason = !isEditorReady
+  const saveBlockedReason = referenceRetryAvailable ? t("references.retryRequired") : !isEditorReady
     ? null
     : missingTitle
       ? t("editor.saveBlockedTitle", {
@@ -1188,15 +1264,38 @@ export function PageEditor({
     if (aliasValidationMessage) setShowAdvancedProperties(true);
   }, [aliasValidationMessage]);
   const showPreviewPane = activeEditorMode !== "source";
+  const citationLocators = useMemo(() => [...new Set(inlineReferences.map((item) => item.href))], [inlineReferences]);
+  const receivePreviewReferences = useCallback((references: ReferenceView[]) => {
+    if (!workspaceId || referenceCacheScopeRef.current !== referenceCacheScope) return;
+    setInlineReferenceCache((previous) => {
+      if (referenceCacheScopeRef.current !== referenceCacheScope) return previous;
+      const merged = new Map((previous.scope === referenceCacheScope ? previous.entries : []).map((item) => [referenceKey(item), item]));
+      for (const reference of references) {
+        const locator = reference.occurrences?.[0]?.href;
+        const authored = locator ? referenceTarget(locator, workspaceId) : null;
+        const value = authored ? { ...reference, target_id: authored.target_id } : reference;
+        merged.set(referenceKey(value), value);
+      }
+      return { scope: referenceCacheScope, entries: [...merged.values()] };
+    });
+  }, [workspaceId, referenceCacheScope]);
   const previewLinks = useLinkTargetPreview({
     actorId,
     body,
-    enabled: showPreviewPane && isEditorReady,
+    enabled: isEditorReady && (showPreviewPane || citationLocators.length > 0),
     initialTargets: page?.link_targets,
     sourcePageId: page?.id ?? null,
     sourceVersionId: page?.version_id ?? null,
     workspaceId,
+    citationLocators,
+    onReferences: receivePreviewReferences,
   });
+  const previewLinkTargets = previewLinks.targets;
+  const reportLinks = previewLinks.reportLinks;
+  const reportPreviewLinks = useCallback((locators: string[]) => {
+    reportLinks([...new Set([...locators, ...citationLocators])]);
+  }, [citationLocators, reportLinks]);
+  useEffect(() => { if (!showPreviewPane) reportPreviewLinks([]); }, [showPreviewPane, reportPreviewLinks]);
   const editorLayout = activeEditorMode;
   const blockMenuOpen = blockMenuTrigger !== null;
   const filteredBlockEntries = useMemo(
@@ -1660,7 +1759,7 @@ export function PageEditor({
       setPages(listResult.data);
       setSourceSuggestions(sources);
       if (sourceResult.warning) {
-        setStatus(sourceResult.warning);
+        setStatus(translationRef.current("references.suggestionsUnavailable"));
       }
       setContextTree(contextNodes);
       if (mode === "create") {
@@ -2933,6 +3032,7 @@ export function PageEditor({
             reason: "Published from Page editor.",
             publish_despite_findings: options.publishDespiteFindings ?? false,
             expected_content_hash: savedPage.content_hash,
+            expected_references_hash: savedPage.references_hash,
           },
           { signal: controller.signal },
         );
@@ -3037,6 +3137,7 @@ export function PageEditor({
             reason: "Published from Page editor.",
             publish_despite_findings: options.publishDespiteFindings ?? false,
             expected_content_hash: page.content_hash,
+            expected_references_hash: page.references_hash,
           },
           { signal: controller.signal },
         );
@@ -3147,6 +3248,7 @@ export function PageEditor({
           reason: "Published from Page editor.",
           publish_despite_findings: options.publishDespiteFindings ?? false,
           expected_content_hash: updated.content_hash,
+          expected_references_hash: updated.references_hash,
         },
         { signal: controller.signal },
       );
@@ -3817,6 +3919,14 @@ export function PageEditor({
     }
 
     if (command.kind === "modal-mutation") {
+      if (command.modal === "reference-picker") {
+        const selection = options.replaceRange ?? view.state.selection.main;
+        referenceRangeRef.current = { from: selection.from, to: selection.to };
+        setReferenceQuery("");
+        closeBlockMenu();
+        openReferencePicker("inline");
+        return true;
+      }
       if (command.modal === "link-dialog") {
         return openLinkDialog(view, options.replaceRange);
       }
@@ -3945,6 +4055,166 @@ export function PageEditor({
       scrollIntoView: true,
     });
     closeLinkDialog({ restoreFocus: true });
+  }
+
+  function insertReference(reference: ReferenceView | ReferenceChoice) {
+    const view = editorViewRef.current;
+    if (!view || !workspaceId) return;
+    if (activeEditorMode === "reading") setEditorMode("source");
+    const href = "href" in reference ? reference.href : referenceHref(workspaceId, reference);
+    if (!href) return;
+    const range = referenceRangeRef.current ?? view.state.selection.main;
+    const token = `@cite{${href}}`;
+    view.dispatch({ changes: { from: range.from, to: range.to, insert: token }, selection: { anchor: range.from + token.length }, scrollIntoView: true });
+    referenceRangeRef.current = null;
+    setReferencePickerMode(null);
+    if (!("href" in reference)) {
+      const cached: ReferenceView = { ...reference, number: 0, href, state: "available", inline_count: 0, metadata_present: false, occurrences: [] };
+      const scope = referenceCacheScopeRef.current;
+      setInlineReferenceCache((current) => ({ scope, entries: [...(current.scope === scope ? current.entries : []).filter((item) => referenceKey(item) !== referenceKey(cached)), cached] }));
+    }
+    view.focus();
+  }
+
+  function openReferencePicker(mode: "metadata" | "inline") {
+    referencePickerScopeRef.current = referenceCacheScopeRef.current;
+    setReferencePickerMode(mode);
+  }
+
+  function convertSelectedReference() {
+    const view = editorViewRef.current;
+    if (!view || !workspaceId) return;
+    const selection = view.state.selection.main;
+    const source = view.state.doc.toString();
+    const link = selectedDocumentLink(source, selection.from, selection.to);
+    if (!link) { setStatus(t("references.selectLink")); return; }
+    const confirmed = previewLinkTargets?.find((item) => item.locator === link.href);
+    const href = confirmed?.href ?? link.href;
+    if (!referenceTarget(href, workspaceId)) { setStatus(t("references.selectLink")); return; }
+    const token = `${link.label} @cite{${href}}`;
+    view.dispatch({ changes: { from: link.from, to: link.to, insert: token }, selection: { anchor: link.from + token.length }, scrollIntoView: true });
+    view.focus();
+  }
+
+  async function mutateReferences(target: ReferenceRemoval, operation: "add" | "remove") {
+    if (!workspaceId || savingRef.current || referenceBusy) return;
+    const owner = { scope: referenceCommandScopeRef.current };
+    referenceCommandOwnerRef.current = owner;
+    const isCurrent = () => referenceCommandOwnerRef.current === owner && referenceCommandScopeRef.current === owner.scope && isEditorMountedRef.current;
+    const dispatchedRevision = editorRevisionRef.current;
+    const snapshot = { ...latestDraftRef.current };
+    const fingerprint = draftSaveFingerprint(snapshot, frontmatterExtraLinesRef.current);
+    savingRef.current = true;
+    setIsSaving(true);
+    setReferenceBusy(true);
+    setStatus(null);
+    try {
+      const pending = pendingReferenceCommandRef.current;
+      let editing = pending?.scope === owner.scope ? pending.page : page;
+      if (!pending) {
+        if (!editing && pageCreationPromiseRef.current) editing = await pageCreationPromiseRef.current;
+        if (!isCurrent()) return;
+        if (!editing) {
+          const creation = createPage(workspaceId, {
+            title: snapshot.title.trim() || undefined,
+            body_md: serializeDraftBody(snapshot, frontmatterExtraLinesRef.current),
+            page_type: snapshot.pageType, tags: snapshot.tags, aliases: snapshot.aliases,
+            placement_parent_node_id: snapshot.destinationNodeId || null,
+          });
+          pageCreationPromiseRef.current = creation;
+          try { editing = await creation; }
+          finally { if (pageCreationPromiseRef.current === creation) pageCreationPromiseRef.current = null; }
+        } else {
+          if (editing.version_status !== "editing") editing = await beginPageEdit(workspaceId, editing);
+          if (!isCurrent()) return;
+          editing = await autosavePage(workspaceId, editing.id, {
+            title: snapshot.title.trim() || editing.title,
+            body_md: serializeDraftBody(snapshot, frontmatterExtraLinesRef.current),
+            page_type: snapshot.pageType, tags: snapshot.tags, aliases: snapshot.aliases,
+            base_version_id: editing.version_id, base_content_hash: editing.content_hash,
+            expected_editing_revision: editing.editing_revision, session_version_id: editing.version_id,
+            destination_node_id: snapshot.destinationNodeId || null,
+            idempotency_key: newIdempotencyKey(), on_stale: "conflict", retry_only: false,
+          });
+        }
+        if (!isCurrent()) return;
+        pageIdRef.current = editing.id;
+        baseVersionIdRef.current = editing.version_id;
+        sessionVersionIdRef.current = editing.version_id;
+        setPage(editing);
+        setPageSlug(editing.slug);
+        acknowledgeEditorRevision(dispatchedRevision);
+        lastSavedRef.current = { ...snapshot, title: editing.title, slug: editing.slug };
+        lastSavedFingerprintRef.current = fingerprint;
+        setPublicationState(editing.current_published_version_id ? "staged" : "never-published");
+      }
+      if (!editing) return;
+      const request = pending?.request ?? {
+        version_id: editing.version_id, expected_editing_revision: editing.editing_revision ?? 1,
+        idempotency_key: newIdempotencyKey(),
+        add: operation === "add" && "target_kind" in target ? [{ target_kind: target.target_kind, target_id: target.target_id, note: target.note ?? null }] : [],
+        remove: operation === "remove" ? [target] : [],
+      };
+      pendingReferenceCommandRef.current = { scope: owner.scope, page: editing, request, target, operation };
+      const changed = await changePageReferences(workspaceId, editing.id, request);
+      if (!isCurrent()) return;
+      pendingReferenceCommandRef.current = null;
+      setReferenceRetryAvailable(false);
+      setPage({ ...editing, editing_revision: changed.editing_revision, references_hash: changed.references_hash });
+      setReferencePickerMode(null);
+      setStatus(t(operation === "add" ? "references.added" : "references.removed"));
+      try {
+        const refreshed = await readPage(workspaceId, editing.id, editing.version_id);
+        if (isCurrent()) setPage(refreshed);
+      } catch {
+        if (isCurrent()) setStatus(t("references.savedReloadFailed"));
+      }
+    } catch (cause) {
+      if (isCurrent()) {
+        if (cause instanceof ApiError && cause.status >= 400 && cause.status < 500) pendingReferenceCommandRef.current = null;
+        setReferenceRetryAvailable(Boolean(pendingReferenceCommandRef.current));
+        if (pendingReferenceCommandRef.current) setReferencePickerMode(null);
+        setStatus(apiErrorMessage(cause, t("references.saveFailed")));
+      }
+    } finally {
+      if (referenceCommandOwnerRef.current === owner) {
+        referenceCommandOwnerRef.current = null;
+        savingRef.current = false;
+        if (isEditorMountedRef.current) {
+          setIsSaving(false);
+          setReferenceBusy(false);
+        }
+      }
+    }
+  }
+
+  async function reconcileReferenceCommand() {
+    const pending = pendingReferenceCommandRef.current;
+    if (!pending || !workspaceId || savingRef.current || referenceBusy) return;
+    const owner = { scope: referenceCommandScopeRef.current };
+    referenceCommandOwnerRef.current = owner;
+    const isCurrent = () => referenceCommandOwnerRef.current === owner && referenceCommandScopeRef.current === owner.scope && isEditorMountedRef.current;
+    savingRef.current = true;
+    setIsSaving(true);
+    setReferenceBusy(true);
+    try {
+      const refreshed = await readPage(workspaceId, pending.page.id, pending.page.version_id);
+      if (!isCurrent()) return;
+      // Reconcile concurrency metadata only. Writing done after the failed
+      // request remains in CodeMirror and retains its unacknowledged revision.
+      setPage(refreshed);
+      pendingReferenceCommandRef.current = null;
+      setReferenceRetryAvailable(false);
+      setStatus(t("references.reconciled"));
+    } catch {
+      if (isCurrent()) setStatus(t("references.reconcileFailed"));
+    } finally {
+      if (referenceCommandOwnerRef.current === owner) {
+        referenceCommandOwnerRef.current = null;
+        savingRef.current = false;
+        if (isEditorMountedRef.current) { setIsSaving(false); setReferenceBusy(false); }
+      }
+    }
   }
 
   function openCommentPreview(view = editorViewRef.current) {
@@ -4816,21 +5086,6 @@ export function PageEditor({
               rows={1}
               value={title}
             />
-            {!singlePaneViewport ? (
-              <div className="editor-title-tags">
-                <ChipInput
-                  ariaLabel={t("editor.tagsAria", { defaultValue: "Tags" })}
-                  truncateItems={false}
-                  maxItems={32}
-                  onItemTooLong={() => setStatus(inputTextError("x".repeat(49), 48))}
-                  onChange={updateTags}
-                  onQueryChange={setTagQuery}
-                  placeholder={t("editor.tagPlaceholder", { defaultValue: "+ Tag" })}
-                  suggestions={tagSuggestions}
-                  value={normalizedTags}
-                />
-              </div>
-            ) : null}
             <button
               aria-label={t("editor.formatDocumentAria", { defaultValue: "Format document" })}
               className="editor-format-button icon-button"
@@ -4891,25 +5146,23 @@ export function PageEditor({
                 </button>
               </header>
               <div className="editor-properties-popover-body">
-              {singlePaneViewport ? (
-                <FormField
-                  htmlFor="editor-mobile-tags"
-                  label={t("editor.tagsAria", { defaultValue: "Tags" })}
-                >
-                  <ChipInput
-                    ariaLabel={t("editor.tagsAria", { defaultValue: "Tags" })}
-                    id="editor-mobile-tags"
-                    truncateItems={false}
+              <FormField
+                htmlFor="editor-tags"
+                label={t("editor.tagsAria", { defaultValue: "Tags" })}
+              >
+                <ChipInput
+                  ariaLabel={t("editor.tagsAria", { defaultValue: "Tags" })}
+                  id="editor-tags"
+                  truncateItems={false}
                   maxItems={32}
                   onItemTooLong={() => setStatus(inputTextError("x".repeat(49), 48))}
                   onChange={updateTags}
-                    onQueryChange={setTagQuery}
-                    placeholder={t("editor.tagPlaceholder", { defaultValue: "+ Tag" })}
-                    suggestions={tagSuggestions}
-                    value={normalizedTags}
-                  />
-                </FormField>
-              ) : null}
+                  onQueryChange={setTagQuery}
+                  placeholder={t("editor.tagPlaceholder", { defaultValue: "+ Tag" })}
+                  suggestions={tagSuggestions}
+                  value={normalizedTags}
+                />
+              </FormField>
               {mode === "create" || hasPersistedPage ? (
                 <FormField label={t("editor.destinationLabel", { defaultValue: "Destination" })}>
                   <TreePickerDropdown
@@ -5091,31 +5344,45 @@ export function PageEditor({
               {t("editor.linkedScrolling", { defaultValue: "Linked scrolling" })}
             </button>
           ) : null}
-          <EditorActionBar
-            commandStates={activeCommandStates}
-            isMobile={compactActionBarViewport}
-            labels={{
-              more: t("editor.actionBar.more", { defaultValue: "More editor actions" }),
-              moreMenu: t("editor.actionBar.moreMenu", { defaultValue: "More editor actions" }),
-              moreShort: t("editor.actionBar.moreShort", { defaultValue: "More" }),
-              readingDisabledReason: t("editor.actionBar.readingDisabled", {
-                defaultValue: "Editing commands are unavailable in Reading mode.",
-              }),
-              toolbar: t("editor.actionBar.toolbar", { defaultValue: "Editor actions" }),
-            }}
-            mode={activeEditorMode}
-            onCommand={(commandId) => executeEditorCommand(commandId)}
-            resolveLabel={(labelKey, fallbackLabel) =>
-              t(labelKey, { defaultValue: fallbackLabel })
-            }
-          />
           <div className="editor-command-cluster editor-command-cluster-trailing">
             <div className="editor-command-actions">
+              <ReferencesControl
+                references={editorReferences}
+                unresolved={unresolvedInlineCitations}
+                checkingLocators={previewLinks.checking}
+                open={referencesOpen}
+                onOpenChange={setReferencesOpen}
+                disabled={!isEditorReady || isSaving || referenceBusy || referenceRetryAvailable}
+                retryDisabled={isSaving || referenceBusy}
+                onRetry={referenceRetryAvailable ? () => {
+                  const pending = pendingReferenceCommandRef.current;
+                  if (pending) void mutateReferences(pending.target, pending.operation);
+                } : undefined}
+                onReconcile={referenceRetryAvailable ? () => { void reconcileReferenceCommand(); } : undefined}
+                onAdd={() => { setReferencesOpen(false); setReferenceQuery(""); openReferencePicker("metadata"); }}
+                onInsert={(reference) => {
+                  setReferencesOpen(false);
+                  referenceRangeRef.current = null;
+                  if (reference) insertReference(reference); else { setReferenceQuery(""); openReferencePicker("inline"); }
+                }}
+                onRemove={(reference) => {
+                  const target = reference.metadata_id ? { reference_id: reference.metadata_id }
+                    : reference.target_id ? { target_kind: reference.target_kind, target_id: reference.target_id } : null;
+                  if (target) void mutateReferences(target, "remove");
+                }}
+                onConvertLink={() => { setReferencesOpen(false); convertSelectedReference(); }}
+                onLocate={(offset) => {
+                  setReferencesOpen(false);
+                  if (activeEditorMode === "reading") setEditorMode("source");
+                  const view = editorViewRef.current;
+                  if (view) { view.dispatch({ selection: { anchor: Math.min(offset, view.state.doc.length) }, scrollIntoView: true }); view.focus(); }
+                }}
+              />
             <button
               aria-label={focusModeLabel}
               aria-pressed={focusMode}
               className={`icon-button editor-focus-toggle ${focusMode ? "active" : ""}`}
-              onClick={() => setFocusMode((current) => !current)}
+              onClick={() => { setReferencesOpen(false); setFocusMode((current) => !current); }}
               title={focusModeLabel}
               type="button"
             >
@@ -5148,6 +5415,24 @@ export function PageEditor({
             ) : null}
             </div>
           </div>
+          <EditorActionBar
+            commandStates={activeCommandStates}
+            isMobile={compactActionBarViewport}
+            labels={{
+              more: t("editor.actionBar.more", { defaultValue: "More editor actions" }),
+              moreMenu: t("editor.actionBar.moreMenu", { defaultValue: "More editor actions" }),
+              moreShort: t("editor.actionBar.moreShort", { defaultValue: "More" }),
+              readingDisabledReason: t("editor.actionBar.readingDisabled", {
+                defaultValue: "Editing commands are unavailable in Reading mode.",
+              }),
+              toolbar: t("editor.actionBar.toolbar", { defaultValue: "Editor actions" }),
+            }}
+            mode={activeEditorMode}
+            onCommand={(commandId) => executeEditorCommand(commandId)}
+            resolveLabel={(labelKey, fallbackLabel) =>
+              t(labelKey, { defaultValue: fallbackLabel })
+            }
+          />
         </div>
         {focusMode ? (
           <div className="editor-focus-meta">
@@ -5401,9 +5686,11 @@ export function PageEditor({
             >
               <MarkdownView
                 body={body}
+                references={editorReferences}
+                referenceOffsets="utf16"
                 checkingLinkLocators={previewLinks.checking}
-                linkTargets={previewLinks.targets}
-                onLinksToCheck={previewLinks.reportLinks}
+                onLinksToCheck={reportPreviewLinks}
+                linkTargets={previewLinkTargets}
                 resolveContextMediaAsset={resolveContextMediaAsset}
                 sourceLineNumbers
                 stripLeadingHeading={title}
@@ -5414,6 +5701,15 @@ export function PageEditor({
             </div>
           ) : null}
         </div>
+        {referencePickerMode && referencePickerScopeRef.current === referenceCacheScope && workspaceId ? <ReferencePicker key={referenceCacheScope} workspaceId={workspaceId} busy={referenceBusy} mode={referencePickerMode === "inline" ? "inline" : "metadata"} references={editorReferences} initialQuery={referenceQuery}
+          onClose={() => { setReferencePickerMode(null); referenceRangeRef.current = null; }}
+          onSelect={(choice: ReferenceChoice, action: ReferenceAction) => {
+            if (referencePickerScopeRef.current !== referenceCacheScopeRef.current) return;
+            if (action === "metadata") { void mutateReferences(choice, "add"); return; }
+            insertReference(choice);
+            // A note belongs to the registration; the inline marker cannot hold it.
+            if (choice.note) void mutateReferences(choice, "add");
+          }} /> : null}
       </section>
     </div>
   );
@@ -6581,7 +6877,7 @@ async function loadSourceSuggestions(workspaceId: string) {
   } catch {
     return {
       sources: [] as LibraryItemSummary[],
-      warning: "Citation suggestions could not be loaded. You can still type @cite{source-id} manually.",
+      warning: true,
     };
   }
 }

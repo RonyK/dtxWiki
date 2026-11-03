@@ -37,7 +37,7 @@ TOOL_REQUIRED_SCOPES = {
     "patch_context_edit": ("draft-write",),
     "list_my_context_edits": ("draft-write",),
     "upload_image": ("draft-write",),
-    "cite": ("cite",),
+    "cite": ("draft-write",),
     "submit_feedback": ("feedback-write",),
     "write_agent_page_draft": ("agent-page-draft",),
     "build_agent_input_bundle": ("agent-bundle",),

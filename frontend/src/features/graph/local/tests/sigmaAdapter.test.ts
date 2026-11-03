@@ -666,16 +666,17 @@ describe("Local Sigma interactions", () => {
     expect(state.sigma.graph.getNodeAttributes("workspace_tree_node:folder").type).toBe("folder");
   });
 
-  it("keeps non-color shape distinctions for Library, conversations and folders in forced colors", () => {
+  it("keeps non-color shape distinctions for Library, Agent, conversations and folders in forced colors", () => {
     adapter.destroy();
     adapter = createSigmaGraphAdapter(document.createElement("div"), { nodes: [
       { id: "context", entity_id: "context", entity_kind: "context_page", family: "document", label: "Context" },
       { id: "library", entity_id: "library", entity_kind: "library_artifact", family: "document", label: "Source" },
       { id: "conversation", entity_id: "conversation", entity_kind: "mcp_chat_session", family: "chat", label: "Conversation" },
       { id: "folder", entity_id: "folder", entity_kind: "workspace_tree_node", family: "structural", label: "Folder" },
+      { id: "agent", entity_id: "agent", entity_kind: "agent_page", family: "document", label: "Agent" },
     ], edges: [] }, { callbacks, forcedColors: true, positions: {}, reducedMotion: true });
     const types = state.sigma.graph.nodes().map((key) => state.sigma.graph.getNodeAttributes(key).type);
-    expect(new Set(types).size).toBe(4);
+    expect(new Set(types).size).toBe(5);
   });
 });
 

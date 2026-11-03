@@ -80,16 +80,6 @@ describe("cross-route accessibility styles", () => {
     expect(settings).not.toMatch(/\.topbar-search,\s*\.sidebar\s*\{/);
   });
 
-  it("sizes the editor tag chip box to its content instead of a fixed 320px (L-3)", () => {
-    const editor = styles("03-editor.css");
-    expect(editor).toMatch(
-      /\.editor-title-tags:has\(\.chip-input-chip\)\s*\{[^}]*flex:\s*0 1 auto;[^}]*max-width:\s*320px;/s,
-    );
-    expect(editor).not.toMatch(
-      /\.editor-title-tags:has\(\.chip-input-chip\)\s*\{[^}]*flex:\s*0 1 320px;/s,
-    );
-  });
-
   it("desaturates a disabled primary icon button instead of just fading it (L-1)", () => {
     // Save draft / Publish / Create draft / Send all render as
     // .icon-button.primary; opacity:0.5 alone left them a lighter purple

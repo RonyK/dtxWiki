@@ -1658,7 +1658,8 @@ def test_hidden_restricted_library_changes_do_not_affect_aggregated_viewer_map(
             session, workspace_id, request=request, actor=_actor("owner")
         )
         assert before_viewer.representation == "aggregated"
-        assert before_owner.counts.candidate_documents == 5
+        # The owner also sees the active sensitive Agent document.
+        assert before_owner.counts.candidate_documents == 6
         assert before_viewer.counts.candidate_documents == 4
         item.title = "RESTRICTED SENTINEL " + "s" * 100
         item_head.updated_at += timedelta(days=1)

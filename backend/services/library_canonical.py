@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import case, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, load_only, selectinload
 
 from backend.library_media.ports import LibraryBlobRepositoryFactory
 from backend.media.domain import BlobEpoch, BlobReference
@@ -239,6 +239,15 @@ def get_effective_library_markdown(
     """Resolve an overlay only while its exact base remains selected."""
 
     base = get_canonical_editable_markdown_artifact(session, version)
+    overlay = (
+        session.get(LibrarySemanticOverlay, version.selected_semantic_overlay_id)
+        if version.selected_semantic_overlay_id is not None
+        else None
+    )
+    return _effective_markdown_from_loaded(version, base, overlay)
+
+
+def _effective_markdown_from_loaded(version, base, overlay):
     if base is None or base.conversion_detail is None:
         return None
     # content_sha256 is NOT NULL on LibraryArtifact now; index_text lives on
@@ -262,10 +271,6 @@ def get_effective_library_markdown(
     )
     if version.selected_semantic_overlay_id is None:
         return base_projection
-    overlay = session.get(
-        LibrarySemanticOverlay,
-        version.selected_semantic_overlay_id,
-    )
     if (
         overlay is None
         or overlay.library_item_version_id != version.id
@@ -425,6 +430,7 @@ def canonical_library_artifact_lookup_many(
     workspace_id: UUID,
     artifact_ids: set[UUID] | list[UUID] | tuple[UUID, ...],
     chunk_size: int = 400,
+    metadata_only: bool = False,
 ) -> dict[UUID, tuple[LibraryItem, LibraryItemVersion, LibraryArtifact] | None]:
     """Resolve canonical artifact lineages with bounded workspace-scoped reads.
 
@@ -444,6 +450,44 @@ def canonical_library_artifact_lookup_many(
         if not resource_ids:
             return rows
         ordered_ids = list(resource_ids)
+        if metadata_only:
+            columns = {
+                LibraryArtifact: (
+                    LibraryArtifact.id,
+                    LibraryArtifact.workspace_id,
+                    LibraryArtifact.library_item_version_id,
+                    LibraryArtifact.attempt_id,
+                    LibraryArtifact.stage,
+                    LibraryArtifact.content_sha256,
+                    LibraryArtifact.media_type,
+                ),
+                LibraryItemVersion: (
+                    LibraryItemVersion.id,
+                    LibraryItemVersion.workspace_id,
+                    LibraryItemVersion.library_item_id,
+                    LibraryItemVersion.processing_status,
+                    LibraryItemVersion.selected_conversion_attempt_id,
+                    LibraryItemVersion.selected_preview_attempt_id,
+                    LibraryItemVersion.preview_status,
+                    LibraryItemVersion.content_hash,
+                ),
+                LibraryItem: (
+                    LibraryItem.id,
+                    LibraryItem.workspace_id,
+                    LibraryItem.current_version_id,
+                    LibraryItem.current_ready_version_id,
+                    LibraryItem.current_preview_version_id,
+                    LibraryItem.lifecycle_status,
+                    LibraryItem.trust_level,
+                ),
+                LibraryAttempt: (
+                    LibraryAttempt.id,
+                    LibraryAttempt.workspace_id,
+                    LibraryAttempt.library_item_version_id,
+                    LibraryAttempt.input_sha256,
+                ),
+            }[model]
+            options = (*options, load_only(*columns))
         for offset in range(0, len(ordered_ids), chunk_size):
             rows.update(
                 (row.id, row)
@@ -595,3 +639,89 @@ __all__ = [
     "list_canonical_library_artifacts",
     "preview_generation_dependency_matches",
 ]
+
+
+def effective_library_markdown_many(session, *, workspace_id, items):
+    """Exact selected Markdown for a bounded batch of already-authorized items."""
+    ids = {item.current_ready_version_id or item.current_version_id for item in items}
+    ids.discard(None)
+    versions = {}
+    for start in range(0, len(ids), 400):
+        chunk = list(ids)[start : start + 400]
+        versions.update(
+            (value.id, value)
+            for value in session.scalars(
+                select_in_workspace_by_ids(
+                    LibraryItemVersion, workspace_id=workspace_id, resource_ids=chunk
+                )
+            )
+        )
+    selected = {
+        item.id: _canonical_version_from_loaded(item, versions) for item in items
+    }
+    selected_versions = {
+        version.id: version for version in selected.values() if version is not None
+    }
+    attempts = {
+        version.selected_conversion_attempt_id for version in selected_versions.values()
+    }
+    bases = {}
+    from backend.repositories.workspace_scoped import select_in_workspace
+
+    version_ids = list(selected_versions)
+    for start in range(0, len(version_ids), 400):
+        statement = select_in_workspace(
+            LibraryArtifact,
+            workspace_id=workspace_id,
+            conditions=(
+                LibraryArtifact.library_item_version_id.in_(
+                    version_ids[start : start + 400]
+                ),
+                LibraryArtifact.attempt_id.in_(attempts),
+                LibraryArtifact.stage == "conversion",
+                LibraryArtifact.role == "markdown",
+                LibraryArtifact.media_type == "text/markdown",
+            ),
+        ).options(selectinload(LibraryArtifact.conversion_detail))
+        for artifact in session.scalars(statement):
+            version = selected_versions[artifact.library_item_version_id]
+            if artifact.attempt_id != version.selected_conversion_attempt_id:
+                continue
+            detail = artifact.conversion_detail
+            if detail is None or not detail.is_complete or detail.index_text is None:
+                continue
+            previous = bases.get(version.id)
+
+            def rank(row):
+                return row.ordinal, row.created_at, str(row.id)
+
+            if previous is None or rank(artifact) < rank(previous):
+                bases[version.id] = artifact
+    overlay_ids = {
+        version.selected_semantic_overlay_id for version in selected_versions.values()
+    }
+    overlay_ids.discard(None)
+    overlays = {}
+    ordered_overlay_ids = list(overlay_ids)
+    for start in range(0, len(ordered_overlay_ids), 400):
+        overlays.update(
+            (row.id, row)
+            for row in session.scalars(
+                select_in_workspace_by_ids(
+                    LibrarySemanticOverlay,
+                    workspace_id=workspace_id,
+                    resource_ids=ordered_overlay_ids[start : start + 400],
+                )
+            )
+        )
+    result = {}
+    for item_id, version in selected.items():
+        if version is not None:
+            projection = _effective_markdown_from_loaded(
+                version,
+                bases.get(version.id),
+                overlays.get(version.selected_semantic_overlay_id),
+            )
+            if projection is not None:
+                result[item_id] = projection.body_markdown
+    return result

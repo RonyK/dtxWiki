@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
-from urllib.parse import parse_qs, quote, urlsplit, urlunsplit
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 from uuid import UUID
 
 from sqlalchemy import or_
@@ -43,6 +43,7 @@ from backend.services.workspace_urls import (
     agent_page_url,
     library_artifact_url,
     library_item_url,
+    public_context_page_url,
     review_item_url,
     workspace_path,
 )
@@ -307,8 +308,7 @@ def markdown_link_targets(
             ):
                 exposed = None
             href = (
-                f"/w/{quote(workspace.slug, safe='')}/pages/"
-                f"{quote(target.slug, safe='')}"
+                public_context_page_url(workspace.slug, target.slug)
                 + (f"#{locator.fragment}" if locator.fragment else "")
                 if exposed is not None
                 else None
@@ -480,9 +480,7 @@ def _server_navigation_target(
             visible = (
                 target_id in navigation_batch.review_ids
                 if navigation_batch is not None
-                else _review_target_visible(
-                    session, workspace_id, target_id, actor
-                )
+                else _review_target_visible(session, workspace_id, target_id, actor)
             )
             return True, review_item_url(workspace_id, target_id) if visible else None
         if section == "ask":
@@ -1038,12 +1036,8 @@ def _navigation_batch(
         if reference is None:
             continue
         section, kind, target_id, explicit_workspace_id = reference
-        if (
-            target_id is None
-            or (
-                explicit_workspace_id is not None
-                and explicit_workspace_id != workspace_id
-            )
+        if target_id is None or (
+            explicit_workspace_id is not None and explicit_workspace_id != workspace_id
         ):
             continue
         if section == "library" and kind in {"item", "legacy_target"}:
@@ -1248,18 +1242,20 @@ def legacy_wikilink_targets(
         source_page_id=page.id,
         source_version_id=version.id,
     )
-    links = list(session.scalars(
-        select_in_workspace(
-            PageLink,
-            workspace_id=page.workspace_id,
-            conditions=(
-                PageLink.source_page_id == page.id,
-                PageLink.source_version_id == version.id,
-                PageLink.locator_key.startswith("wikilink:"),
-                PageLink.target_slug.is_not(None),
-            ),
-        ).order_by(PageLink.target_slug)
-    ))
+    links = list(
+        session.scalars(
+            select_in_workspace(
+                PageLink,
+                workspace_id=page.workspace_id,
+                conditions=(
+                    PageLink.source_page_id == page.id,
+                    PageLink.source_version_id == version.id,
+                    PageLink.locator_key.startswith("wikilink:"),
+                    PageLink.target_slug.is_not(None),
+                ),
+            ).order_by(PageLink.target_slug)
+        )
+    )
     resolution_batch = _resolution_batch(
         session,
         [classify(f"[[{link.target_slug}]]") for link in links],

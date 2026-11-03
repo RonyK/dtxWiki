@@ -8,11 +8,14 @@ from backend.models.audit import AuditEvent
 from backend.models.base import Base
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import (
+    ContextCitation,
     ContextPage,
     ContextPageVersion,
+    EdgeProjection,
     PageLink,
     PageNameIndex,
 )
+from backend.models.document_reference import ContextCitationPublication
 from backend.models.job import Job
 from backend.models.review import ReviewItem
 from backend.models.tree import WorkspaceTreeNode
@@ -213,9 +216,10 @@ def test_page_service_lists_pages_without_per_page_version_queries():
     version_statements: list[str] = []
 
     def count_version_selects(_conn, _cursor, statement, _params, _context, _many):
-        if statement.lstrip().lower().startswith(
-            "select"
-        ) and "context_page_version" in statement.lower():
+        if (
+            statement.lstrip().lower().startswith("select")
+            and "context_page_version" in statement.lower()
+        ):
             version_statements.append(statement)
 
     event.listen(engine, "before_cursor_execute", count_version_selects)
@@ -380,9 +384,10 @@ def test_page_service_rolls_back_write_when_change_audit_recorder_fails():
         )
 
     with service.session_factory() as session:
-        assert session.scalar(
-            select(ContextPage).where(ContextPage.slug == "rollback")
-        ) is None
+        assert (
+            session.scalar(select(ContextPage).where(ContextPage.slug == "rollback"))
+            is None
+        )
         assert session.scalars(select(ContextPageVersion)).all() == []
         assert session.scalars(select(ChangeSet)).all() == []
         assert _page_service_audit_rows(session) == []
@@ -793,6 +798,52 @@ def test_page_service_noop_duplicate_content_returns_current_version():
     )
 
     assert duplicate.version_id == created.version_id
+
+    # A pre-manifest page-owned citation is copied once into the first new
+    # version. Subsequent ordinary writes must not import the original again.
+    with service.session_factory.begin() as session:
+        marker = session.get(ContextCitationPublication, created.version_id)
+        session.delete(marker)
+        session.add(
+            ContextCitation(
+                workspace_id=created.workspace_id,
+                target_kind="context_page",
+                target_id=created.id,
+                citation_type="context_page",
+                cited_context_page_version_id=created.version_id,
+            )
+        )
+
+    def revise(previous, body):
+        saved = service.write_page(
+            workspace_slug="default",
+            slug="hello",
+            title="Hello",
+            body_md=body,
+            actor_kind="human",
+            actor_id="dev-local-user",
+            base_version_id=previous.version_id,
+            base_content_hash=previous.content_hash,
+            actor_provenance="browser_session",
+        )
+        with service.session_factory() as session:
+            citations = session.scalars(
+                select(ContextCitation).where(
+                    ContextCitation.target_id == saved.version_id,
+                )
+            ).all()
+            assert len(citations) == 1
+            # Keep the authored self-reference readable without a Graph loop.
+            assert not session.scalar(
+                select(EdgeProjection.id).where(
+                    EdgeProjection.source_id == saved.id,
+                    EdgeProjection.edge_kind == "citation_page",
+                )
+            )
+        return saved
+
+    revised = revise(created, "# Hello\n\nFirst revision.")
+    revise(revised, "# Hello\n\nSecond revision.")
 
 
 def _seed_restored_draft(service):

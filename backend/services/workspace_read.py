@@ -20,6 +20,7 @@ from backend.schemas.read import (
     WorkspaceRouting,
     WorkspaceSummary,
 )
+from backend.services.citation_policy import normalized_citation_policy
 from backend.services.read_errors import ReadNotFoundError
 from backend.services.review_risk_policy import ai_writes_require_human_review
 from backend.services.settings_service import normalized_library_policy
@@ -111,7 +112,10 @@ REQUIRED_WORKFLOW = [
         "returns that section), read for a whole page, read_structure_map for "
         "block ids before block-addressed edits."
     ),
-    "cite before a sourced write.",
+    (
+        "references: open your edit, then cite selected document IDs; inline "
+        "@cite markers join the references at final publication."
+    ),
     (
         "write: create_context_page (new page) or begin_context_edit "
         "(existing page) once per task; patch_context_edit (local changes) or "
@@ -397,7 +401,9 @@ class WorkspaceReadService:
         return {
             "workspace_summary": {key: summary[key] for key in _BRIEF_SUMMARY_FIELDS},
             "actor_context": {key: actor_context[key] for key in _BRIEF_ACTOR_FIELDS},
-            "citation_policy": inputs.workspace.citation_policy,
+            "citation_policy": normalized_citation_policy(
+                inputs.workspace.citation_policy
+            ),
             "workspace_routing": self._workspace_routing(inputs),
             "required_workflow": REQUIRED_WORKFLOW,
             "linking": LinkingGuidance(
@@ -588,7 +594,7 @@ class WorkspaceReadService:
             description=workspace.description,
             library_policy=workspace.library_policy,
             write_policy={},
-            citation_policy=workspace.citation_policy,
+            citation_policy=normalized_citation_policy(workspace.citation_policy),
             agent_injection_policy=workspace.agent_injection_policy,
             created_at=workspace.created_at,
             updated_at=workspace.updated_at,
