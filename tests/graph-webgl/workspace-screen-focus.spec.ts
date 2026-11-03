@@ -1175,7 +1175,7 @@ test("mobile 2k Screen lists keep bounded keyboard navigation and no stale empha
   await evidenceScreenshot(page, testInfo, "screen-mobile-2k-keyboard-list.png");
 });
 
-test("new Screen keyboard node and edge focus replaces stationary pointer hover, while newer hover survives blur", async ({ page }, testInfo) => {
+test("Screen keyboard node and edge focus emphasis survives pointer hover, which never emphasizes a star", async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
@@ -1189,16 +1189,17 @@ test("new Screen keyboard node and edge focus replaces stationary pointer hover,
   for (const [row, points] of [[node, [3, 2, 4]], [edge, [3, 4]]] as const) {
     // Invoke the native engine's real callback without moving the stationary
     // pointer out of the canvas, then use a real DOM keyboard-focus event.
+    // Pointer hover only names the point in a chip; it never emphasizes.
     await page.evaluate(() => window.__workspaceScreenFocus.pointerHover(0));
-    await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toEqual([0, 1]);
+    await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toBeNull();
     await row.focus();
     await expect(row).toBeFocused();
     await expect(row).toHaveAttribute("aria-pressed", "false");
     await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toEqual([...points]);
     await page.evaluate(() => window.__workspaceScreenFocus.pointerHover(0));
-    await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toEqual([0, 1]);
+    await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toEqual([...points]);
     await page.getByRole("searchbox", { name: "Find in visible map" }).focus();
-    await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toEqual([0, 1]);
+    await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toBeNull();
     await page.evaluate(() => window.__workspaceScreenFocus.pointerHover(null));
     await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toBeNull();
   }

@@ -7,6 +7,7 @@ import type { SigmaEdgeEventPayload, SigmaNodeEventPayload, SigmaStageEventPaylo
 import { colorToArray } from "sigma/utils";
 
 import type { GraphRenderScene, GraphPoint, GraphViewport } from "../shared/rendererTypes";
+import { createGraphHoverChip, GRAPH_EDGE_CHIP_OFFSET_PX, graphEdgeChipAnchor } from "../shared/hoverChip";
 import { readGraphTokens } from "../shared/graphTokens";
 import { LOCAL_EDGE_PROGRAMS } from "./edgePrograms";
 import { createLocalLayout, type LocalLayout } from "./layout";
@@ -21,6 +22,7 @@ export type SigmaGraphAdapterOptions = {
     onViewport(viewport: GraphViewport): void;
     onContextStatus?(status: "lost" | "restored"): void;
   };
+  hoverChip?: HTMLDivElement | null;
   forcedColors: boolean;
   initialViewport?: GraphViewport | null;
   positions: Record<string, GraphPoint>;
@@ -54,6 +56,7 @@ export interface SigmaGraphAdapter {
 // Sigma prefers a program's label drawer to its global one. Library squares
 // must use the same viewport bounds and collision handling as other nodes.
 class LocalSquareNodeProgram extends NodeSquareProgram {
+  override drawHover = () => undefined;
   override drawLabel: typeof NodeSquareProgram.prototype.drawLabel =
     (context, data, settings) => settings.defaultDrawNodeLabel(context, data, settings);
 }
@@ -148,6 +151,10 @@ export function createSigmaGraphAdapter(
   let destroyed = false;
   let contextLost = false;
   let restorationRequested = false;
+  const chip = createGraphHoverChip(container, options.hoverChip);
+  let hoverFrame: number | null = null;
+  let hoverEvent: SigmaStageEventPayload["event"] | null = null;
+  let pickedEdge: string | null = null;
   let hoveredId: string | null = null;
   let focusedId: string | null = null;
   let selectedId: string | null = null;
@@ -163,15 +170,13 @@ export function createSigmaGraphAdapter(
 
   const priorityLabelKeys = () => [...new Set([
     ...localScene.nodes.filter((node) => node.isSeed).map((node) => node.key).sort(),
-    ...[selectedId, focusedId, hoveredId].flatMap((id) => {
+    ...[selectedId, focusedId].flatMap((id) => {
       const key = id ? localScene.keyByGraphId.get(id) : undefined;
       return key ? [key] : [];
     }),
   ])];
 
-  // Passing through an edge's hit corridor must not replace the node star.
-  const activeId = () => (hoveredId && localScene.keyByGraphId.has(hoveredId)
-    ? hoveredId : null) ?? focusedId ?? selectedId;
+  const activeId = () => focusedId ?? selectedId;
   const star = () => {
     const id = activeId();
     if (!id) return null;
@@ -256,7 +261,7 @@ export function createSigmaGraphAdapter(
     layout = null;
     localScene = nextLocalScene;
     localScopeKey = nextScopeKey;
-    hoveredId = null;
+    if (renderer) clearHover();
     graph.clear();
     // Recompute from the exact current visible scene. In particular, a filter,
     // actor, or timeline change must not inherit hidden nodes' old positions.
@@ -431,7 +436,7 @@ export function createSigmaGraphAdapter(
       const id = localScene.graphIdByKey.get(key);
       const presentation = id ? nodePresentation.get(id) : undefined;
       const quiet = presentation?.muted || highlightedStar !== null && !highlightedStar.nodes.has(key);
-      const importantLabel = Boolean(data.isSeed || (id && [selectedId, focusedId, hoveredId].includes(id)));
+      const importantLabel = Boolean(data.isSeed || (id && [selectedId, focusedId].includes(id)));
       return {
         ...data,
         hidden: presentation?.hidden ?? false,
@@ -476,10 +481,58 @@ export function createSigmaGraphAdapter(
   const setHover = (id: string | null) => {
     if (destroyed || contextLost) return;
     if (hoveredId === id) return;
+    const previous = hoveredId;
     hoveredId = id;
     options.callbacks.onHover(id);
-    refreshHighlight();
+    if (destroyed || contextLost) return;
+    const edges = [previous, id].filter((edge): edge is string => edge !== null && graph.hasEdge(edge));
+    if (edges.length) sigma.refresh({ partialGraph: { nodes: [], edges }, skipIndexation: true });
+    updateHoverChip();
   };
+  function updateHoverChip() {
+    if (destroyed || contextLost || hoveredId === null) { chip.hide(); return; }
+    const key = localScene.keyByGraphId.get(hoveredId);
+    if (key && graph.hasNode(key)) {
+      const data = sigma.getNodeDisplayData(key);
+      const attributes = graph.getNodeAttributes(key);
+      if (data && !data.hidden) {
+        chip.show(String(attributes.label ?? ""), sigma.graphToViewport({ x: Number(attributes.x), y: Number(attributes.y) }),
+          { kind: "node", id: hoveredId }, sigma.scaleSize(data.size));
+        return;
+      }
+    } else if (graph.hasEdge(hoveredId)) {
+      // A later frame (e.g. history playback under a stationary pointer) can
+      // hide the relation or an endpoint; never name a stroke that is not drawn.
+      const extremities = graph.extremities(hoveredId);
+      const drawn = sigma.getEdgeDisplayData(hoveredId)?.hidden !== true && extremities.every((node) => {
+        const display = sigma.getNodeDisplayData(node);
+        return Boolean(display) && display!.hidden !== true;
+      });
+      const [source, target] = extremities.map((node) => {
+        const data = graph.getNodeAttributes(node);
+        return sigma.graphToViewport({ x: Number(data.x), y: Number(data.y) });
+      });
+      const anchor = drawn
+        ? graphEdgeChipAnchor(source, target, container.clientWidth, container.clientHeight, hoverEvent)
+        : null;
+      if (anchor) {
+        chip.show(String(graph.getEdgeAttribute(hoveredId, "label") ?? ""), anchor,
+          { kind: "edge", id: hoveredId }, GRAPH_EDGE_CHIP_OFFSET_PX);
+        return;
+      }
+    }
+    chip.hide();
+  }
+  function clearHover() {
+    if (hoverFrame !== null) cancelAnimationFrame(hoverFrame);
+    hoverFrame = null;
+    hoverEvent = null;
+    pickedEdge = null;
+    setHover(null);
+    hoveredId = null;
+    chip.hide();
+  }
+  sigma.on("afterRender", updateHoverChip);
   const endDrag = (cancelled = false) => {
     if (!draggingKey) return;
     const key = draggingKey;
@@ -502,7 +555,8 @@ export function createSigmaGraphAdapter(
   const releaseDrag = () => endDrag();
   const cancelDrag = () => endDrag(true);
   const clearSelection = () => {
-    hoveredId = focusedId = selectedId = null;
+    clearHover();
+    focusedId = selectedId = null;
     options.callbacks.onHover(null);
     options.callbacks.onSelect(null);
     refreshHighlight();
@@ -537,10 +591,31 @@ export function createSigmaGraphAdapter(
     refreshHighlight();
   };
 
-  sigma.on("enterNode", ({ node }) => setHover(localScene.graphIdByKey.get(node) ?? null));
-  sigma.on("leaveNode", () => setHover(null));
-  sigma.on("enterEdge", ({ edge }) => setHover(edge));
-  sigma.on("leaveEdge", () => setHover(null));
+  const scheduleHover = (event: SigmaStageEventPayload["event"]) => {
+    const original = event.original;
+    if (destroyed || contextLost) return;
+    if (!(original instanceof MouseEvent) || ("pointerType" in original && original.pointerType === "touch")
+      || !(original.target instanceof Node) || !container.contains(original.target)) {
+      // Sigma reports every document mouse move. Outside the canvas, touch
+      // nothing unless there is pointer hover state to release.
+      if (hoveredId !== null || hoverFrame !== null || hoverEvent !== null || pickedEdge !== null) clearHover();
+      return;
+    }
+    hoverEvent = event;
+    if (hoverFrame !== null) return;
+    hoverFrame = requestAnimationFrame(() => {
+      hoverFrame = null;
+      if (!hoverEvent || destroyed || contextLost) return;
+      const key = nearestNode(hoverEvent);
+      const next = key ? localScene.graphIdByKey.get(key) ?? null : pickedEdge;
+      // A relation chip follows the pointer along the same stroke.
+      if (next === hoveredId) updateHoverChip();
+      else setHover(next);
+    });
+  };
+  sigma.on("enterEdge", ({ edge, event }) => { pickedEdge = edge; scheduleHover(event); });
+  sigma.on("leaveEdge", ({ event }) => { pickedEdge = null; scheduleHover(event); });
+  sigma.on("leaveStage", clearHover);
   const selectNode = ({ node, event }: SigmaNodeEventPayload) => {
     if (destroyed || contextLost || suppressClick) return;
     selectKey(nearestNode(event) ?? node);
@@ -599,6 +674,7 @@ export function createSigmaGraphAdapter(
   sigma.on("downEdge", beginStageGesture);
   sigma.on("downNode", ({ node, event }) => beginNodeDrag(nearestNode(event) ?? node, event));
   sigma.on("moveBody", ({ event }) => {
+    scheduleHover(event);
     if (destroyed || contextLost || !draggingKey) return;
     if (typeof TouchEvent !== "undefined" && event.original instanceof TouchEvent
       && event.original.touches.length !== 1) {
@@ -636,6 +712,7 @@ export function createSigmaGraphAdapter(
     layout?.pause();
     cancelDrag();
     contextLost = true;
+    clearHover();
     options.callbacks.onContextStatus?.("lost");
   };
   const onContextRestored = () => {
@@ -689,6 +766,8 @@ export function createSigmaGraphAdapter(
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      clearHover();
+      chip.destroy();
       draggingKey = null;
       layout?.destroy();
       for (const canvas of contextCanvases) {
@@ -722,13 +801,7 @@ export function createSigmaGraphAdapter(
     focus(id) {
       if (destroyed || contextLost) return;
       focusedId = id;
-      // A stationary pointer must not mask a newer DOM keyboard focus. A
-      // subsequent pointer entry still wins; blur preserves that newer hover.
-      if (id !== null && hoveredId !== null) {
-        hoveredId = null;
-        options.callbacks.onHover(null);
-      }
-      if (!destroyed && !contextLost) refreshHighlight();
+      refreshHighlight();
     },
     pin(id, pinned, position) {
       if (destroyed || contextLost) return null;

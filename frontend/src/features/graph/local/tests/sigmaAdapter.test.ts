@@ -23,6 +23,7 @@ const state = vi.hoisted(() => ({
   refresh: vi.fn(),
   nativeSquareLabel: vi.fn(),
   nodeCanvas: null as HTMLCanvasElement | null,
+  container: null as HTMLDivElement | null,
   labelPass: null as ((sigma: { graph: {
     nodes(): string[]; getNodeAttributes(key: string): Record<string, unknown>;
   } }) => void) | null,
@@ -52,14 +53,19 @@ vi.mock("sigma", () => ({
     }
     on(name: string, callback: (...args: unknown[]) => void) { this.events.set(name, callback); }
     emit(name: string, payload?: unknown) { this.events.get(name)?.(payload); }
-    refresh() {
-      state.refresh();
+    refresh(options?: unknown) {
+      state.refresh(options);
       this.emit("beforeRender");
       state.labelPass?.(this);
+      this.emit("afterRender");
     }
     getCamera() { return this.camera; }
     getMouseCaptor() { return this.captor; }
     getNodeDisplayData(key: string) { return this.graph.getNodeAttributes(key); }
+    getEdgeDisplayData(key: string) {
+      const reducer = this.settings.edgeReducer as (key: string, data: Record<string, unknown>) => Record<string, unknown>;
+      return reducer(key, this.graph.getEdgeAttributes(key));
+    }
     graphToViewport(point: unknown) { return point; }
     scaleSize(size: number) { return size; }
     getCanvases() { return { nodes: state.nodeCanvas! }; }
@@ -94,6 +100,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   state.nodeCanvas = document.createElement("canvas");
   const container = document.createElement("div");
+  state.container = container;
+  container.appendChild(state.nodeCanvas);
   Object.defineProperties(container, {
     clientWidth: { value: 860 }, clientHeight: { value: 640 },
   });
@@ -108,6 +116,51 @@ afterEach(() => {
 });
 
 describe("Local Sigma interactions", () => {
+  it("shows node and relationship chips without changing selection, ordinary labels or full indexing", () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; });
+    vi.stubGlobal("cancelAnimationFrame", () => { frames.length = 0; });
+    const move = (x: number, y: number, target: EventTarget = state.nodeCanvas!) => {
+      const original = new MouseEvent("mousemove"); target.dispatchEvent(original);
+      const payload = { ...event(x, y), original };
+      state.sigma.emit("moveBody", { event: payload });
+      frames.splice(0).forEach(callback => callback(0));
+      return payload;
+    };
+    Object.assign(state.sigma.graph.getNodeAttributes("context_page:neighbor"), { x: 100, y: 100, size: 5 });
+    Object.assign(state.sigma.graph.getNodeAttributes("context_page:other"), { x: 300, y: 300 });
+    const reducer = state.sigma.settings.nodeReducer as (key: string, data: Record<string, unknown>) => Record<string, unknown>;
+    const presentation = () => state.sigma.graph.nodes().map(key => reducer(key, state.sigma.graph.getNodeAttributes(key)));
+    const before = presentation();
+    state.refresh.mockClear();
+    move(112, 100);
+    const chip = state.container!.querySelector<HTMLElement>(".graph-hover-chip")!;
+    expect(chip.hidden).toBe(false); expect(chip.textContent).toBe("neighbor");
+    expect(presentation()).toEqual(before); expect(state.refresh).not.toHaveBeenCalled();
+    adapter.select("other"); const selected = presentation(); state.refresh.mockClear();
+    move(100, 100); expect(presentation()).toEqual(selected); expect(state.refresh).not.toHaveBeenCalled();
+    move(200, 200); expect(chip.hidden).toBe(true);
+    const edgeEvent = move(200, 200);
+    state.sigma.emit("enterEdge", { edge: "relation", event: edgeEvent });
+    frames.splice(0).forEach(callback => callback(0));
+    expect(chip.hidden).toBe(false); expect(chip.textContent).toBe("link");
+    expect(state.refresh).toHaveBeenLastCalledWith({ partialGraph: { nodes: [], edges: ["relation"] }, skipIndexation: true });
+    expect(presentation()).toEqual(selected);
+    expect(chip.dataset.hoverEdgeId).toBe("relation"); expect(chip.dataset.hoverNodeId).toBeUndefined();
+    // Zoomed in, the relation's midpoint is offscreen; its visible stroke is still named.
+    Object.assign(state.sigma.graph.getNodeAttributes("context_page:seed"), { x: -2_000, y: 100 });
+    move(40, 100); expect(chip.hidden).toBe(false); expect(chip.dataset.hoverEdgeId).toBe("relation");
+    move(112, 100); expect(chip.textContent).toBe("neighbor"); expect(chip.dataset.hoverNodeId).toBe("neighbor");
+    expect(state.refresh.mock.calls.every(([options]) => options?.skipIndexation === true)).toBe(true);
+    // A later frame hiding the relation under a stationary pointer removes its chip.
+    move(40, 100); expect(chip.dataset.hoverEdgeId).toBe("relation");
+    adapter.replaceScene({ ...scene, edges: scene.edges.map((edge) => ({ ...edge, hidden: true })) });
+    expect(chip.hidden).toBe(true);
+    move(112, 100, document.createElement("button")); expect(chip.hidden).toBe(true);
+    move(112, 100); state.sigma.emit("leaveStage"); expect(chip.hidden).toBe(true);
+    move(112, 100); adapter.replaceScene(changedGeometry()); expect(chip.hidden).toBe(true);
+  });
+
   it("reports WebGL loss, stops work, requests fresh restoration, and detaches on destroy", () => {
     const loss = new Event("webglcontextlost", { cancelable: true });
     state.nodeCanvas!.dispatchEvent(loss);
@@ -183,25 +236,16 @@ describe("Local Sigma interactions", () => {
     expect(muted.color).not.toBe(data.color);
   });
 
-  it("edge hover does not replace a selected node's neighborhood", () => {
-    adapter.select("other");
-    state.sigma.emit("enterEdge", { edge: "relation" });
-    const reducer = state.sigma.settings.nodeReducer as (key: string, data: Record<string, unknown>) => Record<string, unknown>;
-    const data = state.sigma.graph.getNodeAttributes("context_page:seed");
-    expect(reducer("context_page:seed", data).color).not.toBe(data.color);
-  });
-
   it.each([
-    { hovered: "neighbor", focused: "other", bright: "other", quiet: "seed" },
-    { hovered: "other", focused: "relation", bright: "seed", quiet: "other" },
-  ])("new keyboard focus $focused supersedes stationary hover without changing the scene", ({ hovered, focused, bright, quiet }) => {
+    { focused: "other", bright: "other", quiet: "seed" },
+    { focused: "relation", bright: "seed", quiet: "other" },
+  ])("keyboard focus $focused overrides selection without changing the scene", ({ focused, bright, quiet }) => {
     adapter.select("seed");
     const layoutCount = vi.mocked(createLocalLayout).mock.calls.length;
     const positions = state.sigma.graph.nodes().map((key) => {
       const { x, y } = state.sigma.graph.getNodeAttributes(key);
       return { key, x, y };
     });
-    state.sigma.emit("enterNode", { node: `context_page:${hovered}` });
     state.refresh.mockClear();
     adapter.focus(focused);
     expect(state.refresh).toHaveBeenCalledOnce();
@@ -210,7 +254,7 @@ describe("Local Sigma interactions", () => {
     const quietData = state.sigma.graph.getNodeAttributes(`context_page:${quiet}`);
     expect(reducer(`context_page:${bright}`, brightData).color).toBe(brightData.color);
     expect(reducer(`context_page:${quiet}`, quietData).color).not.toBe(quietData.color);
-    expect(callbacks.onHover).toHaveBeenLastCalledWith(null);
+    expect(callbacks.onHover).not.toHaveBeenCalled();
     expect(callbacks.onSelect).not.toHaveBeenCalled();
     expect(callbacks.onPin).not.toHaveBeenCalled();
     expect(state.setCameraState).not.toHaveBeenCalled();
@@ -225,41 +269,6 @@ describe("Local Sigma interactions", () => {
     const otherData = state.sigma.graph.getNodeAttributes("context_page:other");
     expect(reducer("context_page:seed", seedData).color).toBe(seedData.color);
     expect(reducer("context_page:other", otherData).color).not.toBe(otherData.color);
-  });
-
-  it("retains later pointer hover across keyboard blur and ignores focus after loss/destroy", () => {
-    adapter.focus("other");
-    state.sigma.emit("enterNode", { node: "context_page:neighbor" });
-    callbacks.onHover.mockClear();
-    adapter.focus(null);
-    const reducer = state.sigma.settings.nodeReducer as (key: string, data: Record<string, unknown>) => Record<string, unknown>;
-    const seedData = state.sigma.graph.getNodeAttributes("context_page:seed");
-    const otherData = state.sigma.graph.getNodeAttributes("context_page:other");
-    expect(reducer("context_page:seed", seedData).color).toBe(seedData.color);
-    expect(reducer("context_page:other", otherData).color).not.toBe(otherData.color);
-    expect(callbacks.onHover).not.toHaveBeenCalled();
-    state.nodeCanvas!.dispatchEvent(new Event("webglcontextlost", { cancelable: true }));
-    callbacks.onHover.mockClear();
-    adapter.focus("other");
-    expect(callbacks.onHover).not.toHaveBeenCalled();
-    adapter.destroy();
-    adapter.focus("other");
-    expect(callbacks.onHover).not.toHaveBeenCalled();
-  });
-
-  it.each(["destroy", "context loss"])("does not refresh when keyboard hover clearing triggers %s", (transition) => {
-    state.sigma.emit("enterNode", { node: "context_page:neighbor" });
-    state.refresh.mockClear();
-    callbacks.onHover.mockImplementationOnce(() => {
-      if (transition === "destroy") adapter.destroy();
-      else state.nodeCanvas!.dispatchEvent(new Event("webglcontextlost", { cancelable: true }));
-    });
-    adapter.focus("other");
-    expect(callbacks.onHover).toHaveBeenLastCalledWith(null);
-    expect(state.refresh).not.toHaveBeenCalled();
-    if (transition === "context loss") {
-      expect(callbacks.onContextStatus).toHaveBeenLastCalledWith("lost");
-    }
   });
 
   it("blank-stage selection clears focus and selection without resetting pins", () => {
@@ -481,10 +490,10 @@ describe("Local Sigma interactions", () => {
     }
   });
 
-  it("keeps selection and hover labels forced simultaneously when ordinary labels are off", () => {
+  it("keeps selection and keyboard focus labels forced simultaneously when ordinary labels are off", () => {
     adapter.setLabelsVisible(false);
     adapter.select("neighbor");
-    state.sigma.emit("enterNode", { node: "context_page:other" });
+    adapter.focus("other");
     const reducer = state.sigma.settings.nodeReducer as (
       key: string, data: Record<string, unknown>,
     ) => Record<string, unknown>;
@@ -498,7 +507,7 @@ describe("Local Sigma interactions", () => {
     drawNodeLabel(context, "context_page:other");
     expect(context.fillText.mock.calls.map((call) => call[0])).toEqual(["seed", "neighbor", "other"]);
     adapter.select(null);
-    state.sigma.emit("leaveNode");
+    adapter.focus(null);
     state.sigma.emit("beforeRender");
     context.fillText.mockClear();
     drawNodeLabel(context, "context_page:seed");
@@ -535,7 +544,7 @@ describe("Local Sigma interactions", () => {
       callbacks, forcedColors: false, positions: {}, reducedMotion: true, showLabels: false,
     });
     adapter.select("neighbor");
-    state.sigma.emit("enterNode", { node: "context_page:other" });
+    adapter.focus("other");
     for (const key of state.sigma.graph.nodes()) {
       Object.assign(state.sigma.graph.getNodeAttributes(key), { x: 24, y: 10, size: 5 });
     }
@@ -705,7 +714,6 @@ describe("Local scene refresh boundary", () => {
     adapter.pin("neighbor", true, { x: 94, y: 119 });
     adapter.select("seed");
     adapter.focus("other");
-    state.sigma.emit("enterNode", { node: "context_page:neighbor" });
     if (paused) adapter.stopLayout();
     const before = positions();
     const activeColors = colors();
@@ -737,8 +745,6 @@ describe("Local scene refresh boundary", () => {
     expect(state.sigma.graph.getEdgeAttributes("relation").label).toBe("Updated relationship");
     expect(state.refresh).toHaveBeenCalled();
 
-    state.sigma.emit("leaveNode");
-    expect(colors()).not.toEqual(activeColors);
     adapter.focus(null);
     const reducer = state.sigma.settings.nodeReducer as (key: string, data: Record<string, unknown>) => Record<string, unknown>;
     const seed = state.sigma.graph.getNodeAttributes("context_page:seed");

@@ -7,6 +7,7 @@ import {
   type WorkspaceMapCommunityOutcome,
 } from "../map/communityJob";
 import type { WorkspaceMapColumns } from "../map/sceneColumns";
+import { createGraphHoverChip, GRAPH_EDGE_CHIP_OFFSET_PX, graphEdgeChipAnchor } from "../shared/hoverChip";
 import { readGraphTokens } from "../shared/graphTokens";
 import { sameGraphVisibleIdentity, type GraphPoint, type GraphViewport, type GraphVisibleIdentity } from "../shared/rendererTypes";
 import { canAnimateWorkspaceRelationLayout } from "../shared/workspaceLayoutPolicy";
@@ -50,6 +51,9 @@ export type WorkspaceCosmosOptions = {
   physics?: "force-atlas2" | "rest-log";
   /** The caller's admitted device/scale budget, fixed for this renderer. */
   budget?: WorkspaceMapBudget;
+  hoverChip?: HTMLDivElement | null;
+  /** Localized name of one relation of a WORKSPACE_MAP_EDGE_KIND; without it, relation hover shows no chip. */
+  relationLabel?(kind: number): string;
   callbacks: WorkspaceCosmosCallbacks;
   forcedColors: boolean;
   initialViewport?: GraphViewport | null;
@@ -236,8 +240,13 @@ export function createWorkspaceCosmosAdapter(
   let selectedId: string | null = null;
   let focusedId: string | null = null;
   let searchMatchedIds: ReadonlySet<string> | null = null;
+  const chip = createGraphHoverChip(container, options.hoverChip);
   let hoveredIndex: number | null = null;
-  // Native pick ownership is distinct from presentation hover, which keyboard focus can clear.
+  let hoveredEdge: number | null = null;
+  let pointerOnCanvas = true;
+  // Client coordinates of the latest canvas pointer, for the relation chip anchor.
+  let pointerClient: { x: number; y: number } | null = null;
+  // Preserve native pick ownership for drag independently of the chip.
   let nativeHoveredIndex: number | null = null;
   let draggedPoint: { index: number; nodeKey: string; identityKey: string; startX: number; startY: number; moved: boolean } | null = null;
   let initialFadeZoom: number | null = null;
@@ -417,10 +426,13 @@ export function createWorkspaceCosmosAdapter(
     linkGreyoutOpacity: keepOverviewContext() ? 0.08 : 0.1,
     focusedPointRingColor: interactionInk,
     hoveredPointRingColor: interactionInk,
-    renderHoveredPointRing: true,
+    renderHoveredPointRing: false,
+    hoveredPointCursor: "pointer",
+    hoveredLinkCursor: "pointer",
     renderLinks: showEdges,
     enableDrag: true,
     onSimulationTick(alpha) {
+      if (ready && !destroyed && !contextLost) updateHoverChip();
       // Keep the current 2K relation graph live after natural cooling without
       // an interval or stale generation callback. Initial camera framing has
       // its own bounded readback/ownership window, independent of physics.
@@ -448,21 +460,30 @@ export function createWorkspaceCosmosAdapter(
         reheatRelationPhysics(0.15);
       }
     },
-    onPointMouseOver(index, position) {
+    onPointMouseOver(index, position, event) {
       if (destroyed || contextLost) return;
       nativeHoveredIndex = index;
+      if (!allowsHover(event)) return;
+      hoveredEdge = null;
       hoveredIndex = index;
       cachePickedLabelPosition(index, position);
       options.callbacks.onHover(columns.nodeIds[index] ?? null);
-      applyHighlight();
+      trackHover();
+      updateHoverChip();
     },
     onPointMouseOut() {
       if (destroyed || contextLost) return;
       nativeHoveredIndex = null;
-      hoveredIndex = null;
-      options.callbacks.onHover(null);
-      applyHighlight();
+      clearHover();
     },
+    onLinkMouseOver(index) {
+      if (destroyed || contextLost || !showEdges || !pointerOnCanvas || hoveredIndex !== null) return;
+      hoveredEdge = index;
+      options.callbacks.onHover(columns.edgeIds[index] ?? null);
+      trackHover();
+      updateHoverChip();
+    },
+    onLinkMouseOut() { if (!destroyed && !contextLost && hoveredEdge !== null) clearHover(); },
     onPointClick(index, position) {
       if (destroyed || contextLost) return;
       const id = columns.nodeIds[index];
@@ -766,6 +787,7 @@ export function createWorkspaceCosmosAdapter(
           cachedLabelPositions = null;
           writePositions(positions);
           graph.render(undefined, 0);
+          updateHoverChip();
           // Official FA2 has no cooling alpha. Camera ownership remains the
           // existing bounded wall-time gate, independent of the solver.
           initialCamera?.tick(1);
@@ -1125,8 +1147,7 @@ export function createWorkspaceCosmosAdapter(
     cancelReveal();
     selectedId = id;
     focusedId = null;
-    hoveredIndex = null;
-    options.callbacks.onHover(null);
+    clearHover();
     applyHighlight();
     options.callbacks.onSelect(id);
   }
@@ -1155,7 +1176,7 @@ export function createWorkspaceCosmosAdapter(
         const getFrame = graph.getTrackedPointPositionsFrame.bind(graph);
         const owner = workspaceMapCommunityIdentityKey(columns);
         trackedPositions = createWorkspaceTrackedPositions({
-          getFrame: () => destroyed || contextLost || simulationFailed || !showLabels || document.visibilityState === "hidden"
+          getFrame: () => destroyed || contextLost || simulationFailed || (!showLabels && hoveredIndex === null && hoveredEdge === null) || document.visibilityState === "hidden"
             ? null : getFrame(),
           onPositions(positions) {
             if (destroyed || contextLost || simulationFailed || owner !== workspaceMapCommunityIdentityKey(columns)) return;
@@ -1194,12 +1215,13 @@ export function createWorkspaceCosmosAdapter(
   function syncLabelCandidates(force = false, star = interactionStar()): boolean {
     // A selected/focused node must not disappear merely because it falls
     // outside the scene's top-40 labels. Reserve the first slots for the
-    // explicit interaction while retaining the 40-label DOM/readback cap.
-    const priority = [hoveredIndex === null ? null : columns.nodeIds[hoveredIndex], focusedId, selectedId]
+    // explicit interaction while retaining the 40-label DOM cap. Hover tracks
+    // at most two extra endpoints without changing these label candidates.
+    const priority = [focusedId, selectedId]
       .map((id) => id === null ? undefined : nodeById.get(id))
       .filter((index): index is number => index !== undefined);
     // Search labels must describe the active search, including matches outside
-    // the normal top-40. Explicit selected/hover titles still take precedence.
+    // the normal top-40. Explicit selected/focused titles still take precedence.
     const ordinary = searchMatchedIds === null ? rankedLabelIndices
       : [...searchMatchedIds].flatMap((id) => {
         const index = nodeById.get(id); return index === undefined ? [] : [index];
@@ -1222,7 +1244,7 @@ export function createWorkspaceCosmosAdapter(
     if (!ready || !labelLayer) return changed;
     if (changed) {
       trackedPositions?.invalidate();
-      graph.trackPointPositionsByIndices(labelIndices);
+      graph.trackPointPositionsByIndices(trackingIndices());
     }
     let textChanged = false;
     for (let index = 0; index < labelElements.length; index += 1) {
@@ -1260,7 +1282,7 @@ export function createWorkspaceCosmosAdapter(
   }
 
   function updateLabels(positions?: Float32Array, reprojectOnly = false) {
-    if (!ready || destroyed || contextLost || !labelLayer || !showLabels) return;
+    if (!ready || destroyed || contextLost || !labelLayer || (!showLabels && hoveredIndex === null && hoveredEdge === null)) return;
     const now = performance.now();
     // Hover/focus may change faster than the 5Hz timer. They still share one
     // bounded GPU label readback budget, rather than adding per-pointer reads.
@@ -1274,7 +1296,7 @@ export function createWorkspaceCosmosAdapter(
       if (cachedLabelPositions?.size) updateLabels(undefined, true);
       return;
     }
-    const tracked = reprojectOnly ? cachedLabelPositions : knownPositions ? new Map(labelIndices.map((index) =>
+    const tracked = reprojectOnly ? cachedLabelPositions : knownPositions ? new Map(trackingIndices().map((index) =>
       [index, [knownPositions[index * 2], knownPositions[index * 2 + 1]] as [number, number]]))
       : new Map([...graph.getTrackedPointPositionsMap()].map(([index, point]) =>
         [index, nativeSpace.fromNativePoint(point)] as const));
@@ -1282,11 +1304,13 @@ export function createWorkspaceCosmosAdapter(
     if (!reprojectOnly) {
       // Camera motion reprojects this bounded snapshot immediately, without
       // another GPU read or consuming the next scheduled position refresh.
-      cachedLabelPositions = new Map(labelIndices.flatMap((index) => {
+      cachedLabelPositions = new Map(trackingIndices().flatMap((index) => {
         const point = tracked.get(index);
         return point ? [[index, [point[0], point[1]] as [number, number]] as const] : [];
       }));
     }
+    updateHoverChip();
+    if (!showLabels) return;
     const bounds = container.getBoundingClientRect();
     const candidates: Array<{
       label: HTMLSpanElement; screenX: number; screenY: number;
@@ -1387,15 +1411,87 @@ export function createWorkspaceCosmosAdapter(
     labelTimer = window.setInterval(updateLabels, 200); // 5 reads/s, below the 6/s cap.
   }
 
+  function allowsHover(input: unknown) {
+    const source = input && typeof input === "object" && "sourceEvent" in input ? input.sourceEvent : input;
+    const event = source instanceof MouseEvent ? source : undefined;
+    return pointerOnCanvas && (!source || !!event) && (!event || ((!('pointerType' in event) || event.pointerType !== "touch")
+      && (!event.target || event.target instanceof Node && container.contains(event.target))));
+  }
+
+  // Up to 40 labels plus at most two hover endpoints: WORKSPACE_TRACKED_POSITION_LIMIT.
+  function trackingIndices() {
+    const extra = hoveredIndex !== null ? [hoveredIndex] : hoveredEdge !== null
+      ? [columns.edgeSources[hoveredEdge], columns.edgeTargets[hoveredEdge]] : [];
+    return [...new Set([...labelIndices, ...extra])];
+  }
+
+  function trackHover() {
+    if (!ready || destroyed || contextLost) return;
+    trackedPositions?.invalidate();
+    graph.trackPointPositionsByIndices(trackingIndices());
+  }
+
+  function clearHover() {
+    const hadHover = hoveredIndex !== null || hoveredEdge !== null;
+    hoveredIndex = hoveredEdge = null;
+    chip.hide();
+    if (hadHover && !destroyed && !contextLost) { trackHover(); options.callbacks.onHover(null); }
+  }
+
+  function updateHoverChip() {
+    // Native picks resolve asynchronously, so a hovered index can outlive its
+    // row or meet a not-yet-placed one. Name nothing rather than throw from a
+    // pointer callback inside the native frame.
+    const point = (index: number): [number, number] | undefined => {
+      const position: [number, number] | undefined = usesCpuLayout()
+        ? [buffers.positions[index * 2], buffers.positions[index * 2 + 1]] : cachedLabelPositions?.get(index);
+      return position && Number.isFinite(position[0]) && Number.isFinite(position[1]) ? position : undefined;
+    };
+    if (hoveredIndex !== null) {
+      const position = point(hoveredIndex);
+      if (position) {
+        const [x, y] = projectPoint(position);
+        chip.show(columns.nodeLabels[hoveredIndex], { x, y }, { kind: "node", id: columns.nodeIds[hoveredIndex] },
+          buffers.drawPointSizes[hoveredIndex] / 2);
+        return;
+      }
+    } else if (hoveredEdge !== null && showEdges) {
+      const source = point(columns.edgeSources[hoveredEdge]), target = point(columns.edgeTargets[hoveredEdge]);
+      const label = options.relationLabel?.(columns.edgeKinds[hoveredEdge]);
+      if (source && target && label) {
+        const [sourceX, sourceY] = projectPoint(source), [targetX, targetY] = projectPoint(target);
+        const bounds = pointerClient ? container.getBoundingClientRect() : null;
+        const anchor = graphEdgeChipAnchor({ x: sourceX, y: sourceY }, { x: targetX, y: targetY },
+          container.clientWidth, container.clientHeight,
+          bounds && pointerClient ? { x: pointerClient.x - bounds.left, y: pointerClient.y - bounds.top } : null);
+        if (anchor) {
+          chip.show(label, anchor, { kind: "edge", id: columns.edgeIds[hoveredEdge] }, GRAPH_EDGE_CHIP_OFFSET_PX);
+          return;
+        }
+      }
+    }
+    chip.hide();
+  }
+  const onPointerMove = (event: PointerEvent) => {
+    pointerOnCanvas = event.pointerType !== "touch";
+    pointerClient = pointerOnCanvas ? { x: event.clientX, y: event.clientY } : null;
+    if (!pointerOnCanvas) clearHover();
+    // A relation chip follows the pointer along the same stroke.
+    else if (hoveredEdge !== null && ready && !destroyed && !contextLost) updateHoverChip();
+  };
+  const onPointerLeave = () => { pointerOnCanvas = false; pointerClient = null; clearHover(); };
+  container.addEventListener("pointermove", onPointerMove);
+  container.addEventListener("pointerleave", onPointerLeave);
+  container.addEventListener("touchstart", onPointerLeave);
+
   function activeIndex(): number | null {
-    if (hoveredIndex !== null) return hoveredIndex;
     const id = focusedId ?? selectedId;
     return id === null ? null : nodeById.get(id) ?? null;
   }
 
   function interactionStar() {
     const index = activeIndex();
-    const edge = hoveredIndex === null && index === null
+    const edge = index === null
       ? edgeById.get(focusedId ?? selectedId ?? "") : undefined;
     // Relationship-list focus emphasizes that relationship and its endpoints;
     // it does not select an endpoint or alter the saved selection/camera.
@@ -1423,11 +1519,7 @@ export function createWorkspaceCosmosAdapter(
       focusedLinkIndex: selectedId === null ? undefined : edgeById.get(selectedId),
       highlightedPointIndices: searchPoints === null ? star?.points
         : [...new Set([...searchPoints, ...(star?.points ?? [])])],
-      // Pointer hover reads one direct relationship star. Search may retain
-      // matching points as context, but must not add neighbor-neighbor or
-      // unrelated relations to that star. The original GPU inputs and forces
-      // remain untouched; leaving hover restores the ordinary search state.
-      highlightedLinkIndices: hoveredIndex !== null ? star?.links : searchLinks === null ? star?.links
+      highlightedLinkIndices: searchLinks === null ? star?.links
         : [...new Set([...searchLinks, ...(star?.links ?? [])])],
       pointGreyoutColor: searchPoints !== null || keepOverviewContext() ? tokens.node.folder : undefined,
       pointGreyoutOpacity: keepOverviewContext() && star ? 0.3
@@ -1488,6 +1580,7 @@ export function createWorkspaceCosmosAdapter(
     event.preventDefault();
     if (destroyed) return;
     contextLost = true;
+    clearHover();
     detachNativePointPicker();
     trackedPositions?.destroy(); trackedPositions = null;
     retireCpuLayout();
@@ -1631,6 +1724,11 @@ export function createWorkspaceCosmosAdapter(
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      clearHover();
+      chip.destroy();
+      container.removeEventListener("pointermove", onPointerMove);
+      container.removeEventListener("pointerleave", onPointerLeave);
+      container.removeEventListener("touchstart", onPointerLeave);
       retireCpuLayout();
       initialCamera?.cancel(false);
       cancelReveal();
@@ -1668,12 +1766,6 @@ export function createWorkspaceCosmosAdapter(
     focus(id) {
       if (id !== null && id !== focusedId) retireForPresentation();
       focusedId = id;
-      if (id !== null) {
-        // A new keyboard interaction supersedes a stationary pointer's old
-        // hover. A later mouseover still wins; blur must not erase that hover.
-        hoveredIndex = null;
-        if (!destroyed && !contextLost) options.callbacks.onHover(null);
-      }
       applyHighlight();
     },
     getViewport,
@@ -1768,7 +1860,7 @@ export function createWorkspaceCosmosAdapter(
       buffers = next;
       nodeById = new Map(columns.nodeIds.map((id, index) => [id, index]));
       edgeById = new Map(columns.edgeIds.map((id, index) => [id, index]));
-      hoveredIndex = null;
+      clearHover();
       pinned.clear();
       pinOwners.clear();
       retiredPinIds.clear();
@@ -1814,7 +1906,7 @@ export function createWorkspaceCosmosAdapter(
       // same-index pick emits no MouseOver, so retain that public pick owner.
       selectedId = null;
       focusedId = null;
-      hoveredIndex = null;
+      clearHover();
       const releasedPins = pinned.size > 0;
       pinned.clear();
       pinOwners.clear();
@@ -1858,6 +1950,7 @@ export function createWorkspaceCosmosAdapter(
     },
     setEdgesVisible(enabled) {
       showEdges = enabled;
+      if (!enabled && hoveredEdge !== null) clearHover();
       if (ready && !destroyed && !contextLost) graph.setConfigPartial({ renderLinks: enabled });
     },
     setLabelsVisible(enabled) {

@@ -9,7 +9,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import type { GraphCanvasHandle, RendererStatus } from "../GraphCanvas";
-import type { WorkspaceMapColumns } from "../map/sceneColumns";
+import { WORKSPACE_MAP_EDGE_KIND, type WorkspaceMapColumns } from "../map/sceneColumns";
 import { sameGraphVisibleIdentity, type GraphPoint, type GraphViewport, type GraphVisibleIdentity } from "../shared/rendererTypes";
 import { readGraphTokens } from "../shared/graphTokens";
 import { sameWorkspaceMapIndexedGeometry } from "../shared/workspaceMapGeometry";
@@ -99,6 +99,9 @@ export const WorkspaceMapCanvas = forwardRef<GraphCanvasHandle, WorkspaceMapCanv
     ref,
   ) {
     const { t } = useTranslation("graph");
+    const translationRef = useRef(t);
+    translationRef.current = t;
+    const hoverChipRef = useRef<HTMLDivElement | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const adapterRef = useRef<WorkspaceCosmosAdapter | null>(null);
     const columnsRef = useRef(columns);
@@ -327,6 +330,9 @@ export const WorkspaceMapCanvas = forwardRef<GraphCanvasHandle, WorkspaceMapCanv
               edgeCount: snapshot.columns.edgeIds.length }, rendererBudget)
             && preservesAppliedPins(snapshot.columns, columnsRef.current);
           const adapter = createWorkspaceCosmosAdapter(container, columnsRef.current, {
+            hoverChip: hoverChipRef.current,
+            relationLabel: (kind) => translationRef.current(kind === WORKSPACE_MAP_EDGE_KIND.citation
+              ? "graph.legend.edge.citation" : "graph.legend.edge.link"),
             budget: rendererBudget,
             forcedColors,
             initialPaused,
@@ -589,6 +595,7 @@ export const WorkspaceMapCanvas = forwardRef<GraphCanvasHandle, WorkspaceMapCanv
           data-testid="graph-canvas"
           ref={containerRef}
         />
+        <div aria-hidden="true" className="graph-hover-chip" hidden ref={hoverChipRef} />
         {status === "loading" ? (
           <p className="graph-canvas-status" role="status">
             {t("workspaceGraph.mapRendererLoading", { defaultValue: "Loading interactive map…" })}

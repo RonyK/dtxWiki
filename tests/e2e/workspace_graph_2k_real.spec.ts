@@ -654,6 +654,9 @@ async function prepareNativeDocumentDrag(
       && labelX + width + 5 > other.x + 8
       && Math.abs(labelY - (other.y - 9)) < 18);
   };
+  // The hover chip is a sibling of the native canvas in its frame. Resolve it
+  // from the canvas element itself, whichever scope (page or dialog) found it.
+  const hoverChip = canvas.locator("xpath=..").locator(".graph-hover-chip");
   let before = await settleMapReadback(page, canvas);
   let expectedId: string | null = null;
   const preparation: { camera: MapReadback["camera"]; expectedId: string | null;
@@ -666,16 +669,16 @@ async function prepareNativeDocumentDrag(
       const bounds = await canvas.locator("canvas").boundingBox();
       if (!bounds) throw new Error("No native drag bounds");
       await page.mouse.move(bounds.x + point.x, bounds.y + point.y);
-      // Native GPU picking and the bounded label readback both must publish
-      // this ORIGINAL intended source before any mouse down can create a pin.
+      // Native GPU picking must publish this ORIGINAL intended source as the
+      // hover chip before any mouse down can create a pin.
       await page.waitForTimeout(300);
-      const nativeHoverIds = await canvas.locator("[data-workspace-map-labels] [data-full-title=true][data-node-id]")
-        .evaluateAll((labels) => labels.filter((label) => getComputedStyle(label).display !== "none")
-          .map((label) => (label as HTMLElement).dataset.nodeId!));
+      const nativeHoverIds = await hoverChip.evaluateAll((chips) => chips
+        .filter((chip) => getComputedStyle(chip).display !== "none")
+        .flatMap((chip) => (chip as HTMLElement).dataset.hoverNodeId ?? []));
       preparation.push({ camera: before.camera, expectedId, point, nativeHoverIds });
       if (nativeHoverIds.includes(expectedId)) {
-        await expect(canvas.locator(`[data-workspace-map-labels] [data-full-title=true][data-node-id="${expectedId}"]`))
-          .toBeVisible();
+        await expect(hoverChip).toHaveAttribute("data-hover-node-id", expectedId);
+        await expect(hoverChip).toBeVisible();
         await attachJson(testInfo, `real-api-2k-native-drag-preparation-${suffix}.json`, {
           entrypoint: "real camera zoom, fresh ordinary GPU label, expected-source native hover BEFORE mouse down",
           expectedId, preparation, before,
@@ -885,8 +888,8 @@ async function expectRealFolderContext(
     await page.mouse.move(dragBounds.x + dragPoint.x + dragDelta.x,
       dragBounds.y + dragPoint.y + dragDelta.y, { steps: 10 });
     await page.mouse.up();
-    // Mouse hover uses a clamped full-title label. Leave the native canvas so
-    // the original ordinary GPU-backed label can measure the completed drag.
+    // Leave the native canvas so the original ordinary GPU-backed label,
+    // rather than the hover chip, measures the completed drag.
     const afterDrag = await settleMapReadback(page, canvas);
     expect(afterDrag.camera).not.toBeNull();
     expect(afterDrag.camera!.k).toBeCloseTo(beforeDrag.camera!.k, 5);

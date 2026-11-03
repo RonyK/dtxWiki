@@ -77,6 +77,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     ref,
   ) {
     const { t } = useTranslation("graph");
+    const hoverChipRef = useRef<HTMLDivElement | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const adapterRef = useRef<SigmaGraphAdapter | null>(null);
     const sceneRef = useRef(scene);
@@ -164,6 +165,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
             container,
             sceneRef.current,
             {
+              hoverChip: hoverChipRef.current,
               forcedColors,
               initialViewport: viewportRef.current,
               positions: positionsRef.current,
@@ -355,6 +357,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           data-testid="graph-canvas"
           ref={containerRef}
         />
+        <div aria-hidden="true" className="graph-hover-chip" hidden ref={hoverChipRef} />
         {status === "loading" ? (
           <p className="graph-canvas-status" role="status">
             {t("graph.rendererLoading", { defaultValue: "Loading interactive graph…" })}

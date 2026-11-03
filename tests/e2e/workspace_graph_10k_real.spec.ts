@@ -720,7 +720,10 @@ async function pinOriginalAccountDocument(page: Page, document: WorkspaceGraphDo
   await canvas.locator("canvas").scrollIntoViewIfNeeded();
   await page.mouse.move(0, 0);
   const label = canvas.locator(`[data-workspace-map-labels] span[data-node-id="${document.id}"]`);
-  const fullTitle = canvas.locator(`[data-workspace-map-labels] span[data-full-title=true][data-node-id="${document.id}"]`);
+  // The hover chip is a sibling of the native canvas in its frame. Resolve it
+  // from the canvas element itself, whichever scope (page or dialog) found it.
+  const hoverChip = canvas.locator("xpath=..").locator(".graph-hover-chip");
+  const pickedChip = hoverChip.and(page.locator(`[data-hover-node-id="${document.id}"]`));
   const preparation: { attempt: number; point: { x: number; y: number }; hoveredIds: string[];
     hoverWaitMs: number; nativePointerHit: boolean }[] = [];
   let point: { x: number; y: number } | null = null;
@@ -728,7 +731,7 @@ async function pinOriginalAccountDocument(page: Page, document: WorkspaceGraphDo
   for (let attempt = 0; attempt <= 6; attempt += 1) {
     await afterAnimationFrame(page);
     await page.waitForTimeout(300); // bounded5Hz production label readback, not inferred title placement
-    await expect(fullTitle).toHaveCount(0);
+    await expect(pickedChip).toHaveCount(0);
     await expect(label).toBeVisible();
     point = await label.evaluate((element) => {
       if (!element.hasAttribute("data-point-x") || !element.hasAttribute("data-point-y")) {
@@ -753,14 +756,14 @@ async function pinOriginalAccountDocument(page: Page, document: WorkspaceGraphDo
     let hoveredIds: string[] = [];
     for (let sample = 0; sample <= 15; sample += 1) {
       if (sample > 0) await page.waitForTimeout(100);
-      hoveredIds = await canvas.locator("[data-workspace-map-labels] span[data-full-title=true][data-node-id]")
-        .evaluateAll((labels) => labels.filter((element) => getComputedStyle(element).display !== "none")
-          .map((element) => (element as HTMLElement).dataset.nodeId!));
+      hoveredIds = await hoverChip.evaluateAll((chips) => chips
+        .filter((chip) => getComputedStyle(chip).display !== "none")
+        .flatMap((chip) => (chip as HTMLElement).dataset.hoverNodeId ?? []));
       if (hoveredIds.includes(document.id)) break;
     }
     preparation.push({ attempt, point, hoveredIds, hoverWaitMs: Date.now() - hoverStarted, nativePointerHit });
     if (hoveredIds.includes(document.id)) {
-      await expect(fullTitle).toBeVisible();
+      await expect(pickedChip).toBeVisible();
       break;
     }
     if (attempt === 6) {
