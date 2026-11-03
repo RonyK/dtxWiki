@@ -51,6 +51,7 @@ def reindex_workspace(
                     page=page,
                     version=None,
                     record_graph_observations=False,
+                    sync_graph_edges=False,
                     self_origins=configured_self_origins(database_provider.settings),
                 )
             for version in live_versions:
@@ -59,9 +60,21 @@ def reindex_workspace(
                     page=page,
                     version=version,
                     record_graph_observations=False,
+                    sync_graph_edges=False,
                     self_origins=configured_self_origins(database_provider.settings),
                 )
                 synced_versions += 1
+        # Reindex is the source-backed recovery path even when derived repair
+        # jobs exhausted their retries. Rebuild counters/cursors first, then
+        # publish all edge kinds together without an intermediate revision.
+        from backend.services.co_access import rebuild_co_access_pairs
+
+        rebuild_co_access_pairs(
+            session,
+            workspace_id,
+            usage_signals_enabled=usage_signals,
+            sync_projection=False,
+        )
         edge_counts = rebuild_edge_projection(
             session, workspace_id, usage_signals_enabled=usage_signals
         )

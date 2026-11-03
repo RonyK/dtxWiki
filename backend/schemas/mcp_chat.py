@@ -11,7 +11,7 @@ McpChatArtifactKind = Literal[
     "context_page", "library_item", "agent_page", "context_media_asset"
 ]
 McpChatArtifactVerb = Literal[
-    "created", "edited", "cited", "referenced", "search_match"
+    "created", "edited", "cited", "referenced", "viewed", "search_match"
 ]
 McpChatPeriod = Literal["today", "week", "month", "all"]
 McpChatSort = Literal["last_activity_desc", "write_count_desc"]

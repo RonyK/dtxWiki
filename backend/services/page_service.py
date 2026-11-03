@@ -6117,13 +6117,15 @@ def sync_page_projections(
     page: ContextPage,
     version: ContextPageVersion | None = None,
     record_graph_observations: bool = True,
+    sync_graph_edges: bool = True,
     self_origins: frozenset[str] | None = None,
 ) -> None:
     """Synchronize write-through projections for a Context page.
 
     PageLink rows are version-scoped so draft and published link graphs can
     coexist. page_name_index is a rebuildable projection of the currently live
-    published/draft heads.
+    published/draft heads. Full rebuilders can defer graph edges until every
+    page's source facts are synchronized, then reconcile them once together.
     """
 
     _sync_page_name_index(session, page=page)
@@ -6145,7 +6147,9 @@ def sync_page_projections(
         refresh_page_edge_projection,
     )
 
-    if version is None or version.id == page.current_published_version_id:
+    if sync_graph_edges and (
+        version is None or version.id == page.current_published_version_id
+    ):
         refresh_page_edge_projection(
             session,
             page.workspace_id,

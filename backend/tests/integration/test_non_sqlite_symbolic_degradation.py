@@ -120,9 +120,7 @@ def test_non_sqlite_guards_skip_raw_sql_but_keep_workflow_lanes(monkeypatch):
     change_result = workflow_result.model_copy(
         update={"id": uuid4(), "type": "change_set", "title": "Workflow change"}
     )
-    monkeypatch.setattr(
-        retriever, "_search_changes", lambda **_kwargs: [change_result]
-    )
+    monkeypatch.setattr(retriever, "_search_changes", lambda **_kwargs: [change_result])
 
     anonymous_results = retriever.retrieve(
         session=session,
@@ -241,21 +239,17 @@ def test_rest_search_and_capabilities_warn_without_recording_gap(
         f"/api/v1/workspaces/{workspace_id}/search",
         json={"query": "missing postgres evidence"},
     )
-    capabilities = client.get(
-        f"/api/v1/workspaces/{workspace_id}/search/capabilities"
-    )
+    capabilities = client.get(f"/api/v1/workspaces/{workspace_id}/search/capabilities")
 
     assert response.status_code == 200, response.text
-    assert response.json()["data"]["warnings"] == [
-        KEYWORD_LANE_UNAVAILABLE_WARNING
-    ]
+    assert response.json()["data"]["warnings"] == [KEYWORD_LANE_UNAVAILABLE_WARNING]
     assert [item["code"] for item in response.json()["envelope"]["warnings"]] == [
         KEYWORD_LANE_UNAVAILABLE_WARNING
     ]
     assert capabilities.status_code == 200, capabilities.text
-    assert [
-        item["code"] for item in capabilities.json()["envelope"]["warnings"]
-    ] == [KEYWORD_LANE_UNAVAILABLE_WARNING]
+    assert [item["code"] for item in capabilities.json()["envelope"]["warnings"]] == [
+        KEYWORD_LANE_UNAVAILABLE_WARNING
+    ]
     with session_factory() as session:
         assert session.scalar(select(func.count(KnowledgeCoverageGap.id))) == 0
 
@@ -280,11 +274,19 @@ def test_injected_keyword_retriever_avoids_false_dialect_warning_and_records_gap
     )
     app = create_app(container=container, bootstrap_on_startup=False)
     client = TestClient(app)
-    authenticate_test_client_in_workspace(
-        client,
-        session_factory,
-        email="remote-keyword@example.com",
-    )
+    # Only retrieval is simulated as PostgreSQL. Signup creates a personal
+    # tree and must use the actual SQLite fixture's locking implementation.
+    # Keep both container assembly and the tested search on the simulated
+    # dialect, without pretending SQLite can execute PostgreSQL lock SQL.
+    with monkeypatch.context() as authentication_setup:
+        authentication_setup.setattr(
+            session_factory.kw["bind"].dialect, "name", "sqlite"
+        )
+        authenticate_test_client_in_workspace(
+            client,
+            session_factory,
+            email="remote-keyword@example.com",
+        )
 
     response = client.post(
         f"/api/v1/workspaces/{workspace_id}/search",
@@ -321,14 +323,10 @@ def test_capabilities_accepts_duck_search_service_without_diagnostics_method(
         email="duck-capabilities@example.com",
     )
 
-    response = client.get(
-        f"/api/v1/workspaces/{workspace_id}/search/capabilities"
-    )
+    response = client.get(f"/api/v1/workspaces/{workspace_id}/search/capabilities")
 
     assert response.status_code == 200, response.text
-    assert response.json()["data"] == {
-        "supported_retrieval_modes": ["keyword"]
-    }
+    assert response.json()["data"] == {"supported_retrieval_modes": ["keyword"]}
     assert response.json()["envelope"]["warnings"] == []
 
 

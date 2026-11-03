@@ -398,6 +398,7 @@ describe("ChatsDetailScreen", () => {
       })),
       referenced,
       { ...referenced, id: "artifact-link-4", verb: "search_match", occurrence_count: 1 },
+      { ...referenced, id: "artifact-link-5", verb: "viewed", occurrence_count: 4 },
       {
         ...referenced,
         id: "artifact-link-2",
@@ -411,7 +412,7 @@ describe("ChatsDetailScreen", () => {
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/chat-1`]: chatResponse(detail),
     });
 
-    // Twelve rows, ten artifacts -> the chip and the preview limit count
+    // Thirteen rows, ten artifacts -> the chip and the preview limit count
     // artifacts, not rows.
     expect(await screen.findByText("10 artifacts")).toBeInTheDocument();
     await openSection(user, /Linked artifacts/);
@@ -425,10 +426,10 @@ describe("ChatsDetailScreen", () => {
     // spoken as words, and a single link has no count rather than "1 links".
     const pills = [...first.querySelectorAll(".status-pill")];
     expect(pills.map((pill) => pill.textContent))
-      .toEqual(["Edited ×3", "Referenced ×2", "Search match"]);
-    expect(pills[2].getAttribute("title")).toMatch(/^Search match · \d{4}-\d{2}-\d{2} /);
+      .toEqual(["Edited ×3", "Viewed ×4", "Referenced ×2", "Search match"]);
+    expect(pills[3].getAttribute("title")).toMatch(/^Search match · \d{4}-\d{2}-\d{2} /);
     expect(first).toHaveAccessibleName(
-      /^Authentication policy, Edited 3 links, Referenced 2 links, Search match, \d{4}-\d{2}-\d{2} /,
+      /^Authentication policy, Edited 3 links, Viewed 4 links, Referenced 2 links, Search match, \d{4}-\d{2}-\d{2} /,
     );
   });
 

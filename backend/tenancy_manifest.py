@@ -69,6 +69,7 @@ WORKSPACE_PLANE_TABLES: frozenset[str] = frozenset(
         "change_set",
         "chunk_embedding",
         "client_delegated_task",
+        "co_access_pair",
         "content_chunk",
         "context_citation",
         "context_claim",

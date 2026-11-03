@@ -14,9 +14,9 @@ from backend.models.mcp_chat import McpChatArtifactKind, McpChatArtifactVerb
 from backend.models.mcp_trace import MCPToolCall
 from backend.models.workspace import MCPClient
 from backend.policy.auth import ActorContext
+from backend.services.mcp_artifact_activity import ArtifactLinkCandidate
 from backend.services.mcp_chat_service import (
     CONTEXT_EDIT_TOOLS,
-    ArtifactLinkCandidate,
     McpChatService,
     mcp_session_trace_uuid,
 )
@@ -64,6 +64,8 @@ def persist_mcp_tool_trace(
     read_projection: dict[str, Any] | None = None,
     edit_first_change: dict[str, Any] | None = None,
 ) -> MCPToolCall | None:
+    from backend.policy.mcp_scopes import FOCUSED_READ_TOOLS
+
     arguments, payload = redact_tool_capture(tool_name, arguments, payload)
     envelope = payload.get("envelope", {})
     workspace_id = _workspace_id(envelope, actor)
@@ -143,17 +145,27 @@ def persist_mcp_tool_trace(
                 ArtifactLinkCandidate(
                     McpChatArtifactKind(safe_read["resource_kind"]),
                     UUID(safe_read["resource_id"]),
-                    McpChatArtifactVerb.REFERENCED,
+                    McpChatArtifactVerb.VIEWED
+                    if tool_name in FOCUSED_READ_TOOLS
+                    else McpChatArtifactVerb.REFERENCED,
                 )
             ]
         for candidate in candidates:
+            verb = candidate.verb
+            if (
+                verb == McpChatArtifactVerb.VIEWED
+                and tool_call.result_status != "succeeded"
+            ):
+                # A partial body read is still an auditable reference, but
+                # cannot contribute to successful body-view relationships.
+                verb = McpChatArtifactVerb.REFERENCED
             chat_service.link_artifact(
                 session=session,
                 chat_session=chat,
                 tool_call=tool_call,
                 resource_kind=candidate.resource_kind,
                 resource_id=candidate.resource_id,
-                verb=candidate.verb,
+                verb=verb,
                 version_id=candidate.version_id,
                 root_hash=candidate.root_hash,
             )
@@ -466,14 +478,14 @@ def _read_links(
         return _link_if_uuid(
             McpChatArtifactKind.CONTEXT_PAGE,
             page_id,
-            McpChatArtifactVerb.REFERENCED,
+            McpChatArtifactVerb.VIEWED,
         )
     if tool_name == "read_agent_page":
         agent_page_id = _uuid_or_none(arguments.get("agent_page_id"))
         return _link_if_uuid(
             McpChatArtifactKind.AGENT_PAGE,
             agent_page_id,
-            McpChatArtifactVerb.REFERENCED,
+            McpChatArtifactVerb.VIEWED,
         )
 
     target_type = arguments.get("target_type")
@@ -488,7 +500,7 @@ def _read_links(
         return _link_if_uuid(
             McpChatArtifactKind.CONTEXT_PAGE,
             target_id,
-            McpChatArtifactVerb.REFERENCED,
+            McpChatArtifactVerb.VIEWED,
         )
     if target_type == "library_item_version" and target_id is not None:
         target_id = _library_item_id_for_version(session, target_id)
@@ -500,13 +512,13 @@ def _read_links(
         return _link_if_uuid(
             McpChatArtifactKind.LIBRARY_ITEM,
             target_id,
-            McpChatArtifactVerb.REFERENCED,
+            McpChatArtifactVerb.VIEWED,
         )
     if target_type == "agent_page":
         return _link_if_uuid(
             McpChatArtifactKind.AGENT_PAGE,
             target_id,
-            McpChatArtifactVerb.REFERENCED,
+            McpChatArtifactVerb.VIEWED,
         )
     return []
 
@@ -534,7 +546,7 @@ def _fetch_links(
         return _link_if_uuid(
             McpChatArtifactKind.CONTEXT_PAGE,
             entity_id,
-            McpChatArtifactVerb.REFERENCED,
+            McpChatArtifactVerb.VIEWED,
         )
     if entity_type == "library_artifact":
         entity_id = _library_item_id_for_artifact(session, entity_id)
@@ -543,13 +555,13 @@ def _fetch_links(
         return _link_if_uuid(
             McpChatArtifactKind.LIBRARY_ITEM,
             entity_id,
-            McpChatArtifactVerb.REFERENCED,
+            McpChatArtifactVerb.VIEWED,
         )
     if entity_type == "agent_page":
         return _link_if_uuid(
             McpChatArtifactKind.AGENT_PAGE,
             entity_id,
-            McpChatArtifactVerb.REFERENCED,
+            McpChatArtifactVerb.VIEWED,
         )
     # feedback and change_set are audit-class, not knowledge artifacts.
     return []
@@ -560,20 +572,20 @@ def _read_concept_links(data: dict[str, Any]) -> list[ArtifactLinkCandidate]:
         return _link_if_uuid(
             McpChatArtifactKind.LIBRARY_ITEM,
             _uuid_or_none(data.get("target_id")),
-            McpChatArtifactVerb.REFERENCED,
+            McpChatArtifactVerb.VIEWED,
         )
     page_id = _uuid_or_none(data.get("page_id"))
     return _link_if_uuid(
         McpChatArtifactKind.CONTEXT_PAGE,
         page_id,
-        McpChatArtifactVerb.REFERENCED,
+        McpChatArtifactVerb.VIEWED,
     )
 
 
 def _grep_links(data: dict[str, Any]) -> list[ArtifactLinkCandidate]:
     # Preserve the top matches as an exposure/audit trail, but do not treat
     # their co-occurrence as consumption. A later focused read records its own
-    # REFERENCED edge if the agent actually opens one of these pages.
+    # VIEWED edge if the agent actually opens one of these pages.
     candidates: list[ArtifactLinkCandidate] = []
     seen: set[UUID] = set()
     for match in data.get("matches") or []:

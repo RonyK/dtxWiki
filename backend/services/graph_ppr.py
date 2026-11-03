@@ -14,7 +14,9 @@ from sqlalchemy.orm import Session
 from backend.models.context import ContextPage, ContextPageVersion, EdgeProjection
 from backend.models.graph import KnowledgeNodeStat
 from backend.models.review import ReviewDecision, ReviewItem
+from backend.repositories.workspace_scoped import select_projection_in_workspace
 from backend.services.graph_cache import edge_version
+from backend.services.graph_rank import CO_ACCESS_PAGERANK_PARAM, pagerank_weight
 
 NodeRef = tuple[str, UUID]
 PROVENANCE_PRIORITY = {"curated": 3, "derived": 2, "usage": 1}
@@ -220,7 +222,7 @@ def _load_subgraph(
         rows.sort(
             key=lambda edge: (
                 -PROVENANCE_PRIORITY.get(edge.provenance, 0),
-                -edge.weight,
+                -pagerank_weight(edge.edge_kind, edge.weight),
                 str(edge.id),
             )
         )
@@ -242,7 +244,7 @@ def _load_subgraph(
                     edge.source_id,
                     edge.target_kind,
                     edge.target_id,
-                    edge.weight,
+                    pagerank_weight(edge.edge_kind, edge.weight),
                 )
             )
         frontier = next_frontier
@@ -265,24 +267,50 @@ def _frontier_edges(
         remaining = limit - len(selected)
         if remaining <= 0:
             break
+        # Usage candidates need the same units as the PageRank transition
+        # input. Preserve index ordering for curated/derived producer weights.
+        param = CO_ACCESS_PAGERANK_PARAM
+        priority_weight = (
+            case(
+                (
+                    EdgeProjection.edge_kind == "co_access",
+                    case(
+                        (
+                            EdgeProjection.weight > 0,
+                            param.w
+                            * EdgeProjection.weight
+                            / (EdgeProjection.weight + param.k),
+                        ),
+                        else_=0.0,
+                    ),
+                ),
+                else_=EdgeProjection.weight,
+            )
+            if provenance == "usage"
+            else EdgeProjection.weight
+        )
         directional_rows = [
             session.execute(
-                select(
-                    EdgeProjection.id,
-                    EdgeProjection.source_kind,
-                    EdgeProjection.source_id,
-                    EdgeProjection.target_kind,
-                    EdgeProjection.target_id,
-                    EdgeProjection.provenance,
-                    EdgeProjection.weight,
-                )
-                .where(
-                    EdgeProjection.workspace_id == workspace_id,
-                    EdgeProjection.provenance == provenance,
-                    tuple_(kind_column, id_column).in_(frontier),
+                select_projection_in_workspace(
+                    EdgeProjection,
+                    workspace_id=workspace_id,
+                    columns=(
+                        EdgeProjection.id,
+                        EdgeProjection.source_kind,
+                        EdgeProjection.source_id,
+                        EdgeProjection.target_kind,
+                        EdgeProjection.target_id,
+                        EdgeProjection.provenance,
+                        EdgeProjection.edge_kind,
+                        EdgeProjection.weight,
+                    ),
+                    predicates=(
+                        EdgeProjection.provenance == provenance,
+                        tuple_(kind_column, id_column).in_(frontier),
+                    ),
                 )
                 .order_by(
-                    EdgeProjection.weight.desc(),
+                    priority_weight.desc(),
                     EdgeProjection.id.desc(),
                 )
                 .limit(remaining)
@@ -322,6 +350,6 @@ def _frontier_edges(
 def _edge_priority_key(edge: Row) -> tuple[int, float, str]:
     return (
         -PROVENANCE_PRIORITY.get(edge.provenance, 0),
-        -edge.weight,
+        -pagerank_weight(edge.edge_kind, edge.weight),
         str(edge.id),
     )

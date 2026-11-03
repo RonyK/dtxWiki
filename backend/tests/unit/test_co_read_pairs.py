@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
@@ -300,3 +301,74 @@ def test_the_documented_segment_ceiling_matches_the_constants():
         window=CO_ACCESS_ADJACENCY_WINDOW,
         max_per_segment=CO_ACCESS_MAX_ARTIFACTS_PER_SEGMENT,
     )
+
+
+def test_online_cursor_matches_replay_with_bounded_work_for_a_long_conversation(
+    monkeypatch,
+):
+    """One append trajectory crosses repeats, gaps and segment boundaries.
+
+    The thousand-read tail is the same growing conversation, not a set of
+    independent input variants. Count pairing inputs to prove append work is
+    bounded without introducing a timing-dependent performance assertion.
+    """
+    from backend.services.indexing import co_read_state
+
+    timeline = [
+        ("A", NINE),
+        ("B", NINE + timedelta(minutes=1)),
+        ("B", NINE + timedelta(minutes=2)),
+        ("A", NINE + timedelta(minutes=3)),
+    ]
+    timeline.extend(
+        (f"doc-{index}", NINE + timedelta(minutes=4 + index)) for index in range(13)
+    )
+    timeline.extend(
+        [
+            ("A", NINE + timedelta(hours=2)),
+            ("B", NINE + timedelta(hours=2, minutes=1)),
+        ]
+    )
+    timeline.extend(
+        (f"tail-{index % 17}", NINE + timedelta(hours=3, seconds=index))
+        for index in range(1_000)
+    )
+    source = _reads(uuid4(), timeline)
+    paired_input_sizes = []
+    replay_segment = co_read_state._pair_elements
+
+    def bounded_pairing(runs, **kwargs):
+        paired_input_sizes.append(len(runs))
+        return replay_segment(runs, **kwargs)
+
+    monkeypatch.setattr(co_read_state, "_pair_elements", bounded_pairing)
+    cursor = None
+    accumulated = {}
+    for read in source:
+        previous = cursor
+        serialized_previous = json.dumps(previous, sort_keys=True)
+        cursor, changed, segment, position = co_read_state.advance_co_read_state(
+            previous, read
+        )
+        assert json.dumps(previous, sort_keys=True) == serialized_previous
+        assert position == len(cursor["runs"]) - 1
+        assert len(cursor["runs"]) <= CO_ACCESS_MAX_ARTIFACTS_PER_SEGMENT
+        if previous is not None and segment != previous["segment"]:
+            assert position == 0
+            assert changed == {}
+        for key, (first, last) in changed.items():
+            known = accumulated.get(key)
+            accumulated[key] = (
+                (min(known[0], first), max(known[1], last)) if known else (first, last)
+            )
+
+    assert accumulated == {
+        (pair.left, pair.right): (pair.first_pair_at, pair.last_pair_at)
+        for pair in _pairs(source)
+    }
+    assert max(paired_input_sizes) <= CO_ACCESS_MAX_ARTIFACTS_PER_SEGMENT
+    assert sum(paired_input_sizes) <= (
+        2 * CO_ACCESS_MAX_ARTIFACTS_PER_SEGMENT * len(source)
+    )
+    with pytest.raises(ValueError, match="increasing read order"):
+        co_read_state.advance_co_read_state(cursor, source[-2])

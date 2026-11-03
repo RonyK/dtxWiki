@@ -20,12 +20,12 @@ from backend.models import Base, ContextPage, ContextPageVersion, PageLink
 from backend.models.graph import GraphHistoryCoverage, GraphObservation
 from backend.models.search_index import include_non_fts5_object
 from backend.scripts.seed_dev import seed_default_workspace
+from backend.services.ops.alembic_migration_graph import schema_release_head
 from backend.services.workspace_purge import purge_workspace_data
 from backend.services.workspace_write import WorkspaceWriteService
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 INITIAL_REVISION = "bd62193d5cf6"
-HEAD_REVISION = "1d8f1c08ca36"
 CORE_REVISION = "efcbcf724889"
 GRAPH_REVISION = "9aeab6944f25"
 
@@ -488,7 +488,7 @@ def test_release_head_matches_current_model_schema(head_engine):
             column["name"] for column in inspector.get_columns("library_item_version")
         }
 
-    assert version == HEAD_REVISION
+    assert version == schema_release_head("0.2.0")
     assert set(Base.metadata.tables).issubset(table_names)
     assert diffs == []
     assert {"refresh_ttl_seconds", "sliding_enabled"}.issubset(consent_columns)
@@ -615,7 +615,7 @@ def test_core_revision_rolls_back_late_failure_and_retries(tmp_path, sqlite_temp
         RuntimeError,
         match=r"workspace_tree_node\.\(parent_id\).*cross-workspace",
     ):
-        command.upgrade(config, HEAD_REVISION)
+        command.upgrade(config, schema_release_head("0.2.0"))
 
     assert _schema_snapshot(engine) == before_snapshot
     with engine.connect() as connection:
@@ -628,10 +628,10 @@ def test_core_revision_rolls_back_late_failure_and_retries(tmp_path, sqlite_temp
             text("UPDATE workspace_tree_node SET parent_id = NULL WHERE id = :node_id"),
             {"node_id": node_a.hex},
         )
-    command.upgrade(config, HEAD_REVISION)
+    command.upgrade(config, schema_release_head("0.2.0"))
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-            HEAD_REVISION
+            schema_release_head("0.2.0")
         )
     engine.dispose()
 

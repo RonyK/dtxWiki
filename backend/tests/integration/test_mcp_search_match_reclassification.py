@@ -21,11 +21,11 @@ from backend.models.mcp_chat import (
     McpChatArtifactKind,
     McpChatArtifactLink,
     McpChatArtifactVerb,
+    McpChatSession,
     McpChatToolCallArtifact,
 )
 from backend.models.mcp_trace import MCPToolCall
 from backend.models.workspace import MCPClient, Workspace
-from backend.services.indexing import edge_registry
 from backend.services.indexing.edge_registry import refresh_co_access_edge_projection
 from backend.services.mcp_chat_service import McpChatService
 from backend.services.trail_analysis import recompute_authority
@@ -205,6 +205,8 @@ def test_core_schema_upgrade_reclassifies_rows_from_the_initial_release(
         _seed_initial_release_search_matches(tmp_path, sqlite_templates)
     )
     original_reclassify = search_schema.reclassify_search_matches
+    valid_source, valid_target = sorted((uuid4(), uuid4()))
+    valid_finding_id = uuid4()
 
     def seed_stale_projection(connection, **kwargs):
         # The core tables exist at this seam, before the frozen normalizer runs.
@@ -233,13 +235,85 @@ def test_core_schema_upgrade_reclassifies_rows_from_the_initial_release(
                 "entity_id": uuid4(),
             },
         )
+        # A real positive control at the actual released schema boundary.
+        # Its five supporting reference chats are one valid hot-path fixture;
+        # VIEWED and the lifetime table do not exist at this migration point.
+        client_id = connection.scalar(
+            select(MCPClient.id).where(MCPClient.workspace_id == workspace_id)
+        )
+        at = datetime.now(UTC) - timedelta(minutes=10)
+        for index in range(5):
+            chat = uuid4()
+            connection.execute(
+                McpChatSession.__table__.insert().values(
+                    id=chat,
+                    workspace_id=workspace_id,
+                    client_id=client_id,
+                    mcp_session_id=str(uuid4()),
+                    started_at=at,
+                    last_activity_at=at,
+                )
+            )
+            for offset, resource_id in enumerate((valid_source, valid_target)):
+                call = uuid4()
+                viewed_at = at + timedelta(minutes=index, seconds=offset)
+                connection.execute(
+                    MCPToolCall.__table__.insert().values(
+                        id=call,
+                        workspace_id=workspace_id,
+                        client_id=client_id,
+                        request_id=uuid4(),
+                        tool_name="read",
+                        result_status="succeeded",
+                        started_at=viewed_at,
+                        completed_at=viewed_at,
+                    )
+                )
+                connection.execute(
+                    McpChatToolCallArtifact.__table__.insert().values(
+                        id=uuid4(),
+                        workspace_id=workspace_id,
+                        chat_session_id=chat,
+                        mcp_tool_call_id=call,
+                        resource_kind="context_page",
+                        resource_id=resource_id,
+                        verb="referenced",
+                        occurred_at=viewed_at,
+                    )
+                )
+        run_id = uuid4()
+        connection.execute(
+            LintRun.__table__.insert().values(
+                id=run_id,
+                workspace_id=workspace_id,
+                lint_scope={"kind": "maintenance"},
+                trigger_type="trail_tick",
+                status="completed",
+                finding_count_by_severity={"info": 1},
+                started_at=at,
+                completed_at=at,
+            )
+        )
+        connection.execute(
+            LintFinding.__table__.insert().values(
+                id=valid_finding_id,
+                workspace_id=workspace_id,
+                lint_run_id=run_id,
+                target_type="context_page",
+                target_id=valid_source,
+                rule_id="kb.hot_path_unmaterialized",
+                severity="info",
+                status="open",
+                fingerprint=f"hot-path:{valid_source}:{valid_target}",
+            )
+        )
         return original_reclassify(connection, **kwargs)
 
     monkeypatch.setattr(
         search_schema, "reclassify_search_matches", seed_stale_projection
     )
 
-    def assert_reclassified(expected_revision):
+    def assert_reclassified(expected_revision, expected_versions):
         with engine.connect() as connection:
             assert connection.execute(
                 text(
@@ -262,42 +336,65 @@ def test_core_schema_upgrade_reclassifies_rows_from_the_initial_release(
                 connection.scalar(text("SELECT version_num FROM alembic_version"))
                 == expected_revision
             )
-            assert connection.scalar(text("SELECT COUNT(*) FROM edge_projection")) == 0
+            assert connection.scalar(text("SELECT COUNT(*) FROM edge_projection")) == 1
             assert (
-                connection.scalar(text("SELECT COUNT(*) FROM knowledge_node_stat")) == 0
+                connection.scalar(text("SELECT COUNT(*) FROM knowledge_node_stat")) == 2
             )
-            assert connection.execute(
-                text(
-                    "SELECT edge_projection_version, authority_projection_version "
-                    "FROM workspace"
+            assert (
+                connection.scalar(
+                    select(LintFinding.status).where(LintFinding.id == valid_finding_id)
                 )
-            ).one() == (1, 1)
+                == "open"
+            )
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT edge_projection_version, authority_projection_version "
+                        "FROM workspace"
+                    )
+                ).one()
+                == expected_versions
+            )
 
     command.upgrade(config, "efcbcf724889")
-    assert_reclassified("efcbcf724889")
+    assert_reclassified("efcbcf724889", (1, 1))
 
     # The released core projection can insert and refresh without the graph
     # columns. Isolate storage compatibility from the independently tested
     # co-read source.
-    rows = [
-        {
-            "workspace_id": workspace_id,
-            "source_kind": "context_page",
-            "source_id": uuid4(),
-            "target_kind": "context_page",
-            "target_id": uuid4(),
-            "edge_kind": "co_access",
-            "provenance": "usage",
-            "weight": 2.0,
-            "occurred_at": NOW,
-            "source_ref": {"table": "mcp_chat_tool_call_artifact"},
-            "support_session_count": 2,
-            "first_observed_at": NOW - timedelta(days=1),
-        }
-    ]
+    row = {
+        "workspace_id": workspace_id,
+        "source_kind": "context_page",
+        "source_id": uuid4(),
+        "target_kind": "context_page",
+        "target_id": uuid4(),
+        "edge_kind": "co_access",
+        "provenance": "usage",
+        "weight": 2.0,
+        "occurred_at": NOW,
+        "source_ref": {"table": "mcp_chat_tool_call_artifact"},
+        "support_session_count": 2,
+        "first_observed_at": NOW - timedelta(days=1),
+    }
+    from backend.migrations.revision_modules.v0_2 import legacy_usage_v1
+
     with monkeypatch.context() as co_access, engine.connect() as connection:
         co_access.setattr(
-            edge_registry, "_co_access_rows", lambda *_args, **_kwargs: rows
+            legacy_usage_v1,
+            "_evidence",
+            lambda *_args, **_kwargs: {
+                (
+                    row["source_kind"],
+                    row["source_id"],
+                    row["target_kind"],
+                    row["target_id"],
+                ): [
+                    row["weight"],
+                    row["support_session_count"],
+                    row["first_observed_at"],
+                    row["occurred_at"],
+                ]
+            },
         )
         assert {"support_session_count", "first_observed_at"}.isdisjoint(
             column["name"]
@@ -334,7 +431,7 @@ def test_core_schema_upgrade_reclassifies_rows_from_the_initial_release(
         connection.rollback()
 
     command.upgrade(config, "head")
-    assert_reclassified(ScriptDirectory.from_config(config).get_current_head())
+    assert_reclassified(ScriptDirectory.from_config(config).get_current_head(), (2, -1))
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT COUNT(*) FROM graph_observation")) == 0
     engine.dispose()
@@ -563,6 +660,7 @@ def test_reclassification_refreshes_authority_and_dismisses_invalid_hot_path(
         page_a, _version_a = _page_with_version(session, workspace.id, "repair-hot-a")
         page_b, _version_b = _page_with_version(session, workspace.id, "repair-hot-b")
         page_c, _version_c = _page_with_version(session, workspace.id, "repair-hot-c")
+        page_d, _version_d = _page_with_version(session, workspace.id, "repair-hot-d")
         for index in range(5):
             call, chat = _add_call(
                 session,
@@ -574,6 +672,29 @@ def test_reclassification_refreshes_authority_and_dismisses_invalid_hot_path(
                 NOW + timedelta(minutes=index),
             )
             for page in (page_a, page_b):
+                service.link_artifact(
+                    session=session,
+                    chat_session=chat,
+                    tool_call=call,
+                    resource_kind=McpChatArtifactKind.CONTEXT_PAGE,
+                    resource_id=page.id,
+                    verb=McpChatArtifactVerb.REFERENCED,
+                )
+        # This positive control is the exact released semantics: actual reads
+        # are still REFERENCED here, before VIEWED exists. Removing search
+        # pollution must leave their independently valid hot-path warning open.
+        for index in range(5):
+            conversation = uuid4()
+            for offset, page in enumerate((page_c, page_d)):
+                call, chat = _add_call(
+                    session,
+                    service,
+                    workspace.id,
+                    client.id,
+                    conversation,
+                    "read",
+                    NOW + timedelta(minutes=index, seconds=offset),
+                )
                 service.link_artifact(
                     session=session,
                     chat_session=chat,
@@ -597,7 +718,26 @@ def test_reclassification_refreshes_authority_and_dismisses_invalid_hot_path(
                 last_seen_at=NOW,
             )
         )
-        refresh_co_access_edge_projection(session, workspace.id, now=NOW)
+        # Reproduce the pre-reclassification projection directly. The current
+        # projector intentionally cannot turn search references into co-views.
+        source_id, target_id = sorted((page_a.id, page_b.id), key=str)
+        session.add(
+            EdgeProjection(
+                workspace_id=workspace.id,
+                source_kind="context_page",
+                source_id=source_id,
+                target_kind="context_page",
+                target_id=target_id,
+                edge_kind="co_access",
+                provenance="usage",
+                weight=5.0,
+                occurred_at=NOW + timedelta(minutes=4),
+                support_session_count=5,
+                first_observed_at=NOW,
+                source_ref={"table": "mcp_chat_tool_call_artifact"},
+                last_seen_at=NOW,
+            )
+        )
         recompute_authority(session, workspace.id, now=NOW)
         run = LintRun(
             workspace_id=workspace.id,
@@ -623,6 +763,19 @@ def test_reclassification_refreshes_authority_and_dismisses_invalid_hot_path(
             fingerprint=f"hot-path:{ordered[0]}:{ordered[1]}",
         )
         session.add(finding)
+        valid_source, valid_target = sorted((page_c.id, page_d.id), key=str)
+        valid_finding = LintFinding(
+            lint_run_id=run.id,
+            workspace_id=workspace.id,
+            target_type="context_page",
+            target_id=page_c.id,
+            rule_id="kb.hot_path_unmaterialized",
+            severity="info",
+            status="open",
+            suggested_action=json.dumps({"proposal": "add_cross_link"}),
+            fingerprint=f"hot-path:{valid_source}:{valid_target}",
+        )
+        session.add(valid_finding)
         session.flush()
         assert session.scalar(
             select(KnowledgeNodeStat.in_degree).where(
@@ -642,6 +795,7 @@ def test_reclassification_refreshes_authority_and_dismisses_invalid_hot_path(
         workspace_id = workspace.id
         page_a_id = page_a.id
         finding_id = finding.id
+        valid_finding_id = valid_finding.id
 
     result = _run_reclassification(session_factory)
 
@@ -652,6 +806,8 @@ def test_reclassification_refreshes_authority_and_dismisses_invalid_hot_path(
                 select(EdgeProjection.id).where(
                     EdgeProjection.workspace_id == workspace_id,
                     EdgeProjection.edge_kind == "co_access",
+                    EdgeProjection.source_id == source_id,
+                    EdgeProjection.target_id == target_id,
                 )
             )
             is None
@@ -672,6 +828,17 @@ def test_reclassification_refreshes_authority_and_dismisses_invalid_hot_path(
             "dismissed_by": "search_match_reclassification",
             "proposal": "add_cross_link",
         }
+
+        assert session.get(LintFinding, valid_finding_id).status == "open"
+        valid_edge = session.scalar(
+            select(EdgeProjection).where(
+                EdgeProjection.workspace_id == workspace_id,
+                EdgeProjection.edge_kind == "co_access",
+                EdgeProjection.source_id == valid_source,
+                EdgeProjection.target_id == valid_target,
+            )
+        )
+        assert valid_edge is not None and valid_edge.support_session_count == 5
 
 
 def _workspace_and_client(session):
@@ -748,6 +915,10 @@ def _add_call(
 def _run_reclassification(session_factory):
     engine = session_factory.kw["bind"]
     with engine.begin() as connection:
+        # These data-contract cases use current ORM fixtures; explicitly name
+        # their historical execution context rather than pretending current
+        # body-view semantics existed in the released reference-only schema.
+        connection = connection.execution_options(dtxwiki_legacy_usage_projection=True)
         return search_schema.reclassify_search_matches(connection, now=NOW)
 
 

@@ -13,7 +13,10 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
-from backend.services.ops.alembic_migration_graph import code_revisions
+from backend.services.ops.alembic_migration_graph import (
+    code_revisions,
+    schema_release_head,
+)
 from backend.services.ops.db_revision_inventory import RETIRED_REVISION_IDS
 from backend.services.ops.revision_rename import LEGACY_REVISION_ALIASES
 from scripts.new_migration import create_revision
@@ -40,7 +43,8 @@ USER_DELETION_REVISION = "eb86fdacb1bb"
 INBOX_REVISION = "175b9664724e"
 CONTEXT_LINK_REVISION = "af62c98d0731"
 INBOX_RECIPIENT_REVISION = "6f4a9f50c046"
-CURRENT_HEAD = "1d8f1c08ca36"
+GRAPH_INBOX_MERGE_REVISION = "1d8f1c08ca36"
+CURRENT_HEAD = schema_release_head("0.2.0")
 ALEMBIC_REVISION_METADATA = {
     "revision",
     "down_revision",
@@ -84,6 +88,19 @@ def _revision_graph(script: ScriptDirectory) -> dict[str, object]:
     }
 
 
+def _revision_ancestors(graph: dict[str, object], revision: str) -> set[str]:
+    ancestors: set[str] = set()
+    pending = [revision]
+    while pending:
+        current = pending.pop()
+        if current in ancestors:
+            continue
+        ancestors.add(current)
+        parents = graph[current]
+        pending.extend((parents,) if isinstance(parents, str) else parents or ())
+    return ancestors
+
+
 def test_graph_preserves_released_boundaries_and_appends_current_head():
     """Unreleased changes append after immutable published schema boundaries."""
 
@@ -93,7 +110,7 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
     assert code_revisions() == set(graph)
     assert code_revisions().isdisjoint(RETIRED_REVISION_IDS)
 
-    assert graph == {
+    expected_prefix = {
         INITIAL_REVISION: None,
         CORE_REVISION: INITIAL_REVISION,
         RELEASE_013_REVISION: CORE_REVISION,
@@ -106,8 +123,23 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
         INBOX_REVISION: USER_DELETION_REVISION,
         CONTEXT_LINK_REVISION: INBOX_REVISION,
         INBOX_RECIPIENT_REVISION: CONTEXT_LINK_REVISION,
-        CURRENT_HEAD: (GRAPH_REVISION, INBOX_RECIPIENT_REVISION),
+        GRAPH_INBOX_MERGE_REVISION: (GRAPH_REVISION, INBOX_RECIPIENT_REVISION),
     }
+    assert {
+        revision: graph[revision] for revision in expected_prefix
+    } == expected_prefix
+    # The fixed prefix cannot be rewritten when another unreleased feature
+    # appends a revision or merges independent descendants of its boundary.
+    appended = set(graph) - expected_prefix.keys()
+    assert _revision_ancestors(graph, CURRENT_HEAD) == set(graph)
+    assert all(
+        GRAPH_INBOX_MERGE_REVISION in _revision_ancestors(graph, revision)
+        for revision in appended
+    )
+    assert all(
+        Path(script.get_revision(revision).path).parent.name == "v0_2"
+        for revision in appended
+    )
     assert {
         Path(script.get_revision(revision).path).parent.name
         for revision in (
@@ -115,7 +147,7 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
             INBOX_REVISION,
             CONTEXT_LINK_REVISION,
             INBOX_RECIPIENT_REVISION,
-            CURRENT_HEAD,
+            GRAPH_INBOX_MERGE_REVISION,
         )
     } == {"v0_2"}
 

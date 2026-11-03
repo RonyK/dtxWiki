@@ -1,7 +1,7 @@
 """One comparable rank for relations whose raw weights mean different things.
 
 ``EdgeProjection.weight`` is in a different unit for every kind: summed link
-occurrences, citation counts, a co-read sum already decayed at projection, or
+occurrences, citation counts, producer-defined usage weights, or
 a flat 1.0. Sorting by it lets whichever kind has the biggest numbers crowd
 out the rest. ``rank_score`` maps every kind onto ``[0, w]``: a saturating
 curve in the kind's own unit, ``weight / (weight + k)`` (``k`` is the weight
@@ -16,8 +16,9 @@ page that links to everything. Callers count the denominators over what the
 reader can see; this module only does the arithmetic, so the Knowledge Map
 can reuse it on its own relation counts.
 
-Stored ``EdgeProjection.weight`` stays raw. PPR and authority read it as the
-relation was recorded; rank is a display order, computed per request.
+Stored ``EdgeProjection.weight`` stays raw. PPR and authority bound lifetime
+co-access counts separately so reading habits cannot outweigh authored links.
+Display rank is computed per request.
 """
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ class RankParam:
     half_life_days: float | None
 
 
-# The 0822 table, verbatim and in its order.
+# Shared display parameters; storage weighting belongs to each producer.
 RANK_PARAMS: dict[str, RankParam] = {
     "wikilink": RankParam(1.00, 3, None),
     "citation_page": RankParam(0.95, 2, None),
@@ -54,17 +55,25 @@ RANK_PARAMS: dict[str, RankParam] = {
     "promoted_from": RankParam(0.50, 1, None),
     "library_sync_version": RankParam(0.35, 1, 180),
     "ask_citation": RankParam(0.30, 2, 60),
-    "co_access": RankParam(0.20, 25, 30),
+    "co_access": RankParam(0.20, 25, None),
 }
-# A merge is the same lineage relation as a parent version.
-RANK_ALIASES: dict[str, str] = {"version_merge": "version_parent"}
-# Kinds whose stored weight already carries their half-life: co_access is a
-# sum of co-reads each decayed at projection (edge_registry reads the value
-# from this table). Decaying them again here would count their age twice.
-PREDECAYED_KINDS: frozenset[str] = frozenset({"co_access"})
+# Importance compares lifetime support with link strength independently of the
+# display profile. At 25 conversations, co-access contributes half a unit.
+CO_ACCESS_PAGERANK_PARAM = RankParam(1.00, 25, None)
+# Usage producers own any storage-time aging. The shared display profile
+# consumes their supplied weight without applying another age multiplier.
+PREDECAYED_KINDS: frozenset[str] = frozenset()
 # The order a seed's queues take turns in: its own links, links to it, then
 # the undirected and unanchored relations.
 ROLE_ORDER: tuple[str, ...] = ("out", "in", "undirected", "context")
+
+
+# Producers declare aliases with their relation semantics; the math is shared.
+RANK_ALIASES: dict[str, str] = {
+    kind: semantic.rank_alias
+    for kind, semantic in EDGE_SEMANTICS.items()
+    if semantic.rank_alias is not None
+}
 
 
 def _kind_order() -> tuple[str, ...]:
@@ -137,6 +146,23 @@ def rank_score(
     return saturation(edge_kind, effective_weight) * decay(edge_kind, occurred_at, now)
 
 
+def pagerank_weight(edge_kind: str, raw_weight: float) -> float:
+    """Bound cumulative usage evidence without changing stored counts or age.
+
+    A co-access pair carries lifetime conversation support, not link strength.
+    Its importance input approaches 1.0 with a 25-conversation midpoint;
+    authored and other producer weights retain their existing units. Display
+    ranking uses its own, lower ceiling.
+    """
+    raw = max(float(raw_weight), 0.0)
+    if RANK_ALIASES.get(edge_kind, edge_kind) == "co_access":
+        if not (raw > 0 and math.isfinite(raw)):
+            return 0.0
+        param = CO_ACCESS_PAGERANK_PARAM
+        return param.w * raw / (raw + param.k)
+    return raw
+
+
 def wikilink_weight(occurrences: float, out_degree: int) -> float:
     """Link occurrences divided down by how many documents the source links."""
 
@@ -174,7 +200,12 @@ _NO_DENOMINATORS = RankDenominators()
 
 
 # The kinds effective_weight divides by their stored source's denominators.
-DENOMINATOR_KINDS = frozenset(("wikilink", "citation_page", "citation_source", "tree"))
+DENOMINATOR_KINDS = frozenset(
+    kind
+    for kind in EDGE_SEMANTICS
+    if RANK_ALIASES.get(kind, kind)
+    in ("wikilink", "citation_page", "citation_source", "tree")
+)
 
 
 def effective_weight(
@@ -192,6 +223,7 @@ def effective_weight(
 
     counts = denominators or _NO_DENOMINATORS
     raw = max(0.0, raw_weight)
+    edge_kind = RANK_ALIASES.get(edge_kind, edge_kind)
     if edge_kind == "wikilink":
         return wikilink_weight(raw, counts.wikilink_out_degree)
     if edge_kind in ("citation_page", "citation_source"):

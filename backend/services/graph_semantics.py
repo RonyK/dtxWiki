@@ -19,6 +19,7 @@ class GraphSemantic:
     provenance: str = "derived"
     directed: bool = True
     default_visible: bool = True
+    rank_alias: str | None = None
 
 
 EDGE_SEMANTICS: dict[str, GraphSemantic] = {
@@ -82,7 +83,8 @@ EDGE_SEMANTICS: dict[str, GraphSemantic] = {
     # git-merge "second parent", kept distinct from version_parent so a query
     # can tell lineage from reconciliation.
     "version_merge": GraphSemantic(
-        "version_merge", "was merged into", "merged from", "activity", "merged"
+        "version_merge", "was merged into", "merged from", "activity", "merged",
+        rank_alias="version_parent",
     ),
     "co_access": GraphSemantic(
         "co_access",

@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, inspect, select
 
 from backend.models.ask import AskSession, AskTurn, AskTurnCitation
 from backend.models.base import Base
@@ -21,7 +21,12 @@ from backend.models.mcp_chat import McpChatArtifactKind
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.services.entity_ref import EntityKind
+from backend.services.graph_cache import lock_edge_projection_workspace
 from backend.services.graph_service import HYDRATORS
+from backend.services.indexing.edge_projection import (
+    EdgeProjectionScope,
+    reconcile_edge_projection_rows,
+)
 from backend.services.indexing.edge_registry import (
     DEFERRED_EDGE_RELATIONS,
     EDGE_BEARING_RELATIONS,
@@ -73,6 +78,9 @@ _GRAPH_FK_TARGET_TABLES = {
     "workspace_tree_node",
 }
 _NON_EDGE_RELATION_SOURCES = {
+    # Lifetime counters feed the registered co_access extractor, not new kinds.
+    "co_access_pair.source_kind+source_id",
+    "co_access_pair.target_kind+target_id",
     # A personal preference is not a shared knowledge-graph relationship.
     "user_favorite.target_kind+target_id",
     # Mutable head pointers and rebuildable lookup/index rows are storage
@@ -673,11 +681,25 @@ def test_narrow_wikilink_reconcile_never_mutates_sources_outside_lock_set(
         outside_before = _edge_projection_snapshots(session, outside_edge_ids)
 
     with session_factory.begin() as session:
-        delta = reconcile_wikilink_edge_projection(
-            session,
-            workspace_id,
-            source_page_ids=frozenset({locked_source_id}),
-        )
+        statements = []
+        connection = session.connection()
+
+        def capture_statement(_conn, _cursor, statement, *_args):
+            statements.append(statement.lower())
+
+        event.listen(connection, "before_cursor_execute", capture_statement)
+        try:
+            delta = reconcile_wikilink_edge_projection(
+                session,
+                workspace_id,
+                source_page_ids=frozenset({locked_source_id}),
+            )
+        finally:
+            event.remove(connection, "before_cursor_execute", capture_statement)
+        # PostgreSQL writers must acquire the Workspace lock before touching
+        # edge rows; SQLite observes the same portable no-op UPDATE first.
+        assert statements[0].startswith("update workspace set")
+        assert any("edge_projection" in statement for statement in statements[1:])
 
     assert delta.desired_count == 1
     assert delta.inserted == 0
@@ -689,6 +711,36 @@ def test_narrow_wikilink_reconcile_never_mutates_sources_outside_lock_set(
         assert locked_after is not None
         assert locked_after.weight == 2.0
         assert _edge_projection_snapshots(session, outside_edge_ids) == outside_before
+
+        # Reuse these rows to exercise the expired-attribute autoflush path.
+        outside = session.get(EdgeProjection, next(iter(outside_edge_ids)))
+        workspace_state = select(
+            Workspace.edge_projection_version, Workspace.updated_at
+        ).where(Workspace.id == workspace_id)
+        before = session.execute(workspace_state).one()
+        session.expire(outside)
+        locked_after.weight += 1
+        flushes = []
+
+        def before_flush(*_args):
+            flushes.append(True)
+
+        event.listen(session, "before_flush", before_flush)
+        try:
+            lock_edge_projection_workspace(session, workspace_id)
+            assert flushes == [] and inspect(locked_after).modified
+            with pytest.raises(ValueError, match="outside the producer"):
+                reconcile_edge_projection_rows(
+                    session,
+                    scope=EdgeProjectionScope(workspace_id, frozenset({"co_access"})),
+                    existing_rows=[outside],
+                    desired_rows=[],
+                )
+            assert flushes == [] and inspect(locked_after).modified
+            assert not inspect(outside).deleted
+            assert session.connection().execute(workspace_state).one() == before
+        finally:
+            event.remove(session, "before_flush", before_flush)
 
 
 def _edge_projection_snapshots(session, edge_ids):

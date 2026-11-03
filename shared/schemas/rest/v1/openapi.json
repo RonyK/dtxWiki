@@ -13382,6 +13382,7 @@
               "edited",
               "cited",
               "referenced",
+              "viewed",
               "search_match"
             ],
             "title": "Verb",
@@ -14707,6 +14708,7 @@
               "edited",
               "cited",
               "referenced",
+              "viewed",
               "search_match"
             ],
             "title": "Verb",
@@ -15091,6 +15093,7 @@
               "edited",
               "cited",
               "referenced",
+              "viewed",
               "search_match"
             ],
             "title": "Verb",
@@ -15220,6 +15223,7 @@
                 "edited",
                 "cited",
                 "referenced",
+                "viewed",
                 "search_match"
               ],
               "type": "string"
@@ -43825,6 +43829,7 @@
                     "edited",
                     "cited",
                     "referenced",
+                    "viewed",
                     "search_match"
                   ],
                   "type": "string"

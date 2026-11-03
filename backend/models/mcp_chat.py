@@ -3,6 +3,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from sqlalchemy import (
+    JSON,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -10,6 +11,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql.elements import conv
@@ -33,6 +35,7 @@ class McpChatArtifactVerb(StrEnum):
     EDITED = "edited"
     CITED = "cited"
     REFERENCED = "referenced"
+    VIEWED = "viewed"
     SEARCH_MATCH = "search_match"
 
 
@@ -40,11 +43,13 @@ class McpChatArtifactVerb(StrEnum):
 # and trail projections consume only CONSUMPTION_VERBS; an item merely exposed
 # in search results must never acquire read/co-access semantics.
 CONSUMPTION_VERBS = frozenset(
-    {McpChatArtifactVerb.REFERENCED, McpChatArtifactVerb.CITED}
+    {
+        McpChatArtifactVerb.REFERENCED,
+        McpChatArtifactVerb.VIEWED,
+        McpChatArtifactVerb.CITED,
+    }
 )
-AUTHORING_VERBS = frozenset(
-    {McpChatArtifactVerb.CREATED, McpChatArtifactVerb.EDITED}
-)
+AUTHORING_VERBS = frozenset({McpChatArtifactVerb.CREATED, McpChatArtifactVerb.EDITED})
 EXPOSURE_VERBS = frozenset({McpChatArtifactVerb.SEARCH_MATCH})
 
 
@@ -127,6 +132,8 @@ class McpChatSession(UuidPrimaryKeyMixin, Base):
     frozen_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     archived_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     conversation_group_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    # Bounded active co-read segment; completed evidence stays in per-call rows.
+    co_access_state: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
 
     artifact_links: Mapped[list["McpChatArtifactLink"]] = relationship(
         back_populates="chat_session",
@@ -236,13 +243,35 @@ class McpChatToolCallArtifact(UuidPrimaryKeyMixin, Base):
             "resource_kind",
             "resource_id",
         ),
-        # The co-read source (co_access edges and hot paths) reads one
-        # workspace's last 30 days; the per-call history is never pruned, so
-        # without this every trail tick scanned the whole table.
+        # The recent hot-path analysis reads one workspace's last 30 days;
+        # co-access instead uses the viewed-session index below for increments.
+        # Raw per-call history remains available for explicit recovery.
         Index(
             "ix_mcp_chat_tool_call_artifact_workspace_time",
             "workspace_id",
             "occurred_at",
+        ),
+        # Incremental co-access reads one conversation in stable read order.
+        Index(
+            "ix_mcp_chat_tool_call_artifact_viewed_session",
+            "workspace_id",
+            "chat_session_id",
+            "occurred_at",
+            "mcp_tool_call_id",
+            "id",
+            sqlite_where=text("verb = 'viewed'"),
+            postgresql_where=text("verb = 'viewed'"),
+        ),
+        Index(
+            "ix_mcp_chat_tool_call_artifact_viewed_pair",
+            "workspace_id",
+            "chat_session_id",
+            "resource_kind",
+            "resource_id",
+            "co_access_segment",
+            "co_access_position",
+            sqlite_where=text("verb = 'viewed'"),
+            postgresql_where=text("verb = 'viewed'"),
         ),
         # Epic-3 D-3 final schema: workspace-scoped, not just
         # session/tool-call-scoped.
@@ -282,6 +311,8 @@ class McpChatToolCallArtifact(UuidPrimaryKeyMixin, Base):
     resource_kind: Mapped[str] = mapped_column(Text, nullable=False)
     resource_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
     verb: Mapped[str] = mapped_column(Text, nullable=False)
+    co_access_segment: Mapped[int | None] = mapped_column(Integer)
+    co_access_position: Mapped[int | None] = mapped_column(Integer)
     occurred_at: Mapped[datetime] = mapped_column(
         UTCDateTime(),
         default=utc_now,

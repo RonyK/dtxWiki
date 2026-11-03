@@ -28,7 +28,8 @@ from backend.models.user import User
 from backend.models.workspace import MCPClient, Workspace
 from backend.policy.auth import ActorContext
 from backend.schemas.read import GraphNeighborEntry, GraphNeighborsPayload
-from backend.services import graph_ppr, graph_rank
+from backend.services import co_access, graph_ppr, trail_analysis
+from backend.services.co_access import rebuild_co_access_pairs
 from backend.services.eval.harness import (
     LaneMetrics,
     ModeMetrics,
@@ -43,7 +44,6 @@ from backend.services.indexing.edge_registry import (
     CO_ACCESS_MAX_ARTIFACTS_PER_SEGMENT,
     CO_ACCESS_MAX_PAIRS_PER_SEGMENT,
     CO_ACCESS_MIN_SESSIONS,
-    refresh_co_access_edge_projection,
 )
 from backend.services.librarian import _stage_misplaced_pages, run_librarian_tick
 from backend.services.page_service import PageService
@@ -161,7 +161,7 @@ def _seed_touches(
     resource_id,
     *,
     occurred_at,
-    verb="referenced",
+    verb="viewed",
     count=1,
     resource_kind="context_page",
     tool_name="read",
@@ -182,7 +182,7 @@ def _seed_touches(
             workspace_id=workspace_id,
             request_id=uuid4(),
             tool_name=tool_name,
-            result_status="success",
+            result_status="succeeded",
         )
         session.add(tool_call)
         session.flush()
@@ -221,7 +221,7 @@ def _seed_chat_pair(
     right_id,
     *,
     occurred_at,
-    verbs=("referenced", "referenced"),
+    verbs=("viewed", "viewed"),
     tool_name="read",
     owner_user_id=None,
 ):
@@ -247,7 +247,7 @@ def _seed_chat_artifacts(
     artifacts,
     *,
     occurred_at,
-    verb="referenced",
+    verb="viewed",
     step=timedelta(minutes=1),
 ):
     """Read each artifact ``count`` times in list order, ``step`` apart.
@@ -296,7 +296,7 @@ def _seed_read_sequence(session, workspace_id, page_ids, *, occurred_at):
         )
 
 
-def test_co_access_rebuild_decays_and_discards_session_identity(
+def test_co_access_rebuild_counts_lifetime_support_without_session_identity(
     session_factory, page_service
 ):
     left = _publish(page_service, "co-left", "Co Left")
@@ -313,32 +313,24 @@ def test_co_access_rebuild_decays_and_discards_session_identity(
             occurred_at=now - timedelta(days=30),
         )
         before = edge_version(session, workspace_id)
-        assert refresh_co_access_edge_projection(session, workspace_id, now=now) == 1
+        assert rebuild_co_access_pairs(session, workspace_id) == 1
         edge = session.scalar(
             select(EdgeProjection).where(EdgeProjection.edge_kind == "co_access")
         )
         assert edge is not None
-        assert edge.weight == pytest.approx(1.5, rel=0.02)
+        assert edge.weight == 2
         assert edge.provenance == "usage"
-        assert edge.source_ref == {"table": "mcp_chat_tool_call_artifact"}
+        assert edge.source_ref == {"table": "co_access_pair"}
         assert "session" not in json.dumps(edge.source_ref).lower()
         assert edge_version(session, workspace_id) > before
 
 
-def test_co_access_projection_decay_reads_the_rank_table_half_life(
-    session_factory, page_service, monkeypatch
+def test_co_access_projection_is_lifetime_count_and_dates_do_not_decay(
+    session_factory, page_service
 ):
-    """The co_access half-life has one source: the rank table.
-
-    rank_score never decays co_access because projection already did; the
-    two only agree if projection reads the same value.
-    """
-
-    monkeypatch.setitem(
-        graph_rank.RANK_PARAMS, "co_access", graph_rank.RankParam(0.20, 25, 15)
-    )
-    left = _publish(page_service, "co-halflife-left", "Co Half-life Left")
-    right = _publish(page_service, "co-halflife-right", "Co Half-life Right")
+    """Time passing changes neither stored counts nor the graph revision."""
+    left = _publish(page_service, "co-lifetime-left", "Co Lifetime Left")
+    right = _publish(page_service, "co-lifetime-right", "Co Lifetime Right")
     now = datetime.now(UTC)
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
@@ -348,16 +340,24 @@ def test_co_access_projection_decay_reads_the_rank_table_half_life(
             workspace_id,
             left.id,
             right.id,
-            occurred_at=now - timedelta(days=30),
+            occurred_at=now - timedelta(days=365),
         )
-        refresh_co_access_edge_projection(session, workspace_id, now=now)
+        rebuild_co_access_pairs(session, workspace_id)
         edge = session.scalar(
             select(EdgeProjection).where(EdgeProjection.edge_kind == "co_access")
         )
+        assert edge.weight == edge.support_session_count == 2
+        assert edge.first_observed_at == now - timedelta(days=365)
+        revision = edge_version(session, workspace_id)
+        from backend.services.indexing.edge_registry import (
+            refresh_co_access_edge_projection,
+        )
 
-    # One fresh session (1.0) plus one 30-day-old session at a 15-day
-    # half-life (0.25); the literal 30 would give 1.5.
-    assert edge.weight == pytest.approx(1.25, rel=0.02)
+        refresh_co_access_edge_projection(
+            session, workspace_id, now=now + timedelta(days=365)
+        )
+        assert edge.weight == 2
+        assert edge_version(session, workspace_id) == revision
 
 
 @pytest.mark.parametrize("discovery_tool", ["search", "grep_wiki"])
@@ -388,7 +388,7 @@ def test_co_access_ignores_result_lists_from_discovery_tools(
                 verbs=("search_match", "search_match"),
                 tool_name=discovery_tool,
             )
-        assert refresh_co_access_edge_projection(session, workspace_id, now=now) == 0
+        assert rebuild_co_access_pairs(session, workspace_id) == 0
 
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
@@ -401,7 +401,7 @@ def test_co_access_ignores_result_lists_from_discovery_tools(
                 occurred_at=now,
                 tool_name="read",
             )
-        assert refresh_co_access_edge_projection(session, workspace_id, now=now) == 1
+        assert rebuild_co_access_pairs(session, workspace_id) == 1
 
 
 def test_co_access_builds_from_one_person_reading_across_conversations(
@@ -429,7 +429,7 @@ def test_co_access_builds_from_one_person_reading_across_conversations(
                 occurred_at=now,
                 owner_user_id=reader,
             )
-            refresh_co_access_edge_projection(session, workspace_id, now=now)
+            rebuild_co_access_pairs(session, workspace_id)
             edge = session.scalar(
                 select(EdgeProjection).where(EdgeProjection.edge_kind == "co_access")
             )
@@ -463,10 +463,10 @@ def test_co_access_requires_support_from_more_than_one_session(session_factory):
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         _seed_chat_pair(session, workspace_id, left_id, right_id, occurred_at=now)
-        assert refresh_co_access_edge_projection(session, workspace_id, now=now) == 0
+        assert rebuild_co_access_pairs(session, workspace_id) == 0
 
         _seed_chat_pair(session, workspace_id, left_id, right_id, occurred_at=now)
-        assert refresh_co_access_edge_projection(session, workspace_id, now=now) == 1
+        assert rebuild_co_access_pairs(session, workspace_id) == 1
 
 
 def test_co_access_joins_only_reads_adjacent_in_the_session(session_factory):
@@ -485,7 +485,7 @@ def test_co_access_joins_only_reads_adjacent_in_the_session(session_factory):
         workspace_id = _workspace_id(session)
         for _ in range(CO_ACCESS_MIN_SESSIONS):
             _seed_read_sequence(session, workspace_id, page_ids, occurred_at=now)
-        refresh_co_access_edge_projection(session, workspace_id, now=now)
+        rebuild_co_access_pairs(session, workspace_id)
         pairs = {
             frozenset((source_id, target_id))
             for source_id, target_id in session.execute(
@@ -540,7 +540,7 @@ def test_co_access_splits_long_sessions_and_keeps_their_earliest_reads(
                 artifacts,
                 occurred_at=now,
             )
-        emitted = refresh_co_access_edge_projection(session, workspace_id, now=now)
+        emitted = rebuild_co_access_pairs(session, workspace_id)
         pairs = {
             frozenset((source_id, target_id))
             for source_id, target_id in session.execute(
@@ -622,7 +622,7 @@ def test_citation_candidates_of_one_write_are_not_read_together(session_factory)
         for _ in range(max(CO_ACCESS_MIN_SESSIONS, HOT_PATH_MIN_SESSIONS)):
             _seed_citation_fanout(session, workspace_id, page_ids, occurred_at=now)
 
-        assert refresh_co_access_edge_projection(session, workspace_id, now=now) == 0
+        assert rebuild_co_access_pairs(session, workspace_id) == 0
         assert _context_pair_session_counts(session, workspace_id, now=now) == {}
 
 
@@ -657,7 +657,7 @@ def test_hot_paths_and_co_access_separate_pages_the_same_way(session_factory):
                     occurred_at=now - timedelta(minutes=len(sequence) - offset),
                     resource_kind=kind,
                 )
-        refresh_co_access_edge_projection(session, workspace_id, now=now)
+        rebuild_co_access_pairs(session, workspace_id)
         co_access = {
             frozenset((source_id, target_id))
             for source_id, target_id in session.execute(
@@ -690,9 +690,12 @@ def test_co_access_does_not_depend_on_the_fetch_batch(session_factory, monkeypat
                 occurred_at=now - timedelta(hours=shift + 1),
             )
         for batch_rows in (1, 2, 5_000):
+            from backend.services.indexing import co_read_source as shared_source
+
             monkeypatch.setattr(
-                edge_registry, "CO_ACCESS_SOURCE_BATCH_ROWS", batch_rows
+                shared_source, "CO_ACCESS_SOURCE_BATCH_ROWS", batch_rows
             )
+            rebuild_co_access_pairs(session, workspace_id)
             results[batch_rows] = sorted(
                 (
                     row["source_id"],
@@ -700,9 +703,7 @@ def test_co_access_does_not_depend_on_the_fetch_batch(session_factory, monkeypat
                     round(float(row["weight"]), 9),
                     row["occurred_at"],
                 )
-                for row in edge_registry._co_access_rows(
-                    session, workspace_id, now=now
-                )
+                for row in edge_registry._co_access_rows(session, workspace_id)
             )
 
     assert results[1]
@@ -719,20 +720,18 @@ def test_a_failed_refresh_keeps_the_projection_and_a_retry_rebuilds_it(
 
     def weight(session):
         return session.scalar(
-            select(EdgeProjection.weight).where(
-                EdgeProjection.edge_kind == "co_access"
-            )
+            select(EdgeProjection.weight).where(EdgeProjection.edge_kind == "co_access")
         )
 
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         for _ in range(CO_ACCESS_MIN_SESSIONS):
             _seed_chat_pair(session, workspace_id, left_id, right_id, occurred_at=now)
-        refresh_co_access_edge_projection(session, workspace_id, now=now)
+        rebuild_co_access_pairs(session, workspace_id)
         before = weight(session)
         _seed_chat_pair(session, workspace_id, left_id, right_id, occurred_at=now)
 
-    real_pairs = edge_registry.co_access_pairs
+    real_pairs = co_access.co_access_pairs
 
     def dies_after_one_pair(reads):
         for index, pair in enumerate(real_pairs(reads)):
@@ -740,16 +739,16 @@ def test_a_failed_refresh_keeps_the_projection_and_a_retry_rebuilds_it(
                 raise RuntimeError("tick cancelled")
             yield pair
 
-    monkeypatch.setattr(edge_registry, "co_access_pairs", dies_after_one_pair)
+    monkeypatch.setattr(co_access, "co_access_pairs", dies_after_one_pair)
     with pytest.raises(RuntimeError, match="tick cancelled"):
         with session_factory.begin() as session:
-            refresh_co_access_edge_projection(session, workspace_id, now=now)
+            rebuild_co_access_pairs(session, workspace_id)
     with session_factory() as session:
         assert weight(session) == pytest.approx(before)
 
-    monkeypatch.setattr(edge_registry, "co_access_pairs", real_pairs)
+    monkeypatch.setattr(co_access, "co_access_pairs", real_pairs)
     with session_factory.begin() as session:
-        refresh_co_access_edge_projection(session, workspace_id, now=now)
+        rebuild_co_access_pairs(session, workspace_id)
         assert weight(session) == pytest.approx(before * 1.5)
 
 
@@ -803,7 +802,7 @@ def test_co_access_canonicalizes_pairs_across_reversed_session_rankings(
             occurred_at=now,
         )
 
-        assert refresh_co_access_edge_projection(session, workspace_id, now=now) == 1
+        assert rebuild_co_access_pairs(session, workspace_id) == 1
         edges = session.scalars(
             select(EdgeProjection).where(
                 EdgeProjection.workspace_id == workspace_id,
@@ -820,8 +819,8 @@ def test_co_access_canonicalizes_pairs_across_reversed_session_rankings(
     ("verbs", "expected_edges"),
     # One unconsumed side already rejects the pair; two add no branch.
     [
-        (("referenced", "referenced"), 1),
-        (("referenced", "search_match"), 0),
+        (("viewed", "viewed"), 1),
+        (("viewed", "search_match"), 0),
     ],
 )
 def test_co_access_requires_both_artifacts_to_be_consumed(
@@ -843,15 +842,12 @@ def test_co_access_requires_both_artifacts_to_be_consumed(
                 verbs=verbs,
             )
 
-        assert (
-            refresh_co_access_edge_projection(session, workspace_id, now=now)
-            == expected_edges
-        )
+        assert rebuild_co_access_pairs(session, workspace_id) == expected_edges
 
 
 @pytest.mark.parametrize(
     ("verb", "expected_findings"),
-    [("search_match", 0), ("referenced", 1)],
+    [("search_match", 0), ("viewed", 1)],
 )
 def test_trail_tick_stages_only_consumed_unlinked_repeated_distant_paths(
     session_factory, page_service, verb, expected_findings
@@ -929,9 +925,7 @@ def test_hot_concepts_require_consumption_not_search_exposure(
             occurred_at=now,
             verb="search_match",
         )
-        assert list_hot_concepts(
-            session, workspace_id, actor=_actor(), now=now
-        ) == []
+        assert list_hot_concepts(session, workspace_id, actor=_actor(), now=now) == []
 
         link = session.scalar(
             select(McpChatArtifactLink).where(
@@ -1028,7 +1022,7 @@ def test_hot_concepts_batch_hydrate_and_enforce_actor_visibility(
                     chat_session_id=chat.id,
                     resource_kind=kind,
                     resource_id=entity_id,
-                    verb="referenced",
+                    verb="viewed",
                     first_occurred_at=now,
                     last_occurred_at=now,
                     occurrence_count=count,
@@ -1150,6 +1144,7 @@ def test_associative_search_lane_is_opt_in_and_keeps_exact_hit_first(
 
 def test_ppr_cache_uses_database_revision_across_sessions(session_factory):
     seed, first_target, second_target = uuid4(), uuid4(), uuid4()
+    usage_target = uuid4()
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         session.add(
@@ -1165,11 +1160,56 @@ def test_ppr_cache_uses_database_revision_across_sessions(session_factory):
                 source_ref={},
             )
         )
+        session.add(
+            EdgeProjection(
+                workspace_id=workspace_id,
+                source_kind="context_page",
+                source_id=seed,
+                target_kind="context_page",
+                target_id=usage_target,
+                edge_kind="co_access",
+                provenance="usage",
+                weight=300.0,
+                source_ref={},
+            )
+        )
         bump_edge_version(session, workspace_id)
+        access_revision = session.scalar(
+            select(Workspace.updated_at).where(Workspace.id == workspace_id)
+        )
+        recompute_authority(session, workspace_id)
+        assert (
+            session.scalar(
+                select(Workspace.updated_at).where(Workspace.id == workspace_id)
+            )
+            == access_revision
+        )
+        authority = dict(
+            session.execute(
+                select(KnowledgeNodeStat.entity_id, KnowledgeNodeStat.authority).where(
+                    KnowledgeNodeStat.workspace_id == workspace_id,
+                    KnowledgeNodeStat.entity_id.in_((first_target, usage_target)),
+                )
+            ).all()
+        )
+        assert authority[first_target] > authority[usage_target]
 
     with session_factory() as session:
         first = subgraph_ppr(session, workspace_id, [("context_page", seed, 1.0)])
         assert first_target in {result.entity_id for result in first}
+        scores = {result.entity_id: result.score for result in first}
+        assert scores[first_target] > scores[usage_target]
+        assert scores[usage_target] / scores[first_target] == pytest.approx(300 / 325)
+        # The normalization is an input policy, not a rewrite of evidence.
+        assert (
+            session.scalar(
+                select(EdgeProjection.weight).where(
+                    EdgeProjection.workspace_id == workspace_id,
+                    EdgeProjection.edge_kind == "co_access",
+                )
+            )
+            == 300
+        )
 
     with session_factory.begin() as session:
         session.execute(
@@ -1377,6 +1417,36 @@ def test_ppr_ties_use_context_trust_and_cut_usage_after_curated(
             top_k=10,
             node_budget=4,
         )
+
+        # Once curated candidates are exhausted, SQL must compare usage kinds
+        # with importance weights rather than the lower display ceiling.
+        session.execute(
+            delete(EdgeProjection).where(
+                EdgeProjection.workspace_id == workspace_id,
+                EdgeProjection.provenance == "curated",
+            )
+        )
+        session.add(
+            EdgeProjection(
+                workspace_id=workspace_id,
+                source_kind="context_page",
+                source_id=source.id,
+                target_kind="context_page",
+                target_id=uuid4(),
+                edge_kind="ask_citation",
+                provenance="usage",
+                weight=0.5,
+                source_ref={},
+            )
+        )
+        session.flush()
+        usage_candidates = _frontier_edges(
+            session,
+            workspace_id,
+            {("context_page", source.id)},
+            limit=1,
+        )
+        assert [row.target_id for row in usage_candidates] == [usage_target]
 
     by_id = {result.entity_id: result for result in results}
     assert by_id[human.id].trust_prior > by_id[agent.id].trust_prior
@@ -1902,9 +1972,9 @@ def _metered_edges(rows, *, probe_budget):
     The calculation is a pure function over its edges, so the edges are the one
     place to watch it from. Every wrapper delegates to the value it stands for,
     leaving the ranks exactly as the plain call computes them; each only counts.
-    ``passes`` and ``rows`` count reads of the edge sequence, ``transitions`` the
-    weights scaled into transition probabilities (by whichever of ``*`` and ``/``
-    reaches a weight first, so the order the code writes them in is immaterial),
+    ``passes`` and ``rows`` count reads of the edge sequence. ``transitions``
+    counts normalized weights scaled into probabilities (by whichever of ``*``
+    and ``/`` reaches a weight first), separately from storage-count conversion.
     ``probes`` the hash-table probes made on node ids. A probe past
     ``probe_budget`` raises on the spot, so a quadratic node index fails at once
     instead of running for hours.
@@ -1937,6 +2007,8 @@ def _metered_edges(rows, *, probe_budget):
             probe()
             return super().__eq__(other)
 
+    meter.weight_type = Weight
+
     class Edges:
         def __iter__(self):
             meter.passes += 1
@@ -1948,7 +2020,7 @@ def _metered_edges(rows, *, probe_budget):
                     target_kind,
                     NodeId(int=target_id.int),
                     kind,
-                    Weight(weight),
+                    weight,
                 )
 
     return Edges(), meter
@@ -1958,7 +2030,7 @@ def _metered_edges(rows, *, probe_budget):
 # transition meter (test_authority_builds_at_most_two_transitions_per_edge)
 # and authority projection (test_ppr_visibility_and_authority_projection).
 @pytest.mark.release_scale
-def test_authority_work_is_bounded_at_100k_edges(session_factory):
+def test_authority_work_is_bounded_at_100k_edges(session_factory, monkeypatch):
     # The 5s budget (§19.5.7) rests on the calculation doing a bounded amount of
     # work per edge. That is counted on every run instead of timed (the wall
     # clock lives in the opt-in benchmark below): the edges are read once, one
@@ -1969,6 +2041,12 @@ def test_authority_work_is_bounded_at_100k_edges(session_factory):
         seeded_nodes, nodes, edge_rows = _seed_authority_chain(session, workspace_id)
 
     edges, meter = _metered_edges(edge_rows, probe_budget=8 * len(edge_rows))
+    normalize = trail_analysis.pagerank_weight
+    monkeypatch.setattr(
+        trail_analysis,
+        "pagerank_weight",
+        lambda kind, value: meter.weight_type(normalize(kind, value)),
+    )
     stats = _authority_stat_rows(
         edges,
         workspace_id=workspace_id,
@@ -1994,7 +2072,7 @@ def test_authority_work_is_bounded_at_100k_edges(session_factory):
     assert set(chain[20:]) == {plateau}
 
 
-def test_authority_builds_at_most_two_transitions_per_edge():
+def test_authority_builds_at_most_two_transitions_per_edge(monkeypatch):
     # A co_access edge is mutual, so it builds its reverse as well; every other
     # kind builds one. Two per edge is therefore the ceiling on inner-loop work.
     kinds = ["wikilink", "co_access", "wikilink", "co_access", "co_access"]
@@ -2004,6 +2082,12 @@ def test_authority_builds_at_most_two_transitions_per_edge():
         for index, kind in enumerate(kinds)
     ]
     edges, meter = _metered_edges(rows, probe_budget=8 * len(rows))
+    normalize = trail_analysis.pagerank_weight
+    monkeypatch.setattr(
+        trail_analysis,
+        "pagerank_weight",
+        lambda kind, value: meter.weight_type(normalize(kind, value)),
+    )
 
     _authority_stat_rows(
         edges, workspace_id=uuid4(), now=datetime(2026, 1, 1, tzinfo=UTC)

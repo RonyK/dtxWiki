@@ -12,6 +12,7 @@ from backend.models.change import ChangeSet
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.mcp_chat import McpChatArtifactKind, McpChatArtifactVerb
 from backend.models.workspace import Workspace
+from backend.policy.mcp_scopes import FOCUSED_READ_TOOLS
 from backend.schemas.common import MCPResultEnvelope
 from backend.schemas.mcp.upload_tools import (
     UploadImageResult,
@@ -102,7 +103,7 @@ def test_submit_revision_update_links_page(page_service):
     assert links[0].verb == McpChatArtifactVerb.EDITED
 
 
-def test_read_concept_links_referenced_page(page_service):
+def test_read_concept_links_viewed_page(page_service):
     with page_service.session_factory.begin() as session:
         ws = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         page = ContextPage(
@@ -130,7 +131,7 @@ def test_read_concept_links_referenced_page(page_service):
     links = _page_links(candidates)
     assert len(links) == 1
     assert links[0].resource_id == page.id
-    assert links[0].verb == McpChatArtifactVerb.REFERENCED
+    assert links[0].verb == McpChatArtifactVerb.VIEWED
 
 
 def test_grep_wiki_links_search_matched_pages(page_service):
@@ -175,7 +176,9 @@ def test_grep_wiki_links_search_matched_pages(page_service):
         "begin_context_edit",
     ],
 )
-def test_focused_read_tools_still_derive_referenced_links(page_service, tool_name):
+def test_body_reads_are_viewed_and_structural_reads_remain_referenced(
+    page_service, tool_name
+):
     page_id = uuid4()
     version_id = uuid4()
     arguments: dict[str, object] = {}
@@ -212,7 +215,11 @@ def test_focused_read_tools_still_derive_referenced_links(page_service, tool_nam
         )
 
     assert links
-    assert {link.verb for link in links} == {McpChatArtifactVerb.REFERENCED}
+    assert {link.verb for link in links} == {
+        McpChatArtifactVerb.VIEWED
+        if tool_name in FOCUSED_READ_TOOLS
+        else McpChatArtifactVerb.REFERENCED
+    }
     if tool_name in {
         "read_context_outline",
         "read_structure_map",
@@ -544,6 +551,7 @@ def test_persist_trace_stores_the_masked_edit_receipt(page_service, mcp_default_
 def test_persist_trace_stores_no_detail_for_a_read_or_a_failed_edit(
     page_service, mcp_default_actor
 ):
+    from backend.models.mcp_chat import McpChatToolCallArtifact
     from backend.models.mcp_trace import MCPToolCall
 
     actor = mcp_default_actor(scopes=("read", "draft-write"))
@@ -551,12 +559,25 @@ def test_persist_trace_stores_no_detail_for_a_read_or_a_failed_edit(
         workspace_id = session.scalar(
             select(Workspace).where(Workspace.slug == "default")
         ).id
+    page_id = uuid4()
+    read_arguments = {
+        "workspace_id": str(workspace_id),
+        "target_type": "context_page",
+        "target_id": str(page_id),
+    }
     read_id = _persist(
         page_service,
         actor,
         "read",
-        {"workspace_id": str(workspace_id), "target_type": "context_page"},
+        read_arguments,
         _edit_trace_payload(workspace_id, data={"edit_receipt": {"forged": True}}),
+    )
+    partial_read_id = _persist(
+        page_service,
+        actor,
+        "read",
+        read_arguments,
+        _edit_trace_payload(workspace_id, data=None, result_status="partial"),
     )
     failed_id = _persist(
         page_service,
@@ -568,6 +589,22 @@ def test_persist_trace_stores_no_detail_for_a_read_or_a_failed_edit(
 
     with page_service.session_factory() as session:
         assert session.get(MCPToolCall, read_id).result_detail is None
+        assert (
+            session.scalar(
+                select(McpChatToolCallArtifact.verb).where(
+                    McpChatToolCallArtifact.mcp_tool_call_id == read_id
+                )
+            )
+            == "viewed"
+        )
+        assert (
+            session.scalar(
+                select(McpChatToolCallArtifact.verb).where(
+                    McpChatToolCallArtifact.mcp_tool_call_id == partial_read_id
+                )
+            )
+            == "referenced"
+        )
         assert session.get(MCPToolCall, failed_id).result_detail is None
 
 

@@ -261,7 +261,9 @@ def _call(
         tool_call=call,
         resource_kind=McpChatArtifactKind.CONTEXT_PAGE,
         resource_id=page.id,
-        verb=McpChatArtifactVerb.REFERENCED,
+        verb=(
+            McpChatArtifactVerb.VIEWED if snapshot else McpChatArtifactVerb.REFERENCED
+        ),
     )
     session.flush()
     return call, chat

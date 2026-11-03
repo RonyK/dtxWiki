@@ -156,7 +156,7 @@ def list_artifact_links(
     since: datetime | None = None,
     until: datetime | None = None,
     verb: Literal[
-        "created", "edited", "cited", "referenced", "search_match"
+        "created", "edited", "cited", "referenced", "viewed", "search_match"
     ]
     | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,

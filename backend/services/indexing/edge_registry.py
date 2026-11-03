@@ -9,14 +9,12 @@ guards against duplicates).
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Iterator
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from collections.abc import Collection, Iterator
+from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import and_, delete, func, inspect, or_, select
-from sqlalchemy.engine import Connection
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.models.ask import AskSession, AskTurn, AskTurnCitation
@@ -30,59 +28,59 @@ from backend.models.context import (
     PageProvenance,
 )
 from backend.models.library import LibraryItem, LibraryItemVersion
-from backend.models.mcp_chat import McpChatArtifactVerb, McpChatToolCallArtifact
 from backend.models.tree import WorkspaceTreeNode
 from backend.services.entity_ref import EntityKind
-from backend.services.graph_cache import bump_edge_version
+from backend.services.graph_cache import (
+    bump_edge_version,
+    lock_edge_projection_workspace,
+)
 from backend.services.graph_observation_service import GraphObservationService
-from backend.services.graph_rank import RANK_PARAMS
 from backend.services.graph_semantics import EDGE_SEMANTICS
 from backend.services.indexing.co_read import (
-    CoReadPair,
     Read,
-    co_read_pairs,
-    max_pairs_per_segment,
+)
+from backend.services.indexing.co_read_policy import (
+    CO_ACCESS_ADJACENCY_WINDOW as CO_ACCESS_ADJACENCY_WINDOW,
+)
+from backend.services.indexing.co_read_policy import (
+    CO_ACCESS_MAX_ARTIFACTS_PER_SEGMENT as CO_ACCESS_MAX_ARTIFACTS_PER_SEGMENT,
+)
+from backend.services.indexing.co_read_policy import (
+    CO_ACCESS_MAX_GAP as CO_ACCESS_MAX_GAP,
+)
+from backend.services.indexing.co_read_policy import (
+    CO_ACCESS_MAX_PAIRS_PER_SEGMENT as CO_ACCESS_MAX_PAIRS_PER_SEGMENT,
+)
+from backend.services.indexing.co_read_policy import (
+    CO_ACCESS_MIN_SESSIONS as CO_ACCESS_MIN_SESSIONS,
+)
+from backend.services.indexing.co_read_policy import (
+    CO_ACCESS_SOURCE_BATCH_ROWS as CO_ACCESS_SOURCE_BATCH_ROWS,
+)
+from backend.services.indexing.co_read_policy import (
+    co_access_pairs as co_access_pairs,
 )
 
-# Only a focused read is evidence that a document was consumed. CITED is a
-# consumption verb too, but trace capture records one CITED row per citation
-# *candidate* of a write, all at the write's instant, so a single write would
-# pair every candidate with its neighbours. Until capture can tell a candidate
-# from a citation the writer kept, co-reads count REFERENCED only. This is a
-# subset of CONSUMPTION_VERBS (tests/static/test_mcp_chat_verb_classes.py).
-CO_ACCESS_SOURCE_VERBS = frozenset({McpChatArtifactVerb.REFERENCED})
-# Two consecutive reads further apart than this are not "read together": the
-# session is cut there, so a 09:00 read never pairs with a 17:00 one.
-CO_ACCESS_MAX_GAP = timedelta(minutes=30)
-# Reads pair only with their neighbours in the read order, never across the
-# whole session: under a clique the first and last document of a long session
-# are joined however unrelated they are, and the pair count grows
-# quadratically.
-CO_ACCESS_ADJACENCY_WINDOW = 5
-# A segment longer than this many distinct reads is split front to back into
-# sub-segments of this size. Nothing is dropped: the first read of a long
-# session pairs just like the last one.
-CO_ACCESS_MAX_ARTIFACTS_PER_SEGMENT = 12
-# The contract the window and segment size jointly guarantee for one
-# sub-segment. Derived rather than written down so a change to either
-# constant moves the bound with it instead of leaving a stale literal behind
-# for a test to enshrine.
-CO_ACCESS_MAX_PAIRS_PER_SEGMENT = max_pairs_per_segment(
-    window=CO_ACCESS_ADJACENCY_WINDOW,
-    max_per_segment=CO_ACCESS_MAX_ARTIFACTS_PER_SEGMENT,
+# Only successful body views qualify; structural/outline/edit-session touches
+# remain REFERENCED and never contribute to co-access.
+from backend.services.indexing.co_read_source import (
+    CO_ACCESS_SOURCE_VERBS as CO_ACCESS_SOURCE_VERBS,
 )
-# The history both co-read signals look back over.
-CO_ACCESS_SOURCE_WINDOW = timedelta(days=30)
-# Rows fetched per round trip while streaming that history. Pairing keeps
-# one session's state at a time, so memory follows the largest session and
-# the number of distinct pairs, not the number of rows read.
-CO_ACCESS_SOURCE_BATCH_ROWS = 5_000
-# A pair seen in exactly one session is the weakest evidence there is, and in
-# a long-tailed read distribution it is most of the rows. This is a signal and
-# volume control, not a privacy one: it counts sessions, not people, so one
-# person returning to the same two documents in a second conversation is
-# exactly the case it is meant to admit.
-CO_ACCESS_MIN_SESSIONS = 2
+from backend.services.indexing.edge_projection import (
+    EdgeProjectionDelta as EdgeProjectionDelta,
+)
+from backend.services.indexing.edge_projection import (
+    EdgeProjectionScope,
+    build_edge_row,
+    reconcile_edge_projection_rows,
+)
+from backend.services.indexing.edge_projection import (
+    edge_row_identity as _edge_row_identity,
+)
+from backend.services.indexing.edge_projection import (
+    stored_edge_identity as _stored_edge_identity,
+)
+
 _ENTITY_KIND_VALUES = frozenset(kind.value for kind in EntityKind)
 PAGE_EDGE_OBSERVATION_EXTRACTOR_VERSION = "page-edge-write-through.v1"
 PAGE_EDGE_KINDS = ("wikilink", "citation_page", "citation_source")
@@ -94,21 +92,6 @@ class EdgeExtractor(Protocol):
     ) -> list[dict[str, object]]:
         """Return edge_projection row dicts for one workspace."""
         ...
-
-
-@dataclass(frozen=True)
-class EdgeProjectionDelta:
-    """Content changes made by a narrow edge-projection reconciliation."""
-
-    desired_count: int
-    inserted: int
-    updated: int
-    deleted: int
-    affected_source_ids: frozenset[UUID]
-
-    @property
-    def changed(self) -> bool:
-        return bool(self.inserted or self.updated or self.deleted)
 
 
 PROVENANCE_BY_KIND: dict[str, str] = {
@@ -133,20 +116,20 @@ def _edge(
     support_session_count: int | None = None,
     first_observed_at: datetime | None = None,
 ) -> dict[str, object]:
-    return {
-        "workspace_id": workspace_id,
-        "source_kind": source_kind.value,
-        "source_id": source_id,
-        "target_kind": target_kind.value,
-        "target_id": target_id,
-        "edge_kind": edge_kind,
-        "provenance": PROVENANCE_BY_KIND[edge_kind],
-        "weight": weight,
-        "occurred_at": occurred_at,
-        "support_session_count": support_session_count,
-        "first_observed_at": first_observed_at,
-        "source_ref": {"table": source_table},
-    }
+    return build_edge_row(
+        workspace_id=workspace_id,
+        source_kind=source_kind,
+        source_id=source_id,
+        target_kind=target_kind,
+        target_id=target_id,
+        edge_kind=edge_kind,
+        provenance=PROVENANCE_BY_KIND[edge_kind],
+        source_table=source_table,
+        weight=weight,
+        occurred_at=occurred_at,
+        support_session_count=support_session_count,
+        first_observed_at=first_observed_at,
+    )
 
 
 def _ask_citation_rows(session: Session, workspace_id: UUID) -> list[dict[str, object]]:
@@ -174,146 +157,18 @@ def _ask_citation_rows(session: Session, workspace_id: UUID) -> list[dict[str, o
     ]
 
 
-def co_access_pairs(reads: Iterable[Read]) -> Iterator[CoReadPair]:
-    """Pair ordered reads with the co_access gap, window and segment size.
+def co_read_source(session: Session, workspace_id: UUID, **filters) -> Iterator[Read]:
+    """Compatibility entrypoint to the single focused-body evidence source."""
+    from backend.services.indexing.co_read_source import co_read_source as source
 
-    The co_access edge and the hot-path finding both go through this, so the
-    graph and the lint rule agree on which documents were read together.
-    """
-
-    return co_read_pairs(
-        reads,
-        max_gap=CO_ACCESS_MAX_GAP,
-        window=CO_ACCESS_ADJACENCY_WINDOW,
-        max_per_segment=CO_ACCESS_MAX_ARTIFACTS_PER_SEGMENT,
-    )
+    return source(session, workspace_id, **filters)
 
 
-def co_read_source(
-    session: Session,
-    workspace_id: UUID,
-    *,
-    since: datetime,
-) -> Iterator[Read]:
-    """Stream the workspace's co-access source reads in read order.
+def _co_access_rows(session: Session, workspace_id: UUID):
+    """Delegate rebuilds to the current co-access row producer."""
+    from backend.services.co_access import co_access_projection_rows
 
-    Source is the per-call edge, not the McpChatArtifactLink rollup. The rollup
-    keeps one row per (session, artifact) with a count and only its first/last
-    instant, which can say "touched in the same session" but not WHEN each
-    read happened -- and "read together" is a statement about reads adjacent
-    in time, so every read needs its own instant. Search and grep_wiki result
-    lists never get here: they carry the search_match verb, which is not a
-    co-access source verb.
-
-    The ORDER BY is the read order co_read_pairs requires, and rows arrive in
-    batches of CO_ACCESS_SOURCE_BATCH_ROWS, so a 30-day history is never held
-    in memory at once. A pair that spans two batches is still paired: the
-    pairing state lives in co_read_pairs, not in the batch.
-    """
-
-    result = session.execute(
-        select(
-            McpChatToolCallArtifact.chat_session_id,
-            McpChatToolCallArtifact.resource_kind,
-            McpChatToolCallArtifact.resource_id,
-            McpChatToolCallArtifact.occurred_at,
-            McpChatToolCallArtifact.mcp_tool_call_id,
-            McpChatToolCallArtifact.id,
-        )
-        .where(
-            McpChatToolCallArtifact.workspace_id == workspace_id,
-            McpChatToolCallArtifact.verb.in_(CO_ACCESS_SOURCE_VERBS),
-            McpChatToolCallArtifact.occurred_at >= since,
-        )
-        .order_by(
-            McpChatToolCallArtifact.chat_session_id,
-            McpChatToolCallArtifact.occurred_at,
-            McpChatToolCallArtifact.mcp_tool_call_id,
-            McpChatToolCallArtifact.id,
-        )
-        .execution_options(yield_per=CO_ACCESS_SOURCE_BATCH_ROWS)
-    )
-    try:
-        for session_id, kind, entity_id, occurred_at, call_id, artifact_id in result:
-            if kind in _ENTITY_KIND_VALUES:
-                yield Read(
-                    session_id=session_id,
-                    entity=(kind, entity_id),
-                    occurred_at=occurred_at,
-                    mcp_tool_call_id=call_id,
-                    artifact_id=artifact_id,
-                )
-    finally:
-        # A consumer that stops early (an error, a cancelled tick) must not
-        # leave a server-side cursor open for the rest of the transaction.
-        result.close()
-
-
-def _co_access_rows(
-    session: Session,
-    workspace_id: UUID,
-    *,
-    now: datetime | None = None,
-) -> list[dict[str, object]]:
-    """Pair documents read close together, aggregated across sessions."""
-
-    now = now or datetime.now(UTC)
-    # Per pair: summed weight, last instant, number of sessions, and first
-    # instant -- never the session ids themselves. The support threshold and
-    # the "read together in N sessions over D days" display need only the
-    # cardinality and the span, and keeping identity here would put the
-    # behavioural trail of one actor into a read model. co_access_pairs
-    # yields a pair at most once per session, so counting yields counts
-    # sessions.
-    aggregates: dict[tuple[tuple[str, UUID], tuple[str, UUID]], list] = {}
-    # The rank table is the one source of the co_access half-life: rank_score
-    # leaves co_access alone because its age is already counted here.
-    half_life = RANK_PARAMS["co_access"].half_life_days
-    reads = co_read_source(session, workspace_id, since=now - CO_ACCESS_SOURCE_WINDOW)
-    for pair in co_access_pairs(reads):
-        occurred_at = pair.last_pair_at
-        age_days = max(0.0, (now - occurred_at).total_seconds() / 86400.0)
-        weight = min(pair.left_reads, pair.right_reads) * (
-            0.5 ** (age_days / half_life)
-        )
-        aggregate = aggregates.get((pair.left, pair.right))
-        if aggregate is None:
-            aggregates[(pair.left, pair.right)] = [
-                weight,
-                occurred_at,
-                1,
-                pair.first_pair_at,
-            ]
-        else:
-            aggregate[0] += weight
-            if occurred_at > aggregate[1]:
-                aggregate[1] = occurred_at
-            aggregate[2] += 1
-            if pair.first_pair_at < aggregate[3]:
-                aggregate[3] = pair.first_pair_at
-
-    return [
-        _edge(
-            workspace_id=workspace_id,
-            source_kind=EntityKind(left[0]),
-            source_id=left[1],
-            target_kind=EntityKind(right[0]),
-            target_id=right[1],
-            edge_kind="co_access",
-            source_table="mcp_chat_tool_call_artifact",
-            weight=weight,
-            occurred_at=occurred_at,
-            support_session_count=sessions,
-            first_observed_at=first_observed_at,
-        )
-        for (left, right), (
-            weight,
-            occurred_at,
-            sessions,
-            first_observed_at,
-        ) in aggregates.items()
-        if sessions >= CO_ACCESS_MIN_SESSIONS
-    ]
+    return co_access_projection_rows(session, workspace_id)
 
 
 def _promoted_from_rows(
@@ -441,6 +296,7 @@ def reconcile_wikilink_edge_projection(
     caller already locked, so a page committed during the run is never mistaken
     for stale state. The caller owns the workspace revision bump.
     """
+    lock_edge_projection_workspace(session, workspace_id)
 
     locked_source_ids = frozenset(source_page_ids)
     desired_rows = [
@@ -461,120 +317,11 @@ def reconcile_wikilink_edge_projection(
         )
         if edge.source_id in locked_source_ids
     ]
-    return _reconcile_edge_projection_rows(
+    return reconcile_edge_projection_rows(
         session,
+        scope=EdgeProjectionScope(workspace_id, frozenset({"wikilink"})),
         existing_rows=existing_rows,
         desired_rows=desired_rows,
-    )
-
-
-def _edge_row_identity(
-    row: dict[str, object],
-) -> tuple[str, UUID, str, UUID, str]:
-    source_kind = row["source_kind"]
-    source_id = row["source_id"]
-    target_kind = row["target_kind"]
-    target_id = row["target_id"]
-    edge_kind = row["edge_kind"]
-    if not (
-        isinstance(source_kind, str)
-        and isinstance(source_id, UUID)
-        and isinstance(target_kind, str)
-        and isinstance(target_id, UUID)
-        and isinstance(edge_kind, str)
-    ):
-        raise RuntimeError("edge extractor returned an invalid identity")
-    return source_kind, source_id, target_kind, target_id, edge_kind
-
-
-def _stored_edge_identity(
-    edge: EdgeProjection,
-) -> tuple[str, UUID, str, UUID, str]:
-    return (
-        edge.source_kind,
-        edge.source_id,
-        edge.target_kind,
-        edge.target_id,
-        edge.edge_kind,
-    )
-
-
-def _apply_edge_projection_values(
-    edge: EdgeProjection,
-    desired: dict[str, object],
-) -> bool:
-    changed = False
-    for attribute in ("provenance", "occurred_at", "source_ref"):
-        value = desired[attribute]
-        if getattr(edge, attribute) != value:
-            setattr(edge, attribute, value)
-            changed = True
-    weight = float(desired["weight"])
-    if float(edge.weight) != weight:
-        edge.weight = weight
-        changed = True
-    return changed
-
-
-def _reconcile_edge_projection_rows(
-    session: Session,
-    *,
-    existing_rows: Collection[EdgeProjection],
-    desired_rows: Collection[dict[str, object]],
-) -> EdgeProjectionDelta:
-    """Apply a scoped desired edge set without replacing stable identities."""
-
-    desired_by_identity = {
-        _edge_row_identity(row): row
-        for row in desired_rows
-    }
-    if len(desired_by_identity) != len(desired_rows):
-        raise RuntimeError("edge extractor produced duplicate identities")
-    existing_by_identity = {
-        _stored_edge_identity(edge): edge
-        for edge in existing_rows
-    }
-    if len(existing_by_identity) != len(existing_rows):
-        raise RuntimeError("edge projection contains duplicate identities")
-
-    inserted = 0
-    updated = 0
-    deleted = 0
-    affected_source_ids: set[UUID] = set()
-    for identity, edge in existing_by_identity.items():
-        desired = desired_by_identity.get(identity)
-        if desired is None:
-            session.delete(edge)
-            deleted += 1
-            affected_source_ids.add(edge.source_id)
-            continue
-        if _apply_edge_projection_values(edge, desired):
-            updated += 1
-            affected_source_ids.add(edge.source_id)
-
-    # Flush removals before inserts so a stale row can never occupy the unique
-    # identity while its replacement is inserted by the same unit of work.
-    session.flush()
-    observed_at = datetime.now(UTC)
-    for identity in sorted(
-        desired_by_identity.keys() - existing_by_identity.keys(),
-        key=lambda value: tuple(str(part) for part in value),
-    ):
-        session.add(
-            EdgeProjection(
-                **desired_by_identity[identity],
-                last_seen_at=observed_at,
-            )
-        )
-        inserted += 1
-        affected_source_ids.add(identity[1])
-    session.flush()
-    return EdgeProjectionDelta(
-        desired_count=len(desired_rows),
-        inserted=inserted,
-        updated=updated,
-        deleted=deleted,
-        affected_source_ids=frozenset(affected_source_ids),
     )
 
 
@@ -1162,6 +909,7 @@ def refresh_page_edge_projection(
     transaction while preserving stable row identity and avoiding no-op
     revision changes (failure fails the publish, like other projections).
     """
+    lock_edge_projection_workspace(session, workspace_id)
     existing_rows = list(
         session.scalars(
             select(EdgeProjection)
@@ -1176,8 +924,7 @@ def refresh_page_edge_projection(
         )
     )
     existing = {
-        _stored_edge_identity(edge): float(edge.weight)
-        for edge in existing_rows
+        _stored_edge_identity(edge): float(edge.weight) for edge in existing_rows
     }
 
     desired_rows: list[dict[str, object]] = []
@@ -1193,12 +940,10 @@ def refresh_page_edge_projection(
                 continue
             desired_rows.append(row)
 
-    desired = {
-        _edge_row_identity(row): float(row["weight"])
-        for row in desired_rows
-    }
-    delta = _reconcile_edge_projection_rows(
+    desired = {_edge_row_identity(row): float(row["weight"]) for row in desired_rows}
+    delta = reconcile_edge_projection_rows(
         session,
+        scope=EdgeProjectionScope(workspace_id, frozenset(PAGE_EDGE_KINDS)),
         existing_rows=existing_rows,
         desired_rows=desired_rows,
     )
@@ -1371,6 +1116,7 @@ def refresh_tree_node_edge_projection(
     """
     if not node_ids:
         return
+    lock_edge_projection_workspace(session, workspace_id)
     nodes = session.scalars(
         select(WorkspaceTreeNode).where(
             WorkspaceTreeNode.workspace_id == workspace_id,
@@ -1479,6 +1225,7 @@ def refresh_tree_edge_projection(session: Session, workspace_id: UUID) -> None:
     an O(workspace) rebuild. A tripwire test asserts production paths do not
     reach here; keep it that way.
     """
+    lock_edge_projection_workspace(session, workspace_id)
     session.execute(
         delete(EdgeProjection)
         .where(EdgeProjection.workspace_id == workspace_id)
@@ -1497,136 +1244,18 @@ def refresh_co_access_edge_projection(
     *,
     now: datetime | None = None,
 ) -> int:
-    rows = _co_access_rows(session, workspace_id, now=now)
-    # The frozen core migration calls this runtime seam before Graph View's
-    # revision exists. Reflection is confined to its connection-bound Session;
-    # ordinary Engine-bound workers and graph requests keep the current path.
-    if (
-        session.join_transaction_mode == "rollback_only"
-        and isinstance(session.get_bind(), Connection)
-        and {"support_session_count", "first_observed_at"}.isdisjoint(
-            column["name"]
-            for column in inspect(session.connection()).get_columns("edge_projection")
-        )
-    ):
-        return _refresh_released_co_access_projection(
-            session, workspace_id, rows=rows, now=now
-        )
-    projected = {
-        (
-            str(row["source_kind"]),
-            row["source_id"],
-            str(row["target_kind"]),
-            row["target_id"],
-            float(row["weight"]),
-            row["occurred_at"],
-            row["support_session_count"],
-            row["first_observed_at"],
-        )
-        for row in rows
-    }
-    # The evidence is part of the row: a new supporting session changes the
-    # count or the first observation even where the weight would round equal.
-    existing = {
-        (
-            str(source_kind),
-            source_id,
-            str(target_kind),
-            target_id,
-            float(weight),
-            occurred_at,
-            support_session_count,
-            first_observed_at,
-        )
-        for (
-            source_kind,
-            source_id,
-            target_kind,
-            target_id,
-            weight,
-            occurred_at,
-            support_session_count,
-            first_observed_at,
-        ) in session.execute(
-            select(
-                EdgeProjection.source_kind,
-                EdgeProjection.source_id,
-                EdgeProjection.target_kind,
-                EdgeProjection.target_id,
-                EdgeProjection.weight,
-                EdgeProjection.occurred_at,
-                EdgeProjection.support_session_count,
-                EdgeProjection.first_observed_at,
-            ).where(
-                EdgeProjection.workspace_id == workspace_id,
-                EdgeProjection.edge_kind == "co_access",
-            )
-        ).all()
-    }
-    if existing == projected:
-        return len(rows)
-    session.execute(
-        delete(EdgeProjection).where(
-            EdgeProjection.workspace_id == workspace_id,
-            EdgeProjection.edge_kind == "co_access",
-        )
+    from backend.migrations.revision_modules.v0_2.legacy_usage_v1 import (
+        legacy_migration_session,
+        restore_legacy_usage,
     )
-    seen_at = now or datetime.now(UTC)
-    for row in rows:
-        session.add(EdgeProjection(**row, last_seen_at=seen_at))
-    session.flush()
-    bump_edge_version(session, workspace_id)
-    return len(rows)
 
-
-def _refresh_released_co_access_projection(
-    session: Session,
-    workspace_id: UUID,
-    *,
-    rows: list[dict[str, object]],
-    now: datetime | None,
-) -> int:
-    """Repair the released core shape without loading newer ORM fields."""
-
-    table = EdgeProjection.__table__
-    columns = (
-        table.c.source_kind,
-        table.c.source_id,
-        table.c.target_kind,
-        table.c.target_id,
-        table.c.weight,
-        table.c.occurred_at,
-    )
-    connection = session.connection()
-    predicate = (
-        table.c.workspace_id == workspace_id,
-        table.c.edge_kind == "co_access",
-    )
-    existing = {
-        tuple(row) for row in connection.execute(select(*columns).where(*predicate))
-    }
-    projected = {tuple(row[column.name] for column in columns) for row in rows}
-    if existing == projected:
-        return len(rows)
-    connection.execute(table.delete().where(*predicate))
-    if rows:
-        seen_at = now or datetime.now(UTC)
-        connection.execute(
-            table.insert(),
-            [
-                {
-                    **{
-                        key: value
-                        for key, value in row.items()
-                        if key not in {"support_session_count", "first_observed_at"}
-                    },
-                    "last_seen_at": seen_at,
-                }
-                for row in rows
-            ],
+    if legacy_migration_session(session):
+        return restore_legacy_usage(
+            session.connection(), workspace_id, now=now or datetime.now(UTC)
         )
-    bump_edge_version(session, workspace_id)
-    return len(rows)
+    from backend.services.co_access import sync_co_access_projection
+
+    return sync_co_access_projection(session, workspace_id, usage_signals_enabled=True)
 
 
 def clear_co_access_edge_projection(session: Session, workspace_id: UUID) -> int:
@@ -1635,6 +1264,7 @@ def clear_co_access_edge_projection(session: Session, workspace_id: UUID) -> int
     This is what the owner's usage-signal switch does when it is off. Turning
     it back on lets the next refresh rebuild the rows from the same records.
     """
+    lock_edge_projection_workspace(session, workspace_id)
 
     removed = session.execute(
         delete(EdgeProjection).where(
@@ -1661,6 +1291,7 @@ def rebuild_edge_projection(
     ``usage_signals_enabled`` is the owner's switch and has no default: with
     it off, co_access rows are removed like every other kind but not rebuilt.
     """
+    lock_edge_projection_workspace(session, workspace_id)
 
     session.execute(
         delete(EdgeProjection)

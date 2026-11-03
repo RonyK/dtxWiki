@@ -22,3 +22,27 @@ condition = "AND"
 paths = ['''^tests/e2e/prepare_backend_db\.py$''']
 regexTarget = "secret"
 regexes = ['''^e2e-knowledge-10k(?:-aggregated)?$''']
+
+[[allowlists]]
+description = "The SQLAlchemy populate_existing flag is Python code, not an API key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^backend/services/indexing/co_read_source\.py$''']
+regexTarget = "secret"
+regexes = ['''^populate_existing=True$''']
+
+[[allowlists]]
+description = "The historical frontmatter length limit is Python code, not an API key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^backend/utils/page_frontmatter\.py$''']
+regexTarget = "secret"
+regexes = ['''^max_length=48$''']
+
+[[allowlists]]
+description = "The deterministic density-test graph seed is not an API key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^backend/tests/integration/test_synthetic_corpus_profiles\.py$''']
+regexTarget = "secret"
+regexes = ['''^scale-1000-density-4x$''']

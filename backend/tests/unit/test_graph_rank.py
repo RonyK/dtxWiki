@@ -22,6 +22,7 @@ from backend.services.graph_rank import (
     citation_weight,
     effective_weight,
     fair_share_quotas,
+    pagerank_weight,
     rank_param,
     rank_score,
     round_robin_take,
@@ -46,9 +47,16 @@ def test_no_amount_of_co_reading_outranks_one_authored_link():
         "wikilink", 1.0, None, NOW
     )
     assert rank_score("wikilink", 1.0, None, NOW) == 0.25
+    # Stored co-access counts are a different unit from an authored link.
+    # Importance/PageRank must bound them too, without applying age decay.
+    assert pagerank_weight("co_access", 300) == pytest.approx(300 / 325)
+    assert pagerank_weight("co_access", 25) == 0.5
+    assert pagerank_weight("co_access", 40_000) < pagerank_weight("wikilink", 1)
+    assert pagerank_weight("wikilink", 1) == 1
+    assert pagerank_weight("co_access", 0) == 0
 
 
-def test_rank_table_is_the_0822_table_verbatim():
+def test_rank_table_declares_shared_display_parameters():
     assert RANK_PARAMS == {
         "wikilink": RankParam(1.00, 3, None),
         "citation_page": RankParam(0.95, 2, None),
@@ -59,7 +67,7 @@ def test_rank_table_is_the_0822_table_verbatim():
         "promoted_from": RankParam(0.50, 1, None),
         "library_sync_version": RankParam(0.35, 1, 180),
         "ask_citation": RankParam(0.30, 2, 60),
-        "co_access": RankParam(0.20, 25, 30),
+        "co_access": RankParam(0.20, 25, None),
     }
 
 
@@ -180,12 +188,16 @@ def test_denominator_kinds_are_exactly_the_kinds_effective_weight_divides():
     assert divided == DENOMINATOR_KINDS
 
 
-def test_co_access_is_not_decayed_twice():
-    """Its stored weight already carries the table's 30-day half-life."""
+def test_usage_ranking_consumes_stored_weights_without_recency():
+    """Display ranking leaves storage-time aging to its producer."""
 
-    assert rank_param("co_access").half_life_days == 30
-    assert rank_score("co_access", 30, NOW - timedelta(days=90), NOW) == rank_score(
+    assert rank_param("co_access").half_life_days is None
+    assert PREDECAYED_KINDS == frozenset()
+    assert rank_score("co_access", 30, NOW - timedelta(days=365), NOW) == rank_score(
         "co_access", 30, None, NOW
+    )
+    assert rank_score("co_access", 30, NOW - timedelta(days=365), NOW) > rank_score(
+        "co_access", 2, NOW, NOW
     )
 
 

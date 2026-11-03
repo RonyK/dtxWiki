@@ -413,6 +413,35 @@ Python backend, CLI, MCP, worker 코드는 editable install이므로 일반적�
 process는 새 코드를 읽지 않으므로 backend와 worker는 재시작해야 합니다. MCP client가
 tool catalog를 cache했다면 backend 재시작 후 연결을 다시 초기화하세요.
 
+### Graph projection writer 계약
+
+`services/indexing/edge_projection.py`는 typed row, Workspace·edge-kind 소유
+범위와 reconcile 결과를 공통으로 정의합니다. 모든 입력을 변경 전에 검사하며
+기존 row ID, no-op 상태와 usage의 지원 횟수·최초 관찰 시각을 보존합니다.
+관계 추출, 인용 발행, 읽기 pair 집계와 observation은 각 producer가 소유합니다.
+
+관리자 rebuild producer는 `graph_cache.lock_edge_projection_workspace()`로
+Workspace의 maintenance barrier를 먼저 잡고 edge를 조회·수정합니다. 읽기 usage
+hook은 새 per-call 행의 `viewed + succeeded + focused-read tool`만 처리하며,
+대화 행 잠금으로 같은 대화의 집계를 직렬화합니다. PostgreSQL에서는 maintenance
+barrier를 공유 모드로 대기 없이 확인하고, 보이는 관계의 identity·지원 횟수·가중치·
+provenance가 바뀔 때만 Workspace revision 잠금을 잡아 같은 트랜잭션에서 올립니다.
+최초·마지막 관찰 시각만 바뀌면 revision을 유지하며, 잠금과 revision 갱신은
+Workspace의 일반 `updated_at`을 바꾸지 않습니다.
+
+읽기 집계는 원본 trace를 flush한 뒤 savepoint에서 새 열람 한 건만 처리합니다.
+Cursor 이전 시각의 지연 열람이나 미처리 backlog는 요청 안에서 재생하지 않고,
+원본 기록을 보존한 채 repair job으로 넘겨 worker가 재생·복구합니다. maintenance
+충돌이나 집계 오류도 같은 방식으로 파생 집계를 복구합니다. Reindex는 처음 잠근
+대화 집합에 속한 동일한 원본 스트림으로 pair counter와 cursor·ordinal을 재구축한
+뒤 전체 edge projection을 한 번 반영합니다. 잠금 집합 확정 후 생긴 대화는 이
+집계에서 제외하며, 보존된 원본을 일반 열람·repair 경로에서 처리합니다. 대화별
+재처리도 한 번 가져온 원본으로 변경 전후를 계산합니다. 누적 지원 횟수는 저장 시
+감쇠하지 않으며, 표시 순위와 중요도 계산에서 각각 정한 포화 함수를 적용합니다.
+
+현재 schema head는 release manifest에서 읽습니다. 독립 migration을 통합할 때는
+원본 revision을 유지하고 merge revision으로 연결한 뒤 schema·model 일치를 검사합니다.
+
 ## 설치 방식별 업데이트 방법
 
 | 설치 방식 | 코드 변경 반영 방법 | 재설치 필요 조건 |
@@ -642,9 +671,8 @@ head가 하나여야 하며, 모든 신규 경로가 고정된 core revision
 `efcbcf724889`를 거쳐야 합니다. 패키지 검증기는 이 그래프와 고정 파일의 해시를
 함께 확인합니다.
 
-현재 0.2.0 head는 `1d8f1c08ca36`입니다. `af62c98d0731`에서 갈라진
-Graph revision `9aeab6944f25`와 Inbox 수신자 revision `6f4a9f50c046`을
-병합한 revision이며, 두 기존 revision의 ID와 내용은 유지합니다.
+현재 0.2.0 head는 `7c2bde1490af`입니다. `1d8f1c08ca36`에서 이어지는
+Graph co-access migration이며, 집계와 cursor schema 및 backfill을 함께 적용합니다.
 
 ### Migration 테스트 수 제한
 

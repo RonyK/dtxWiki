@@ -1854,6 +1854,22 @@ class OneShotWorker:
         )
         return {"lint_run_id": str(result.id), "status": result.status}
 
+    def _business_co_access_repair(
+        self, session: Session, job: Job | _ClaimedJob, queue_job: Job | None
+    ) -> dict[str, Any]:
+        from backend.services.co_access import record_co_access_read
+        from backend.services.mcp_focused_read_usage import co_access_write_budget
+
+        with co_access_write_budget(session):
+            record_co_access_read(
+                session,
+                workspace_id=job.workspace_id,
+                chat_session_id=UUID(str(job.target_ref["chat_session_id"])),
+                artifact_id=UUID(str(job.target_ref["artifact_id"])),
+                allow_replay=True,
+            )
+        return {"co_access_repaired": True}
+
     def _business_trail_tick(
         self, session: Session, job: Job | _ClaimedJob, queue_job: Job | None
     ) -> dict[str, Any]:
@@ -1877,6 +1893,7 @@ class OneShotWorker:
             job.workspace_id,
             now=self._datetime_target(job=job, key="scheduled_for"),
             usage_signals_enabled=enabled,
+            refresh_usage_projection=job.trigger_type == "settings",
         )
 
     def _business_librarian_tick(
@@ -2452,6 +2469,10 @@ register(
         completes_in_service=False,
         on_failure=OneShotWorker._lint_failure_markers,
     ),
+)
+register(
+    "co_access_repair",
+    JobHandler(OneShotWorker._business_co_access_repair, completes_in_service=False),
 )
 register(
     "trail_tick",

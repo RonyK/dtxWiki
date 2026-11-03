@@ -12,19 +12,20 @@ Two things live here, and the second is keyed on the first:
 Why the census is keyed on ``workspace`` and not on ``users``
 -------------------------------------------------------------
 An earlier recorded framing of this gap named the three ``-> users`` edges.
-Against the measured census that understates the edges by 20x (60 against 3)
-and the unwritable tables by more than 28x (57 against 2). Measured on this tree:
+Against the measured census that understates the edges by more than 20x
+(61 against 3) and the unwritable tables by 29x (58 against 2).
+Measured on this tree:
 
-- 88 shard-resident tables (87 WORKSPACE_PLANE + 1 MIXED_PLANE), carrying
-  60 FK constraints into control-plane parents. All 60 are single-column.
-- By parent: ``workspace`` 57 edges, ``users`` 3 edges.
-- 57 of those 88 tables are BLOCKED (at least one control-plane FK parent):
-  ``workspace`` blocks 57, ``users`` blocks 2. Only 31 are insertable.
-- 4 of the 60 edges have all-nullable local columns
+- 89 shard-resident tables (88 WORKSPACE_PLANE + 1 MIXED_PLANE), carrying
+  61 FK constraints into control-plane parents. All 61 are single-column.
+- By parent: ``workspace`` 58 edges, ``users`` 3 edges.
+- 58 of those 89 tables are BLOCKED (at least one control-plane FK parent):
+  ``workspace`` blocks 58, ``users`` blocks 2. Only 31 are insertable.
+- 4 of the 61 edges have all-nullable local columns
   (``audit_event.workspace_id``, ``mcp_chat_session.owner_user_id``,
   ``mcp_client.created_by``, ``mcp_client.issued_to_user_id``).
 
-A neighbouring count of 59 for the same schema is not a contradiction: it
+A neighbouring count of 60 for the same schema is not a contradiction: it
 scopes the children to WORKSPACE_PLANE_TABLES only and so omits the MIXED
 child ``audit_event.workspace_id -> workspace``. This census includes it,
 because a manifest-pure shard is expected to carry ``audit_event`` and that
@@ -98,6 +99,7 @@ EXPECTED_WORKSPACE_TO_CONTROL_FK_EDGES: frozenset[str] = frozenset(
         "change_set.workspace_id -> workspace",
         "chunk_embedding.workspace_id -> workspace",
         "client_delegated_task.workspace_id -> workspace",
+        "co_access_pair.workspace_id -> workspace",
         "content_chunk.workspace_id -> workspace",
         "context_citation.workspace_id -> workspace",
         "context_claim.workspace_id -> workspace",
@@ -200,40 +202,42 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     workspace UUIDs and no cross-plane FK: 87 = 86 + 1, insertable 30 = 29 + 1.
     Its recipient lifecycle table also uses bare UUIDs: 88 = 87 + 1 and
     insertable 31 = 30 + 1, without adding a control-plane FK edge.
+    Lifetime co-access adds one workspace-owned aggregate with a workspace
+    FK: 89 resident, 61 edges and 58 blocked; insertable remains 31.
     """
 
     edges = workspace_to_control_fk_edges()
     labels = frozenset(edge.label for edge in edges)
     assert labels == EXPECTED_WORKSPACE_TO_CONTROL_FK_EDGES
     # One label per constraint: no two constraints may collapse into one entry.
-    assert len(edges) == len(labels) == 60
+    assert len(edges) == len(labels) == 61
     assert all(len(edge.columns) == 1 for edge in edges)
     # Reconciles this census with the workspace-plane-only scoping recorded
-    # elsewhere in the tree as 59: the difference is the one MIXED child.
-    assert len([edge for edge in edges if edge.child in WORKSPACE_PLANE_TABLES]) == 59
+    # elsewhere in the tree as 60: the difference is the one MIXED child.
+    assert len([edge for edge in edges if edge.child in WORKSPACE_PLANE_TABLES]) == 60
     assert [edge.label for edge in edges if edge.child in MIXED_PLANE_TABLES] == [
         "audit_event.workspace_id -> workspace"
     ]
 
     resident = WORKSPACE_PLANE_TABLES | MIXED_PLANE_TABLES
-    assert len(resident) == 88
+    assert len(resident) == 89
 
     by_parent = {
         parent: [edge for edge in edges if edge.parent == parent]
         for parent in {edge.parent for edge in edges}
     }
     assert {parent: len(found) for parent, found in by_parent.items()} == {
-        "workspace": 57,
+        "workspace": 58,
         "users": 3,
     }
     assert {
         parent: len({edge.child for edge in found})
         for parent, found in by_parent.items()
-    } == {"workspace": 57, "users": 2}
+    } == {"workspace": 58, "users": 2}
 
     blocked = shard_blocked_tables()
     assert set(blocked) <= resident
-    assert len(blocked) == 57
+    assert len(blocked) == 58
     assert len(resident) - len(blocked) == 31
 
     assert (

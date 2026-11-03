@@ -116,6 +116,7 @@ def test_worker_registry_roster_is_explicit():
         "embed",
         "lint_tick",
         "trail_tick",
+        "co_access_repair",
         "librarian_tick",
         "media_install_reconcile",
         "context_media_orphan_sweep",
