@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Link, useInRouterContext } from "react-router-dom";
 import type { ReferenceView } from "../../shared/api/references";
+import { withContextHeadingFragment } from "../../shared/lib/contextLinks";
 import { kindLabel, referenceKey } from "./documentReferences";
 
 export function ReferencesSection({ references, anchorPrefix = "dtx-reference", checkingLocators }: {
@@ -22,8 +23,8 @@ export function ReferencesSection({ references, anchorPrefix = "dtx-reference", 
             ) : (
               <>
                 {reference.href ? inRouter && reference.href.startsWith("/") && !reference.href.startsWith("//")
-                  ? <Link to={reference.href}>{reference.title ?? t("references.unavailable")}</Link>
-                  : <a href={reference.href}>{reference.title ?? t("references.unavailable")}</a> : <span>{reference.title}</span>}
+                  ? <Link to={withContextHeadingFragment(reference.href)}>{reference.title ?? t("references.unavailable")}</Link>
+                  : <a href={withContextHeadingFragment(reference.href)}>{reference.title ?? t("references.unavailable")}</a> : <span>{reference.title}</span>}
                 <span className="reference-kind">{t(`references.kinds.${kindLabel(reference.target_kind)}`)}</span>
                 {reference.location ? <span className="reference-location">{reference.location}</span> : null}
                 {reference.note ? <span className="reference-note">{reference.note}</span> : null}

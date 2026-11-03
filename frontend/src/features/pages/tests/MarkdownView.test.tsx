@@ -31,14 +31,14 @@ describe("MarkdownView", () => {
   });
 
   it("connects numbered in-text citations to one References item and back to each use", () => {
-    const href = "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222";
+    const href = "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222#details";
     const token = `@cite{${href}}`;
-    const body = `😀 &amp; ==${token}==. [[notes|alias ${token}]] Again ${token}. Escaped \\${token} and code \`${token}\`. Math $${token}$ and <span>${token}</span>.`;
+    const body = `## Details\n\n😀 &amp; ==${token}==. [[notes|alias ${token}]] Again ${token}. Escaped \\${token} and code \`${token}\`. Math $${token}$ and <span>${token}</span>.`;
     // Server-shaped Python code-point spans from the actual authored source;
     // the wiki alias, code, math and HTML examples are not citation uses.
     const starts = [body.indexOf(token), body.indexOf(`Again ${token}`) + "Again ".length];
     const occurrences = starts.map((start) => ({ href, start: Array.from(body.slice(0, start)).length, end: Array.from(body.slice(0, start + token.length)).length }));
-    render(<MemoryRouter><MarkdownView body={body} references={[{
+    const { rerender } = render(<MemoryRouter><MarkdownView body={body} references={[{
       target_kind: "context_page", target_id: "22222222-2222-4222-8222-222222222222", number: 1,
       href, title: "Research notes", state: "available", inline_count: 2, metadata_present: true,
       location: "Plan / Research", note: null,
@@ -49,10 +49,18 @@ describe("MarkdownView", () => {
     expect(citations[0]).toHaveAttribute("title", "Research notes · Context");
     const destination = citations[0].getAttribute("href")!;
     expect(document.getElementById(destination.slice(1))).toHaveTextContent("Research notes");
-    expect(screen.getByRole("link", { name: "Research notes" })).toHaveAttribute("href", href);
+    expect(screen.getByRole("link", { name: "Research notes" })).toHaveAttribute("href", href.replace("#details", "#user-content-details"));
     const backs = screen.getAllByRole("link", { name: /Back to citation 1/ });
     expect(backs).toHaveLength(2);
     expect(document.getElementById(backs[1].getAttribute("href")!.slice(1))).toBe(citations[1]);
+    expect(screen.getByRole("heading", { name: "Details" })).toHaveAttribute("id", "user-content-details");
+    const publicHref = "/w/default/pages/research-notes#details";
+    rerender(<MarkdownView body={body} wikilinkMode="plain" references={[{
+      target_kind: "context_page", target_id: "22222222-2222-4222-8222-222222222222", number: 1,
+      href: publicHref, title: "Public notes", state: "available", inline_count: 2,
+      metadata_present: true, occurrences,
+    }]} />);
+    expect(screen.getByRole("link", { name: "Public notes" })).toHaveAttribute("href", "/w/default/pages/research-notes#user-content-details");
   });
 
   beforeEach(() => {

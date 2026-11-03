@@ -115,6 +115,22 @@ export function normalizeContextHeading(value: string): string {
     .slice(0, 80);
 }
 
+// The shared anchor namespace. rehype-sanitize clobber-prefixes every id/name
+// with this so user-authored markup can never claim (clobber) the app's own
+// anchor/DOM namespace; rehypePrefixFragmentHrefs keeps same-page fragment
+// links pointing at the prefixed ids.
+export const CONTEXT_HEADING_ID_PREFIX = "user-content-";
+
+/** Match heading IDs produced by the page renderer's sanitizer. */
+export function withContextHeadingFragment(href: string): string {
+  const index = href.indexOf("#");
+  if (
+    index < 0 || index === href.length - 1 ||
+    href.slice(index + 1).startsWith(CONTEXT_HEADING_ID_PREFIX)
+  ) return href;
+  return `${href.slice(0, index + 1)}${CONTEXT_HEADING_ID_PREFIX}${href.slice(index + 1)}`;
+}
+
 function fragmentSuffix(fragment?: string | null): string {
   return fragment ? `#${fragment.replace(/^#/, "")}` : "";
 }

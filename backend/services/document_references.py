@@ -1077,6 +1077,45 @@ def publish_document_references(
             # A marker alone whose document is missing or hidden from the
             # publisher stays text, exactly as an unresolvable address does.
             del entries[key]
+    for order, entry in enumerate(entries.values()):
+        key = entry["ref"].key
+        if key in deleted:
+            stone, previous = deleted[key]
+            snapshot = {
+                **previous,
+                "registration_origin": "published",
+                "metadata_present": entry["metadata_present"],
+                "inline_count": len(entry["occurrences"]),
+                "legacy_count": entry["legacy_count"],
+                "occurrences": entry["occurrences"],
+                "sort_order": order,
+                "note": entry["note"],
+            }
+            # Deleted targets cannot have FK-backed publication rows. Replace
+            # only this version's snapshot; ancestor evidence stays immutable.
+            stone.citations = [
+                value
+                for value in stone.citations or []
+                if not (
+                    value.get("citation_type") == "document_reference"
+                    and value.get("target_id") == str(version.id)
+                )
+            ] + [snapshot]
+            deleted[key] = stone, snapshot
+            continue
+        session.add(
+            ContextPublishedCitation(
+                workspace_id=version.workspace_id,
+                source_version_id=version.id,
+                **target_columns(entry["ref"]),
+                sort_order=order,
+                metadata_present=entry["metadata_present"],
+                inline_count=len(entry["occurrences"]),
+                legacy_count=entry["legacy_count"],
+                occurrences=entry["occurrences"],
+                note=entry["note"],
+            )
+        )
     fingerprint = hashlib.sha256(
         (
             (version.body_md or "")
@@ -1093,22 +1132,6 @@ def publish_document_references(
             format_revision=1,
         )
     )
-    for order, entry in enumerate(entries.values()):
-        if entry["ref"].key in deleted:
-            continue
-        session.add(
-            ContextPublishedCitation(
-                workspace_id=version.workspace_id,
-                source_version_id=version.id,
-                **target_columns(entry["ref"]),
-                sort_order=order,
-                metadata_present=entry["metadata_present"],
-                inline_count=len(entry["occurrences"]),
-                legacy_count=entry["legacy_count"],
-                occurrences=entry["occurrences"],
-                note=entry["note"],
-            )
-        )
     session.flush()
 
 

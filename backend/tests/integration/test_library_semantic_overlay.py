@@ -592,11 +592,14 @@ def test_library_delete_breaks_overlay_pointer_and_removes_owned_row(
         )
         session.add(page)
         session.flush()
+        deleted_href = f"/workspaces/{workspace_id}/library/items/{item.id}"
+        token = f"@cite{{{deleted_href}}}"
+        owner_body = f"# Source reader\n\n{token}"
         owner = ContextPageVersion(
             workspace_id=workspace_id,
             page_id=page.id,
             version_no=1,
-            body_md="# Source reader",
+            body_md=owner_body,
             content_hash="e" * 64,
             actor_type="human",
             created_by_actor_kind="human",
@@ -619,6 +622,14 @@ def test_library_delete_breaks_overlay_pointer_and_removes_owned_row(
             target_kind="library_item",
             library_item_id=item.id,
             metadata_present=True,
+            inline_count=1,
+            occurrences=[
+                {
+                    "href": deleted_href,
+                    "start": owner_body.index(token),
+                    "end": owner_body.index(token) + len(token),
+                }
+            ],
         )
         session.add_all(
             [
@@ -659,3 +670,62 @@ def test_library_delete_breaks_overlay_pointer_and_removes_owned_row(
             "published",
         }
         assert all(entry["target_id"] == str(owner.id) for entry in tombstone.citations)
+
+        # Reuse this deletion lifecycle to prove that copy-on-edit plus final
+        # publication updates only the new version's deleted-source snapshot.
+        # Keep a live citation first to detect stale numbering as well as spans.
+        from backend.repositories.document_reference import copy_document_references
+        from backend.services.document_references import (
+            publish_document_references,
+            read_document_references,
+        )
+
+        original_snapshots = list(tombstone.citations)
+        live_token = f"@cite{{/p/{workspace_id}/{page.id}}}"
+        body = f"# Moved 😀\n\n{live_token}\n\nShifted {token} and {token}"
+        editing = ContextPageVersion(
+            workspace_id=workspace_id,
+            page_id=page.id,
+            parent_version_id=owner.id,
+            version_no=2,
+            body_md=body,
+            content_hash="a" * 64,
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id="reader",
+            version_status="editing",
+        )
+        session.add(editing)
+        session.flush()
+        copy_document_references(session, source=owner, target=editing)
+        session.flush()
+        publish_document_references(session, version=editing, actor=actor)
+        owner.version_status = "superseded_snapshot"
+        session.flush()
+        editing.version_status = "published_snapshot"
+        page.current_version_id = page.current_published_version_id = editing.id
+        session.flush()
+        session.expire_all()
+        references = read_document_references(session, version=editing, actor=actor)
+        deleted = next(value for value in references if value.state == "deleted")
+        starts = [body.index(token), body.rindex(token)]
+        assert deleted.number == 2 and deleted.inline_count == 2
+        assert [(value.start, value.end) for value in deleted.occurrences] == [
+            (start, start + len(token)) for start in starts
+        ]
+        current = [
+            value
+            for value in tombstone.citations
+            if value["target_id"] == str(editing.id)
+        ]
+        assert len(current) == 1
+        assert current[0]["registration_origin"] == "published"
+        assert current[0]["inline_count"] == 2 and current[0]["sort_order"] == 1
+        assert [
+            value
+            for value in tombstone.citations
+            if value["target_id"] == str(owner.id)
+        ] == original_snapshots
+        snapshot = list(tombstone.citations)
+        publish_document_references(session, version=editing, actor=actor)
+        assert tombstone.citations == snapshot

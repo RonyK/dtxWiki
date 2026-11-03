@@ -57,7 +57,7 @@ import { useTranslation } from "react-i18next";
 import "highlight.js/styles/github-dark.css";
 import "katex/dist/katex.min.css";
 
-import { classifyContextLink, formatContextPageUrl, isContextId, normalizeContextHeading, type ContextLinkTarget } from "../../shared/lib/contextLinks";
+import { CONTEXT_HEADING_ID_PREFIX as CLOBBER_PREFIX, withContextHeadingFragment, classifyContextLink, formatContextPageUrl, isContextId, normalizeContextHeading, type ContextLinkTarget } from "../../shared/lib/contextLinks";
 import { canPreservePageHref } from "../../shared/lib/customPageHref";
 import { createReferenceReturnState } from "../../shared/lib/navigationRecovery";
 import { hasConflictingWorkspaceQuery, workspacePath } from "../../shared/lib/workspaceRoutes";
@@ -190,11 +190,6 @@ const MERMAID_FONT_FAMILY =
 const MERMAID_FONT_SIZE = "13px";
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const SVG_NUMBER_PATTERN = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
-// The shared anchor namespace. rehype-sanitize clobber-prefixes every id/name
-// with this so user-authored markup can never claim (clobber) the app's own
-// anchor/DOM namespace; rehypePrefixFragmentHrefs keeps same-page fragment
-// links pointing at the prefixed ids.
-const CLOBBER_PREFIX = "user-content-";
 const TRUSTED_REFERENCE_NODE = "dtxTrustedReference";
 const TRUSTED_INLINE_TAG_NODE = "dtxTrustedInlineTag";
 // remark-rehype would otherwise prefix GFM footnote ids itself; emit them raw
@@ -616,11 +611,6 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
   // Markdown-authored locators of the current tree that the server may
   // resolve, as the same strings it extracts from a body.
   const linksToCheck = new Set<string>();
-  const withFragmentPrefix = (href: string) => {
-    const index = href.indexOf("#");
-    if (index < 0 || index === href.length - 1 || href.slice(index + 1).startsWith(CLOBBER_PREFIX)) return href;
-    return `${href.slice(0, index + 1)}${CLOBBER_PREFIX}${href.slice(index + 1)}`;
-  };
   function resolveAnchor(child: HastElement, reference: MarkdownAuthoredReference | null): HastNode[] {
       const props = child.properties;
       // Raw HTML may claim these marker names, but it never passes through the
@@ -664,7 +654,7 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
       };
       if (options.confirmedOnly) {
         if (!target || target.state !== "ok" || !target.href || !target.href.startsWith("/") || target.href.startsWith("//")) return unavailable();
-        props.href = withFragmentPrefix(target.href);
+        props.href = withContextHeadingFragment(target.href);
         return [child];
       }
       const classification = classifyContextLink(locator, {
@@ -696,7 +686,7 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
         : classification.stableUrl ?? (wikilink && legacyPageId && href !== "#" ? href : null);
       if (options.publicReader && !resolvedHref) return unavailable();
       if (resolvedHref) {
-        props.href = withFragmentPrefix(resolvedHref);
+        props.href = withContextHeadingFragment(resolvedHref);
         if (wikilink) props.className = ["wikilink"];
         const pageId = target?.target_page_id ?? classification.pageId ?? legacyPageId;
         if (!options.publicReader && pageId) props.dataInternalPageId = pageId;
