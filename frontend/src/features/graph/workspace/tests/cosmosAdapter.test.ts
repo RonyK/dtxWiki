@@ -540,7 +540,8 @@ describe("default 2K official CPU Worker with Cosmos GPU drawing", () => {
   });
 
   it("uploads CPU frames without GPU readback, topology replacement or user-camera movement", async () => {
-    const { adapter, container } = await mountCpu(columns(), { initialViewport: { zoom: 2, pan: { x: 50, y: 60 } } });
+    const { adapter, container } = await mountCpu(columns(), { initialViewport: { zoom: 2, pan: { x: 50, y: 60 } },
+      relationLabel: () => "Link" });
     const frame = Float32Array.from([700, 800, 900, 1000, 1100, 1200]);
     graph.getPointPositions.mockClear(); graph.setLinks.mockClear(); graph.fitView.mockClear();
     graph.setZoomTransformByPointPositions.mockClear(); graph.setZoomLevel.mockClear();
@@ -551,6 +552,9 @@ describe("default 2K official CPU Worker with Cosmos GPU drawing", () => {
     expect(graph.fitView).not.toHaveBeenCalled(); expect(graph.setZoomTransformByPointPositions).not.toHaveBeenCalled();
     expect(graph.setZoomLevel).not.toHaveBeenCalled(); expect(container.dataset.mapLayoutTicks).toBe("1");
     expect(adapter.captureCoordinates()!.positions).toEqual(frame);
+    // A native pick resolves asynchronously and can name a link with no rows in this frame.
+    expect(() => createGraph.mock.calls.at(-1)![1].onLinkMouseOver?.(99)).not.toThrow();
+    expect(container.querySelector<HTMLElement>(".graph-hover-chip")!.hidden).toBe(true);
   });
 
   const contactProgress: WorkspaceForceAtlas2Progress = Object.freeze({ profile: "gephi-lite-2k-v1",
@@ -1614,15 +1618,15 @@ describe("Cosmos Map presentation-only search", () => {
     await mount(input);
     const [container, config] = createGraph.mock.calls[0];
     vi.spyOn(container, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 734, 608));
+    Object.defineProperties(container, { clientWidth: { value: 734 }, clientHeight: { value: 608 } });
     // The initial refresh just consumed the six-Hz position budget.
     now += 1;
     graph.getTrackedPointPositionsMap.mockClear(); graph.getPointPositions.mockClear();
     config.onPointMouseOver?.(9_999, [250, 300], undefined, false, false);
-    const label = container.querySelector<HTMLElement>('[data-node-id="node:9999"]')!;
-    expect(label.dataset.fullTitle).toBe("true");
-    expect(label.style.display).toBe("block");
-    expect(label.dataset.pointX).toBe("250");
-    expect(label.dataset.pointY).toBe("300");
+    const chip = container.querySelector<HTMLElement>(".graph-hover-chip")!;
+    expect(chip.textContent).toBe(input.nodeLabels[9_999]);
+    expect(chip.dataset.hoverNodeId).toBe("node:9999");
+    expect(container.querySelector('[data-node-id="node:9999"]')).toBeNull();
     expect(graph.getTrackedPointPositionsMap).not.toHaveBeenCalled();
     expect(graph.getPointPositions).not.toHaveBeenCalled();
     expect(container.querySelectorAll("[data-workspace-map-labels] span")).toHaveLength(40);
@@ -1782,13 +1786,12 @@ describe("Cosmos Map presentation-only search", () => {
       graph.fitView, graph.setZoomLevel, graph.start, graph.stop, community.compute]) expect(method).not.toHaveBeenCalled();
   });
 
-  it.each(["hover", "select", "focus", "edge-focus"] as const)(
+  it.each(["select", "focus", "edge-focus"] as const)(
     "reserves direct endpoint labels beyond the global top40 for %s without losing context or mutating the scene",
     async interaction => {
       const input = sizedColumns(60, 1);
       input.edgeSources[0] = 58; input.edgeTargets[0] = 59;
       const adapter = await mount(input);
-      const config = createGraph.mock.calls[0][1];
       const currentIds = () => [...document.querySelectorAll<HTMLElement>("[data-workspace-map-labels] span")]
         .map(label => label.dataset.nodeId).filter(Boolean);
       const normal = currentIds();
@@ -1796,13 +1799,11 @@ describe("Cosmos Map presentation-only search", () => {
       const positions = graph.getPointPositions();
       const viewport = adapter.getViewport();
       const activate = () => {
-        if (interaction === "hover") config.onPointMouseOver?.(58, [0, 0], undefined, false, false);
-        else if (interaction === "select") adapter.select("node:58");
+        if (interaction === "select") adapter.select("node:58");
         else adapter.focus(interaction === "edge-focus" ? "edge:0" : "node:58");
       };
       const clear = () => {
-        if (interaction === "hover") config.onPointMouseOut?.(new MouseEvent("mouseout"));
-        else if (interaction === "select") adapter.select(null);
+        if (interaction === "select") adapter.select(null);
         else adapter.focus(null);
       };
       vi.clearAllMocks();
@@ -1901,7 +1902,7 @@ describe("Cosmos Map presentation-only search", () => {
     }
   });
 
-  it.each([390, 734])("reserves hover, then focus, then selection full titles without overprinting at %ipx", async width => {
+  it.each([390, 734])("preserves focus and selection full titles during hover without overprinting at %ipx", async width => {
     let now = 1_000;
     vi.spyOn(performance, "now").mockImplementation(() => now);
     const input = columns(); input.nodeLabels = input.nodeLabels.map((title) => `${title} ${"complete long title ".repeat(8)}`);
@@ -1923,8 +1924,8 @@ describe("Cosmos Map presentation-only search", () => {
     now += 200; adapter.select("a"); now += 200; adapter.focus("b"); now += 200;
     config.onPointMouseOver?.(2, [width - 12, 470], undefined, false, false);
     const titles = [...container.querySelectorAll<HTMLElement>('[data-full-title="true"]')];
-    expect(titles.map(element => element.dataset.nodeId)).toEqual(["c", "b", "a"]);
-    expect(titles.map(element => element.dataset.labelPriority)).toEqual(["active", "explicit", "explicit"]);
+    expect(titles.map(element => element.dataset.nodeId)).toEqual(["b", "a"]);
+    expect(titles.map(element => element.dataset.labelPriority)).toEqual(["active", "explicit"]);
     const rectangles = titles.map(element => {
       expect(element.style.display).toBe("block"); expect(element.dataset.placementReason).toBe("placed");
       expect(element.textContent).toBe(input.nodeLabels[input.nodeIds.indexOf(element.dataset.nodeId!)]);
@@ -1938,7 +1939,7 @@ describe("Cosmos Map presentation-only search", () => {
         || rectangles[index].x + Math.min(374, width - 16) + 5 <= other.x
         || other.x + Math.min(374, width - 16) + 5 <= rectangles[index].x).toBe(true);
     }
-    expect(titles[0].dataset.pointY).toBe("470");
+    expect(titles[0].dataset.pointY).toBe("455");
     expect(container.querySelectorAll("[data-workspace-map-labels] span")).toHaveLength(40);
     expect(graph.getPointPositions()).toEqual(positions); expect(adapter.getViewport()).toEqual(viewport);
     for (const mutation of [graph.setPointPositions, graph.setLinks, graph.setPinnedPoints,
@@ -2935,18 +2936,20 @@ describe("Cosmos Map interaction contracts", () => {
       graph.stop, graph.setPointClusters, graph.setClusterPositions, community.compute]) expect(method).not.toHaveBeenCalled();
   });
 
-  it.each([false, true])("isolates the 2K pointer-hover incident star over search matches (forced colors: %s)", async (forcedColors) => {
+  it.each([false, true])("preserves search and selection during node and edge hover (forced colors: %s)", async (forcedColors) => {
+    graph.getTrackedPointPositionsMap.mockReturnValue(new Map([[0, [0, 0]], [1, [100, 100]], [2, [200, 200]]]));
     const input = sizedColumns(2_000, 3);
     // A's two neighbors also link to one another. Searching B/C highlights
-    // that third relation, but hovering A must show only A's direct star.
+    // that third relation; hovering A must retain the same search presentation.
     input.edgeIds = ["ab", "ac", "bc"];
     input.edgeSources = Uint32Array.from([0, 0, 1]);
     input.edgeTargets = Uint32Array.from([1, 2, 2]);
     const container = document.createElement("div"); document.body.appendChild(container);
     const adapter = createWorkspaceCosmosAdapter(container, input, {
-      forcedColors, reducedMotion: true,
+      forcedColors, reducedMotion: true, relationLabel: (kind) => kind === 1 ? "Citation" : "Link",
       callbacks: { onHover: vi.fn(), onSelect: vi.fn() },
     });
+    Object.defineProperties(container, { clientWidth: { value: 734 }, clientHeight: { value: 608 } });
     adapters.push(adapter); await adapter.whenSettled();
     const config = createGraph.mock.calls[0][1];
     adapter.setSearchMatches(new Set(["node:1", "node:2"]));
@@ -2959,23 +2962,24 @@ describe("Cosmos Map interaction contracts", () => {
     const strength = graph.setLinkStrength.mock.lastCall![0], savedStrength = strength.slice();
     vi.clearAllMocks();
 
+    const labels = container.querySelector("[data-workspace-map-labels]")!.innerHTML;
     config.onPointMouseOver?.(0, [0, 0], undefined, false, false);
-    expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({
-      highlightedPointIndices: [1, 2, 0], highlightedLinkIndices: [0, 1],
-      pointGreyoutOpacity: .3, linkGreyoutOpacity: .08,
-    }));
+    expect(graph.setConfigPartial).not.toHaveBeenCalled();
+    expect(container.querySelector("[data-workspace-map-labels]")!.innerHTML).toBe(labels);
+    config.onPointMouseOut?.(undefined);
+    config.onLinkMouseOver?.(2);
+    const chip = container.querySelector<HTMLElement>(".graph-hover-chip")!;
+    expect(chip.hidden).toBe(false);
+    expect(chip.textContent).toBe("Link");
+    expect(chip.dataset.hoverEdgeId).toBe("bc");
+    config.onLinkMouseOut?.(undefined);
+    expect(graph.setConfigPartial).not.toHaveBeenCalled();
+    expect(graph.setLinkColors).not.toHaveBeenCalled();
     expect(graph.getPointPositions()).toEqual(positions);
     expect(adapter.getViewport()).toEqual(viewport);
-    if (!forcedColors) {
-      // Hover is a draw policy, not deletion of the BC relation's input.
-      expect(graph.setLinkColors.mock.lastCall![0]).toHaveLength(12);
-      expect(graph.setLinkColors.mock.lastCall![0][11]).toBeGreaterThan(0);
-    }
 
     config.onPointMouseOut?.(undefined);
-    expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({
-      highlightedPointIndices: [1, 2], highlightedLinkIndices: [2], linkGreyoutOpacity: .08,
-    }));
+    expect(graph.setConfigPartial).not.toHaveBeenCalled();
     expect(graph.getPointPositions()).toEqual(positions);
     expect(adapter.getViewport()).toEqual(viewport);
     expect(input.edgeWeights).toEqual(Float64Array.from([1, 1, 1]));
@@ -2986,15 +2990,21 @@ describe("Cosmos Map interaction contracts", () => {
       graph.setPointClusters, graph.setClusterPositions, graph.fitView, graph.setZoomLevel,
       graph.setZoomTransformByPointPositions, graph.start, graph.stop, graph.pause,
       graph.unpause, community.compute]) expect(method).not.toHaveBeenCalled();
+    adapter.select("node:0");
+    const selection = graph.setConfigPartial.mock.lastCall;
+    graph.setConfigPartial.mockClear();
+    config.onPointMouseOver?.(2, [0, 0], undefined, false, false);
+    expect(graph.setConfigPartial).not.toHaveBeenCalled();
+    expect(selection?.[0]).toMatchObject({ highlightedPointIndices: [1, 2, 0], highlightedLinkIndices: [2, 0, 1] });
   });
 
-  it.each(["light", "dark"])("uses a contrasting %s focus/hover ring instead of native white", async (mode) => {
+  it.each(["light", "dark"])("uses a contrasting %s focus ring and disables hover rings", async (mode) => {
     document.documentElement.setAttribute("data-theme", mode);
     try {
       await mount();
       expect(createGraph.mock.calls[0][1]).toMatchObject({
         focusedPointRingColor: mode === "dark" ? "#f8fafc" : "#0f172a",
-        hoveredPointRingColor: mode === "dark" ? "#f8fafc" : "#0f172a", renderHoveredPointRing: true,
+        hoveredPointRingColor: mode === "dark" ? "#f8fafc" : "#0f172a", renderHoveredPointRing: false,
       });
     } finally { document.documentElement.removeAttribute("data-theme"); }
   });
@@ -3356,8 +3366,11 @@ describe("Cosmos Map interaction contracts", () => {
     expect(label.textContent).toBe(input.nodeLabels[0]);
     adapter.focus(null);
     expect(label.textContent).toBe(`${input.nodeLabels[0].slice(0, 24)}…`);
+    Object.defineProperties(createGraph.mock.calls[0][0], { clientWidth: { value: 734 }, clientHeight: { value: 608 } });
     createGraph.mock.calls[0][1].onPointMouseOver?.(0, [0, 0], new MouseEvent("mousemove"), false, false);
-    expect(label.textContent).toBe(input.nodeLabels[0]);
+    expect(label.textContent).toBe(`${input.nodeLabels[0].slice(0, 24)}…`);
+    expect(document.querySelector<HTMLElement>(".graph-hover-chip")!.hidden).toBe(false);
+    expect(document.querySelector(".graph-hover-chip")!.textContent).toBe(input.nodeLabels[0]);
   });
 
   it.each([
@@ -3376,7 +3389,7 @@ describe("Cosmos Map interaction contracts", () => {
     expect(label.getAttribute("data-full-title")).toBe("false");
   });
 
-  it("keeps the complete Unicode title for selected, focused and hovered nodes", async () => {
+  it("keeps complete Unicode titles for selection and focus and a separate hover chip", async () => {
     const input = columns();
     input.nodeLabels[0] = `${"A".repeat(23)}😀Z`;
     const adapter = await mount(input);
@@ -3387,7 +3400,6 @@ describe("Cosmos Map interaction contracts", () => {
     for (const activate of [
       () => adapter.select("a"),
       () => adapter.focus("a"),
-      () => config.onPointMouseOver?.(0, [0, 0], new MouseEvent("mousemove"), false, false),
     ]) {
       activate();
       expect(label.textContent).toBe(input.nodeLabels[0]);
@@ -3400,6 +3412,11 @@ describe("Cosmos Map interaction contracts", () => {
       expect(label.getAttribute("title")).toBe(input.nodeLabels[0]);
       expect(label.getAttribute("data-full-title")).toBe("false");
     }
+    Object.defineProperties(createGraph.mock.calls[0][0], { clientWidth: { value: 734 }, clientHeight: { value: 608 } });
+    config.onPointMouseOver?.(0, [0, 0], undefined, false, false);
+    expect(label.textContent).toBe(shortened);
+    expect(document.querySelector<HTMLElement>(".graph-hover-chip")!.hidden).toBe(false);
+    expect(document.querySelector(".graph-hover-chip")!.textContent).toBe(input.nodeLabels[0]);
   });
 
   it("emphasizes an edge's endpoints independently and restores the selected node star on blur", async () => {
@@ -3444,7 +3461,7 @@ describe("Cosmos Map interaction contracts", () => {
     }));
   });
 
-  it.each(["c", "bc"])("replaces stationary-pointer hover with newer keyboard focus %s", async (id) => {
+  it.each(["c", "bc"])("preserves keyboard focus during stationary-pointer hover %s", async (id) => {
     const onHover = vi.fn();
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -3458,7 +3475,7 @@ describe("Cosmos Map interaction contracts", () => {
     config.onPointMouseOver?.(0, [0, 0], undefined, false, false);
     expect(onHover).toHaveBeenLastCalledWith("a");
     expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({
-      highlightedPointIndices: [0, 1], highlightedLinkIndices: [0],
+      highlightedPointIndices: undefined, highlightedLinkIndices: undefined,
     }));
     graph.setPointPositions.mockClear();
     graph.setLinks.mockClear();
@@ -3470,12 +3487,12 @@ describe("Cosmos Map interaction contracts", () => {
       highlightedPointIndices: id === "c" ? [2, 1] : [1, 2],
       highlightedLinkIndices: [1],
     }));
-    expect(onHover).toHaveBeenLastCalledWith(null);
-    // A later pointer interaction wins, and blur must not erase that hover.
+    expect(onHover).toHaveBeenLastCalledWith("a");
+    // Pointer motion changes only the chip; blur clears keyboard emphasis.
     config.onPointMouseOver?.(0, [0, 0], undefined, false, false);
     adapter.focus(null);
     expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({
-      highlightedPointIndices: [0, 1], highlightedLinkIndices: [0],
+      highlightedPointIndices: undefined, highlightedLinkIndices: undefined,
     }));
     expect(onHover).toHaveBeenLastCalledWith("a");
     config.onPointMouseOut?.(undefined);

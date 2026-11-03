@@ -57,10 +57,15 @@ describe("bounded asynchronous native label positions", () => {
     h.controller.destroy();
   });
 
-  it("maps the issued index snapshot, not a subsequently mutated caller array", () => {
-    const h = harness(), indices = [7, 2]; h.setFrame({ ...h.frame!, indices });
-    h.controller.request(); indices.reverse(); h.complete(); tick();
-    expect(h.onPositions.mock.calls[0][0].get(7)).toEqual([10, 20]); h.controller.destroy();
+  it("maps a full-capacity issued index snapshot, not a subsequently mutated caller array", () => {
+    // 40 labels plus a hovered relation's two unlabelled endpoints: the full limit is accepted.
+    const h = harness(), indices = Array.from({ length: 40 + 2 }, (_, slot) => 100 + slot);
+    h.setFrame({ ...h.frame!, width: 7, height: 7, indices });
+    expect(h.controller.request()).toBe(true); indices.reverse();
+    h.complete(Float32Array.from({ length: 7 * 7 * 4 }, (_, offset) => offset % 4 < 2 ? Math.floor(offset / 4) * 10 + offset % 4 : 1));
+    tick(); const positions = h.onPositions.mock.calls[0][0];
+    expect(positions.get(100)).toEqual([0, 1]); expect(positions.get(141)).toEqual([410, 411]);
+    expect(positions.size).toBe(42); expect(h.onError).not.toHaveBeenCalled(); h.controller.destroy();
   });
 
   it("fences callbacks retained after invalidation and allows a fresh paused snapshot", () => {
@@ -97,7 +102,7 @@ describe("bounded asynchronous native label positions", () => {
   });
 
   it.each([
-    { indices: Array.from({ length: 41 }, (_, index) => index), width: 7, height: 7 },
+    { indices: Array.from({ length: 43 }, (_, index) => index), width: 7, height: 7 },
     { indices: [1, 1] }, { indices: [-1] }, { indices: [NaN] },
     { width: 9, height: 8 }, { width: 1, height: 1 }, { width: 1.5 },
   ])("fails once on an invalid snapshot: %j", invalid => {

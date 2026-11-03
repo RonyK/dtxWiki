@@ -765,6 +765,7 @@ body[data-focus-mode="true"] .main-surface {
 }
 
 .graph-canvas {
+  isolation: isolate;
   position: absolute;
   inset: 0;
   min-width: 0;
@@ -6603,7 +6604,7 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 .graph-frame .graph-local-stage { overflow: hidden; }
 .graph-view .graph-frame .graph-canvas-frame { height: 560px; min-height: 560px; border: 0; border-radius: 0; }
 .graph-view .graph-frame-history .graph-canvas-frame { height: 440px; min-height: 440px; }
-.graph-canvas-context { position: absolute; z-index: 2; left: 10px; top: 10px; display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: 7px; max-width: calc(100% - 140px); pointer-events: none; }
+.graph-canvas-context { position: absolute; z-index: 1; left: 10px; top: 10px; display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: 7px; max-width: calc(100% - 140px); pointer-events: none; }
 .graph-seed-pill, .graph-time-pill { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 5px 10px; border: 1px solid var(--border); border-radius: 20px; background: var(--surface); box-shadow: 0 1px 2px #0001; color: var(--ink-muted); font-size: 11px; }
 .graph-seed-pill strong { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .graph-seed-pill { white-space: nowrap; }
@@ -6724,3 +6725,26 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 }
 .graph-frame:fullscreen .graph-local-stage .graph-details { inset: 60px 12px auto auto; width: min(300px, calc(100% - 24px)); max-height: calc(100% - 72px); border-radius: 10px; }
 .graph-frame:fullscreen .graph-details-sheet-toggle { display: none; }
+
+.graph-hover-chip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  pointer-events: none;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 2px #0001;
+  font: 600 11px/16px system-ui, sans-serif;
+}
+.graph-hover-chip[hidden] { display: none; }
+@media (forced-colors: active) {
+  .graph-hover-chip { background: Canvas; color: CanvasText; border-color: CanvasText; }
+}

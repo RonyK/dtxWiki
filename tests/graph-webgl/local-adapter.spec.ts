@@ -214,7 +214,7 @@ async function mountFixture(page: Page, width = 860, viewportWidth = width): Pro
   await page.setContent(`
     <style>
       html, body { margin: 0; }
-      #graph { width: ${width}px; height: 640px; background: #fff; color: #0f172a;
+      #graph { --surface: #fff; --ink: #0f172a; --border: #d1d5db; width: ${width}px; height: 640px; background: #fff; color: #0f172a;
         --graph-surface: #fff; --graph-node-context: #7c3aed;
         --graph-node-library: #0f9f8f; --graph-edge-link: #e11d48;
         --graph-edge-citation: #16a34a; --graph-edge-co-access: #2563eb;
@@ -222,6 +222,7 @@ async function mountFixture(page: Page, width = 860, viewportWidth = width): Pro
     </style>
     <div id="graph" aria-label="Local Graph renderer fixture"></div>
   `);
+  await page.addStyleTag({ path: path.resolve("frontend/src/styles/03-editor.css") });
   await page.addScriptTag({ content: bundle });
   await expect.poll(() => page.locator("#graph canvas").count()).toBeGreaterThan(2);
   await page.evaluate(() => window.__graphLocalFixture.stop());
@@ -447,7 +448,7 @@ test("Local selecting an unlinked document keeps every original relationship pai
   expect(errors).toEqual([]);
 });
 
-test("Local DOM keyboard emphasis replaces stationary hover and preserves later pointer hover", async ({ page }, testInfo) => {
+test("Local DOM keyboard emphasis and selection stay unchanged by pointer hover", async ({ page }, testInfo) => {
   const errors = await mountFixture(page);
   await testInfo.attach("local-native-initial-state.json", {
     body: JSON.stringify(await page.evaluate(() => ({
@@ -484,7 +485,7 @@ test("Local DOM keyboard emphasis replaces stationary hover and preserves later 
   await page.mouse.move(seed.x, seed.y);
   await expect.poll(() => page.evaluate(() => window.__graphLocalFixture.events.filter((event) => event.type === "hover").at(-1)?.id)).toBe("context:seed");
   await page.locator("#focus-node").focus();
-  await expect.poll(() => page.evaluate(() => window.__graphLocalFixture.events.filter((event) => event.type === "hover").at(-1)?.id)).toBeNull();
+  await expect.poll(() => page.evaluate(() => window.__graphLocalFixture.events.filter((event) => event.type === "hover").at(-1)?.id)).toBe("context:seed");
   const nodeFocused = await nodePixels(page, "context:unrelated");
   expect(nodeFocused.painted).toBeGreaterThan(5);
   expect(nodeFocused.brightness).toBeLessThan(unrelated.brightness - 30);
@@ -500,7 +501,7 @@ test("Local DOM keyboard emphasis replaces stationary hover and preserves later 
   await expect.poll(() => page.evaluate(() => window.__graphLocalFixture.events.filter((event) => event.type === "hover").at(-1)?.id)).toBe("context:unrelated");
   await page.keyboard.press("Tab");
   await expect(page.locator("#outside-focus")).toBeFocused();
-  expect((await nodePixels(page, "context:unrelated")).brightness).toBeLessThan(edgeFocused.brightness - 30);
+  expect(Math.abs((await nodePixels(page, "context:unrelated")).brightness - edgeFocused.brightness)).toBeLessThan(5);
   await page.mouse.move(20, 500);
   await expect.poll(() => page.evaluate(() => window.__graphLocalFixture.events.filter((event) => event.type === "hover").at(-1)?.id)).toBeNull();
   expect(Math.abs((await nodePixels(page, "context:unrelated")).brightness - unrelated.brightness)).toBeLessThan(5);

@@ -442,7 +442,7 @@ test("native 2k Cosmos pointer drag saves its canonical position through Resume,
   }) });
 });
 
-test("native 2k hover names its direct neighbors without moving the graph", async ({ page }, testInfo) => {
+test("native 2k hover shows a chip without changing labels, emphasis or geometry", async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(`${origin}/src/features/graph/workspace/tests/browserSmoke.html?geometry=2000&theme=light&motion=normal&topology=links&interaction=targets`);
@@ -492,7 +492,8 @@ test("native 2k hover names its direct neighbors without moving the graph", asyn
       && bounds.left >= 0 && bounds.top >= 0 && bounds.right <= innerWidth && bounds.bottom <= innerHeight;
   }).map((element) => (element as HTMLElement).dataset.nodeId ?? "").filter(Boolean));
   const hoverLabelCount = await labels.count();
-  await evidenceScreenshot(page, testInfo, "map-2k-neighbor-labels-hover.png");
+  await expect(page.locator(".graph-hover-chip")).toBeVisible();
+  await evidenceScreenshot(page, testInfo, "map-2k-hover-chip.png");
   // Fit's margin leaves this real canvas pixel blank. Native picking/MouseOut,
   // rather than a synthetic callback, restores the ordinary label candidates.
   await page.mouse.move(0, 0);
@@ -509,17 +510,14 @@ test("native 2k hover names its direct neighbors without moving the graph", asyn
     scope: "Real native 2K mouse hover and DOM labels on the original fixture topology; not API or target-device performance acceptance",
   }) });
 
-  expect(hoverCandidates).toContain(target.id);
+  expect(hoverCandidates).toEqual(overviewCandidates);
   expect(before.highlightedLinks).toEqual([]);
-  // Native renderer state must contain exactly the original direct incident
-  // edges. Nonincident strokes remain faintly visible as spatial context;
-  // MouseOut restores the overview config without replacing relation inputs.
-  expect(hovered.highlightedLinks).toEqual(incidentLinks);
+  // Hover preserves the overview configuration and every ordinary label.
+  expect(hovered.highlightedLinks).toEqual(before.highlightedLinks);
   expect(hovered.linkGreyoutOpacity).toBe(.08);
   expect(cleared.highlightedLinks).toEqual(before.highlightedLinks);
   expect(cleared.linkGreyoutOpacity).toBe(before.linkGreyoutOpacity);
-  expect(hoverCandidates).toEqual(expect.arrayContaining(neighborIds));
-  expect(visibleHoverCandidates.some((id) => neighbors.has(Number(id.replace("node-", ""))))).toBe(true);
+  expect(hoverCandidates).toEqual(overviewCandidates);
   expect(hoverLabelCount).toBeLessThanOrEqual(40);
   expect(hoverCandidates.length).toBeLessThanOrEqual(40);
   expect(clearedCandidates).toEqual(overviewCandidates);
@@ -587,12 +585,13 @@ test("native 2k active full titles do not overprint adjacent selection and focus
   await page.mouse.move(hoveredPoint[0], hoveredPoint[1]);
   await expect.poll(() => page.evaluate(() => window.__workspaceMapSmoke?.hoveredId)).toBe("node-1998");
   const labels = page.locator("[data-workspace-map-labels] span");
-  await expect(labels.first()).toHaveAttribute("data-node-id", "node-1998");
-  for (const id of ["node-1998", "node-1999", "node-0"]) {
+  await expect(labels.first()).toHaveAttribute("data-node-id", "node-1999");
+  await expect(page.locator(".graph-hover-chip")).toBeVisible();
+  for (const id of ["node-1999", "node-0"]) {
     await expect(labels.locator(`xpath=self::*[@data-node-id='${id}']`)).toBeVisible();
   }
   const measured = await labels.evaluateAll(elements => elements.filter(element =>
-    ["node-1998", "node-1999", "node-0"].includes((element as HTMLElement).dataset.nodeId ?? ""))
+    ["node-1999", "node-0"].includes((element as HTMLElement).dataset.nodeId ?? ""))
     .map(element => {
       const rectangle = element.getBoundingClientRect();
       const css = getComputedStyle(element);
@@ -601,7 +600,7 @@ test("native 2k active full titles do not overprint adjacent selection and focus
         right: rectangle.right, bottom: rectangle.bottom, width: rectangle.width, height: rectangle.height,
         background: css.backgroundColor, pointerEvents: css.pointerEvents };
     }));
-  expect(measured).toHaveLength(3);
+  expect(measured).toHaveLength(2);
   for (let left = 0; left < measured.length; left++) {
     const label = measured[left];
     expect(label.full).toBe("true");

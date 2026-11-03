@@ -15,6 +15,13 @@ interface TrackedPositionsOptions {
   onError(error: Error): void;
 }
 
+/**
+ * The Map's 40 label slots plus the two endpoints of a hovered relation, which
+ * hover tracks without taking a label slot. Native tracking packs n indices into
+ * a ceil(sqrt(n))² attachment: 42 rows need 49 texels, inside the 64-texel readback.
+ */
+export const WORKSPACE_TRACKED_POSITION_LIMIT = 42;
+
 /** Request at the label cadence; poll only the fence, never GPU positions, on RAF. */
 export function createWorkspaceTrackedPositions(options: TrackedPositionsOptions) {
   let context: WebGL2RenderingContext | null = null;
@@ -47,7 +54,7 @@ export function createWorkspaceTrackedPositions(options: TrackedPositionsOptions
       if (!frame || frame.gl.isContextLost() || frame.indices.length === 0) return false;
       const { width, height } = frame;
       const indices = [...frame.indices];
-      if (indices.length > 40 || new Set(indices).size !== indices.length
+      if (indices.length > WORKSPACE_TRACKED_POSITION_LIMIT || new Set(indices).size !== indices.length
         || indices.some(index => !Number.isInteger(index) || index < 0)
         || !Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1
         || width * height > 64 || width * height < indices.length) {
