@@ -16,7 +16,7 @@ test.describe("Workspace Map synthetic 2k list", () => {
   test.describe("desktop", () => {
     test.use({ viewport: { width: 1440, height: 900 } });
 
-    test("bounds DOM rows, keeps selection keyboard-accessible, and paints WebGL", async ({
+    test("bounds list rows to one page, selects from search results, and paints WebGL", async ({
       page,
     }, testInfo) => {
       test.setTimeout(120_000);
@@ -45,9 +45,8 @@ test.describe("Workspace Map synthetic 2k list", () => {
       await expect(nodeList).toHaveAttribute("data-total-count", String(NODE_COUNT));
       await expect(edgeList).toHaveAttribute("data-total-count", String(EDGE_COUNT));
       expect(requests.count).toBeGreaterThan(0);
-      await expect(nodeList).toHaveAttribute("aria-describedby", /keyboard-hint/);
-      await expect(edgeList).toHaveAttribute("aria-describedby", /keyboard-hint/);
-      await expectBoundedRows(nodeList, edgeList);
+      // Without a search both sections are folded: counts, no rows.
+      await expectBoundedRows(nodeList, edgeList, 0);
 
       const canvas = page.getByTestId("graph-canvas");
       await expect(page.locator('.graph-canvas-frame[data-renderer-status="ready"]'))
@@ -104,14 +103,11 @@ test.describe("Workspace Map synthetic 2k list", () => {
       expect(linksRestored.equals(linksOff), "restoring relationships must change WebGL pixels")
         .toBe(false);
 
-      await expectFilteredScrollContinuity(page, requests);
+      await expectFilteredResults(page, requests);
+      await openMapList(page);
+      await expectBoundedRows(nodeList, edgeList, 10);
 
-      await nodeList.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-      const lastNode = nodeList.getByRole("button", { name: /Virtual Document 1999/ });
-      await expect(lastNode).toBeVisible();
-      await expect(lastNode.locator("xpath=.."))
-        .toHaveAttribute("aria-posinset", String(NODE_COUNT));
-      await lastNode.click();
+      await selectFromSearch(page, "Virtual Document 1999");
       await expect(page.locator(".workspace-graph-details").getByRole("heading", {
         name: "Virtual Document 1999",
       })).toBeVisible();
@@ -132,31 +128,7 @@ test.describe("Workspace Map synthetic 2k list", () => {
       expect(labelBounds!.y + labelBounds!.height)
         .toBeLessThanOrEqual(selectedCanvasBounds!.y + selectedCanvasBounds!.height);
       await capture(canvas, testInfo, "synthetic-2k-desktop-selected-webgl-canvas.png");
-      // Keep an intentional list scroll while toolbar/camera state rerenders
-      // the screen; selection should reveal once, never trap the scroll.
-      await nodeList.evaluate((element) => { element.scrollTop = 1_500 * 64; });
-      await afterAnimationFrame(page);
-      const manualScroll = await nodeList.evaluate((element) => element.scrollTop);
-      // Browser scrollHeight can clamp while virtual spacers settle. Compare
-      // the settled user position, not an immediate assignment before paint.
-      expect(manualScroll).toBeGreaterThan(90_000);
-      await expect(lastNode).toHaveCount(0);
-      await page.getByRole("button", { name: "Zoom out" }).click();
-      await afterAnimationFrame(page);
-      expect(await nodeList.evaluate((element) => element.scrollTop)).toBe(manualScroll);
-      await page.getByRole("button", { name: "Refine" }).click();
-      await page.keyboard.press("Escape");
-      expect(await nodeList.evaluate((element) => element.scrollTop)).toBe(manualScroll);
-      await nodeList.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-      await lastNode.focus();
-      await page.keyboard.press("Home");
-      await expect(nodeList.getByRole("button", { name: /Virtual Document 0000/ }))
-        .toBeFocused();
-
-      await edgeList.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-      await expect(edgeList.locator('li[data-graph-edge-id="edge:04699"]'))
-        .toBeVisible();
-      await expectBoundedRows(nodeList, edgeList);
+      await expectBoundedRows(nodeList, edgeList, 10);
 
       const gpu = await canvas.evaluate((element) => {
         const canvases = element.querySelectorAll("canvas");
@@ -220,24 +192,18 @@ test.describe("Workspace Map synthetic 2k list", () => {
       await expect(page.getByTestId("graph-canvas")).toHaveCount(1);
       await capture(page, testInfo, "synthetic-2k-mobile-first-viewport.png");
       await page.getByRole("button", { name: "Open Map details sheet", exact: true }).click();
-      await expectBoundedRows(nodeList, edgeList);
+      await expectBoundedRows(nodeList, edgeList, 0);
       const listBounds = await nodeList.boundingBox();
       expect(listBounds?.y).toBeLessThan(700);
 
-      await expectFilteredScrollContinuity(page, requests);
+      await expectFilteredResults(page, requests);
 
-      await nodeList.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-      const lastNode = nodeList.getByRole("button", { name: /Virtual Document 1999/ });
-      await expect(lastNode).toBeVisible();
-      await lastNode.click();
+      await selectFromSearch(page, "Virtual Document 1999");
       await expect(page.locator(".workspace-graph-details").getByRole("heading", {
         name: "Virtual Document 1999",
       })).toBeVisible();
-      await lastNode.focus();
-      await page.keyboard.press("Home");
-      await expect(nodeList.getByRole("button", { name: /Virtual Document 0000/ }))
-        .toBeFocused();
-      await expectBoundedRows(nodeList, edgeList);
+      await openMapList(page);
+      await expectBoundedRows(nodeList, edgeList, 10);
       await capture(page, testInfo, "synthetic-2k-mobile-list.png");
       // Closing the sheet hands focus to the selection card, which replaces its toggle.
       await page.keyboard.press("Escape");
@@ -314,15 +280,35 @@ async function interceptOverview(page: Page) {
   return requests;
 }
 
+/** Rows are paged, never the whole map: at most `rows` per section. */
 async function expectBoundedRows(
   nodeList: ReturnType<Page["getByTestId"]>,
   edgeList: ReturnType<Page["getByTestId"]>,
+  rows: number,
 ) {
-  expect(await nodeList.locator("li[data-graph-node-id]").count()).toBeLessThan(30);
-  expect(await edgeList.locator("li[data-graph-edge-id]").count()).toBeLessThan(30);
+  await expect(nodeList.locator("li[data-graph-node-id]")).toHaveCount(rows);
+  await expect(edgeList.locator("li[data-graph-edge-id]")).toHaveCount(rows);
 }
 
-async function expectFilteredScrollContinuity(page: Page, requests: { count: number }) {
+/** Without a search the sidebar sections start folded; opening one browses ten rows at a time. */
+async function openMapList(page: Page) {
+  for (const testId of ["workspace-graph-node-list", "workspace-graph-edge-list"]) {
+    const head = page.getByTestId(testId).locator(".workspace-graph-fold-head").first();
+    if (await head.getAttribute("aria-expanded") === "false") await head.click();
+  }
+}
+
+/** Find a document with the Map search, select its result row, then clear the search. */
+async function selectFromSearch(page: Page, label: string) {
+  const search = page.getByRole("searchbox", { name: "Find in visible map" });
+  await search.fill(label);
+  await page.getByTestId("workspace-graph-node-list").locator("li")
+    .filter({ hasText: label }).locator("button.workspace-graph-list-select").click();
+  await search.clear();
+}
+
+/** The Map search narrows the paged results without refetching, remounting the canvas, or moving the camera. */
+async function expectFilteredResults(page: Page, requests: { count: number }) {
   const list = page.getByTestId("workspace-graph-node-list");
   const search = page.getByRole("searchbox", { name: "Find in visible map" });
   const query = "0";
@@ -339,36 +325,12 @@ async function expectFilteredScrollContinuity(page: Page, requests: { count: num
   // The canvas saves its first framing on its own; compare against that, not the empty slot before it.
   await expect.poll(async () => (await savedViewports()).some((entry) => entry.viewport !== null)).toBe(true);
   const viewportBefore = await savedViewports();
-  await list.locator("button[data-list-index='0']").focus();
-  await page.keyboard.press("End");
-  await expect(list.locator(`button[data-list-index='${NODE_COUNT - 1}']`)).toBeFocused();
   await search.fill(query);
   await expect(list).toHaveAttribute("data-total-count", String(matching.length));
-  const window = await list.evaluate((element) => {
-    const rows = Array.from(element.querySelectorAll<HTMLLIElement>("li[data-graph-node-id]"));
-    return {
-      indices: rows.map((row) => Number(row.querySelector<HTMLButtonElement>("button")!.dataset.listIndex)),
-      rowHeight: Number.parseFloat(rows[0]?.style.height ?? "0"),
-      spacerHeight: Array.from(element.querySelectorAll<HTMLElement>(".workspace-graph-list-spacer"))
-        .reduce((height, spacer) => height + Number.parseFloat(spacer.style.height), 0),
-      scrollTop: element.scrollTop, maximumScrollTop: element.scrollHeight - element.clientHeight,
-    };
-  });
-  expect(window.indices.length).toBeGreaterThan(0);
-  expect(window.indices.length).toBeLessThan(30);
-  expect(window.rowHeight).toBeGreaterThan(0);
-  expect(window.indices[0]).toBeGreaterThanOrEqual(0);
-  expect(window.indices.at(-1)!).toBeLessThan(matching.length);
-  expect(window.indices).toEqual(Array.from({ length: window.indices.length }, (_, offset) => window.indices[0] + offset));
-  expect(window.spacerHeight).toBe((matching.length - window.indices.length) * window.rowHeight);
-  expect(window.scrollTop).toBeLessThanOrEqual(window.maximumScrollTop + 1);
+  await expect(list).toHaveAttribute("data-shown-count", "10");
+  await expect(list.locator("li[data-graph-node-id]")).toHaveCount(10);
   await search.clear();
   await expect(list).toHaveAttribute("data-total-count", String(NODE_COUNT));
-  await list.locator("button[data-list-index]").first().focus();
-  await page.keyboard.press("Home");
-  await expect(list.locator("button[data-list-index='0']")).toBeFocused();
-  await page.keyboard.press("End");
-  await expect(list.locator(`button[data-list-index='${NODE_COUNT - 1}']`)).toBeFocused();
   await expect(page.getByTestId("graph-canvas").locator("canvas")).toHaveCount(nativeCount);
   if (native) {
     expect(await native.evaluate((element) => element === document.querySelector('[data-testid="graph-canvas"] canvas'))).toBe(true);

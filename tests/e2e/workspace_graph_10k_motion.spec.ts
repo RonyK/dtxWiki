@@ -239,15 +239,19 @@ test.describe("PC10K normal-motion and dense real-API stability", () => {
     const edges = page.getByTestId("workspace-graph-edge-list");
     expect(await nodes.locator("li").count()).toBeLessThan(30);
     expect(await edges.locator("li").count()).toBeLessThan(30);
-    await nodes.locator("button.workspace-graph-list-select").first().focus();
-    await page.keyboard.press("End");
+    // Search reaches the last original document; its listed relations keep original wire IDs.
     const lastNode = scene.nodes.at(-1)!;
-    await expect(nodes.locator(`li[data-graph-node-id="${lastNode.id}"] button`)).toBeFocused();
+    const search = page.getByRole("searchbox", { name: "Find in visible map", exact: true });
+    await search.fill(lastNode.label);
+    const lastButton = nodes.locator(`li[data-graph-node-id="${lastNode.id}"] button.workspace-graph-list-select`);
+    await lastButton.focus();
     await page.keyboard.press("Enter");
     await expect(page.locator(".workspace-graph-details").getByRole("heading", { name: lastNode.label, exact: true })).toBeVisible();
-    await edges.locator("button.workspace-graph-list-select").first().focus();
-    await page.keyboard.press("End");
-    await expect(edges.locator(`li[data-graph-edge-id="${scene.edges.at(-1)!.id}"] button`)).toBeFocused();
+    const originalEdgeIds = new Set(scene.edges.map((edge) => edge.id));
+    const listed = await edges.locator("li[data-graph-edge-id]").evaluateAll((rows) => rows.map((row) => row.getAttribute("data-graph-edge-id")));
+    expect(listed.length).toBeGreaterThan(0);
+    expect(listed.filter((id) => !originalEdgeIds.has(id!))).toEqual([]);
+    await search.clear();
 
     const downloadPromise = page.waitForEvent("download");
     await page.getByRole("button", { name: "Export visible map", exact: true }).click();

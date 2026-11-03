@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createServer, type ViteDevServer } from "vite";
@@ -373,10 +373,11 @@ for (const scenario of [
         ? "Open Map details sheet" : "지도 상세 시트 열기", exact: true }).click();
     }
     await expect(list).toBeVisible();
+    await openListSection(list);
     const firstRow = list.locator("li[data-graph-node-id='context:0000']");
-    const openDocument = firstRow.getByRole("link", { name: language === "en" ? "Open" : "열기", exact: true });
+    const openDocument = firstRow.getByRole("link", { name: language === "en" ? /^Open document: / : /^문서 열기: / });
     await expect(openDocument).toHaveAttribute("href", "/context/0");
-    await firstRow.locator("button[data-list-index='0']").focus();
+    await firstRow.locator("button.workspace-graph-list-select").focus();
     await page.keyboard.press("Tab");
     await expect(openDocument).toBeFocused();
     if (mobile) {
@@ -506,12 +507,13 @@ test("observed owner downgrade disposes live CPU layout and Cosmos 2k graph befo
   expect(owner.positions.slice(0, 2)).toEqual([1234, 2345]);
   const ownerGraphs = await page.evaluate(() => window.__workspaceScreenFocus.simulationLifecycle());
   const list = page.getByTestId("workspace-graph-node-list");
-  await list.locator("button[data-list-index='0']").focus();
-  await page.keyboard.press("End");
-  const restricted = list.locator("button[data-list-index='1999']");
+  const search = page.getByRole("searchbox", { name: "Find in visible map" });
+  await search.fill("Owner-only Library");
+  const restricted = list.locator("li").filter({ hasText: "Owner-only Library" }).locator("button.workspace-graph-list-select");
   await expect(restricted).toContainText("Owner-only Library");
   await restricted.press("Enter");
   await expect(restricted).toHaveAttribute("aria-pressed", "true");
+  await search.clear();
   await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
   await expect.poll(() => page.evaluate(() => Object.values(sessionStorage)
     .some((value) => value.includes('"selectedId":"context:1999"')))).toBe(true);
@@ -613,7 +615,7 @@ test("PC10K explicit scale reaches native buffers, preserves theme geometry, and
   expect(requests.map((request) => request.budget)).toEqual([
     { documents: 2000, relations: 6000 }, { documents: 10000, relations: 100000 },
   ]);
-  expect(await list.locator("button[data-list-index]").count()).toBeLessThan(30);
+  expect(await list.locator("li[data-graph-node-id]").count()).toBeLessThanOrEqual(10);
   const selectorBounds = await scale.boundingBox();
   expect(selectorBounds?.height).toBeGreaterThanOrEqual(44);
   await view.locator("summary").click();
@@ -755,7 +757,9 @@ async function distanceFromUncoveredCenter(page: Page, index: number): Promise<n
 }
 
 async function dragFirstNativeNode(page: Page): Promise<void> {
-  await page.getByTestId("workspace-graph-node-list").locator("button[data-list-index='0']").press("Enter");
+  const list = page.getByTestId("workspace-graph-node-list");
+  await openListSection(list);
+  await listRow(list, 0).press("Enter");
   await page.getByRole("region", { name: "Details", exact: true }).getByRole("button", { name: "Center", exact: true }).click();
   await expect.poll(() => distanceFromUncoveredCenter(page, 0)).toBeLessThan(6);
   await page.evaluate(() => window.__workspaceScreenFocus.observeNativePointer());
@@ -879,6 +883,16 @@ for (const mode of ["desktop", "mobile-fullscreen"] as const) {
   });
 }
 
+/** Without a search the sidebar sections start folded; opening one lists rows in scene order. */
+async function openListSection(list: Locator): Promise<void> {
+  const head = list.locator(".workspace-graph-fold-head").first();
+  if (await head.getAttribute("aria-expanded") === "false") await head.click();
+}
+
+function listRow(list: Locator, index: number): Locator {
+  return list.locator("li").nth(index).locator("button.workspace-graph-list-select");
+}
+
 async function openFocusFixture(page: Page): Promise<void> {
   await page.goto(origin);
   await expect.poll(() => page.evaluate(() => Boolean(window.__workspaceScreenFocus?.ready))).toBe(true);
@@ -899,6 +913,9 @@ for (const { language, mobile } of [
     await page.goto(`${origin}/?lang=${language}`);
     await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2000");
     await expectSettledNativeScene(page);
+    // The phone sheet is closed here; open the folded section without a pointer.
+    await page.getByTestId("workspace-graph-node-list").locator(".workspace-graph-fold-head").first()
+      .evaluate((head) => (head as HTMLButtonElement).click());
     const geometry = await page.evaluate(() => {
       const rectangle = (selector: string) => {
         const bounds = document.querySelector(selector)!.getBoundingClientRect();
@@ -912,7 +929,7 @@ for (const { language, mobile } of [
         search: rectangle("#workspace-graph-visible-search"), stage: rectangle(".workspace-graph-stage"),
         list: rectangle(".workspace-graph-list"),
         nodeRow: rectangle("[data-testid='workspace-graph-node-list'] li[data-graph-node-id]"),
-        nodeAction: rectangle("[data-testid='workspace-graph-node-list'] li[data-graph-node-id] .workspace-graph-list-actions a"),
+        nodeAction: rectangle("[data-testid='workspace-graph-node-list'] li[data-graph-node-id] .workspace-graph-open-link"),
         canvas: rectangle(".graph-canvas-frame"),
         inspector: rectangle(".inspector-panel"),
       };
@@ -922,8 +939,7 @@ for (const { language, mobile } of [
     expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.viewport.width);
     expect(geometry.search.left).toBeGreaterThanOrEqual(geometry.toolbar.left);
     expect(geometry.search.right).toBeLessThanOrEqual(geometry.toolbar.right);
-    // The row action needs its own inset, including when row virtualization
-    // fixes the height. Selector-button padding cannot protect this link.
+    // The row's open link needs its own inset; selector-button padding cannot protect it.
     expect(geometry.nodeRow.right - geometry.nodeAction.right).toBeGreaterThanOrEqual(8);
     expect(geometry.nodeAction.top - geometry.nodeRow.top).toBeGreaterThanOrEqual(8);
     expect(geometry.nodeRow.bottom - geometry.nodeAction.bottom).toBeGreaterThanOrEqual(8);
@@ -1022,16 +1038,18 @@ test("real 2k Screen keyboard node focus reaches native Cosmos without selection
   const initial = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
   expect(initial.positions).toHaveLength(4000);
   expect(initial.glError).toBe(0);
-  const first = list.locator("button[data-list-index='0']");
+  await openListSection(list);
+  const first = listRow(list, 0);
   await first.focus();
   await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toEqual([0, 1]);
   await evidenceScreenshot(page, testInfo, "screen-2k-node-star.png");
-  await first.press("End");
-  const last = list.locator("button[data-list-index='1999']");
-  await expect(last).toBeFocused();
-  await expect(last).toHaveAttribute("aria-pressed", "false");
-  await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toEqual([1999, 1998]);
-  await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().links)).toEqual([1998]);
+  // Keyboard focus moving to another row moves the native emphasis with it.
+  const tenth = listRow(list, 9);
+  await tenth.focus();
+  await expect(tenth).toBeFocused();
+  await expect(tenth).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toEqual([9, 8, 10]);
+  await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().links)).toEqual([8, 9]);
   await page.getByRole("searchbox", { name: "Find in visible map" }).focus();
   await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toBeNull();
   const after = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
@@ -1056,23 +1074,24 @@ test("real 2k Screen edge focus reaches Cosmos endpoints and blur restores indep
   await openFocusFixture(page);
   await expectSettledNativeScene(page);
   const nodes = page.getByTestId("workspace-graph-node-list");
-  await nodes.locator("button[data-list-index='0']").focus();
+  await openListSection(nodes);
+  await listRow(nodes, 0).focus();
   await page.keyboard.press("Enter");
-  await expect(nodes.locator("button[data-list-index='0']")).toHaveAttribute("aria-pressed", "true");
+  await expect(listRow(nodes, 0)).toHaveAttribute("aria-pressed", "true");
   await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().selectedPoint)).toBe(0);
   const before = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
   const edges = page.getByTestId("workspace-graph-edge-list");
-  await edges.locator("button[data-list-index='0']").focus();
-  await page.keyboard.press("ArrowDown");
-  await expect(edges.locator("button[data-list-index='1']")).toBeFocused();
+  await openListSection(edges);
+  await listRow(edges, 1).focus();
+  await expect(listRow(edges, 1)).toBeFocused();
   await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toEqual([1, 2]);
   await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().links)).toEqual([1]);
   await evidenceScreenshot(page, testInfo, "screen-2k-edge-endpoints.png");
-  await page.keyboard.press("End");
-  await expect(edges.locator("button[data-list-index='1998']")).toBeFocused();
-  await expect(edges.locator("button[data-list-index='1998']")).toHaveAttribute("aria-pressed", "false");
-  await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toEqual([1998, 1999]);
-  await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().links)).toEqual([1998]);
+  await listRow(edges, 9).focus();
+  await expect(listRow(edges, 9)).toBeFocused();
+  await expect(listRow(edges, 9)).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toEqual([9, 10]);
+  await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().links)).toEqual([9]);
   await evidenceScreenshot(page, testInfo, "screen-2k-relationship-focus.png");
   await page.getByRole("searchbox", { name: "Find in visible map" }).focus();
   await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().points)).toEqual([0, 1]);
@@ -1155,11 +1174,13 @@ test("mobile 2k Screen lists keep bounded keyboard navigation and no stale empha
   const list = page.getByTestId("workspace-graph-node-list");
   await expect(list).toHaveAttribute("data-total-count", "2000");
   await page.getByRole("button", { name: "Open Map details sheet", exact: true }).click();
-  await list.locator("button[data-list-index='0']").focus();
-  await page.keyboard.press("End");
-  await expect(list.locator("button[data-list-index='1999']")).toBeFocused();
-  await expect(list.locator("button[data-list-index='1999']")).toHaveAttribute("aria-pressed", "false");
-  expect(await list.locator("li[data-graph-node-id]").count()).toBeLessThan(30);
+  await openListSection(list);
+  await listRow(list, 0).focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(listRow(list, 1)).toBeFocused();
+  await expect(listRow(list, 1)).toHaveAttribute("aria-pressed", "false");
+  expect(await list.locator("li[data-graph-node-id]").count()).toBeLessThanOrEqual(10);
   await page.getByRole("button", { name: "Hide Map details", exact: true }).click();
   await page.getByRole("button", { name: "Open canvas" }).click();
   await expectSettledNativeScene(page);
@@ -1184,8 +1205,12 @@ test("Screen keyboard node and edge focus emphasis survives pointer hover, which
   await openFocusFixture(page);
   await expectSettledNativeScene(page);
   const before = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
-  const node = page.getByTestId("workspace-graph-node-list").locator("button[data-list-index='3']");
-  const edge = page.getByTestId("workspace-graph-edge-list").locator("button[data-list-index='3']");
+  const nodeList = page.getByTestId("workspace-graph-node-list");
+  const edgeList = page.getByTestId("workspace-graph-edge-list");
+  await openListSection(nodeList);
+  await openListSection(edgeList);
+  const node = listRow(nodeList, 3);
+  const edge = listRow(edgeList, 3);
   for (const [row, points] of [[node, [3, 2, 4]], [edge, [3, 4]]] as const) {
     // Invoke the native engine's real callback without moving the stationary
     // pointer out of the canvas, then use a real DOM keyboard-focus event.

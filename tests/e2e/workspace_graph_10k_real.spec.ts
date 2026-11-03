@@ -96,27 +96,21 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
       expect(exported.completeness).toBe("complete");
       expectVisibleExportIdentity(scene, exported);
 
-      // End must reach the last original wire ID, not a renamed/sample row.
+      // Search must reach the last original wire ID, not a renamed/sample row,
+      // and list only original relationships of the matched documents.
       const lastNode = scene.nodes.at(-1);
       if (!lastNode || lastNode.grain !== "document") throw new Error("Exact scene has no last document");
-      await nodeList.locator("button.workspace-graph-list-select").first().focus();
-      await page.keyboard.press("End");
-      const lastNodeRow = nodeList.locator(`li[aria-posinset="${DOCUMENT_COUNT}"]`);
-      await expect(lastNodeRow).toHaveAttribute("data-graph-node-id", lastNode.id);
-      const lastNodeButton = lastNodeRow.locator("button.workspace-graph-list-select");
-      await expect(lastNodeButton).toBeFocused();
+      const search = page.getByRole("searchbox", { name: "Find in visible map", exact: true });
+      await search.fill(lastNode.label);
+      const lastNodeButton = nodeList.locator(`li[data-graph-node-id="${lastNode.id}"] button.workspace-graph-list-select`);
+      await lastNodeButton.focus();
       await page.keyboard.press("Enter");
       await expect(lastNodeButton).toHaveAttribute("aria-pressed", "true");
       await expect(page.locator(".workspace-graph-details").getByRole("heading", {
         name: lastNode.label, exact: true,
       })).toBeVisible();
-      const lastEdge = scene.edges.at(-1);
-      if (!lastEdge) throw new Error("Exact scene has no last authored relationship");
-      await edgeList.locator("button.workspace-graph-list-select").first().focus();
-      await page.keyboard.press("End");
-      const lastEdgeRow = edgeList.locator(`li[aria-posinset="${RELATION_COUNT}"]`);
-      await expect(lastEdgeRow).toHaveAttribute("data-graph-edge-id", lastEdge.id);
-      await expect(lastEdgeRow.locator("button.workspace-graph-list-select")).toBeFocused();
+      await expectOriginalSearchRelations(edgeList, scene, lastNode.label);
+      await search.clear();
       await expectBoundedRows(nodeList, edgeList);
       await capture(page, testInfo, "real-api-pc10k-original-id-end.png");
       await capture(canvas, testInfo, "real-api-pc10k-native-canvas.png");
@@ -149,7 +143,7 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
         requests: overviewRequests, counts: scene.counts, relationKinds: relationKindCounts(scene),
         topology: { folders: scene.folder_topology!.folders.length, memberships: scene.folder_topology!.memberships.length,
           edgeSlices: scene.folder_topology!.edge_slices.length },
-        originalLastNodeId: lastNode.id, originalLastEdgeId: lastEdge.id, gpu,
+        originalLastNodeId: lastNode.id, gpu,
         sameOriginalUiResponses: responseReader.evidence(),
         boundedReturn: { apiListExportEdges: bounded.edges.length, canvasEdges: boundedCanvasEdges,
           aggregateSelfLoopIds: bounded.edges.filter((edge) => edge.source === edge.target).map((edge) => edge.id) },
@@ -323,9 +317,7 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
           && point.x > 16 && point.x < point.width - 16 && point.y > 16 && point.y < point.height - 16;
       }, { message: "The original focused GPU point, not its clamped full title, must be visible before any manual Center/Fit/Zoom" }).toBe(true);
       const actualFocusPoint = await readFocusPoint();
-      await expect(page.getByTestId("workspace-graph-node-list")
-        .locator(`li[data-graph-node-id="${focus.node_id}"] button.workspace-graph-list-select`))
-        .toHaveAttribute("aria-pressed", "true");
+      // Without a search the list is folded; Details carries the restored selection.
       await expect(page.locator(".workspace-graph-details").getByRole("heading", { name: focusedNode.label, exact: true })).toBeVisible();
       await expect(page.getByRole("searchbox", { name: "Find in visible map", exact: true })).toHaveValue("");
       await expectDefaultMapScale(page);
@@ -1401,6 +1393,17 @@ async function expectLiveWebGL(canvas: Locator) {
   expect(gpu.width).toBeGreaterThan(0);
   expect(gpu.height).toBeGreaterThan(0);
   return gpu;
+}
+
+/** Every listed relation is an original relation with an end among the documents the search matched. */
+async function expectOriginalSearchRelations(edgeList: Locator, scene: WorkspaceGraphScene, query: string) {
+  const needle = query.toLocaleLowerCase();
+  const matched = new Set(scene.nodes.filter((node) => node.label.toLocaleLowerCase().includes(needle)).map((node) => node.id));
+  const original = new Set(scene.edges.filter((edge) => matched.has(edge.source) || matched.has(edge.target)).map((edge) => edge.id));
+  const listed = await edgeList.locator("li[data-graph-edge-id]")
+    .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-graph-edge-id")));
+  expect(listed.length).toBeGreaterThan(0);
+  expect(listed.filter((id) => !original.has(id!))).toEqual([]);
 }
 
 async function expectBoundedRows(nodeList: Locator, edgeList: Locator) {

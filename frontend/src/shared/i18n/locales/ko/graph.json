@@ -660,8 +660,7 @@
       "unknown": "서버 정의 사용자 표시 지표"
     },
     "list": {
-      "title": "검색 가능한 관계 목록",
-      "description": "노드 {{nodes}}개 · 엣지 {{edges}}개. 캔버스와 동일하게 조작할 수 있습니다.",
+      "title": "지도 항목",
       "virtualKeyboardHint": "항목 {{count}}개. 위/아래 방향키, Page Up/Down, Home, End로 목록을 이동할 수 있습니다.",
       "documents": "문서와 군집",
       "relationships": "관계",
@@ -678,7 +677,29 @@
       "combinedMetric": "표시 가능한 참조 문서 {{references}}개 · 근거 관계 {{evidence}}개",
       "uniformMetric": "문서 크기 동일",
       "relationCount_one": "관계 {{count}}개",
-      "relationCount_other": "관계 {{count}}개"
+      "relationCount_other": "관계 {{count}}개",
+      "hint": "지도 위 ‘표시된 지도에서 찾기’에 입력하면 일치하는 문서와 관계를 여기에 보여 줍니다. 검색 없이 보려면 섹션을 펼치세요(10개씩).",
+      "status": "‘{{query}}’ 일치: 문서·군집 {{nodes}}개 · 관계 {{relations}}개",
+      "noMatch": "‘{{query}}’와 일치하는 항목이 지금 지도에 없습니다. 숨긴 문서는 찾지 않습니다. 보기의 ‘연결 없는 문서 표시’나 세부 필터를 확인하세요.",
+      "noDocuments": "일치하는 문서·군집이 없습니다.",
+      "noRelationships": "일치하는 관계가 없습니다.",
+      "groups": {
+        "both": "검색 결과끼리",
+        "kind": "관계 종류 이름 일치",
+        "outgoing": "검색 결과 → 다른 문서",
+        "incoming": "다른 문서 → 검색 결과"
+      },
+      "more": "{{count}}개 더 보기 (남은 {{remaining}}개)",
+      "openDocument": "문서 열기: {{label}}",
+      "expandCluster": "군집 펼치기: {{label}}",
+      "relationName": "{{source}}에서 {{target}}(으)로, {{kind}}",
+      "relationNameUndirected": "{{source}}와(과) {{target}}, {{kind}}",
+      "clusterMeta": "구성원 {{members}} · 관계 {{relations}}",
+      "referenceMetricShort_one": "참조 {{count}}",
+      "referenceMetricShort_other": "참조 {{count}}",
+      "evidenceMetricShort_one": "근거 {{count}}",
+      "evidenceMetricShort_other": "근거 {{count}}",
+      "combinedMetricShort": "참조 {{references}} · 근거 {{evidence}}"
     },
     "details": {
       "title": "상세 정보",
@@ -702,9 +723,48 @@
       "alsoAppears": "다른 위치",
       "openDocument": "문서 열기",
       "centerMap": "지도에서 가운데로",
-      "centerAction": "위치 보기",
+      "centerAction": "보기",
       "explore": "주변 관계 탐색",
-      "exploreAction": "주변 탐색"
+      "exploreAction": "탐색",
+      "sourceRoleLink": "출발 · 링크한 문서",
+      "sourceRoleCitation": "출발 · 인용한 문서",
+      "targetRoleLink": "대상 · 링크된 문서",
+      "targetRoleCitation": "대상 · 인용된 문서"
+    },
+    "relations": {
+      "title": "관계",
+      "none": "지도에 표시된 관계가 없습니다.",
+      "searchDocument": "이 문서의 관계에서 찾기",
+      "searchCluster": "이 군집의 관계에서 찾기",
+      "searchPlaceholder": "이름·폴더·종류로 찾기",
+      "clearSearch": "관계 검색어 지우기",
+      "searchStatus": "{{total}}개 중 {{shown}}개 일치",
+      "noMatch": "‘{{query}}’와 일치하는 관계가 없습니다.",
+      "incoming": "들어오는 관계",
+      "outgoing": "나가는 관계",
+      "incomingNoteDocument": "이 문서를 가리킴",
+      "incomingNoteCluster": "이 군집을 가리킴",
+      "outgoingNoteDocument": "이 문서가 가리킴",
+      "outgoingNoteCluster": "이 군집이 가리킴",
+      "selfDocument": "이 문서",
+      "selfCluster": "이 군집"
+    },
+    "chips": {
+      "context": "컨텍스트",
+      "library": "라이브러리",
+      "cluster": "군집",
+      "folder_cluster": "폴더",
+      "link_cluster": "군집",
+      "other_cluster": "기타",
+      "wikilink": "링크",
+      "citation_page": "인용",
+      "citation_source": "출처",
+      "ask_citation": "근거",
+      "line": {
+        "link": "링크(실선)",
+        "citation": "인용·출처(점선)",
+        "other": "기타 관계"
+      }
     },
     "drawer": {
       "close": "세부 데이터 필터 닫기",

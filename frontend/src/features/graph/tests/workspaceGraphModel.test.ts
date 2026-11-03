@@ -11,8 +11,11 @@ import {
   refineFiltersDiffer,
   removeFacetRule,
   saveWorkspaceGraphState,
+  searchWorkspaceGraphItems,
   updateFacetRule,
+  workspaceGraphDisplayItems,
   workspaceGraphMetricSize,
+  workspaceGraphNodeRelations,
   workspaceGraphRenderScene,
   workspaceGraphRequest,
   workspaceGraphOrphanIds,
@@ -244,6 +247,48 @@ describe("workspaceGraphModel", () => {
     );
     expect(searched.nodes.map((node) => node.id)).toEqual(["context:one"]);
     expect(searched.edges).toEqual([]);
+  });
+
+  it("groups sidebar search results by match and splits a node's relations by direction", () => {
+    const doc = (id: string, label: string, kind: "context" | "library" = "context") => ({
+      ...scene.nodes[0], id, label, entity_kind: kind, primary_folder_label: "Research", reference_count: 0, evidence_count: 0,
+    });
+    const edge = (id: string, source: string, target: string, relation_kind: string) => ({
+      ...scene.edges[0], id, source, target, relation_kind,
+    });
+    const payload: WorkspaceGraphScene = {
+      ...scene,
+      nodes: [doc("b", "Alpha Billing"), doc("a", "Billing one"), doc("c", "Gamma", "library"), doc("d", "Delta"), doc("e", "Billing orphan")],
+      edges: [
+        edge("d-a", "d", "a", "citation_page"),
+        edge("a-c", "a", "c", "wikilink"),
+        edge("a-b", "a", "b", "wikilink"),
+        edge("c-d", "c", "d", "citation_source"),
+      ],
+    };
+    const names = (kind: string) => kind === "citation_source" ? "Source citation Source" : kind;
+    const display = { show_edges: true, show_orphans: false };
+    const items = workspaceGraphDisplayItems(payload, display);
+    const ids = (values: readonly { id: string }[]) => values.map((value) => value.id);
+    expect(searchWorkspaceGraphItems(items, "  ", names)).toBeNull();
+    const billing = searchWorkspaceGraphItems(items, "billing", names)!;
+    // Name-prefix matches first; the hidden orphan is not a result.
+    expect(ids(billing.nodes)).toEqual(["a", "b"]);
+    expect({
+      both: ids(billing.relations.both),
+      kind: ids(billing.relations.kind),
+      outgoing: ids(billing.relations.outgoing),
+      incoming: ids(billing.relations.incoming),
+    }).toEqual({ both: ["a-b"], kind: [], outgoing: ["a-c"], incoming: ["d-a"] });
+    expect(billing.relationCount).toBe(3);
+    const source = searchWorkspaceGraphItems(items, "source", names)!;
+    expect([ids(source.nodes), ids(source.relations.kind), source.relationCount]).toEqual([[], ["c-d"], 1]);
+    expect(searchWorkspaceGraphItems(workspaceGraphDisplayItems(payload, { ...display, show_edges: false }), "billing", names)!
+      .relationCount).toBe(0);
+
+    const labels = new Map(payload.nodes.map((node) => [node.id, node.label]));
+    const relations = workspaceGraphNodeRelations(items, "a", labels);
+    expect([ids(relations.outgoing), ids(relations.incoming)]).toEqual([["a-b", "a-c"], ["d-a"]]);
   });
 
   it("uses bounded metric sizing only for metric-bearing lenses", () => {

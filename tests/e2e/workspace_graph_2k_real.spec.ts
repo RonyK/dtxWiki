@@ -175,8 +175,10 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
     await page.keyboard.press("Escape");
     await afterAnimationFrame(page);
 
-    await nodeList.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-    const lastNode = nodeList.locator('li[aria-posinset="2000"][data-graph-node-id]');
+    // Without a search the sections are folded; opening one browses ten rows at a time.
+    for (const list of [nodeList, edgeList]) await list.locator(".workspace-graph-fold-head").first().click();
+    await expect(nodeList.locator("li[data-graph-node-id]")).toHaveCount(10);
+    const lastNode = nodeList.locator("li[data-graph-node-id]").last();
     await expect(lastNode).toBeVisible();
     const selectedLabel = await lastNode.locator("strong").textContent();
     expect(selectedLabel).toBeTruthy();
@@ -190,9 +192,7 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
     await expect(page.getByRole("button", { name: "Clear selection" })).toBeVisible();
     await capture(canvas, testInfo, "real-api-2k-selected-canvas.png");
 
-    await edgeList.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-    await expect(edgeList.locator('li[aria-posinset="5057"][data-graph-edge-id]'))
-      .toBeVisible();
+    await expect(edgeList.locator("li[data-graph-edge-id]")).toHaveCount(10);
     await expectBoundedRows(nodeList, edgeList);
     expect(diagnostics.pageErrors).toEqual([]);
     expect(diagnostics.consoleErrors).toEqual([]);

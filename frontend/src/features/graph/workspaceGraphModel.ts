@@ -2,6 +2,7 @@ import type {
   WorkspaceGraphDataFilters,
   WorkspaceGraphAvailableLens,
   WorkspaceGraphDocumentKind,
+  WorkspaceGraphEdge,
   WorkspaceGraphFacetRule,
   WorkspaceGraphNode,
   WorkspaceGraphOverviewRequest,
@@ -158,34 +159,134 @@ function effectiveFolderModes(folders: WorkspaceGraphOverviewRequest["folders"])
   return modes;
 }
 
+/** What the map currently shows, before any visible-map search. */
+export type WorkspaceGraphDisplayItems = {
+  nodes: WorkspaceGraphNode[];
+  edges: WorkspaceGraphEdge[];
+};
+
+export function workspaceGraphDisplayItems(
+  payload: WorkspaceGraphScene,
+  display: Pick<WorkspaceGraphDisplaySettings, "show_orphans" | "show_edges">,
+): WorkspaceGraphDisplayItems {
+  const hiddenOrphans = display.show_orphans ? new Set<string>() : workspaceGraphOrphanIds(payload);
+  const nodes = payload.nodes.filter((node) => !hiddenOrphans.has(node.id));
+  const ids = new Set(nodes.map((node) => node.id));
+  const edges = display.show_edges
+    ? payload.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target))
+    : [];
+  return { nodes, edges };
+}
+
+export function normalizeWorkspaceGraphSearch(search: string): string {
+  return search.trim().toLocaleLowerCase();
+}
+
+/** The one document/cluster match rule: map highlight and sidebar results share it. */
+export function workspaceGraphNodeMatchesSearch(node: WorkspaceGraphNode, normalizedSearch: string): boolean {
+  return !normalizedSearch || [
+    node.label,
+    node.grain === "document" ? node.primary_folder_label : null,
+    node.grain === "document" ? node.entity_kind : "cluster",
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLocaleLowerCase()
+    .includes(normalizedSearch);
+}
+
 export function workspaceGraphRenderScene(
   payload: WorkspaceGraphScene,
   display: WorkspaceGraphDisplaySettings,
   search = "",
   lens: WorkspaceGraphAvailableLens = DEFAULT_WORKSPACE_GRAPH_STATE.lens,
 ): GraphRenderScene {
-  const normalizedSearch = search.trim().toLocaleLowerCase();
-  const hiddenOrphans = display.show_orphans ? new Set<string>() : workspaceGraphOrphanIds(payload);
-  const matchingNodes = payload.nodes.filter((node) =>
-    !hiddenOrphans.has(node.id) && (!normalizedSearch
-      || [
-        node.label,
-        node.grain === "document" ? node.primary_folder_label : null,
-        node.grain === "document" ? node.entity_kind : "cluster",
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLocaleLowerCase()
-        .includes(normalizedSearch)),
-  );
+  const normalizedSearch = normalizeWorkspaceGraphSearch(search);
+  const items = workspaceGraphDisplayItems(payload, display);
+  const matchingNodes = items.nodes.filter((node) => workspaceGraphNodeMatchesSearch(node, normalizedSearch));
   const matchingIds = new Set(matchingNodes.map((node) => node.id));
   const nodes = matchingNodes.map((node) => renderNode(node, display.show_labels, lens));
-  const edges = display.show_edges
-    ? payload.edges
-        .filter((edge) => matchingIds.has(edge.source) && matchingIds.has(edge.target))
-        .map(renderEdge)
-    : [];
+  const edges = items.edges
+    .filter((edge) => matchingIds.has(edge.source) && matchingIds.has(edge.target))
+    .map(renderEdge);
   return { nodes, edges };
+}
+
+/** Sidebar relation groups, in display order: both ends, kind name, then one end by direction. */
+export const WORKSPACE_GRAPH_RELATION_GROUPS = ["both", "kind", "outgoing", "incoming"] as const;
+export type WorkspaceGraphRelationGroup = typeof WORKSPACE_GRAPH_RELATION_GROUPS[number];
+
+export type WorkspaceGraphSearchResults = {
+  nodes: WorkspaceGraphNode[];
+  relations: Record<WorkspaceGraphRelationGroup, WorkspaceGraphEdge[]>;
+  relationCount: number;
+};
+
+/**
+ * Sidebar results for the visible-map search. A relation is a result when
+ * either end matches or its kind names contain the query; `outgoing` and
+ * `incoming` are relative to the matched documents. Scene order is kept
+ * inside each group; documents whose name starts with the query come first.
+ */
+export function searchWorkspaceGraphItems(
+  items: WorkspaceGraphDisplayItems,
+  search: string,
+  relationNames: (kind: string) => string,
+): WorkspaceGraphSearchResults | null {
+  const normalizedSearch = normalizeWorkspaceGraphSearch(search);
+  if (!normalizedSearch) return null;
+  const matched = items.nodes.filter((node) => workspaceGraphNodeMatchesSearch(node, normalizedSearch));
+  const nodes = [
+    ...matched.filter((node) => node.label.toLocaleLowerCase().startsWith(normalizedSearch)),
+    ...matched.filter((node) => !node.label.toLocaleLowerCase().startsWith(normalizedSearch)),
+  ];
+  const ids = new Set(nodes.map((node) => node.id));
+  const relations: WorkspaceGraphSearchResults["relations"] = { both: [], kind: [], outgoing: [], incoming: [] };
+  const kindMatches = new Map<string, boolean>();
+  const kindMatch = (kind: string) => {
+    let match = kindMatches.get(kind);
+    if (match === undefined) {
+      match = relationNames(kind).toLocaleLowerCase().includes(normalizedSearch);
+      kindMatches.set(kind, match);
+    }
+    return match;
+  };
+  for (const edge of items.edges) {
+    const source = ids.has(edge.source);
+    const target = ids.has(edge.target);
+    if (source && target) relations.both.push(edge);
+    else if (kindMatch(edge.relation_kind)) relations.kind.push(edge);
+    else if (source) relations.outgoing.push(edge);
+    else if (target) relations.incoming.push(edge);
+  }
+  const relationCount = WORKSPACE_GRAPH_RELATION_GROUPS.reduce((count, group) => count + relations[group].length, 0);
+  return { nodes, relations, relationCount };
+}
+
+export type WorkspaceGraphNodeRelations = {
+  incoming: WorkspaceGraphEdge[];
+  outgoing: WorkspaceGraphEdge[];
+};
+
+/**
+ * One node's relations split by direction, each ordered by the other end's
+ * label. An undirected relation is listed once, on the side its stored
+ * source puts it.
+ */
+export function workspaceGraphNodeRelations(
+  items: WorkspaceGraphDisplayItems,
+  nodeId: string,
+  labels: ReadonlyMap<string, string>,
+): WorkspaceGraphNodeRelations {
+  const byOther = (other: (edge: WorkspaceGraphEdge) => string) =>
+    (left: WorkspaceGraphEdge, right: WorkspaceGraphEdge) =>
+      (labels.get(other(left)) ?? "").localeCompare(labels.get(other(right)) ?? "");
+  return {
+    incoming: items.edges.filter((edge) => edge.target === nodeId && edge.source !== nodeId)
+      .sort(byOther((edge) => edge.source)),
+    outgoing: items.edges.filter((edge) => edge.source === nodeId)
+      .sort(byOther((edge) => edge.target)),
+  };
 }
 
 /**

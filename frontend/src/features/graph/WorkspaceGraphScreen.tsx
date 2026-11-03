@@ -1,7 +1,5 @@
 import {
   Download,
-  FileText,
-  ListPlus,
   Maximize2,
   Scan,
   Pause,
@@ -60,6 +58,21 @@ import { WorkspaceMapCanvas } from "./workspace/WorkspaceMapCanvas";
 import { WorkspaceGraphExpandedGroups } from "./workspace/WorkspaceGraphExpandedGroups";
 import { WorkspaceGraphNodeActions, type WorkspaceGraphDocumentNavigation } from "./workspace/WorkspaceGraphNodeActions";
 import { WorkspaceGraphNotice } from "./workspace/WorkspaceGraphNotice";
+import {
+  WORKSPACE_GRAPH_RESULT_PAGE,
+  WorkspaceGraphExpandClusterButton,
+  WorkspaceGraphFoldHeader,
+  WorkspaceGraphLineSummary,
+  WorkspaceGraphMoreButton,
+  WorkspaceGraphNodeChip,
+  WorkspaceGraphNodeSummary,
+  WorkspaceGraphOpenLink,
+  WorkspaceGraphRelationEnds,
+  WorkspaceGraphRelationFlow,
+  WorkspaceGraphRelationMiniMap,
+  workspaceGraphRelationName,
+  workspaceGraphRelationNames,
+} from "./workspace/WorkspaceGraphSidebarParts";
 import { WorkspaceGraphSelectionCard } from "./workspace/WorkspaceGraphSelectionCard";
 import { RETAINED_EXPANSION_LIMIT, retainedExpansions, type WorkspaceGraphExpansionStep } from "./workspace/workspaceGraphExpansion";
 import { formatCount, workspaceGraphEnumLabel } from "./workspace/workspaceGraphLabels";
@@ -78,8 +91,15 @@ import {
   loadWorkspaceGraphState,
   refineFiltersDiffer,
   saveWorkspaceGraphState,
+  searchWorkspaceGraphItems,
+  WORKSPACE_GRAPH_RELATION_GROUPS,
+  workspaceGraphDisplayItems,
+  workspaceGraphNodeRelations,
   workspaceGraphRenderScene,
   workspaceGraphRequest,
+  type WorkspaceGraphDisplayItems,
+  type WorkspaceGraphNodeRelations,
+  type WorkspaceGraphRelationGroup,
   type WorkspaceGraphRestorableState,
 } from "./workspaceGraphModel";
 
@@ -568,31 +588,47 @@ export function WorkspaceGraphScreen() {
     setFolderSelection(null);
     folderOpenerRef.current = null;
   }, [authorityScope, request, folderSelectionFingerprint]);
+  /** Map search matches, highlighted on the canvas. */
   const visibleNodeIds = useMemo(
     () => new Set(renderScene.nodes.map((node) => node.id)),
     [renderScene.nodes],
   );
-  const visibleEdgeIds = useMemo(
-    () => new Set(renderScene.edges.map((edge) => edge.id)),
-    [renderScene.edges],
+  /** Everything the map shows before search: sidebar rows and focus emphasis draw from it. */
+  const displayItems = useMemo<WorkspaceGraphDisplayItems>(
+    () => scene
+      ? workspaceGraphDisplayItems(scene, { show_orphans: showOrphans, show_edges: state.display.show_edges })
+      : { nodes: [], edges: [] },
+    [scene, showOrphans, state.display.show_edges],
   );
+  const displayNodeIds = useMemo(() => new Set(displayItems.nodes.map((node) => node.id)), [displayItems]);
+  const displayEdgeIds = useMemo(() => new Set(displayItems.edges.map((edge) => edge.id)), [displayItems]);
   const focusedId = listFocus && mapColumns
     && listFocus.scope === authorityScope
     && listFocus.request === request
     && listFocus.storageEpoch === sceneOwner?.storageEpoch
     && listFocus.storageEpoch === workspaceGraphStorageEpoch()
-    && (visibleNodeIds.has(listFocus.id) || visibleEdgeIds.has(listFocus.id))
+    && (displayNodeIds.has(listFocus.id) || displayEdgeIds.has(listFocus.id))
     ? listFocus.id : null;
   useEffect(() => {
     // A removed/filtered row must not regain emphasis when it becomes visible
     // again without receiving a new DOM focus event.
     if (listFocus && focusedId === null) setListFocus(null);
   }, [focusedId, listFocus]);
+  // A search, a scene change or a new selection can unmount the focused row
+  // (results, Details relations); removal fires no blur, so drop the emphasis
+  // once DOM focus is no longer inside that row.
+  useLayoutEffect(() => {
+    if (!listFocus) return;
+    const active = document.activeElement;
+    const row = active instanceof Element
+      ? active.closest<HTMLElement>("[data-graph-node-id], [data-graph-edge-id]") : null;
+    if ((row?.dataset.graphNodeId ?? row?.dataset.graphEdgeId) !== listFocus.id) setListFocus(null);
+  }, [deferredVisibleSearch, displayItems, listFocus, state.selectedId]);
   const handleListFocus = (id: string) => {
     if (!workspaceId || !actorId || !mapColumns
       || sceneOwner?.scope !== authorityScope
       || sceneOwner.storageEpoch !== workspaceGraphStorageEpoch()
-      || (!visibleNodeIds.has(id) && !visibleEdgeIds.has(id))) return;
+      || (!displayNodeIds.has(id) && !displayEdgeIds.has(id))) return;
     setListFocus({ id, scope: authorityScope, request, storageEpoch: sceneOwner.storageEpoch });
   };
   const handleListBlur = (id: string) => {
@@ -604,12 +640,27 @@ export function WorkspaceGraphScreen() {
     () => new Map(scene?.nodes.map((node) => [node.id, node.label]) ?? []),
     [scene?.nodes],
   );
+  const nodesById = useMemo(
+    () => new Map(scene?.nodes.map((node) => [node.id, node]) ?? []),
+    [scene?.nodes],
+  );
   const selectedNode = scene?.nodes.find((node) =>
     node.id === state.selectedId && mapColumns?.nodeIds.includes(node.id),
   ) ?? null;
   const selectedEdge = scene?.edges.find((edge) =>
     edge.id === state.selectedId && mapColumns?.edgeIds.includes(edge.id),
   ) ?? null;
+  const selectedRelations = useMemo(
+    () => selectedNode ? workspaceGraphNodeRelations(displayItems, selectedNode.id, nodeLabels) : null,
+    [displayItems, nodeLabels, selectedNode],
+  );
+  /** A sidebar row (result or related document) selects on the map and centres it. */
+  const selectFromSidebar = (id: string) => {
+    setFolderSelection(null);
+    setState((current) => ({ ...current, selectedId: id }));
+    if (canvasRef.current) canvasRef.current.centerOn(id);
+    else pendingListCenterRef.current = id;
+  };
   const focusStatus = requestedFocus && scene
     ? scene.focus?.status ?? "unavailable"
     : null;
@@ -1381,29 +1432,27 @@ export function WorkspaceGraphScreen() {
                   nodes={scene.nodes}
                   revision={scene.graph_revision}
                   workspaceId={workspaceId}
+                  nodesById={nodesById}
+                  onBlurRelation={handleListBlur}
                   onCenter={(id) => canvasRef.current?.centerOn(id)}
                   onExpand={(clusterId) => expandCluster(clusterId)}
+                  onFocusRelation={handleListFocus}
                   onNavigate={handleDocumentNavigation}
+                  onSelectRelated={selectFromSidebar}
+                  relations={selectedRelations}
                 /> : null}
                 <WorkspaceGraphList
                   activeExpansion={activeExpansion}
                   busy={pendingReplay !== null}
                   expandableClusterIds={expandableClusterIds}
                   expandingClusterId={expandingClusterId}
-                  focusedId={focusedId}
+                  items={displayItems}
                   labels={nodeLabels}
                   lens={state.lens}
-                  mobileLayout={mobileLayout}
-                  scene={scene}
+                  nodesById={nodesById}
+                  query={deferredVisibleSearch}
                   selectedId={state.selectedId}
-                  visibleEdgeIds={visibleEdgeIds}
-                  visibleNodeIds={visibleNodeIds}
-                  onSelect={(id) => {
-                    setFolderSelection(null);
-                    setState((current) => ({ ...current, selectedId: id }));
-                    if (canvasRef.current) canvasRef.current.centerOn(id);
-                    else pendingListCenterRef.current = id;
-                  }}
+                  onSelect={selectFromSidebar}
                   onExpand={expandCluster}
                   onFocus={handleListFocus}
                   onBlur={handleListBlur}
@@ -2059,46 +2108,119 @@ function WorkspaceGraphLegend() {
   );
 }
 
+type WorkspaceGraphListSection = "nodes" | "edges" | WorkspaceGraphRelationGroup;
+
+/**
+ * Sidebar results for the Map toolbar search. Without a query both sections
+ * stay folded (their headers keep the counts); opening one browses the whole
+ * visible map ten rows at a time. With a query they open on the matches.
+ */
 function WorkspaceGraphList({
   activeExpansion,
   busy,
   expandableClusterIds,
   expandingClusterId,
-  focusedId,
+  items,
   labels,
   lens,
-  mobileLayout,
+  nodesById,
+  onBlur,
   onExpand,
   onFocus,
-  onBlur,
   onNavigate,
   onSelect,
-  scene,
+  query,
   selectedId,
-  visibleEdgeIds,
-  visibleNodeIds,
 }: {
   activeExpansion: { clusterId: string; cursor: string | null } | null;
   busy: boolean;
   expandableClusterIds: Set<string>;
   expandingClusterId: string | null;
-  focusedId: string | null;
+  items: WorkspaceGraphDisplayItems;
   labels: ReadonlyMap<string, string>;
   lens: WorkspaceGraphAvailableLens;
-  mobileLayout: boolean;
+  nodesById: ReadonlyMap<string, WorkspaceGraphNode>;
+  onBlur: (id: string) => void;
   onExpand: (clusterId: string, cursor?: string | null) => void;
   onFocus: (id: string) => void;
-  onBlur: (id: string) => void;
   onNavigate: WorkspaceGraphDocumentNavigation;
   onSelect: (id: string) => void;
-  scene: WorkspaceGraphScene;
+  query: string;
   selectedId: string | null;
-  visibleEdgeIds: Set<string>;
-  visibleNodeIds: Set<string>;
 }) {
   const { t } = useTranslation("graph");
-  const nodes = scene.nodes.filter((node) => visibleNodeIds.has(node.id));
-  const edges = scene.edges.filter((edge) => visibleEdgeIds.has(edge.id));
+  const results = useMemo(
+    () => searchWorkspaceGraphItems(items, query, (kind) => workspaceGraphRelationNames(kind, t)),
+    [items, query, t],
+  );
+  const searching = results !== null;
+  const [browseOpen, setBrowseOpen] = useState({ nodes: false, edges: false });
+  const [resultOpen, setResultOpen] = useState({ nodes: true, edges: true });
+  const [groupOpen, setGroupOpen] = useState<Partial<Record<WorkspaceGraphRelationGroup, boolean>>>({});
+  // Shown rows return to one page when the query or the scene changes.
+  const [paging, setPaging] = useState<{
+    items: WorkspaceGraphDisplayItems | null;
+    query: string;
+    limits: Partial<Record<WorkspaceGraphListSection, number>>;
+  }>({ items: null, query: "", limits: {} });
+  const limit = (section: WorkspaceGraphListSection) =>
+    paging.items === items && paging.query === query
+      ? paging.limits[section] ?? WORKSPACE_GRAPH_RESULT_PAGE : WORKSPACE_GRAPH_RESULT_PAGE;
+  const showMore = (section: WorkspaceGraphListSection) => setPaging((current) => {
+    const limits = current.items === items && current.query === query ? current.limits : {};
+    return { items, query, limits: { ...limits, [section]: (limits[section] ?? WORKSPACE_GRAPH_RESULT_PAGE) + WORKSPACE_GRAPH_RESULT_PAGE } };
+  });
+  const open = searching ? resultOpen : browseOpen;
+  const toggle = (section: "nodes" | "edges") =>
+    (searching ? setResultOpen : setBrowseOpen)((current) => ({ ...current, [section]: !current[section] }));
+  const nodes = results?.nodes ?? items.nodes;
+  const edges = useMemo(() => results
+    ? WORKSPACE_GRAPH_RELATION_GROUPS.flatMap((group) => results.relations[group])
+    : items.edges, [items.edges, results]);
+  const firstGroup = results ? WORKSPACE_GRAPH_RELATION_GROUPS.find((group) => results.relations[group].length) : undefined;
+  const shownNodes = open.nodes ? nodes.slice(0, limit("nodes")) : [];
+  const nodeRow = (node: WorkspaceGraphNode) => (
+    <li data-graph-node-id={node.id} key={node.id}>
+      <button aria-pressed={selectedId === node.id} className="workspace-graph-list-select"
+        onClick={() => onSelect(node.id)} title={nodeSummary(node, lens, t)} type="button">
+        <strong>{node.label}</strong>
+        <span className="workspace-graph-row-meta">
+          <WorkspaceGraphNodeChip node={node} />
+          <span className="workspace-graph-row-meta-text">{nodeMeta(node, lens, t)}</span>
+        </span>
+      </button>
+      {node.grain === "document" ? <WorkspaceGraphOpenLink node={node} onNavigate={onNavigate} />
+        : expandableClusterIds.has(node.id) ? <WorkspaceGraphExpandClusterButton busy={busy}
+          expanding={expandingClusterId === node.id} node={node} onExpand={() => onExpand(node.id, null)} /> : null}
+    </li>
+  );
+  const edgeRow = (edge: WorkspaceGraphEdge) => (
+    <li className="workspace-graph-relation-row" data-graph-edge-id={edge.id} key={edge.id}>
+      <button aria-label={workspaceGraphRelationName(edge, labels, t)} aria-pressed={selectedId === edge.id}
+        className="workspace-graph-list-select workspace-graph-relation-select" onClick={() => onSelect(edge.id)} type="button">
+        <WorkspaceGraphRelationMiniMap edge={edge} nodesById={nodesById} />
+      </button>
+    </li>
+  );
+  const edgeList = (section: WorkspaceGraphListSection, list: readonly WorkspaceGraphEdge[], label: string) => {
+    const shown = list.slice(0, limit(section));
+    return <>
+      <ul aria-label={label} className="workspace-graph-result-list" data-relation-group={section === "edges" ? undefined : section}
+        data-shown-count={shown.length} id={`workspace-graph-relations-${section}`}>
+        {shown.map(edgeRow)}
+      </ul>
+      <WorkspaceGraphMoreButton onClick={() => showMore(section)} remaining={list.length - shown.length}
+        step={WORKSPACE_GRAPH_RESULT_PAGE} />
+    </>;
+  };
+  let shownEdges = 0;
+  if (open.edges) {
+    if (results) {
+      for (const group of WORKSPACE_GRAPH_RELATION_GROUPS) {
+        if (groupOpen[group] ?? group === firstGroup) shownEdges += Math.min(results.relations[group].length, limit(group));
+      }
+    } else shownEdges = Math.min(edges.length, limit("edges"));
+  }
   return (
     <section className="workspace-graph-list" aria-labelledby="workspace-graph-list-title"
       onFocusCapture={(event) => {
@@ -2114,7 +2236,15 @@ function WorkspaceGraphList({
       }}
     >
       <h2 id="workspace-graph-list-title" tabIndex={-1}>{t("workspaceGraph.list.title")}</h2>
-      <p>{t("workspaceGraph.list.description", { edges: edges.length, nodes: nodes.length })}</p>
+      {results ? <p className="workspace-graph-list-status" role="status">
+        {results.nodes.length || results.relationCount
+          ? t("workspaceGraph.list.status", {
+            nodes: formatCount(results.nodes.length),
+            query: query.trim(),
+            relations: formatCount(results.relationCount),
+          })
+          : t("workspaceGraph.list.noMatch", { query: query.trim() })}
+      </p> : <p className="workspace-graph-list-hint">{t("workspaceGraph.list.hint")}</p>}
       {activeExpansion?.cursor ? (
         <button
           className="workspace-graph-load-more"
@@ -2127,96 +2257,39 @@ function WorkspaceGraphList({
             : t("workspaceGraph.list.loadMore")}
         </button>
       ) : null}
-      <h3>{t("workspaceGraph.list.documents")}</h3>
-      <WindowedWorkspaceGraphRows
-        focusedId={focusedId}
-        onBlur={onBlur}
-        getId={(node) => node.id}
-        hint={t("workspaceGraph.list.virtualKeyboardHint", { count: nodes.length })}
-        items={nodes}
-        label={t("workspaceGraph.list.documents")}
-        mobileLayout={mobileLayout}
-        selectedId={selectedId}
-        testId="workspace-graph-node-list"
-        renderRow={(node, index, virtualized, rowHeight, onKeyDown) => (
-          <li
-            aria-posinset={virtualized ? index + 1 : undefined}
-            aria-setsize={virtualized ? nodes.length : undefined}
-            className={virtualized ? "workspace-graph-virtual-row" : undefined}
-            data-graph-node-id={node.id}
-            key={node.id}
-            style={virtualized ? { height: rowHeight } : undefined}
-          >
-            <button
-              aria-pressed={selectedId === node.id}
-              className="workspace-graph-list-select"
-              data-list-index={virtualized ? index : undefined}
-              onKeyDown={onKeyDown}
-              onClick={() => onSelect(node.id)}
-              type="button"
-            >
-              <strong title={node.label}>{node.label}</strong>
-              <small title={nodeSummary(node, lens, t)}>{nodeSummary(node, lens, t)}</small>
-            </button>
-            <div className="workspace-graph-list-actions">
-              {node.grain === "document" ? (
-                <Link onClick={onNavigate} title={`${t("workspaceGraph.details.openDocument")}: ${node.label}`} to={node.path}>
-                  <FileText aria-hidden="true" size={15} />
-                  {t("workspaceGraph.list.open")}
-                </Link>
-              ) : null}
-              {node.grain === "cluster" && expandableClusterIds.has(node.id) ? (
-                <button
-                  className="workspace-graph-list-expand"
-                  aria-label={t(expandingClusterId === node.id ? "workspaceGraph.list.expanding" : "workspaceGraph.list.expand")}
-                  disabled={busy}
-                  onClick={() => onExpand(node.id, null)}
-                  type="button"
-                >
-                  <ListPlus aria-hidden="true" size={15} />
-                  {expandingClusterId === node.id
-                    ? t("workspaceGraph.list.expanding")
-                    : t("workspaceGraph.list.expandAction")}
-                </button>
-              ) : null}
-            </div>
-          </li>
-        )}
-      />
-      <h3>{t("workspaceGraph.list.relationships")}</h3>
-      <WindowedWorkspaceGraphRows
-        focusedId={focusedId}
-        onBlur={onBlur}
-        getId={(edge) => edge.id}
-        hint={t("workspaceGraph.list.virtualKeyboardHint", { count: edges.length })}
-        items={edges}
-        label={t("workspaceGraph.list.relationships")}
-        mobileLayout={mobileLayout}
-        selectedId={selectedId}
-        testId="workspace-graph-edge-list"
-        renderRow={(edge, index, virtualized, rowHeight, onKeyDown) => (
-          <li
-            aria-posinset={virtualized ? index + 1 : undefined}
-            aria-setsize={virtualized ? edges.length : undefined}
-            className={virtualized ? "workspace-graph-virtual-row" : undefined}
-            data-graph-edge-id={edge.id}
-            key={edge.id}
-            style={virtualized ? { height: rowHeight } : undefined}
-          >
-            <button
-              aria-pressed={selectedId === edge.id}
-              className="workspace-graph-list-select"
-              data-list-index={virtualized ? index : undefined}
-              onKeyDown={onKeyDown}
-              onClick={() => onSelect(edge.id)}
-              type="button"
-            >
-              <strong>{workspaceGraphEnumLabel(edge.relation_kind, t)}</strong>
-              <small>{labels.get(edge.source)} → {labels.get(edge.target)} · {workspaceGraphEnumLabel(edge.layer, t)}{edge.relation_count > 1 ? ` · ${t("workspaceGraph.list.relationCount", { count: edge.relation_count })}` : ""}</small>
-            </button>
-          </li>
-        )}
-      />
+      <div className="workspace-graph-list-section" data-shown-count={shownNodes.length}
+        data-testid="workspace-graph-node-list" data-total-count={nodes.length}>
+        <WorkspaceGraphFoldHeader controls="workspace-graph-result-nodes" count={nodes.length}
+          onToggle={() => toggle("nodes")} open={open.nodes} summary={<WorkspaceGraphNodeSummary nodes={nodes} />}
+          title={t("workspaceGraph.list.documents")} />
+        {open.nodes ? nodes.length ? <>
+          <ul aria-label={t("workspaceGraph.list.documents")} className="workspace-graph-result-list" id="workspace-graph-result-nodes">
+            {shownNodes.map(nodeRow)}
+          </ul>
+          <WorkspaceGraphMoreButton onClick={() => showMore("nodes")} remaining={nodes.length - shownNodes.length}
+            step={WORKSPACE_GRAPH_RESULT_PAGE} />
+        </> : <p className="workspace-graph-list-none" id="workspace-graph-result-nodes">{t("workspaceGraph.list.noDocuments")}</p> : null}
+      </div>
+      <div className="workspace-graph-list-section" data-shown-count={shownEdges}
+        data-testid="workspace-graph-edge-list" data-total-count={edges.length}>
+        <WorkspaceGraphFoldHeader controls="workspace-graph-result-edges" count={edges.length}
+          onToggle={() => toggle("edges")} open={open.edges} summary={<WorkspaceGraphLineSummary edges={edges} />}
+          title={t("workspaceGraph.list.relationships")} />
+        {open.edges ? <div id="workspace-graph-result-edges">
+          {!edges.length ? <p className="workspace-graph-list-none">{t("workspaceGraph.list.noRelationships")}</p>
+            : results ? WORKSPACE_GRAPH_RELATION_GROUPS.filter((group) => results.relations[group].length).map((group) => {
+              const groupIsOpen = groupOpen[group] ?? group === firstGroup;
+              const label = t(`workspaceGraph.list.groups.${group}`);
+              return <div className="workspace-graph-result-group" key={group}>
+                <WorkspaceGraphFoldHeader controls={`workspace-graph-relations-${group}`}
+                  count={results.relations[group].length} level="group"
+                  onToggle={() => setGroupOpen((current) => ({ ...current, [group]: !groupIsOpen }))}
+                  open={groupIsOpen} title={label} />
+                {groupIsOpen ? edgeList(group, results.relations[group], label) : null}
+              </div>;
+            }) : edgeList("edges", edges, t("workspaceGraph.list.relationships"))}
+        </div> : null}
+      </div>
     </section>
   );
 }
@@ -2601,9 +2674,14 @@ function WorkspaceGraphDetails({
   nodes,
   revision,
   workspaceId,
+  nodesById,
+  onBlurRelation,
   onCenter,
   onExpand,
+  onFocusRelation,
   onNavigate,
+  onSelectRelated,
+  relations,
 }: {
   busy: boolean;
   canExpand: boolean;
@@ -2614,9 +2692,14 @@ function WorkspaceGraphDetails({
   nodes: WorkspaceGraphNode[];
   revision: string;
   workspaceId: string;
+  nodesById: ReadonlyMap<string, WorkspaceGraphNode>;
+  onBlurRelation: (edgeId: string) => void;
   onCenter?: (id: string) => void;
   onExpand: (clusterId: string) => void;
+  onFocusRelation: (edgeId: string) => void;
   onNavigate: WorkspaceGraphDocumentNavigation;
+  onSelectRelated: (nodeId: string) => void;
+  relations: WorkspaceGraphNodeRelations | null;
 }) {
   const { t } = useTranslation("graph");
   const source = edge && ["citation_page", "citation_source", "citation_agent"].includes(edge.relation_kind)
@@ -2639,12 +2722,16 @@ function WorkspaceGraphDetails({
           onNavigate={onNavigate}
         />
       ) : null}
+      {node && relations ? (
+        <WorkspaceGraphRelationFlow key={node.id} labels={labels} node={node} nodesById={nodesById}
+          onBlur={onBlurRelation} onFocus={onFocusRelation} onNavigate={onNavigate} onSelect={onSelectRelated}
+          relations={relations} />
+      ) : null}
       {edge ? (
         <>
           <h3>{workspaceGraphEnumLabel(edge.relation_kind, t)}</h3>
+          <WorkspaceGraphRelationEnds edge={edge} nodesById={nodesById} onNavigate={onNavigate} />
           <dl className="workspace-graph-detail-fields">
-            <WorkspaceGraphDetailField label={t("workspaceGraph.details.source")}>{labels.get(edge.source) ?? "—"}</WorkspaceGraphDetailField>
-            <WorkspaceGraphDetailField label={t("workspaceGraph.details.target")}>{labels.get(edge.target) ?? "—"}</WorkspaceGraphDetailField>
             <WorkspaceGraphDetailField label={t("workspaceGraph.details.layer")}>{workspaceGraphEnumLabel(edge.layer, t)}</WorkspaceGraphDetailField>
             <WorkspaceGraphDetailField label={t("workspaceGraph.details.direction")}>{workspaceGraphEnumLabel(edge.direction, t)}</WorkspaceGraphDetailField>
             <WorkspaceGraphDetailField label={t("workspaceGraph.details.relationsRepresented")}>{formatCount(edge.relation_count)}</WorkspaceGraphDetailField>
@@ -2839,6 +2926,26 @@ function nodeSummary(
     kind: workspaceGraphEnumLabel(node.entity_kind, t),
     metric,
   });
+}
+
+/** The compact second line of a result row; the kind is on the chip beside it. */
+function nodeMeta(
+  node: WorkspaceGraphNode,
+  lens: WorkspaceGraphAvailableLens,
+  t: TFunction<"graph">,
+) {
+  if (node.grain === "cluster") {
+    return t("workspaceGraph.list.clusterMeta", { members: node.member_count, relations: node.relation_count });
+  }
+  const folder = node.primary_folder_label || t("workspaceGraph.folders.unplaced");
+  const metric = lens === "combined"
+    ? t("workspaceGraph.list.combinedMetricShort", { references: node.reference_count, evidence: node.evidence_count })
+    : lens === "links"
+      ? t("workspaceGraph.list.referenceMetricShort", { count: node.reference_count })
+      : lens === "evidence"
+        ? t("workspaceGraph.list.evidenceMetricShort", { count: node.evidence_count })
+        : null;
+  return metric ? `${folder} · ${metric}` : folder;
 }
 
 function exportWorkspaceGraph(scene: WorkspaceGraphScene, renderScene: GraphRenderScene) {
