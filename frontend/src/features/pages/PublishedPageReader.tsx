@@ -134,6 +134,7 @@ export function PublishedPageReader() {
         </header>
         <MarkdownView
           body={page.body_md}
+          references={page.references}
           resolveContextMediaAsset={resolveContextMediaAsset}
           stripLeadingHeading={page.title}
           wikilinkMode="plain"

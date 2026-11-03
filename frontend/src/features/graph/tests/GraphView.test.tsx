@@ -325,6 +325,7 @@ describe("GraphView", () => {
     const payload = graphFixture();
     payload.nodes.push(
       { ...payload.nodes[1], id: "node:library", entity_kind: "library_item_version", entity_id: "library", label: "Source" },
+      { ...payload.nodes[1], id: "node:agent", entity_kind: "agent_page", entity_id: "agent", label: "Agent" },
       { ...payload.nodes[1], id: "node:folder", entity_kind: "workspace_tree_node", entity_id: "folder", family: "structural", label: "Folder" },
     );
     payload.edges.push({ ...payload.edges[0], id: "edge:action", edge_kind: "edited", action_kind: "edited", layer: "action" });
@@ -332,6 +333,7 @@ describe("GraphView", () => {
     const legend = screen.getByTestId("graph-view").querySelector(".graph-legend")!;
     expect(legend.querySelector('[data-node-visual-kind="context"] circle')).toHaveAttribute("fill", "#7c3aed");
     expect(legend.querySelector('[data-node-visual-kind="library"] rect')).toHaveAttribute("fill", "#0f9f8f");
+    expect(legend.querySelector('[data-node-visual-kind="agent"] polygon')).toHaveAttribute("points", "8,1.4 13.5,8 8,14.6 2.5,8");
     expect(legend.querySelector('[data-node-visual-kind="folder"] circle')).toHaveAttribute("fill", "none");
     expect(legend.querySelector('[data-node-visual-kind="conversation"] circle')).toHaveAttribute("fill", "#ea580c");
     expect(legend.querySelector('[data-node-visual-kind="seed"] circle')).toHaveAttribute("stroke-width", "2.64");

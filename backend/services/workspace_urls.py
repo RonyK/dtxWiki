@@ -1,5 +1,6 @@
 """Canonical browser destinations for workspace-owned records."""
 
+from urllib.parse import quote
 from uuid import UUID
 
 
@@ -29,3 +30,7 @@ def agent_page_url(workspace_id: UUID | str, page_id: UUID | str) -> str:
 
 def review_item_url(workspace_id: UUID | str, review_id: UUID | str) -> str:
     return f"{workspace_path(workspace_id)}/review/{review_id}"
+
+
+def public_context_page_url(workspace_slug: str, page_slug: str) -> str:
+    return f"/w/{quote(workspace_slug, safe='')}/pages/{quote(page_slug, safe='')}"

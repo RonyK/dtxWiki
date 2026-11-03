@@ -1,5 +1,5 @@
 export type GraphColorMode = "light" | "dark" | "forced";
-export type GraphNodeVisualKind = "context" | "library" | "conversation" | "folder";
+export type GraphNodeVisualKind = "context" | "library" | "agent" | "conversation" | "folder";
 export type GraphEdgeVisualKind = "link" | "citation" | "coAccess" | "membership" | "action";
 
 export type GraphVisualTokens = {
@@ -30,6 +30,7 @@ const DEFAULT_COLORS = {
     node: {
       context: "#7c3aed",
       library: "#0f9f8f",
+      agent: "#2563eb",
       conversation: "#ea580c",
       folder: "#64748b",
     },
@@ -46,6 +47,7 @@ const DEFAULT_COLORS = {
     node: {
       context: "#8b5cf6",
       library: "#0d9488",
+      agent: "#60a5fa",
       conversation: "#ea580c",
       folder: "#94a3b8",
     },
@@ -74,7 +76,7 @@ export function readGraphTokens(
       ?? (isLightInk(ink) ? "#000000" : "#ffffff");
     return {
       surface,
-      node: { context: ink, library: ink, conversation: ink, folder: ink },
+      node: { context: ink, library: ink, agent: ink, conversation: ink, folder: ink },
       edge: { link: ink, citation: ink, coAccess: ink, membership: ink, action: ink },
     };
   }
@@ -85,6 +87,7 @@ export function readGraphTokens(
     node: {
       context: css("--graph-node-context", defaults.node.context),
       library: css("--graph-node-library", defaults.node.library),
+      agent: css("--graph-node-agent", defaults.node.agent),
       conversation: css("--graph-node-conversation", defaults.node.conversation),
       folder: css("--graph-node-folder", defaults.node.folder),
     },

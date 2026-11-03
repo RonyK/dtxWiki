@@ -7,7 +7,7 @@ import { buildCosmosRelationColors, buildCosmosSceneBuffers, incidentStar, isDen
 
 const tokens: GraphVisualTokens = {
   surface: "#101827",
-  node: { context: "#8b5cf6", library: "#0d9488", conversation: "#ea580c", folder: "#94a3b8" },
+  node: { context: "#8b5cf6", library: "#0d9488", agent: "#60a5fa", conversation: "#ea580c", folder: "#94a3b8" },
   edge: { link: "#64748b", citation: "#0d9488", coAccess: "#ea580c", membership: "#64748b", action: "#a78bfa" },
 };
 
@@ -162,8 +162,10 @@ describe("Workspace Cosmos typed scene", () => {
   });
 
   it("encodes native colors, shapes, widths and direct-incident hover stars", () => {
-    const buffers = buildCosmosSceneBuffers(columns(), tokens);
-    expect(Array.from(buffers.pointShapes)).toEqual([0, 1, 0]);
+    const input = columns();
+    input.nodeKinds[2] = 4; // Same scene, now with an Agent instead of an aggregate.
+    const buffers = buildCosmosSceneBuffers(input, tokens);
+    expect(Array.from(buffers.pointShapes)).toEqual([0, 1, 3]);
     expect(Array.from(buffers.pointSizes)).toEqual([4, 6, 8]);
     expect(Array.from(buffers.drawPointSizes)).toEqual([5, 6, 8]);
     expect(Array.from(buffers.linkStyles)).toEqual([0, 1, 0]);

@@ -730,6 +730,19 @@
             "default": null,
             "title": "Published Version No"
           },
+          "references": {
+            "items": {
+              "$ref": "#/$defs/ReferenceView"
+            },
+            "title": "References",
+            "type": "array"
+          },
+          "references_hash": {
+            "default": "",
+            "pattern": "^(?:[a-f0-9]{64})?$",
+            "title": "References Hash",
+            "type": "string"
+          },
           "review_item_id": {
             "anyOf": [
               {
@@ -816,6 +829,174 @@
           "created_at"
         ],
         "title": "PagePayload",
+        "type": "object"
+      },
+      "ReferenceOccurrence": {
+        "properties": {
+          "end": {
+            "title": "End",
+            "type": "integer"
+          },
+          "href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Href"
+          },
+          "start": {
+            "title": "Start",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "href",
+          "start",
+          "end"
+        ],
+        "title": "ReferenceOccurrence",
+        "type": "object"
+      },
+      "ReferenceView": {
+        "properties": {
+          "href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Href"
+          },
+          "inline_count": {
+            "default": 0,
+            "title": "Inline Count",
+            "type": "integer"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Location"
+          },
+          "location_warning": {
+            "anyOf": [
+              {
+                "const": "fragment_unavailable",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Location Warning"
+          },
+          "metadata_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Metadata Id"
+          },
+          "metadata_present": {
+            "default": false,
+            "title": "Metadata Present",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Note"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "occurrences": {
+            "items": {
+              "$ref": "#/$defs/ReferenceOccurrence"
+            },
+            "title": "Occurrences",
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "available",
+              "unavailable",
+              "unpublished",
+              "deleted"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "target_kind": {
+            "enum": [
+              "context_page",
+              "library_item",
+              "agent_page"
+            ],
+            "title": "Target Kind",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Title"
+          }
+        },
+        "required": [
+          "target_kind",
+          "target_id",
+          "number",
+          "state"
+        ],
+        "title": "ReferenceView",
         "type": "object"
       },
       "TextMatchCandidate": {

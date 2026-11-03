@@ -281,8 +281,8 @@
     max-inline-size: 100%;
   }
 
-  /* Tags move into the Properties drawer at this breakpoint, so the title can
-     share one compact row with Format and Properties. The <=1024px wrap rule
+  /* Tags live in the Properties drawer, so the title can share one compact
+     row with Format and Properties. The <=1024px wrap rule
      otherwise gives the textarea its intrinsic flex basis and pushes both
      controls onto a second 44px row. */
   .page-workspace .editor-title-row {

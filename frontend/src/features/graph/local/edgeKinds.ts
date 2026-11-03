@@ -24,6 +24,7 @@ export function localEdgeVisualKind(
       return "link";
     case "citation_page":
     case "citation_source":
+    case "citation_agent":
     case "ask_citation":
       return "citation";
     case "co_access":

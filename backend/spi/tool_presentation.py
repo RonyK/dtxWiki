@@ -26,7 +26,7 @@ KOREAN_TOOL_TITLES = {
     "patch_context_edit": "컨텍스트 편집 부분 수정",
     "list_my_context_edits": "내 편집 중인 컨텍스트 목록",
     "upload_image": "이미지 업로드",
-    "cite": "인용 후보 찾기",
+    "cite": "참고문헌 등록",
     "submit_feedback": "피드백 제출",
     "write_agent_page_draft": "에이전트 페이지 초안 작성",
     "build_agent_input_bundle": "에이전트 입력 번들 만들기",

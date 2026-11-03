@@ -218,6 +218,40 @@ def join_in_workspace(
     )
 
 
+def join_correlated_workspace_projection(
+    statement: Select,
+    source_workspace_column,
+    joined_model: type,
+    *,
+    on: ColumnElement[bool],
+) -> Select:
+    """Preserve row ownership inside a read-only cross-workspace selectable.
+
+    Unlike a request-scoped lookup this builds a reusable SQL projection. Its
+    caller must bind the resulting projection to a workspace when reading it.
+    Each join is still required to match the source row's physical workspace;
+    a foreign target UUID cannot supply any endpoint data.
+    """
+    source_table = getattr(source_workspace_column, "table", None)
+    if (
+        source_table is None
+        or source_table.name not in WORKSPACE_PLANE_TABLES
+        or source_workspace_column.name != "workspace_id"
+        or source_workspace_column.nullable
+    ):
+        raise TypeError("a classified non-null source workspace column is required")
+    joined = inspect(joined_model)
+    _validate_workspace_model(
+        joined.mapper.class_ if joined.is_aliased_class else joined_model,
+        operation="join_correlated_workspace_projection",
+    )
+    return statement.join(
+        joined_model,
+        on & (joined_model.workspace_id == source_workspace_column),
+        isouter=True,
+    )
+
+
 def update_in_workspace[Model](
     model: type[Model],
     *,

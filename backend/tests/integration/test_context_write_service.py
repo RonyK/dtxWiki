@@ -616,8 +616,8 @@ def test_published_citation_projection_uses_writer_target_shapes(
         )
 
     assert edge is not None
-    assert edge.target_kind == "library_item_version"
-    assert edge.target_id == library_version.id
+    assert edge.target_kind == "library_item"
+    assert edge.target_id == library_version.library_item_id
 
 
 def test_write_draft_standard_policy_warns_without_rollback(session_factory):

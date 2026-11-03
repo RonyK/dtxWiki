@@ -2,11 +2,13 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { components } from "../api/types.gen";
+import type { ReferenceView } from "../api/references";
+import { ReferenceChanges } from "./ReferenceChanges";
 
 export type DiffViewerDiff = Pick<
   components["schemas"]["PageVersionDiff"],
   "from_version_no" | "to_version_no" | "lines" | "additions" | "deletions"
->;
+> & { references_before?: ReferenceView[]; references_after?: ReferenceView[]; metadata_changes?: string[] };
 
 export type DiffViewerMode = "split" | "unified";
 type DiffCellKind = "add" | "context" | "del" | "empty";
@@ -101,6 +103,8 @@ export function DiffViewer({
           </div>
         ) : null}
       </div>
+      {Array.isArray(metadataChanges) && metadataChanges.includes("references")
+        ? <ReferenceChanges before={diff.references_before ?? []} after={diff.references_after ?? []} /> : null}
       {!hasChanges ? (
         <p className="diff-viewer-empty">
           {/* Still reachable after the self-compare guard: two different

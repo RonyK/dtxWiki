@@ -80,10 +80,6 @@ def lock_edge_projection_workspace(
             ):
                 raise ValueError("workspace not found while locking edge projection")
             return
-        if session.get_bind().dialect.name == "postgresql":
-            session.execute(
-                select(func.pg_advisory_xact_lock(_projection_lock_key(workspace_id)))
-            )
         result = session.execute(
             update(Workspace)
             .where(Workspace.id == workspace_id)
@@ -93,8 +89,15 @@ def lock_edge_projection_workspace(
             )
             .execution_options(synchronize_session=False)
         )
-    if result.rowcount != 1:
-        raise ValueError("workspace not found while locking edge projection")
+        if result.rowcount != 1:
+            raise ValueError("workspace not found while locking edge projection")
+        if session.get_bind().dialect.name == "postgresql":
+            # Policy/publication callers may already own this Workspace row.
+            # Taking the maintenance barrier first would invert their order.
+            # Incremental readers retain shared-barrier + row NOWAIT behavior.
+            session.execute(
+                select(func.pg_advisory_xact_lock(_projection_lock_key(workspace_id)))
+            )
 
 
 def edge_version(session: Session, workspace_id: UUID) -> int:

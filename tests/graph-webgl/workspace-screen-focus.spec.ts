@@ -35,7 +35,7 @@ test.beforeAll(async () => {
         if (source.endsWith("shared/api/workspaceGraph")) return "\0focus-api";
       },
       load(id) {
-        if (id === "\0focus-auth") return 'export const useAuth = () => ({user:{user_id:"focus-actor"}});';
+        if (id === "\0focus-auth") return 'export const useAuth = () => ({user:{user_id:"focus-actor"}}); export const useOptionalAuth = useAuth;';
         if (id === "\0focus-workspace") return `import { useSyncExternalStore } from "react";
           export const useWorkspaceContext = () => {
             const fixture = window.__workspaceScreenFocus;

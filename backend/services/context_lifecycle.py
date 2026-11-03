@@ -1540,6 +1540,8 @@ def apply_context_publication(
     version: ContextPageVersion,
     require_latest_draft: bool,
     allow_chain_ancestor: bool = False,
+    actor=None,
+    self_origins: frozenset[str] | None = None,
 ) -> UUID | None:
     """Atomically normalize snapshots and advance every published pointer.
 
@@ -1571,6 +1573,14 @@ def apply_context_publication(
     ):
         chain_ids = [draft.id for draft in live_draft_chain(session, page)]
         newer_draft_ids = set(chain_ids[: chain_ids.index(version.id)])
+    from backend.services.document_references import publish_document_references
+
+    # Register the exact stored version once, inside the caller's publication
+    # transaction. Reindex/read paths never manufacture citation metadata.
+    if page.current_published_version_id != version.id:
+        publish_document_references(
+            session, version=version, actor=actor, self_origins=self_origins
+        )
     previous_published_version_id = page.current_published_version_id
     previous = (
         get_in_workspace(

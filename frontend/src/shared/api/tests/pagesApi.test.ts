@@ -195,6 +195,7 @@ describe("pages api", () => {
       reason: "Publish from test.",
       publish_despite_findings: false,
       expected_content_hash: "a".repeat(64),
+      expected_references_hash: "b".repeat(64),
     });
 
     expect(result.page.version_id).toBe("v2");
@@ -206,6 +207,7 @@ describe("pages api", () => {
           reason: "Publish from test.",
           publish_despite_findings: false,
           expected_content_hash: "a".repeat(64),
+          expected_references_hash: "b".repeat(64),
         }),
       }),
     );

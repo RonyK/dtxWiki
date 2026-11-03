@@ -123,6 +123,10 @@ def test_production_shaped_page_shows_links_tree_and_citations(
                 ContextPage.slug == "mixed-seed",
             )
         )
+        from backend.models.document_reference import ContextCitationPublication
+        # Production-shaped legacy evidence predates publication manifests.
+        marker = session.get(ContextCitationPublication, seed.version_id)
+        session.delete(marker)
         canonical = _seed_canonical_fixture(session, workspace_id)
         session.add(
             ContextCitation(

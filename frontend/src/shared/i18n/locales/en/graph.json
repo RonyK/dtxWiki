@@ -64,7 +64,8 @@
       "library_sync_version": "Library retrieval",
       "version_parent": "Version parent",
       "co_access": "Often read together",
-      "associative": "Associated"
+      "associative": "Associated",
+      "citation_agent": "Agent citation"
     },
     "graphActionKind": {
       "searched": "Searched",
@@ -230,7 +231,8 @@
         "library": "Library material",
         "conversation": "Conversation or activity",
         "folder": "Folder",
-        "seed": "Seed"
+        "seed": "Seed",
+        "agent": "Agent document"
       },
       "edge": {
         "link": "Link",
@@ -572,7 +574,8 @@
       "crossFolder": "Cross-folder",
       "recentlyConnected": "Recently connected",
       "apply": "Apply data filters",
-      "chooseKind": "Choose at least one document kind before applying."
+      "chooseKind": "Choose at least one document kind before applying.",
+      "agent": "Agent"
     },
     "metadata": {
       "aria": "Map coverage",
@@ -600,7 +603,8 @@
       "visibleRelationMetric": "Node size: relationships shown in this map (bounded square-root scale).",
       "linksMetric": "Node size: Referenced by N visible documents (bounded square-root scale).",
       "evidenceMetric": "Node size: visible evidence relationship count (bounded square-root scale).",
-      "uniformMetric": "Node size is uniform for this lens; it does not encode importance."
+      "uniformMetric": "Node size is uniform for this lens; it does not encode importance.",
+      "agent": "Agent document"
     },
     "enums": {
       "context": "Context",
@@ -624,7 +628,9 @@
       "capped": "Capped",
       "partial": "Partial",
       "privacy_suppressed": "Privacy suppressed",
-      "unknown": "Other visible relationship"
+      "unknown": "Other visible relationship",
+      "agent": "Agent",
+      "citation_agent": "Agent citation"
     },
     "metrics": {
       "combined": "Visible published links and citation relationships",

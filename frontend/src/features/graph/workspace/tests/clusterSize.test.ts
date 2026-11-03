@@ -7,7 +7,7 @@ import { buildCosmosSceneBuffers } from "../cosmosScene";
 
 const tokens: GraphVisualTokens = {
   surface: "#ffffff",
-  node: { context: "#7c3aed", library: "#0f9f8f", conversation: "#ea580c", folder: "#64748b" },
+  node: { context: "#7c3aed", library: "#0f9f8f", agent: "#2563eb", conversation: "#ea580c", folder: "#64748b" },
   edge: { link: "#64748b", citation: "#0f9f8f", coAccess: "#ea580c", membership: "#94a3b8", action: "#7c3aed" },
 };
 const CLUSTER = 2;

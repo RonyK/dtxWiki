@@ -187,24 +187,6 @@ def test_topbar_keeps_workspace_switcher_separate_from_search_track():
     assert actions["min-width"] == "max-content"
 
 
-def test_editor_title_tags_only_claim_wide_space_when_chips_exist():
-    stylesheet = read_app_styles()
-
-    empty_tags = declarations_for_selector(stylesheet, ".editor-title-tags")
-    populated_tags = declarations_for_selector(
-        stylesheet,
-        ".editor-title-tags:has(.chip-input-chip)",
-    )
-
-    assert empty_tags["flex"] == "0 0 auto"
-    assert empty_tags["min-width"] == "80px"
-    # L-3 (260908 UI audit): a fixed 320px flex-basis reserved that width even
-    # for a single short tag chip, leaving a large empty box. Size to content
-    # (flex-grow/shrink still bounded by max-width) instead of a fixed basis.
-    assert populated_tags["flex"] == "0 1 auto"
-    assert populated_tags["max-width"] == "320px"
-
-
 def test_page_properties_popover_uses_dynamic_anchor_position():
     stylesheet = read_app_styles()
     editor_source = (ROOT / "frontend/src/features/pages/PageEditor.tsx").read_text(

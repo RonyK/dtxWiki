@@ -3193,9 +3193,10 @@ function ContextReader({
           aria-labelledby="context-reader-tab-view"
           tabIndex={0}
         >
-          {detail.body_markdown ? (
+          {detail.body_markdown || detail.references?.length ? (
             <MarkdownView
-              body={detail.body_markdown}
+              body={detail.body_markdown ?? ""}
+              references={detail.references}
               resolveContextMediaAsset={resolveContextMediaAsset}
               stripLeadingHeading={detail.title}
               deletedSources={deletedSources}

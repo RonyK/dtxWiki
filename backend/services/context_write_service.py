@@ -125,6 +125,11 @@ from backend.services.context_visibility import (
     visible_context_version_id,
 )
 from backend.services.db_write_intent import acquire_write_intent
+from backend.services.document_reference_merge import (
+    AuthoredReferenceMerge,
+    merge_authored_document_references,
+)
+from backend.services.document_references import replace_authored_document_references
 from backend.services.job_queue import (
     JobQueueService,
     context_page_embed_idempotency_key,
@@ -1437,6 +1442,7 @@ class ContextWriteService:
             # silently overwriting).
             effective_operations: list[EditOperation] = request.operations
             reconciled_branch: ContextPageVersion | None = None
+            reference_merge: AuthoredReferenceMerge | None = None
             caller_receipt_plan: list[tuple[int | None, str, str]] = []
 
             requested_base_version: ContextPageVersion | None = None
@@ -1685,10 +1691,19 @@ class ContextWriteService:
                 base_body_md=requested_base_version.body_md,
                 head_body_md=base_version.body_md,
             )
+            if reconciled_branch is not None or (
+                base_is_stale and push_decision.outcome != "diverged"
+            ):
+                reference_merge = merge_authored_document_references(
+                    session,
+                    source=reconciled_branch or requested_base_version,
+                    head=base_version,
+                )
 
             if (
                 base_is_stale
                 and not actual_target_ids
+                and not (reference_merge and reference_merge.changed)
                 and not request.needs_review
                 and not self._identical_body_requires_fork(session, base_version)
             ):
@@ -1832,6 +1847,7 @@ class ContextWriteService:
                     conflicting_ids=conflicting_ids,
                     actual_target_ids=actual_target_ids,
                     supersedes_branch=reconciled_branch,
+                    reference_merge=reference_merge,
                 )
                 result = project_caller_receipts(result)
                 if reconciled_branch is not None:
@@ -1915,6 +1931,7 @@ class ContextWriteService:
                 and not request.needs_review
                 and not request.dry_run
                 and reconciled_branch is None
+                and not (reference_merge and reference_merge.changed)
                 and not self._identical_body_requires_fork(session, base_version)
             ):
                 no_effect_classification = _ContextUpdateClassification(
@@ -2018,10 +2035,12 @@ class ContextWriteService:
                     classification=classification,
                     new_body=new_body,
                     needs_review=request.needs_review,
-                    manual_citation=False,
+                    manual_citation=bool(reference_merge and reference_merge.changed),
                 )
-                requires_fork = self._identical_body_requires_fork(
-                    session, base_version
+                requires_fork = (
+                    self._identical_body_requires_fork(session, base_version)
+                    or reconciled_branch is not None
+                    or bool(reference_merge and reference_merge.changed)
                 )
                 engine_noop = all(edit.no_op for edit in edits)
                 normalized_noop = (
@@ -2054,7 +2073,9 @@ class ContextWriteService:
                         body_changed=not same_authored_markdown(
                             new_body, base_version.body_md
                         ),
-                        metadata_changed=False,
+                        metadata_changed=bool(
+                            reference_merge and reference_merge.changed
+                        ),
                         version_status=(
                             "draft"
                             if would_create_version
@@ -2112,7 +2133,9 @@ class ContextWriteService:
                 edits=edits,
                 identity_seed=identity_seed,
                 prepared_block_map=prepared_block_map,
-                force_new_version=reconciled_branch is not None,
+                force_new_version=reconciled_branch is not None
+                or bool(reference_merge and reference_merge.changed),
+                reference_merge=reference_merge,
             )
             if push_decision is not None:
                 result = result.model_copy(
@@ -2483,6 +2506,7 @@ class ContextWriteService:
         conflicting_ids: frozenset[str],
         actual_target_ids: frozenset[str],
         supersedes_branch: ContextPageVersion | None = None,
+        reference_merge: AuthoredReferenceMerge | None = None,
     ) -> UpdateDraftResult:
         """Land a patch_draft push that conflicted with head as a branch,
         never touching head (design doc section 5's "diverged" row).
@@ -2523,6 +2547,13 @@ class ContextWriteService:
             identity_seed=identity_seed,
             prepared_block_map=prepared.predicted_block_map,
         )
+        if reference_merge is not None:
+            replace_authored_document_references(
+                session,
+                version=version,
+                rows=reference_merge.rows,
+                self_origins=self.body_preparer.self_origins,
+            )
         base_block_map = block_map_for_version(
             requested_base_version.block_map, requested_base_version.body_md
         )
@@ -2685,7 +2716,7 @@ class ContextWriteService:
             persisted_character_count=len(version.body_md),
             outcome="updated_draft",
             body_changed=True,
-            metadata_changed=False,
+            metadata_changed=bool(reference_merge and reference_merge.changed),
             version_status=version.version_status,
             latest_draft_version_id=page.latest_draft_version_id,
             current_published_version_id=page.current_published_version_id,
@@ -2825,6 +2856,7 @@ class ContextWriteService:
         identity_seed: str | None = None,
         prepared_block_map: PreparedBlockMap | None = None,
         force_new_version: bool = False,
+        reference_merge: AuthoredReferenceMerge | None = None,
     ) -> UpdateDraftResult:
         """Persist a fully resolved Context update.
 
@@ -2966,7 +2998,7 @@ class ContextWriteService:
         citation_warnings = self._workflow_warnings(citations)
         manual_citation = any(
             citation.created_via == "manual_input" for citation in citations
-        )
+        ) or bool(reference_merge and reference_merge.changed)
         gate, risk_resolution = self._resolve_update_risk(
             session,
             workspace=workspace,
@@ -2995,6 +3027,7 @@ class ContextWriteService:
             classification.format_only_eligible
             and not metadata_patch
             and not citations
+            and not (reference_merge and reference_merge.changed)
             and bool(new_body)
             and base_version is not None
             and self._prepared_base_matches(
@@ -3038,6 +3071,7 @@ class ContextWriteService:
                 session=session,
                 page=page,
                 parent_version_id=restart_parent_id,
+                reference_source_version=base_version,
                 body=prepared_body,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
@@ -3065,13 +3099,20 @@ class ContextWriteService:
                 prepared_block_map=prepared_block_map,
                 force_new_version=force_new_version,
             )
+        if reference_merge is not None and reference_merge.changed:
+            replace_authored_document_references(
+                session,
+                version=version,
+                rows=reference_merge.rows,
+                self_origins=self.body_preparer.self_origins,
+            )
         body_changed = not same_authored_markdown(version.body_md, base_version.body_md)
         metadata_changed = self._metadata_patch_changes(
             session=session,
             page=page,
             version=version,
             metadata_patch=metadata_patch,
-        )
+        ) or bool(reference_merge and reference_merge.changed)
         self._record_metadata_patch(
             session=session,
             change_set_id=change_set.id,
@@ -3496,6 +3537,8 @@ class ContextWriteService:
                 version=version,
                 require_latest_draft=True,
                 allow_chain_ancestor=publish_chain_ancestor,
+                actor=self.actor_context,
+                self_origins=self.body_preparer.self_origins,
             )
 
             change_set = self._create_change_set(
@@ -3590,7 +3633,10 @@ class ContextWriteService:
                 reason=request.reason,
             )
             self._enqueue_embed(
-                session, page=page, version=version, marker="published",
+                session,
+                page=page,
+                version=version,
+                marker="published",
                 decision_id=review_decision_id,
             )
             return PublishContextPageResult(
@@ -3802,6 +3848,7 @@ class ContextWriteService:
         identity_seed: str | None = None,
         explicit_block_replacements: dict[str, str] | None = None,
         prepared_block_map: list[dict] | None = None,
+        reference_source_version: ContextPageVersion | None = None,
     ) -> ContextPageVersion:
         try:
             return insert_version(
@@ -3823,6 +3870,7 @@ class ContextWriteService:
                 identity_seed=identity_seed,
                 explicit_block_replacements=explicit_block_replacements,
                 prepared_block_map=prepared_block_map,
+                reference_source_version=reference_source_version,
             )
         except MarkdownMediaPolicyError as exc:
             raise RejectedByPolicyError(str(exc), error_code=exc.error_code) from exc
@@ -4245,6 +4293,7 @@ class ContextWriteService:
         session: Session,
         page: ContextPage,
         parent_version_id: UUID | None,
+        reference_source_version: ContextPageVersion,
         body: PreparedBody,
         actor_kind: str,
         actor_id: str,
@@ -4269,6 +4318,7 @@ class ContextWriteService:
             session=session,
             page=page,
             parent_version_id=parent_version_id,
+            reference_source_version=reference_source_version,
             body=body,
             actor_kind=actor_kind,
             actor_id=actor_id,

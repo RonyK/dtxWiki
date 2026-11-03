@@ -283,22 +283,26 @@ test("Local ko folder explanations scroll inside a 390x640 viewport", async ({ p
 test("Local folder info stays painted inside a narrow reader on a wide viewport", async ({ page }, testInfo) => {
   const viewport = { width: 1440, height: 900 };
   const errors = await mount(page, "folder-long", "en", "light", viewport, 320);
-  await page.getByText(copy.en.folderChip, { exact: true }).click();
+  const summary = page.getByText(copy.en.folderChip, { exact: true });
   const panel = page.locator(".graph-local-coverage-panel");
-  await expectCoveragePanelFits(page, panel, viewport);
-  const geometry = await panel.evaluate((element) => {
-    const popup = element.getBoundingClientRect();
+  // Open and measure in one browser task, before the native queued toggle
+  // event. The popup must already fit its reader on the first visible frame.
+  const geometry = await summary.evaluate((element) => {
+    (element as HTMLElement).click();
+    const panel = element.parentElement!.querySelector(".graph-local-coverage-panel")!;
+    const popup = panel.getBoundingClientRect();
     const owner = element.closest(".graph-view")!.getBoundingClientRect();
     const points = [[popup.left + 4, popup.top + 4], [popup.right - 4, popup.bottom - 4]];
     return { left: popup.left, right: popup.right, top: popup.top, bottom: popup.bottom,
       owner: { left: owner.left, right: owner.right, top: owner.top, bottom: owner.bottom },
-      painted: points.every(([x, y]) => element.contains(document.elementFromPoint(x, y))) };
+      painted: points.every(([x, y]) => panel.contains(document.elementFromPoint(x, y))) };
   });
   expect(geometry.left).toBeGreaterThanOrEqual(geometry.owner.left);
   expect(geometry.right).toBeLessThanOrEqual(geometry.owner.right);
   expect(geometry.top).toBeGreaterThanOrEqual(geometry.owner.top);
   expect(geometry.bottom).toBeLessThanOrEqual(geometry.owner.bottom);
   expect(geometry.painted).toBe(true);
+  await expectCoveragePanelFits(page, panel, viewport);
   await evidenceScreenshot(page, testInfo, "local-folder-info-narrow-reader-open.png");
   expect(errors).toEqual([]);
 });

@@ -82,6 +82,7 @@ def test_kind_order_lists_every_relation_then_every_action_once():
         "wikilink",
         "citation_page",
         "citation_source",
+        "citation_agent",
         "tree",
         "version_parent",
         "version_merge",
@@ -182,7 +183,7 @@ def test_denominator_kinds_are_exactly_the_kinds_effective_weight_divides():
     counts = RankDenominators(wikilink_out_degree=6, citation_total=14, tree_children=4)
     divided = {
         kind
-        for kind in RANK_PARAMS
+        for kind in EDGE_SEMANTICS
         if effective_weight(kind, 1.0, counts) != effective_weight(kind, 1.0, None)
     }
     assert divided == DENOMINATOR_KINDS

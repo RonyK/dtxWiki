@@ -180,6 +180,7 @@ def _publish_created_version(client, page_service, created, **payload_overrides)
         "reason": "publish page-first editing version",
         "publish_despite_findings": False,
         "expected_content_hash": created["content_hash"],
+        "expected_references_hash": created["references_hash"],
         **payload_overrides,
     }
     return client.post(
@@ -242,6 +243,7 @@ def test_browser_cannot_publish_another_actors_private_editing_version(page_serv
             actor_id=str(uuid4()),
             actor_provenance="browser_session",
             expected_content_hash=created["content_hash"],
+            expected_references_hash=created["references_hash"],
         )
 
     assert page_version_and_pointer_snapshot(page_service, page_id) == before
@@ -273,6 +275,7 @@ def test_non_browser_actor_cannot_direct_publish_its_editing_version(page_servic
                 actor_id=actor_id,
                 actor_provenance=actor_provenance,
                 expected_content_hash=created["content_hash"],
+                expected_references_hash=created["references_hash"],
             )
 
         assert page_version_and_pointer_snapshot(page_service, page_id) == before, (
@@ -935,6 +938,7 @@ def test_second_authors_submit_conflicts_instead_of_orphaning_the_first_draft(
         json={
             "reason": "ship it",
             "expected_content_hash": owner_submitted_data["content_hash"],
+            "expected_references_hash": owner_submitted_data["references_hash"],
         },
     )
     assert published.status_code == 200, published.text
@@ -994,6 +998,7 @@ def test_editing_full_flow_begin_save_submit_publish(page_service):
         json={
             "reason": "seed baseline",
             "expected_content_hash": created["content_hash"],
+            "expected_references_hash": created["references_hash"],
         },
     )
     assert baseline_published.status_code == 200, baseline_published.text
@@ -1086,7 +1091,11 @@ def test_editing_full_flow_begin_save_submit_publish(page_service):
 
     published = client.post(
         f"{pages_url(page_service)}/{page_id}/versions/{editing_version_id}/publish",
-        json={"reason": "ship it", "expected_content_hash": saved_data["content_hash"]},
+        json={
+            "reason": "ship it",
+            "expected_content_hash": saved_data["content_hash"],
+            "expected_references_hash": saved_data["references_hash"],
+        },
     )
     assert published.status_code == 200, published.text
     assert published.json()["data"]["body_md"] == "# Full Flow Target\n\nEdited body."

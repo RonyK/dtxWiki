@@ -421,9 +421,10 @@ tool catalog를 cache했다면 backend 재시작 후 연결을 다시 초기화�
 관계 추출, 인용 발행, 읽기 pair 집계와 observation은 각 producer가 소유합니다.
 
 관리자 rebuild producer는 `graph_cache.lock_edge_projection_workspace()`로
-Workspace의 maintenance barrier를 먼저 잡고 edge를 조회·수정합니다. 읽기 usage
+Workspace 행을 먼저 잠근 뒤 maintenance barrier를 잡고 edge를 조회·수정합니다. 읽기 usage
 hook은 새 per-call 행의 `viewed + succeeded + focused-read tool`만 처리하며,
-대화 행 잠금으로 같은 대화의 집계를 직렬화합니다. PostgreSQL에서는 maintenance
+인용 등록·재시도를 열람 집계에서 제외합니다. 대화 행 잠금으로 같은 대화의 집계를
+직렬화합니다. PostgreSQL에서는 maintenance
 barrier를 공유 모드로 대기 없이 확인하고, 보이는 관계의 identity·지원 횟수·가중치·
 provenance가 바뀔 때만 Workspace revision 잠금을 잡아 같은 트랜잭션에서 올립니다.
 최초·마지막 관찰 시각만 바뀌면 revision을 유지하며, 잠금과 revision 갱신은
@@ -915,9 +916,21 @@ Keep one edit per task and submit it once. In the same MCP chat,
 `begin_context_edit` after a submit reopens that submission while its review is
 pending, instead of creating a new version.
 Editing commands use `editing_version_id`, `expected_editing_revision`, and an
-operation key to detect conflicting updates. The Context editing tools do not
-currently support attaching citation arrays or metadata-only updates without
-resending the body.
+operation key to detect conflicting updates. Use `cite` with the owning page
+and editing version, `expected_editing_revision`, `idempotency_key`, and explicit
+`add`/`remove` document references. Targets use `target_kind` and document UUID,
+not a target version. Search and read the selected sources before registration.
+The REST editor uses the same reference command service. Inline
+`@cite{<internal document address>}` markers are registered at final publication
+alongside reference metadata. Ordinary Markdown links remain ordinary links.
+Saving checks citation syntax and the combined 500-document budget without
+registering Graph edges. Historical `@cite{source-key}` display tokens remain
+unchanged and receive an unresolved-link warning; replace them with permanent
+document addresses to register citations.
+References are returned separately from the authored body; do not append a
+second generated copy to the Markdown. Old claim-based cite inputs are rejected,
+and reindex does not discover historical citations or reinterpret Chats records.
+
 
 Structure results are paginated. Follow `next_cursor` for `read_structure_map`;
 for `read_context_outline`, send `outline_next_cursor` back as `outline_cursor`.

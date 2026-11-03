@@ -77,7 +77,7 @@ SEARCH_SCOPE_RESULT_TYPES = {
 # values such as type, version_id, and concept_path; no new top-level field is
 # permitted without changing this contract first.
 FETCH_RESULT_FIELDS = frozenset({"id", "title", "text", "url", "metadata"})
-FETCH_OUTPUT_FIELDS = frozenset({"envelope", *FETCH_RESULT_FIELDS})
+FETCH_OUTPUT_FIELDS = frozenset({"envelope", "references", *FETCH_RESULT_FIELDS})
 
 # These are the intentional caller/policy failures for fetch. Operational
 # failures such as internal_error are not a license for a handler to translate

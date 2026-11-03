@@ -3860,7 +3860,7 @@ function exactPage(workspaceId: string, pageId: string, versionId: string): page
   return {
     id: pageId, workspace_id: workspaceId, version_id: versionId,
     title: "Feedback Target", slug: "feedback-target", body_md: "Exact candidate body",
-    page_type: "guide", content_hash: "a".repeat(64), editing_revision: 1,
+    page_type: "guide", content_hash: "a".repeat(64), references_hash: "b".repeat(64), editing_revision: 1,
     created_at: "2026-05-09T00:00:00Z", updated_at: "2026-05-09T00:00:00Z",
     backlink_count: 0, children_count: 0, is_alternative: false, is_discarded: false,
     is_draft_head: true, is_public: false, is_published_head: false, is_visible_head: false,

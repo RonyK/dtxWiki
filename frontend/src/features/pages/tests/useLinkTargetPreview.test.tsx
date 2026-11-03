@@ -25,6 +25,35 @@ function answer(request: Parameters<typeof previewLinkTargets>[1], link_targets:
 }
 
 describe("useLinkTargetPreview", () => {
+  it("checks an explicit citation once and returns its reader projection without sending the document", async () => {
+    const onReferences = vi.fn();
+    vi.mocked(previewLinkTargets).mockImplementation(async (_workspace, request) => ({
+      ...answer(request, [confirmed]),
+      references: [{ target_kind: "context_page", target_id: "11111111-1111-4111-8111-111111111111", number: 1,
+        title: "Source title", href: confirmed.href, state: "available", inline_count: 1, metadata_present: false,
+        occurrences: [{ href: ref, start: 0, end: ref.length + 7 }] }],
+    }));
+    const props = { ...input, citationLocators: [ref], onReferences };
+    const { result, rerender } = renderHook((value) => useLinkTargetPreview(value), { initialProps: props });
+    act(() => result.current.reportLinks([ref]));
+    await act(async () => { await vi.advanceTimersByTimeAsync(LINK_CHECK_IDLE_MS); });
+    expect(vi.mocked(previewLinkTargets).mock.calls[0][1].body_md).toBe(`@cite{${ref}}`);
+    expect(onReferences).toHaveBeenCalledWith([expect.objectContaining({ title: "Source title" })]);
+    rerender({ ...props, body: `${input.body}\nMore writing` });
+    await act(async () => { await vi.advanceTimersByTimeAsync(LINK_CHECK_IDLE_MS); });
+    expect(previewLinkTargets).toHaveBeenCalledTimes(1);
+    const parenthesized = "/p/workspace-1/target#section(one)";
+    rerender({ ...props, citationLocators: [parenthesized] });
+    act(() => result.current.reportLinks([parenthesized]));
+    await act(async () => { await vi.advanceTimersByTimeAsync(LINK_CHECK_IDLE_MS); });
+    expect(vi.mocked(previewLinkTargets).mock.calls[1][1].body_md).toBe(`@cite{${parenthesized}}`);
+    rerender({ ...props, citationLocators: ["invalid locator"] });
+    act(() => result.current.reportLinks(["invalid locator"]));
+    await act(async () => { await vi.advanceTimersByTimeAsync(LINK_CHECK_IDLE_MS * 3); });
+    expect(result.current.checking.size).toBe(0);
+    expect(previewLinkTargets).toHaveBeenCalledTimes(2);
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.mocked(previewLinkTargets).mockReset();

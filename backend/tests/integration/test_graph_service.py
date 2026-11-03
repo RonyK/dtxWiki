@@ -699,7 +699,6 @@ def test_neighbors_panel_hydrates_library_artifact_citation_to_item_path(
             )
         )
         seed_id = seed.id
-        artifact_id = artifact.id
         item_id = item.id
 
     with session_factory() as session:
@@ -712,8 +711,8 @@ def test_neighbors_panel_hydrates_library_artifact_citation_to_item_path(
 
     assert len(panel.citations) == 1
     citation = panel.citations[0]
-    assert citation.kind == "library_artifact"
-    assert citation.id == artifact_id
+    assert citation.kind == "library_item"
+    assert citation.id == item_id
     assert citation.title == "Deployment Runbook"
     assert citation.path == f"/library/{item_id}.md"
 

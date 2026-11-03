@@ -81,9 +81,9 @@ def list_dtxwiki_prompts(
             title="dtxWiki context workflow",
             description=(
                 "Use dtxWiki's source-grounded Context workflow: guide, search, "
-                "fetch the chosen result, cite, then create_context_page or "
-                "begin_context_edit/update_context_edit/patch_context_edit when "
-                "changes are needed."
+                "fetch the chosen result, create_context_page or begin_context_edit, "
+                "then update_context_edit/patch_context_edit and register selected "
+                "document references with cite before submitting for review."
             ),
             arguments=[
                 types.PromptArgument(
@@ -207,8 +207,7 @@ def get_dtxwiki_prompt(
             # prompt's content is selected from the workspace plane below --
             # a workspace-plane DB may mirror a stale/different title.
             workspace_label = (
-                surface.workspace_title(control_session, workspace_id)
-                or "workspace"
+                surface.workspace_title(control_session, workspace_id) or "workspace"
             )
         enforce_mcp_surface_lifecycle(
             actor=scoped_actor,
@@ -226,11 +225,15 @@ def get_dtxwiki_prompt(
                             f"Work inside dtxWiki workspace {workspace_label}. "
                             "Call guide first when policy is unclear. Use keyword "
                             "search then fetch by id/type for grounding; use "
-                            "read/list_changes for direct reads, and cite before "
-                            "drafting factual changes. Use create_context_page for "
+                            "read/list_changes for direct reads. Use "
+                            "create_context_page for "
                             "a new page, or begin_context_edit then "
                             "update_context_edit/patch_context_edit for an existing "
-                            "one, followed by submit_context_edit_for_review -- "
+                            "one. Register selected document IDs with cite on "
+                            "your open "
+                            "edit; cite records references and does not search "
+                            "or judge "
+                            "support. Then submit_context_edit_for_review -- "
                             "never publish directly. A new "
                             "image must be uploaded with upload_image first. Store "
                             "data.markdown or data.logical_ref, never data.content_url "
@@ -608,12 +611,20 @@ def read_dtxwiki_resource(
                 content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
                 last_modified = None
             else:
+                preparer = None
+                if tool_context is not None:
+                    preparer = getattr(tool_context.services, "body_preparer", None)
+                    if preparer is None:
+                        preparer = getattr(
+                            tool_context.page_service, "body_preparer", None
+                        )
                 content, content_hash, last_modified_at = (
                     okf.render_workspace_bundle_markdown(
                         session,
                         workspace_id,
                         actor=scoped_actor,
                         workspace_slug=workspace_slug,
+                        self_origins=getattr(preparer, "self_origins", None),
                     )
                 )
                 last_modified = (

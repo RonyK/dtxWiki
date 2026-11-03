@@ -14,6 +14,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
+from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.context import (
     ContextCitation,
     ContextClaim,
@@ -193,6 +194,8 @@ def test_workspace_graph_document_queries_select_only_projection_columns(
         ContextPageVersion,
         LibraryItem,
         LibraryItemVersion,
+        AgentPage,
+        AgentPageVersion,
         WorkspaceTreeNode,
     )
     for model in models:
@@ -205,7 +208,7 @@ def test_workspace_graph_document_queries_select_only_projection_columns(
         for model in models:
             event.remove(model, "load", record_load)
 
-    assert len(statements) == 3
+    assert len(statements) == 4
     assert loaded_entities == []
     context_sql = next(
         statement
@@ -217,6 +220,22 @@ def test_workspace_graph_document_queries_select_only_projection_columns(
         for statement in statements
         if " from library_item join library_item_version " in statement
     )
+    agent_sql = next(
+        statement
+        for statement in statements
+        if " from agent_page join agent_page_version " in statement
+    )
+    assert "agent_page_version.body_markdown" not in agent_sql
+    assert _projected_columns(agent_sql, "agent_page", "agent_page_version") == {
+        "agent_page.id",
+        "agent_page.title",
+        "agent_page.workspace_id",
+        "agent_page.lifecycle_status",
+        "agent_page.category",
+        "agent_page.sensitivity",
+        "agent_page.current_active_version_id",
+        "agent_page_version.created_at",
+    }
     tree_sql = next(
         statement
         for statement in statements

@@ -319,6 +319,7 @@ test.describe("Knowledge Map unified Refine workflow", () => {
         await refine.click();
         await expect(dialog.getByLabel("From", { exact: true })).toHaveValue("");
         await dialog.getByRole("checkbox", { name: "Library", exact: true }).uncheck();
+        await dialog.getByRole("checkbox", { name: "Agent", exact: true }).uncheck();
         await dialog.getByRole("button", { name: "Cross-folder", exact: true }).click();
         await dialog.getByRole("searchbox", { name: "Search published documents" }).fill("Knowledge");
         await captureViewport(page, testInfo, `unified-refine-${viewport.width}-staged.png`);

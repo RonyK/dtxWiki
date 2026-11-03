@@ -10,12 +10,14 @@ export function workspaceGraphEnumLabel(value: string, t: TFunction<"graph">) {
   switch (value) {
     case "context":
     case "library":
+    case "agent":
     case "folder_cluster":
     case "link_cluster":
     case "other_cluster":
     case "wikilink":
     case "citation_page":
     case "citation_source":
+    case "citation_agent":
     case "knowledge":
     case "evidence":
     case "structure":

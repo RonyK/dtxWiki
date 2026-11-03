@@ -419,6 +419,10 @@ def _result_detail(
     if tool_name in PURE_READ_TOOLS and envelope.get("result_status") == "succeeded":
         safe_read = validate_read_projection(read_projection)
         return {"read_projection": safe_read} if safe_read else None
+    if tool_name == "cite":
+        from backend.services.citation_trace import citation_result_detail
+
+        return citation_result_detail(tool_name, payload)
     if tool_name not in CONTEXT_EDIT_TOOLS:
         return None
     if envelope.get("result_status") in ERROR_RESULT_STATUSES:
@@ -657,52 +661,10 @@ def _cite_links(
     session: Session,
     data: dict[str, Any],
 ) -> list[ArtifactLinkCandidate]:
-    candidates: list[ArtifactLinkCandidate] = []
-    for candidate in data.get("citation_candidates") or []:
-        if not isinstance(candidate, dict):
-            continue
-        library_artifact_id = _uuid_or_none(candidate.get("library_artifact_id"))
-        library_item_version_id = _uuid_or_none(
-            candidate.get("library_item_version_id")
-        )
-        context_version_id = _uuid_or_none(
-            candidate.get("cited_context_page_version_id")
-        )
-        if library_artifact_id is not None:
-            library_item_id = _library_item_id_for_artifact(
-                session, library_artifact_id
-            )
-            if library_item_id is not None:
-                candidates.append(
-                    ArtifactLinkCandidate(
-                        McpChatArtifactKind.LIBRARY_ITEM,
-                        library_item_id,
-                        McpChatArtifactVerb.CITED,
-                    )
-                )
-        elif library_item_version_id is not None:
-            library_item_version = session.get(
-                LibraryItemVersion, library_item_version_id
-            )
-            if library_item_version is not None:
-                candidates.append(
-                    ArtifactLinkCandidate(
-                        McpChatArtifactKind.LIBRARY_ITEM,
-                        library_item_version.library_item_id,
-                        McpChatArtifactVerb.CITED,
-                    )
-                )
-        elif context_version_id is not None:
-            version = session.get(ContextPageVersion, context_version_id)
-            if version is not None:
-                candidates.append(
-                    ArtifactLinkCandidate(
-                        McpChatArtifactKind.CONTEXT_PAGE,
-                        version.page_id,
-                        McpChatArtifactVerb.CITED,
-                    )
-                )
-    return candidates
+    """Compatibility entry point for the reference-command trace adapter."""
+    from backend.services.citation_trace import citation_artifact_links
+
+    return citation_artifact_links(data)
 
 
 def _page_id_for_version(session: Session, version_id: UUID) -> UUID | None:

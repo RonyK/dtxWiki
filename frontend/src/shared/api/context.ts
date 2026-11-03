@@ -2,6 +2,7 @@ import { apiRequest } from "./client";
 import type { components } from "./types.gen";
 import type { ContextLinkTarget } from "../lib/contextLinks";
 import type { ContextHistoryStatus } from "../lib/contextHistory";
+import type { ReferenceView } from "./references";
 
 export type VersionInfo = {
   version_id: string;
@@ -43,6 +44,8 @@ export type PendingReviewInfo = {
 export type ContextPageDetail = ContextPageSummary & {
   workspace_id: string;
   body_markdown: string | null;
+  references?: ReferenceView[];
+  references_hash?: string;
   version_info: VersionInfo | null;
   tree_path: Array<{ id: string; title: string; section: string }>;
   parent_node_id: string | null;
@@ -197,6 +200,8 @@ function toContextPageDetail(raw: BackendContextPageDetail): ContextPageDetail {
     updated_at: raw.updated_at,
     workspace_id: raw.workspace_id,
     body_markdown: raw.body_md,
+    references: raw.references ?? [],
+    references_hash: raw.references_hash,
     version_info: {
       version_id: raw.version_id,
       // Dropped from the consolidated detail schema; the version list

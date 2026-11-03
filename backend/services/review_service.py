@@ -2542,14 +2542,17 @@ class ReviewService:
                     include_undo=actor_kind == "human",
                 )
                 if existing.decision_type == "approve":
-                    receipt.published_version_id = next((
-                        item.content.candidate_version_id
-                        for item in receipt.evidence.operations
-                        if item.document is not None
-                        and item.document.document_kind == "context"
-                        and item.content is not None
-                        and item.content.candidate_version_id is not None
-                    ), None)
+                    receipt.published_version_id = next(
+                        (
+                            item.content.candidate_version_id
+                            for item in receipt.evidence.operations
+                            if item.document is not None
+                            and item.document.document_kind == "context"
+                            and item.content is not None
+                            and item.content.candidate_version_id is not None
+                        ),
+                        None,
+                    )
                 return receipt
 
         # A retry of the exact terminal rejection is a read of the original
@@ -2839,9 +2842,22 @@ class ReviewService:
             # acyclic while reusing the sole published-pointer writer.
             from backend.services.context_write_service import ContextWriteService
 
+            # Publication checks the chosen sources with the actual decision
+            # actor. Internal callers carry the role they already proved at
+            # the decision gate; no missing actor is promoted to owner.
+            publication_actor = actor or ActorContext(
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                user_id=actor_user_id,
+                workspace_id=workspace_id,
+                workspace_role=actor_role or "viewer",
+                role=actor_role or "viewer",
+                provenance=actor_provenance,
+            )
             published = ContextWriteService(
                 audit_service=self.audit_service,
                 body_preparer=self.body_preparer,
+                actor_context=publication_actor,
                 context_media_repository_factory=self.context_media_repository_factory,
             ).publish_draft(
                 session=session,
@@ -2999,8 +3015,11 @@ class ReviewService:
                 include_undo=True,
             )
         candidate = self._undo_candidate(
-            session, review, latest[0] if latest else None,
-            actor_user_id=principal, actor_role=actor_role,
+            session,
+            review,
+            latest[0] if latest else None,
+            actor_user_id=principal,
+            actor_role=actor_role,
         )
         if candidate is None or candidate.decision.id != decision_id:
             raise ReviewDecisionUndoUnavailableError("not_undoable")
@@ -3331,8 +3350,11 @@ class ReviewService:
         evidence: ReviewEvidencePayload | None,
     ) -> ReviewDecisionUndo | None:
         candidate = self._undo_candidate(
-            session, review, decision,
-            actor_user_id=actor_user_id, actor_role=actor_role,
+            session,
+            review,
+            decision,
+            actor_user_id=actor_user_id,
+            actor_role=actor_role,
         )
         if candidate is None:
             if not self._may_undo_decision(

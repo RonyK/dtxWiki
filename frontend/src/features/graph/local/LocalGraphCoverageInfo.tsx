@@ -26,10 +26,9 @@ export function LocalGraphCoverageInfo({
 
   useEffect(() => {
     const details = detailsRef.current;
+    const summary = details?.querySelector("summary");
     const positionPanel = () => {
-      if (!details?.open) return;
-      const summary = details.querySelector("summary");
-      if (!summary) return;
+      if (!details || !summary) return;
       const bounds = summary.getBoundingClientRect();
       // The reader can be much narrower than the browser. GraphView clips
       // overflow, so its visible intersection, not window size alone, owns
@@ -49,6 +48,9 @@ export function LocalGraphCoverageInfo({
       details.style.setProperty("--graph-coverage-right", `${bounds.right - panelRight}px`);
       details.style.setProperty("--graph-coverage-available-height", `${Math.max(1, placeAbove ? above : below)}px`);
     };
+    const positionOpenPanel = () => {
+      if (details?.open) positionPanel();
+    };
     const closeOutside = (event: PointerEvent) => {
       if (details?.open && event.target instanceof Node && !details.contains(event.target)) {
         details.open = false;
@@ -64,16 +66,21 @@ export function LocalGraphCoverageInfo({
       details.querySelector("summary")?.focus({ preventScroll: true });
     };
     document.addEventListener("pointerdown", closeOutside, true);
-    document.addEventListener("scroll", positionPanel, true);
-    window.addEventListener("resize", positionPanel);
+    // Native details opens before its queued toggle event. Prepare bounds
+    // during summary activation so the first visible frame fits the reader.
+    // Keyboard activation also dispatches click before the default toggle.
+    summary?.addEventListener("click", positionPanel);
+    document.addEventListener("scroll", positionOpenPanel, true);
+    window.addEventListener("resize", positionOpenPanel);
     details?.addEventListener("keydown", closeEscape);
-    details?.addEventListener("toggle", positionPanel);
+    details?.addEventListener("toggle", positionOpenPanel);
     return () => {
       document.removeEventListener("pointerdown", closeOutside, true);
-      document.removeEventListener("scroll", positionPanel, true);
-      window.removeEventListener("resize", positionPanel);
+      summary?.removeEventListener("click", positionPanel);
+      document.removeEventListener("scroll", positionOpenPanel, true);
+      window.removeEventListener("resize", positionOpenPanel);
       details?.removeEventListener("keydown", closeEscape);
-      details?.removeEventListener("toggle", positionPanel);
+      details?.removeEventListener("toggle", positionOpenPanel);
     };
   }, []);
 

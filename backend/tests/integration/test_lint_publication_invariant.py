@@ -255,6 +255,7 @@ def test_browser_create_as_draft_has_no_published_head(page_service):
             "reason": "first editor Save",
             "publish_despite_findings": False,
             "expected_content_hash": created["content_hash"],
+            "expected_references_hash": created["references_hash"],
         },
     )
     assert saved.status_code == 200, saved.text
@@ -288,6 +289,7 @@ def test_autosave_stages_and_only_explicit_publish_moves_pointer(page_service):
             "reason": "editor Save",
             "publish_despite_findings": False,
             "expected_content_hash": draft["content_hash"],
+            "expected_references_hash": draft["references_hash"],
         },
     )
     assert published.status_code == 200, published.text
@@ -364,6 +366,7 @@ def test_explicit_publish_refuses_findings_without_override(page_service):
             "reason": "editor Save",
             "publish_despite_findings": False,
             "expected_content_hash": draft["content_hash"],
+            "expected_references_hash": draft["references_hash"],
         },
     )
     assert response.status_code == 403, response.text
@@ -393,6 +396,7 @@ def test_override_published_malformed_body_stays_open_after_clean_draft_lint(
             "reason": "author override",
             "publish_despite_findings": True,
             "expected_content_hash": malformed["content_hash"],
+            "expected_references_hash": malformed["references_hash"],
         },
     )
     assert published.status_code == 200, published.text
@@ -607,6 +611,7 @@ def test_floor_waiver_requires_an_interactive_session(page_service):
             "reason": "agent override",
             "publish_despite_findings": True,
             "expected_content_hash": draft["content_hash"],
+            "expected_references_hash": draft["references_hash"],
         },
     )
     # 422 here must come from the browser-provenance gate (PageValidationError
@@ -662,6 +667,7 @@ def test_publish_refuses_a_draft_another_session_rewrote(page_service):
             "reason": "editor Save",
             "publish_despite_findings": False,
             "expected_content_hash": mine["content_hash"],
+            "expected_references_hash": mine["references_hash"],
         },
     )
     assert response.status_code == 409, response.text
@@ -713,6 +719,7 @@ def test_publish_page_version_route_reports_stale_context_draft_when_superseded(
             "reason": "publish the superseded agent draft",
             "publish_despite_findings": False,
             "expected_content_hash": agent_draft["content_hash"],
+            "expected_references_hash": agent_draft["references_hash"],
         },
     )
     assert stale.status_code == 409, stale.text

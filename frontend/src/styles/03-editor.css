@@ -779,6 +779,7 @@ body[data-focus-mode="true"] .main-surface {
   --graph-surface: #0f172a;
   --graph-node-context: #8b5cf6;
   --graph-node-library: #0d9488;
+  --graph-node-agent: #60a5fa;
   --graph-node-folder: #94a3b8;
   --graph-edge-link: #64748b;
   --graph-edge-citation: #0d9488;
@@ -1931,6 +1932,13 @@ body[data-focus-mode="true"] .main-surface {
   border-radius: 2px;
 }
 
+.workspace-graph-node-cue.is-agent,
+.workspace-map-member-dot.is-agent {
+  background: var(--graph-node-agent, #2563eb);
+  border-radius: 0;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+
 .workspace-graph-node-cue.is-cluster {
   width: 20px;
   height: 20px;
@@ -2871,7 +2879,9 @@ p.workspace-graph-list-window-hint {
   }
 
   .workspace-map-member-dot,
-  .workspace-map-member-dot.is-library {
+  .workspace-map-member-dot.is-library,
+  .workspace-map-member-dot.is-agent,
+  .workspace-graph-node-cue.is-agent {
     background: CanvasText;
     border: 1px solid CanvasText;
     forced-color-adjust: none;
@@ -3798,32 +3808,6 @@ p.workspace-graph-list-window-hint {
   margin: 6px 0 0;
 }
 
-.editor-title-tags {
-  flex: 0 0 auto;
-  min-width: 80px;
-  max-width: 360px;
-  padding-top: 2px;
-}
-
-.editor-title-tags:has(.chip-input-chip) {
-  /* L-3 (260908 UI audit): a fixed 320px flex-basis reserved that width even
-     for a single short tag, leaving a large empty box (measured ~310px)
-     beside it. Size to content instead, capped at the old width. */
-  flex: 0 1 auto;
-  max-width: 320px;
-}
-
-.editor-title-tags .chip-input-control {
-  min-height: 34px;
-  border-style: dashed;
-  background: transparent;
-}
-
-.editor-title-tags .chip-input-control input {
-  flex-basis: 72px;
-  min-width: 64px;
-}
-
 .editor-properties-button,
 .editor-format-button {
   flex: 0 0 auto;
@@ -4252,6 +4236,10 @@ p.workspace-graph-list-window-hint {
 
 .editor-command-bar {
   display: flex;
+  /* A flex child of the full-height editor panel: without this no-shrink
+     contract a wrapped ActionBar overflows the bar and is painted underneath
+     the editor grid whenever something else in the panel takes height. */
+  flex: 0 0 auto;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
@@ -4281,9 +4269,17 @@ p.workspace-graph-list-window-hint {
   margin-left: auto;
 }
 
+/* View controls and page tools share the first row; the editing toolbar
+   always takes its own row beneath them, at every width. */
 .editor-action-bar-shell {
   position: relative;
+  flex: 1 0 100%;
   min-width: 0;
+}
+
+@media (min-width: 721px) and (max-width: 1024px) {
+  /* Tablets keep the page tools beside the mode tabs as on desktop. */
+  .editor-command-bar > .editor-mode-tabs { width: auto; }
 }
 
 .editor-action-bar {
@@ -4435,7 +4431,6 @@ body[data-focus-mode="true"] .editor-header {
   white-space: nowrap;
 }
 
-body[data-focus-mode="true"] .editor-title-tags,
 body[data-focus-mode="true"] .editor-properties-button,
 body[data-focus-mode="true"] .editor-format-button,
 body[data-focus-mode="true"] .editor-properties-popover {

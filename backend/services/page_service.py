@@ -608,7 +608,15 @@ class PageService:
             # consumer, which all parse before use).
             public_body = parse_page_frontmatter(version.body_md).body
             exposure_scope = exposure_scope_for_workspace(workspace)
+            from backend.services.document_references import read_document_references
+
             return PublicPagePayload(
+                references=read_document_references(
+                    session,
+                    version=version,
+                    public=True,
+                    self_origins=self.body_preparer.self_origins,
+                ),
                 id=page.id,
                 slug=page.slug,
                 # Title from the PUBLISHED body's heading — NOT page.title, which
@@ -1299,6 +1307,7 @@ class PageService:
         actor_id: str,
         actor_provenance: str,
         expected_content_hash: str | None = None,
+        expected_references_hash: str | None = None,
     ) -> PagePublishResult:
         if reason is not None:
             validate_text(reason, field="reason", max_length=2000)
@@ -1330,6 +1339,41 @@ class PageService:
             if page is None:
                 raise PageNotFoundError("page not found")
             staged = self._require_page_version(session, page, version_id)
+            from backend.services.document_references import document_references_hash
+
+            if (
+                staged.version_status == "editing"
+                and staged.created_by_actor_kind == actor_kind
+                and staged.created_by_actor_id == actor_id
+                and actor_provenance == "browser_session"
+                and expected_references_hash is None
+            ):
+                raise PageValidationError(
+                    "expected_references_hash is required to publish an editing version"
+                )
+            already_published = (
+                staged.version_status == "published_snapshot"
+                and staged.graph_status == "linear"
+                and page.current_published_version_id == staged.id
+                and page.current_version_id == staged.id
+                and page.latest_draft_version_id is None
+                and page.lifecycle_status == "published"
+            )
+            if (
+                not already_published
+                and expected_references_hash is not None
+                and (
+                    document_references_hash(session, staged)
+                    != expected_references_hash
+                )
+            ):
+                disclosed_id, disclosed_hash = self._disclosable_version_fields(
+                    staged, actor_kind, actor_id
+                )
+                raise PageConflictError(
+                    server_version_id=disclosed_id,
+                    server_content_hash=disclosed_hash,
+                )
             # A draft row is mutable, so naming the version does not name the
             # bytes. Another session of the same author -- a second tab -- can
             # overwrite that row between this caller staging its buffer and
@@ -1484,7 +1528,23 @@ class PageService:
                 from_version=from_version,
                 to_version=to_version,
             )
+            from backend.services.document_references import read_document_references
+
             return PageVersionDiff(
+                references_before=read_document_references(
+                    session,
+                    version=from_version,
+                    actor=actor,
+                    self_origins=self.body_preparer.self_origins,
+                )
+                if from_version
+                else [],
+                references_after=read_document_references(
+                    session,
+                    version=to_version,
+                    actor=actor,
+                    self_origins=self.body_preparer.self_origins,
+                ),
                 baseline="empty" if from_version is None else "version",
                 from_version_id=(None if from_version is None else from_version.id),
                 to_version_id=to_version.id,
@@ -2268,8 +2328,10 @@ class PageService:
                 actor_id=actor_id,
                 actor_provenance=actor_provenance,
                 expected_editing_revision=expected_editing_revision,
-                idempotency_key=idempotency_key, reason=reason,
-                retry_only=retry_only, needs_review=True,
+                idempotency_key=idempotency_key,
+                reason=reason,
+                retry_only=retry_only,
+                needs_review=True,
                 chat_session_id=chat_session_id,
             )
 
@@ -2364,6 +2426,31 @@ class PageService:
             page.latest_draft_version_id = version.id
             session.add_all([version, page])
             session.flush()
+            from backend.services.document_references import document_references_hash
+
+            parent = (
+                get_in_workspace(
+                    session,
+                    ContextPageVersion,
+                    workspace_id=version.workspace_id,
+                    resource_id=version.parent_version_id,
+                )
+                if version.parent_version_id
+                else None
+            )
+            effective_risk_signals = dict(risk_signals or {})
+            from backend.services.document_references import (
+                authored_document_references,
+            )
+
+            has_reference_change = (
+                document_references_hash(session, parent)
+                != document_references_hash(session, version)
+                if parent is not None
+                else bool(authored_document_references(session, version))
+            )
+            if has_reference_change:
+                effective_risk_signals["manual_citation"] = True
             result = self.change_audit_recorder.record_context_page_write(
                 session=session,
                 workspace_id=page.workspace_id,
@@ -2376,7 +2463,7 @@ class PageService:
                 actor_provenance=actor_provenance,
                 body=version.body_md,
                 needs_review=needs_review,
-                risk_signals=risk_signals,
+                risk_signals=effective_risk_signals,
                 origin_chat_session_id=chat_session_id,
             )
             if result.change_set_id is not None:
@@ -3622,12 +3709,30 @@ class PageService:
             else None
         )
         try:
-            return context_page_repo.insert_version(
+            version = context_page_repo.insert_version(
                 session,
                 body=body,
                 context_media_repository=repository,
                 **kwargs,
             )
+            parent_id = kwargs.get("parent_version_id")
+            source = (
+                get_in_workspace(
+                    session,
+                    ContextPageVersion,
+                    workspace_id=version.workspace_id,
+                    resource_id=parent_id,
+                )
+                if parent_id
+                else None
+            )
+            if source is not None:
+                from backend.services.context_version_copy import (
+                    copy_context_version_references,
+                )
+
+                copy_context_version_references(session, source=source, target=version)
+            return version
         except MarkdownMediaPolicyError as exc:
             raise PageMediaPolicyError(str(exc), reason_code=exc.reason_code) from exc
         except ContextMediaError as exc:
@@ -3650,12 +3755,21 @@ class PageService:
             else None
         )
         try:
-            return context_page_repo.insert_version_copy(
+            version = context_page_repo.insert_version_copy(
                 session,
                 source_version=source_version,
                 context_media_repository=repository,
                 **kwargs,
             )
+            if source_version is not None:
+                from backend.services.context_version_copy import (
+                    copy_context_version_references,
+                )
+
+                copy_context_version_references(
+                    session, source=source_version, target=version
+                )
+            return version
         except MarkdownMediaPolicyError as exc:
             raise PageMediaPolicyError(str(exc), reason_code=exc.reason_code) from exc
         except ContextMediaError as exc:
@@ -5016,8 +5130,8 @@ class PageService:
         session.flush()
         return len(reviews)
 
-    @staticmethod
     def _set_current_version(
+        self,
         session: Session,
         page: ContextPage,
         version: ContextPageVersion,
@@ -5073,6 +5187,8 @@ class PageService:
                 page=page,
                 version=version,
                 require_latest_draft=False,
+                actor=self.actor_context,
+                self_origins=self.body_preparer.self_origins,
             )
         except LegacyMediaCutoverConflictError as exc:
             raise PageContextMediaError(
@@ -5604,6 +5720,11 @@ class PageService:
         current_version_id_override: UUID | None | object = _UNSET,
         prepared: PreparedBody | None = None,
     ) -> PagePayload:
+        from backend.services.document_references import (
+            document_references_hash,
+            read_document_references,
+        )
+
         title, page_type, tags, aliases = effective_metadata_for_payload(
             session,
             page,
@@ -5673,6 +5794,13 @@ class PageService:
             content_hash=version.content_hash,
             is_public=page.is_public,
             body_md=version.body_md,
+            references=read_document_references(
+                session,
+                version=version,
+                actor=parent_visibility_actor or self.actor_context,
+                self_origins=self.body_preparer.self_origins,
+            ),
+            references_hash=document_references_hash(session, version),
             version_id=version.id,
             editing_revision=version.editing_revision,
             parent_version_id=parent_version_id,
@@ -6090,7 +6218,10 @@ def _page_version_metadata_changes(
             "aliases": tuple(normalize_page_aliases(aliases)),
             "page_type": page_type,
             "placement": placement,
+            "references": document_references_hash(session, version),
         }
+
+    from backend.services.document_references import document_references_hash
 
     before = (
         snapshot(from_version)
@@ -6101,12 +6232,13 @@ def _page_version_metadata_changes(
             "aliases": (),
             "page_type": None,
             "placement": None,
+            "references": document_references_hash(session, None),
         }
     )
     after = snapshot(to_version)
     return [
         key
-        for key in ("title", "tags", "aliases", "page_type", "placement")
+        for key in ("title", "tags", "aliases", "page_type", "placement", "references")
         if before[key] != after[key]
     ]
 
@@ -6148,13 +6280,22 @@ def sync_page_projections(
     )
 
     if sync_graph_edges and (
-        version is None or version.id == page.current_published_version_id
+        version is None
+        or page.current_published_version_id is None
+        or version.id == page.current_published_version_id
     ):
         refresh_page_edge_projection(
             session,
             page.workspace_id,
             page.id,
             record_observations=record_graph_observations,
+        )
+        from backend.services.indexing.edge_registry import (
+            refresh_document_citation_sources,
+        )
+
+        refresh_document_citation_sources(
+            session, page.workspace_id, "context_page", page.id
         )
 
 

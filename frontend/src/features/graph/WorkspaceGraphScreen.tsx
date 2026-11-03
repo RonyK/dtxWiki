@@ -1721,7 +1721,7 @@ function WorkspaceGraphFilterChoices({
     { value: "cross_folder", label: t("workspaceGraph.controls.crossFolder") },
     { value: "recently_connected", label: t("workspaceGraph.controls.recentlyConnected") },
   ];
-  const toggleKind = (kind: "context" | "library") => {
+  const toggleKind = (kind: "context" | "library" | "agent") => {
     const selected = draftFilters.document_kinds.includes(kind);
     onDraftFilters({
       ...cloneFilters(draftFilters),
@@ -1758,6 +1758,10 @@ function WorkspaceGraphFilterChoices({
               type="checkbox"
             />
             {t("workspaceGraph.controls.library")}
+          </label>
+          <label>
+            <input checked={draftFilters.document_kinds.includes("agent")} onChange={() => toggleKind("agent")} type="checkbox" />
+            {t("workspaceGraph.controls.agent")}
           </label>
         </fieldset>
         <fieldset className="workspace-graph-refine-section">
@@ -2036,6 +2040,7 @@ function WorkspaceGraphLegend() {
         <ul aria-label={t("workspaceGraph.legend.shapes")}>
           <li><span aria-hidden="true" className="workspace-graph-node-cue is-context" />{t("workspaceGraph.legend.context")}</li>
           <li><span aria-hidden="true" className="workspace-graph-node-cue is-library" />{t("workspaceGraph.legend.library")}</li>
+          <li><span aria-hidden="true" className="workspace-graph-node-cue is-agent" />{t("workspaceGraph.legend.agent")}</li>
           <li><span aria-hidden="true" className="workspace-graph-node-cue is-cluster" />{t("workspaceGraph.legend.cluster")}</li>
         </ul>
         <ul aria-label={t("workspaceGraph.legend.lines")}>

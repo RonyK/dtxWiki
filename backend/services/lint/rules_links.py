@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from backend.services.context_links import (
     LinkContext,
+    citation_href_decision,
+    citation_link_occurrences,
     configured_self_origins,
     decide_link,
     editor_link_actor,
@@ -66,16 +68,25 @@ def _decisions(body: str, ctx: LintContext):
         if context is None:
             ctx.body_analysis[key] = []
         else:
-            occurrences = extract_links(body)
+            occurrences = extract_links(body) + citation_link_occurrences(body)
             batch = link_decision_batch(occurrences, context)
             ctx.body_analysis[key] = [
-                (locator, decision)
+                (locator, decision, occurrence.kind == "citation")
                 for occurrence in occurrences
                 for locator, _, decision in [
-                    decide_link(occurrence.href, context, batch=batch)
+                    (
+                        citation_href_decision
+                        if occurrence.kind == "citation"
+                        else decide_link
+                    )(occurrence.href, context, batch=batch)
                 ]
             ]
     return ctx.body_analysis[key]
+
+
+# An address that names no citable document, or a marker without one, stays
+# in the text and is not registered; this message says why.
+_CITATION_UNRESOLVED = "link.unresolved_citation"
 
 
 class _LinkRule:
@@ -90,14 +101,15 @@ class _LinkRule:
     def check_body(self, body: str, ctx: LintContext):
         findings = []
         seen = set()
-        for locator, decision in _decisions(body, ctx):
-            if decision.finding != self.rule_id or locator.key in seen:
+        for locator, decision, citation in _decisions(body, ctx):
+            if decision.finding != self.rule_id or (citation, locator.key) in seen:
                 continue
             if ctx.stage == LintStage.READ and self.rule_id == "link.unresolved":
                 # A reader sees the same unavailable rendering for hidden and
                 # missing destinations; reading never produces their findings.
                 continue
-            seen.add(locator.key)
+            seen.add((citation, locator.key))
+            unresolved_citation = citation and self.rule_id == "link.unresolved"
             messages = {
                 "link.unresolved": "This document link is unavailable.",
                 "link.foreign": "Use a full permanent link for another workspace.",
@@ -110,17 +122,70 @@ class _LinkRule:
                     severity=decision.severity,
                     target_type="context_page",
                     target_id=getattr(ctx.page, "id", None),
-                    suggested_action=messages[self.rule_id],
-                    message_key=self.rule_id,
+                    suggested_action=(
+                        "Cite a document of this workspace by its address."
+                        if unresolved_citation
+                        else messages[self.rule_id]
+                    ),
+                    message_key=(
+                        _CITATION_UNRESOLVED if unresolved_citation else self.rule_id
+                    ),
                     message_args={
                         "locator_kind": locator.kind,
                         "locator": locator.href,
                         "written_slug": locator.slug or "",
                         **({"replacement": decision.href} if decision.href else {}),
+                        **({"citation": True} if citation else {}),
                     },
-                    fingerprint=f"{self.rule_id}|{locator.key}",
+                    fingerprint=(
+                        f"{self.rule_id}|citation|{locator.key}"
+                        if citation
+                        else f"{self.rule_id}|{locator.key}"
+                    ),
                 )
             )
+        if self.rule_id == "link.unresolved" and ctx.stage != LintStage.READ:
+            from backend.services.citation_parser import (
+                extract_inline_citations,
+                incomplete_inline_citations,
+                is_legacy_citation_key,
+            )
+
+            for occurrence in extract_inline_citations(body, strict=False):
+                if not is_legacy_citation_key(occurrence.href):
+                    continue
+                findings.append(
+                    LintFindingDraft(
+                        rule_id=self.rule_id,
+                        severity="warning",
+                        target_type="context_page",
+                        target_id=getattr(ctx.page, "id", None),
+                        suggested_action=(
+                            "Replace this legacy citation key with a permanent "
+                            "document address."
+                        ),
+                        message_key=_CITATION_UNRESOLVED,
+                        message_args={
+                            "citation_legacy_key": True,
+                            "citation": True,
+                            "locator": occurrence.href,
+                        },
+                        fingerprint=f"citation.legacy-key|{occurrence.href}",
+                    )
+                )
+            for occurrence in incomplete_inline_citations(body):
+                findings.append(
+                    LintFindingDraft(
+                        rule_id=self.rule_id,
+                        severity="warning",
+                        target_type="context_page",
+                        target_id=getattr(ctx.page, "id", None),
+                        suggested_action="Complete the citation as @cite{address}.",
+                        message_key=_CITATION_UNRESOLVED,
+                        message_args={"citation": True, "locator": occurrence.href},
+                        fingerprint=f"citation.incomplete|{occurrence.href}",
+                    )
+                )
         return findings
 
 

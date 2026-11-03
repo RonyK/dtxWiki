@@ -292,6 +292,8 @@ class McpChatService:
         tool_call: MCPToolCall,
         owner_user_id: UUID | None = None,
     ) -> McpChatSession:
+        from backend.services.citation_trace import citation_write_count
+
         chat = session.scalar(
             select(McpChatSession).where(
                 McpChatSession.workspace_id == workspace_id,
@@ -348,7 +350,13 @@ class McpChatService:
         # Flush immediately: the expression UPDATE expires the counters, so the
         # label/summary refresh below re-reads the post-increment values.
         chat.tool_call_count = McpChatSession.tool_call_count + 1
-        if tool_call.tool_name in WRITE_TOOLS:
+        write_override = citation_write_count(tool_call)
+        count_write = (
+            tool_call.tool_name in WRITE_TOOLS
+            if write_override is None
+            else write_override
+        )
+        if count_write:
             chat.write_count = McpChatSession.write_count + 1
         if tool_call.result_status in ERROR_STATUSES:
             chat.error_count = McpChatSession.error_count + 1
@@ -3790,8 +3798,9 @@ def _intent_from_input(
     the server, so a chat's intent can never be recovered. What *is* recorded is
     the natural-language field the client had to fill in:
     `submit_context_edit_for_review.reason` is required, `search.query` is the
-    literal question asked of the index, and `cite.claim_text` is the sentence
-    being supported.
+    literal question asked of the index. Historical `cite.claim_text` records
+    the sentence sent to the former candidate lookup; new reference commands
+    accept chosen document IDs and have no such text.
 
     The source travels with the text because the screen must not let a reader
     mistake an agent's self-description for something they said themselves.

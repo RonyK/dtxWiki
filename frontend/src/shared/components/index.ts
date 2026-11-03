@@ -62,3 +62,5 @@ export * from "./WorkspaceLayout";
 export * from "./WorkspacePanelChrome";
 export * from "./ZoomPanViewer";
 export * from "./WorkspaceScopePicker";
+
+export * from "./ReferenceChanges";

@@ -86,6 +86,27 @@ def test_unresolved_and_healthy_links(session_factory):
             body,
             LinkContext(session, workspace_id, editor_link_actor("human", "test")),
         )[0] == f"[Target]({canonical})\n"
+        # Citation addresses take the same decision and keep their marker. An
+        # address naming no document here stays text with a citation warning;
+        # neither kind becomes an ordinary link.
+        external = "https://example.test/paper"
+        cited = (
+            f"@cite{{{format_index_ref('context', target.id)}}} "
+            f"@cite{{/pages/{target.slug}}} @cite{{{external}}}\n"
+        )
+        assert rewrite_links_with_report(
+            cited,
+            LinkContext(session, workspace_id, editor_link_actor("human", "test")),
+        )[0] == f"@cite{{{canonical}}} @cite{{{canonical}}} @cite{{{external}}}\n"
+        citing, _ = _page(session, workspace_id, "citing-source", cited)
+        [warning] = _check(session, "link.unresolved", citing)
+        assert (warning.message_key, warning.message_args["locator"]) == (
+            "link.unresolved_citation",
+            external,
+        )
+        assert not session.scalars(
+            select(PageLink).where(PageLink.source_page_id == citing.id)
+        ).all()
 
         # Budget exception: these security paths differ from Context visibility.
         # Restricted Library, sensitive Agent and a folder under a hidden Agent

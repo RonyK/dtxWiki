@@ -24,7 +24,7 @@ from backend.repositories.workspace_scoped import (
 )
 from backend.services.audit_service import AuditService
 from backend.services.body_preparer import BodyInput, BodyPreparer, WriteContext
-from backend.services.context_version_copy import copy_context_version_references
+from backend.services.context_version_copy import inspect_context_version_references
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.graph_cache import try_lock_edge_projection_workspace
 from backend.services.lint import LintPolicy, LintRegistry
@@ -111,8 +111,13 @@ class LintFixWriter:
 
         acquire_write_intent(session)
         preparer = BodyPreparer(self.registry, self_origins=self.self_origins)
+        from backend.spi.types import ActorContext
+
         service = PageService(
             _SessionBoundFactory(session),
+            actor_context=ActorContext(
+                actor_kind="system", actor_id="lint-autofix", workspace_id=workspace_id
+            ),
             change_audit_recorder=ChangeReviewAuditRecorder(
                 audit_service=self.audit, lint_registry=self.registry
             ),
@@ -287,13 +292,18 @@ class LintFixWriter:
                 # the queued-run owner roll back every page/finding in its
                 # transaction; do not continue through a per-page review.
                 raise RuntimeError("Lint maintenance did not persist the prepared body")
-            references = copy_context_version_references(
+            references = inspect_context_version_references(
                 session,
-                source=base,
-                target=saved_version,
+                version=saved_version,
+                body_unchanged=base.body_md == saved_version.body_md,
             )
-            proof = references.anchors_preserved and preparer.auto_approval_allowed(
-                prepared, context
+            from backend.services.document_references import document_references_hash
+
+            proof = (
+                references.anchors_preserved
+                and document_references_hash(session, base)
+                == document_references_hash(session, saved_version)
+                and preparer.auto_approval_allowed(prepared, context)
             )
             reason = "lint.autofix: " + json.dumps(counts, sort_keys=True)
             submitted = service._submit_context_edit_in_session(

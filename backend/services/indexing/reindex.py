@@ -33,7 +33,10 @@ def reindex_workspace(
         usage_signals = usage_relation_signals_enabled(control_session, workspace_id)
     with database_provider.session_for(workspace_id).begin() as session:
         pages = session.scalars(
-            select(ContextPage).where(ContextPage.workspace_id == workspace_id)
+            select(ContextPage)
+            .where(ContextPage.workspace_id == workspace_id)
+            .order_by(ContextPage.id)
+            .with_for_update()
         ).all()
         page_ids = [page.id for page in pages]
         item_ids = session.scalars(

@@ -193,7 +193,7 @@ describe("workspaceGraphModel", () => {
       schema_version: "workspace-graph-overview.v1",
       head_mode: "published",
       lens: "links",
-      document_kinds: ["context", "library"],
+      document_kinds: ["context", "library", "agent"],
       search: "visible terms",
       quick_filters: ["cross_folder"],
       folders: {
@@ -464,7 +464,7 @@ describe("pending effective Refine filters", () => {
     });
     const draft = filters({
       search: "  visible terms\n",
-      document_kinds: ["library", "context", "context"],
+      document_kinds: ["library", "agent", "context", "context"],
       quick_filters: ["cross_folder", "orphans", "orphans"],
       facet_rules: [...active.facet_rules].reverse().concat({ ...active.facet_rules[0] }),
     });
@@ -485,7 +485,7 @@ describe("pending effective Refine filters", () => {
   it("counts the entire document-kind set as one changed dimension", () => {
     expect(countPendingRefineFilters(filters({ document_kinds: ["context"] }), filters())).toBe(1);
     expect(countPendingRefineFilters(filters({ document_kinds: [] }), filters())).toBe(1);
-    expect(countPendingRefineFilters(filters({ document_kinds: ["library", "context"] }), filters())).toBe(0);
+    expect(countPendingRefineFilters(filters({ document_kinds: ["library", "agent", "context"] }), filters())).toBe(0);
   });
 
   it("counts the entire time basis/from/to tuple once and respects omitted bounds", () => {

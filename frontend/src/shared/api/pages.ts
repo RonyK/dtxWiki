@@ -174,6 +174,14 @@ export async function readPage(
   return response.data;
 }
 
+export async function beginPageEdit(workspaceId: string, page: PagePayload) {
+  const response = await apiRequest<PageResponse>(pagesPath(workspaceId, `/${page.id}/begin-edit`), {
+    method: "POST",
+    body: JSON.stringify({ idempotency_key: newIdempotencyKey(), base_version_id: page.version_id, base_content_hash: page.content_hash }),
+  });
+  return response.data;
+}
+
 export async function discardAlternativeDraft(
   workspaceId: string,
   id: string,

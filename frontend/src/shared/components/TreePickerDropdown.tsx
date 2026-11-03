@@ -393,13 +393,19 @@ export function TreePickerDropdown({
     if (navigableIds.length === 0) {
       return;
     }
-    const currentIndex = Math.max(0, navigableIds.indexOf(activeNodeId));
+    // A repositioned popup can hover another row while the chevron retains
+    // native focus. Start keyboard navigation from that focused row.
+    const focusedNodeId = event.target instanceof Element
+      ? event.target.closest<HTMLElement>("[data-tree-toggle]")?.dataset.treeToggle
+      : undefined;
+    const currentIndex = Math.max(0, navigableIds.indexOf(focusedNodeId ?? activeNodeId));
     const activeId = navigableIds[currentIndex] ?? navigableIds[0];
     const activeNode = activeId === ROOT_ENTRY_ID ? null : nodeById.get(activeId) ?? null;
 
     if (["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) {
       // A mouse click can focus a native chevron. Tree navigation returns
       // focus to the aria-activedescendant owner before moving the active row.
+      if (focusedNodeId) setActiveNodeId(activeId);
       resultsRef.current?.focus();
     }
 
