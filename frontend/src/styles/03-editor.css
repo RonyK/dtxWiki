@@ -2279,17 +2279,6 @@ p.workspace-graph-list-window-hint {
   background: repeating-linear-gradient(to right, var(--edge-ink) 0 2px, transparent 2px 4px);
 }
 
-/* The arrowhead is centred on the 2px stroke. */
-.workspace-graph-edge-cue[data-arrow]::after {
-  content: "";
-  position: absolute;
-  top: -3px;
-  border-block: 4px solid transparent;
-}
-
-.workspace-graph-edge-cue[data-arrow="end"]::after { right: -2px; border-left: 6px solid var(--edge-ink); }
-.workspace-graph-edge-cue[data-arrow="start"]::after { left: -2px; border-right: 6px solid var(--edge-ink); }
-
 .workspace-graph-chip {
   --chip-ink: var(--ink-muted);
   display: inline-flex;
@@ -2589,13 +2578,13 @@ p.workspace-graph-list-window-hint {
   font-size: 11.5px;
 }
 
-/* One rail per element: rows, the hub and the headers between them each
-   draw their own segment, so the rail stays continuous at any height. The
-   stub, the node cue and the name share one 20px first line, so their
-   centres line up 16px below each row's top. */
+/* The rail is drawn per element (rows, more, the node, the outgoing header)
+   in SVG, so each stretch can take the colour and dash of the relation that
+   owns it and stay continuous at any height. Branches curve into the rail:
+   incoming ones merge 24px below a row's top, outgoing ones split 8px below
+   it; the branch, node cue and name share the 16px centre line. */
 .workspace-graph-relation-flow {
   --flow-ink: var(--graph-node-context, #7c3aed);
-  --flow-rail: color-mix(in srgb, var(--flow-ink) 60%, var(--surface));
   margin-top: 6px;
 }
 
@@ -2616,17 +2605,38 @@ p.workspace-graph-list-window-hint {
   position: relative;
 }
 
-.workspace-graph-flow-row::before,
-.workspace-graph-flow-hub::before,
-.workspace-graph-flow-head[data-rail="through"]::before,
-.workspace-graph-flow-more[data-rail="through"]::before {
-  content: "";
+.workspace-graph-flow-rail,
+.workspace-graph-flow-rail-arrow {
   position: absolute;
   top: 0;
-  bottom: 0;
-  left: 13px;
-  border-left: 2px solid var(--flow-rail);
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
 }
+
+.workspace-graph-flow-rail { height: 100%; }
+.workspace-graph-flow-rail-arrow { top: calc(50% - 4px); }
+
+/* Same strokes as the map: solid link, dashed citation (4/3 at list size). */
+.workspace-graph-flow-stroke {
+  fill: none;
+  stroke: var(--graph-edge-link, #64748b);
+  stroke-width: 2;
+}
+
+.workspace-graph-flow-stroke[data-visual="citation"] {
+  stroke: var(--graph-edge-citation, #0f9f8f);
+  stroke-dasharray: 4 3;
+}
+
+.workspace-graph-flow-stroke[data-visual="other"] {
+  stroke: var(--ink-muted);
+  stroke-dasharray: 2 2;
+}
+
+.workspace-graph-flow-arrow { fill: var(--graph-edge-link, #64748b); }
+.workspace-graph-flow-arrow[data-visual="citation"] { fill: var(--graph-edge-citation, #0f9f8f); }
+.workspace-graph-flow-arrow[data-visual="other"] { fill: var(--ink-muted); }
 
 .workspace-graph-flow-row {
   display: grid;
@@ -2644,19 +2654,6 @@ p.workspace-graph-list-window-hint {
   left: 32px;
   border-top: 1px solid var(--border);
 }
-
-.workspace-graph-flow-row[data-rail="start"]::before { top: 16px; }
-.workspace-graph-flow-row[data-rail="end"]::before { bottom: auto; height: 16px; }
-
-.workspace-graph-flow-stub {
-  display: flex;
-  grid-column: 1;
-  align-items: center;
-  height: 20px;
-  padding-left: 14px;
-}
-
-.workspace-graph-flow-stub .workspace-graph-edge-cue { width: 14px; }
 
 .workspace-graph-flow-select {
   display: grid;
@@ -2698,30 +2695,12 @@ p.workspace-graph-list-window-hint {
 
 .workspace-graph-flow-head .workspace-graph-fold-head { padding-left: 24px; }
 .workspace-graph-flow-more { padding-left: 32px; }
-.workspace-graph-flow-more:empty { display: none; }
 
 .workspace-graph-flow-hub {
   display: flex;
   align-items: center;
   padding: 8px 0;
 }
-
-.workspace-graph-flow-hub[data-rail="none"]::before { display: none; }
-.workspace-graph-flow-hub[data-rail="top"]::before { bottom: 50%; }
-.workspace-graph-flow-hub[data-rail="bottom"]::before { top: 50%; }
-
-/* Rail arrowheads: into the hub from above, and out of it below. */
-.workspace-graph-flow-hub:is([data-rail="top"], [data-rail="both"])::after,
-.workspace-graph-flow-head[data-rail="through"]::after {
-  content: "";
-  position: absolute;
-  left: 9px;
-  border-top: 7px solid var(--flow-rail);
-  border-inline: 5px solid transparent;
-}
-
-.workspace-graph-flow-hub:is([data-rail="top"], [data-rail="both"])::after { top: 1px; }
-.workspace-graph-flow-head[data-rail="through"]::after { top: calc(50% - 4px); }
 
 .workspace-graph-flow-hub-pill {
   position: relative;
@@ -3451,20 +3430,18 @@ p.workspace-graph-list-window-hint {
 
   .workspace-graph-chip { border-color: CanvasText; }
 
-  .workspace-graph-edge-cue,
-  .workspace-graph-relation-stroke {
+  .workspace-graph-edge-cue[data-visual],
+  .workspace-graph-relation-stroke[data-visual] {
     --edge-ink: CanvasText;
     forced-color-adjust: none;
   }
 
-  /* Text keeps forced colours; only the rail and its arrowheads opt out. */
-  .workspace-graph-relation-flow {
-    --flow-ink: CanvasText;
-    --flow-rail: CanvasText;
-  }
-
-  .workspace-graph-flow-hub::after,
-  .workspace-graph-flow-head::after { forced-color-adjust: none; }
+  /* Text keeps forced colours; only the rail graphics opt out (dashes stay). */
+  .workspace-graph-relation-flow { --flow-ink: CanvasText; }
+  .workspace-graph-flow-rail,
+  .workspace-graph-flow-rail-arrow { forced-color-adjust: none; }
+  .workspace-graph-flow-stroke[data-visual] { stroke: CanvasText; }
+  .workspace-graph-flow-arrow[data-visual] { fill: CanvasText; }
 
   .workspace-graph-list-select[aria-pressed="true"] { outline: 3px solid Highlight; }
 

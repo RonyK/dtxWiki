@@ -25,13 +25,9 @@ export function WorkspaceGraphNodeCue({ kind }: { kind: WorkspaceGraphNodeCueKin
   return <span aria-hidden="true" className={`workspace-graph-node-cue is-${kind} is-inline`} />;
 }
 
-/** A short stroke in the map's line style; only directed relations get an arrowhead. */
-export function WorkspaceGraphEdgeCue({ arrow = null, visual }: {
-  arrow?: "start" | "end" | null;
-  visual: WorkspaceRelationVisual | null;
-}) {
-  return <span aria-hidden="true" className="workspace-graph-edge-cue" data-arrow={arrow ?? undefined}
-    data-visual={visual ?? "other"} />;
+/** A short stroke in the map's line style. */
+export function WorkspaceGraphEdgeCue({ visual }: { visual: WorkspaceRelationVisual | null }) {
+  return <span aria-hidden="true" className="workspace-graph-edge-cue" data-visual={visual ?? "other"} />;
 }
 
 /** Short chip text; the full kind name stays in the tooltip and accessible name. */
@@ -198,6 +194,44 @@ export function WorkspaceGraphRelationMiniMap({ edge, nodesById }: {
 }
 
 type RelationDirection = keyof WorkspaceGraphNodeRelations;
+type FlowStroke = WorkspaceRelationVisual | "other";
+
+const flowStroke = (edge: WorkspaceGraphEdge): FlowStroke => workspaceRelationVisual(edge.relation_kind) ?? "other";
+/** Where a branch meets the rail: incoming relations merge below the name line, outgoing ones split above it. */
+const FLOW_JOINT: Record<RelationDirection, number> = { incoming: 24, outgoing: 8 };
+
+function FlowRailLine({ from, segment, stroke, to }: {
+  from: number | string;
+  segment: "above" | "below";
+  stroke: FlowStroke;
+  to: number | string;
+}) {
+  return <line className="workspace-graph-flow-stroke" data-segment={segment} data-visual={stroke}
+    x1="14" x2="14" y1={from} y2={to} />;
+}
+
+/**
+ * The rail beside one relation row: its curved branch and the rail stretches
+ * above and below the joint. Every stretch belongs to the relation it exists
+ * for, so it takes that relation's colour and line type (see the flow).
+ */
+function FlowRowRail({ above, below, branch, directed, direction }: {
+  above: FlowStroke | null;
+  below: FlowStroke | null;
+  branch: FlowStroke;
+  directed: boolean;
+  direction: RelationDirection;
+}) {
+  const joint = FLOW_JOINT[direction];
+  return <svg aria-hidden="true" className="workspace-graph-flow-rail" width="34">
+    {above ? <FlowRailLine from={0} segment="above" stroke={above} to={joint} /> : null}
+    {below ? <FlowRailLine from={joint} segment="below" stroke={below} to="100%" /> : null}
+    <path className="workspace-graph-flow-stroke" data-segment="branch" data-visual={branch}
+      d={direction === "incoming" ? "M31 16 H22 A8 8 0 0 0 14 24" : `M14 8 A8 8 0 0 0 22 16 H${directed ? 26 : 31}`} />
+    {direction === "outgoing" && directed
+      ? <path className="workspace-graph-flow-arrow" data-visual={branch} d="M25.5 11.5 L31.5 16 L25.5 20.5 Z" /> : null}
+  </svg>;
+}
 
 /**
  * The selected node's relations at the bottom of Details: incoming relations
@@ -277,22 +311,22 @@ export function WorkspaceGraphRelationFlow({ labels, node, nodesById, onBlur, on
     incoming: open.incoming ? filtered.incoming.slice(0, limits.incoming) : [],
     outgoing: open.outgoing ? filtered.outgoing.slice(0, limits.outgoing) : [],
   };
-  const hasIncomingRail = shown.incoming.length > 0;
-  const hasOutgoingRail = shown.outgoing.length > 0;
-  const hubRail = hasIncomingRail && hasOutgoingRail ? "both" : hasIncomingRail ? "top" : hasOutgoingRail ? "bottom" : "none";
-  const row = (edge: WorkspaceGraphEdge, direction: RelationDirection, index: number, count: number) => {
+  // A rail stretch belongs to the relation that makes it exist. Above the node:
+  // from a relation's merge down to the next merge (the last one reaches the
+  // node). Below it: from the previous split, or the node, down to the
+  // relation's own split; nothing is drawn past the last split.
+  const intoNode = shown.incoming.length ? flowStroke(shown.incoming[shown.incoming.length - 1]) : null;
+  const outOfNode = shown.outgoing.length ? flowStroke(shown.outgoing[0]) : null;
+  const row = (edge: WorkspaceGraphEdge, direction: RelationDirection, index: number, visible: readonly WorkspaceGraphEdge[]) => {
     const otherId = direction === "incoming" ? edge.source : edge.target;
     const other = nodesById.get(otherId);
+    const next = visible[index + 1];
     const rail = direction === "incoming"
-      ? index === 0 ? "start" : "through"
-      : index === count - 1 ? "end" : "through";
-    const visual = workspaceRelationVisual(edge.relation_kind);
-    return <li className="workspace-graph-flow-row" data-direction={direction} data-graph-edge-id={edge.id}
-      data-rail={rail} key={edge.id}>
-      <span aria-hidden="true" className="workspace-graph-flow-stub">
-        <WorkspaceGraphEdgeCue arrow={edge.direction === "directed" ? direction === "incoming" ? "start" : "end" : null}
-          visual={visual} />
-      </span>
+      ? { above: index > 0 ? flowStroke(visible[index - 1]) : null, below: flowStroke(edge) }
+      : { above: flowStroke(edge), below: next ? flowStroke(next) : null };
+    return <li className="workspace-graph-flow-row" data-direction={direction} data-graph-edge-id={edge.id} key={edge.id}>
+      <FlowRowRail above={rail.above} below={rail.below} branch={flowStroke(edge)}
+        directed={edge.direction === "directed"} direction={direction} />
       <button aria-label={workspaceGraphRelationName(edge, labels, t)} className="workspace-graph-list-select workspace-graph-flow-select"
         onClick={() => onSelect(otherId)} type="button">
         <span className="workspace-graph-flow-name">
@@ -313,13 +347,14 @@ export function WorkspaceGraphRelationFlow({ labels, node, nodesById, onBlur, on
     const listId = `${baseId}-${direction}`;
     const remaining = open[direction] ? list.length - visible.length : 0;
     return {
+      remaining,
       head: <WorkspaceGraphFoldHeader controls={listId} count={list.length} level="group"
         note={t(`workspaceGraph.relations.${direction}Note${self}`)}
         onToggle={() => setOpen((current) => ({ ...current, [direction]: !current[direction] }))}
         open={open[direction]} title={t(`workspaceGraph.relations.${direction}`)} />,
       list: open[direction] ? <ul aria-label={t(`workspaceGraph.relations.${direction}`)} className="workspace-graph-flow-list"
         data-relation-direction={direction} data-shown-count={visible.length} data-total-count={list.length} id={listId}>
-        {visible.map((edge, index) => row(edge, direction, index, visible.length))}
+        {visible.map((edge, index) => row(edge, direction, index, visible))}
       </ul> : null,
       more: <WorkspaceGraphMoreButton onClick={() => setLimits((current) => ({
         ...current, [direction]: current[direction] + WORKSPACE_GRAPH_RELATION_FLOW_PAGE,
@@ -356,19 +391,41 @@ export function WorkspaceGraphRelationFlow({ labels, node, nodesById, onBlur, on
         : t("workspaceGraph.relations.noMatch", { query: query.trim() })}
     </p> : null}
     <div className="workspace-graph-relation-flow" data-node-kind={workspaceGraphNodeCueKind(node)}>
-      <div className="workspace-graph-flow-head" data-rail="none">{incoming.head}</div>
+      <div className="workspace-graph-flow-head">{incoming.head}</div>
       {incoming.list}
-      <div className="workspace-graph-flow-more" data-rail={hasIncomingRail ? "through" : "none"}>{incoming.more}</div>
-      <div className="workspace-graph-flow-hub" data-rail={hubRail}>
+      {incoming.remaining > 0 ? <div className="workspace-graph-flow-more">
+        {intoNode ? <svg aria-hidden="true" className="workspace-graph-flow-rail" width="34">
+          <FlowRailLine from={0} segment="below" stroke={intoNode} to="100%" />
+        </svg> : null}
+        {incoming.more}
+      </div> : null}
+      <div className="workspace-graph-flow-hub">
+        <svg aria-hidden="true" className="workspace-graph-flow-rail" width="34">
+          {intoNode ? <>
+            <FlowRailLine from={0} segment="above" stroke={intoNode} to={2} />
+            <path className="workspace-graph-flow-arrow" data-visual={intoNode} d="M9 1 L19 1 L14 8 Z" />
+          </> : null}
+          {outOfNode ? <FlowRailLine from="50%" segment="below" stroke={outOfNode} to="100%" /> : null}
+        </svg>
         <span className="workspace-graph-flow-hub-pill">
           <WorkspaceGraphNodeCue kind={workspaceGraphNodeCueKind(node)} />
           <strong title={node.label}>{node.label}</strong>
           <span className="workspace-graph-flow-self">{t(`workspaceGraph.relations.self${self}`)}</span>
         </span>
       </div>
-      <div className="workspace-graph-flow-head" data-rail={hasOutgoingRail ? "through" : "none"}>{outgoing.head}</div>
+      <div className="workspace-graph-flow-head">
+        {outOfNode ? <>
+          <svg aria-hidden="true" className="workspace-graph-flow-rail" width="34">
+            <FlowRailLine from={0} segment="below" stroke={outOfNode} to="100%" />
+          </svg>
+          <svg aria-hidden="true" className="workspace-graph-flow-rail-arrow" height="8" width="34">
+            <path className="workspace-graph-flow-arrow" data-visual={outOfNode} d="M9 0 L19 0 L14 7 Z" />
+          </svg>
+        </> : null}
+        {outgoing.head}
+      </div>
       {outgoing.list}
-      <div className="workspace-graph-flow-more" data-rail="none">{outgoing.more}</div>
+      {outgoing.remaining > 0 ? <div className="workspace-graph-flow-more">{outgoing.more}</div> : null}
     </div>
   </section>;
 }

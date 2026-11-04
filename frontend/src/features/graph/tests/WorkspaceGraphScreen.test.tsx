@@ -720,6 +720,14 @@ describe("WorkspaceGraphScreen", () => {
     const details = screen.getByRole("region", { name: "Details" });
     const rows = (direction: string) => within(details).getByRole("list", { name: direction }).querySelectorAll("li");
     expect([rows("Incoming").length, rows("Outgoing").length]).toEqual([2, 3]);
+    // A rail stretch takes the stroke of the relation it exists for: below the
+    // document, from the previous split down to the relation's own split.
+    const rail = (direction: string) => Array.from(rows(direction), (row) => [
+      row.querySelector('[data-segment="above"]')?.getAttribute("data-visual") ?? null,
+      row.querySelector('[data-segment="below"]')?.getAttribute("data-visual") ?? null,
+    ]);
+    expect(rail("Outgoing")).toEqual([["link", "citation"], ["citation", "link"], ["link", null]]);
+    expect(rail("Incoming")).toEqual([[null, "link"], ["link", "link"]]);
     const relationSearch = within(details).getByRole("searchbox", { name: "Find in this document's relationships" });
     fireEvent.change(relationSearch, { target: { value: "citation" } });
     expect(within(details).getByText("1 of 5 match")).toBeInTheDocument();
