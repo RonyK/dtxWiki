@@ -430,7 +430,7 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
         if dialect == "postgresql":
             # SQLite model parity is already checked by the shared release
             # head test. PostgreSQL types/constraints need this real DB, at
-            # head because later revisions add their own user columns.
+            # head because later revisions can add their own user columns.
             command.upgrade(config, "head")
             with engine.connect() as connection:
                 context = MigrationContext.configure(
@@ -575,7 +575,6 @@ def _seed_release_data(engine, workspace_id, existing_id, now):
             source_version_id=data["version"],
             target_slug="release-target",
             target_page_id=data["target"],
-            link_syntax="wikilink",
             occurrence_count=2,
             first_snippet="Original snippet",
         )
