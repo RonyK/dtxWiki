@@ -93,6 +93,14 @@ test.describe("Workspace Knowledge Map real-route regression", () => {
       });
       const scrollMetricsBeforeModal = await readScrollMetrics(detailsScroller);
       expect(scrollMetricsBeforeModal.scrollTop).toBeGreaterThan(0);
+      // Its overflow (including sr-only relation labels) stays inside it; it
+      // must not stretch the page into blank space below the map.
+      const pageScroll = await page.evaluate(() => {
+        const root = document.scrollingElement!;
+        return { clientHeight: root.clientHeight, scrollHeight: root.scrollHeight };
+      });
+      expect(pageScroll.scrollHeight, "Map details overflow must not scroll the page")
+        .toBe(pageScroll.clientHeight);
       await timeTrigger.evaluate((element) => {
         element.focus({ preventScroll: true });
         (element as HTMLButtonElement).click();
