@@ -247,6 +247,12 @@ await page
   .getByRole('heading', { name: 'Workspace Operations', exact: true })
   .waitFor({ timeout: 10000 });
 await page.getByText('Workspace now', { exact: true }).waitFor({ timeout: 10000 });
+// Account-scoped Labs opt-in is required as well as the workspace policy.
+// Use the shipped Settings UI, matching the real-API graph acceptance fixtures.
+await page.goto(`${baseUrl}/settings?section=labs`);
+await page.getByRole('checkbox', {
+  name: /^(Show Knowledge Map menu|지식 지도 메뉴 표시)$/,
+}).check();
 // A small REST-authored chain checks installed assets/Workers/CSP, not 2K
 // capacity, convergence, graph readability or target-device performance.
 const workspace = await requestData('POST', '/api/v1/workspaces', {
@@ -256,6 +262,11 @@ const workspacePath = `/api/v1/workspaces/${workspace.id}`;
 await requestData('PATCH', `${workspacePath}/settings/policies`, {
   group: 'graph', key: 'workspace_map_enabled', value: true,
 });
+// New workspaces include a real active Agent page. Read its identity through
+// the independent inventory instead of assuming the graph starts empty.
+const seededAgents = await requestData('GET',
+  `${workspacePath}/agent/pages?lifecycle_status=active`);
+expect(seededAgents.map(agent => agent.slug)).toEqual(['default-system-prompt']);
 const documents = [];
 for (let index = 0; index < 8; index++) {
   const previous = documents[index - 1];
@@ -307,9 +318,14 @@ const scene = (await overviewResponse.json()).data;
 expect(scene.representation).toBe('exact');
 expect(scene.completeness).toBe('complete');
 expect(scene.truncated).toBe(false);
-expect(scene.nodes).toHaveLength(documents.length);
+const contextNodes = scene.nodes.filter(node => node.entity_kind === 'context');
+const agentNodes = scene.nodes.filter(node => node.entity_kind === 'agent');
+expect(contextNodes).toHaveLength(documents.length);
+expect(new Set(agentNodes.map(node => node.entity_id))).toEqual(
+  new Set(seededAgents.map(agent => agent.id)));
+expect(scene.nodes).toHaveLength(documents.length + seededAgents.length);
 expect(scene.edges).toHaveLength(documents.length - 1);
-const ids = new Map(scene.nodes.map(node => [node.entity_id, node.id]));
+const ids = new Map(contextNodes.map(node => [node.entity_id, node.id]));
 expect(new Set(ids.keys())).toEqual(new Set(documents.map(document => document.id)));
 expect(new Set(scene.edges.map(edge => `${edge.source}->${edge.target}`))).toEqual(
   new Set(documents.slice(1).map((document, index) =>
