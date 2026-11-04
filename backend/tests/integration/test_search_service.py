@@ -1143,6 +1143,8 @@ def test_name_index_resyncs_on_rename_and_title_only_update():
         actor_kind="human",
         actor_id="00000000-0000-0000-0000-000000000010",
         actor_provenance="browser_session",
+        expected_content_hash=autosaved.content_hash,
+        expected_references_hash=autosaved.references_hash,
     )
     norms = name_norms()
     assert "autosaved title" in norms

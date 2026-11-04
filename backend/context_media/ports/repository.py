@@ -17,7 +17,9 @@ from backend.context_media.domain import (
 class ContextMediaRepository(Protocol):
     def lock_workspace_for_usage(self, workspace_id: UUID) -> None: ...
 
-    def add_asset(self, asset: ContextMediaAssetRecord) -> ContextMediaAssetRecord: ...
+    def add_asset(
+        self, asset: ContextMediaAssetRecord, *, allow_shared_draft: bool = False
+    ) -> ContextMediaAssetRecord: ...
 
     def get_asset(
         self, workspace_id: UUID, asset_id: UUID

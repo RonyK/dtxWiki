@@ -251,6 +251,7 @@ def create_context_page(
             actor_id=actor.actor_id,
             actor_provenance=actor.provenance,
             placement_parent_node_id=request_body.placement_parent_node_id,
+            share_draft=request_body.share_draft,
         )
     except PageServiceError as exc:
         return service_error_response(exc)
@@ -857,6 +858,7 @@ def autosave_page(
             on_stale=request_body.on_stale,
             destination_node_id=request_body.destination_node_id,
             retry_only=request_body.retry_only,
+            share_draft=request_body.share_draft,
         )
     except PageServiceError as exc:
         return service_error_response(exc)

@@ -190,6 +190,169 @@ def _publish_created_version(client, page_service, created, **payload_overrides)
     )
 
 
+def test_browser_reference_draft_stays_shared_through_save_review_and_publish(
+    page_service,
+):
+    # One DB/transport lifecycle: visibility, review evidence and publication
+    # pointers must agree after a reference-only edit and its retries.
+    owner = make_client(page_service)
+    base = pages_url(page_service)
+    target = create_published_page(
+        owner, page_service, title="Reference source", body_md="# Reference source"
+    )
+    created = owner.post(
+        base,
+        json={
+            "title": "Shared references",
+            "body_md": "# Shared references",
+            "share_draft": True,
+        },
+    )
+    assert created.status_code == 201, created.text
+    draft = created.json()["data"]
+    page_url = f"{base}/{draft['id']}"
+    editor = make_client(page_service, authenticated=False)
+    authenticate_test_client_in_workspace(
+        editor,
+        page_service.session_factory,
+        email="shared-reference-editor@example.com",
+        role="editor",
+    )
+    viewer = make_client(page_service, authenticated=False)
+    authenticate_test_client_in_workspace(
+        viewer,
+        page_service.session_factory,
+        email="shared-reference-viewer@example.com",
+        role="viewer",
+    )
+    assert draft["version_status"] == "draft"
+    assert editor.get(page_url).json()["data"]["version_id"] == draft["version_id"]
+    assert viewer.get(page_url).status_code == 404
+
+    def save(value, key, body=None):
+        response = owner.post(
+            f"{page_url}/autosave",
+            json={
+                "body_md": body or value["body_md"],
+                "base_version_id": value["version_id"],
+                "base_content_hash": value["content_hash"],
+                "expected_editing_revision": value["editing_revision"],
+                "session_version_id": value["version_id"],
+                "idempotency_key": key,
+                "share_draft": True,
+            },
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["data"]
+
+    reference = {"target_kind": "context_page", "target_id": target["id"]}
+    added = owner.post(
+        f"{page_url}/references",
+        json={
+            "version_id": draft["version_id"],
+            "expected_editing_revision": draft["editing_revision"],
+            "idempotency_key": "shared-reference-add",
+            "add": [reference],
+        },
+    )
+    assert added.status_code == 200, added.text
+    assert added.json()["data"]["publication_state"] == "draft"
+    draft = editor.get(page_url).json()["data"]
+    assert draft["references"][0]["target_id"] == target["id"]
+    assert _publish_created_version(owner, page_service, draft).status_code == 200
+    published = viewer.get(page_url).json()["data"]
+
+    # Even identical body bytes must stage a mutable shared successor before
+    # changing references on a published or reviewed version.
+    draft = save(published, "stage-reference-removal")
+    assert draft["version_id"] != published["version_id"]
+    removal = {
+        "version_id": draft["version_id"],
+        "expected_editing_revision": draft["editing_revision"],
+        "idempotency_key": "shared-reference-remove",
+        "remove": [reference],
+    }
+    removed = owner.post(f"{page_url}/references", json=removal)
+    assert removed.status_code == 200, removed.text
+    replay = owner.post(f"{page_url}/references", json=removal)
+    assert replay.status_code == 200 and replay.json()["data"]["replayed"]
+    assert (
+        replay.json()["data"]["editing_revision"]
+        == removed.json()["data"]["editing_revision"]
+    )
+    draft = editor.get(page_url).json()["data"]
+    assert not draft["references"]
+    assert viewer.get(page_url).json()["data"]["version_id"] == published["version_id"]
+    assert viewer.get(page_url).json()["data"]["references"]
+
+    submitted = owner.post(
+        f"{page_url}/submit-for-review",
+        json={
+            "version_id": draft["version_id"],
+            "expected_editing_revision": draft["editing_revision"],
+            "idempotency_key": "shared-reference-review",
+            "reason": "Check references",
+        },
+    )
+    assert submitted.status_code == 200, submitted.text
+    reviewed = submitted.json()["data"]
+    assert reviewed["review_item_id"] is not None
+    blocked = owner.post(
+        f"{page_url}/references",
+        json={
+            "version_id": reviewed["version_id"],
+            "expected_editing_revision": reviewed["editing_revision"],
+            "idempotency_key": "review-evidence-is-immutable",
+            "add": [reference],
+        },
+    )
+    assert blocked.status_code == 409, blocked.text
+    successor = save(reviewed, "fork-reviewed-references")
+    assert successor["version_id"] != reviewed["version_id"]
+    changed = owner.post(
+        f"{page_url}/references",
+        json={
+            "version_id": successor["version_id"],
+            "expected_editing_revision": successor["editing_revision"],
+            "idempotency_key": "shared-reference-readd",
+            "add": [reference],
+        },
+    )
+    assert changed.status_code == 200, changed.text
+    historical = owner.get(
+        page_url, params={"version_id": reviewed["version_id"]}
+    ).json()["data"]
+    assert not historical["references"]
+    current = editor.get(page_url).json()["data"]
+    current = save(
+        current,
+        "body-after-reference-change",
+        "# Shared references\n\nSaved after references.",
+    )
+    assert editor.get(page_url).json()["data"]["body_md"] == current["body_md"]
+    assert current["version_status"] == "draft"
+    stale = _publish_created_version(
+        owner,
+        page_service,
+        current,
+        expected_references_hash=successor["references_hash"],
+    )
+    assert stale.status_code == 409, stale.text
+    missing_hash = owner.post(
+        f"{page_url}/versions/{current['version_id']}/publish",
+        json={
+            "reason": "Missing reference fingerprint",
+            "expected_content_hash": current["content_hash"],
+        },
+    )
+    assert missing_hash.status_code == 422, missing_hash.text
+    assert _publish_created_version(owner, page_service, current).status_code == 200
+    assert (
+        viewer.get(page_url).json()["data"]["references"][0]["target_id"]
+        == target["id"]
+    )
+
+
 def test_browser_owner_can_publish_its_active_page_first_editing_version(page_service):
     client = make_client(page_service)
     created = client.post(

@@ -89,6 +89,7 @@ def test_publish_conflict_is_409_and_rolls_back_every_publication_pointer(
             actor_kind="human",
             actor_id=ACTOR_ID,
             actor_provenance="browser_session",
+            expected_references_hash=draft.references_hash,
         )
 
     assert excinfo.value.error_code == "legacy_media_cutover_conflict"

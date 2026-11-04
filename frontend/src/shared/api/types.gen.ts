@@ -5110,9 +5110,9 @@ export interface components {
             /**
              * Publication State
              * @default editing
-             * @constant
+             * @enum {string}
              */
-            publication_state: "editing";
+            publication_state: "editing" | "draft";
             /**
              * Receipt Id
              * Format: uuid
@@ -5620,13 +5620,7 @@ export interface components {
         };
         /**
          * ContextPageCreateRequest
-         * @description Canonical ``POST context/pages`` body (P8.1/P9.1).
-         *
-         *     Deliberately has no ``slug``/``as_draft`` field: the canonical create
-         *     command always runs ``create_page_first`` (new page + empty editing),
-         *     regardless of whether a title/body is supplied. It never branches into
-         *     ``write_page``'s upsert-by-slug behavior -- that ambiguity is exactly what
-         *     P8.1 retired this route to get away from.
+         * @description REST creation can explicitly save a shared draft in a browser session.
          */
         ContextPageCreateRequest: {
             /** Aliases */
@@ -5641,6 +5635,12 @@ export interface components {
             page_type?: ("overview" | "source" | "entity" | "concept" | "synthesis" | "comparison" | "decision" | "contradiction" | "query" | "guide") | null;
             /** Placement Parent Node Id */
             placement_parent_node_id?: string | null;
+            /**
+             * Share Draft
+             * @description Browser-session creation: save a shared, unpublished draft.
+             * @default false
+             */
+            share_draft: boolean;
             /** Tags */
             tags?: string[] | null;
             /**
@@ -9486,14 +9486,10 @@ export interface components {
         };
         /**
          * PageAutosaveRequest
-         * @description P8.1: `expected_editing_revision` is a required CAS input here, not
-         *     optional -- unlike `PATCH /{page_id}` (`PageUpdateRequest`, which targets
-         *     the page's own shared head and has no per-author "editing" row of its
-         *     own), autosave always targets a specific actor's private "editing" row,
-         *     where `content_hash` alone cannot catch a stale write that only changes
-         *     title/tags/aliases/metadata (see `PageUpdateRequest.expected_editing_revision`'s
-         *     comment for why the hash-only check is insufficient). Inherits
-         *     `PageUpdateRequest`'s tag/alias length validators unchanged.
+         * @description Save an actor's edit with revision CAS, including metadata changes.
+         *
+         *     Browser saves explicitly stage a shared draft with ``share_draft``;
+         *     private editing clients retain their existing default behavior.
          */
         PageAutosaveRequest: {
             /** Aliases */
@@ -9534,6 +9530,12 @@ export interface components {
             retry_only: boolean;
             /** Session Version Id */
             session_version_id?: string | null;
+            /**
+             * Share Draft
+             * @description Browser-session save: stage a shared, unpublished draft.
+             * @default false
+             */
+            share_draft: boolean;
             /** Tags */
             tags?: string[] | null;
             /**
@@ -10136,7 +10138,7 @@ export interface components {
             expected_content_hash: string;
             /**
              * Expected References Hash
-             * @description Required when publishing a mutable editing version; frozen submitted versions already bind their references.
+             * @description Required when a browser publishes an editing or draft version.
              */
             expected_references_hash?: string | null;
             /**

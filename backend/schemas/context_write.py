@@ -512,7 +512,7 @@ class CiteResult(BaseModel):
     version_id: UUID
     editing_revision: int
     references_hash: str = Field(pattern=CONTENT_HASH_PATTERN)
-    publication_state: Literal["editing"] = "editing"
+    publication_state: Literal["editing", "draft"] = "editing"
     added: list[DocumentReferenceInput] = Field(default_factory=list)
     removed: list[DocumentReferenceRemoveInput] = Field(default_factory=list)
     unchanged: list[DocumentReferenceInput | DocumentReferenceRemoveInput] = Field(

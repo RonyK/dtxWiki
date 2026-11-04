@@ -84,6 +84,7 @@ class ContextImageIngestCommand:
     actor_id: str
     policy_revision: str
     legacy_upload_asset_id: UUID | None = None
+    allow_shared_draft: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,6 +252,7 @@ class ContextImageIngestService:
                 policy_revision=command.policy_revision,
                 validated_image=prepared.validated_image,
                 legacy_upload_asset_id=command.legacy_upload_asset_id,
+                allow_shared_draft=command.allow_shared_draft,
             )
         except ContextLogicalQuotaExceededError as exc:
             raise _downstream_error(

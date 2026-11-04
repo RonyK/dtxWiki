@@ -1342,14 +1342,19 @@ class PageService:
             from backend.services.document_references import document_references_hash
 
             if (
-                staged.version_status == "editing"
-                and staged.created_by_actor_kind == actor_kind
-                and staged.created_by_actor_id == actor_id
+                staged.version_status in {"editing", "draft"}
+                and (
+                    staged.version_status == "draft"
+                    or (
+                        staged.created_by_actor_kind == actor_kind
+                        and staged.created_by_actor_id == actor_id
+                    )
+                )
                 and actor_provenance == "browser_session"
                 and expected_references_hash is None
             ):
                 raise PageValidationError(
-                    "expected_references_hash is required to publish an editing version"
+                    "expected_references_hash is required to publish a mutable version"
                 )
             already_published = (
                 staged.version_status == "published_snapshot"
@@ -1834,8 +1839,9 @@ class PageService:
         aliases: list[str] | None = None,
         placement_parent_node_id: UUID | None = None,
         with_edit_receipt: bool = False,
+        share_draft: bool = False,
     ) -> PagePayload:
-        """Atomically create a page and its first, private "editing" version.
+        """Create a page with a private edit or an explicitly shared browser draft.
 
         P2.3: used when the caller omits `slug` -- title defaults to "제목
         없음", slug to `p-{page_id}` (computed from a fresh id chosen before
@@ -1847,6 +1853,11 @@ class PageService:
         Empty `body_md` is allowed; publish-time content validation is a
         separate, later check.
         """
+
+        if share_draft and actor_provenance != "browser_session":
+            raise PageValidationError(
+                "sharing a browser draft requires a browser session"
+            )
 
         with self.session_factory.begin() as session:
             acquire_write_intent(session)
@@ -1899,17 +1910,18 @@ class PageService:
                 body=prepared,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
-                version_status="editing",
+                version_status="draft" if share_draft else "editing",
             )
             # Without this, the page has no stored head at all: an ordinary
             # read_page/list_pages by its own author would 404 immediately
             # after a 201 create, since nothing else ever points at a fresh
             # page's first version for them (confirmed the hard way -- an
             # end-to-end create-then-read test failed until this was added).
-            # Never `latest_draft_version_id`: that pointer is reserved for a
-            # SUBMITTED draft (P2.2) and this version is still private
-            # "editing", exactly like `begin_editing`'s fresh-session case.
+            # Private creation keeps the submitted pointer empty. Browser
+            # creation explicitly shares the saved draft without publishing.
             page.current_version_id = version.id
+            if share_draft:
+                page.latest_draft_version_id = version.id
             page.placement_parent_node_id = placement_parent_node_id
             sync_page_link_projection(session, page=page, version=version)
             self._ensure_context_tree_placement(
@@ -1932,7 +1944,7 @@ class PageService:
                 payload={
                     "version_id": str(version.id),
                     "editing_revision": version.editing_revision,
-                    "was_private_edit": True,
+                    "was_private_edit": not share_draft,
                 },
             )
             payload = self._payload_from_page(
@@ -2300,7 +2312,7 @@ class PageService:
         retry_only: bool = False,
         chat_session_id: UUID | None = None,
     ) -> PagePayload:
-        """ "Save draft": lock the caller's own editing content and submit it (P8.1).
+        """Submit the caller's private edit or shared browser draft for review.
 
         Author-only -- this is not a reviewer action. Requires the caller's
         own current ``editing_revision`` (covers body, title, slug, tags,
@@ -2377,7 +2389,15 @@ class PageService:
                 or version.created_by_actor_id != actor_id
             ):
                 raise PageNotFoundError("page version not found")
-            if version.version_status != "editing":
+            browser_draft = (
+                actor_provenance == "browser_session"
+                and version.version_status == "draft"
+                and page.latest_draft_version_id == version.id
+                and not self._context_reviews_for_version(
+                    session=session, page=page, version=version
+                )
+            )
+            if version.version_status != "editing" and not browser_draft:
                 raise PageConflictError(
                     server_version_id=version.id,
                     server_content_hash=version.content_hash,
@@ -3908,6 +3928,7 @@ class PageService:
         retry_only: bool = False,
         with_edit_receipt: bool = False,
         editing_version_id: UUID | None = None,
+        share_draft: bool = False,
     ) -> PagePayload:
         """Save a whole body for this actor (Browser autosave and MCP
         update_context_edit).
@@ -3917,6 +3938,11 @@ class PageService:
         actor's open editing row, or the save is a conflict naming the row
         that is open now (or saying none is).
         """
+
+        if share_draft and actor_provenance != "browser_session":
+            raise PageValidationError(
+                "sharing a browser draft requires a browser session"
+            )
 
         # Empty on an idempotency replay, where no write callback executes.
         receipt_base: dict[str, object] = {}
@@ -3937,6 +3963,19 @@ class PageService:
                     actor_kind=actor_kind,
                     actor_id=actor_id,
                 )
+                if (
+                    share_draft
+                    and current.version_status == "editing"
+                    and page.latest_draft_version_id not in {None, current.id}
+                ):
+                    shared = self._require_page_version(
+                        session, page, page.latest_draft_version_id
+                    )
+                    if shared.version_status == "draft":
+                        raise PageConflictError(
+                            server_version_id=shared.id,
+                            server_content_hash=shared.content_hash,
+                        )
                 same_actor_draft = (
                     current.version_status in ("editing", "draft")
                     and current.graph_status == "linear"
@@ -4032,6 +4071,16 @@ class PageService:
                     prepared.body == current.body_md
                     and not metadata_patch
                     and resume_parent is None
+                    and not (
+                        share_draft
+                        and (
+                            not same_actor_draft
+                            or current.version_status != "draft"
+                            or self._context_reviews_for_version(
+                                session=session, page=page, version=current
+                            )
+                        )
+                    )
                 ):
                     # P2.2/P2.6: `current` is the page-global pointer -- returning
                     # it unchanged is only safe when it is published (anyone with
@@ -4085,6 +4134,7 @@ class PageService:
                     session_version_id=session_version_id,
                     same_actor_draft=same_actor_draft,
                     own_open_edit=own_open_edit,
+                    share_draft=share_draft,
                     baseline_patch=baseline_patch,
                     metadata_patch=metadata_patch,
                     restart=resume_parent,
@@ -4111,6 +4161,7 @@ class PageService:
                             else None
                         ),
                         "on_stale": on_stale,
+                        **({"share_draft": True} if share_draft else {}),
                         "page_type": page_type,
                         "tags": tags,
                         "aliases": aliases,
@@ -4381,6 +4432,7 @@ class PageService:
         session_version_id: UUID | None,
         same_actor_draft: bool,
         own_open_edit: bool,
+        share_draft: bool = False,
         baseline_patch: dict[str, object] | None,
         metadata_patch: dict[str, object],
         restart: RejectedDraftRestart | None = None,
@@ -4432,6 +4484,8 @@ class PageService:
         else:
             version = current
             version.editing_revision += 1
+        if share_draft:
+            version.version_status = "draft"
         session_operation = (
             None
             if created_session_draft
@@ -4481,7 +4535,7 @@ class PageService:
                         if version.parent_version_id
                         else None
                     ),
-                    "was_private_edit": True,
+                    "was_private_edit": not share_draft,
                     "editing_revision": version.editing_revision,
                     "before_content_hash": current.content_hash,
                     "after_content_hash": prepared.content_hash,

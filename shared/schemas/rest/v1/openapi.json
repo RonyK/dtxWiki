@@ -4538,8 +4538,11 @@
             "type": "string"
           },
           "publication_state": {
-            "const": "editing",
             "default": "editing",
+            "enum": [
+              "editing",
+              "draft"
+            ],
             "title": "Publication State",
             "type": "string"
           },
@@ -5829,7 +5832,7 @@
       },
       "ContextPageCreateRequest": {
         "additionalProperties": false,
-        "description": "Canonical ``POST context/pages`` body (P8.1/P9.1).\n\nDeliberately has no ``slug``/``as_draft`` field: the canonical create\ncommand always runs ``create_page_first`` (new page + empty editing),\nregardless of whether a title/body is supplied. It never branches into\n``write_page``'s upsert-by-slug behavior -- that ambiguity is exactly what\nP8.1 retired this route to get away from.",
+        "description": "REST creation can explicitly save a shared draft in a browser session.",
         "properties": {
           "aliases": {
             "anyOf": [
@@ -5891,6 +5894,12 @@
               }
             ],
             "title": "Placement Parent Node Id"
+          },
+          "share_draft": {
+            "default": false,
+            "description": "Browser-session creation: save a shared, unpublished draft.",
+            "title": "Share Draft",
+            "type": "boolean"
           },
           "tags": {
             "anyOf": [
@@ -16750,7 +16759,7 @@
       },
       "PageAutosaveRequest": {
         "additionalProperties": false,
-        "description": "P8.1: `expected_editing_revision` is a required CAS input here, not\noptional -- unlike `PATCH /{page_id}` (`PageUpdateRequest`, which targets\nthe page's own shared head and has no per-author \"editing\" row of its\nown), autosave always targets a specific actor's private \"editing\" row,\nwhere `content_hash` alone cannot catch a stale write that only changes\ntitle/tags/aliases/metadata (see `PageUpdateRequest.expected_editing_revision`'s\ncomment for why the hash-only check is insufficient). Inherits\n`PageUpdateRequest`'s tag/alias length validators unchanged.",
+        "description": "Save an actor's edit with revision CAS, including metadata changes.\n\nBrowser saves explicitly stage a shared draft with ``share_draft``;\nprivate editing clients retain their existing default behavior.",
         "properties": {
           "aliases": {
             "anyOf": [
@@ -16861,6 +16870,12 @@
               }
             ],
             "title": "Session Version Id"
+          },
+          "share_draft": {
+            "default": false,
+            "description": "Browser-session save: stage a shared, unpublished draft.",
+            "title": "Share Draft",
+            "type": "boolean"
           },
           "tags": {
             "anyOf": [
@@ -18384,7 +18399,7 @@
                 "type": "null"
               }
             ],
-            "description": "Required when publishing a mutable editing version; frozen submitted versions already bind their references.",
+            "description": "Required when a browser publishes an editing or draft version.",
             "title": "Expected References Hash"
           },
           "publish_despite_findings": {

@@ -975,6 +975,15 @@ Saving checks citation syntax and the combined 500-document budget without
 registering Graph edges. Historical `@cite{source-key}` display tokens remain
 unchanged and receive an unresolved-link warning; replace them with permanent
 document addresses to register citations.
+
+Browser create and autosave requests set `share_draft: true` to save a shared,
+unpublished draft. Only browser-session authentication accepts this option;
+MCP creation and editing keep their private defaults. Before changing reference
+metadata, the editor stages an owned draft even when the body is unchanged.
+Reviewed versions are forked first. The browser can explicitly submit its
+shared draft through `submit-for-review`; saving alone does not request review.
+Browser publication of a mutable version requires both content and reference
+hashes. Browser image uploads also accept the owner's current unreviewed draft.
 References are returned separately from the authored body; do not append a
 second generated copy to the Markdown. Old claim-based cite inputs are rejected,
 and reindex does not discover historical citations or reinterpret Chats records.

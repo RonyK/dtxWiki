@@ -28,6 +28,7 @@ from backend.context_media.domain import (
 )
 from backend.context_media.ports import ContextLogicalQuotaExceededError
 from backend.media.domain import BlobEpoch, BlobReference, BlobState
+from backend.models.change import ChangeOperation
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.context_media import (
     ContextMediaAsset,
@@ -43,6 +44,7 @@ from backend.models.media import (
     StoredBlobInspectionRow,
     WorkspaceMediaWriteIntent,
 )
+from backend.models.review import ReviewItem
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.repositories.context_media_orphans import (
@@ -57,6 +59,7 @@ from backend.repositories.media_blob_reference import (
     BlobReferenceOwnerKind,
     SqlAlchemyBlobReferenceLedger,
 )
+from backend.repositories.workspace_scoped import select_projection_in_workspace
 from backend.services.actor_visible_read import context_version_is_visible
 from backend.services.db_write_intent import acquire_write_intent
 
@@ -215,7 +218,9 @@ class SqlAlchemyContextMediaRepository:
             self._session.info[_USAGE_LOCK_STATE_KEY] = lock_state
         lock_state[2].add(workspace_id)
 
-    def add_asset(self, asset: ContextMediaAssetRecord) -> ContextMediaAssetRecord:
+    def add_asset(
+        self, asset: ContextMediaAssetRecord, *, allow_shared_draft: bool = False
+    ) -> ContextMediaAssetRecord:
         _lock_context_workspace(self._session, asset.workspace_id)
         self._logical_quota.lock_workspace(asset.workspace_id)
         if asset.legacy_upload_asset_id is not None:
@@ -264,7 +269,37 @@ class SqlAlchemyContextMediaRepository:
             or editing_version.created_by_actor_id != asset.created_by.id
         ):
             raise ContextMediaNotFoundError("Context Page version was not found")
-        if editing_version.version_status != "editing":
+        shared_draft = (
+            allow_shared_draft
+            and editing_version.version_status == "draft"
+            and editing_version.graph_status == "linear"
+            and page.latest_draft_version_id == editing_version.id
+            and self._session.scalar(
+                select_projection_in_workspace(
+                    ReviewItem,
+                    workspace_id=asset.workspace_id,
+                    columns=(ReviewItem.id,),
+                    predicates=(
+                        ReviewItem.review_type == "context_update",
+                        ReviewItem.change_set_id.in_(
+                            select_projection_in_workspace(
+                                ChangeOperation,
+                                workspace_id=asset.workspace_id,
+                                columns=(ChangeOperation.change_set_id,),
+                                predicates=(
+                                    ChangeOperation.target_type == "context_page",
+                                    ChangeOperation.target_id == page.id,
+                                    ChangeOperation.diff_ref
+                                    == f"context_page_version:{editing_version.id}",
+                                ),
+                            )
+                        ),
+                    ),
+                ).limit(1)
+            )
+            is None
+        )
+        if editing_version.version_status != "editing" and not shared_draft:
             raise ContextMediaEditingNotOpenError("editing version is not open")
         self._logical_quota.reserve(
             asset.workspace_id,

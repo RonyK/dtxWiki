@@ -97,6 +97,7 @@ describe("pages api", () => {
           body_md: "# Hello",
           page_type: "decision",
           tags: ["release"],
+          share_draft: true,
         }),
       }),
     );
@@ -173,6 +174,7 @@ describe("pages api", () => {
           expected_editing_revision: 1,
           on_stale: "conflict",
           retry_only: false,
+          share_draft: true,
         }),
       }),
     );

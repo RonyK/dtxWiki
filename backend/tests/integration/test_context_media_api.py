@@ -1278,6 +1278,30 @@ def test_upload_rejects_closed_foreign_and_wrong_page_editing_versions(
         untouched = session.get(ContextPageVersion, UUID(other_page["version_id"]))
         assert untouched.version_status == "editing"
 
+    # Browser saves share their drafts. Attachments may target that owner's
+    # mutable shared draft, but submitting it locks the same evidence again.
+    shared = client.post(
+        _pages_url(client),
+        json={
+            "title": "Shared upload",
+            "body_md": "# Shared upload",
+            "share_draft": True,
+        },
+    ).json()["data"]
+    uploaded = _upload_editing_png(client, page=shared, marker_uuid=uuid4())
+    assert uploaded.status_code == 200, uploaded.text
+    submitted = client.post(
+        f"{_pages_url(client)}/{shared['id']}/submit-for-review",
+        json={
+            "idempotency_key": "lock-shared-upload",
+            "version_id": shared["version_id"],
+            "expected_editing_revision": shared["editing_revision"],
+        },
+    )
+    assert submitted.status_code == 200, submitted.text
+    locked = _upload_editing_png(client, page=shared, marker_uuid=uuid4())
+    assert locked.status_code == 409, locked.text
+
 
 @pytest.mark.parametrize("close_version", [False, True])
 def test_asset_delete_enforces_editing_author_before_usage_token(

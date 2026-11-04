@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Shared browser drafts
+
+- Keep browser Context saves and reference additions or removals in shared,
+  unpublished drafts visible to Editors and Owners. MCP editing stays private.
+- Allow explicit review submission of a shared browser draft. Reference edits
+  fork reviewed versions and preserve their evidence; publication checks both
+  the body and reference fingerprints.
+
 ## 0.2.1 — 2026-11-04
 
 Beta release with Graph View, document references, Inbox, and workspace-scoped

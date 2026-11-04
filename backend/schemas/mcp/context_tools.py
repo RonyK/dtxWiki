@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -7,9 +7,11 @@ from backend.schemas.common import MCPResultEnvelope
 from backend.schemas.context_edit import EditOperation
 from backend.schemas.context_write import (
     CiteRequest,
-    CiteResult,
     SubmitFeedbackRequest,
     SubmitFeedbackResult,
+)
+from backend.schemas.context_write import (
+    CiteResult as ReferenceCommandResult,
 )
 from backend.schemas.edit_receipt import EditReceipt
 from backend.schemas.mcp.page_input import MCPPageInput, validate_typed_target
@@ -20,12 +22,12 @@ from backend.schemas.page import (
     PAGE_LIST_CURSOR_PATTERN,
     PAGE_LIST_LIMIT_MAX,
     BeginContextEditRequest,
-    ContextPageCreateRequest,
     DiscardContextEditRequest,
     DiscardContextEditResult,
     DraftReviewReason,
     ListMyContextEditsResult,
     PagePayload,
+    PrivateContextPageCreateRequest,
     SubmitContextEditRequest,
     UpdateContextEditRequest,
 )
@@ -47,6 +49,11 @@ class CiteInput(CiteRequest):
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
 
     model_config = ConfigDict(extra="forbid")
+
+
+class CiteResult(ReferenceCommandResult):
+    # Keep the MCP result schema and private-edit behavior unchanged.
+    publication_state: Literal["editing"] = "editing"
 
 
 class CiteToolOutput(BaseModel):
@@ -90,7 +97,7 @@ class SubmitFeedbackToolOutput(BaseModel):
 # (backend/api/context_pages.py).
 
 
-class CreateContextPageInput(ContextPageCreateRequest):
+class CreateContextPageInput(PrivateContextPageCreateRequest):
     workspace_id: UUID
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
 
