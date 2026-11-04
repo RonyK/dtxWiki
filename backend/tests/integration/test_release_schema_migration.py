@@ -27,7 +27,7 @@ from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 INITIAL_REVISION = "bd62193d5cf6"
 CORE_REVISION = "efcbcf724889"
-GRAPH_REVISION = "9aeab6944f25"
+GRAPH_REVISION = "5b7e5c149279"
 
 
 def _config(database_url: str) -> Config:
@@ -488,7 +488,7 @@ def test_release_head_matches_current_model_schema(head_engine):
             column["name"] for column in inspector.get_columns("library_item_version")
         }
 
-    assert version == schema_release_head("0.2.0")
+    assert version == schema_release_head("0.2.1")
     assert set(Base.metadata.tables).issubset(table_names)
     assert diffs == []
     assert {"refresh_ttl_seconds", "sliding_enabled"}.issubset(consent_columns)
@@ -615,7 +615,7 @@ def test_core_revision_rolls_back_late_failure_and_retries(tmp_path, sqlite_temp
         RuntimeError,
         match=r"workspace_tree_node\.\(parent_id\).*cross-workspace",
     ):
-        command.upgrade(config, schema_release_head("0.2.0"))
+        command.upgrade(config, schema_release_head("0.2.1"))
 
     assert _schema_snapshot(engine) == before_snapshot
     with engine.connect() as connection:
@@ -628,10 +628,10 @@ def test_core_revision_rolls_back_late_failure_and_retries(tmp_path, sqlite_temp
             text("UPDATE workspace_tree_node SET parent_id = NULL WHERE id = :node_id"),
             {"node_id": node_a.hex},
         )
-    command.upgrade(config, schema_release_head("0.2.0"))
+    command.upgrade(config, schema_release_head("0.2.1"))
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-            schema_release_head("0.2.0")
+            schema_release_head("0.2.1")
         )
     engine.dispose()
 

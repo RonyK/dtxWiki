@@ -161,7 +161,7 @@ method = CompanyOidc()
 plugin = DtxwikiPlugin(
     name="company_login",
     version="1.0.0",
-    requires_core=">=0.1.3,<0.2",
+    requires_core=">=0.2.1,<0.3",
     requires_spi=">=1.1,<2",
     auth_methods=lambda: (method,),
 )
@@ -440,8 +440,10 @@ Cursor 이전 시각의 지연 열람이나 미처리 backlog는 요청 안에�
 재처리도 한 번 가져온 원본으로 변경 전후를 계산합니다. 누적 지원 횟수는 저장 시
 감쇠하지 않으며, 표시 순위와 중요도 계산에서 각각 정한 포화 함수를 적용합니다.
 
-현재 schema head는 release manifest에서 읽습니다. 독립 migration을 통합할 때는
-원본 revision을 유지하고 merge revision으로 연결한 뒤 schema·model 일치를 검사합니다.
+현재 schema head는 release manifest에서 읽습니다. 이미 배포된 revision은 수정하지
+않습니다. 여러 브랜치의 후속 migration은 merge revision으로 연결하고 schema·model
+일치를 검사합니다. 0.2.1의 미배포 migration 통합과 개발 DB 전환은 아래 릴리스
+migration 안내를 따릅니다.
 
 ## 설치 방식별 업데이트 방법
 
@@ -503,9 +505,14 @@ make migrate
 make seed
 ```
 
-When an existing Alembic revision is extended, recreate the dev database:
-delete `~/.dtxwiki/data/dtxwiki.sqlite`, then run `dtxwiki bootstrap`.
-Alembic tracks revision identity, so bootstrap cannot detect changed revision content.
+Never edit a published Alembic revision. The 0.2.1 release consolidates the
+unpublished revisions after 0.1.4 while retaining the head `5b7e5c149279`.
+If a development database is at a removed intermediate revision, use its original
+checkout to upgrade to that head before switching code, then back up and verify
+the database. A disposable test database may instead be recreated at a separate
+explicit path. Do not delete the normal data directory or use `alembic stamp`
+to bypass compatibility checks. Alembic tracks revision identity and does not
+rerun a changed implementation for a database already at its head.
 
 For read-only revision evidence, use explicit targets instead of `bootstrap` or
 `alembic upgrade`:
@@ -637,15 +644,15 @@ make test-packaged                        # frontend + wheel build, packaged UI/
 
 # 검증은 wheel 파일이 아니라 dist 디렉터리를 받으며, 이전 빌드 잔여물이 섞이지 않도록 깨끗한 dist 에서 합니다.
 rm -rf dist && make build-wheel
-.venv/bin/python scripts/verify_wheel_artifact.py dist
+.venv/bin/python scripts/verify_wheel_artifact.py dist --release-version 0.2.1
 WHEEL="$(find dist -maxdepth 1 -name 'dtxwiki-*.whl' -print -quit)"
 sha256sum "$WHEEL" infra/prod/install.sh
 ```
 
 `verify_wheel_artifact.py` 는 릴리스 워크플로가 태그 시점에 돌리는 것과 같은 검사입니다 —
-SPA 번들과 그 index HTML 이 참조하는 asset, alembic.ini, `bd62193d5cf6`/`efcbcf724889` 두 revision,
-그리고 `efcbcf724889` 이 import 하는 `backend/migrations/revision_modules/v0_1/efcbcf724889_core_schema/*` 모듈 전부를 확인하고,
-추출본 안에서 alembic 그래프를 실제로 걸어 head 를 대조합니다. 인자는 dist 디렉터리이며 wheel 경로를
+SPA 번들과 그 index HTML이 참조하는 asset, alembic.ini, 배포된 다섯 migration과
+그 helper의 고정 해시를 확인합니다. 추출본 안에서 Alembic graph를 실제로 걸어
+0.2.1 schema head `5b7e5c149279`와 release manifest를 대조합니다. 인자는 dist 디렉터리이며 wheel 경로를
 넘기면 사용법 오류(exit 2)입니다. 이미 만든 `dist/` 에 이전 빌드가 있으면(`make build-wheel` 은 그것을
 `dist/prev/` 로 옮깁니다) 검사 대상이 모호해지므로 위처럼 `rm -rf dist` 로 시작하세요.
 
@@ -655,7 +662,7 @@ Migration은 `backend/migrations/versions/v<major>_<minor>/<id>_<description>.py
 새 migration이 필요하지 않습니다. 새 파일은 다음 명령으로 생성합니다.
 
 ```bash
-.venv/bin/python scripts/new_migration.py --release 0.2.0 -m "add workspace settings"
+.venv/bin/python scripts/new_migration.py --release 0.2.2 -m "add workspace settings"
 ```
 
 보조 모듈이 필요하면 `revision_modules/v0_2/<id>_add_workspace_settings/`에
@@ -672,12 +679,17 @@ head가 하나여야 하며, 모든 신규 경로가 고정된 core revision
 `efcbcf724889`를 거쳐야 합니다. 패키지 검증기는 이 그래프와 고정 파일의 해시를
 함께 확인합니다.
 
-현재 0.2.0 head는 `5b7e5c149279`입니다. 버전별 참고문헌·발행 citation projection
-schema의 `c58f1d2e890a`와 Chats 도구 호출 조회 인덱스의 `b1d98889a4ad`를
-병합하며, 기존 두 revision의 ID와 부모는 유지합니다. `c58f1d2e890a`는 Graph
-co-access revision `7c2bde1490af` 뒤에 이어지고, `b1d98889a4ad`는
-`1d8f1c08ca36` 뒤의 독립 revision입니다. 병합 revision 자체는 schema나 데이터를
-변경하지 않습니다.
+0.2.1은 0.1.4 이후 미배포 migration 13개를
+`versions/v0_2/5b7e5c149279_release_0_2.py` 하나로 통합합니다.
+`down_revision`은 배포된 0.1.4 head `ef53a0a7061c`이며, 전체 실행 chain은 다섯
+revision입니다. 0.1.4 이하의 배포 파일·helper·해시는 유지하고 0.2.1 구현을 새로
+고정합니다. 통합 migration은 SSO·계정 보존·Review·Inbox·링크 locator·Graph·문서
+참고문헌·Chats 인덱스를 포함하며, 기존 최종 head의 schema와 데이터를 유지합니다.
+
+DB가 이미 `5b7e5c149279`이면 통합 migration을 다시 실행하지 않습니다.
+제거된 미배포 중간 revision의 DB는 원래 checkout으로 먼저 최종 head에 도달하고,
+백업과 schema 검증을 마친 뒤 0.2.1로 전환합니다. 임의로 stamp를 바꾸지 않습니다.
+새 설치와 0.1.4 이하 배포본에서는 정식 chain을 따라 통합 migration을 적용합니다.
 
 ### Migration 테스트 수 제한
 
@@ -933,7 +945,6 @@ document addresses to register citations.
 References are returned separately from the authored body; do not append a
 second generated copy to the Markdown. Old claim-based cite inputs are rejected,
 and reindex does not discover historical citations or reinterpret Chats records.
-
 
 Structure results are paginated. Follow `next_cursor` for `read_structure_map`;
 for `read_context_outline`, send `outline_next_cursor` back as `outline_cursor`.

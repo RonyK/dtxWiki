@@ -2,13 +2,13 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest release of the 0.1.x series.
-Releases 0.0.x are no longer supported.
+Security fixes are provided for the latest release of the 0.2.x series.
+Releases 0.1.x and earlier are no longer supported.
 
 | Version | Supported |
 | --- | --- |
-| 0.1.x | Yes |
-| 0.0.x | No |
+| 0.2.x | Yes |
+| 0.1.x and earlier | No |
 
 ## Reporting a vulnerability
 

@@ -1,8 +1,4 @@
-"""Add external login, email confirmation and email conflict review.
-
-Revision ID: da94025713de
-Revises: 5c3395a75eb0
-"""
+"""Final v0.2 account, external login and email-confirmation schema."""
 
 from dataclasses import replace
 
@@ -13,12 +9,6 @@ from backend.migrations.revision_modules.v0_1.input_restrictions_v1 import (
     RULES,
     rule_sql,
 )
-
-revision = "da94025713de"
-down_revision = "5c3395a75eb0"
-branch_labels = None
-depends_on = None
-
 
 _OLD_MESSAGE_KINDS = (
     "'password_reset', 'email_verification', 'password_changed', "
@@ -33,7 +23,7 @@ _RECIPIENT_CHECK = (
 
 
 def upgrade() -> None:
-    _native_credentials_nullable(True)
+    _upgrade_users()
     op.create_table(
         "user_identities",
         sa.Column("id", sa.Uuid(), primary_key=True),
@@ -105,7 +95,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    _assert_downgrade_safe()
     with op.batch_alter_table("email_outbox") as batch:
         batch.drop_constraint("email_outbox_recipient_check", type_="check")
         batch.drop_constraint("email_outbox_message_kind_check", type_="check")
@@ -138,7 +127,7 @@ def downgrade() -> None:
     op.drop_table("auth_login_transactions")
     op.drop_index("ix_user_identities_provider_slug", table_name="user_identities")
     op.drop_table("user_identities")
-    _native_credentials_nullable(False)
+    _downgrade_users()
 
 
 def _create_email_verification_tables() -> None:
@@ -259,33 +248,76 @@ def _assert_downgrade_safe() -> None:
         )
 
 
-def _native_credentials_nullable(nullable: bool) -> None:
-    email_rule = next(
+def assert_downgrade_safe() -> None:
+    """Check every account-loss guard before the release removes any schema."""
+
+    _assert_downgrade_safe()
+    if op.get_bind().scalar(
+        sa.text("SELECT EXISTS (SELECT 1 FROM users WHERE status = 'deletion_pending')")
+    ):
+        raise RuntimeError(
+            "cannot remove account deletion deadlines while deletion requests "
+            "are pending; finish account cleanup before downgrading"
+        )
+
+
+def _email_check(nullable: bool) -> tuple[str, str]:
+    rule = next(
         rule for rule in RULES if rule.table == "users" and rule.field == "email"
     )
-    email_check = rule_sql(
-        replace(email_rule, nullable=nullable), op.get_bind().dialect.name
+    return rule.name, rule_sql(
+        replace(rule, nullable=nullable), op.get_bind().dialect.name
     )
-    if op.get_bind().dialect.name == "sqlite":
-        with op.batch_alter_table("users") as batch:
-            batch.drop_constraint(email_rule.name, type_="check")
-            batch.create_check_constraint(email_rule.name, email_check)
-            batch.alter_column(
-                "password_hash", existing_type=sa.Text(), nullable=nullable
-            )
-            batch.alter_column("email", existing_type=sa.Text(), nullable=nullable)
-            if nullable:
-                batch.add_column(sa.Column("pending_email", sa.Text(), nullable=True))
-            else:
-                batch.drop_column("pending_email")
-    else:
-        op.drop_constraint(email_rule.name, "users", type_="check")
-        op.create_check_constraint(email_rule.name, "users", email_check)
-        op.alter_column(
-            "users", "password_hash", existing_type=sa.Text(), nullable=nullable
+
+
+def _upgrade_users() -> None:
+    # The pointer, native credential and deletion changes all belong to this
+    # release. Rebuild users once, preserving child rows and the default pointer.
+    check_name, check_sql = _email_check(True)
+    with op.batch_alter_table("users") as batch:
+        batch.drop_constraint("uq_users_personal_workspace_id", type_="unique")
+        batch.drop_constraint(
+            "fk_users_personal_workspace_id_workspace", type_="foreignkey"
         )
-        op.alter_column("users", "email", existing_type=sa.Text(), nullable=nullable)
-        if nullable:
-            op.add_column("users", sa.Column("pending_email", sa.Text(), nullable=True))
-        else:
-            op.drop_column("users", "pending_email")
+        batch.drop_column("personal_workspace_id")
+        batch.drop_constraint(check_name, type_="check")
+        batch.create_check_constraint(check_name, check_sql)
+        batch.alter_column("password_hash", existing_type=sa.Text(), nullable=True)
+        batch.alter_column("email", existing_type=sa.Text(), nullable=True)
+        batch.add_column(sa.Column("pending_email", sa.Text(), nullable=True))
+        batch.add_column(sa.Column("deletion_requested_at", sa.DateTime(timezone=True)))
+        batch.add_column(sa.Column("purge_after", sa.DateTime(timezone=True)))
+        batch.add_column(sa.Column("deletion_retention_days", sa.Integer()))
+        batch.add_column(sa.Column("deletion_prior_status", sa.Text()))
+        batch.add_column(sa.Column("deletion_failure_count", sa.Integer()))
+        batch.add_column(sa.Column("deletion_last_error", sa.Text()))
+    op.create_index("ix_users_purge_after", "users", ["purge_after"], unique=False)
+
+
+def _downgrade_users() -> None:
+    check_name, check_sql = _email_check(False)
+    op.drop_index("ix_users_purge_after", table_name="users")
+    with op.batch_alter_table("users") as batch:
+        batch.drop_constraint(check_name, type_="check")
+        batch.create_check_constraint(check_name, check_sql)
+        batch.alter_column("password_hash", existing_type=sa.Text(), nullable=False)
+        batch.alter_column("email", existing_type=sa.Text(), nullable=False)
+        batch.drop_column("pending_email")
+        batch.drop_column("deletion_last_error")
+        batch.drop_column("deletion_failure_count")
+        batch.drop_column("deletion_prior_status")
+        batch.drop_column("deletion_retention_days")
+        batch.drop_column("purge_after")
+        batch.drop_column("deletion_requested_at")
+        # The dropped personal pointer is intentionally not guessed back.
+        batch.add_column(sa.Column("personal_workspace_id", sa.Uuid(), nullable=True))
+        batch.create_foreign_key(
+            "fk_users_personal_workspace_id_workspace",
+            "workspace",
+            ["personal_workspace_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
+        batch.create_unique_constraint(
+            "uq_users_personal_workspace_id", ["personal_workspace_id"]
+        )

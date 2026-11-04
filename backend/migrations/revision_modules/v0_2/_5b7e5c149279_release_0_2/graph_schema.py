@@ -1,97 +1,98 @@
-"""Add Graph View settings, relation projections and temporal evidence.
-
-Revision ID: 9aeab6944f25
-Revises: af62c98d0731
-Create Date: 2026-10-14
-
-The upstream locator schema and durable page pins remain unchanged. Graph
-syntax is derived from each existing locator; the evidence ledger starts
-empty because current projections cannot prove past events. Downgrade removes
-only Graph settings, evidence and syntax, retaining all authored link rows,
-locator constraints and existing edge projections.
-"""
+"""Final v0.2 graph ledger and single-pass authored-link schema changes."""
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "9aeab6944f25"
-down_revision = "af62c98d0731"
-branch_labels = None
-depends_on = None
 
-
-def upgrade() -> None:
-    op.add_column(
-        "workspace",
+def upgrade_columns() -> None:
+    for column in (
+        sa.Column("account_deletion_user_id", sa.Uuid(as_uuid=True)),
         sa.Column(
             "graph_observation_sequence",
             sa.Integer(),
             nullable=False,
             server_default="0",
         ),
-    )
-    op.add_column(
-        "workspace",
         sa.Column(
             "workspace_graph_enabled",
             sa.Boolean(),
             nullable=False,
             server_default=sa.false(),
         ),
-    )
-    op.add_column(
-        "workspace",
         sa.Column(
             "usage_relation_signals_enabled",
             sa.Boolean(),
             nullable=False,
             server_default=sa.true(),
         ),
+    ):
+        op.add_column("workspace", column)
+    op.create_index(
+        "ix_workspace_account_deletion_user_id",
+        "workspace",
+        ["account_deletion_user_id"],
+        unique=False,
     )
+    op.add_column("edge_projection", sa.Column("support_session_count", sa.Integer()))
     op.add_column(
-        "edge_projection",
-        sa.Column("support_session_count", sa.Integer(), nullable=True),
+        "edge_projection", sa.Column("first_observed_at", sa.DateTime(timezone=True))
     )
-    op.add_column(
-        "edge_projection",
-        sa.Column("first_observed_at", sa.DateTime(timezone=True), nullable=True),
+
+    # The released parent has only slug-authored wikilinks. Populate its new
+    # identity before one rebuild installs the final locator and syntax shape.
+    op.add_column("page_links", sa.Column("locator_key", sa.Text(), nullable=True))
+    op.execute(
+        sa.text("UPDATE page_links SET locator_key = 'wikilink:' || target_slug")
     )
-    with op.batch_alter_table("page_links") as batch_op:
-        batch_op.add_column(
+    with op.batch_alter_table("page_links") as batch:
+        batch.drop_constraint("uq_page_links_source_version_target", type_="unique")
+        batch.alter_column("target_slug", existing_type=sa.Text(), nullable=True)
+        batch.alter_column("locator_key", existing_type=sa.Text(), nullable=False)
+        batch.create_unique_constraint(
+            "uq_page_links_source_version_locator",
+            ["source_page_id", "source_version_id", "locator_key"],
+        )
+        batch.add_column(
             sa.Column(
                 "link_syntax", sa.Text(), nullable=False, server_default="wikilink"
             )
         )
-        batch_op.create_check_constraint(
+        batch.create_check_constraint(
             "page_links_link_syntax_check", "link_syntax IN ('wikilink', 'context_url')"
         )
-    # The Context-link branch already has durable URL pins. Preserve
-    # their syntax so adding/removing Graph does not reinterpret them.
+
+
+def downgrade_columns() -> None:
+    # A pre-v0.2 runtime cannot represent non-wikilink projections. Their
+    # source bodies survive; a later reindex can rebuild these derived rows.
     op.execute(
         sa.text(
-            "UPDATE page_links SET link_syntax = CASE "
-            "WHEN locator_key LIKE 'wikilink:%' THEN 'wikilink' "
-            "ELSE 'context_url' END"
+            "DELETE FROM page_links WHERE locator_key NOT LIKE 'wikilink:%' "
+            "OR target_slug IS NULL"
         )
     )
-    _upgrade_ledger()
+    with op.batch_alter_table("page_links") as batch:
+        batch.drop_constraint("page_links_link_syntax_check", type_="check")
+        batch.drop_constraint("uq_page_links_source_version_locator", type_="unique")
+        batch.alter_column("target_slug", existing_type=sa.Text(), nullable=False)
+        batch.drop_column("link_syntax")
+        batch.drop_column("locator_key")
+        batch.create_unique_constraint(
+            "uq_page_links_source_version_target",
+            ["source_page_id", "source_version_id", "target_slug"],
+        )
+    with op.batch_alter_table("edge_projection") as batch:
+        batch.drop_column("first_observed_at")
+        batch.drop_column("support_session_count")
+    op.drop_index("ix_workspace_account_deletion_user_id", table_name="workspace")
+    with op.batch_alter_table("workspace") as batch:
+        batch.drop_column("usage_relation_signals_enabled")
+        batch.drop_column("workspace_graph_enabled")
+        batch.drop_column("graph_observation_sequence")
+        batch.drop_column("account_deletion_user_id")
 
 
-def downgrade() -> None:
-    _downgrade_ledger()
-    with op.batch_alter_table("page_links") as batch_op:
-        batch_op.drop_constraint("page_links_link_syntax_check", type_="check")
-        batch_op.drop_column("link_syntax")
-    with op.batch_alter_table("edge_projection") as batch_op:
-        batch_op.drop_column("first_observed_at")
-        batch_op.drop_column("support_session_count")
-    with op.batch_alter_table("workspace") as batch_op:
-        batch_op.drop_column("usage_relation_signals_enabled")
-        batch_op.drop_column("workspace_graph_enabled")
-        batch_op.drop_column("graph_observation_sequence")
-
-
-def _upgrade_ledger() -> None:
+def upgrade_ledger() -> None:
     op.create_table(
         "graph_observation",
         sa.Column("workspace_id", sa.Uuid(), nullable=False),
@@ -255,7 +256,7 @@ def _upgrade_ledger() -> None:
     )
 
 
-def _downgrade_ledger() -> None:
+def downgrade_ledger() -> None:
     op.drop_index(
         "ix_mcp_chat_tool_call_artifact_workspace_time",
         table_name="mcp_chat_tool_call_artifact",

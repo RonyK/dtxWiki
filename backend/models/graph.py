@@ -197,7 +197,7 @@ class GraphObservation(UuidPrimaryKeyMixin, Base):
 
 # The one sanctioned DELETE: workspace teardown, issued after the workspace
 # row itself is gone. The database trigger admits exactly that shape (see
-# migrations/versions/v0_2/9aeab6944f25_add_graph_view.py); this option tells the
+# migrations/versions/v0_2/5b7e5c149279_release_0_2.py); this option tells the
 # ORM guard the same thing, so an ordinary session.execute(delete(...)) from
 # anywhere else still fails closed.
 GRAPH_OBSERVATION_TEARDOWN_OPTION = "graph_observation_teardown"

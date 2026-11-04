@@ -56,11 +56,9 @@ RELEASED_CHAIN_BASE = [
     ["bd62193d5cf6", None],
     ["efcbcf724889", "bd62193d5cf6"],
 ]
-# This feature needs its own revision; an artifact containing only the frozen
-# core chain would still resolve a valid Alembic head but could not run Graph View.
-GRAPH_MIGRATION = Path(
-    "backend/migrations/versions/v0_2/9aeab6944f25_add_graph_view.py"
-)
+# The consolidated 0.2 release owns Graph and the other release additions. A
+# core-only artifact can resolve a valid head but cannot serve this release.
+GRAPH_MIGRATION = Path("backend/migrations/versions/v0_2/5b7e5c149279_release_0_2.py")
 GRAPH_RUNTIME_FILES = tuple(
     Path(path)
     for path in (
@@ -136,6 +134,36 @@ FROZEN_MIGRATIONS = {
     "revision_modules/v0_1/input_restrictions_v1.py": (
         "14f50082552dc8490e2ee2ac239983f4224cbbce80758df6ce498f9cacef26d5"
     ),
+    "revision_modules/v0_2/_5b7e5c149279_release_0_2/__init__.py": (
+        "2409dab9b580bd31c476b9a0bd3698899f01efdd7dd9d8a99280d2e187377008"
+    ),
+    "revision_modules/v0_2/_5b7e5c149279_release_0_2/co_access_schema.py": (
+        "ad1b0ad0c25f2f3067991ed6cb9e1eeaf6a36bef9f5b67eefd7620e8efe4a3e9"
+    ),
+    "revision_modules/v0_2/_5b7e5c149279_release_0_2/document_reference_schema.py": (
+        "c3d8ef2050f9f97f6bfef5e500596493f94be9bd19358649bc5b0facbcb84663"
+    ),
+    "revision_modules/v0_2/_5b7e5c149279_release_0_2/graph_schema.py": (
+        "91c11dceb2c14394078fe17da5f87c97b8f8909a22e8c5f5d6f3531812f712b7"
+    ),
+    "revision_modules/v0_2/_5b7e5c149279_release_0_2/identity_schema.py": (
+        "dcc057ba34a94e38fe0594ae13d1a27aeb2f990ddd4dfb582bece2f63b4e1350"
+    ),
+    "revision_modules/v0_2/_5b7e5c149279_release_0_2/inbox_schema.py": (
+        "0b2376bbfef03c351ebaaa3b1837f039c08c455dee1e43f80278b91337c27933"
+    ),
+    "revision_modules/v0_2/__init__.py": (
+        "5f3eb4116f07bb24e42375b4804692461fe4795f19107cfbff39e5ed19ff5686"
+    ),
+    "revision_modules/v0_2/co_read_v1.py": (
+        "d2d76a36e06862a42b661b8773f9bdd6ba58a94cdfb2610a9f1d0760147d5a88"
+    ),
+    "revision_modules/v0_2/legacy_usage_v1.py": (
+        "369051756eb50b2f06139e2d8642d0cf3379d126524579b3dc362e01e9e38a78"
+    ),
+    "revision_modules/v0_2/lifetime_co_access_v1.py": (
+        "d86ff3130305d73bda12f8618b4ce6066b35e22b58a41df8046f4d934f49567f"
+    ),
     "versions/v0_0/bd62193d5cf6_initial_schema.py": (
         "1c944d1f3c1d5427ff40470aacf1fbf611092a8e7e1111f19bc4089d13bd45e8"
     ),
@@ -147,6 +175,9 @@ FROZEN_MIGRATIONS = {
     ),
     "versions/v0_1/efcbcf724889_core_schema.py": (
         "1e4edcea3733bc4ea0f7407a9cd331a5f2f5e6913eebb289856cf87a45b9cd6b"
+    ),
+    "versions/v0_2/5b7e5c149279_release_0_2.py": (
+        "29f14554c195e4a03b52f0f78a9d44085e8d9aee984f17cd53cc57ecb61f19f9"
     ),
 }
 FROZEN_MANIFEST = Path("backend") / "migrations" / "frozen_revisions.json"
@@ -383,6 +414,7 @@ def _check_alembic_payload(root: Path) -> list[str]:
             "0.1.2": {"group": "v0_1", "head": "efcbcf724889"},
             "0.1.3": {"group": "v0_1", "head": "19db79d3e622"},
             "0.1.4": {"group": "v0_1", "head": "ef53a0a7061c"},
+            "0.2.1": {"group": "v0_2", "head": "5b7e5c149279"},
         }
         aliases = {
             "0001_initial_release": "bd62193d5cf6",

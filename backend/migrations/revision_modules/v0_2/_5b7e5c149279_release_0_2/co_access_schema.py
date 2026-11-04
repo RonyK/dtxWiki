@@ -1,23 +1,9 @@
-"""Store lifetime conversation support for document co-access pairs.
-
-Revision ID: 7c2bde1490af
-Revises: 1d8f1c08ca36
-Create Date: 2026-11-02
-
-The pair read model stores aggregate evidence without conversation identities.
-Single-conversation pairs remain available for a later second conversation;
-the visible graph continues to admit only pairs supported by two or more.
-"""
+"""Final v0.2 lifetime co-access storage and fixed historical replay."""
 
 import sqlalchemy as sa
 from alembic import op
 
 from backend.migrations.revision_modules.v0_2 import lifetime_co_access_v1
-
-revision = "7c2bde1490af"
-down_revision = "1d8f1c08ca36"
-branch_labels = None
-depends_on = None
 
 VIEWED_SESSION_INDEX = "ix_mcp_chat_tool_call_artifact_viewed_session"
 VIEWED_PAIR_INDEX = "ix_mcp_chat_tool_call_artifact_viewed_pair"
@@ -105,8 +91,9 @@ def upgrade() -> None:
 def downgrade() -> None:
     lifetime_co_access_v1.downgrade(op.get_bind())
     op.drop_index(VIEWED_PAIR_INDEX, table_name="mcp_chat_tool_call_artifact")
-    op.drop_column("mcp_chat_tool_call_artifact", "co_access_position")
-    op.drop_column("mcp_chat_tool_call_artifact", "co_access_segment")
+    with op.batch_alter_table("mcp_chat_tool_call_artifact") as batch:
+        batch.drop_column("co_access_position")
+        batch.drop_column("co_access_segment")
     op.drop_column("mcp_chat_session", "co_access_state")
     op.drop_index(VIEWED_SESSION_INDEX, table_name="mcp_chat_tool_call_artifact")
     op.drop_table("co_access_pair")

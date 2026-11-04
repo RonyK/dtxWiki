@@ -729,10 +729,16 @@ docker compose up -d app worker
 `rollback`, `migrate-data`는 "stop dtxWiki (server and worker) first"로 거부합니다(systemd tier의
 `update`는 서비스를 스스로 멈췄다 다시 시작합니다).
 
-Context 링크 locator 색인 migration `af62c98d0731`이 포함된 버전으로 업그레이드한 뒤에는
-서버와 같은 OS 계정·환경·DB로 `dtxwiki reindex`를 한 번 실행해 기존 live 버전의 링크
-색인을 갱신하세요. 본문과 content hash는 바뀌지 않습니다. 이전 스키마로 downgrade하면
-wikilink 외 링크 색인과 pin이 삭제되므로 다시 업그레이드한 뒤에도 재색인이 필요합니다.
+0.2.1의 통합 schema로 업그레이드한 뒤에는 서버와 같은 OS 계정·환경·DB로
+`dtxwiki reindex`와 `dtxwiki graph reproject --all-workspaces`를 실행해 기존 live 버전의
+링크 색인과 Graph projection을 갱신하세요. 본문과 content hash는 바뀌지 않으며
+과거의 누락된 인용을 추가하지 않습니다. 이전 schema로 downgrade하면 wikilink 외 링크
+색인과 pin이 삭제되므로 다시 업그레이드한 뒤에도 재색인이 필요합니다.
+
+미배포 중간 revision을 사용한 DB는 해당 revision의 원래 checkout으로 먼저
+`5b7e5c149279`까지 업그레이드하고 백업·schema 검증을 마친 뒤 0.2.1을 설치하세요.
+이미 이 head인 DB는 schema를 유지합니다. 제거된 revision을 `alembic stamp`로
+우회하지 마세요. 배포된 0.1.4 이하 DB는 0.2.1 chain으로 직접 업그레이드합니다.
 
 ### 관리자 화면에서 버전 확인
 
@@ -756,7 +762,7 @@ npx는 같은 npm 대상 버전을 지정하여 릴리스에서 요구하는 사
 사용하고 필요한 복구·migration은 상세 문서의 순서를 따르세요.
 
 화면의 안내는 설치·마이그레이션·복구 전체 절차를 대신하지 않습니다.
-[상세 유지보수 문서](https://docs.dtxwiki.com/docs/0.1/administration/backup-upgrades/)와
+[상세 유지보수 문서](https://docs.dtxwiki.com/docs/0.2/administration/backup-upgrades/)와
 [릴리스 변경 내역](https://github.com/dtxSuite/dtxWiki/releases)을 확인하고,
 실행 중인 서버와 별도로 관리하는 worker를 모두 중지한 뒤 DB·파일·설정을 백업하세요.
 
@@ -785,7 +791,7 @@ readiness를 수행하며, 실패 시 자동 rollback하지 않고 복구 명령
 ```bash
 # systemd + private wheel index
 sudo dtxwiki update --check               # 새 버전 유무만 (가능하면 exit 10)
-sudo dtxwiki update --version 0.2.0       # 특정 버전 핀
+sudo dtxwiki update --version 0.2.1       # 특정 버전 핀
 sudo dtxwiki update --index-url https://pypi.internal/simple   # 사설 wheel index
 ```
 
@@ -1264,18 +1270,23 @@ endpoint를 사용한다.
 ## DB Migration — 0.1.2 이후
 
 0.1.2부터 DB migration은 **릴리스 그룹**, **revision ID**, **변경 내용 이름**을 구분해
-관리합니다. 이 개편은 migration의 식별자와 파일 배치를 정리한 것으로, 테이블 변경이나
-데이터 변환을 수행하는 새로운 revision을 추가하지 않았습니다. 현재 배포본에는 아래 두
-revision이 있으며, 최신 DB 스키마를 나타내는 head는 `efcbcf724889`입니다.
+관리합니다. 당시 ID·파일 배치 정리는 schema·데이터 작업을 바꾸지 않았습니다.
+0.2.1 배포본에는 아래 다섯 revision이 있으며, head는 `5b7e5c149279`입니다.
 
 ```text
-base → bd62193d5cf6 (initial_schema) → efcbcf724889 (core_schema, head)
+base → bd62193d5cf6 (initial_schema) → efcbcf724889 (core_schema)
+     → 19db79d3e622 (0.1.3) → ef53a0a7061c (0.1.4) → 5b7e5c149279 (0.2, head)
 ```
 
-`initial_schema`는 DB의 기본 테이블을 생성하고, `core_schema`는 workspace,
-identity/access, Context, Library, 검색, 작업 처리와 tenancy 제약을 포함한 현재
-스키마로 올립니다. 새 DB를 설치하면 두 revision을 순서대로 적용합니다. 이후 DB 변경은
-이 head 뒤에 새로운 revision을 연결합니다.
+`initial_schema`와 `core_schema` 뒤에 배포된 0.1.3·0.1.4 변경을 적용하고,
+0.2 통합 migration이 SSO·계정 보존·Review·Inbox·링크 locator·Graph·문서 참고문헌과
+Chats 인덱스를 추가합니다. 0.1.4 이후의 미배포 migration 13개만 통합했으며,
+배포된 이전 migration과 helper의 구현·해시는 유지합니다. 새 DB는 이 chain을
+순서대로 적용합니다.
+
+통합 후에도 최종 revision ID와 schema는 같으므로 기존 `5b7e5c149279` DB는
+그대로 인식합니다. 제거된 미배포 중간 revision은 원래 checkout에서 최종 head까지
+업그레이드하고 백업·검증한 뒤 전환해야 합니다. `alembic stamp`로 건너뛰지 않습니다.
 
 ### 이전 DB의 revision ID 변환
 
@@ -1340,21 +1351,15 @@ backend/migrations/
 ├── versions/                              # Alembic이 실행할 revision 파일
 │   ├── v0_0/
 │   │   └── bd62193d5cf6_initial_schema.py
-│   └── v0_1/
-│       └── efcbcf724889_core_schema.py
-├── revision_modules/                      # 특정 revision이 사용하는 보조 코드
-│   └── v0_1/
-│       └── efcbcf724889_core_schema/
-│           ├── workspace_schema.py
-│           ├── identity_access_schema.py
-│           ├── context_schema.py
-│           ├── context_data.py
-│           ├── library_media_schema.py
-│           ├── library_policy.py
-│           ├── search_schema.py
-│           ├── operations_schema.py
-│           ├── tenancy_schema.py
-│           └── unique_key_prepass.py
+│   ├── v0_1/
+│   │   ├── efcbcf724889_core_schema.py
+│   │   ├── 19db79d3e622_release_0_1_3.py
+│   │   └── ef53a0a7061c_index_change_operation_change_set_id.py
+│   └── v0_2/
+│       └── 5b7e5c149279_release_0_2.py
+├── revision_modules/                      # 릴리스 그룹별 고정 helper 구현
+│   ├── v0_1/
+│   └── v0_2/
 ├── release_manifest.json                  # 스키마 릴리스별 그룹과 head 매핑
 └── frozen_revisions.json                  # 배포된 migration 구현의 해시
 ```
@@ -1372,11 +1377,12 @@ backend/migrations/
 
 ### 새 DB 변경 추가
 
-개발 checkout의 저장소 루트에서 다음 helper로 실행 파일을 생성합니다. 아래 `0.2.0`은
-향후 DB 변경의 예시이며, 현재 배포본에 세 번째 revision이 있다는 뜻은 아닙니다.
+개발 checkout의 저장소 루트에서 다음 helper로 실행 파일을 생성합니다. 아래 `0.2.2`는
+0.2.1 이후 schema 변경을 추가하는 예시입니다. 버전만 바뀌고 DB 변경이 없으면
+새 migration이 필요하지 않습니다.
 
 ```bash
-.venv/bin/python scripts/new_migration.py --release 0.2.0 -m "add workspace settings"
+.venv/bin/python scripts/new_migration.py --release 0.2.2 -m "add workspace settings"
 ```
 
 이 명령은 `versions/v0_2/<생성된 ID>_add_workspace_settings.py`를 만들고 직전 head와
@@ -1404,8 +1410,8 @@ sudo dtxwiki db revision-inventory --configured prod
 
 ```text
 Database revision inventory (evidence only; not migration approval)
-code heads: efcbcf724889
-prod: status=ok revisions=efcbcf724889 consistency=consistent
+code heads: 5b7e5c149279
+prod: status=ok revisions=5b7e5c149279 consistency=consistent
 ```
 
 `revisions`는 DB에 기록된 revision이고, `code heads`는 설치된 코드의 최신 revision입니다.

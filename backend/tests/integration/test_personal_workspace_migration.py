@@ -11,7 +11,7 @@ from sqlalchemy import create_engine, inspect, select
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
-# The 0.1.1 backfill writes users.personal_workspace_id, which 5c3395a75eb0
+# The 0.1.1 backfill writes users.personal_workspace_id, which release 0.2
 # later drops, so the backfill is checked at the revision that ran it.
 BACKFILL_REVISION = "efcbcf724889"
 

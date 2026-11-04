@@ -1,41 +1,7 @@
-"""Add per-user Inbox entries for workspaces and accounts.
-
-Revision ID: 175b9664724e
-Revises: eb86fdacb1bb
-Create Date: 2026-10-28 14:23:11.150546
-
-What this adds
---------------
-``workspace_inbox_entry`` (workspace plane) and ``account_inbox_entry``
-(control plane) share one shape. A ``stored`` row is a message a producer
-wrote in the same transaction as its source change, plus the recipient's
-marks. A ``mark`` row holds only the recipient's marks for an item a computed
-source derives on read. The mode CHECK keeps the two shapes apart: a stored
-row needs ``revision`` and ``event_at``; a mark row has neither, and no
-``ref``.
-
-The workspace table carries bare user UUIDs, like ``user_favorite``, so it
-stays on the workspace shard. The account table references ``users`` with
-ON DELETE CASCADE. ``kind`` has no CHECK: kinds are registered in code, so
-adding one needs no migration.
-
-Both list indexes lead with the recipient and mode, then follow the keyset
-order (event_at, kind, item_key) the list endpoint pages by.
-
-Deployment and rollback
------------------------
-New tables only; no existing row, column or constraint changes, and no
-backfill. Downgrade drops both tables with their rows (personal marks and any
-stored messages). Re-upgrade recreates them empty.
-"""
+"""Final v0.2 Inbox tables and retained deleted-recipient fences."""
 
 import sqlalchemy as sa
 from alembic import op
-
-revision = "175b9664724e"
-down_revision = "eb86fdacb1bb"
-branch_labels = None
-depends_on = None
 
 _MODE_CHECK = "mode IN ('stored', 'mark')"
 _MODE_COLUMNS_CHECK = (
@@ -91,9 +57,58 @@ def upgrade() -> None:
         ["user_id", "mode", "event_at", "kind", "item_key"],
     )
 
+    _create_recipients()
+
 
 def downgrade() -> None:
+    op.drop_table("workspace_inbox_recipient")
     op.drop_index("ix_account_inbox_entry_list", table_name="account_inbox_entry")
     op.drop_table("account_inbox_entry")
     op.drop_index("ix_workspace_inbox_entry_list", table_name="workspace_inbox_entry")
     op.drop_table("workspace_inbox_entry")
+
+
+def _create_recipients() -> None:
+    recipients = op.create_table(
+        "workspace_inbox_recipient",
+        sa.Column("workspace_id", sa.Uuid(), primary_key=True),
+        sa.Column("user_id", sa.Uuid(), primary_key=True),
+        sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
+    )
+    users = sa.table("users", sa.column("id", sa.Uuid()))
+    changes = sa.table(
+        "change_set",
+        sa.column("workspace_id", sa.Uuid()),
+        sa.column("actor_type", sa.Text()),
+        sa.column("actor_id", sa.Uuid()),
+    )
+    entries = sa.table(
+        "workspace_inbox_entry",
+        sa.column("workspace_id", sa.Uuid()),
+        sa.column("user_id", sa.Uuid()),
+    )
+
+    def missing_user(user_id):
+        return ~sa.select(users.c.id).where(users.c.id == user_id).exists()
+
+    deleted_recipients = sa.union(
+        sa.select(changes.c.workspace_id, changes.c.actor_id.label("user_id")).where(
+            changes.c.actor_type == "human",
+            changes.c.actor_id.is_not(None),
+            missing_user(changes.c.actor_id),
+        ),
+        sa.select(entries.c.workspace_id, entries.c.user_id).where(
+            missing_user(entries.c.user_id)
+        ),
+    ).subquery()
+    op.execute(
+        recipients.insert().from_select(
+            ["workspace_id", "user_id", "deleted_at"],
+            sa.select(
+                deleted_recipients.c.workspace_id,
+                deleted_recipients.c.user_id,
+                sa.func.current_timestamp(),
+            ),
+        )
+    )
+    op.execute(entries.delete().where(missing_user(entries.c.user_id)))

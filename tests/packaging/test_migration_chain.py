@@ -32,19 +32,10 @@ RELEASE_GATE = REPO_ROOT / "scripts" / "verify_wheel_artifact.py"
 INITIAL_REVISION = "bd62193d5cf6"
 # Frozen core schema boundary of the 0.1 release group.
 CORE_REVISION = "efcbcf724889"
-GRAPH_REVISION = "9aeab6944f25"
-
 RELEASE_013_REVISION = "19db79d3e622"
 RELEASE_014_REVISION = "ef53a0a7061c"
-PERSONAL_POINTER_REVISION = "5c3395a75eb0"
-EXTERNAL_LOGIN_REVISION = "da94025713de"
-REVIEW_HISTORY_INDEX_REVISION = "333a67e22cd7"
-USER_DELETION_REVISION = "eb86fdacb1bb"
-INBOX_REVISION = "175b9664724e"
-CONTEXT_LINK_REVISION = "af62c98d0731"
-INBOX_RECIPIENT_REVISION = "6f4a9f50c046"
-GRAPH_INBOX_MERGE_REVISION = "1d8f1c08ca36"
-CURRENT_HEAD = schema_release_head("0.2.0")
+RELEASE_021_REVISION = "5b7e5c149279"
+CURRENT_HEAD = schema_release_head("0.2.1")
 ALEMBIC_REVISION_METADATA = {
     "revision",
     "down_revision",
@@ -115,48 +106,30 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
         CORE_REVISION: INITIAL_REVISION,
         RELEASE_013_REVISION: CORE_REVISION,
         RELEASE_014_REVISION: RELEASE_013_REVISION,
-        GRAPH_REVISION: CONTEXT_LINK_REVISION,
-        PERSONAL_POINTER_REVISION: RELEASE_014_REVISION,
-        EXTERNAL_LOGIN_REVISION: PERSONAL_POINTER_REVISION,
-        REVIEW_HISTORY_INDEX_REVISION: EXTERNAL_LOGIN_REVISION,
-        USER_DELETION_REVISION: REVIEW_HISTORY_INDEX_REVISION,
-        INBOX_REVISION: USER_DELETION_REVISION,
-        CONTEXT_LINK_REVISION: INBOX_REVISION,
-        INBOX_RECIPIENT_REVISION: CONTEXT_LINK_REVISION,
-        GRAPH_INBOX_MERGE_REVISION: (GRAPH_REVISION, INBOX_RECIPIENT_REVISION),
+        RELEASE_021_REVISION: RELEASE_014_REVISION,
     }
     assert {
         revision: graph[revision] for revision in expected_prefix
     } == expected_prefix
-    # The fixed prefix cannot be rewritten when another unreleased feature
-    # appends a revision or merges independent descendants of its boundary.
+    # Future changes append after the single frozen 0.2 release migration.
     appended = set(graph) - expected_prefix.keys()
     assert _revision_ancestors(graph, CURRENT_HEAD) == set(graph)
     assert all(
-        GRAPH_INBOX_MERGE_REVISION in _revision_ancestors(graph, revision)
+        RELEASE_021_REVISION in _revision_ancestors(graph, revision)
         for revision in appended
     )
     assert all(
         Path(script.get_revision(revision).path).parent.name == "v0_2"
         for revision in appended
     )
-    assert {
-        Path(script.get_revision(revision).path).parent.name
-        for revision in (
-            GRAPH_REVISION,
-            INBOX_REVISION,
-            CONTEXT_LINK_REVISION,
-            INBOX_RECIPIENT_REVISION,
-            GRAPH_INBOX_MERGE_REVISION,
-        )
-    } == {"v0_2"}
+    assert Path(script.get_revision(RELEASE_021_REVISION).path).parent.name == "v0_2"
 
     manifest = json.loads((MIGRATIONS_DIR.parent / "release_manifest.json").read_text())
     assert manifest["legacy_revision_aliases"] == LEGACY_REVISION_ALIASES
     assert manifest["schema_releases"]["0.1.2"]["head"] == CORE_REVISION
     assert manifest["schema_releases"]["0.1.3"]["head"] == RELEASE_013_REVISION
     assert manifest["schema_releases"]["0.1.4"]["head"] == RELEASE_014_REVISION
-    assert manifest["schema_releases"]["0.2.0"]["head"] == CURRENT_HEAD
+    assert manifest["schema_releases"]["0.2.1"]["head"] == RELEASE_021_REVISION
     for release, entry in manifest["schema_releases"].items():
         major, minor = release.split(".")[:2]
         assert entry["group"] == f"v{major}_{minor}"
@@ -215,6 +188,18 @@ def test_the_freeze_covers_every_released_migration_file():
         *(
             f"revision_modules/v0_1/efcbcf724889_core_schema/{path.name}"
             for path in CORE_REVISION_DIR.glob("*.py")
+        ),
+        "versions/v0_2/5b7e5c149279_release_0_2.py",
+        "revision_modules/v0_2/__init__.py",
+        "revision_modules/v0_2/co_read_v1.py",
+        "revision_modules/v0_2/legacy_usage_v1.py",
+        "revision_modules/v0_2/lifetime_co_access_v1.py",
+        *(
+            path.relative_to(MIGRATIONS_DIR.parent).as_posix()
+            for path in (
+                MIGRATIONS_DIR.parent
+                / "revision_modules/v0_2/_5b7e5c149279_release_0_2"
+            ).glob("*.py")
         ),
     }
 

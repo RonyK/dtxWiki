@@ -2,7 +2,7 @@
 
 **쌓아 둔 지식을, AI와 함께 다음 작업에 활용하세요.**
 
-[웹사이트](https://www.dtxwiki.com/ko/) · [사용 안내](http://docs.dtxwiki.com/ko/) · [PyPI](https://pypi.org/project/dtxwiki/) · [English](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/README.md)
+[웹사이트](https://www.dtxwiki.com/ko/) · [사용 안내](https://docs.dtxwiki.com/ko/) · [PyPI](https://pypi.org/project/dtxwiki/) · [English](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/README.md)
 
 dtxWiki는 메모, 참고 자료, 의사결정을 연결해 사람과 AI 도구가 함께 사용하는
 지식 베이스를 만듭니다. 작업의 배경을 찾기 쉽게 남겨 두고, 다음 일이 시작될 때
@@ -24,6 +24,10 @@ dtxWiki는 메모, 참고 자료, 의사결정을 연결해 사람과 AI 도구�
 - **결과와 그 이유를 함께 남기세요.** 계획에 인터뷰, 메모, 의사결정 기록을
   연결하세요. 시간이 지난 뒤 프로젝트로 돌아와도 현재 상태뿐 아니라
   그 배경과 다음에 할 일을 이해할 수 있습니다.
+- **문서 사이의 관계를 살펴보세요.** Context의 Local Graph에서 링크·인용·함께
+  읽은 문서를 따라가세요. Knowledge Map은 설정에서 활성화해 사용하는 Preview
+  기능입니다. **설정 > Labs > Knowledge Map 메뉴 표시**와 워크스페이스 소유자의
+  **설정 > 워크스페이스 > Knowledge Graph** 활성화가 필요합니다.
 - **AI가 한 일을 확인하세요.** **Chats**는 dtxWiki의 MCP 도구로 수행한 검색,
   읽기, 수정 작업을 보여 줍니다. 각 호출의 입력·결과·연결 자료와 문서 이력의
   변경 내용을 확인하세요. AI 앱의 대화 전체가 아닌 도구의 작업 기록입니다.
@@ -40,13 +44,13 @@ dtxWiki는 메모, 참고 자료, 의사결정을 연결해 사람과 AI 도구�
 
 ## 시작하기
 
-이 안내는 **dtxWiki 0.1.3** 기준입니다. 내 컴퓨터에서 시작하고,
+이 안내는 **dtxWiki 0.2.1 (Beta)** 기준입니다. 내 컴퓨터에서 시작하고,
 [다른 기기에서 접속하기](#server-access)와
 [백그라운드 실행](#4-백그라운드-실행)까지 설정하면 다른 사람과 함께 사용할 수 있습니다.
 Claude Code나 Codex CLI를 등록하려면
 [MCP 클라이언트 연결하기](#mcp-clients)를 참고하세요.
 기존 설치를 사용 중이라면 새 서버를 시작하기 전에
-[0.1.3으로 업데이트하기](#upgrade-013)를 읽으세요.
+[0.2.1으로 업데이트하기](#upgrade-021)를 읽으세요.
 
 ### 1. 설치하고 웹 서버 실행하기
 
@@ -62,7 +66,7 @@ Linux 또는 macOS (`python3`가 Python 3.12 이상이어야 합니다):
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install "dtxwiki==0.1.3"
+python -m pip install "dtxwiki==0.2.1"
 dtxwiki
 ```
 
@@ -71,7 +75,7 @@ Windows PowerShell (Python 3.12가 설치된 환경):
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install "dtxwiki==0.1.3"
+python -m pip install "dtxwiki==0.2.1"
 dtxwiki
 ```
 
@@ -85,15 +89,15 @@ Python 3.12 이상이 있는 [pipx](https://pipx.pypa.io/stable/installation/),
 npm 패키지는 이 도구를 통해 같은 버전의 Python 패키지를 실행합니다.
 
 ```bash
-npx @dtxsuite/dtxwiki@0.1.3
+npx @dtxsuite/dtxwiki@0.2.1
 ```
 
 npm을 쓸 때는 아래에서 터미널에 직접 실행하는 `dtxwiki` 명령을
-`npx @dtxsuite/dtxwiki@0.1.3`으로 바꾸세요. 전역 설치를 원하면
-`npm install --global @dtxsuite/dtxwiki@0.1.3`을 실행한 뒤 `dtxwiki`를 사용하세요.
+`npx @dtxsuite/dtxwiki@0.2.1`으로 바꾸세요. 전역 설치를 원하면
+`npm install --global @dtxsuite/dtxwiki@0.2.1`을 실행한 뒤 `dtxwiki`를 사용하세요.
 수동 백그라운드 실행 예시는 위의 pip 가상환경처럼 Python 패키지를 직접 설치한
 환경을 사용합니다. 실행기 설명은
-[npm 안내](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/npm/dtxwiki/README.md)를 참고하세요.
+[npm 안내](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/npm/dtxwiki/README.md)를 참고하세요.
 
 브라우저에서 **[http://127.0.0.1:21080/](http://127.0.0.1:21080/)**이 열립니다.
 자동으로 열리지 않으면 직접 접속하세요. 이 주소는 실행한 컴퓨터에서만 접속할 수
@@ -111,7 +115,7 @@ npm이 포함된 Node.js 22.18 이상, GNU Make를 준비하세요.
 릴리스 소스를 clone한 뒤 의존성을 설치하고 웹 UI를 빌드합니다.
 
 ```bash
-git clone --branch v0.1.3 https://github.com/dtxSuite/dtxWiki.git
+git clone --branch v0.2.1 https://github.com/dtxSuite/dtxWiki.git
 cd dtxWiki
 uv sync --locked --extra dev --python 3.12
 npm ci
@@ -120,7 +124,7 @@ source .venv/bin/activate
 dtxwiki
 ```
 
-개발 서버와 기여 절차는 [DEVELOPMENT.md](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/DEVELOPMENT.md)를 참고하세요.
+개발 서버와 기여 절차는 [DEVELOPMENT.md](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/DEVELOPMENT.md)를 참고하세요.
 
 </details>
 
@@ -193,20 +197,20 @@ dtxwiki serve --host 0.0.0.0 --port 21080 --no-open
 #### 함께 사용할 HTTPS 서버
 
 sudo를 사용할 수 있는 Ubuntu 22.04 이상 서버를 준비하고 도메인의 DNS가 서버를
-가리키게 하세요. **TCP 80·443** 인바운드를 허용한 뒤, 서버에서 0.1.3 설치 프로그램과
+가리키게 하세요. **TCP 80·443** 인바운드를 허용한 뒤, 서버에서 0.2.1 설치 프로그램과
 해당 릴리스의 wheel을 내려받고 도메인과 관리자 이메일을 바꾸어 실행하세요.
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y curl ca-certificates
-curl -fL https://raw.githubusercontent.com/dtxSuite/dtxWiki/v0.1.3/infra/prod/install.sh -o install-dtxwiki.sh
-curl -fL https://github.com/dtxSuite/dtxWiki/releases/download/v0.1.3/dtxwiki-0.1.3-py3-none-any.whl -o /tmp/dtxwiki-0.1.3-py3-none-any.whl
-chmod 0644 /tmp/dtxwiki-0.1.3-py3-none-any.whl
+curl -fL https://raw.githubusercontent.com/dtxSuite/dtxWiki/v0.2.1/infra/prod/install.sh -o install-dtxwiki.sh
+curl -fL https://github.com/dtxSuite/dtxWiki/releases/download/v0.2.1/dtxwiki-0.2.1-py3-none-any.whl -o /tmp/dtxwiki-0.2.1-py3-none-any.whl
+chmod 0644 /tmp/dtxwiki-0.2.1-py3-none-any.whl
 sudo bash install-dtxwiki.sh \
   --domain wiki.example.com \
   --email admin@example.com \
   --tls acme \
-  --wheel /tmp/dtxwiki-0.1.3-py3-none-any.whl
+  --wheel /tmp/dtxwiki-0.2.1-py3-none-any.whl
 ```
 
 설치 프로그램이 Python, HTTPS, 관리자 계정과 재부팅 후에도 시작되는 서비스를
@@ -219,7 +223,7 @@ sudo bash install-dtxwiki.sh \
 이 설치는 서버와 worker를 별도 systemd 서비스로 관리하며 필요한 모드를 자동으로
 설정합니다. worker를 수동으로 추가 실행하지 마세요. 사설 인증서, 기존 프록시,
 사설 패키지 인덱스 설정은
-[배포 안내](http://docs.dtxwiki.com/ko/docs/0.1/administration/deployment/)를 참고하세요.
+[배포 안내](https://docs.dtxwiki.com/ko/docs/0.2/administration/deployment/)를 참고하세요.
 
 ### 4. 백그라운드 실행
 
@@ -290,7 +294,7 @@ sudo systemctl start dtxwiki dtxwiki-worker
 
 ### 5. MCP 클라이언트 연결하기
 
-[English: the same MCP setup instructions](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/README.md#mcp-clients)
+[English: the same MCP setup instructions](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/README.md#mcp-clients)
 
 dtxWiki를 실행한 상태로 두고 클라이언트 컴퓨터에 Claude Code나 Codex CLI를
 설치하세요. 아래 예시는 액세스 키(PAT, 개인 액세스 토큰)로 Streamable HTTP
@@ -418,15 +422,15 @@ Context 변경은 검토할 초안으로 준비됩니다.
 
 기존 키의 허용 워크스페이스는 클라이언트를
 다시 등록하지 않고 **설정 > MCP 접근**에서 변경할 수 있습니다. 권한 규칙은
-[배포 안내의 MCP 워크스페이스 접근](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/DEPLOYMENT.md#mcp-workspace-access)을 참고하세요.
+[배포 안내의 MCP 워크스페이스 접근](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/DEPLOYMENT.md#mcp-workspace-access)을 참고하세요.
 다른 클라이언트와 OAuth 호환성은
-[AI 앱 연결 안내](https://docs.dtxwiki.com/ko/docs/0.1/integrations/mcp-connections/)를 참고하세요.
+[AI 앱 연결 안내](https://docs.dtxwiki.com/ko/docs/0.2/integrations/mcp-connections/)를 참고하세요.
 
 ## 설치·연결이 막힐 때
 
 | 증상 | 확인할 내용 |
 | --- | --- |
-| `dtxwiki` 명령을 찾지 못함 | pip 설치는 1단계의 가상환경을 활성화하세요. npm은 `npx @dtxsuite/dtxwiki@0.1.3`으로 실행하세요. |
+| `dtxwiki` 명령을 찾지 못함 | pip 설치는 1단계의 가상환경을 활성화하세요. npm은 `npx @dtxsuite/dtxwiki@0.2.1`으로 실행하세요. |
 | 로컬에서는 되지만 다른 기기에서 접속 안 됨 | `--host 0.0.0.0`, TCP 21080 방화벽, 공유기 포트 전달, WSL·가상 머신 전달을 확인하세요. |
 | IP·도메인 접속이 Host 검사에서 거절됨 | `DTXWIKI_PUBLIC_BASE_URL`에 브라우저에서 접속하는 기본 주소를 넣고 추가 IP·이름은 `DTXWIKI_ALLOWED_HOSTS`에 허용하세요. 대표 URL에 `/mcp`나 `0.0.0.0`을 넣지 마세요. 환경변수 변경 후 재시작해야 합니다. |
 | `admin grant`가 계정을 찾지 못함 | 서버와 같은 OS 사용자·데이터 경로인지, 계정이 이미 생성되어 있는지 확인하세요. |
@@ -436,20 +440,22 @@ Context 변경은 검토할 초안으로 준비됩니다.
 | worker 오류로 서버가 종료됨 | `server.log` 또는 systemd journal의 오류를 먼저 해결하세요. 통합 runtime 옆에 worker를 추가로 실행해서 해결할 수는 없습니다. |
 
 <a id="upgrade-013"></a>
+<a id="upgrade-021"></a>
 
-## 0.1.3으로 업데이트하기
+## 0.2.1으로 업데이트하기
 
-systemd나 Docker 설치는 [백업과 유지보수](https://docs.dtxwiki.com/ko/docs/0.1/administration/backup-upgrades/)의
+systemd나 Docker 설치는 [백업과 유지보수](https://docs.dtxwiki.com/ko/docs/0.2/administration/backup-upgrades/)의
 배포 방식별 업데이트 절차를 따르세요. 로컬 설치는
-[변경 내역](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/CHANGELOG.md)을 읽고
+[변경 내역](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/CHANGELOG.md)을 읽고
 서버와 별도로 실행한 모든 worker를 중지한 뒤 DB·파일·설정을 백업하세요.
-기존 설치 방식을 사용해 0.1.3을 설치하되 새 서버를 시작하지 마세요.
+
+기존 설치 방식을 사용해 0.2.1을 설치하되 새 서버를 시작하지 마세요.
 pip 설치는 기존 가상환경을 활성화한 뒤
-`python -m pip install --upgrade "dtxwiki==0.1.3"`을 실행하세요.
-npm은 [npm 업데이트 안내](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/npm/dtxwiki/README.md#updating)를 따르세요.
+`python -m pip install --upgrade "dtxwiki==0.2.1"`을 실행하세요.
+npm은 [npm 업데이트 안내](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/npm/dtxwiki/README.md#updating)를 따르세요.
 
 기존 uv 설치를 바꿀 때는
-`uv tool install --force "dtxwiki==0.1.3"`을 사용하세요. dtxWiki는 Python 3.12 이상이
+`uv tool install --force "dtxwiki==0.2.1"`을 사용하세요. dtxWiki는 Python 3.12 이상이
 필요하며 이 명령은 Python 버전을 고정하지 않습니다. 특정 인터프리터가 필요할 때만
 지원 버전의 `--python <버전-또는-경로>` 옵션을 추가하세요. 기존 패키지 인덱스·인증 설정도
 유지하세요.
@@ -473,6 +479,15 @@ dtxwiki inputs audit
 128개를 초과하면 로그인이나 재인증에 사용할 수 없습니다. 비밀번호 복구 또는
 관리자 복구로 8–128개 길이의 새 비밀번호를 설정하세요.
 
+서버를 시작하기 전에 같은 OS 계정·환경 설정·DB로 schema를 적용하고 기존 링크와
+Graph projection을 갱신하세요.
+
+```bash
+dtxwiki bootstrap
+dtxwiki reindex
+dtxwiki graph reproject --all-workspaces
+```
+
 process manager로 worker를 별도 실행한다면 새 웹 서버를 시작하기 전에
 `DTXWIKI_WORKER_MODE=external`을 설정하세요. systemd updater는 자동으로
 설정하며 Docker 이미지는 이미 external 모드를 기본값으로 사용합니다.
@@ -483,22 +498,22 @@ process manager로 worker를 별도 실행한다면 새 웹 서버를 시작하�
 
 | 필요한 작업 | 안내 |
 | --- | --- |
-| SMTP·이메일 인증·복구 메일 | [이메일과 SMTP](http://docs.dtxwiki.com/ko/docs/0.1/administration/email-smtp/) |
-| 비밀번호 복구·워크스페이스 접근 | [계정과 워크스페이스 접근](http://docs.dtxwiki.com/ko/docs/0.1/administration/members-access/) |
-| 백업·업데이트·데이터 복원 | [백업과 유지보수](http://docs.dtxwiki.com/ko/docs/0.1/administration/backup-upgrades/) |
-| 실행·연결 문제 | [문제 해결](http://docs.dtxwiki.com/ko/docs/0.1/administration/troubleshooting/) |
+| SMTP·이메일 인증·복구 메일 | [이메일과 SMTP](https://docs.dtxwiki.com/ko/docs/0.2/administration/email-smtp/) |
+| 비밀번호 복구·워크스페이스 접근 | [계정과 워크스페이스 접근](https://docs.dtxwiki.com/ko/docs/0.2/administration/members-access/) |
+| 백업·업데이트·데이터 복원 | [백업과 유지보수](https://docs.dtxwiki.com/ko/docs/0.2/administration/backup-upgrades/) |
+| 실행·연결 문제 | [문제 해결](https://docs.dtxwiki.com/ko/docs/0.2/administration/troubleshooting/) |
 
-더 많은 활용 방법은 [전체 사용 안내](http://docs.dtxwiki.com/ko/)에서 확인할 수 있습니다.
+더 많은 활용 방법은 [전체 사용 안내](https://docs.dtxwiki.com/ko/)에서 확인할 수 있습니다.
 
 ## 함께 만들기
 
 활용 사례를 공유하거나, 개선 아이디어를 제안하거나, 문제를 발견했다면
 [GitHub](https://github.com/dtxSuite/dtxWiki/issues)에 알려 주세요.
 코드와 문서 기여 방법은
-[기여 가이드](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/CONTRIBUTING.md)를 참고하세요.
+[기여 가이드](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/CONTRIBUTING.md)를 참고하세요.
 
 ## 라이선스
 
 dtxWiki는 **AGPL-3.0-only OR Elastic-2.0** 중 하나를 선택하여 사용할 수 있습니다.
 이용 조건, 제3자 구성요소의 고지, 상용 라이선스 안내는
-[LICENSE](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/LICENSE)를 참고하세요.
+[LICENSE](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/LICENSE)를 참고하세요.
