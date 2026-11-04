@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     Numeric,
     Text,
@@ -22,6 +23,13 @@ from backend.models.base import Base, UTCDateTime, UuidPrimaryKeyMixin, utc_now
 class MCPToolCall(UuidPrimaryKeyMixin, Base):
     __tablename__ = "mcp_tool_call"
     __table_args__ = (
+        Index(
+            "ix_mcp_tool_call_workspace_session_started",
+            "workspace_id",
+            "mcp_session_id",
+            "started_at",
+            "id",
+        ),
         UniqueConstraint(
             "workspace_id",
             "request_id",

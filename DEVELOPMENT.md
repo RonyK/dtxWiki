@@ -672,9 +672,12 @@ head가 하나여야 하며, 모든 신규 경로가 고정된 core revision
 `efcbcf724889`를 거쳐야 합니다. 패키지 검증기는 이 그래프와 고정 파일의 해시를
 함께 확인합니다.
 
-현재 0.2.0 head는 `c58f1d2e890a`입니다. Graph co-access revision
-`7c2bde1490af` 뒤에 이어지며, 버전별 참고문헌과 발행 citation projection schema를
-추가합니다.
+현재 0.2.0 head는 `5b7e5c149279`입니다. 버전별 참고문헌·발행 citation projection
+schema의 `c58f1d2e890a`와 Chats 도구 호출 조회 인덱스의 `b1d98889a4ad`를
+병합하며, 기존 두 revision의 ID와 부모는 유지합니다. `c58f1d2e890a`는 Graph
+co-access revision `7c2bde1490af` 뒤에 이어지고, `b1d98889a4ad`는
+`1d8f1c08ca36` 뒤의 독립 revision입니다. 병합 revision 자체는 schema나 데이터를
+변경하지 않습니다.
 
 ### Migration 테스트 수 제한
 

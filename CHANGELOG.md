@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Chats loading
+
+- Build Chats list cards with page-wide reads and reuse document visibility
+  and title results within each request, avoiding repeated reads for each chat
+  and each reference to the same document. Tool-call lookups use a workspace,
+  conversation, timestamp, and ID index as history grows.
+- Order linked-artifact samples by latest occurrence and descending ID so
+  equal timestamps produce a stable sample.
+- Keep uploads created for another author's discarded Context edit private,
+  matching the existing restriction on unshared editing versions.
+
 ### Lint settings
 
 - Disable unconfirmed save and approval options while loading or after a
@@ -468,8 +479,12 @@
   graph observation ledger, history coverage, workspace settings, link syntax,
   relation evidence, and query indexes. Released migrations remain frozen.
 - Merge Graph revision `9aeab6944f25` and Inbox recipient revision
-  `6f4a9f50c046` at `1d8f1c08ca36`, the single 0.2.0 head. Both existing
-  revisions retain their IDs and contents.
+  `6f4a9f50c046` at `1d8f1c08ca36`. Both existing revisions retain their IDs
+  and contents.
+- Append `b1d98889a4ad` for the Chats trace lookup index, preserving the
+  existing trace data. Merge it with the document-reference revision
+  `c58f1d2e890a` at the single 0.2.0 head `5b7e5c149279`; both parents retain
+  their original IDs and ancestry.
 - After upgrading, run `dtxwiki graph reproject --all-workspaces` to reconcile
   existing authored relationships. Take a backup before the upgrade as usual.
 - Source builds and tests use Node.js 22.18.x.

@@ -64,7 +64,7 @@ dependencies = [
   "python-multipart>=0.0.32",
   "PyJWT>=2.15.1",
   "PyYAML>=6.0.2",
-  "sqlalchemy>=2.0",
+  "sqlalchemy>=2.0.42",
   # ASGI types, BaseHTTPMiddleware and ClientDisconnect are imported from
   # starlette directly rather than through FastAPI's re-exports; fastapi
   # pins only a lower bound, so declare our own.

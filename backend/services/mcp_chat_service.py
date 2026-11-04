@@ -10,7 +10,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from pydantic import ValidationError
 from sqlalchemy import and_, case, desc, or_, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, aliased, load_only, selectinload
+from sqlalchemy.orm import Session, load_only, selectinload
 
 from backend.domain.input_policy import (
     fit_generated_title,
@@ -35,15 +35,15 @@ from backend.models.mcp_trace import MCPToolCall
 from backend.models.workspace import MCPClient
 from backend.policy.auth import ActorContext
 from backend.policy.mcp_scopes import FOCUSED_READ_TOOLS
-from backend.policy.trust_boundaries import (
-    actor_can_read_drafts,
-    actor_can_read_restricted_library,
-    actor_can_read_sensitive_agent_pages,
-)
 from backend.repositories.context_visibility import (
     PRIVATE_VERSION_STATUSES,
     editing_row_hidden_from_actor,
-    visible_context_version_expression,
+)
+from backend.repositories.mcp_chat_projection import (
+    ChatPageProjection,
+    ProjectionPolicy,
+    artifact_visible_predicate,
+    load_projection,
 )
 from backend.repositories.mcp_chat_repo import (
     list_call_artifact_edges,
@@ -51,11 +51,8 @@ from backend.repositories.mcp_chat_repo import (
 )
 from backend.repositories.workspace_scoped import (
     get_in_workspace,
-    join_in_workspace,
-    select_in_workspace,
     select_in_workspace_by_ids,
 )
-from backend.schemas.agent import SENSITIVE_AGENT_PAGE_CATEGORIES
 from backend.schemas.mcp_chat import (
     McpChatAction,
     McpChatArchiveResult,
@@ -181,6 +178,18 @@ _SAFE_KIND_INPUT_FIELDS: dict[str, tuple[str, ...]] = {
     "read": ("target_type",),
     "submit_feedback": ("target_type",),
 }
+_INTENT_INPUT_FIELDS: dict[str, tuple[tuple[str, str], ...]] = {
+    "write_agent_page_draft": (
+        ("reason", "write_reason"),
+        ("patch_description", "write_reason"),
+    ),
+    "submit_context_edit_for_review": (
+        ("reason", "write_reason"),
+        ("patch_description", "write_reason"),
+    ),
+    "search": (("query", "search_query"),),
+    "cite": (("claim_text", "claim_text"),),
+}
 # Detail-view-only input fields of the Context editing commands. Kept apart
 # from _SAFE_TEXT_INPUT_FIELDS on purpose: these label one timeline row and
 # never feed a chat's title, summary or list search.
@@ -274,6 +283,14 @@ _TYPED_TARGET_KINDS = {
 _TARGET_SCAN_MAX_DEPTH = 8
 _TARGET_SCAN_MAX_ITEMS = 500
 _TARGET_SCAN_MAX_REFS = 200
+
+
+@dataclass(frozen=True)
+class _ChatLabels:
+    presentation: McpChatPresentationDescriptor
+    semantic_summary: str
+    intent_summary: str | None
+    intent_source: str | None
 
 
 class McpChatService:
@@ -592,24 +609,34 @@ class McpChatService:
         )
         if actor_search:
             assert actor is not None
-            items, next_cursor = self._actor_visible_chat_search_page(
+            items, next_cursor, projection = self._actor_visible_chat_search_page(
                 session=session,
                 stmt=stmt,
                 actor=actor,
                 needle=needle,
                 offset=offset,
                 limit=limit,
+                workspace_id=workspace_id,
             )
         else:
             rows = session.scalars(stmt.offset(offset).limit(limit + 1)).all()
+            projection = self._load_projection(
+                session,
+                workspace_id,
+                rows[:limit],
+                actor,
+                include_client_catalog=True,
+            )
             items = [
-                self._session_ref(session, row, actor=actor) for row in rows[:limit]
+                self._build_session_ref(row, projection, actor) for row in rows[:limit]
             ]
             next_cursor = str(offset + limit) if len(rows) > limit else None
         return McpChatListPayload(
             items=items,
             next_cursor=next_cursor,
-            clients=self._client_refs(session, workspace_id),
+            clients=[
+                _client_list_ref(client) for client in projection.clients.values()
+            ],
         )
 
     def _actor_visible_chat_search_page(
@@ -621,7 +648,8 @@ class McpChatService:
         needle: str,
         offset: int,
         limit: int,
-    ) -> tuple[list[McpChatSessionRef], str | None]:
+        workspace_id: UUID,
+    ) -> tuple[list[McpChatSessionRef], str | None, ChatPageProjection]:
         """Search the current actor-visible projection before paginating it.
 
         Scanning the same base chat set for every actor-bound query prevents a
@@ -634,9 +662,16 @@ class McpChatService:
 
         candidate_limit = min(limit, ACTOR_SEARCH_CANDIDATE_BUDGET)
         rows = session.scalars(stmt.offset(offset).limit(candidate_limit + 1)).all()
+        projection = self._load_projection(
+            session,
+            workspace_id,
+            rows[:candidate_limit],
+            actor,
+            include_client_catalog=True,
+        )
         matches: list[McpChatSessionRef] = []
         for row in rows[:candidate_limit]:
-            item = self._session_ref(session, row, actor=actor)
+            item = self._build_session_ref(row, projection, actor)
             if (
                 needle in item.title.casefold()
                 or needle in item.summary.casefold()
@@ -648,7 +683,7 @@ class McpChatService:
             if len(rows) > candidate_limit
             else None
         )
-        return matches, next_cursor
+        return matches, next_cursor, projection
 
     def read_chat(
         self,
@@ -784,137 +819,13 @@ class McpChatService:
         actor: ActorContext,
         workspace_id: UUID,
     ):
-        """Correlated SQL predicate equivalent to ``_artifact_payload`` gates.
-
-        Filtering hidden targets in SQL makes offset/cursor count only visible
-        links. A thousand restricted rows therefore neither displace a visible
-        link nor create an observable continuation, and query work stays bound
-        by the requested visible page size.
-        """
-
-        from backend.services.okf import EXCLUDED_LIBRARY_LIFECYCLE_STATUSES
-
-        context_visible = (
-            select(ContextPage.id)
-            .where(
-                ContextPage.id == McpChatArtifactLink.resource_id,
-                ContextPage.workspace_id == workspace_id,
-                ContextPage.lifecycle_status != "archived",
-                visible_context_version_expression(actor).is_not(None),
-            )
-            .exists()
-        )
-
-        agent_filters = [
-            AgentPage.id == McpChatArtifactLink.resource_id,
-            AgentPage.workspace_id == workspace_id,
-            AgentPage.lifecycle_status != "archived",
-        ]
-        if not actor_can_read_drafts(actor):
-            agent_filters.append(AgentPage.current_active_version_id.is_not(None))
-        if not actor_can_read_sensitive_agent_pages(actor):
-            agent_filters.extend(
-                [
-                    AgentPage.category.notin_(SENSITIVE_AGENT_PAGE_CATEGORIES),
-                    AgentPage.sensitivity.in_(VISIBLE_AGENT_SENSITIVITIES),
-                ]
-            )
-        agent_visible = select(AgentPage.id).where(*agent_filters).exists()
-
-        library_filters = [
-            LibraryItem.workspace_id == workspace_id,
-            LibraryItem.lifecycle_status.notin_(EXCLUDED_LIBRARY_LIFECYCLE_STATUSES),
-        ]
-        if not actor_can_read_restricted_library(actor):
-            library_filters.append(LibraryItem.trust_level != "restricted")
-        # P5.1: every producer normalizes a LibraryArtifact id to its parent
-        # LibraryItem id before writing a library_item-kind link
-        # (mcp_trace_capture.py's _library_item_id_for_artifact), so
-        # resource_id under this kind is always a real LibraryItem id --
-        # no need to also probe LibraryArtifact ids here.
-        direct_library_visible = (
-            select(LibraryItem.id)
-            .where(
-                LibraryItem.id == McpChatArtifactLink.resource_id,
-                *library_filters,
-            )
-            .exists()
-        )
-
-        # P3.1/P3.2: every asset is page-owned now (ContextMediaSession and
-        # its page-less "session-bound" ownership shape are gone), but that
-        # does NOT mean every page-bound asset is as visible as its page.
-        # `visible_context_version_expression(actor).is_not(None)` below only
-        # proves the PAGE has some head visible to this actor (e.g. its
-        # published version) -- it says nothing about whether THIS asset's
-        # OWN `created_for_version_id` is that same visible row. Page-first
-        # creation can register an asset against a private "editing" row on a
-        # page that also has an unrelated visible head (its own published
-        # version, or another author's shared draft), so without the extra
-        # join below a page-visible-at-all check alone would leak an
-        # unshared editing session's upload the same way P2.6
-        # (PageNameIndex/FTS) leaked names/body text through an analogous
-        # gap -- confirmed reachable now that page-bound-but-private assets
-        # are possible, which they were not before P2/P3 existed. The
-        # created_for_version join closes it the same way
-        # context_visibility.py's editing_row_hidden_from_actor does: an
-        # "editing" row is visible only to its own creator, any other status
-        # is visible on the same terms as the rest of the page. Excludes a
-        # tombstoned asset -- see the matching comment in
-        # _artifact_title_and_path for why that mirrors the archived-page and
-        # excluded-library-status exclusions above rather than preserving raw
-        # history. This predicate always runs with a real actor (only called
-        # from the `if actor is not None:` branch above), so the exclusion is
-        # unconditional here, unlike the actor-optional Python gate.
-        media_created_for_version = aliased(ContextPageVersion)
-        media_page_visible = (
-            select(ContextMediaAsset.id)
-            .join(ContextPage, ContextPage.id == ContextMediaAsset.page_id)
-            .join(
-                media_created_for_version,
-                media_created_for_version.id
-                == ContextMediaAsset.created_for_version_id,
-            )
-            .where(
-                ContextMediaAsset.id == McpChatArtifactLink.resource_id,
-                ContextMediaAsset.workspace_id == workspace_id,
-                ContextMediaAsset.association_state != "tombstoned",
-                ContextPage.workspace_id == workspace_id,
-                ContextPage.lifecycle_status != "archived",
-                visible_context_version_expression(actor).is_not(None),
-                or_(
-                    media_created_for_version.version_status != "editing",
-                    and_(
-                        media_created_for_version.created_by_actor_kind
-                        == actor.actor_kind,
-                        media_created_for_version.created_by_actor_id == actor.actor_id,
-                    ),
-                ),
-            )
-            .exists()
-        )
-
-        return or_(
-            and_(
-                McpChatArtifactLink.resource_kind
-                == McpChatArtifactKind.CONTEXT_PAGE.value,
-                context_visible,
-            ),
-            and_(
-                McpChatArtifactLink.resource_kind
-                == McpChatArtifactKind.AGENT_PAGE.value,
-                agent_visible,
-            ),
-            and_(
-                McpChatArtifactLink.resource_kind
-                == McpChatArtifactKind.LIBRARY_ITEM.value,
-                direct_library_visible,
-            ),
-            and_(
-                McpChatArtifactLink.resource_kind
-                == McpChatArtifactKind.CONTEXT_MEDIA_ASSET.value,
-                media_page_visible,
-            ),
+        """Share canonical artifact gates with the batch card loader."""
+        return artifact_visible_predicate(
+            McpChatArtifactLink.resource_kind,
+            McpChatArtifactLink.resource_id,
+            actor,
+            workspace_id,
+            policy=_projection_policy(),
         )
 
     def update_title(
@@ -1066,68 +977,49 @@ class McpChatService:
             parts.append(f"{errors} error{'' if errors == 1 else 's'}")
         return ", ".join(parts)
 
-    def _semantic_summary(
+    def _load_projection(
         self,
         session: Session,
-        chat: McpChatSession,
-        actor: ActorContext | None = None,
+        workspace_id: UUID,
+        chats,
+        actor: ActorContext | None,
         *,
-        redacted_call_ids: set[UUID] | None = None,
         shared_only: bool = False,
-    ) -> str:
-        # What the session DID (primary artifact verb + title, or the first tool
-        # action) — not a restatement of the call/write counts, which the UI
-        # already shows as chips (item 4). Falls back to counts only for an
-        # otherwise-empty chat.
-        link = session.scalar(
-            select_in_workspace(
-                McpChatArtifactLink,
-                workspace_id=chat.workspace_id,
-                conditions=(
-                    McpChatArtifactLink.chat_session_id == chat.id,
-                    McpChatArtifactLink.verb.not_in(
-                        (
-                            McpChatArtifactVerb.REFERENCED.value,
-                            McpChatArtifactVerb.VIEWED.value,
-                            McpChatArtifactVerb.SEARCH_MATCH.value,
-                        )
-                    ),
-                ),
-            ).order_by(McpChatArtifactLink.last_occurred_at.desc())
+        include_search_matches: bool = False,
+        load_clients: bool = True,
+        include_client_catalog: bool = False,
+    ) -> ChatPageProjection:
+        return load_projection(
+            session,
+            workspace_id,
+            chats,
+            actor,
+            policy=_projection_policy(),
+            shared_only=shared_only,
+            include_search_matches=include_search_matches,
+            load_clients=load_clients,
+            include_client_catalog=include_client_catalog,
         )
-        if link is not None:
-            title, _path = self._artifact_title_and_path(
-                session,
-                link.resource_kind,
-                link.resource_id,
-                actor,
-                chat.workspace_id,
-                shared_only=shared_only,
-            )
-            if title:
-                verb = link.verb.replace("_", " ").capitalize()
-                return f"{verb}: {title}"
-        first_call = self._first_tool_call(
-            session, chat, actor, redacted_call_ids=redacted_call_ids
-        )
-        if first_call is not None:
-            # The list response serializes summary even though the current UI
-            # treats it as legacy/debug data. Keep that field behind the same
-            # per-tool input allowlist as the presentation descriptor; an
-            # arbitrary tool's `title`, prompt-like body or nested arguments
-            # must not hitch a ride through this fallback.
-            return _presentation_anchor(
-                _input_presentation(first_call.tool_name, first_call.input_summary)
-            )
-        return self.auto_summary(chat)
 
     def _refresh_chat_labels(self, session: Session, chat: McpChatSession) -> None:
-        # The stored labels are computed without a reader, so they must not
-        # name a page only its author can see: a private page's title lives
-        # on the page aggregate until its first submit.
-        chat.summary = self._semantic_summary(session, chat, shared_only=True)
+        # Capture-time labels share the reader's pure rules, but may never
+        # promote an author's unshared page title into stored presentation.
+        projection = self._load_projection(
+            session,
+            chat.workspace_id,
+            [chat],
+            None,
+            shared_only=True,
+            load_clients=False,
+        )
+        labels = self._build_chat_labels(chat, projection, None)
+        chat.summary = labels.semantic_summary
         if not chat.title_user_edited:
-            chat.title = self.auto_title(session, chat, shared_only=True)
+            chat.title = fit_generated_title(
+                _presentation_anchor(labels.presentation),
+                max_length=120,
+                fallback="MCP activity",
+            )
 
     def auto_title(
         self,
@@ -1137,35 +1029,20 @@ class McpChatService:
         *,
         shared_only: bool = False,
     ) -> str:
-        # Concise, human-readable title = the chat's primary anchor (a linked
-        # artifact title or the first tool action). Client identity and the
-        # call count are surfaced separately in the UI (client chip + meta),
-        # so they are intentionally omitted from the title here.
+        projection = self._load_projection(
+            session,
+            chat_session.workspace_id,
+            [chat_session],
+            actor,
+            shared_only=shared_only,
+            load_clients=False,
+        )
+        labels = self._build_chat_labels(chat_session, projection, actor)
         return fit_generated_title(
-            self._title_anchor(session, chat_session, actor, shared_only=shared_only),
+            _presentation_anchor(labels.presentation),
             max_length=120,
             fallback="MCP activity",
         )
-
-    def _title_anchor(
-        self,
-        session: Session,
-        chat: McpChatSession,
-        actor: ActorContext | None = None,
-        *,
-        redacted_call_ids: set[UUID] | None = None,
-        shared_only: bool = False,
-    ) -> str:
-        if redacted_call_ids is None:
-            redacted_call_ids = self._redacted_call_ids(session, chat, actor)
-        presentation = self._session_presentation(
-            session,
-            chat,
-            actor,
-            redacted_call_ids=redacted_call_ids,
-            shared_only=shared_only,
-        )
-        return _presentation_anchor(presentation)
 
     def _session_ref(
         self,
@@ -1177,61 +1054,234 @@ class McpChatService:
         include_full_client: bool = False,
         include_search_matches: bool = False,
     ) -> McpChatSessionRef:
-        client = get_in_workspace(
+        # Detail headers, provenance and exports use exactly the same loader
+        # and pure card builder as the batched list.
+        projection = self._load_projection(
             session,
-            MCPClient,
-            workspace_id=chat.workspace_id,
-            resource_id=chat.client_id,
-        )
-        links_query = select(McpChatArtifactLink).where(
-            McpChatArtifactLink.chat_session_id == chat.id
-        )
-        if not include_search_matches:
-            links_query = links_query.where(
-                McpChatArtifactLink.verb != McpChatArtifactVerb.SEARCH_MATCH.value
-            )
-        links = session.scalars(
-            links_query.order_by(desc(McpChatArtifactLink.last_occurred_at)).limit(
-                link_limit
-            )
-        ).all()
-        # Generated labels are always re-derived from the same read-time,
-        # actor-visible descriptor. This heals both legacy count titles and the
-        # old bootstrap-first titles without persisting localized prose. A
-        # user-edited title remains the only immutable stored override.
-        redacted_call_ids = self._redacted_call_ids(session, chat, actor)
-        presentation = self._session_presentation(
-            session,
-            chat,
+            chat.workspace_id,
+            [chat],
             actor,
-            redacted_call_ids=redacted_call_ids,
+            include_search_matches=include_search_matches,
         )
-        stored_title = (
-            chat.title
-            if chat.title_user_edited and chat.title
-            else _presentation_anchor(presentation)
+        return self._build_session_ref(
+            chat,
+            projection,
+            actor,
+            link_limit=link_limit,
+            include_full_client=include_full_client,
         )
-        intent_summary, intent_source = self._intent(
-            session, chat, actor, redacted_call_ids=redacted_call_ids
+
+    def _build_chat_labels(
+        self,
+        chat: McpChatSession,
+        projection: ChatPageProjection,
+        actor: ActorContext | None,
+    ) -> _ChatLabels:
+        """The single, SQL-free title/summary/intent policy for every card."""
+        calls = projection.calls_by_chat.get(chat.id, [])
+        call_by_id = {row.id: row for row in calls}
+        first = call_by_id.get(projection.first_call_ids_by_chat.get(chat.id))
+        action_call = call_by_id.get(
+            projection.first_action_call_ids_by_chat.get(chat.id)
         )
-        if actor is not None:
-            stored_summary = self._semantic_summary(
-                session, chat, actor, redacted_call_ids=redacted_call_ids
+        edges = [
+            edge
+            for edge in projection.edges_by_chat.get(chat.id, [])
+            if edge.result_status in PRESENTATION_ELIGIBLE_STATUSES
+        ]
+        artifacts = projection.artifacts
+        presentation = None
+        if chat.title_user_edited:
+            tool_name = first.tool_name if first is not None else None
+            presentation = McpChatPresentationDescriptor(
+                title_source="user",
+                action=_tool_action(tool_name),
+                subject=chat.title or "",
+                subject_kind=None,
+                primary_tool_name=tool_name,
             )
         else:
-            stored_summary = (
-                chat.frozen_summary or chat.summary or self.auto_summary(chat)
+            authored = sorted(
+                (edge for edge in edges if edge.verb in AUTHORING_VERBS),
+                key=lambda edge: (
+                    -_as_utc(edge.occurred_at).timestamp(),
+                    -_as_utc(edge.started_at).timestamp(),
+                    edge.mcp_tool_call_id,
+                    edge.resource_kind,
+                    edge.resource_id,
+                    edge.verb,
+                ),
+            )
+            for edge in authored:
+                title, _ = artifacts.get(
+                    (edge.resource_kind, edge.resource_id), (None, None)
+                )
+                subject = _normalize_presentation_text(title)
+                if subject is not None:
+                    presentation = _artifact_presentation(
+                        tool_name=edge.tool_name,
+                        verb=edge.verb,
+                        resource_kind=edge.resource_kind,
+                        title=subject,
+                    )
+                    break
+            if presentation is None:
+                for row in calls:
+                    field = _SEARCH_INPUT_FIELDS.get(row.tool_name)
+                    if field is None:
+                        continue
+                    subject = _normalize_presentation_text(row.input_summary.get(field))
+                    if subject is not None:
+                        presentation = McpChatPresentationDescriptor(
+                            title_source="query",
+                            action="search",
+                            subject=subject,
+                            subject_kind="query",
+                            primary_tool_name=row.tool_name,
+                        )
+                        break
+            if presentation is None:
+                focused: dict[tuple[str, UUID], tuple[str, str]] = {}
+                for edge in sorted(
+                    (
+                        edge
+                        for edge in edges
+                        if edge.verb
+                        in (
+                            McpChatArtifactVerb.VIEWED.value,
+                            McpChatArtifactVerb.REFERENCED.value,
+                        )
+                        and edge.tool_name in FOCUSED_READ_TOOLS
+                    ),
+                    key=lambda edge: (
+                        _as_utc(edge.started_at),
+                        edge.mcp_tool_call_id,
+                        edge.resource_kind,
+                        edge.resource_id,
+                    ),
+                ):
+                    key = (edge.resource_kind, edge.resource_id)
+                    if key in focused:
+                        continue
+                    title, _ = artifacts.get(key, (None, None))
+                    subject = _normalize_presentation_text(title)
+                    if subject is not None:
+                        focused[key] = (subject, edge.tool_name)
+                if len(focused) == 1:
+                    (kind, _), (subject, tool_name) = next(iter(focused.items()))
+                    presentation = McpChatPresentationDescriptor(
+                        title_source="artifact",
+                        action="read",
+                        subject=subject,
+                        subject_kind=kind,
+                        primary_tool_name=tool_name,
+                    )
+            if presentation is None and action_call is not None:
+                presentation = _allowlisted_input_presentation(
+                    action_call.tool_name, action_call.input_summary
+                )
+            if (
+                presentation is None
+                and first is not None
+                and projection.bootstrap_by_chat.get(chat.id, False)
+            ):
+                presentation = _safe_tool_presentation(first.tool_name)
+        if presentation is None:
+            presentation = _generic_presentation()
+
+        # Inspect only the latest authoring/citation rollup, even if hidden.
+        # Falling through to an older visible link would change this contract.
+        summary = None
+        for link in projection.links_by_chat.get(chat.id, []):
+            if link.verb in (
+                McpChatArtifactVerb.REFERENCED.value,
+                McpChatArtifactVerb.VIEWED.value,
+                McpChatArtifactVerb.SEARCH_MATCH.value,
+            ):
+                continue
+            title, _ = artifacts.get(
+                (link.resource_kind, link.resource_id), (None, None)
+            )
+            if title:
+                summary = f"{link.verb.replace('_', ' ').capitalize()}: {title}"
+            break
+        if summary is None and first is not None:
+            summary = _presentation_anchor(
+                _input_presentation(first.tool_name, first.input_summary)
+            )
+        if summary is None:
+            summary = self.auto_summary(chat)
+
+        intent = None
+        if first is not None:
+            content_visible = True
+            if actor is not None and first.tool_name in CONTEXT_EDIT_TOOLS:
+                version_id = _edited_version_id(first)
+                content_visible = (
+                    version_id in projection.visible_edit_versions
+                    if version_id is not None
+                    else actor.user_id is not None
+                    and chat.owner_user_id == actor.user_id
+                )
+            if content_visible:
+                intent = _intent_from_input(first.tool_name, first.input_summary)
+        return _ChatLabels(
+            presentation,
+            summary,
+            intent[0] if intent is not None else None,
+            intent[1] if intent is not None else None,
+        )
+
+    def _build_session_ref(
+        self,
+        chat: McpChatSession,
+        projection: ChatPageProjection,
+        actor: ActorContext | None,
+        *,
+        link_limit: int = 4,
+        include_full_client: bool = False,
+    ) -> McpChatSessionRef:
+        labels = self._build_chat_labels(chat, projection, actor)
+        client = projection.clients.get(chat.client_id)
+        links = []
+        for link in projection.links_by_chat.get(chat.id, [])[:link_limit]:
+            title, path = projection.artifacts.get(
+                (link.resource_kind, link.resource_id), (None, None)
+            )
+            if actor is not None and title is None:
+                continue
+            links.append(
+                McpChatArtifactLinkPayload(
+                    id=link.id,
+                    resource_kind=link.resource_kind,
+                    resource_id=link.resource_id,
+                    artifact_title=title,
+                    navigation_path=path,
+                    verb=link.verb,
+                    first_occurred_at=link.first_occurred_at,
+                    last_occurred_at=link.last_occurred_at,
+                    occurrence_count=link.occurrence_count,
+                    last_mcp_tool_call_id=link.last_mcp_tool_call_id,
+                )
             )
         return McpChatSessionRef(
-            **presentation.model_dump(),
+            **labels.presentation.model_dump(),
             id=chat.id,
             workspace_id=chat.workspace_id,
-            client=(
-                _client_ref(client) if include_full_client else _client_list_ref(client)
-            ),
+            client=_client_ref(client)
+            if include_full_client
+            else _client_list_ref(client),
             mcp_session_id=chat.mcp_session_id,
-            title=stored_title,
-            summary=stored_summary,
+            title=(
+                chat.title
+                if chat.title_user_edited and chat.title
+                else _presentation_anchor(labels.presentation)
+            ),
+            summary=(
+                labels.semantic_summary
+                if actor is not None
+                else chat.frozen_summary or chat.summary or self.auto_summary(chat)
+            ),
             started_at=chat.started_at,
             last_activity_at=chat.last_activity_at,
             tool_call_count=chat.tool_call_count,
@@ -1242,324 +1292,10 @@ class McpChatService:
             archived_at=chat.archived_at,
             conversation_group_id=chat.conversation_group_id,
             title_user_edited=chat.title_user_edited,
-            intent_summary=intent_summary,
-            intent_source=intent_source,
-            linked_artifacts=[
-                payload
-                for link in links
-                if (
-                    payload := self._artifact_payload(
-                        session, link, actor, chat.workspace_id
-                    )
-                )
-                is not None
-            ],
+            intent_summary=labels.intent_summary,
+            intent_source=labels.intent_source,
+            linked_artifacts=links,
         )
-
-    def _session_presentation(
-        self,
-        session: Session,
-        chat: McpChatSession,
-        actor: ActorContext | None,
-        *,
-        redacted_call_ids: set[UUID],
-        shared_only: bool = False,
-    ) -> McpChatPresentationDescriptor:
-        """Derive the seven-tier localizable presentation hierarchy.
-
-        Only typed call status, allowlisted input fields and per-call artifact
-        edges participate. Result-summary prose, result counts and inferred
-        external-client prompts are deliberately outside this contract.
-        """
-
-        if chat.title_user_edited:
-            safe_tool_name = self._first_eligible_tool_name(
-                session, chat, redacted_call_ids=redacted_call_ids
-            )
-            return McpChatPresentationDescriptor(
-                title_source="user",
-                action=_tool_action(safe_tool_name),
-                subject=chat.title or "",
-                subject_kind=None,
-                primary_tool_name=safe_tool_name,
-            )
-
-        authoring = self._authoring_presentation(
-            session, chat, actor, shared_only=shared_only
-        )
-        if authoring is not None:
-            return authoring
-
-        search = self._search_presentation(
-            session, chat, redacted_call_ids=redacted_call_ids
-        )
-        if search is not None:
-            return search
-
-        focused_read = self._focused_read_presentation(
-            session, chat, actor, shared_only=shared_only
-        )
-        if focused_read is not None:
-            return focused_read
-
-        action_input = self._action_input_presentation(
-            session, chat, redacted_call_ids=redacted_call_ids
-        )
-        if action_input is not None:
-            return action_input
-
-        bootstrap = self._bootstrap_presentation(
-            session, chat, redacted_call_ids=redacted_call_ids
-        )
-        if bootstrap is not None:
-            return bootstrap
-
-        return _generic_presentation()
-
-    def _eligible_tool_call_stmt(
-        self,
-        session: Session,
-        chat: McpChatSession,
-        *,
-        redacted_call_ids: set[UUID] | None = None,
-    ):
-        stmt = self._tool_call_query(session, chat)
-        if stmt is None:
-            return None
-        stmt = stmt.where(MCPToolCall.result_status.in_(PRESENTATION_ELIGIBLE_STATUSES))
-        if redacted_call_ids:
-            stmt = stmt.where(MCPToolCall.id.notin_(redacted_call_ids))
-        return stmt
-
-    def _first_eligible_tool_name(
-        self,
-        session: Session,
-        chat: McpChatSession,
-        *,
-        redacted_call_ids: set[UUID],
-    ) -> str | None:
-        stmt = self._eligible_tool_call_stmt(
-            session, chat, redacted_call_ids=redacted_call_ids
-        )
-        if stmt is None:
-            return None
-        return session.scalar(stmt.with_only_columns(MCPToolCall.tool_name).limit(1))
-
-    def _authoring_presentation(
-        self,
-        session: Session,
-        chat: McpChatSession,
-        actor: ActorContext | None,
-        *,
-        shared_only: bool = False,
-    ) -> McpChatPresentationDescriptor | None:
-        rows = session.execute(
-            select(
-                McpChatToolCallArtifact.verb,
-                McpChatToolCallArtifact.resource_kind,
-                McpChatToolCallArtifact.resource_id,
-                MCPToolCall.tool_name,
-            )
-            .join(
-                MCPToolCall,
-                MCPToolCall.id == McpChatToolCallArtifact.mcp_tool_call_id,
-            )
-            .where(
-                McpChatToolCallArtifact.chat_session_id == chat.id,
-                McpChatToolCallArtifact.verb.in_(
-                    (
-                        McpChatArtifactVerb.CREATED.value,
-                        McpChatArtifactVerb.EDITED.value,
-                    )
-                ),
-                MCPToolCall.workspace_id == chat.workspace_id,
-                MCPToolCall.result_status.in_(PRESENTATION_ELIGIBLE_STATUSES),
-            )
-            # Latest authoring evidence wins; all remaining columns are stable
-            # tie-breakers, so insert/materialization order cannot affect it.
-            .order_by(
-                McpChatToolCallArtifact.occurred_at.desc(),
-                MCPToolCall.started_at.desc(),
-                MCPToolCall.id,
-                McpChatToolCallArtifact.resource_kind,
-                McpChatToolCallArtifact.resource_id,
-                McpChatToolCallArtifact.verb,
-            )
-        ).all()
-        for verb, resource_kind, resource_id, tool_name in rows:
-            title, _path = self._artifact_title_and_path(
-                session,
-                resource_kind,
-                resource_id,
-                actor,
-                chat.workspace_id,
-                shared_only=shared_only,
-            )
-            subject = _normalize_presentation_text(title)
-            if subject is not None:
-                return _artifact_presentation(
-                    tool_name=tool_name,
-                    verb=verb,
-                    resource_kind=resource_kind,
-                    title=subject,
-                )
-        return None
-
-    def _search_presentation(
-        self,
-        session: Session,
-        chat: McpChatSession,
-        *,
-        redacted_call_ids: set[UUID],
-    ) -> McpChatPresentationDescriptor | None:
-        stmt = self._eligible_tool_call_stmt(
-            session, chat, redacted_call_ids=redacted_call_ids
-        )
-        if stmt is None:
-            return None
-        rows = session.execute(
-            stmt.where(
-                MCPToolCall.tool_name.in_(_SEARCH_INPUT_FIELDS)
-            ).with_only_columns(
-                MCPToolCall.tool_name,
-                MCPToolCall.input_summary,
-            )
-        ).all()
-        for tool_name, input_summary in rows:
-            if not isinstance(input_summary, dict):
-                continue
-            subject = _normalize_presentation_text(
-                input_summary.get(_SEARCH_INPUT_FIELDS[tool_name])
-            )
-            if subject is not None:
-                return McpChatPresentationDescriptor(
-                    title_source="query",
-                    action="search",
-                    subject=subject,
-                    subject_kind="query",
-                    primary_tool_name=tool_name,
-                )
-        return None
-
-    def _focused_read_presentation(
-        self,
-        session: Session,
-        chat: McpChatSession,
-        actor: ActorContext | None,
-        *,
-        shared_only: bool = False,
-    ) -> McpChatPresentationDescriptor | None:
-        rows = session.execute(
-            join_in_workspace(
-                select_in_workspace(
-                    McpChatToolCallArtifact,
-                    workspace_id=chat.workspace_id,
-                    conditions=(
-                        McpChatToolCallArtifact.chat_session_id == chat.id,
-                        McpChatToolCallArtifact.verb.in_(
-                            (
-                                McpChatArtifactVerb.VIEWED.value,
-                                McpChatArtifactVerb.REFERENCED.value,
-                            )
-                        ),
-                    ),
-                ),
-                McpChatToolCallArtifact,
-                MCPToolCall,
-                workspace_id=chat.workspace_id,
-                on=(MCPToolCall.id == McpChatToolCallArtifact.mcp_tool_call_id)
-                & MCPToolCall.tool_name.in_(FOCUSED_READ_TOOLS)
-                & MCPToolCall.result_status.in_(PRESENTATION_ELIGIBLE_STATUSES),
-            )
-            .with_only_columns(
-                MCPToolCall.id,
-                MCPToolCall.tool_name,
-                McpChatToolCallArtifact.resource_kind,
-                McpChatToolCallArtifact.resource_id,
-            )
-            .order_by(
-                MCPToolCall.started_at,
-                MCPToolCall.id,
-                McpChatToolCallArtifact.resource_kind,
-                McpChatToolCallArtifact.resource_id,
-            )
-        ).all()
-        visible_artifacts: dict[tuple[str, UUID], tuple[str, str]] = {}
-        for _call_id, tool_name, resource_kind, resource_id in rows:
-            title, _path = self._artifact_title_and_path(
-                session,
-                resource_kind,
-                resource_id,
-                actor,
-                chat.workspace_id,
-                shared_only=shared_only,
-            )
-            subject = _normalize_presentation_text(title)
-            if subject is not None:
-                # The query is ordered by call time, so setdefault preserves
-                # the first eligible read tool as stable provenance when the
-                # same artifact is read repeatedly.
-                visible_artifacts.setdefault(
-                    (resource_kind, resource_id), (subject, tool_name)
-                )
-
-        # Focused reading is a chat-level intent, not a per-call property.  Two
-        # one-document calls that read A and then B are discovery, even though
-        # each call is individually unambiguous.  Hidden artifacts intentionally
-        # do not count; including them would leak their existence through the
-        # selected title tier.
-        if len(visible_artifacts) != 1:
-            return None
-        (resource_kind, _resource_id), (subject, tool_name) = next(
-            iter(visible_artifacts.items())
-        )
-        return McpChatPresentationDescriptor(
-            title_source="artifact",
-            action="read",
-            subject=subject,
-            subject_kind=resource_kind,
-            primary_tool_name=tool_name,
-        )
-
-    def _action_input_presentation(
-        self,
-        session: Session,
-        chat: McpChatSession,
-        *,
-        redacted_call_ids: set[UUID],
-    ) -> McpChatPresentationDescriptor | None:
-        stmt = self._eligible_tool_call_stmt(
-            session, chat, redacted_call_ids=redacted_call_ids
-        )
-        if stmt is None:
-            return None
-        row = session.execute(
-            stmt.where(MCPToolCall.tool_name.notin_(_BOOTSTRAP_TOOLS))
-            .with_only_columns(MCPToolCall.tool_name, MCPToolCall.input_summary)
-            .limit(1)
-        ).first()
-        if row is None or not isinstance(row.input_summary, dict):
-            return None
-        return _allowlisted_input_presentation(row.tool_name, row.input_summary)
-
-    def _bootstrap_presentation(
-        self,
-        session: Session,
-        chat: McpChatSession,
-        *,
-        redacted_call_ids: set[UUID],
-    ) -> McpChatPresentationDescriptor | None:
-        stmt = self._eligible_tool_call_stmt(
-            session, chat, redacted_call_ids=redacted_call_ids
-        )
-        if stmt is None:
-            return None
-        tool_names = session.scalars(
-            stmt.with_only_columns(MCPToolCall.tool_name)
-        ).all()
-        if tool_names and all(name in _BOOTSTRAP_TOOLS for name in tool_names):
-            return _safe_tool_presentation(tool_names[0])
-        return None
 
     def _timeline(
         self,
@@ -1831,34 +1567,12 @@ class McpChatService:
         )
 
     def _tool_call_query(self, session: Session, chat: McpChatSession):
-        """Ordered select of this chat's calls, or None when it has none.
-
-        Shared so the timeline and the single-row summary lookup cannot drift
-        on which calls belong to a chat.
-        """
-
-        mcp_session_uuid = mcp_session_trace_uuid(chat.mcp_session_id)
-        # No client_id filter: the conversation token already identifies the
-        # chat uniquely per workspace, and a conversation continued through a
-        # second client identity must keep the first client's calls in the
-        # timeline (tool_call_count includes them).
-        filters = [
-            MCPToolCall.workspace_id == chat.workspace_id,
-        ]
-        if mcp_session_uuid is None:
-            # Non-UUID session token: recover the chat's calls from the per-call
-            # edge table so EVERY call that touched an artifact is included, not
-            # just the latest per rollup (T9b-FU1, consistent with _timeline).
-            linked_call_ids = session.scalars(
-                select(McpChatToolCallArtifact.mcp_tool_call_id)
-                .where(McpChatToolCallArtifact.chat_session_id == chat.id)
-                .distinct()
-            ).all()
-            if not linked_call_ids:
-                return None
-            filters.append(MCPToolCall.id.in_(linked_call_ids))
-        else:
-            filters.append(MCPToolCall.mcp_session_id == mcp_session_uuid)
+        """Ordered full trace rows for the detail timeline only."""
+        # A conversation can continue through a second client identity.
+        filters = [MCPToolCall.workspace_id == chat.workspace_id]
+        filters.append(
+            MCPToolCall.mcp_session_id == mcp_session_trace_uuid(chat.mcp_session_id)
+        )
         return (
             select(MCPToolCall)
             .where(and_(*filters))
@@ -1870,108 +1584,7 @@ class McpChatService:
         session: Session,
         chat: McpChatSession,
     ) -> list[MCPToolCall]:
-        stmt = self._tool_call_query(session, chat)
-        if stmt is None:
-            return []
-        return session.scalars(stmt).all()
-
-    def _intent(
-        self,
-        session: Session,
-        chat: McpChatSession,
-        actor: ActorContext | None,
-        *,
-        redacted_call_ids: set[UUID] | None = None,
-    ) -> tuple[str | None, str | None]:
-        """The client's own statement of what it was doing, if it made one.
-
-        Read from the first call this reader is allowed to describe, so a chat
-        whose opening move touched a hidden page contributes nothing here.
-        """
-
-        first_call = self._first_tool_call(
-            session, chat, actor, redacted_call_ids=redacted_call_ids
-        )
-        if first_call is None:
-            return None, None
-        if not _ReaderGate(
-            self, session, chat.workspace_id, actor
-        ).call_content_visible(first_call, chat):
-            return None, None
-        found = _intent_from_input(first_call.tool_name, first_call.input_summary)
-        if found is None:
-            return None, None
-        return found
-
-    def _redacted_call_ids(
-        self,
-        session: Session,
-        chat: McpChatSession,
-        actor: ActorContext | None,
-    ) -> set[UUID]:
-        """Calls whose primary target this reader may not see.
-
-        A call's arguments were captured verbatim, so they still name the
-        target's title, claim text or body. Anything derived from them — the
-        timeline row, and equally the list card's title and summary — has to
-        consult this first. It used to be decided inline in `_timeline` only,
-        which is exactly why the summary path leaked.
-
-        A hidden search match does not count: it is one result among several,
-        and the timeline drops just that result. Failed calls are absent here
-        because they never carry an edge; every label derivation already
-        ignores them by status, and the timeline gates them on the targets
-        their input names (``_error_call_item``).
-        """
-
-        if actor is None:
-            return set()
-        hidden_target: dict[tuple[str, UUID], bool] = {}
-        hidden: set[UUID] = set()
-        for tool_call_id, verb, resource_kind, resource_id in list_call_artifact_edges(
-            session, workspace_id=chat.workspace_id, chat_session_id=chat.id
-        ):
-            if verb == McpChatArtifactVerb.SEARCH_MATCH.value:
-                continue
-            key = (resource_kind, resource_id)
-            if key not in hidden_target:
-                title, _path = self._artifact_title_and_path(
-                    session, resource_kind, resource_id, actor, chat.workspace_id
-                )
-                hidden_target[key] = title is None
-            if hidden_target[key]:
-                hidden.add(tool_call_id)
-        return hidden
-
-    def _first_tool_call(
-        self,
-        session: Session,
-        chat: McpChatSession,
-        actor: ActorContext | None = None,
-        *,
-        redacted_call_ids: set[UUID] | None = None,
-    ) -> MCPToolCall | None:
-        """The earliest call this reader is allowed to describe.
-
-        Selects one row rather than materializing every call in the chat:
-        `input_summary` holds the full arguments, `body_markdown` included, so
-        loading them all to look at the first was megabytes per chat — and the
-        list ran it twice for every chat on the page.
-
-        Only the explicit presentation-status allowlist is eligible. This is a
-        positive contract: a future unknown status cannot silently promote raw
-        inputs into a list card merely because it is not one of today's errors.
-        """
-
-        if redacted_call_ids is None:
-            redacted_call_ids = self._redacted_call_ids(session, chat, actor)
-        stmt = self._tool_call_query(session, chat)
-        if stmt is None:
-            return None
-        stmt = stmt.where(MCPToolCall.result_status.in_(PRESENTATION_ELIGIBLE_STATUSES))
-        if redacted_call_ids:
-            stmt = stmt.where(MCPToolCall.id.notin_(redacted_call_ids))
-        return session.scalars(stmt.limit(1)).first()
+        return list(session.scalars(self._tool_call_query(session, chat)).all())
 
     def _artifact_payload(
         self,
@@ -3414,6 +3027,43 @@ def _client_list_ref(client: MCPClient | None) -> McpChatClientRef:
     )
 
 
+def _projection_policy() -> ProjectionPolicy:
+    from backend.services.okf import EXCLUDED_LIBRARY_LIFECYCLE_STATUSES
+
+    fields: dict[str, set[str]] = {}
+    for tool, field in _SEARCH_INPUT_FIELDS.items():
+        fields.setdefault(tool, set()).add(field)
+    for tool, entries in _SAFE_TEXT_INPUT_FIELDS.items():
+        fields.setdefault(tool, set()).update(field for field, _ in entries)
+    for tool, entries in _SAFE_KIND_INPUT_FIELDS.items():
+        fields.setdefault(tool, set()).update(entries)
+    for tool, entries in _INTENT_INPUT_FIELDS.items():
+        fields.setdefault(tool, set()).update(field for field, _ in entries)
+    for tool in _VERSION_NAMING_EDIT_TOOLS:
+        fields.setdefault(tool, set()).add("version_id")
+    return ProjectionPolicy(
+        eligible_statuses=PRESENTATION_ELIGIBLE_STATUSES,
+        bootstrap_tools=_BOOTSTRAP_TOOLS,
+        search_fields=_SEARCH_INPUT_FIELDS,
+        input_fields_by_tool={
+            tool: tuple(sorted(names)) for tool, names in fields.items()
+        },
+        context_edit_tools=CONTEXT_EDIT_TOOLS,
+        version_naming_edit_tools=_VERSION_NAMING_EDIT_TOOLS,
+        trace_session_uuid=mcp_session_trace_uuid,
+        artifact_urls={
+            "context_page": context_page_url,
+            "agent_page": agent_page_url,
+            "library_item": library_item_url,
+            "context_media_asset": context_page_url,
+        },
+        visible_agent_sensitivities=VISIBLE_AGENT_SENSITIVITIES,
+        excluded_library_lifecycle_statuses=frozenset(
+            EXCLUDED_LIBRARY_LIFECYCLE_STATUSES
+        ),
+    )
+
+
 def _period_start(period: str):
     now = utc_now()
     if period == "today":
@@ -3806,27 +3456,10 @@ def _intent_from_input(
     mistake an agent's self-description for something they said themselves.
     """
 
-    for field, source in (
-        ("reason", "write_reason"),
-        ("patch_description", "write_reason"),
-    ):
-        value = input_summary.get(field)
-        normalized = _sanitize_display_text(value)
-        if (
-            tool_name
-            in {
-                "write_agent_page_draft",
-                "submit_context_edit_for_review",
-            }
-            and normalized is not None
-        ):
+    for field, source in _INTENT_INPUT_FIELDS.get(tool_name, ()):
+        normalized = _sanitize_display_text(input_summary.get(field))
+        if normalized is not None:
             return _truncate_graphemes(normalized, SUMMARY_MAX_CHARS), source
-    query = _sanitize_display_text(input_summary.get("query"))
-    if tool_name == "search" and query is not None:
-        return _truncate_graphemes(query, SUMMARY_MAX_CHARS), "search_query"
-    claim = _sanitize_display_text(input_summary.get("claim_text"))
-    if tool_name == "cite" and claim is not None:
-        return _truncate_graphemes(claim, SUMMARY_MAX_CHARS), "claim_text"
     return None
 
 
