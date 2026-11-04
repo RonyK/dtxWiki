@@ -1528,6 +1528,12 @@ body[data-focus-mode="true"] .main-surface {
   padding: 0;
 }
 
+/* An auto grid track grows to its widest unbreakable child (a long relation
+   header in English); keep Details at the sidebar width and let text truncate. */
+.workspace-graph-screen .workspace-graph-details {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .workspace-graph-screen .workspace-graph-metadata dl {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -2241,6 +2247,534 @@ p.workspace-graph-list-window-hint {
   margin-top: 10px;
 }
 
+/* Sidebar results, chips and the Details relation flow. Shapes, colours and
+   strokes reuse the map and legend tokens (cosmosScene, GRAPH_EDGE_PATTERN). */
+.workspace-graph-node-cue.is-inline {
+  width: 10px;
+  height: 10px;
+}
+
+.workspace-graph-node-cue.is-inline.is-library { border-radius: 1px; }
+.workspace-graph-node-cue.is-inline.is-cluster { width: 12px; height: 12px; }
+
+/* Dashes are drawn, not bordered: a short dashed border can render as one
+   dash. 4px dash / 3px gap keeps the map's 7/4 rhythm at list size. */
+.workspace-graph-edge-cue {
+  --edge-ink: var(--graph-edge-link, #64748b);
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 16px;
+  height: 2px;
+  background: var(--edge-ink);
+}
+
+.workspace-graph-edge-cue[data-visual="citation"] {
+  --edge-ink: var(--graph-edge-citation, #0f9f8f);
+  background: repeating-linear-gradient(to right, var(--edge-ink) 0 4px, transparent 4px 7px);
+}
+
+.workspace-graph-edge-cue[data-visual="other"] {
+  --edge-ink: var(--ink-muted);
+  background: repeating-linear-gradient(to right, var(--edge-ink) 0 2px, transparent 2px 4px);
+}
+
+.workspace-graph-chip {
+  --chip-ink: var(--ink-muted);
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--chip-ink) 38%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--chip-ink) 8%, var(--surface));
+  color: color-mix(in srgb, var(--chip-ink) 55%, var(--ink));
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.workspace-graph-chip[data-node-kind="context"] { --chip-ink: var(--graph-node-context, #7c3aed); }
+.workspace-graph-chip[data-node-kind="library"] { --chip-ink: var(--graph-node-library, #0f9f8f); }
+.workspace-graph-chip[data-node-kind="cluster"] { --chip-ink: var(--graph-node-folder, #64748b); }
+.workspace-graph-chip[data-visual="link"] { --chip-ink: var(--graph-edge-link, #64748b); }
+.workspace-graph-chip[data-visual="citation"] { --chip-ink: var(--graph-edge-citation, #0f9f8f); }
+.workspace-graph-chip .workspace-graph-node-cue.is-inline { width: 8px; height: 8px; }
+.workspace-graph-chip .workspace-graph-edge-cue { width: 12px; }
+
+.workspace-graph-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.workspace-graph-row-meta-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Document icon + arrow reads as a link; the row itself selects on the map. */
+.workspace-graph-sidebar .workspace-graph-open-link {
+  display: inline-flex;
+  flex: none;
+  align-items: flex-start;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 32px;
+  min-height: 36px;
+  height: 36px;
+  padding: 10px 0 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--context);
+  cursor: pointer;
+}
+
+.workspace-graph-sidebar .workspace-graph-open-link .workspace-graph-open-arrow { margin: -3px 0 0 -1px; }
+.workspace-graph-sidebar .workspace-graph-open-link:hover { background: var(--context-soft); }
+.workspace-graph-sidebar .workspace-graph-open-link:focus-visible { outline: 2px solid var(--context); outline-offset: 1px; }
+.workspace-graph-sidebar button.workspace-graph-open-link { color: var(--ink-muted); }
+.workspace-graph-sidebar button.workspace-graph-open-link:disabled { cursor: default; opacity: 0.5; }
+
+.workspace-graph-list > p.workspace-graph-list-status {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.workspace-graph-list-section {
+  margin-top: 10px;
+  border-top: 1px solid var(--border-strong);
+}
+
+.workspace-graph-list .workspace-graph-result-list { margin-top: 0; }
+.workspace-graph-result-group { border-top: 1px solid var(--border); }
+
+.workspace-graph-list p.workspace-graph-list-none {
+  margin: 2px 0 8px 22px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.workspace-graph-fold-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-graph-fold-head:hover { background: var(--surface-hover); }
+.workspace-graph-fold-head:focus-visible { outline: 2px solid var(--context); outline-offset: -2px; }
+.workspace-graph-fold-chevron { flex: none; color: var(--ink-muted); }
+
+.workspace-graph-fold-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-graph-fold-head[data-level="group"] { min-height: 32px; padding-left: 4px; }
+.workspace-graph-fold-head[data-level="group"] .workspace-graph-fold-title { font-size: 12px; font-weight: 700; }
+
+.workspace-graph-fold-count {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-active);
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* The note gives way long before the title does. */
+.workspace-graph-fold-note {
+  flex: 0 100 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-graph-fold-summary {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--ink-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.workspace-graph-fold-summary-item { display: inline-flex; align-items: center; gap: 4px; }
+.workspace-graph-fold-summary .workspace-graph-edge-cue { width: 12px; }
+
+.workspace-graph-more {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 32px;
+  margin: 4px 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.workspace-graph-more:hover { background: var(--surface-hover); }
+
+/* A result relation reads like the map: source, stroke + arrow, target. */
+.workspace-graph-list .workspace-graph-relation-select { display: block; }
+
+.workspace-graph-relation-map {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  grid-template-rows: 20px 22px 20px;
+  align-items: center;
+  column-gap: 8px;
+  min-width: 0;
+}
+
+.workspace-graph-relation-cue { display: flex; align-items: center; justify-content: center; }
+
+.workspace-graph-relation-end {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-graph-relation-kind { display: flex; min-width: 0; }
+
+.workspace-graph-relation-stroke {
+  --edge-ink: var(--graph-edge-link, #64748b);
+  position: relative;
+  grid-row: 2;
+  grid-column: 1;
+  align-self: stretch;
+  justify-self: center;
+  width: 2px;
+  margin: -3px 0 -1px;
+  background: var(--edge-ink);
+}
+
+.workspace-graph-relation-stroke[data-visual="citation"] {
+  --edge-ink: var(--graph-edge-citation, #0f9f8f);
+  background: repeating-linear-gradient(to bottom, var(--edge-ink) 0 4px, transparent 4px 7px);
+}
+
+.workspace-graph-relation-stroke[data-visual="other"] {
+  --edge-ink: var(--ink-muted);
+  background: repeating-linear-gradient(to bottom, var(--edge-ink) 0 2px, transparent 2px 4px);
+}
+
+.workspace-graph-relation-stroke[data-directed="true"]::after {
+  content: "";
+  position: absolute;
+  bottom: -3px;
+  left: -4px;
+  border-top: 7px solid var(--edge-ink);
+  border-inline: 5px solid transparent;
+}
+
+/* Details: the selected node's relations. */
+.workspace-graph-relations {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-strong);
+}
+
+.workspace-graph-relations-head { display: flex; align-items: center; gap: 6px; }
+.workspace-graph-details .workspace-graph-relations h3 { margin: 0; font-size: 13px; }
+.workspace-graph-relations-head .workspace-graph-fold-summary { margin-left: auto; }
+
+.workspace-graph-relations-search {
+  position: relative;
+  margin-top: 8px;
+}
+
+.workspace-graph-relations-search > svg {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  color: var(--ink-muted);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.workspace-graph-relations-search input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 34px 6px 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.workspace-graph-relations-search input:focus-visible {
+  border-color: var(--context);
+  outline: 2px solid color-mix(in srgb, var(--context) 30%, transparent);
+  outline-offset: 0;
+}
+
+.workspace-graph-relations-search input::-webkit-search-cancel-button { display: none; }
+
+.workspace-graph-relations-clear {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.workspace-graph-relations-clear:hover { background: var(--surface-hover); color: var(--ink); }
+
+.workspace-graph-details .workspace-graph-relations-status,
+.workspace-graph-details .workspace-graph-relations-empty {
+  margin-top: 6px;
+  color: var(--ink-muted);
+  font-size: 11.5px;
+}
+
+/* The rail is drawn per element (rows, more, the node, the outgoing header)
+   in SVG, so each stretch can take the colour and dash of the relation that
+   owns it and stay continuous at any height. Branches curve into the rail:
+   incoming ones merge 24px below a row's top, outgoing ones split 8px below
+   it; the branch, node cue and name share the 16px centre line. */
+.workspace-graph-relation-flow {
+  --flow-ink: var(--graph-node-context, #7c3aed);
+  margin-top: 6px;
+}
+
+.workspace-graph-relation-flow[data-node-kind="library"] { --flow-ink: var(--graph-node-library, #0f9f8f); }
+.workspace-graph-relation-flow[data-node-kind="cluster"] { --flow-ink: var(--graph-node-folder, #64748b); }
+
+.workspace-graph-flow-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace-graph-flow-row,
+.workspace-graph-flow-hub,
+.workspace-graph-flow-head,
+.workspace-graph-flow-more {
+  position: relative;
+}
+
+.workspace-graph-flow-rail,
+.workspace-graph-flow-rail-arrow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.workspace-graph-flow-rail { height: 100%; }
+.workspace-graph-flow-rail-arrow { top: calc(50% - 4px); }
+
+/* Same strokes as the map: solid link, dashed citation (4/3 at list size). */
+.workspace-graph-flow-stroke {
+  fill: none;
+  stroke: var(--graph-edge-link, #64748b);
+  stroke-width: 2;
+}
+
+.workspace-graph-flow-stroke[data-visual="citation"] {
+  stroke: var(--graph-edge-citation, #0f9f8f);
+  stroke-dasharray: 4 3;
+}
+
+.workspace-graph-flow-stroke[data-visual="other"] {
+  stroke: var(--ink-muted);
+  stroke-dasharray: 2 2;
+}
+
+.workspace-graph-flow-arrow { fill: var(--graph-edge-link, #64748b); }
+.workspace-graph-flow-arrow[data-visual="citation"] { fill: var(--graph-edge-citation, #0f9f8f); }
+.workspace-graph-flow-arrow[data-visual="other"] { fill: var(--ink-muted); }
+
+.workspace-graph-flow-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 4px;
+  padding: 6px 0;
+}
+
+.workspace-graph-flow-row + .workspace-graph-flow-row::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 32px;
+  border-top: 1px solid var(--border);
+}
+
+.workspace-graph-flow-select {
+  display: grid;
+  grid-column: 2;
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-graph-flow-select:hover { background: var(--surface-hover); }
+
+.workspace-graph-flow-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 20px;
+}
+
+.workspace-graph-flow-name strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-graph-flow-row .workspace-graph-open-link { grid-column: 3; align-self: center; }
+
+.workspace-graph-flow-head .workspace-graph-fold-head { padding-left: 24px; }
+.workspace-graph-flow-more { padding-left: 32px; }
+
+.workspace-graph-flow-hub {
+  display: flex;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.workspace-graph-flow-hub-pill {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  margin-left: 2px;
+  padding: 4px 10px 4px 5px;
+  border: 2px solid var(--flow-ink);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--flow-ink) 10%, var(--surface));
+  font-size: 12.5px;
+}
+
+.workspace-graph-flow-hub-pill strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-graph-flow-self {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--flow-ink);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+/* A selected relation: source, the map stroke with its arrow, target. */
+.workspace-graph-relation-ends { display: grid; margin-top: 6px; }
+
+.workspace-graph-relation-end-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 4px;
+  row-gap: 2px;
+  padding: 2px 0 2px 2px;
+}
+
+.workspace-graph-relation-end-row > :not(.workspace-graph-open-link) { grid-column: 1; }
+.workspace-graph-relation-role { padding-left: 16px; color: var(--ink-muted); font-size: 11px; font-weight: 650; }
+.workspace-graph-relation-end-row .workspace-graph-row-meta { padding-left: 16px; }
+.workspace-graph-relation-end-row .workspace-graph-open-link { grid-row: 1 / span 3; grid-column: 2; }
+
+.workspace-graph-relation-ends-stroke {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  padding-left: 6px;
+}
+
+.workspace-graph-relation-ends-stroke .workspace-graph-relation-stroke { height: 100%; margin: 0; }
+
+@media screen and (max-width: 640px) {
+  .workspace-graph-sidebar .workspace-graph-open-link {
+    width: 44px;
+    min-height: 44px;
+    height: 44px;
+    padding-top: 14px;
+  }
+
+  .workspace-graph-fold-head,
+  .workspace-graph-relations-search input { min-height: 44px; }
+}
+
 .workspace-graph-canvas-panel {
   position: relative;
   height: 100%;
@@ -2887,6 +3421,29 @@ p.workspace-graph-list-window-hint {
     border: 1px solid CanvasText;
     forced-color-adjust: none;
   }
+
+  /* Shape and dash keep their meaning when colours are forced. */
+  .workspace-graph-node-cue.is-inline {
+    background: CanvasText;
+    forced-color-adjust: none;
+  }
+
+  .workspace-graph-chip { border-color: CanvasText; }
+
+  .workspace-graph-edge-cue[data-visual],
+  .workspace-graph-relation-stroke[data-visual] {
+    --edge-ink: CanvasText;
+    forced-color-adjust: none;
+  }
+
+  /* Text keeps forced colours; only the rail graphics opt out (dashes stay). */
+  .workspace-graph-relation-flow { --flow-ink: CanvasText; }
+  .workspace-graph-flow-rail,
+  .workspace-graph-flow-rail-arrow { forced-color-adjust: none; }
+  .workspace-graph-flow-stroke[data-visual] { stroke: CanvasText; }
+  .workspace-graph-flow-arrow[data-visual] { fill: CanvasText; }
+
+  .workspace-graph-list-select[aria-pressed="true"] { outline: 3px solid Highlight; }
 
   .workspace-graph-folder-controls button[aria-pressed="true"],
   .workspace-graph-folder-toggle[aria-pressed="true"],

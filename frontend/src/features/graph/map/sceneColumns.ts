@@ -88,19 +88,30 @@ function nodeKind(node: WorkspaceGraphNode): number {
     : node.entity_kind === "agent" ? WORKSPACE_MAP_NODE_KIND.agent : WORKSPACE_MAP_NODE_KIND.library;
 }
 
-function relationKind(kind: string): number | null {
+export type WorkspaceRelationVisual = keyof typeof WORKSPACE_MAP_EDGE_KIND;
+
+/**
+ * The one relation kind -> stroke mapping. The map and the sidebar chips
+ * both read it, so a new kind is added here only.
+ */
+export function workspaceRelationVisual(kind: string): WorkspaceRelationVisual | null {
   switch (kind) {
     case "wikilink":
-      return WORKSPACE_MAP_EDGE_KIND.link;
+      return "link";
     case "citation_page":
     case "citation_source":
     case "citation_agent":
     case "ask_citation":
-      return WORKSPACE_MAP_EDGE_KIND.citation;
+      return "citation";
     default:
       // Map's relation layout omits co-access and membership strokes.
       return null;
   }
+}
+
+function relationKind(kind: string): number | null {
+  const visual = workspaceRelationVisual(kind);
+  return visual === null ? null : WORKSPACE_MAP_EDGE_KIND[visual];
 }
 
 function positiveCount(count: number): number | null {

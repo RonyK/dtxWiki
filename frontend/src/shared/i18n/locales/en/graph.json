@@ -660,8 +660,7 @@
       "unknown": "Server-defined actor-visible metric"
     },
     "list": {
-      "title": "Searchable relationship list",
-      "description": "{{nodes}} nodes · {{edges}} edges. This is the operable equivalent of the canvas.",
+      "title": "Map items",
       "virtualKeyboardHint": "{{count}} entries. Use Up/Down, Page Up/Down, Home, or End to move through this list.",
       "documents": "Documents and clusters",
       "relationships": "Relationships",
@@ -678,7 +677,29 @@
       "combinedMetric": "{{references}} visible referring documents · {{evidence}} evidence relationships",
       "uniformMetric": "Uniform document size",
       "relationCount_one": "{{count}} relationship",
-      "relationCount_other": "{{count}} relationships"
+      "relationCount_other": "{{count}} relationships",
+      "hint": "Type in “Find in visible map” above the map to list matching documents and relationships here. Open a section to browse without searching, 10 at a time.",
+      "status": "“{{query}}”: {{nodes}} documents or clusters · {{relations}} relationships",
+      "noMatch": "Nothing in the visible map matches “{{query}}”. Hidden documents are not searched; check View › Show unlinked documents or Refine.",
+      "noDocuments": "No matching documents or clusters.",
+      "noRelationships": "No matching relationships.",
+      "groups": {
+        "both": "Between matches",
+        "kind": "Kind name matches",
+        "outgoing": "Matches → other documents",
+        "incoming": "Other documents → matches"
+      },
+      "more": "Show {{count}} more ({{remaining}} left)",
+      "openDocument": "Open document: {{label}}",
+      "expandCluster": "Expand cluster: {{label}}",
+      "relationName": "{{source}} to {{target}}, {{kind}}",
+      "relationNameUndirected": "{{source}} and {{target}}, {{kind}}",
+      "clusterMeta": "{{members}} members · {{relations}} relations",
+      "referenceMetricShort_one": "{{count}} reference",
+      "referenceMetricShort_other": "{{count}} references",
+      "evidenceMetricShort_one": "{{count}} evidence",
+      "evidenceMetricShort_other": "{{count}} evidence",
+      "combinedMetricShort": "{{references}} references · {{evidence}} evidence"
     },
     "details": {
       "title": "Details",
@@ -704,7 +725,46 @@
       "centerMap": "Center on map",
       "centerAction": "Center",
       "explore": "Explore neighborhood",
-      "exploreAction": "Explore"
+      "exploreAction": "Explore",
+      "sourceRoleLink": "From · links",
+      "sourceRoleCitation": "From · cites",
+      "targetRoleLink": "To · linked",
+      "targetRoleCitation": "To · cited"
+    },
+    "relations": {
+      "title": "Relationships",
+      "none": "No relationships in the visible map.",
+      "searchDocument": "Find in this document's relationships",
+      "searchCluster": "Find in this cluster's relationships",
+      "searchPlaceholder": "Name, folder or kind",
+      "clearSearch": "Clear relationship search",
+      "searchStatus": "{{shown}} of {{total}} match",
+      "noMatch": "No relationships match “{{query}}”.",
+      "incoming": "Incoming",
+      "outgoing": "Outgoing",
+      "incomingNoteDocument": "to this document",
+      "incomingNoteCluster": "to this cluster",
+      "outgoingNoteDocument": "from this document",
+      "outgoingNoteCluster": "from this cluster",
+      "selfDocument": "This document",
+      "selfCluster": "This cluster"
+    },
+    "chips": {
+      "context": "Context",
+      "library": "Library",
+      "cluster": "Cluster",
+      "folder_cluster": "Folder",
+      "link_cluster": "Cluster",
+      "other_cluster": "Other",
+      "wikilink": "Link",
+      "citation_page": "Citation",
+      "citation_source": "Source",
+      "ask_citation": "Evidence",
+      "line": {
+        "link": "Links (solid line)",
+        "citation": "Citations and sources (dashed line)",
+        "other": "Other relationships"
+      }
     },
     "drawer": {
       "close": "Close Refine data",

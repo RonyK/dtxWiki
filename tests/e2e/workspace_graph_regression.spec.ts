@@ -50,26 +50,26 @@ test.describe("Workspace Knowledge Map real-route regression", () => {
       expectKnowledgeRelations(initialScene, "combined");
       expect(initialScene.completeness).toBe("complete");
       await expect(page.getByRole("combobox", { name: "Lens" })).toHaveValue("combined");
-      await expect(page.getByTestId("workspace-graph-node-list").locator(":scope > li"))
-        .toHaveCount(KNOWLEDGE_DOCUMENT_COUNT);
-      await expect(page.getByTestId("workspace-graph-edge-list").locator(":scope > li"))
-        .toHaveCount(KNOWLEDGE_COMBINED_RELATION_COUNT);
+      await expect(page.getByTestId("workspace-graph-node-list"))
+        .toHaveAttribute("data-total-count", String(KNOWLEDGE_DOCUMENT_COUNT));
+      await expect(page.getByTestId("workspace-graph-edge-list"))
+        .toHaveAttribute("data-total-count", String(KNOWLEDGE_COMBINED_RELATION_COUNT));
       await expect(page.getByRole("button", { name: /^Unlinked \d+$/ })).toHaveCount(0);
 
       // Combined connects all eight Library sources. Preserve the original
       // orphan regression by explicitly choosing Links, not by hiding citations.
       await selectKnowledgeLinks(page);
 
-      await expect(page.getByTestId("workspace-graph-node-list").locator(":scope > li"))
-        .toHaveCount(32);
+      await expect(page.getByTestId("workspace-graph-node-list"))
+        .toHaveAttribute("data-total-count", String(32));
       await expect(page.getByRole("button", { name: /^Unlinked \d+$/ }))
         .toHaveAttribute("title", "8 unlinked documents hidden from this map.");
       await page.getByRole("button", { name: /^Unlinked \d+$/ }).click();
 
-      await expect(page.getByTestId("workspace-graph-node-list").locator(":scope > li"))
-        .toHaveCount(40);
-      await expect(page.getByTestId("workspace-graph-edge-list").locator(":scope > li"))
-        .toHaveCount(40);
+      await expect(page.getByTestId("workspace-graph-node-list"))
+        .toHaveAttribute("data-total-count", String(40));
+      await expect(page.getByTestId("workspace-graph-edge-list"))
+        .toHaveAttribute("data-total-count", String(40));
       await expectRendererReady(page);
       // The worker's community attribute is set before Cosmos's scheduled
       // camera fit and paint. Capture the settled WebGL frame, not that gap.
@@ -141,8 +141,8 @@ test.describe("Workspace Knowledge Map real-route regression", () => {
       await expect(page.locator(".workspace-graph-notice").filter({
         hasText: "Full comparison projection is not available yet.",
       })).toBeVisible();
-      await expect(page.getByTestId("workspace-graph-edge-list").locator(":scope > li"))
-        .toHaveCount(48);
+      await expect(page.getByTestId("workspace-graph-edge-list"))
+        .toHaveAttribute("data-total-count", String(48));
       await captureViewport(page, testInfo, "knowledge-40-desktop-compare-partial.png");
 
       expect(diagnostics.pageErrors).toEqual([]);
@@ -203,17 +203,17 @@ test.describe("Workspace Knowledge Map real-route regression", () => {
       const initialScene = await openKnowledgeMap(page);
       expectKnowledgeRelations(initialScene, "combined");
       await expect(page.getByRole("combobox", { name: "Lens" })).toHaveValue("combined");
-      await expect(page.getByTestId("workspace-graph-node-list").locator(":scope > li"))
-        .toHaveCount(KNOWLEDGE_DOCUMENT_COUNT);
+      await expect(page.getByTestId("workspace-graph-node-list"))
+        .toHaveAttribute("data-total-count", String(KNOWLEDGE_DOCUMENT_COUNT));
       await expect(page.getByRole("button", { name: /^Unlinked \d+$/ })).toHaveCount(0);
       await selectKnowledgeLinks(page);
-      await expect(page.getByTestId("workspace-graph-node-list").locator(":scope > li"))
-        .toHaveCount(32);
+      await expect(page.getByTestId("workspace-graph-node-list"))
+        .toHaveAttribute("data-total-count", String(32));
       await expect(page.getByRole("button", { name: /^Unlinked \d+$/ }))
         .toHaveAttribute("title", "8 unlinked documents hidden from this map.");
       await page.getByRole("button", { name: /^Unlinked \d+$/ }).click();
-      await expect(page.getByTestId("workspace-graph-node-list").locator(":scope > li"))
-        .toHaveCount(40);
+      await expect(page.getByTestId("workspace-graph-node-list"))
+        .toHaveAttribute("data-total-count", String(40));
       // Phones open on the map; the list waits in the Map details sheet.
       await expectRendererReady(page);
       await captureViewport(page, testInfo, "knowledge-40-mobile-map-first.png");
@@ -466,11 +466,14 @@ async function expectRendererReady(scope: Page | ReturnType<Page["getByRole"]>) 
 }
 
 async function selectKnowledgeDocument00(page: Page) {
-  const nodeButton = page.getByTestId("workspace-graph-node-list")
-    .getByRole("button")
-    .filter({ hasText: "Knowledge Document 00" })
-    .first();
-  await nodeButton.click();
+  // Browse the folded list a page at a time; keyboard focus stays in the sidebar.
+  const list = page.getByTestId("workspace-graph-node-list");
+  const head = list.locator(".workspace-graph-fold-head").first();
+  if (await head.getAttribute("aria-expanded") === "false") await head.click();
+  const row = list.locator("li").filter({ hasText: "Knowledge Document 00" }).first();
+  const more = list.locator(".workspace-graph-more");
+  while (!await row.count() && await more.count()) await more.click();
+  await row.locator("button.workspace-graph-list-select").click();
   await expect(page.locator(".workspace-graph-details").getByRole("heading", {
     name: "Knowledge Document 00",
     exact: true,

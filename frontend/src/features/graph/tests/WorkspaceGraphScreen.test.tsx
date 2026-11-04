@@ -203,6 +203,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     expect(queryWorkspaceGraphMock.mock.calls[0][1].budget).toEqual({ documents: 2_000, relations: 6_000 });
     await userEvent.click(screen.getByText("View", { selector: "summary" }));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Map node limit" }), "10k");
@@ -211,6 +212,7 @@ describe("WorkspaceGraphScreen", () => {
       lens: "combined", budget: { documents: 10_000, relations: 100_000 },
     });
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     expect(screen.getByRole("combobox", { name: "Map node limit" })).toHaveValue("10k");
   });
 
@@ -219,6 +221,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     await userEvent.click(screen.getByText("View", { selector: "summary" }));
     expect(screen.queryByRole("combobox", { name: "Map node limit" })).not.toBeInTheDocument();
     expect(screen.getByText("Mobile and unrecognized devices use a maximum of 2,000 map nodes.")).toBeVisible();
@@ -231,9 +234,11 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     await userEvent.click(screen.getByText("View", { selector: "summary" }));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Map node limit" }), "10k");
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     act(() => { mobileLayout = true; for (const listener of mobileMediaListeners) listener(); });
     expect(profile).toHaveBeenCalledTimes(1);
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2);
@@ -249,6 +254,7 @@ describe("WorkspaceGraphScreen", () => {
       .mockResolvedValue(baseScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     const oldSelect = canvasSelectCallbackMock.mock.calls.at(-1)![0];
     const oldPin = canvasPinCallbackMock.mock.calls.at(-1)![0];
     await userEvent.click(screen.getByText("View", { selector: "summary" }));
@@ -256,6 +262,7 @@ describe("WorkspaceGraphScreen", () => {
     const largeSignal = queryWorkspaceGraphMock.mock.calls[1][2].signal as AbortSignal;
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Map node limit" }), "2k");
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     const late = baseScene();
     late.nodes = late.nodes.map((node) => ({ ...node, label: "Late PC response" }));
     await act(async () => { resolveLarge(late); oldSelect("context:alpha"); oldPin("context:alpha", { x: 500, y: 500 }); });
@@ -274,7 +281,7 @@ describe("WorkspaceGraphScreen", () => {
     renderScreen();
     await screen.findByText(i18n.t("graph:workspaceGraph.ui.unavailable"));
     expect(screen.queryByTestId("workspace-graph-canvas")).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Searchable relationship list" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Map items" })).not.toBeInTheDocument();
     expect(canvasColumnsMock).not.toHaveBeenCalled();
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
   });
@@ -284,12 +291,14 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     act(() => { canvasPinCallbackMock.mock.calls.at(-1)![0]("context:alpha", { x: 123, y: 456 }); });
     act(() => { canvasViewportCallbackMock.mock.calls.at(-1)![0]({ zoom: 2, pan: { x: 25, y: 50 } }); });
     await waitFor(() => expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-viewport", JSON.stringify({ zoom: 2, pan: { x: 25, y: 50 } })));
     await userEvent.click(screen.getByText("View", { selector: "summary" }));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Map node limit" }), "10k");
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     // 2K layout coordinates mean nothing to the native 10K solver.
     expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-pinned-positions", "{}");
     expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-viewport", "null");
@@ -298,6 +307,7 @@ describe("WorkspaceGraphScreen", () => {
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Map node limit" }), "2k");
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(3));
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-pinned-positions", JSON.stringify({ "context:alpha": { x: 123, y: 456 } }));
     expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-viewport", JSON.stringify({ zoom: 2, pan: { x: 25, y: 50 } }));
   });
@@ -307,15 +317,18 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     const view = renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     await userEvent.click(screen.getByText("View", { selector: "summary" }));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Map node limit" }), "10k");
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     workspaceState.selectedWorkspace = { id: "workspace-one", role: "viewer" };
     view.rerender(<MemoryRouter><WorkspaceGraphScreen /></MemoryRouter>);
     await waitFor(() => expect(queryWorkspaceGraphMock.mock.calls.at(-1)?.[1].budget.documents).toBe(2_000));
     view.unmount();
     renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     expect(queryWorkspaceGraphMock.mock.calls.at(-1)?.[1].budget).toEqual({ documents: 2_000, relations: 6_000 });
   });
 
@@ -324,6 +337,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     await userEvent.click(screen.getByText("View", { selector: "summary" }));
     let queued: FrameRequestCallback | undefined;
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => { queued = callback; return 700; });
@@ -333,6 +347,7 @@ describe("WorkspaceGraphScreen", () => {
     expect(screen.getByTestId("workspace-graph-canvas")).not.toHaveAttribute("data-viewport", JSON.stringify(viewport));
     fireEvent.change(screen.getByRole("combobox", { name: "Map node limit" }), { target: { value: "10k" } });
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     // The 10K scene is not framed by a 2K camera; the flush kept it for 2K.
     expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-viewport", "null");
     expect(cancelFrame).toHaveBeenCalledWith(700);
@@ -342,6 +357,7 @@ describe("WorkspaceGraphScreen", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Map node limit" }), { target: { value: "2k" } });
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(3));
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-viewport", JSON.stringify(viewport));
   });
 
@@ -372,6 +388,7 @@ describe("WorkspaceGraphScreen", () => {
     };
     const first = renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     await capture(camera2k, pin2k);
     await chooseScale("10k");
     expectCamera(null, {});
@@ -383,6 +400,7 @@ describe("WorkspaceGraphScreen", () => {
     first.unmount();
     renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     await waitFor(() => expect(canvas()).toHaveAttribute("data-budget", "2000"));
     expectCamera(camera2k, { "context:alpha": pin2k });
     await chooseScale("10k");
@@ -399,6 +417,7 @@ describe("WorkspaceGraphScreen", () => {
         <Route path="/pages/*" element={<p data-testid="document-destination">Document destination</p>} />
       </Routes></MemoryRouter>);
       await screen.findByTestId("workspace-graph-canvas");
+      openMapList();
       const nodeList = screen.getByTestId("workspace-graph-node-list");
       const row = nodeList.querySelector('li[data-graph-node-id="context:alpha"]')!;
       vi.useFakeTimers();
@@ -413,7 +432,7 @@ describe("WorkspaceGraphScreen", () => {
         const key = `${workspaceGraphStorageScope("workspace-one", "actor-one")}latest`;
         expect(window.sessionStorage.getItem(key) ?? "").not.toContain('"zoom":3');
         const link = entry === "list-open"
-          ? within(row as HTMLElement).getByRole("link", { name: "Open" })
+          ? within(row as HTMLElement).getByRole("link", { name: "Open document: Alpha" })
           : within(screen.getByRole("region", { name: "Details" }))
             .getByRole("link", { name: entry === "details-open" ? "Open" : "Explore" });
         await act(async () => { fireEvent.click(link); });
@@ -441,6 +460,7 @@ describe("WorkspaceGraphScreen", () => {
       <Route path="/context" element={<p data-testid="document-destination">Document destination</p>} />
     </Routes></MemoryRouter>);
     await screen.findByTestId("workspace-graph-node-list");
+    openMapList();
     if (mobile) await userEvent.click(screen.getByRole("button", { name: "Open canvas fullscreen" }));
     const scope = mobile ? screen.getByRole("dialog", { name: "Knowledge Map canvas" }) : document;
     await userEvent.click(within(scope as HTMLElement).getByRole("button", { name: "Folder context" }));
@@ -472,6 +492,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     const row = screen.getByTestId("workspace-graph-node-list")
       .querySelector('li[data-graph-node-id="context:alpha"]')!;
     fireEvent.click(row.querySelector("button")!);
@@ -499,6 +520,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     fireEvent.click(screen.getByTestId("workspace-graph-node-list")
       .querySelector('li[data-graph-node-id="context:alpha"] button')!);
     const link = within(screen.getByRole("region", { name: "Details" })).getByRole("link", { name: "Open" });
@@ -522,7 +544,8 @@ describe("WorkspaceGraphScreen", () => {
     renderScreen();
 
     expect(screen.getByText("Building Knowledge Map…")).toBeInTheDocument();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
     expect(queryWorkspaceGraphMock.mock.calls[0]?.[1]).toMatchObject({
       schema_version: "workspace-graph-overview.v1",
@@ -562,13 +585,16 @@ describe("WorkspaceGraphScreen", () => {
       "data-search-matches", "context:alpha",
     );
     expect(document.querySelectorAll("[data-graph-node-id]")).toHaveLength(1);
-    expect(document.querySelectorAll("[data-graph-edge-id]")).toHaveLength(0);
+    // One matching end is enough: the relation is listed by its direction from the match.
+    expect(Array.from(document.querySelectorAll('[data-relation-group="outgoing"] [data-graph-edge-id]'),
+      (row) => row.getAttribute("data-graph-edge-id"))).toEqual(["edge:alpha-cluster"]);
   });
 
   it("keeps one authoritative column object and mounted canvas through matching, no-match and cleared search", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     const canvas = screen.getByTestId("workspace-graph-canvas");
     const initialColumns = canvasColumnsMock.mock.calls.at(-1)?.[0];
     const search = screen.getByRole("searchbox", { name: "Find in visible map" });
@@ -585,6 +611,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-node-list");
+    openMapList();
     const search = screen.getByRole("searchbox", { name: "Find in visible map" });
     fireEvent.change(search, { target: { value: "no matching document" } });
     expect(document.querySelectorAll("[data-graph-node-id]")).toHaveLength(0);
@@ -613,7 +640,8 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(scene);
     try {
       renderScreen();
-      await screen.findByRole("heading", { name: "Searchable relationship list" });
+      await screen.findByRole("heading", { name: "Map items" });
+      openMapList();
       fireEvent.click(within(screen.getByTestId("workspace-graph-node-list"))
         .getByRole("button", { name: /^Alpha/ }));
       expect(screen.getByRole("heading", { name: "Alpha" })).toBeInTheDocument();
@@ -639,48 +667,88 @@ describe("WorkspaceGraphScreen", () => {
     }
   });
 
-  it("keeps a synthetic 2k/4.7k Map list DOM bounded and keyboard-operable", async () => {
+  it("keeps a synthetic 2k/4.7k Map list folded without a search and pages it ten rows at a time", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(largeScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
 
     const nodeList = screen.getByTestId("workspace-graph-node-list");
     const edgeList = screen.getByTestId("workspace-graph-edge-list");
     expect(nodeList).toHaveAttribute("data-total-count", "2000");
     expect(edgeList).toHaveAttribute("data-total-count", "4700");
-    expect(nodeList.querySelectorAll("li[data-graph-node-id]").length).toBeLessThan(30);
-    expect(edgeList.querySelectorAll("li[data-graph-edge-id]").length).toBeLessThan(30);
-    expect(screen.getByText(/2000 entries\. Use Up\/Down/)).toBeInTheDocument();
+    expect(document.querySelectorAll("li[data-graph-node-id], li[data-graph-edge-id]")).toHaveLength(0);
+    openMapList();
+    expect(nodeList.querySelectorAll("li[data-graph-node-id]")).toHaveLength(10);
+    expect(edgeList.querySelectorAll("li[data-graph-edge-id]")).toHaveLength(10);
+    fireEvent.click(within(nodeList).getByRole("button", { name: "Show 10 more (1,990 left)" }));
+    expect(nodeList).toHaveAttribute("data-shown-count", "20");
 
-    nodeList.scrollTop = 2_000 * 64;
-    fireEvent.scroll(nodeList);
-    const lastNode = within(nodeList).getByRole("button", { name: /Knowledge Document 1999/ });
-    expect(lastNode.closest("li")).toHaveAttribute("aria-posinset", "2000");
-    fireEvent.click(lastNode);
-    expect(screen.getByRole("heading", { name: "Knowledge Document 1999" })).toBeInTheDocument();
+    fireEvent.click(within(nodeList).getByRole("button", { name: /^Knowledge Document 0019/ }));
+    expect(screen.getByRole("heading", { name: "Knowledge Document 0019" })).toBeInTheDocument();
     expect(screen.getByText(/A selection is active/)).toBeInTheDocument();
-    expect(canvasCenterOnMock).toHaveBeenCalledExactlyOnceWith("context:1999");
+    expect(canvasCenterOnMock).toHaveBeenCalledExactlyOnceWith("context:0019");
     fireEvent.click(within(screen.getByRole("region", { name: "Details" })).getByRole("button", { name: "Center" }));
     expect(canvasCenterOnMock).toHaveBeenCalledTimes(2);
     fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
-    expect(screen.queryByRole("heading", { name: "Knowledge Document 1999" })).not.toBeInTheDocument();
-    lastNode.focus();
-    fireEvent.keyDown(lastNode, { key: "Home" });
-    await waitFor(() => expect(within(nodeList).getByRole("button", {
-      name: /Knowledge Document 0000/,
-    })).toHaveFocus());
+    expect(screen.queryByRole("heading", { name: "Knowledge Document 0019" })).not.toBeInTheDocument();
+  }, 30_000);
 
-    edgeList.scrollTop = 4_700 * 64;
-    fireEvent.scroll(edgeList);
-    expect(edgeList.querySelector('li[data-graph-edge-id="edge:04699"]')).not.toBeNull();
-    expect(nodeList.querySelectorAll("li[data-graph-node-id]").length).toBeLessThan(30);
-    expect(edgeList.querySelectorAll("li[data-graph-edge-id]").length).toBeLessThan(30);
+  it("lists toolbar matches by direction and finds within the selected document's relations", async () => {
+    const payload = largeScene();
+    // Knowledge Document 0001 links to 0002 and 0148, cites 0075, and is linked from 0000 and 1927.
+    payload.edges[2001] = { ...payload.edges[2001], relation_kind: "citation_page", layer: "evidence" };
+    queryWorkspaceGraphMock.mockResolvedValue(payload);
+    renderScreen();
+    await screen.findByRole("heading", { name: "Map items" });
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find in visible map" }), { target: { value: "Document 0001" } });
+
+    const nodeList = screen.getByTestId("workspace-graph-node-list");
+    const edgeList = screen.getByTestId("workspace-graph-edge-list");
+    expect(screen.getByText("“Document 0001”: 1 documents or clusters · 5 relationships")).toBeInTheDocument();
+    expect([nodeList.dataset.totalCount, edgeList.dataset.totalCount]).toEqual(["1", "5"]);
+    const groupHead = (name: RegExp) => within(edgeList).getByRole("button", { name });
+    expect(groupHead(/^Matches → other documents/)).toHaveAttribute("aria-expanded", "true");
+    expect(groupHead(/^Other documents → matches/)).toHaveAttribute("aria-expanded", "false");
+    expect(edgeList.querySelectorAll('[data-relation-group="outgoing"] li')).toHaveLength(3);
+    fireEvent.click(groupHead(/^Relationships/));
+    expect(edgeList.querySelectorAll("li")).toHaveLength(0);
+    expect(edgeList).toHaveAttribute("data-total-count", "5");
+    expect(within(nodeList).getByRole("link", { name: "Open document: Knowledge Document 0001" }))
+      .toHaveAttribute("href", "/pages/knowledge document 0001");
+
+    fireEvent.click(within(nodeList).getByRole("button", { name: /^Knowledge Document 0001/ }));
+    const details = screen.getByRole("region", { name: "Details" });
+    const rows = (direction: string) => within(details).getByRole("list", { name: direction }).querySelectorAll("li");
+    expect([rows("Incoming").length, rows("Outgoing").length]).toEqual([2, 3]);
+    // A rail stretch takes the stroke of the relation it exists for: below the
+    // document, from the previous split down to the relation's own split.
+    const rail = (direction: string) => Array.from(rows(direction), (row) => [
+      row.querySelector('[data-segment="above"]')?.getAttribute("data-visual") ?? null,
+      row.querySelector('[data-segment="below"]')?.getAttribute("data-visual") ?? null,
+    ]);
+    expect(rail("Outgoing")).toEqual([["link", "citation"], ["citation", "link"], ["link", null]]);
+    expect(rail("Incoming")).toEqual([[null, "link"], ["link", "link"]]);
+    const relationSearch = within(details).getByRole("searchbox", { name: "Find in this document's relationships" });
+    fireEvent.change(relationSearch, { target: { value: "citation" } });
+    expect(within(details).getByText("1 of 5 match")).toBeInTheDocument();
+    expect(within(details).getByRole("button", {
+      name: "Knowledge Document 0001 to Knowledge Document 0075, Page citation",
+    })).toBeInTheDocument();
+    expect(rows("Incoming")).toHaveLength(0);
+    // Escape clears the relation search first and keeps the selection.
+    fireEvent.keyDown(relationSearch, { key: "Escape" });
+    expect(relationSearch).toHaveValue("");
+    expect(screen.getByRole("heading", { name: "Knowledge Document 0001" })).toBeInTheDocument();
+    fireEvent.click(within(details).getByRole("button", { name: /^Knowledge Document 0000 to Knowledge Document 0001/ }));
+    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-selected-id", "context:0000");
+    expect(canvasCenterOnMock).toHaveBeenLastCalledWith("context:0000");
   }, 30_000);
 
   it("emphasizes focused node, action and relationship rows without selecting or centering", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     const canvas = screen.getByTestId("workspace-graph-canvas");
     const node = within(screen.getByTestId("workspace-graph-node-list")).getByRole("button", { name: /^Alpha/ });
     act(() => node.focus());
@@ -690,7 +758,7 @@ describe("WorkspaceGraphScreen", () => {
     act(() => open.focus());
     expect(canvas).toHaveAttribute("data-focused-id", "context:alpha");
     fireEvent.click(node);
-    const edge = within(screen.getByTestId("workspace-graph-edge-list")).getByRole("button");
+    const edge = within(screen.getByTestId("workspace-graph-edge-list")).getByRole("button", { name: /^Alpha to Related documents/ });
     act(() => edge.focus());
     expect(canvas).toHaveAttribute("data-focused-id", "edge:alpha-cluster");
     expect(canvas).toHaveAttribute("data-selected-id", "context:alpha");
@@ -701,94 +769,11 @@ describe("WorkspaceGraphScreen", () => {
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
   });
 
-  it.each([false, true])("bridges virtual node and edge keyboard navigation (mobile=%s) without changing selection", async (mobile) => {
-    mobileLayout = mobile;
-    queryWorkspaceGraphMock.mockResolvedValue(largeScene());
-    renderScreen();
-    await screen.findByTestId("workspace-graph-node-list");
-    // The mobile sheet keeps the same bounded keyboard-operable lists.
-    if (mobile) await userEvent.click(screen.getByRole("button", { name: "Open Map details sheet" }));
-    for (const [kind, count] of [["node", 2000], ["edge", 4700]] as const) {
-      const list = screen.getByTestId(`workspace-graph-${kind}-list`);
-      let row = list.querySelector<HTMLButtonElement>("button[data-list-index='0']")!;
-      act(() => row.focus());
-      for (const [key, next] of [["ArrowDown", 1], ["PageDown", mobile ? 4 : 8], ["End", count - 1], ["ArrowUp", count - 2], ["PageUp", count - 2 - (mobile ? 3 : 7)], ["Home", 0]] as const) {
-        fireEvent.keyDown(row, { key });
-        await waitFor(() => expect(list.querySelector(`button[data-list-index='${next}']`)).toHaveFocus());
-        row = document.activeElement as HTMLButtonElement;
-        const id = row.closest("li")!.getAttribute(`data-graph-${kind}-id`)!;
-        if (!mobile) expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-focused-id", id);
-        expect(row).toHaveAttribute("aria-pressed", "false");
-      }
-      expect(list.querySelectorAll(`li[data-graph-${kind}-id]`).length).toBeLessThan(30);
-    }
-    expect(canvasCenterOnMock).not.toHaveBeenCalled();
-    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-  }, 30_000);
-
-  it("discards focus when a virtual row unmounts and does not revive it on scroll back", async () => {
-    queryWorkspaceGraphMock.mockResolvedValue(largeScene());
-    renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
-    const list = screen.getByTestId("workspace-graph-node-list");
-    act(() => list.querySelector<HTMLButtonElement>("button")!.focus());
-    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-focused-id", "context:0000");
-    list.scrollTop = 1500 * 64;
-    fireEvent.scroll(list);
-    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-focused-id", "");
-    list.scrollTop = 0;
-    fireEvent.scroll(list);
-    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-focused-id", "");
-    expect(canvasCenterOnMock).not.toHaveBeenCalled();
-  });
-
-  it.each([false, true])("keeps a shortened virtual list populated after a near-bottom scroll (mobile=%s)", async (mobile) => {
-    mobileLayout = mobile;
-    const payload = largeScene();
-    payload.nodes = payload.nodes.map((node, index) => ({
-      ...node,
-      label: `${index < 1_100 ? "Matching" : "Other"} ${node.label}`,
-    }));
-    queryWorkspaceGraphMock.mockResolvedValue(payload);
-    renderScreen();
-    await screen.findByTestId("workspace-graph-node-list");
-    if (mobile) await userEvent.click(screen.getByRole("button", { name: "Open Map details sheet" }));
-    const list = screen.getByTestId("workspace-graph-node-list");
-    const rowHeight = mobile ? 112 : 64;
-    const viewportHeight = mobile ? 336 : 448;
-    list.scrollTop = 1_990 * rowHeight;
-    fireEvent.scroll(list);
-    expect(list.querySelector("li[data-graph-node-id]")).not.toBeNull();
-
-    fireEvent.change(screen.getByRole("searchbox", { name: "Find in visible map" }), {
-      target: { value: "Matching" },
-    });
-    await waitFor(() => expect(list).toHaveAttribute("data-total-count", "1100"));
-    expect(list.querySelectorAll("li[data-graph-node-id]").length).toBeGreaterThan(0);
-    expect(list.querySelectorAll("li[data-graph-node-id]").length).toBeLessThan(30);
-    expect(list.scrollTop).toBe(1_100 * rowHeight - viewportHeight);
-    expect(within(list).getByRole("button", { name: /Matching Knowledge Document 1099/ }))
-      .toHaveAttribute("data-list-index", "1099");
-    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-    expect(canvasCenterOnMock).not.toHaveBeenCalled();
-
-    fireEvent.change(screen.getByRole("searchbox", { name: "Find in visible map" }), {
-      target: { value: "missing document" },
-    });
-    await waitFor(() => expect(list).toHaveAttribute("data-total-count", "0"));
-    expect(list.scrollTop).toBe(0);
-    fireEvent.change(screen.getByRole("searchbox", { name: "Find in visible map" }), {
-      target: { value: "Matching" },
-    });
-    await waitFor(() => expect(list).toHaveAttribute("data-total-count", "1100"));
-    expect(within(list).getByRole("button", { name: /Matching Knowledge Document 0000/ }))
-      .toHaveAttribute("data-list-index", "0");
-  }, 30_000);
-
   it("discards filtered row focus without losing selection or reviving focus after clearing Find", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     const row = within(screen.getByTestId("workspace-graph-node-list")).getByRole("button", { name: /^Alpha/ });
     act(() => row.focus());
     fireEvent.click(row);
@@ -804,7 +789,8 @@ describe("WorkspaceGraphScreen", () => {
   it.each(["lens", "actor", "workspace", "purge"])("does not carry list focus across %s ownership changes", async (change) => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     const { rerender } = renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     act(() => within(screen.getByTestId("workspace-graph-node-list")).getByRole("button", { name: /^Alpha/ }).focus());
     expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-focused-id", "context:alpha");
     if (change === "lens") fireEvent.change(screen.getByRole("combobox", { name: "Lens" }), { target: { value: "links" } });
@@ -814,32 +800,36 @@ describe("WorkspaceGraphScreen", () => {
       if (change === "purge") clearWorkspaceGraphStorage();
       rerender(graphTree());
     }
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-focused-id", "");
   });
 
   it("enables the default Combined lens and its union metrics through lens changes", async () => {
     queryWorkspaceGraphMock.mockResolvedValue({ ...baseScene(), metric_basis: "visible_published_links_and_citations.pre_quick.v1" });
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     const lens = screen.getByRole("combobox", { name: "Lens" });
     expect(lens).toHaveValue("combined");
     expect(within(lens).getByRole("option", { name: "Combined" })).toBeEnabled();
     expect(queryWorkspaceGraphMock.mock.calls[0]?.[1]).toMatchObject({ lens: "combined" });
     expect(screen.getByText("Visible published links and citation relationships")).toBeInTheDocument();
-    expect(screen.getByTestId("workspace-graph-node-list")).toHaveTextContent("2 visible referring documents · 0 evidence relationships");
+    expect(screen.getByTestId("workspace-graph-node-list")).toHaveTextContent("2 references · 0 evidence");
     fireEvent.change(lens, { target: { value: "links" } });
     await waitFor(() => expect(queryWorkspaceGraphMock.mock.lastCall?.[1]).toMatchObject({ lens: "links" }));
     fireEvent.change(lens, { target: { value: "combined" } });
     await waitFor(() => expect(queryWorkspaceGraphMock.mock.lastCall?.[1]).toMatchObject({ lens: "combined" }));
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
-    expect(screen.getByTestId("workspace-graph-node-list")).toHaveTextContent("2 visible referring documents · 0 evidence relationships");
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
+    expect(screen.getByTestId("workspace-graph-node-list")).toHaveTextContent("2 references · 0 evidence");
   });
 
   it("preserves a manually scrolled 2k list after selection while other Map UI changes", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(largeScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     const list = screen.getByTestId("workspace-graph-node-list");
     await userEvent.click(within(list).getByRole("button", { name: /Knowledge Document 0000/ }));
     list.scrollTop = 1_500 * 64;
@@ -855,7 +845,8 @@ describe("WorkspaceGraphScreen", () => {
   it("centers a list selection and puts its details above the list, without moving keyboard focus on Escape", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     const row = within(screen.getByTestId("workspace-graph-node-list"))
       .getByRole("button", { name: /^Alpha/ });
     await userEvent.click(row);
@@ -882,6 +873,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-node-list");
+    openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Open Map details sheet" }));
     await userEvent.click(within(screen.getByTestId("workspace-graph-node-list"))
       .getByRole("button", { name: /^Alpha/ }));
@@ -905,6 +897,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     selectMockMapId("context:alpha");
     const card = screen.getByRole("region", { name: "Selection summary" });
     expect(within(card).getByText("Alpha")).toBeInTheDocument();
@@ -922,6 +915,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Hide Map details" }));
     selectMockMapId("context:alpha");
     expect(screen.queryByRole("heading", { name: "Alpha" })).not.toBeInTheDocument();
@@ -935,7 +929,8 @@ describe("WorkspaceGraphScreen", () => {
   it("clears Map selection from a background callback", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     await userEvent.click(within(screen.getByTestId("workspace-graph-node-list"))
       .getByRole("button", { name: /^Alpha/ }));
     fireEvent.click(screen.getByTestId("workspace-graph-canvas"));
@@ -947,6 +942,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-node-list");
+    openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Open Map details sheet" }));
     await userEvent.click(within(screen.getByTestId("workspace-graph-node-list"))
       .getByRole("button", { name: /^Alpha/ }));
@@ -972,7 +968,8 @@ describe("WorkspaceGraphScreen", () => {
     }));
     queryWorkspaceGraphMock.mockResolvedValue(scene);
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     expect(screen.getByTestId("workspace-graph-canvas").getAttribute("data-node-ids"))
       .not.toContain("context:unlinked");
     expect(screen.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "1999");
@@ -1001,7 +998,8 @@ describe("WorkspaceGraphScreen", () => {
     }));
     queryWorkspaceGraphMock.mockResolvedValue(scene);
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Unlinked 1" }));
     fireEvent.change(screen.getByRole("searchbox", { name: "Find in visible map" }), {
       target: { value: "Unlinked document" },
@@ -1021,7 +1019,8 @@ describe("WorkspaceGraphScreen", () => {
   it("keeps one prominent map search and stages published-document search in Refine", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
 
     expect(screen.getByRole("searchbox", { name: "Find in visible map" })).toBeInTheDocument();
     expect(screen.queryByRole("searchbox", { name: "Search published documents" }))
@@ -1066,7 +1065,8 @@ describe("WorkspaceGraphScreen", () => {
   it("edits kinds and quick filters only in Refine, with one Apply and an applied-only summary", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
 
     const summary = screen.getByText(/More data filters/, { selector: "summary" });
     const details = summary.closest("details")!;
@@ -1110,7 +1110,8 @@ describe("WorkspaceGraphScreen", () => {
     async (close) => {
       queryWorkspaceGraphMock.mockResolvedValue(baseScene());
       renderScreen();
-      await screen.findByRole("heading", { name: "Searchable relationship list" });
+      await screen.findByRole("heading", { name: "Map items" });
+      openMapList();
       const trigger = screen.getByRole("button", { name: "Refine" });
       await userEvent.click(trigger);
       let dialog = screen.getByRole("dialog", { name: "Refine data" });
@@ -1136,7 +1137,8 @@ describe("WorkspaceGraphScreen", () => {
   it("validates the single Refine Apply and explains an empty kind selection", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Refine" }));
     const dialog = screen.getByRole("dialog", { name: "Refine data" });
     const ui = within(dialog);
@@ -1162,7 +1164,8 @@ describe("WorkspaceGraphScreen", () => {
   it("offers Resume after Pause and Reset returns the layout control to Pause", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
 
     fireEvent.click(screen.getByRole("button", { name: "Pause layout" }));
     expect(screen.getByRole("button", { name: "Resume layout" })).toBeInTheDocument();
@@ -1177,8 +1180,9 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValueOnce(baseScene());
     queryWorkspaceGraphMock.mockImplementation(() => new Promise(() => {}));
     const { rerender } = renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
-    expect(screen.getByText("Alpha")).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
+    expect(screen.getAllByText("Alpha")).not.toHaveLength(0);
 
     if (scope === "actor") authState.userId = "actor-two";
     else workspaceState.selectedId = "workspace-two";
@@ -1202,7 +1206,8 @@ describe("WorkspaceGraphScreen", () => {
     }));
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     const { rerender } = renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     expect(queryWorkspaceGraphMock.mock.calls[0]?.[1]).toMatchObject({
       lens: "evidence", search: "private actor-one terms", document_kinds: ["library"],
     });
@@ -1215,7 +1220,8 @@ describe("WorkspaceGraphScreen", () => {
       expect(nextRequest).toMatchObject({ lens: "combined", document_kinds: ["context", "library", "agent"], quick_filters: [] });
     }
     expect(window.sessionStorage.getItem(key)).toBeNull();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
   });
 
   it.each(["viewer", null])("rejects the owner scene in the first observed %s-role commit and purges its saved state", async (role) => {
@@ -1247,7 +1253,8 @@ describe("WorkspaceGraphScreen", () => {
     }
     const tree = () => <MemoryRouter><WorkspaceGraphScreen /><AuthorityPaintProbe /></MemoryRouter>;
     const view = render(tree());
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     window.sessionStorage.removeItem(key);
     workspaceState.selectedWorkspace = { id: "workspace-one", role };
     view.rerender(tree());
@@ -1270,32 +1277,35 @@ describe("WorkspaceGraphScreen", () => {
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1));
     workspaceState.selectedWorkspace = { id: "workspace-one", role: "viewer" };
     view.rerender(graphTree());
-    await screen.findAllByText("Revalidated document");
+    await findMapLabels("Revalidated document");
     workspaceState.selectedWorkspace = { id: "workspace-one", role: "owner" };
     view.rerender(graphTree());
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(3));
     expect(queryWorkspaceGraphMock.mock.calls[0]?.[2]?.signal.aborted).toBe(true);
     await act(async () => resolveOld(baseScene()));
+    expect(await findMapLabels("Revalidated document")).not.toHaveLength(0);
     expect(screen.queryByText("Alpha")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Revalidated document")).not.toHaveLength(0);
   });
 
   it.each([false, true])("rejects old native selection, pins and viewport callbacks after a same-actor role change (owner again: %s)", async (ownerAgain) => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     const view = renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     const oldSelect = canvasSelectCallbackMock.mock.calls.at(-1)![0];
     const oldPin = canvasPinCallbackMock.mock.calls.at(-1)![0];
     const oldViewport = canvasViewportCallbackMock.mock.calls.at(-1)![0];
     workspaceState.selectedWorkspace = { id: "workspace-one", role: "viewer" };
     view.rerender(graphTree());
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2));
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     if (ownerAgain) {
       workspaceState.selectedWorkspace = { id: "workspace-one", role: "owner" };
       view.rerender(graphTree());
       await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(3));
-      await screen.findByRole("heading", { name: "Searchable relationship list" });
+      await screen.findByRole("heading", { name: "Map items" });
+      openMapList();
     }
     await act(async () => {
       oldSelect("context:alpha");
@@ -1319,13 +1329,15 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockImplementationOnce(() => new Promise<WorkspaceGraphScene>((resolve) => { resolveExpansion = resolve; }));
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     const view = renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     fireEvent.click(screen.getByRole("button", { name: /Expand cluster/ }));
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2));
     workspaceState.selectedWorkspace = { id: "workspace-one", role: "viewer" };
     view.rerender(graphTree());
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(3));
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     expect(queryWorkspaceGraphMock.mock.calls[1]?.[2]?.signal.aborted).toBe(true);
     const oldExpansion = expandedScene(null, "owner-only-expansion");
     oldExpansion.nodes = oldExpansion.nodes.map((node) => node.id === "context:gamma"
@@ -1347,7 +1359,8 @@ describe("WorkspaceGraphScreen", () => {
       };
       queryWorkspaceGraphMock.mockResolvedValue(replacement);
       const view = renderScreen();
-      await screen.findByRole("heading", { name: "Searchable relationship list" });
+      await screen.findByRole("heading", { name: "Map items" });
+      openMapList();
       fireEvent.click(screen.getByRole("button", { name: /Expand cluster/ }));
       await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2));
       await userEvent.click(screen.getByRole("button", { name: "Refine" }));
@@ -1376,7 +1389,7 @@ describe("WorkspaceGraphScreen", () => {
       expect(screen.queryByRole("dialog", { name: "Refine data" })).not.toBeInTheDocument();
       expect(oldDialog).not.toBeInTheDocument();
       await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(3));
-      await screen.findAllByText("Current authority document");
+      await findMapLabels("Current authority document");
       expect(queryWorkspaceGraphMock.mock.calls[1]?.[2]?.signal.aborted).toBe(true);
       expect(queryWorkspaceGraphMock.mock.calls[2]?.[0]).toBe(scope === "workspace" ? "workspace-two" : "workspace-one");
       expect(queryWorkspaceGraphMock.mock.calls[2]?.[1].folders).toEqual({ include: [], exclude: [], only: [] });
@@ -1416,7 +1429,8 @@ describe("WorkspaceGraphScreen", () => {
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeUrl });
     try {
       const view = renderScreen();
-      await screen.findByRole("heading", { name: "Searchable relationship list" });
+      await screen.findByRole("heading", { name: "Map items" });
+      openMapList();
       const oldExport = screen.getByRole("button", { name: "Export visible map" });
       fireEvent.click(oldExport);
       expect(createUrl).toHaveBeenCalledTimes(1);
@@ -1441,12 +1455,14 @@ describe("WorkspaceGraphScreen", () => {
     workspaceState.selectedWorkspace = null;
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     const view = renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
     workspaceState.selectedWorkspace = { id: "workspace-one", role: "viewer" };
     view.rerender(graphTree());
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2));
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
   });
 
   it.each([false, true])("purges owner restoration when capability revalidation unmounts the Screen (already invalidated: %s)", async (alreadyInvalidated) => {
@@ -1466,7 +1482,8 @@ describe("WorkspaceGraphScreen", () => {
     });
     const tree = () => <MemoryRouter><WorkspaceGraphGate><WorkspaceGraphScreen /></WorkspaceGraphGate></MemoryRouter>;
     const view = render(tree());
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     const saved = freshWorkspaceGraphState();
     saved.viewerId = "actor-one";
     saved.dataFilters.search = "owner-only saved filter";
@@ -1486,7 +1503,7 @@ describe("WorkspaceGraphScreen", () => {
     act(() => window.dispatchEvent(new Event("pagehide")));
     expect(window.sessionStorage.getItem(key)).toBeNull();
     await act(async () => capabilityResolvers.at(-1)!({ ...enabled, can_manage: false }));
-    await screen.findAllByText("Viewer document");
+    await findMapLabels("Viewer document");
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2);
     expect(queryWorkspaceGraphMock.mock.calls[1]?.[1]).not.toHaveProperty("search");
     const canvas = screen.getByTestId("workspace-graph-canvas");
@@ -1519,7 +1536,8 @@ describe("WorkspaceGraphScreen", () => {
       <MemoryRouter><WorkspaceGraphScreen /><PaintProbe /></MemoryRouter>
     );
     const { rerender } = render(tree());
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     if (scope === "actor") authState.userId = "actor-two";
     else workspaceState.selectedId = "workspace-two";
     rerender(tree());
@@ -1547,7 +1565,8 @@ describe("WorkspaceGraphScreen", () => {
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2);
     expect(queryWorkspaceGraphMock.mock.calls[1]?.[1]).not.toHaveProperty("search");
   });
@@ -1562,11 +1581,11 @@ describe("WorkspaceGraphScreen", () => {
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1));
     authState.userId = "actor-two";
     rerender(graphTree());
-    await screen.findAllByText("Actor two document");
+    await findMapLabels("Actor two document");
     expect(queryWorkspaceGraphMock.mock.calls[0]?.[2]?.signal.aborted).toBe(true);
     await act(async () => resolveOld(baseScene()));
+    expect(await findMapLabels("Actor two document")).not.toHaveLength(0);
     expect(screen.queryByText("Alpha")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Actor two document")).not.toHaveLength(0);
   });
 
   it("flushes newly applied unplaced filters before pagehide without waiting for the persistence debounce", async () => {
@@ -1577,7 +1596,7 @@ describe("WorkspaceGraphScreen", () => {
     const view = renderScreen();
     try {
       await act(async () => {});
-      expect(screen.getByRole("heading", { name: "Searchable relationship list" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Map items" })).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Refine" }));
       fireEvent.change(screen.getByRole("combobox", { name: "Folder" }), {
         target: { value: "unplaced" },
@@ -1610,7 +1629,8 @@ describe("WorkspaceGraphScreen", () => {
       error_code: "forbidden", message: "Not available", request_id: "test", warnings: [],
     }));
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Lens" }), "evidence");
     await screen.findAllByText(i18n.t("graph:workspaceGraph.ui.unavailable"));
     act(() => window.dispatchEvent(new Event("pagehide")));
@@ -1625,7 +1645,7 @@ describe("WorkspaceGraphScreen", () => {
     const view = renderScreen();
     try {
       await act(async () => {});
-      expect(screen.getByRole("heading", { name: "Searchable relationship list" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Map items" })).toBeInTheDocument();
       if (purge === "all") clearWorkspaceGraphStorage();
       else clearWorkspaceGraphState("workspace-one", "actor-one");
       act(() => window.dispatchEvent(new Event("pagehide")));
@@ -1677,7 +1697,8 @@ describe("WorkspaceGraphScreen", () => {
     }
     const tree = () => <MemoryRouter><WorkspaceGraphScreen /><PageExitProbe /></MemoryRouter>;
     const view = render(tree());
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     // No purge epoch changed yet: the first committed new scope must reject
     // the old pagehide listener even before passive scope cleanup runs.
     window.sessionStorage.removeItem(key);
@@ -1713,7 +1734,8 @@ describe("WorkspaceGraphScreen", () => {
     }));
     queryWorkspaceGraphMock.mockResolvedValue(payload);
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     await waitFor(() => expect(screen.queryByText("Building Knowledge Map…")).not.toBeInTheDocument());
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(owner === "correct" ? 1 : 2);
     expect(queryWorkspaceGraphMock.mock.calls.every(([, request]) => !request.search)).toBe(true);
@@ -1779,7 +1801,8 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValueOnce(baseScene());
     queryWorkspaceGraphMock.mockImplementationOnce(() => new Promise<WorkspaceGraphScene>((resolve) => { resolveExpansion = resolve; }));
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     fireEvent.click(screen.getByRole("button", { name: /Expand cluster/ }));
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2));
     clearWorkspaceGraphStorage();
@@ -1853,6 +1876,7 @@ describe("WorkspaceGraphScreen", () => {
       queryWorkspaceGraphMock.mockImplementation(() => new Promise(() => {}));
       const view = renderScreen(focusUrl);
       await screen.findByTestId("workspace-graph-canvas");
+      openMapList();
       expect(screen.getByTestId("workspace-graph-canvas"))
         .toHaveAttribute("data-navigation-target-id", "context:alpha");
       const isCurrent = canvasNavigationCallbackMock.mock.calls.at(-1)![1];
@@ -1915,7 +1939,8 @@ describe("WorkspaceGraphScreen", () => {
     });
 
     renderScreen(`/graph?focus=${focusId}`);
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
 
     expect(queryWorkspaceGraphMock.mock.calls[0]?.[1]).toMatchObject({
       focus_entity_id: focusId,
@@ -1996,7 +2021,8 @@ describe("WorkspaceGraphScreen", () => {
     });
 
     renderScreen(`/graph?focus=${unavailableFocusId}`);
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
 
     expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute(
       "data-selected-id",
@@ -2019,7 +2045,8 @@ describe("WorkspaceGraphScreen", () => {
     });
 
     renderScreen(`/graph?focus=${focusId}`);
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
 
     expect(queryWorkspaceGraphMock.mock.calls[0]?.[1]).toMatchObject({
       focus_entity_id: focusId,
@@ -2040,7 +2067,8 @@ describe("WorkspaceGraphScreen", () => {
   it("stages folder/time filters while display settings remain client-only", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
 
     await userEvent.click(screen.getByRole("button", { name: "Refine" }));
     await userEvent.click(within(screen.getByRole("dialog")).getByLabelText("Show labels"));
@@ -2075,7 +2103,8 @@ describe("WorkspaceGraphScreen", () => {
     }));
     queryWorkspaceGraphMock.mockResolvedValue(payload);
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     const trigger = screen.getByRole("button", { name: "Refine" });
     await userEvent.click(trigger);
     const dialog = screen.getByRole("dialog", { name: "Refine data" });
@@ -2129,7 +2158,8 @@ describe("WorkspaceGraphScreen", () => {
     );
     queryWorkspaceGraphMock.mockResolvedValue(payload);
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Refine" }));
     let dialog = screen.getByRole("dialog", { name: "Refine data" });
     await draftFolderRule(dialog, research, "include");
@@ -2191,11 +2221,12 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-node-list");
+    openMapList();
     const canvas = await screen.findByTestId("workspace-graph-canvas");
-    expect(screen.queryByRole("heading", { name: "Searchable relationship list" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Map items" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Open Map details sheet" }));
     expect(screen.getByRole("dialog", { name: "Map details sheet" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Searchable relationship list" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Map items" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Hide Map details" }));
 
     const open = screen.getByRole("button", { name: "Open canvas fullscreen" });
@@ -2231,7 +2262,7 @@ describe("WorkspaceGraphScreen", () => {
     await screen.findByText(i18n.t("graph:workspaceGraph.ui.unavailable"));
     expect(screen.queryByTestId("workspace-graph-canvas")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open canvas fullscreen" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Searchable relationship list" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Map items" })).not.toBeInTheDocument();
     expect(queryWorkspaceGraphMock).toHaveBeenCalledOnce();
     expect(queryWorkspaceGraphMock.mock.calls[0][1].budget).toEqual({ documents: 2000, relations: 6000 });
   });
@@ -2241,6 +2272,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-node-list");
+    openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Open canvas fullscreen" }));
     expect(screen.getAllByTestId("workspace-graph-canvas")).toHaveLength(1);
 
@@ -2269,9 +2301,10 @@ describe("WorkspaceGraphScreen", () => {
       .mockResolvedValueOnce(opened)
       .mockResolvedValueOnce(expandedScene(null, "cluster:final"));
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
 
-    await userEvent.click(screen.getByRole("button", { name: "Expand cluster" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Expand cluster/ }));
     await screen.findByRole("heading", { name: "Gamma" });
     expect(queryWorkspaceGraphMock.mock.calls[1]?.[1].expansion).toEqual({
       cluster_id: "cluster:base",
@@ -2298,7 +2331,7 @@ describe("WorkspaceGraphScreen", () => {
 
     // Any cluster on the expanded map opens next; the pinned group is replayed first.
     expect(screen.getByRole("button", { name: "Pin “Base group”" })).toHaveAttribute("aria-pressed", "true");
-    await userEvent.click(screen.getByRole("button", { name: "Expand cluster" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Expand cluster/ }));
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(4));
     expect(queryWorkspaceGraphMock.mock.calls[3]?.[1]).toMatchObject({
       retained_expansions: [{ cluster_id: "cluster:base", pinned: true }],
@@ -2311,10 +2344,13 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
     expect(screen.getByText("지식 지도 구성 중…")).toBeInTheDocument();
-    await screen.findByRole("heading", { name: "검색 가능한 관계 목록" });
+    await screen.findByRole("heading", { name: "지도 항목" });
+    openMapList();
     expect(screen.getByRole("heading", { name: "지식 지도" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "레이아웃 일시 중지" })).toBeInTheDocument();
-    expect(screen.getByText("위키 링크")).toBeInTheDocument();
+    // The relation chip is short; its tooltip keeps the full kind name.
+    const chips = within(screen.getByTestId("workspace-graph-edge-list")).getAllByText("링크");
+    expect(chips.map((chip) => chip.getAttribute("title"))).toEqual(chips.map(() => "위키 링크"));
     await userEvent.click(screen.getByRole("button", { name: "세부 필터" }));
     expect(screen.getByRole("dialog", { name: "데이터 세부 필터" })).toBeInTheDocument();
     expect(screen.queryByText("links to")).not.toBeInTheDocument();
@@ -2323,7 +2359,8 @@ describe("WorkspaceGraphScreen", () => {
   it("closes Refine as the topmost Escape layer and restores the actual trigger", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     await userEvent.click(within(screen.getByTestId("workspace-graph-node-list"))
       .getByRole("button", { name: /Alpha/ }));
     await userEvent.click(screen.getByText("More data filters"));
@@ -2340,7 +2377,8 @@ describe("WorkspaceGraphScreen", () => {
   it("portals Refine, isolates and locks its underlay, contains focus, and restores exact state", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     const view = renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     const shell = view.container.querySelector<HTMLElement>(".app-shell");
     const region = view.container.querySelector<HTMLElement>(".feature-main.workspace-graph");
     expect(shell).not.toBeNull();
@@ -2383,7 +2421,8 @@ describe("WorkspaceGraphScreen", () => {
   it("targets Folder and Time controls and restores each triggering control on close", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
 
     await userEvent.click(screen.getByText("More data filters"));
     const folderTrigger = screen.getByRole("button", { name: "Folder" });
@@ -2407,7 +2446,8 @@ describe("WorkspaceGraphScreen", () => {
   it("relation-first: the optional folder context does not replace original document and cross-relation columns", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(mixedFolderUiScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     const columns = latestMockMapColumns();
     const canvas = screen.getByTestId("workspace-graph-canvas");
     selectMockMapId("cluster:mixed");
@@ -2432,7 +2472,8 @@ describe("WorkspaceGraphScreen", () => {
     saveWorkspaceGraphState("workspace-one", "actor-one", payload.graph_revision, saved);
     queryWorkspaceGraphMock.mockResolvedValue(payload);
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Pause layout" }));
     const row = within(screen.getByTestId("workspace-graph-node-list")).getByRole("button", { name: /Alpha/ });
     act(() => row.focus());
@@ -2448,7 +2489,8 @@ describe("WorkspaceGraphScreen", () => {
   it("relation-first: the actual 2k document scene keeps normal live pause and resume controls", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(largeFolderUiScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     expect(screen.getByRole("button", { name: "Pause layout" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: i18n.t("graph:workspaceGraph.folders.groupByFolder") }));
     expect(screen.getByRole("button", { name: "Pause layout" })).toBeEnabled();
@@ -2459,6 +2501,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-node-list");
+    openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Pause layout" }));
     expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-layout-paused", "true");
     await act(async () => { await i18n.changeLanguage("ko"); });
@@ -2483,7 +2526,8 @@ describe("WorkspaceGraphScreen", () => {
   it("folder context: leaves a legacy response usable with an explicit disabled option", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     expect(screen.getByRole("button", { name: "Folder context" })).toBeDisabled();
     expect(screen.getByText("Folder context is unavailable for this response; the map and list remain usable.")).toBeInTheDocument();
     expect(screen.getByTestId("workspace-graph-canvas")).toBeInTheDocument();
@@ -2503,7 +2547,8 @@ describe("WorkspaceGraphScreen", () => {
       expect(queryWorkspaceGraphMock).toHaveBeenCalledOnce();
       return;
     }
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     expect(screen.getByRole("button", { name: "Folder context" })).toBeDisabled();
     expect(screen.getByText("Folder context is unavailable for this response; the map and list remain usable.")).toBeInTheDocument();
     expectOriginalDocumentMapColumns();
@@ -2519,7 +2564,8 @@ describe("WorkspaceGraphScreen", () => {
     expect(isWorkspaceGraphResponse({ data: unavailable })).toBe(true);
     queryWorkspaceGraphMock.mockResolvedValueOnce(initial).mockResolvedValueOnce(unavailable).mockResolvedValueOnce(initial);
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
     expect(screen.getByRole("button", { name: "Pause layout" })).toBeEnabled();
     selectMockMapId("cluster:mixed");
@@ -2544,6 +2590,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     expect(prepare).not.toHaveBeenCalled();
     const columns = latestMockMapColumns();
     const toggle = screen.getByRole("button", { name: "Folder context" });
@@ -2570,6 +2617,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockImplementationOnce(() => new Promise<WorkspaceGraphScene>((resolve) => { resolveNext = resolve; }));
     const view = renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     expect(prepare).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
     expect(prepare).toHaveBeenCalledTimes(1);
@@ -2581,6 +2629,7 @@ describe("WorkspaceGraphScreen", () => {
     expect(prepare).toHaveBeenCalledTimes(1);
     await act(async () => { resolveNext(replacement); });
     await screen.findByTestId("workspace-graph-canvas");
+    openMapList();
     expect(prepare).toHaveBeenCalledTimes(1);
     const toggle = screen.getByRole("button", { name: "Folder context" });
     expect(toggle).toBeEnabled();
@@ -2595,7 +2644,8 @@ describe("WorkspaceGraphScreen", () => {
     expect(isWorkspaceGraphResponse({ data: payload })).toBe(true);
     queryWorkspaceGraphMock.mockResolvedValue(payload);
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     const toggle = screen.getByRole("button", { name: "Folder context" });
     const columns = latestMockMapColumns();
     const canvas = screen.getByTestId("workspace-graph-canvas");
@@ -2619,7 +2669,8 @@ describe("WorkspaceGraphScreen", () => {
   it("folder context: follows primary parents and document URLs without replacing original selection or centering phantom folders", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     selectMockMapId("context:alpha");
     const canvas = screen.getByTestId("workspace-graph-canvas");
     const columns = latestMockMapColumns();
@@ -2661,6 +2712,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(payload);
     renderScreen();
     await screen.findByTestId("workspace-graph-node-list");
+    openMapList();
     if (mobile) await userEvent.click(screen.getByRole("button", { name: "Open canvas fullscreen" }));
     const dialog = mobile ? screen.getByRole("dialog", { name: "Knowledge Map canvas" }) : undefined;
     const surface = dialog ? within(dialog) : screen;
@@ -2687,7 +2739,7 @@ describe("WorkspaceGraphScreen", () => {
     }
     expect(screen.getByRole("heading", { name: "Mixed knowledge group" })).toBeInTheDocument();
     if (!mobile) {
-      const sourceRow = within(screen.getByTestId("workspace-graph-node-list")).getByRole("button", { name: /Mixed knowledge group/ });
+      const sourceRow = within(screen.getByTestId("workspace-graph-node-list")).getByRole("button", { name: /^Mixed knowledge group/ });
       act(() => sourceRow.focus());
       expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-focused-id", "cluster:mixed");
     }
@@ -2697,7 +2749,8 @@ describe("WorkspaceGraphScreen", () => {
   it("folder context: original native nodes and cross-folder relationships remain selectable while metadata is open", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     const columns = latestMockMapColumns();
     await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
     await selectFolderFromIndex(UI_FOLDERS.research);
@@ -2718,11 +2771,12 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(mixedFolderUiScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-node-list");
+    openMapList();
     selectMockMapId("cluster:mixed");
     const canvas = screen.getByTestId("workspace-graph-canvas");
     const columns = latestMockMapColumns();
     await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
-    const row = within(screen.getByTestId("workspace-graph-node-list")).getByRole("button", { name: /Mixed knowledge group/ });
+    const row = within(screen.getByTestId("workspace-graph-node-list")).getByRole("button", { name: /^Mixed knowledge group/ });
     act(() => row.focus());
     expect(canvas).toHaveAttribute("data-focused-id", "cluster:mixed");
     fireEvent.change(screen.getByRole("searchbox", { name: "Find in visible map" }), { target: { value: "Mixed" } });
@@ -2757,7 +2811,8 @@ describe("WorkspaceGraphScreen", () => {
     for (const payload of [before, renamed, weighted]) expect(isWorkspaceGraphResponse({ data: payload })).toBe(true);
     queryWorkspaceGraphMock.mockResolvedValueOnce(before).mockResolvedValueOnce(renamed).mockResolvedValueOnce(weighted);
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
     const columns = latestMockMapColumns();
     selectMockMapId("cluster:mixed");
@@ -2774,7 +2829,8 @@ describe("WorkspaceGraphScreen", () => {
   it.each(["actor", "workspace", "request"] as const)("folder context: invalidates independently selected folder details on a %s change", async (change) => {
     queryWorkspaceGraphMock.mockResolvedValue(mixedFolderUiScene());
     const view = renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
     await selectFolderFromIndex(UI_FOLDERS.library);
     expect(screen.getByRole("region", { name: "Folder members and relationships" })).toBeInTheDocument();
@@ -2790,7 +2846,8 @@ describe("WorkspaceGraphScreen", () => {
     const toggle = await screen.findByRole("button", { name: "Folder context" });
     if (change !== "request") expect(toggle).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByRole("region", { name: "Folder members and relationships" })).not.toBeInTheDocument();
-    const source = within(screen.getByTestId("workspace-graph-node-list")).getByRole("button", { name: /Mixed knowledge group/ });
+    openMapList();
+    const source = within(screen.getByTestId("workspace-graph-node-list")).getByRole("button", { name: /^Mixed knowledge group/ });
     await userEvent.click(source);
     expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-selected-id", "cluster:mixed");
     expect(canvasCenterOnMock).toHaveBeenLastCalledWith("cluster:mixed");
@@ -2807,7 +2864,8 @@ describe("WorkspaceGraphScreen", () => {
     saveWorkspaceGraphState("workspace-one", "actor-one", payload.graph_revision, saved);
     queryWorkspaceGraphMock.mockResolvedValue(payload);
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     selectMockMapId("context:alpha");
     await userEvent.click(screen.getByRole("button", { name: "Pause layout" }));
     const canvas = screen.getByTestId("workspace-graph-canvas");
@@ -2834,7 +2892,8 @@ describe("WorkspaceGraphScreen", () => {
   it("folder context: accepts original drag pins and normal Reset without suppressing or restoring obsolete positions", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
     const view = renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
     const canvas = screen.getByTestId("workspace-graph-canvas");
     fireEvent.doubleClick(canvas);
@@ -2843,7 +2902,8 @@ describe("WorkspaceGraphScreen", () => {
     act(() => window.dispatchEvent(new Event("pagehide")));
     view.unmount();
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-pinned-positions", JSON.stringify({ "context:alpha": { x: 999, y: 888 } }));
     expect(screen.getByRole("button", { name: "Folder context" })).toHaveAttribute("aria-pressed", "false");
     await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
@@ -2855,7 +2915,8 @@ describe("WorkspaceGraphScreen", () => {
   it("folder context: visible search keeps original columns, fingerprint and camera with no server requests", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
     const columns = latestMockMapColumns();
     const canvas = screen.getByTestId("workspace-graph-canvas");
@@ -2888,7 +2949,8 @@ describe("WorkspaceGraphScreen", () => {
     }
     const tree = () => <MemoryRouter><WorkspaceGraphScreen /><FolderPaintProbe /></MemoryRouter>;
     const view = render(tree());
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
     await selectFolderFromIndex(UI_FOLDERS.research);
     if (scope === "actor") authState.userId = "actor-two";
@@ -2909,7 +2971,8 @@ describe("WorkspaceGraphScreen", () => {
   it("folder context: Escape closes only independent metadata before clearing original document selection", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     selectMockMapId("context:alpha");
     await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
     await selectFolderFromIndex(UI_FOLDERS.research);
@@ -2930,6 +2993,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-node-list");
+    openMapList();
     if (mobile) await userEvent.click(screen.getByRole("button", { name: "Open canvas fullscreen" }));
     const panel = mobile ? screen.getByRole("dialog", { name: "Knowledge Map canvas" }) : document;
     const scope = mobile ? within(panel as HTMLElement) : screen;
@@ -2969,6 +3033,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-node-list");
+    openMapList();
     if (mobile) await userEvent.click(screen.getByRole("button", { name: "Open canvas fullscreen" }));
     const panel = mobile ? screen.getByRole("dialog", { name: "Knowledge Map canvas" }) : document;
     const scope = mobile ? within(panel as HTMLElement) : screen;
@@ -2991,6 +3056,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-node-list");
+    openMapList();
     if (mobile) await userEvent.click(screen.getByRole("button", { name: "Open canvas fullscreen" }));
     const panel = mobile ? screen.getByRole("dialog", { name: "Knowledge Map canvas" }) : document;
     const scope = mobile ? within(panel as HTMLElement) : screen;
@@ -3038,6 +3104,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
     renderScreen();
     await screen.findByTestId("workspace-graph-node-list");
+    openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Open canvas fullscreen" }));
     const dialog = screen.getByRole("dialog", { name: "Knowledge Map canvas" });
     const toggle = within(dialog).getByRole("button", { name: "Folder context" });
@@ -3066,7 +3133,8 @@ describe("WorkspaceGraphScreen", () => {
     expect(isWorkspaceGraphResponse({ data: payload })).toBe(true);
     queryWorkspaceGraphMock.mockResolvedValue(payload);
     renderScreen();
-    await screen.findByRole("heading", { name: "Searchable relationship list" });
+    await screen.findByRole("heading", { name: "Map items" });
+    openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
     await selectFolderFromIndex(UI_FOLDERS.research);
     const members = screen.getByTestId("workspace-map-folder-members");
@@ -3115,6 +3183,21 @@ describe("WorkspaceGraphScreen", () => {
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2);
   });
 });
+
+/** Scene labels are listed once a section is open: wait for the list, open it, then read. */
+async function findMapLabels(label: string) {
+  await screen.findByTestId("workspace-graph-node-list");
+  openMapList();
+  return screen.findAllByText(label);
+}
+
+/** Without a search the sidebar sections start folded; open both to browse the map list. */
+function openMapList() {
+  for (const testId of ["workspace-graph-node-list", "workspace-graph-edge-list"]) {
+    const head = screen.queryByTestId(testId)?.querySelector<HTMLButtonElement>(".workspace-graph-fold-head");
+    if (head?.getAttribute("aria-expanded") === "false") fireEvent.click(head);
+  }
+}
 
 function renderScreen(initialEntry = "/graph") {
   return render(graphTree(initialEntry));
