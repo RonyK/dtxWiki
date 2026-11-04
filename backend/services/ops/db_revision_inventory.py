@@ -15,9 +15,9 @@ _REVISION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 #: from ``efcbcf724889`` in a graph with one current head.
 RELEASED_BASE_REVISION = "bd62193d5cf6"
 RELEASED_EPIC1_REVISION = "efcbcf724889"
-#: Identifiers of the pre-rebaseline chain. A database stamped with one of
-#: them needs an operator-led conversion, so the classifier never accepts
-#: them, and no new revision may reuse one (tests/packaging enforces that).
+#: Superseded identifiers. Historical IDs need an operator-led conversion;
+#: unpublished 0.2 steps must reach the terminal head with their old checkout.
+#: The classifier never accepts these, and new revisions may not reuse them.
 RETIRED_REVISION_IDS = frozenset(
     {
         "0001_initial_release",
@@ -37,6 +37,21 @@ RETIRED_REVISION_IDS = frozenset(
         "0013_context_content_hash_fix",
         "0014_job_failure_notification",
         "0015_consolidated",
+        # Unpublished steps replaced by the consolidated 0.2 release. The
+        # terminal 5b7e5c149279 ID still describes the same complete schema;
+        # intermediate databases must reach it with the old checkout first.
+        "5c3395a75eb0",
+        "da94025713de",
+        "333a67e22cd7",
+        "eb86fdacb1bb",
+        "175b9664724e",
+        "af62c98d0731",
+        "9aeab6944f25",
+        "6f4a9f50c046",
+        "1d8f1c08ca36",
+        "7c2bde1490af",
+        "c58f1d2e890a",
+        "b1d98889a4ad",
     }
 )
 _UNSAFE_CONSISTENCIES = {
@@ -427,9 +442,9 @@ def classify_revision_consistency(
     """Compare one Alembic stamp with the only supported migration shapes.
 
     Retired intermediate and alternate revision identifiers are deliberately
-    not inferred from marker subsets. Once the graph is consolidated to
-    0001 -> 0002, those stamps require an explicit operator-led conversion and
-    remain unknown even when their schema resembles part of the final shape.
+    not inferred from marker subsets. After release consolidation, those stamps
+    require an explicit conversion or an upgrade with their original checkout;
+    they remain unknown even when their schema resembles part of the final shape.
 
     ``known_revisions`` is the script directory the caller migrates with; the
     adapters that can read one pass it (``AlembicMigrationGraphSource``, the

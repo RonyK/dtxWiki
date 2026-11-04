@@ -19,33 +19,33 @@ The first run downloads dtxWiki and its dependencies; later runs reuse them.
 ## Usage
 
 ```bash
-npx @dtxsuite/dtxwiki@0.1.3
+npx @dtxsuite/dtxwiki@0.2.1
 ```
 
 This opens dtxWiki on `http://127.0.0.1:21080/` in your browser. Only this
 computer can reach that address. Keep the command running while using dtxWiki;
 press `Ctrl+C` to stop it. Your data is kept in `~/.dtxwiki`.
 
-In **0.1.3**, the server starts and stops its managed worker automatically.
+The server starts and stops its managed worker automatically.
 Do not launch a separate worker.
 
 Every argument is passed to the `dtxwiki` command, for example
-`npx @dtxsuite/dtxwiki@0.1.3 --help` or `npx @dtxsuite/dtxwiki@0.1.3 serve --no-open`
+`npx @dtxsuite/dtxwiki@0.2.1 --help` or `npx @dtxsuite/dtxwiki@0.2.1 serve --no-open`
 (`--no-open` skips opening the browser).
 
 To keep the `dtxwiki` command on your `PATH`:
 
 ```bash
-npm install --global @dtxsuite/dtxwiki@0.1.3
+npm install --global @dtxsuite/dtxwiki@0.2.1
 dtxwiki
 ```
 
 ## Server and MCP setup
 
-The [README](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/README.md#get-started)
+The [README](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/README.md#get-started)
 includes administrator grants, external access, background execution, MCP client
 registration commands, and setup troubleshooting. Replace foreground `dtxwiki`
-commands with `npx @dtxsuite/dtxwiki@0.1.3`.
+commands with `npx @dtxsuite/dtxwiki@0.2.1`.
 
 Use a direct Python installation, such as the README's pip virtual environment,
 for the manual background PID examples. The npm launcher starts child processes;
@@ -55,16 +55,17 @@ its PID is not the server PID.
 
 This package selects the Python release, so `dtxwiki update` prints the npm
 steps instead of upgrading it. Stop dtxWiki, back up `~/.dtxwiki`,
-and read the [release notes](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/CHANGELOG.md)
-and [maintenance guide](http://docs.dtxwiki.com/docs/0.1/administration/backup-upgrades/).
-Complete any required data checks or migrations before starting the new version.
+and read the [release notes](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/CHANGELOG.md)
+and [maintenance guide](https://docs.dtxwiki.com/docs/0.2/administration/backup-upgrades/).
+Complete the 0.2.1 README's audit, bootstrap, reindex, and graph reprojection
+steps before starting the new version.
 
 Then run the new published version:
 
 ```bash
-npx @dtxsuite/dtxwiki@latest
+npx @dtxsuite/dtxwiki@0.2.1
 # or, for a global install:
-npm install --global @dtxsuite/dtxwiki@latest
+npm install --global @dtxsuite/dtxwiki@0.2.1
 ```
 
 Restart the launcher after a global update; its worker starts automatically.
@@ -73,10 +74,10 @@ to it; see the maintenance guide.
 
 ## Documentation and license
 
-The [project README](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/README.md#get-started)
-covers setup for 0.1.3. See the [documentation](http://docs.dtxwiki.com/) for
+The [project README](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/README.md#get-started)
+covers setup for 0.2.1. See the [documentation](https://docs.dtxwiki.com/) for
 SMTP, backups, and advanced configuration.
 
 dtxWiki is licensed under `AGPL-3.0-only OR Elastic-2.0`, at your election;
-see the [license terms](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/LICENSE).
+see the [license terms](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/LICENSE).
 dtxSuite also offers commercial licenses.

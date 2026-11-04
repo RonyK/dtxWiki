@@ -83,7 +83,7 @@ def _dist_with_one_artifact_mutated(tmp_path, artifact_kind, mutate):
 @pytest.mark.parametrize(
     "relative",
     [
-        "backend/migrations/versions/v0_2/9aeab6944f25_add_graph_view.py",
+        "backend/migrations/versions/v0_2/5b7e5c149279_release_0_2.py",
         "backend/services/workspace_graph_service.py",
         "backend/utils/markdown_links.py",
     ],

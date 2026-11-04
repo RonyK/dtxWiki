@@ -368,6 +368,12 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
       data: { group: "graph", expected_revision: graphPolicy.revision, changes: { workspace_map_enabled: true } },
     });
     expect(enabled.ok()).toBe(true);
+    const agentInventory = await page.request.get(
+      `${backendBaseUrl}/api/v1/workspaces/${secondary.id}/agent/pages?lifecycle_status=active`,
+    );
+    expect(agentInventory.ok()).toBe(true);
+    const secondaryAgents = (await agentInventory.json()).data as Array<{ id: string; slug: string }>;
+    expect(secondaryAgents.map(agent => agent.slug)).toEqual(["default-system-prompt"]);
     await installNativeDrawMeter(page);
     const diagnostics = watchBrowserDiagnostics(page);
     const failedReads = watchFailedWorkspaceReads(page);
@@ -403,16 +409,23 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
       await expect(page.getByRole("searchbox", { name: "Find in visible map", exact: true })).toHaveValue("");
       await expect(page.locator(".workspace-graph-details")).toHaveCount(0);
       await expect(page.getByTestId("workspace-graph-node-list").locator('[aria-pressed="true"]')).toHaveCount(0);
-      if (secondaryScene.nodes.length) {
-        const links = expectNavigationColumnEligibility(secondaryScene);
-        await expectNavigationMapReady(page, secondaryScene, links);
-        await expectNativeCounts(page, secondaryScene.nodes.length, links);
-      } else {
-        await expect(page.getByTestId("graph-canvas")).toHaveCount(0);
-      }
       await expect.poll(async () => (await readAccountMapState(page, actorId, secondary.id))?.viewerId).toBe(actorId);
       const secondaryState = (await readAccountMapState(page, actorId, secondary.id))!;
       expect(secondaryState).toMatchObject({ viewerId: actorId, selectedId: null, pinnedIds: [], pinnedPositions: {}, viewport: null });
+      // The independent fresh workspace contains only its default Agent page.
+      // Its exact one-node scene is initially hidden by the unlinked display
+      // setting; retain that default and reveal the real node through the UI.
+      expect(secondaryScene.representation).toBe("exact");
+      expect(secondaryScene.counts).toMatchObject({ candidate_documents: 1, candidate_relations: 0,
+        rendered_documents: 1, rendered_clusters: 0, rendered_relations: 0 });
+      expect(secondaryScene.nodes).toHaveLength(secondaryAgents.length);
+      expect(secondaryScene.nodes[0]).toMatchObject({ grain: "document", entity_kind: "agent",
+        entity_id: secondaryAgents[0].id, id: `document:agent:${secondaryAgents[0].id}` });
+      expect(secondaryScene.edges).toEqual([]);
+      await expect(page.getByTestId("graph-canvas")).toHaveCount(0);
+      await page.getByRole("button", { name: "Unlinked 1", exact: true }).click();
+      await expectNavigationMapReady(page, secondaryScene, 0);
+      await expectNativeCounts(page, 1, 0);
       await capture(page, testInfo, "real-api-pc10k-secondary-workspace-default2k.png");
       const secondaryEvidence = secondaryReader.evidence();
       await secondaryReader.dispose();
@@ -543,7 +556,7 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
           signInAccountThroughUi(page, viewerEmail, timeOrigin));
         expect(viewerSessionId).toBe(viewerId);
         const viewerRead = await test.step("Viewer chooses the same workspace and opens its default Map", () =>
-          openAccountWorkspaceMapThroughUi(page, workspace));
+          openAccountWorkspaceMapThroughUi(page, workspace, { enableLab: true }));
         expectOverviewRequest(viewerRead.request(), workspace.id, DEFAULT_BUDGET);
         expectFreshAccountOverviewRequest(viewerRead.request());
         const viewerScene = await responseReader.read(viewerRead);
@@ -566,7 +579,7 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
         expect(await test.step("Owner returns through the actual credential form", () =>
           signInAccountThroughUi(page, OWNER_EMAIL, timeOrigin))).toBe(ownerId);
         const ownerReturnRead = await test.step("Returned owner chooses the same workspace and opens its default Map", () =>
-          openAccountWorkspaceMapThroughUi(page, workspace));
+          openAccountWorkspaceMapThroughUi(page, workspace, { enableLab: true }));
         expectOverviewRequest(ownerReturnRead.request(), workspace.id, DEFAULT_BUDGET);
         expectFreshAccountOverviewRequest(ownerReturnRead.request());
         const ownerReturnScene = await ownerReturnReader.read(ownerReturnRead);
@@ -838,7 +851,9 @@ async function signInAccountThroughUi(page: Page, email: string, timeOrigin: num
   return actorId;
 }
 
-async function openAccountWorkspaceMapThroughUi(page: Page, workspace: { id: string; title: string }) {
+async function openAccountWorkspaceMapThroughUi(
+  page: Page, workspace: { id: string; title: string }, { enableLab = false }: { enableLab?: boolean } = {},
+) {
   await page.locator(".workspace-switcher-button").click();
   const switcher = page.getByRole("dialog", { name: "Workspace switcher", exact: true });
   // Switching from a Map keeps its section and can finish the original read
@@ -847,18 +862,21 @@ async function openAccountWorkspaceMapThroughUi(page: Page, workspace: { id: str
   await switcher.locator(".workspace-menu-item").filter({ has: page.getByText(workspace.title, { exact: true }) }).click();
   await expect(switcher).not.toBeVisible();
   await expect(page.locator(".workspace-switcher-button")).toHaveAttribute("aria-label", `Switch workspace, current: ${workspace.title}`);
-  // Each new account opts in separately. Keep navigation in this document so
-  // the account-transition test still proves the same browser realm survives.
-  await page.locator(`.sidebar-nav a[href="/workspaces/${workspace.id}/settings"]`).click();
-  await page.getByRole("button", { name: "Labs", exact: true }).click();
-  await page.getByRole("checkbox", { name: "Show Knowledge Map menu", exact: true }).check();
-  await page.locator(`.sidebar-nav a[href="/workspaces/${workspace.id}/graph"]`).click();
+  // Fresh sign-ins start outside the Map and opt in through the real Labs UI.
+  // A same-actor picker transition already opened its Map: leaving and returning
+  // would issue a second overview and abandon the original UI response.
+  if (enableLab) {
+    await page.locator(`.sidebar-nav a[href="/workspaces/${workspace.id}/settings"]`).click();
+    await page.getByRole("button", { name: "Labs", exact: true }).click();
+    await page.getByRole("checkbox", { name: "Show Knowledge Map menu", exact: true }).check();
+    await page.locator(`.sidebar-nav a[href="/workspaces/${workspace.id}/graph"]`).click();
+  }
   await expect(page).toHaveURL(/\/graph$/);
   return read;
 }
 
 function expectFreshAccountOverviewRequest(request: Request) {
-  expect(request.postDataJSON()).toMatchObject({ lens: "combined", head_mode: "published", document_kinds: ["context", "library"],
+  expect(request.postDataJSON()).toMatchObject({ lens: "combined", head_mode: "published", document_kinds: ["context", "library", "agent"],
     quick_filters: [], folders: { include: [], exclude: [], only: [] }, time: { basis: "document_updated" } });
   expect(request.postDataJSON()).not.toHaveProperty("focus_entity_id");
   expect(request.postDataJSON()).not.toHaveProperty("search");
@@ -889,7 +907,7 @@ async function expectFreshAccountMap(
   const state = (await readAccountMapState(page, actorId, workspaceId))!;
   expect(state).toMatchObject({ viewerId: actorId, selectedId: null, pinnedIds: [], pinnedPositions: {}, lens: "combined",
     display: { show_edges: true, show_labels: true, show_orphans: false },
-    dataFilters: { search: "", document_kinds: ["context", "library"], time_basis: "document_updated", time_from: null,
+    dataFilters: { search: "", document_kinds: ["context", "library", "agent"], time_basis: "document_updated", time_from: null,
       time_to: null, quick_filters: [], facet_rules: [] } });
   expect(state.viewport).not.toEqual(previous.viewport);
   if (state.viewport) expectFiniteAccountViewport(state.viewport);
@@ -985,9 +1003,9 @@ async function expectRealLocalQuery(response: Response, workspaceId: string, ent
   expect(response.url()).toBe(`${backendBaseUrl}/api/v1/workspaces/${workspaceId}/graph/query`);
   expect(response.ok()).toBe(true);
   const body = response.request().postDataJSON() as GraphQueryRequest;
-  const depth = mode === "current" ? 2 : 1;
+  const depth = 1;
   const budget = mode === "current" ? { nodes: 250, edges: 750 } : { nodes: 50, edges: 150 };
-  const expected = { schema_version: "dtxwiki.graph-query.v1", scope: "local", preset: "all", direction: "both", depth,
+  const expected = { schema_version: "dtxwiki.graph-query.v1", scope: "local", preset: "all", direction: "both", depth, relation_scope: "direct",
     seeds: [{ kind: "context_page", id: entityId }], layers: ["knowledge", "evidence", "activity", "action"],
     time: { mode }, budget, cursor: null };
   expect(body).toMatchObject(expected);

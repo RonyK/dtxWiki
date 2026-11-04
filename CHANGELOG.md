@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.2.1 — 2026-11-04
+
+Beta release with Graph View, document references, Inbox, and workspace-scoped
+MCP workflows. Installation and package metadata now target 0.2.1.
+
 ### Chats loading
 
 - Build Chats list cards with page-wide reads and reuse document visibility
@@ -203,11 +208,11 @@
   by source page when several locator forms point to the same document.
 - Add batched workspace-scoped link visibility helpers and preserve other
   authors' live editing-version pins during projection cleanup and reindexing.
-- Migration `af62c98d0731` follows Inbox revision `175b9664724e` and backfills
-  existing wikilink pins. Reindex live versions after upgrading; a downgrade
-  discards rebuildable non-wikilink projections, requiring reindex on re-upgrade.
+- The 0.2 schema backfills existing wikilink pins. Reindex live versions
+  after upgrading; a downgrade discards rebuildable non-wikilink projections,
+  requiring reindex on re-upgrade.
 
-### Inbox (planned for 0.2.0)
+### Inbox
 
 - Add four built-in Inbox kinds. The top bar opens the workspace Inbox or the
   account Inbox at `/inbox`, and shows a dot when either has an unread item.
@@ -226,9 +231,9 @@
   list items; `POST …/marks` sets marks. A mark applies only to the revision the
   client saw, so a late request cannot mark newer news as read.
 - New tables `workspace_inbox_entry` (workspace plane) and `account_inbox_entry`
-  (control plane) in revision `175b9664724e`. Downgrade drops them and their rows.
-- Revision `6f4a9f50c046` adds workspace-local recipient deletion markers so
-  retained shared reviews cannot recreate Inbox data after account removal.
+  (control plane). Downgrade drops them and their rows.
+- Workspace-local recipient deletion markers ensure that retained shared reviews
+  cannot recreate Inbox data after account removal.
   Upgrades also fence already-deleted authors and remove their orphan Inbox
   entries while preserving shared history. Downgrade drops the markers.
 - Hide rejected join results when their workspace becomes private, stop scoped
@@ -458,8 +463,9 @@
 
 - Add Local Graphs for Context pages and a Workspace Knowledge Map for published
   Context, Library, and Agent documents, with actor visibility checks on every
-  request. Workspace owners enable the map from Settings > Workspace; the
-  operator can disable it everywhere with `DTXWIKI_GRAPH_SERVICE_AVAILABLE=false`.
+  request. The Knowledge Map is Preview: enable its menu in Settings > Labs
+  and have a workspace owner enable it from Settings > Workspace. The operator
+  can disable it everywhere with `DTXWIKI_GRAPH_SERVICE_AVAILABLE=false`.
 - Add relation filters, bounded ranking, focus deep links, history exploration,
   cluster expansion, search, and graph details. Local Graph relation budgets
   reserve space for each seed and relation kind.
@@ -473,21 +479,40 @@
   Advance the MCP tool contract to revision 27, retaining the latest search and
   input constraints. Clients should refresh `tools/list` and generated schemas.
 
+- Search the visible map for documents and relationships, browse grouped
+  results in the sidebar, and inspect a selected document's incoming and
+  outgoing relationships with their own search and expandable lists.
+- Explore a Context page's direct graph or bounded neighborhood, follow history
+  frames with event-time details, and keep graph details available in fullscreen.
+  Hover labels remain stable while selection and keyboard focus control emphasis.
+- Preserve lifetime read-together support counts and reconstruct derived
+  projections from retained tool-read evidence when needed.
+
 ### Database upgrade
 
-- Add `9aeab6944f25` after `af62c98d0731` in `versions/v0_2/` for the
-  graph observation ledger, history coverage, workspace settings, link syntax,
-  relation evidence, and query indexes. Released migrations remain frozen.
-- Merge Graph revision `9aeab6944f25` and Inbox recipient revision
-  `6f4a9f50c046` at `1d8f1c08ca36`. Both existing revisions retain their IDs
-  and contents.
-- Append `b1d98889a4ad` for the Chats trace lookup index, preserving the
-  existing trace data. Merge it with the document-reference revision
-  `c58f1d2e890a` at the single 0.2.0 head `5b7e5c149279`; both parents retain
-  their original IDs and ancestry.
-- After upgrading, run `dtxwiki graph reproject --all-workspaces` to reconcile
-  existing authored relationships. Take a backup before the upgrade as usual.
-- Source builds and tests use Node.js 22.18.x.
+- Consolidate the 13 unpublished migrations after 0.1.4 into
+  `versions/v0_2/5b7e5c149279_release_0_2.py`, directly after the unchanged
+  0.1.4 revision `ef53a0a7061c`. Freeze the release migration and its helpers;
+  the five published migration files form one linear chain.
+- The consolidated upgrade includes external login and account retention,
+  review-decision history, removal of the personal-workspace pointer, Inbox,
+  Context link locators, Graph observation and relationship evidence, lifetime
+  read-together pairs, document references, and the Chats tool-call lookup index.
+- Databases already at `5b7e5c149279` retain that head. An unpublished
+  intermediate revision must first reach that head using its original checkout;
+  back up and verify it before installing 0.2.1. Do not use `alembic stamp` to
+  bypass a missing revision or a schema mismatch. Released 0.1.4 and earlier
+  revisions remain unchanged.
+- Stop the server and worker and take a verified backup before upgrading.
+  Run `dtxwiki inputs audit`, apply the schema with `dtxwiki bootstrap`, then
+  run `dtxwiki reindex` and `dtxwiki graph reproject --all-workspaces` against
+  the same database to reconcile existing authored relationships. Historical
+  bodies and missing citation evidence are not backfilled.
+- Refresh MCP tool catalogs and generated result schemas after upgrading to
+  tool contract revision 29. Application, SPI, and MCP schema versions remain
+  separate. Rollback requires the matching code and its pre-upgrade backup.
+- Source builds and tests use Node.js 22.18.x. Python package metadata marks
+  this release Beta; security fixes target the latest 0.2.x release.
 
 ## 0.1.4 — 2026-10-23
 

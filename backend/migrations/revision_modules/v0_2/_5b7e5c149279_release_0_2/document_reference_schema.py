@@ -1,19 +1,7 @@
-"""Add version-owned bibliography and final publication citation projections.
-
-Revision ID: c58f1d2e890a
-Revises: 7c2bde1490af
-
-New tables only. Existing bodies, evidence and graph rows are untouched.
-Downgrade removes the new bibliography data; re-upgrade recreates empty tables.
-"""
+"""Final v0.2 version-owned bibliography and citation projections."""
 
 import sqlalchemy as sa
 from alembic import op
-
-revision = "c58f1d2e890a"
-down_revision = "7c2bde1490af"
-branch_labels = None
-depends_on = None
 
 
 def _target_columns():
