@@ -44,22 +44,27 @@
     },
     "review_attention": {
       "pending": "Waiting for your review",
-      "changesRequested": "Changes requested from you"
+      "changesRequested": "Changes requested from you",
+      "removal": "Disappears when the review is resolved, replaced, assigned elsewhere, or no longer available to you, even if archived."
     },
     "review_result": {
       "approved": "Your change was approved",
-      "rejected": "Your change was rejected"
+      "rejected": "Your change was rejected",
+      "removal": "Disappears if the decision is undone or replaced, or you lose access, even if archived."
     },
     "workspace_join": {
       "untitled": "A workspace",
       "pending": "{{requester}} asked to join {{workspace}}",
       "approved": "You joined {{workspace}}",
-      "rejected": "Your request to join {{workspace}} was declined"
+      "rejected": "Your request to join {{workspace}} was declined",
+      "pendingRemoval": "Disappears when the request is decided, cancelled or closed, or you lose owner access, even if archived.",
+      "resultRemoval": "Disappears {{date, datetime(dateStyle: medium; timeStyle: short)}}, even if archived; may disappear sooner if you reapply or lose access."
     },
     "access_key_expiry": {
       "untitled": "An Access Key",
       "expiring": "Expires {{date, datetime}}",
-      "expired": "Expired {{date, datetime}}"
+      "expired": "Expired {{date, datetime}}",
+      "removal": "Disappears {{date, datetime(dateStyle: medium; timeStyle: short)}}, even if archived; may disappear sooner if the key is revoked or its expiry changes."
     }
   }
 }

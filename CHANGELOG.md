@@ -42,6 +42,15 @@
   The static view now spans the full graph width, and **Export filtered
   graph** writes the same styles.
 
+### Inbox
+
+- Allow every Inbox item to be archived and moved back to the Inbox, including
+  reviews awaiting action, workspace join requests/results and Access Key
+  expiry notices. Archived computed items support message pagination.
+- Show each built-in item's disappearance conditions, including the configured
+  end date for join results and Access Key notices. Archiving does not extend
+  an item's visibility window or preserve it after its source disappears.
+
 ## 0.2.1 — 2026-11-04
 
 Beta release with Graph View, document references, Inbox, and workspace-scoped

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import timedelta
 from uuid import UUID, uuid4
 
@@ -38,7 +39,16 @@ def test_builtin_kinds_follow_their_sources_without_announcing_undo(session_fact
     who hears a decision, and how undo and a colleague's claim change that
     without new messages. Account: join requests and Access Key expiry."""
 
-    inbox = InboxService(InboxRegistry(build_builtin_inbox_kinds(DEFAULT_INBOX_CONFIG)))
+    config = replace(
+        DEFAULT_INBOX_CONFIG,
+        workspace_join=replace(
+            DEFAULT_INBOX_CONFIG.workspace_join, result_visible_for=timedelta(days=11)
+        ),
+        access_key_expiry=replace(
+            DEFAULT_INBOX_CONFIG.access_key_expiry, keep_after_expiry=timedelta(days=4)
+        ),
+    )
+    inbox = InboxService(InboxRegistry(build_builtin_inbox_kinds(config)))
     reviews = ReviewService(decision_listeners=(ReviewResultNotifier(lambda: inbox),))
 
     with session_factory.begin() as session:
@@ -192,16 +202,48 @@ def test_builtin_kinds_follow_their_sources_without_announcing_undo(session_fact
         session.flush()
         join_key, token_key = f"{workspace_id}:{request.id}", str(token.id)
 
-    def account(user_id):
+    def account(user_id, state="all"):
         actor = ActorContext("human", str(user_id), user_id=user_id)
         with session_factory() as session:
             page = inbox.list_items(
-                session, InboxViewer(actor, user_id, AccountInbox())
+                session, InboxViewer(actor, user_id, AccountInbox()), state=state
             )
+        for item in page.status_items + page.items:
+            if item.kind == "workspace_join":
+                until = (
+                    (
+                        item.event_at + config.workspace_join.result_visible_for
+                    ).isoformat()
+                    if item.revision.endswith(("approved", "rejected"))
+                    else None
+                )
+            else:
+                expiry = item.event_at
+                if item.revision == "expiring":
+                    expiry += config.access_key_expiry.warn_before
+                until = (
+                    expiry + config.access_key_expiry.keep_after_expiry
+                ).isoformat()
+            assert item.display.params["visible_until"] == until
         return {
             (i.kind, i.item_key): (i.revision, i.unread, i.display.href)
-            for i in page.status_items
+            for i in page.status_items + page.items
         }
+
+    def account_archive(user_id, kind, key, revision):
+        with session_factory.begin() as session:
+            assert inbox.mark(
+                session,
+                InboxViewer(
+                    ActorContext("human", str(user_id), user_id=user_id),
+                    user_id,
+                    AccountInbox(),
+                ),
+                kind=kind,
+                item_key=key,
+                seen_revision=revision,
+                archived=True,
+            ).applied
 
     def change(model, key, **values):
         with session_factory.begin() as session:
@@ -232,15 +274,27 @@ def test_builtin_kinds_follow_their_sources_without_announcing_undo(session_fact
             read=True,
         ).applied
 
+    account_archive(owner_id, "workspace_join", join_key, "1:pending")
+    account_archive(requester_id, "access_key_expiry", token_key, "expiring")
+    assert account(owner_id) == account(requester_id) == {}
+    assert ("workspace_join", join_key) in account(owner_id, "archived")
+    assert account(requester_id, "archived") == {
+        ("access_key_expiry", token_key): ("expiring", False, "/account/integrations")
+    }
+
     # A rejection leaves the owner's list and shows the requester, without a
     # link, until the result window closes. Expiry makes the key unread again.
     change(WorkspaceJoinRequest, request.id, status="rejected", decided_at=utc_now())
     change(ApiToken, token.id, expires_at=utc_now() - timedelta(hours=1))
     assert account(owner_id) == {}
+    assert account(owner_id, "archived") == {}
+    assert account(requester_id, "archived") == {}
     assert account(requester_id) == {
         ("workspace_join", join_key): ("1:rejected", True, None),
         ("access_key_expiry", token_key): ("expired", True, "/account/integrations"),
     }
+    account_archive(requester_id, "workspace_join", join_key, "1:rejected")
+    assert ("workspace_join", join_key) in account(requester_id, "archived")
     # A rejected outsider cannot learn a private workspace's current title,
     # either by listing the result or by marking its previously known key.
     change(
@@ -253,6 +307,7 @@ def test_builtin_kinds_follow_their_sources_without_announcing_undo(session_fact
     assert account(requester_id) == {
         ("access_key_expiry", token_key): ("expired", True, "/account/integrations")
     }
+    assert account(requester_id, "archived") == {}
     with session_factory.begin() as session:
         with pytest.raises(ReadNotFoundError):
             inbox.mark(
@@ -269,7 +324,8 @@ def test_builtin_kinds_follow_their_sources_without_announcing_undo(session_fact
             )
     # Keep the expiry assertion independent of the workspace visibility gate.
     change(Workspace, workspace_id, visibility="team", join_policy="request")
-    window = DEFAULT_INBOX_CONFIG.workspace_join.result_visible_for
+    window = config.workspace_join.result_visible_for
     change(WorkspaceJoinRequest, request.id, decided_at=utc_now() - window)
     change(ApiToken, token.id, revoked_at=utc_now())
     assert account(requester_id) == {}
+    assert account(requester_id, "archived") == {}

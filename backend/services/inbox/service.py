@@ -94,7 +94,8 @@ class InboxService:
         """Status items come whole on the first page; stored items page by
         keyset, reading ahead past items the viewer can no longer see.
 
-        Call on a fresh session: the read-mark counts, status scans and marks
+        Archived computed items page through their personal marks alongside
+        stored messages. Call on a fresh session: mark counts, scans and marks
         are read from one database snapshot."""
 
         acquire_consistent_read_snapshot(session)
@@ -116,7 +117,7 @@ class InboxService:
         items: list[InboxItem] = []
         last: InboxEntryRow | None = None
         for _ in range(self.listing.stream_scan_batches):
-            rows = entries.stored_page(
+            rows = entries.message_page(
                 session,
                 scope,
                 viewer.user_id,
@@ -125,21 +126,23 @@ class InboxService:
                 after=position,
                 limit=limit + 1,
             )
-            displays = self._resolve_rows(session, viewer, rows)
+            resolved = self._resolve_rows(session, viewer, rows)
             for row in rows:
                 if len(items) == limit:
                     return InboxPage(
                         status_items, status_overflow, items, _encode_cursor(last)
                     )
                 last = row
-                display = displays.get((row.kind, row.item_key))
-                snapshot = entries.stored_snapshot(row)
-                if display is not None and snapshot is not None:
+                found = resolved.get((row.kind, row.item_key))
+                if found is not None:
+                    snapshot, display = found
                     spec = self.registry.kind(scope.name, row.kind)
-                    items.append(_item(spec, snapshot, row, display))
+                    item = _item(spec, snapshot, row, display)
+                    if _matches(item, state):
+                        items.append(item)
             if len(rows) <= limit:
                 return InboxPage(status_items, status_overflow, items, None)
-            position = (last.event_at, last.kind, last.item_key)
+            position = (last.event_at or last.updated_at, last.kind, last.item_key)
         return InboxPage(status_items, status_overflow, items, _encode_cursor(last))
 
     def mark(
@@ -166,8 +169,6 @@ class InboxService:
         if read is None and archived is None:
             raise ReadValidationError("set read or archived")
         scope = viewer.scope
-        if archived is not None and not self.registry.archivable(scope.name, kind):
-            raise ReadValidationError("a status item is read or unread, not archived")
         spec = self.registry.kind(scope.name, kind)
         scope.acquire_write(session)
         # A savepoint removes any recipient and entry rows created for a missing
@@ -204,22 +205,23 @@ class InboxService:
 
         The source applies who may see an item before its limit, so only the
         viewer's own marks can hide a candidate. Every candidate a mark hides
-        has a mark row, so an unread view asks for one more candidate per read
-        mark, up to a cap. The overflow total is the source's own count.
+        has a mark row, so ask for one more candidate per hiding mark, up to
+        a cap. The overflow total is the source's own count.
         """
 
         if state == "archived":
+            # Archived marks are paginated by message_page, including marks
+            # for items beyond this source's first page.
             return [], []
         shown = self.listing.status_items_per_kind
-        extra = 0
-        if state == "unread":
-            extra = entries.count_read_marks(
-                session,
-                viewer.scope,
-                viewer.user_id,
-                spec.name,
-                cap=self.listing.read_mark_scan_cap,
-            )
+        extra = entries.count_hidden_marks(
+            session,
+            viewer.scope,
+            viewer.user_id,
+            spec.name,
+            state=state,
+            cap=self.listing.read_mark_scan_cap,
+        )
         wanted = shown + extra
         scan = spec.source.status(session, viewer, spec.name, wanted)
         found = list(scan.items)[:wanted]
@@ -248,20 +250,25 @@ class InboxService:
 
     def _resolve_rows(
         self, session: Session, viewer: InboxViewer, rows: Sequence[InboxEntryRow]
-    ) -> dict[tuple[str, str], InboxDisplay]:
+    ) -> dict[tuple[str, str], tuple[InboxSnapshot, InboxDisplay]]:
         by_kind: dict[str, list[InboxSnapshot]] = {}
         for row in rows:
             snapshot = entries.stored_snapshot(row)
+            if snapshot is None:
+                spec = self.registry.kind(viewer.scope.name, row.kind)
+                snapshot = spec.source.current(
+                    session, viewer, row.kind, row.item_key, None
+                )
             if snapshot is not None:
                 by_kind.setdefault(row.kind, []).append(snapshot)
-        displays: dict[tuple[str, str], InboxDisplay] = {}
+        resolved: dict[tuple[str, str], tuple[InboxSnapshot, InboxDisplay]] = {}
         for name, snapshots in by_kind.items():
             spec = self.registry.kind(viewer.scope.name, name)
-            for item_key, display in self._resolve(
-                session, viewer, spec, snapshots
-            ).items():
-                displays[(name, item_key)] = display
-        return displays
+            displays = self._resolve(session, viewer, spec, snapshots)
+            for snapshot in snapshots:
+                if (display := displays.get(snapshot.item_key)) is not None:
+                    resolved[(name, snapshot.item_key)] = (snapshot, display)
+        return resolved
 
     def _resolve(
         self,
@@ -314,7 +321,9 @@ def _newest_first(item: InboxItem) -> tuple[float, str, str]:
 
 
 def _encode_cursor(entry: InboxEntryRow) -> str:
-    raw = json.dumps([entry.event_at.isoformat(), entry.kind, entry.item_key])
+    raw = json.dumps(
+        [(entry.event_at or entry.updated_at).isoformat(), entry.kind, entry.item_key]
+    )
     return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
 
 

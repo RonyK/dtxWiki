@@ -1,6 +1,7 @@
 import { KeyRound } from "lucide-react";
 
 import type { InboxRenderer } from "../inboxRenderers";
+import { inboxVisibleUntil } from "../inboxVisibility";
 
 // An Access Key about to expire or just expired; params.stage and
 // params.expires_at.
@@ -13,6 +14,10 @@ export const accessKeyExpiryRenderer: InboxRenderer = {
     return item.display?.params?.stage === "expired"
       ? t("kinds.access_key_expiry.expired", { date })
       : t("kinds.access_key_expiry.expiring", { date });
+  },
+  removal: (item, t) => {
+    const date = inboxVisibleUntil(item);
+    return date ? t("kinds.access_key_expiry.removal", { date }) : null;
   },
   icon: KeyRound,
 };

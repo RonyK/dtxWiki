@@ -21,7 +21,7 @@ from backend.services.inbox import (
     WorkspaceInbox,
 )
 from backend.services.inbox.recipients import retire_workspace_recipient
-from backend.services.read_errors import ReadNotFoundError, ReadValidationError
+from backend.services.read_errors import ReadNotFoundError
 
 
 def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
@@ -56,6 +56,7 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
             get=lambda _s, _v, key: status.get(key),
         ),
         resolve,
+        reopen_on_new_revision=True,
     )
     delivered = []
 
@@ -153,9 +154,19 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
     assert [(row.item_key, row.read_revision) for row in rows] == [("queue", "r1")]
     assert all(i.kind != "test.status" for i in page(state="all").items)
 
-    # A status item is read or unread; it leaves when resolved, not archived.
-    with pytest.raises(ReadValidationError):
-        mark("queue", "r2", kind="test.status", archived=True)
+    # Every kind supports the same archive/restore marks, independent of read.
+    assert mark("queue", "r2", kind="test.status", archived=True).applied
+    assert page().status_items == []
+    assert page(state="unread").status_items == []
+    queued = next(i for i in page(state="archived").items if i.kind == "test.status")
+    assert (queued.item_key, queued.archived, queued.unread) == ("queue", True, True)
+    assert not mark("queue", "r1", kind="test.status", archived=False).applied
+    assert mark("queue", "r2", kind="test.status", archived=False).applied
+    assert [i.item_key for i in page().status_items] == ["queue"]
+    assert mark("queue", "r2", kind="test.status", archived=True).applied
+    status["queue"] = InboxSnapshot("queue", "r3", start)
+    assert [i.revision for i in page(state="unread").status_items] == ["r3"]
+    assert all(i.kind != "test.status" for i in page(state="archived").items)
 
     # Read items do not crowd unread ones out of a short status list: each
     # read mark buys one more candidate, up to the cap, and the overflow keeps
@@ -185,6 +196,44 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
     assert [i.item_key for i in everything.status_items] == ["q1", "q2"]
     assert [o.total for o in everything.status_overflow] == [6]
     assert capped_page("archived").status_items == []
+
+    # Archive marks also compensate current-state scans. Archived messages
+    # page from marks, so q6 is reachable beyond the source's first 2 items.
+    assert mark("q1", "r1", kind="test.status", archived=True).applied
+    assert mark("q2", "r1", kind="test.status", archived=True).applied
+    assert mark("q3", "r1", kind="test.status", archived=True).applied
+    assert [i.item_key for i in capped_page("all").status_items] == ["q4", "q5"]
+    assert [i.item_key for i in capped_page("unread").status_items] == ["q5"]
+    assert mark("q6", "r1", kind="test.status", archived=True).applied
+
+    def archived_keys(service):
+        keys, cursor = [], None
+        while True:
+            with session_factory() as session:
+                result = service.list_items(
+                    session, viewer(alice), state="archived", limit=1, cursor=cursor
+                )
+            assert result.status_items == []
+            keys.extend(i.item_key for i in result.items)
+            if result.next_cursor is None:
+                return keys
+            assert result.next_cursor != cursor
+            cursor = result.next_cursor
+
+    assert set(archived_keys(capped)) == {"note", "q1", "q2", "q3", "q6"}
+    assert page(user_id=bob, state="archived").items == []
+    # Source removal, revision changes and resolver visibility still apply
+    # in the archive. Even empty scan batches must leave a usable cursor.
+    del status["q1"]
+    status["q2"] = InboxSnapshot("q2", "r2", start)
+    status["q3"] = InboxSnapshot("q3", "r1", start, {"hidden": True})
+    shallow = InboxService(
+        InboxRegistry((note, computed)),
+        listing=InboxListingConfig(stream_scan_batches=1),
+    )
+    assert set(archived_keys(shallow)) == {"note", "q6"}
+    assert mark("q6", "r1", kind="test.status", archived=False).applied
+    assert "q6" in [i.item_key for i in page().status_items]
 
     # Final account cleanup closes the recipient to every producer and
     # delivery channel, even when retained history generates a later event.

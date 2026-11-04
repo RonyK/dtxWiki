@@ -42,16 +42,13 @@ export function InboxItemRow({
   item,
   busy,
   onMark,
-  archivable = true,
 }: {
   item: InboxItem;
   busy: boolean;
   onMark: (item: InboxItem, marks: { read?: boolean; archived?: boolean }) => void;
-  // A status item is current state: it leaves when resolved, so it has no archive.
-  archivable?: boolean;
 }) {
   const { t, i18n } = useTranslation("inbox");
-  const { title, summary, icon: Icon } = presentInboxItem(item, t);
+  const { title, summary, removal, icon: Icon } = presentInboxItem(item, t);
   const href = item.display?.href;
   const time = item.event_at
     ? new Intl.DateTimeFormat(i18n.language, { dateStyle: "medium", timeStyle: "short" }).format(
@@ -73,6 +70,7 @@ export function InboxItemRow({
           <span className="inbox-row-title">{title}</span>
         )}
         {summary ? <span className="inbox-row-summary">{summary}</span> : null}
+        {removal ? <span className="inbox-row-removal">{removal}</span> : null}
         {time ? <time className="inbox-row-time" dateTime={item.event_at ?? undefined}>{time}</time> : null}
       </div>
       <div className="inbox-row-actions">
@@ -86,18 +84,17 @@ export function InboxItemRow({
         >
           {item.unread ? <MailOpen size={16} aria-hidden="true" /> : <Mail size={16} aria-hidden="true" />}
         </button>
-        {archivable ? (
-          <button
-            aria-label={item.archived ? t("actions.unarchive") : t("actions.archive")}
-            className="icon-button"
-            disabled={busy}
-            onClick={() => onMark(item, { archived: !item.archived })}
-            title={item.archived ? t("actions.unarchive") : t("actions.archive")}
-            type="button"
-          >
-            {item.archived ? <ArchiveRestore size={16} aria-hidden="true" /> : <Archive size={16} aria-hidden="true" />}
-          </button>
-        ) : null}
+        <button
+          aria-label={item.archived ? t("actions.unarchive") : t("actions.archive")}
+          className="icon-button text-button"
+          disabled={busy}
+          onClick={() => onMark(item, { archived: !item.archived })}
+          title={item.archived ? t("actions.unarchive") : t("actions.archive")}
+          type="button"
+        >
+          {item.archived ? <ArchiveRestore size={16} aria-hidden="true" /> : <Archive size={16} aria-hidden="true" />}
+          <span>{item.archived ? t("actions.unarchive") : t("actions.archive")}</span>
+        </button>
       </div>
     </li>
   );
@@ -184,11 +181,10 @@ export function InboxScreen() {
     }
   }
 
-  const rows = (items: InboxItem[], archivable = true) => (
+  const rows = (items: InboxItem[]) => (
     <ul className="inbox-list">
       {items.map((item) => (
         <InboxItemRow
-          archivable={archivable}
           busy={busyKey === itemKey(item)}
           item={item}
           key={itemKey(item)}
@@ -197,8 +193,9 @@ export function InboxScreen() {
       ))}
     </ul>
   );
-  // Nothing to list can still leave an overflow count or a cursor to follow.
-  const nothingShown = page && page.items.length === 0 && page.status_items.length === 0;
+  // A partial scan can be empty while still leaving candidates to inspect.
+  const nothingShown = page && page.items.length === 0 && page.status_items.length === 0
+    && page.status_overflow.length === 0 && !page.next_cursor;
 
   return (
     <div className="workspace-screen single-column">
@@ -243,7 +240,7 @@ export function InboxScreen() {
             {nothingShown ? <p className="empty-state">{t(`empty.${state}`)}</p> : null}
             {page.status_items.length > 0 || page.status_overflow.length > 0 ? (
               <section className="feature-section inbox-status" aria-label={t("status.label")}>
-                {page.status_items.length > 0 ? rows(page.status_items, false) : null}
+                {page.status_items.length > 0 ? rows(page.status_items) : null}
                 {page.status_overflow.map((overflow) => (
                   <p className="inbox-overflow" key={overflow.kind}>
                     {t("status.overflow", { total: overflow.total })}

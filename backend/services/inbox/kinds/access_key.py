@@ -57,7 +57,13 @@ class _ExpiringKeys:
             str(token.id),
             "expired" if expired else "expiring",
             expires_at if expired else expires_at - self.config.warn_before,
-            {"name": token.name, "expires_at": expires_at.isoformat()},
+            {
+                "name": token.name,
+                "expires_at": expires_at.isoformat(),
+                "visible_until": (
+                    expires_at + self.config.keep_after_expiry
+                ).isoformat(),
+            },
         )
 
     def scan(self, session: Session, viewer: InboxViewer, limit: int) -> ComputedScan:
@@ -100,6 +106,7 @@ def _resolve(
             params={
                 "stage": snapshot.revision,
                 "expires_at": (snapshot.ref or {}).get("expires_at"),
+                "visible_until": (snapshot.ref or {}).get("visible_until"),
             },
         )
         for snapshot in snapshots

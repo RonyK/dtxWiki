@@ -1,6 +1,7 @@
 import { UserPlus } from "lucide-react";
 
 import type { InboxRenderer } from "../inboxRenderers";
+import { inboxVisibleUntil } from "../inboxVisibility";
 
 // A join request; the title is the workspace, params carry its status and
 // the requester's name.
@@ -16,6 +17,11 @@ export const workspaceJoinRenderer: InboxRenderer = {
       default:
         return t("kinds.workspace_join.pending", { requester, workspace });
     }
+  },
+  removal: (item, t) => {
+    if (item.display?.params?.status === "pending") return t("kinds.workspace_join.pendingRemoval");
+    const date = inboxVisibleUntil(item);
+    return date ? t("kinds.workspace_join.resultRemoval", { date }) : null;
   },
   icon: UserPlus,
 };

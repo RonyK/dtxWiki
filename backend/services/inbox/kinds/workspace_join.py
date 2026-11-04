@@ -165,7 +165,17 @@ class _JoinRequests:
                     if status == "approved"
                     else None
                 ),
-                params={"status": status, "requester": requester_name},
+                params={
+                    "status": status,
+                    "requester": requester_name,
+                    "visible_until": (
+                        (
+                            request.decided_at + self.config.result_visible_for
+                        ).isoformat()
+                        if status in RESULTS and request.decided_at is not None
+                        else None
+                    ),
+                },
             )
         return displays
 

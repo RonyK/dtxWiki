@@ -107,7 +107,8 @@
   color: var(--ink-soft);
 }
 
-.inbox-row-summary {
+.inbox-row-summary,
+.inbox-row-removal {
   color: var(--ink-muted);
   font-size: 13px;
   overflow-wrap: anywhere;
