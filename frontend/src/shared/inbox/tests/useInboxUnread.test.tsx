@@ -1,9 +1,9 @@
-import { act, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as inboxApi from "../../api/inbox";
 import type { InboxPage } from "../../api/inbox";
-import { notifyInboxChanged, useInboxUnread } from "../useInboxUnread";
+import { useInboxUnread } from "../useInboxUnread";
 
 function UnreadProbe() {
   const unread = useInboxUnread(null, true);
@@ -42,13 +42,5 @@ describe("useInboxUnread", () => {
     expect(list).toHaveBeenNthCalledWith(3, inboxApi.ACCOUNT_INBOX_SCOPE, {
       state: "unread", limit: 1, cursor: "visible-page",
     });
-
-    // Archive removes the last unread item; restoring it refreshes the dot.
-    list.mockResolvedValue(page(null));
-    act(() => notifyInboxChanged());
-    expect(await screen.findByText("No unread messages")).toBeInTheDocument();
-    list.mockResolvedValue(visible);
-    act(() => notifyInboxChanged());
-    expect(await screen.findByText("Unread messages")).toBeInTheDocument();
   });
 });

@@ -157,6 +157,19 @@ def count_hidden_marks(
     return session.scalar(select(func.count()).select_from(marked)) or 0
 
 
+def _order_at(model: Any, state: InboxState) -> Any:
+    # The Archived list is newest archive first for every entry; the others
+    # follow when each message happened. ``updated_at`` is set by a producer
+    # write and by archive or restore, never by a read mark.
+    return model.updated_at if state == "archived" else model.event_at
+
+
+def list_position(entry: InboxEntryRow, state: InboxState) -> tuple[datetime, str, str]:
+    """The keyset position of an entry in ``message_page`` for this state."""
+
+    return (_order_at(entry, state), entry.kind, entry.item_key)
+
+
 def message_page(
     session: Session,
     scope: InboxScope,
@@ -167,11 +180,12 @@ def message_page(
     after: tuple[datetime, str, str] | None,
     limit: int,
 ) -> Sequence[InboxEntryRow]:
-    """Messages plus archived computed marks, in stable keyset order.
+    """The entries a message page reads, in keyset order, newest first.
 
-    Marks have no event_at. Use their update time to page archived candidates
-    independently of the source's bounded current-state scan. The caller
-    rechecks their current revision and visibility before showing them.
+    Inbox and Unread read stored messages; computed items come from their
+    source's status scan. Archived reads every archived entry, stored or
+    marks-only, so archived computed items page past the source's first scan.
+    The caller rechecks each entry's current revision and visibility.
     """
 
     model = scope.model
@@ -179,29 +193,28 @@ def message_page(
         model.archived_revision.is_not(None),
         or_(
             model.kind.not_in(reopen_kinds),
+            # A marks-only row's revision lives at its source.
+            model.revision.is_(None),
             model.archived_revision == model.revision,
         ),
     )
-    selected = and_(model.mode == STORED_MODE, not_(archived))
-    ordering_at = model.event_at
+    conditions = [*_equal(model, scope.owner(user_id))]
     if state == "archived":
-        selected = or_(
-            and_(model.mode == STORED_MODE, archived),
-            and_(model.mode == MARK_MODE, model.archived_revision.is_not(None)),
-        )
-        ordering_at = func.coalesce(model.event_at, model.updated_at)
-    conditions = [*_equal(model, scope.owner(user_id)), selected]
+        conditions.append(archived)
+    else:
+        conditions += [model.mode == STORED_MODE, not_(archived)]
     if state == "unread":
         conditions.append(
             or_(model.read_revision.is_(None), model.read_revision != model.revision)
         )
+    order_at = _order_at(model, state)
     if after is not None:
-        event_at, kind, item_key = after
+        position_at, kind, item_key = after
         conditions.append(
             or_(
-                ordering_at < event_at,
+                order_at < position_at,
                 and_(
-                    ordering_at == event_at,
+                    order_at == position_at,
                     or_(
                         model.kind < kind,
                         and_(model.kind == kind, model.item_key < item_key),
@@ -212,7 +225,7 @@ def message_page(
     return session.scalars(
         select(model)
         .where(*conditions)
-        .order_by(ordering_at.desc(), model.kind.desc(), model.item_key.desc())
+        .order_by(order_at.desc(), model.kind.desc(), model.item_key.desc())
         .limit(limit)
     ).all()
 

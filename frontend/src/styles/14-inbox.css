@@ -1,4 +1,4 @@
-/* Inbox screen: scope/state controls and message rows. */
+/* Inbox screen: scope/state controls, item groups and two-line item rows. */
 
 .inbox-controls {
   display: flex;
@@ -6,6 +6,60 @@
   gap: 12px;
   align-items: center;
   margin-bottom: 16px;
+}
+
+/* The workspace segment names its workspace beside the generic label; a long
+   title is cut here and shown whole in the button's tooltip. */
+.inbox-scope-detail {
+  display: inline-block;
+  max-width: 160px;
+  margin-left: 2px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+/* One explanation per view instead of a sentence on every row. */
+.inbox-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 0 0 14px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.inbox-note svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--ink-soft);
+}
+
+.inbox-group-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  margin: 0 0 8px;
+  color: var(--ink-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.inbox-group-hint {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .inbox-list {
@@ -17,14 +71,15 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   background: var(--surface);
+  overflow: hidden;
 }
 
 .inbox-row {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
   gap: 12px;
-  align-items: center;
-  padding: 10px 14px;
+  align-items: start;
+  padding: 10px 12px 10px 14px;
   border-top: 1px solid var(--border);
 }
 
@@ -32,49 +87,151 @@
   border-top: 0;
 }
 
+.inbox-row.is-unread {
+  background: color-mix(in srgb, var(--accent) 3%, var(--surface));
+}
+
 .inbox-row-dot {
-  display: inline-flex;
-  color: var(--ink-faint);
+  width: 8px;
+  height: 8px;
+  margin-top: 8px;
+  border-radius: 50%;
 }
 
 .inbox-row.is-unread .inbox-row-dot {
-  color: var(--accent);
+  background: var(--accent);
 }
 
 .inbox-row-body {
   display: grid;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
 }
 
+.inbox-row-head {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.inbox-row-icon {
+  flex: none;
+  margin-top: 3px;
+  color: var(--ink-soft);
+}
+
 .inbox-row-title {
+  min-width: 0;
   overflow-wrap: anywhere;
+  word-break: keep-all;
   color: var(--ink);
 }
 
 .inbox-row.is-unread .inbox-row-title {
-  font-weight: 600;
+  font-weight: 650;
 }
 
 .inbox-row-time {
+  flex: none;
+  margin-left: auto;
+  padding-left: 12px;
   color: var(--ink-soft);
   font-size: 12px;
+  line-height: 22px;
+  white-space: nowrap;
+}
+
+.inbox-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: center;
+  padding-left: 22px;
+}
+
+.inbox-row-summary {
+  color: var(--ink-muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.inbox-removal-chip,
+.inbox-removal-info {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  cursor: pointer;
+}
+
+.inbox-removal-chip {
+  padding: 1px 8px;
+  border-color: var(--border);
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  font-size: 11.5px;
+  line-height: 18px;
+}
+
+.inbox-row.is-archived .inbox-removal-chip {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+  background: var(--warning-soft);
+  color: color-mix(in srgb, var(--warning) 55%, var(--ink));
+}
+
+.inbox-removal-info {
+  margin-top: 2px;
+  padding: 2px;
+  border-radius: 4px;
+  color: var(--ink-faint);
+}
+
+.inbox-removal-chip:focus-visible,
+.inbox-removal-info:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The full condition opens below the row's text, so it also works on touch. */
+.inbox-removal-detail {
+  margin: 2px 0 0;
+  padding-left: 22px;
+  color: var(--ink-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 
 .inbox-row-actions {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
 }
 
-.inbox-status {
-  margin-bottom: 16px;
+.inbox-row-actions .icon-button {
+  justify-content: center;
+}
+
+.inbox-group {
+  margin-bottom: 18px;
 }
 
 .inbox-overflow {
   margin: 8px 0 0;
   color: var(--ink-soft);
   font-size: 13px;
+}
+
+.inbox-scan-empty {
+  margin: 0;
+  padding: 18px 16px 4px;
+  color: var(--ink-muted);
+  font-size: 13px;
+  text-align: center;
 }
 
 /* Topbar entry: a dot when an open inbox has an unread item. */
@@ -94,22 +251,39 @@
 }
 
 @media (max-width: 640px) {
+  .inbox-scope-detail {
+    max-width: 120px;
+  }
+
   .inbox-row {
-    grid-template-columns: 16px minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px;
   }
 
-  .inbox-row-actions {
-    grid-column: 2;
+  .inbox-group-hint {
+    flex-basis: 100%;
   }
-}
 
-.inbox-row-icon {
-  color: var(--ink-soft);
-}
+  /* The time moves under the title so a long title keeps the full width,
+     and the lines below start under the icon to leave room for the actions. */
+  .inbox-row-head {
+    flex-wrap: wrap;
+  }
 
-.inbox-row-summary,
-.inbox-row-removal {
-  color: var(--ink-muted);
-  font-size: 13px;
-  overflow-wrap: anywhere;
+  .inbox-row-title {
+    flex: 1 1 0;
+  }
+
+  .inbox-row-time {
+    flex-basis: 100%;
+    order: 5;
+    margin-left: 0;
+    padding-left: 0;
+    line-height: 18px;
+  }
+
+  .inbox-row-meta,
+  .inbox-removal-detail {
+    padding-left: 0;
+  }
 }

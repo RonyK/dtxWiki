@@ -94,9 +94,9 @@ class InboxService:
         """Status items come whole on the first page; stored items page by
         keyset, reading ahead past items the viewer can no longer see.
 
-        Archived computed items page through their personal marks alongside
-        stored messages. Call on a fresh session: mark counts, scans and marks
-        are read from one database snapshot."""
+        The Archived list pages every archived entry, computed items included,
+        newest archive first. Call on a fresh session: mark counts, scans and
+        marks are read from one database snapshot."""
 
         acquire_consistent_read_snapshot(session)
         if limit is None:
@@ -130,7 +130,10 @@ class InboxService:
             for row in rows:
                 if len(items) == limit:
                     return InboxPage(
-                        status_items, status_overflow, items, _encode_cursor(last)
+                        status_items,
+                        status_overflow,
+                        items,
+                        _encode_cursor(last, state),
                     )
                 last = row
                 found = resolved.get((row.kind, row.item_key))
@@ -142,8 +145,10 @@ class InboxService:
                         items.append(item)
             if len(rows) <= limit:
                 return InboxPage(status_items, status_overflow, items, None)
-            position = (last.event_at or last.updated_at, last.kind, last.item_key)
-        return InboxPage(status_items, status_overflow, items, _encode_cursor(last))
+            position = entries.list_position(last, state)
+        return InboxPage(
+            status_items, status_overflow, items, _encode_cursor(last, state)
+        )
 
     def mark(
         self,
@@ -178,8 +183,8 @@ class InboxService:
                 raise ReadNotFoundError("inbox item not found")
             entry = entries.lock_entry(session, scope, viewer.user_id, kind, item_key)
             current = spec.source.current(
-                session, viewer, kind, item_key, entries.stored_snapshot(entry)
-            )
+                session, viewer, kind, {item_key: entries.stored_snapshot(entry)}
+            ).get(item_key)
             display = (
                 self._resolve(session, viewer, spec, [current]).get(item_key)
                 if current is not None
@@ -194,7 +199,8 @@ class InboxService:
                 entry.read_revision = current.revision if read else None
             if archived is not None:
                 entry.archived_revision = current.revision if archived else None
-            entry.updated_at = utc_now()
+                # Orders the Archived list; a read mark does not move an item.
+                entry.updated_at = utc_now()
             session.flush()
         return InboxMarkResult(applied, _item(spec, current, entry, display))
 
@@ -210,8 +216,7 @@ class InboxService:
         """
 
         if state == "archived":
-            # Archived marks are paginated by message_page, including marks
-            # for items beyond this source's first page.
+            # Archived items, computed ones included, page with the messages.
             return [], []
         shown = self.listing.status_items_per_kind
         extra = entries.count_hidden_marks(
@@ -251,23 +256,21 @@ class InboxService:
     def _resolve_rows(
         self, session: Session, viewer: InboxViewer, rows: Sequence[InboxEntryRow]
     ) -> dict[tuple[str, str], tuple[InboxSnapshot, InboxDisplay]]:
-        by_kind: dict[str, list[InboxSnapshot]] = {}
+        """Each row's current item and display, one source call per kind."""
+
+        by_kind: dict[str, dict[str, InboxSnapshot | None]] = {}
         for row in rows:
-            snapshot = entries.stored_snapshot(row)
-            if snapshot is None:
-                spec = self.registry.kind(viewer.scope.name, row.kind)
-                snapshot = spec.source.current(
-                    session, viewer, row.kind, row.item_key, None
-                )
-            if snapshot is not None:
-                by_kind.setdefault(row.kind, []).append(snapshot)
+            by_kind.setdefault(row.kind, {})[row.item_key] = entries.stored_snapshot(
+                row
+            )
         resolved: dict[tuple[str, str], tuple[InboxSnapshot, InboxDisplay]] = {}
-        for name, snapshots in by_kind.items():
+        for name, stored in by_kind.items():
             spec = self.registry.kind(viewer.scope.name, name)
-            displays = self._resolve(session, viewer, spec, snapshots)
-            for snapshot in snapshots:
-                if (display := displays.get(snapshot.item_key)) is not None:
-                    resolved[(name, snapshot.item_key)] = (snapshot, display)
+            found = spec.source.current(session, viewer, name, stored)
+            displays = self._resolve(session, viewer, spec, list(found.values()))
+            for item_key, snapshot in found.items():
+                if (display := displays.get(item_key)) is not None:
+                    resolved[(name, item_key)] = (snapshot, display)
         return resolved
 
     def _resolve(
@@ -320,10 +323,9 @@ def _newest_first(item: InboxItem) -> tuple[float, str, str]:
     return (-stamp, item.kind, item.item_key)
 
 
-def _encode_cursor(entry: InboxEntryRow) -> str:
-    raw = json.dumps(
-        [(entry.event_at or entry.updated_at).isoformat(), entry.kind, entry.item_key]
-    )
+def _encode_cursor(entry: InboxEntryRow, state: InboxState) -> str:
+    at, kind, item_key = entries.list_position(entry, state)
+    raw = json.dumps([at.isoformat(), kind, item_key])
     return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
 
 

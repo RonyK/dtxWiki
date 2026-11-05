@@ -202,32 +202,18 @@ def test_builtin_kinds_follow_their_sources_without_announcing_undo(session_fact
         session.flush()
         join_key, token_key = f"{workspace_id}:{request.id}", str(token.id)
 
-    def account(user_id, state="all"):
+    def listed(user_id, state="all"):
         actor = ActorContext("human", str(user_id), user_id=user_id)
         with session_factory() as session:
             page = inbox.list_items(
                 session, InboxViewer(actor, user_id, AccountInbox()), state=state
             )
-        for item in page.status_items + page.items:
-            if item.kind == "workspace_join":
-                until = (
-                    (
-                        item.event_at + config.workspace_join.result_visible_for
-                    ).isoformat()
-                    if item.revision.endswith(("approved", "rejected"))
-                    else None
-                )
-            else:
-                expiry = item.event_at
-                if item.revision == "expiring":
-                    expiry += config.access_key_expiry.warn_before
-                until = (
-                    expiry + config.access_key_expiry.keep_after_expiry
-                ).isoformat()
-            assert item.display.params["visible_until"] == until
+        return page.status_items + page.items
+
+    def account(user_id, state="all"):
         return {
             (i.kind, i.item_key): (i.revision, i.unread, i.display.href)
-            for i in page.status_items + page.items
+            for i in listed(user_id, state)
         }
 
     def account_archive(user_id, kind, key, revision):
@@ -284,8 +270,20 @@ def test_builtin_kinds_follow_their_sources_without_announcing_undo(session_fact
 
     # A rejection leaves the owner's list and shows the requester, without a
     # link, until the result window closes. Expiry makes the key unread again.
-    change(WorkspaceJoinRequest, request.id, status="rejected", decided_at=utc_now())
-    change(ApiToken, token.id, expires_at=utc_now() - timedelta(hours=1))
+    decided_at, expired_at = utc_now(), utc_now() - timedelta(hours=1)
+    change(WorkspaceJoinRequest, request.id, status="rejected", decided_at=decided_at)
+    change(ApiToken, token.id, expires_at=expired_at)
+    # The stated end is the configured window, which the last step closes.
+    assert {
+        i.kind: i.display.params["visible_until"] for i in listed(requester_id)
+    } == {
+        "workspace_join": (
+            decided_at + config.workspace_join.result_visible_for
+        ).isoformat(),
+        "access_key_expiry": (
+            expired_at + config.access_key_expiry.keep_after_expiry
+        ).isoformat(),
+    }
     assert account(owner_id) == {}
     assert account(owner_id, "archived") == {}
     assert account(requester_id, "archived") == {}

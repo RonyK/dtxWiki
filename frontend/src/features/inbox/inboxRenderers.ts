@@ -11,6 +11,8 @@ import { workspaceJoinRenderer } from "./kinds/workspaceJoin";
 export type InboxRenderer = {
   title?: (item: InboxItem, t: TFunction<"inbox">) => string;
   summary?: (item: InboxItem, t: TFunction<"inbox">) => string | null;
+  // When the item leaves on its own. A date the server states in
+  // display.params.visible_until is shown by the row for every kind.
   removal?: (item: InboxItem, t: TFunction<"inbox">) => string | null;
   icon?: LucideIcon;
 };

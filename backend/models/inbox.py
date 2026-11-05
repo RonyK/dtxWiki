@@ -68,6 +68,8 @@ class WorkspaceInboxEntry(Base):
     event_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     read_revision: Mapped[str | None] = mapped_column(Text)
     archived_revision: Mapped[str | None] = mapped_column(Text)
+    # Set when the row is created, a producer writes it, or the recipient
+    # archives or restores it; read marks leave it. Orders the Archived list.
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=utc_now, nullable=False
     )
@@ -103,6 +105,8 @@ class AccountInboxEntry(Base):
     event_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     read_revision: Mapped[str | None] = mapped_column(Text)
     archived_revision: Mapped[str | None] = mapped_column(Text)
+    # Set when the row is created, a producer writes it, or the recipient
+    # archives or restores it; read marks leave it. Orders the Archived list.
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=utc_now, nullable=False
     )

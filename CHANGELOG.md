@@ -46,10 +46,18 @@
 
 - Allow every Inbox item to be archived and moved back to the Inbox, including
   reviews awaiting action, workspace join requests/results and Access Key
-  expiry notices. Archived computed items support message pagination.
-- Show each built-in item's disappearance conditions, including the configured
-  end date for join results and Access Key notices. Archiving does not extend
-  an item's visibility window or preserve it after its source disappears.
+  expiry notices, under one rule for all kinds. Archived lists newest archive
+  first and pages through every archived item; read marks do not reorder it.
+- Show when each item leaves on its own: a chip with the remaining time where
+  the server states an end date, otherwise an info button. Either one opens the
+  kind's full condition. Archived explains once that archiving does not extend
+  an item's visibility or keep it after its source disappears.
+- Show Inbox items in two lines under "Live" and "Messages" headings, with icon
+  actions, and explain an empty scan that still has older items to check.
+- Label the workspace scope "Workspace" and show the workspace's name beside
+  it, shortened when long with the full name on hover.
+- Look up the items of a listed page in one batched source query per kind
+  instead of one query per item.
 
 ## 0.2.1 — 2026-11-04
 

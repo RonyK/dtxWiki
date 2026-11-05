@@ -3,9 +3,10 @@
   "description": "이 workspace와 내 계정으로 온 메시지입니다.",
   "loading": "수신함 불러오는 중",
   "loadMore": "더 보기",
+  "checkOlder": "이전 항목 확인",
   "scope": {
     "label": "수신함 범위",
-    "workspace": "현재 workspace",
+    "workspace": "워크스페이스",
     "account": "계정"
   },
   "state": {
@@ -15,12 +16,15 @@
     "archived": "보관됨"
   },
   "status": {
-    "label": "현재 상태",
+    "label": "진행 중",
+    "hint": "원래 화면에서 처리되거나 만료되면 자동으로 사라집니다.",
     "overflow": "전체 {{total}}건 중 일부입니다. 나머지는 원래 화면에서 확인하세요."
   },
   "items": {
     "label": "메시지"
   },
+  "archivedNote": "최근에 보관한 순서로 표시됩니다. 보관한 항목도 원래 항목이 처리·만료되거나 볼 수 없게 되면 자동으로 사라집니다.",
+  "scanEmpty": "최근 항목 중 지금 표시할 수 있는 항목이 없습니다.",
   "empty": {
     "all": "메시지가 없습니다.",
     "unread": "안 읽은 메시지가 없습니다.",
@@ -38,6 +42,11 @@
     "archive": "보관",
     "unarchive": "수신함으로 되돌리기"
   },
+  "removal": {
+    "label": "자동 삭제 안내",
+    "chip": "{{relative}} 자동 삭제",
+    "until": "{{date, datetime(dateStyle: medium; timeStyle: short)}}에 자동으로 사라집니다."
+  },
   "kinds": {
     "review": {
       "untitled": "리뷰 항목"
@@ -45,26 +54,26 @@
     "review_attention": {
       "pending": "검토를 기다리고 있습니다",
       "changesRequested": "나에게 변경 요청이 왔습니다",
-      "removal": "보관해도 리뷰가 처리·대체되거나 다른 담당자에게 배정되거나 열람할 수 없게 되면 사라집니다."
+      "removal": "리뷰가 처리·대체되거나 다른 담당자에게 배정되거나 열람할 수 없게 되면 사라집니다."
     },
     "review_result": {
       "approved": "내 변경이 승인되었습니다",
       "rejected": "내 변경이 거절되었습니다",
-      "removal": "보관해도 결정이 취소·대체되거나 열람 권한이 없어지면 사라집니다."
+      "removal": "결정이 취소·대체되거나 열람 권한이 없어지면 사라집니다."
     },
     "workspace_join": {
       "untitled": "workspace",
       "pending": "{{requester}} 님이 {{workspace}} 가입을 요청했습니다",
       "approved": "{{workspace}}에 가입되었습니다",
       "rejected": "{{workspace}} 가입 요청이 거절되었습니다",
-      "pendingRemoval": "보관해도 요청이 처리·취소·종료되거나 소유자 권한이 없어지면 사라집니다.",
-      "resultRemoval": "보관해도 {{date, datetime(dateStyle: medium; timeStyle: short)}}에 사라집니다. 재요청하거나 열람 권한이 없어지면 먼저 사라질 수 있습니다."
+      "pendingRemoval": "요청이 처리·취소·종료되거나 소유자 권한이 없어지면 사라집니다.",
+      "resultRemoval": "다시 요청하거나 열람 권한이 없어지면 먼저 사라질 수 있습니다."
     },
     "access_key_expiry": {
       "untitled": "Access Key",
       "expiring": "{{date, datetime}} 만료 예정",
       "expired": "{{date, datetime}} 만료됨",
-      "removal": "보관해도 {{date, datetime(dateStyle: medium; timeStyle: short)}}에 사라집니다. 키를 폐기하거나 만료일을 변경하면 먼저 사라질 수 있습니다."
+      "removal": "키를 폐기하거나 만료일을 바꾸면 먼저 사라질 수 있습니다."
     }
   }
 }

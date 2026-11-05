@@ -33,6 +33,11 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
     scope = WorkspaceInbox(workspace_id)
     start = datetime(2026, 10, 28, tzinfo=UTC)
     status = {"queue": InboxSnapshot("queue", "r1", start)}
+    lookups = []
+
+    def lookup(_session, _viewer, keys):
+        lookups.append(tuple(keys))
+        return {key: status[key] for key in keys if key in status}
 
     def resolve(_session, _viewer, snapshots):
         return {
@@ -53,7 +58,7 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
                 sorted(status.values(), key=lambda s: s.event_at, reverse=True)[:limit],
                 len(status),
             ),
-            get=lambda _s, _v, key: status.get(key),
+            lookup=lookup,
         ),
         resolve,
         reopen_on_new_revision=True,
@@ -205,6 +210,13 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
     assert [i.item_key for i in capped_page("all").status_items] == ["q4", "q5"]
     assert [i.item_key for i in capped_page("unread").status_items] == ["q5"]
     assert mark("q6", "r1", kind="test.status", archived=True).applied
+    # Newest archive first, whatever the item's own time; a read mark does
+    # not move an archived item. A page asks each source once, not per row.
+    assert mark("q2", "r1", kind="test.status", read=False).applied
+    newest_archive_first = ["q6", "q3", "q2", "q1", "note"]
+    lookups.clear()
+    assert [i.item_key for i in page(state="archived").items] == newest_archive_first
+    assert len(lookups) == 1
 
     def archived_keys(service):
         keys, cursor = [], None
@@ -220,7 +232,7 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
             assert result.next_cursor != cursor
             cursor = result.next_cursor
 
-    assert set(archived_keys(capped)) == {"note", "q1", "q2", "q3", "q6"}
+    assert archived_keys(capped) == newest_archive_first
     assert page(user_id=bob, state="archived").items == []
     # Source removal, revision changes and resolver visibility still apply
     # in the archive. Even empty scan batches must leave a usable cursor.
@@ -231,7 +243,7 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
         InboxRegistry((note, computed)),
         listing=InboxListingConfig(stream_scan_batches=1),
     )
-    assert set(archived_keys(shallow)) == {"note", "q6"}
+    assert archived_keys(shallow) == ["q6", "note"]
     assert mark("q6", "r1", kind="test.status", archived=False).applied
     assert "q6" in [i.item_key for i in page().status_items]
 

@@ -1,6 +1,7 @@
 import type { InboxItem } from "../../shared/api/inbox";
 
-// The server derives this from the kind's configured visibility window.
+// When an item leaves on its own, if its kind states a date: the server derives
+// display.params.visible_until from the kind's configured window.
 export function inboxVisibleUntil(item: InboxItem): Date | null {
   const raw = item.display?.params?.visible_until;
   const date = typeof raw === "string" ? new Date(raw) : null;

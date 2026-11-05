@@ -3,9 +3,10 @@
   "description": "Messages addressed to you in this workspace and on your account.",
   "loading": "Loading Inbox",
   "loadMore": "Load more",
+  "checkOlder": "Check older items",
   "scope": {
     "label": "Inbox scope",
-    "workspace": "Current workspace",
+    "workspace": "Workspace",
     "account": "Account"
   },
   "state": {
@@ -15,12 +16,15 @@
     "archived": "Archived"
   },
   "status": {
-    "label": "Current status",
+    "label": "Live",
+    "hint": "Leaves automatically when it is handled or expires at its source.",
     "overflow": "{{total}} in total; open the source for the rest."
   },
   "items": {
     "label": "Messages"
   },
+  "archivedNote": "Listed by when you archived them. Archived items still disappear automatically when their source is handled, expires, or becomes unavailable to you.",
+  "scanEmpty": "None of the recent items can be shown now.",
   "empty": {
     "all": "No messages.",
     "unread": "No unread messages.",
@@ -38,6 +42,11 @@
     "archive": "Archive",
     "unarchive": "Move back to Inbox"
   },
+  "removal": {
+    "label": "When this is removed",
+    "chip": "Auto-removed {{relative}}",
+    "until": "Removed automatically {{date, datetime(dateStyle: medium; timeStyle: short)}}."
+  },
   "kinds": {
     "review": {
       "untitled": "A review"
@@ -45,26 +54,26 @@
     "review_attention": {
       "pending": "Waiting for your review",
       "changesRequested": "Changes requested from you",
-      "removal": "Disappears when the review is resolved, replaced, assigned elsewhere, or no longer available to you, even if archived."
+      "removal": "Disappears when the review is resolved, replaced, assigned elsewhere, or no longer available to you."
     },
     "review_result": {
       "approved": "Your change was approved",
       "rejected": "Your change was rejected",
-      "removal": "Disappears if the decision is undone or replaced, or you lose access, even if archived."
+      "removal": "Disappears if the decision is undone or replaced, or you lose access."
     },
     "workspace_join": {
       "untitled": "A workspace",
       "pending": "{{requester}} asked to join {{workspace}}",
       "approved": "You joined {{workspace}}",
       "rejected": "Your request to join {{workspace}} was declined",
-      "pendingRemoval": "Disappears when the request is decided, cancelled or closed, or you lose owner access, even if archived.",
-      "resultRemoval": "Disappears {{date, datetime(dateStyle: medium; timeStyle: short)}}, even if archived; may disappear sooner if you reapply or lose access."
+      "pendingRemoval": "Disappears when the request is decided, cancelled or closed, or you lose owner access.",
+      "resultRemoval": "May disappear sooner if you reapply or lose access."
     },
     "access_key_expiry": {
       "untitled": "An Access Key",
       "expiring": "Expires {{date, datetime}}",
       "expired": "Expired {{date, datetime}}",
-      "removal": "Disappears {{date, datetime(dateStyle: medium; timeStyle: short)}}, even if archived; may disappear sooner if the key is revoked or its expiry changes."
+      "removal": "May disappear sooner if the key is revoked or its expiry changes."
     }
   }
 }
