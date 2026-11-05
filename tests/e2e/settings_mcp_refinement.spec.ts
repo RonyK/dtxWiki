@@ -1,6 +1,6 @@
 import { expect, test, type Page, type TestInfo } from "./fixtures";
 import { mkdir, writeFile } from "node:fs/promises";
-import { authenticatePage, workspaceUrl } from "./auth";
+import { authenticatePage, saveLabsSettings, workspaceUrl } from "./auth";
 import { evidenceScreenshot } from "./evidence";
 
 async function checkBoxes(page: Page, testInfo: TestInfo, surface: string) {
@@ -785,15 +785,16 @@ for (const [language, width] of LAYOUTS) {
         },
       }),
     );
-    // Ask is opt-in per account/browser. Enable it through the mounted Labs
+    // Ask is enabled per workspace. Enable it through the mounted Labs
     // UI so this inventory exercises the save form rather than Not Found.
-    await page.goto(`/account/integrations?section=labs`);
+    await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=labs`);
     const askMenu = page.getByRole("checkbox", {
-      name: language === "en" ? "Show Ask menu" : "Ask 메뉴 표시",
+      name: "Ask",
       exact: true,
     });
     await expect(askMenu).not.toBeChecked();
     await askMenu.check();
+    await saveLabsSettings(page);
     await expect(askMenu).toBeChecked();
     await page.goto(workspaceUrl(workspace.id, `ask/${session.id}`));
     await expect(page.locator(".ask-main")).toBeVisible();

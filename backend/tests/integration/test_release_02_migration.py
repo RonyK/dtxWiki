@@ -7,6 +7,10 @@ and fault inputs plus one locator duplicate write per dialect exercise distinct
 data-loss/transaction/constraint paths;
 none introduces another database traversal. Scalar validation matrices belong
 to existing policy tests rather than this consolidated release migration.
+
+The same populated database also traverses the appended Labs policy revision
+once in each direction, covering its default and NULL constraint on both
+dialects without adding another collected migration scenario.
 """
 
 import os
@@ -201,7 +205,20 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
         if dialect == "sqlite":
             _assert_each_table_rebuilt_at_most_once(statements)
         _assert_release_upgrade(engine, release_data, now, first=True)
+        _assert_labs_policy_upgrade(engine, config, workspace_id)
         _seed_runtime_links(engine, release_data)
+        command.downgrade(config, REVISION)
+        assert "labs_policy" not in {
+            column["name"] for column in inspect(engine).get_columns("workspace")
+        }
+        with engine.connect() as connection:
+            workspaces = _table(connection, "workspace")
+            assert connection.execute(
+                sa.select(
+                    workspaces.c.workspace_graph_enabled,
+                    workspaces.c.usage_relation_signals_enabled,
+                ).where(workspaces.c.id == workspace_id)
+            ).one() == (True, False)
         users, identities, transactions = _tables()
         with engine.connect() as connection:
             assert retained_account_state(connection) == retained
@@ -427,6 +444,7 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
                 connection.scalar(sa.select(sa.func.count()).select_from(transactions))
                 == 0
             )
+        _assert_labs_policy_upgrade(engine, config, workspace_id, raw_default=True)
         if dialect == "postgresql":
             # SQLite model parity is already checked by the shared release
             # head test. PostgreSQL types/constraints need this real DB, at
@@ -465,6 +483,82 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
                     connection.execute(sa.text("DROP TABLE IF EXISTS alembic_version"))
         finally:
             engine.dispose()
+
+
+def _assert_labs_policy_upgrade(engine, config, workspace_id, *, raw_default=False):
+    """Reuse this traversal's real workspace for the appended JSON setting."""
+
+    revision = "fec23ff328e6"
+    with engine.begin() as connection:
+        workspaces = _table(connection, "workspace")
+        connection.execute(
+            workspaces.update()
+            .where(workspaces.c.id == workspace_id)
+            .values(workspace_graph_enabled=True, usage_relation_signals_enabled=False)
+        )
+        original = dict(
+            connection.execute(
+                sa.select(workspaces).where(workspaces.c.id == workspace_id)
+            )
+            .mappings()
+            .one()
+        )
+
+    assert "labs_policy" not in original
+    command.upgrade(config, revision)
+    columns = {
+        column["name"]: column for column in inspect(engine).get_columns("workspace")
+    }
+    with engine.begin() as connection:
+        workspaces = _table(connection, "workspace")
+        current = dict(
+            connection.execute(
+                sa.select(workspaces).where(workspaces.c.id == workspace_id)
+            )
+            .mappings()
+            .one()
+        )
+        assert {key: current[key] for key in original} == original
+        assert (
+            connection.scalar(sa.text("SELECT version_num FROM alembic_version"))
+            == revision
+        )
+        assert not columns["labs_policy"]["nullable"]
+        assert columns["labs_policy"]["default"] is not None
+        assert current["labs_policy"] == {}
+        connection.execute(
+            workspaces.update()
+            .where(workspaces.c.id == workspace_id)
+            .values(labs_policy={"ask_enabled": True, "agent_enabled": True})
+        )
+        assert connection.scalar(
+            sa.select(workspaces.c.labs_policy).where(workspaces.c.id == workspace_id)
+        ) == {"ask_enabled": True, "agent_enabled": True}
+        with pytest.raises(sa.exc.IntegrityError), connection.begin_nested():
+            connection.execute(
+                workspaces.update()
+                .where(workspaces.c.id == workspace_id)
+                .values(labs_policy=sa.null())
+            )
+
+    # A new raw SQL insert must also default off without consulting ORM defaults.
+    if not raw_default:
+        return
+    with engine.begin() as connection:
+        workspaces = _table(connection, "workspace")
+        inserted_id = uuid4()
+        connection.execute(
+            workspaces.insert(),
+            {**original, "id": inserted_id, "slug": "labs-default-workspace"},
+        )
+        assert (
+            connection.scalar(
+                sa.select(workspaces.c.labs_policy).where(
+                    workspaces.c.id == inserted_id
+                )
+            )
+            == {}
+        )
 
 
 RELEASE_TABLES = {

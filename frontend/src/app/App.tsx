@@ -185,12 +185,12 @@ export function createAppRoutes() {
       <Route path="/workspaces/:workspaceId/library/artifacts/:artifactId" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
       <Route path="/workspaces/:workspaceId/library/folders/new" element={<RequireAuth><RequireEditor><LibraryScreen /></RequireEditor></RequireAuth>} />
       <Route path="/workspaces/:workspaceId/library/folders/:nodeId" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
-      <Route path="/workspaces/:workspaceId/agent" element={<RequireAuth><AgentScreen /></RequireAuth>} />
-      <Route path="/workspaces/:workspaceId/agent/pages/new" element={<RequireAuth><RequireEditor><AgentScreen /></RequireEditor></RequireAuth>} />
-      <Route path="/workspaces/:workspaceId/agent/pages/:agentPageId" element={<RequireAuth><AgentScreen /></RequireAuth>} />
-      <Route path="/workspaces/:workspaceId/agent/pages/:agentPageId/edit" element={<RequireAuth><RequireEditor><AgentScreen /></RequireEditor></RequireAuth>} />
-      <Route path="/workspaces/:workspaceId/agent/folders/new" element={<RequireAuth><RequireEditor><AgentScreen /></RequireEditor></RequireAuth>} />
-      <Route path="/workspaces/:workspaceId/agent/folders/:nodeId" element={<RequireAuth><AgentScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent" element={<RequireAuth><RequireAgentEnabled><AgentScreen /></RequireAgentEnabled></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent/pages/new" element={<RequireAuth><RequireAgentEnabled><RequireEditor><AgentScreen /></RequireEditor></RequireAgentEnabled></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent/pages/:agentPageId" element={<RequireAuth><RequireAgentEnabled><AgentScreen /></RequireAgentEnabled></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent/pages/:agentPageId/edit" element={<RequireAuth><RequireAgentEnabled><RequireEditor><AgentScreen /></RequireEditor></RequireAgentEnabled></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent/folders/new" element={<RequireAuth><RequireAgentEnabled><RequireEditor><AgentScreen /></RequireEditor></RequireAgentEnabled></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/agent/folders/:nodeId" element={<RequireAuth><RequireAgentEnabled><AgentScreen /></RequireAgentEnabled></RequireAuth>} />
       <Route path="/workspaces/:workspaceId/activity" element={<RequireAuth><ActivityScreen /></RequireAuth>} />
       <Route path="/workspaces/:workspaceId/activity/:lane" element={<RequireAuth><ActivityLanePage /></RequireAuth>} />
       <Route path="/workspaces/:workspaceId/review" element={<RequireAuth><ReviewScreen /></RequireAuth>} />
@@ -427,8 +427,15 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   return children;
 }
 
+export function RequireAgentEnabled({ children }: { children: ReactNode }) {
+  const { preferences, status } = useLabsPreferences();
+  if (status === "loading") return <RouteLoading />;
+  return preferences.agent ? children : <NotFoundScreen />;
+}
+
 export function RequireAskEnabled({ children }: { children: ReactNode }) {
-  const { preferences } = useLabsPreferences();
+  const { preferences, status } = useLabsPreferences();
+  if (status === "loading") return <RouteLoading />;
   return preferences.ask ? children : <NotFoundScreen />;
 }
 
@@ -479,7 +486,7 @@ export function RequireEditor({ children }: { children: ReactNode }) {
     );
   }
   if (!isEditorRole(selectedWorkspace?.role)) {
-    // Keep the read-only /agent fallback (a viewer can use it), but bounce the
+    // Keep the section fallback, but bounce the
     // page edit/create gates to /dashboard instead of a random page reader that
     // drops the editorRequired banner. The Dashboard renders the banner so the
     // reason for the redirect survives regardless of workspace contents.

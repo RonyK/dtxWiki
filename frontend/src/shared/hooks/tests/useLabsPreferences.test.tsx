@@ -1,172 +1,130 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useLabsPreferences } from "../useLabsPreferences";
+import { invalidateWorkspaceLabsPreferences, useLabsPreferences } from "../useLabsPreferences";
 
-type TestAuth = { status: string; user: { user_id: string } | null } | null;
-const authState = vi.hoisted(() => ({ current: null as TestAuth }));
-vi.mock("../../auth/AuthContext", () => ({
-  useOptionalAuth: () => authState.current,
+const state = vi.hoisted(() => ({
+  auth: { status: "authenticated", user: { user_id: "owner" } },
+  workspaceId: "workspace-one",
+  workspaces: [{ id: "workspace-one", role: "owner" }, { id: "workspace-two", role: "owner" }],
+  load: vi.fn(),
 }));
+vi.mock("../../auth/AuthContext", () => ({ useOptionalAuth: () => state.auth }));
+vi.mock("../../lib/workspaceRoutes", () => ({ useWorkspaceRoute: () => ({ workspaceId: state.workspaceId }) }));
+vi.mock("../../workspace/WorkspaceContext", () => ({
+  useOptionalWorkspaceContext: () => ({ selectedId: "workspace-one", workspaces: state.workspaces }),
+}));
+vi.mock("../../api/operations", () => ({ getSettingsPolicies: state.load }));
 
-let userSequence = 0;
-let userId: string;
-let storageKey: string;
-
-function Consumer({ name }: { name: string }) {
-  const { preferences, setMenuVisible, ready } = useLabsPreferences();
-  return (
-    <div>
-      <output data-testid={name}>{JSON.stringify({ ...preferences, ready })}</output>
-      <button onClick={() => setMenuVisible("ask", !preferences.ask)}>{name} ask</button>
-      <button onClick={() => setMenuVisible("agent", !preferences.agent)}>{name} agent</button>
-      <button onClick={() => setMenuVisible("knowledgeMap", !preferences.knowledgeMap)}>{name} knowledge map</button>
-    </div>
-  );
+function Consumer({ name = "labs" }: { name?: string }) {
+  const { preferences, ready } = useLabsPreferences();
+  return <output data-testid={name}>{JSON.stringify({ ...preferences, ready })}</output>;
 }
-
-function expectPreferences(name: string, ask: boolean, agent: boolean, ready = true, knowledgeMap = false) {
+function policy(ask = false, agent = false, knowledgeMap = false) {
+  return { labs: { policy: { ask_enabled: ask, agent_enabled: agent, workspace_map_enabled: knowledgeMap } } };
+}
+function expectPreferences(name: string, ask: boolean, agent: boolean, knowledgeMap = false, ready = true) {
   expect(screen.getByTestId(name).textContent).toBe(JSON.stringify({ ask, agent, knowledgeMap, ready }));
 }
-
-function remoteChange(key: string | null, value: string | null) {
-  if (key === null) window.localStorage.clear();
-  else if (value === null) window.localStorage.removeItem(key);
-  else window.localStorage.setItem(key, value);
-  window.dispatchEvent(new StorageEvent("storage", {
-    key,
-    newValue: value,
-    storageArea: window.localStorage,
-  }));
-}
-
 beforeEach(() => {
-  vi.restoreAllMocks();
+  invalidateWorkspaceLabsPreferences();
+  state.auth = { status: "authenticated", user: { user_id: "owner" } };
+  state.workspaceId = "workspace-one";
+  state.workspaces = [{ id: "workspace-one", role: "owner" }, { id: "workspace-two", role: "owner" }];
+  state.load.mockReset().mockResolvedValue(policy());
   window.localStorage.clear();
-  userId = `labs-user-${++userSequence}`;
-  storageKey = `dtxwiki:labs:${userId}`;
-  authState.current = { status: "authenticated", user: { user_id: userId } };
 });
-
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-});
+afterEach(() => { cleanup(); });
 
 describe("useLabsPreferences", () => {
-  it("starts with all Labs menus hidden and changes mounted consumers independently", () => {
-    render(<><Consumer name="settings" /><Consumer name="navigation" /></>);
-    expectPreferences("settings", false, false);
-    expectPreferences("navigation", false, false);
-
-    fireEvent.click(screen.getByRole("button", { name: "settings ask" }));
-    expectPreferences("navigation", true, false);
-    expect(JSON.parse(window.localStorage.getItem(storageKey)!)).toEqual({ ask: true, agent: false, knowledgeMap: false });
-
-    fireEvent.click(screen.getByRole("button", { name: "navigation agent" }));
-    expectPreferences("settings", true, true);
-    fireEvent.click(screen.getByRole("button", { name: "settings ask" }));
-    expectPreferences("navigation", false, true);
-    fireEvent.click(screen.getByRole("button", { name: "settings knowledge map" }));
-    expectPreferences("navigation", false, true, true, true);
-    expect(JSON.parse(window.localStorage.getItem(storageKey)!)).toEqual({ ask: false, agent: true, knowledgeMap: true });
-    fireEvent.click(screen.getByRole("button", { name: "navigation knowledge map" }));
-    expectPreferences("settings", false, true);
+  it("shares server state between readers and revalidates after saving", async () => {
+    state.load.mockResolvedValueOnce(policy(true, false, true));
+    render(<><Consumer name="navigation" /><Consumer name="route" /></>);
+    await waitFor(() => expectPreferences("navigation", true, false, true));
+    expectPreferences("route", true, false, true);
+    expect(state.load).toHaveBeenCalledTimes(1);
+    state.load.mockResolvedValueOnce(policy(false, true));
+    act(() => invalidateWorkspaceLabsPreferences("workspace-one"));
+    await waitFor(() => expectPreferences("navigation", false, true));
+    expectPreferences("route", false, true);
+    expect(state.load).toHaveBeenCalledTimes(2);
+    state.load.mockResolvedValueOnce(policy(true, false, true));
+    act(() => window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expectPreferences("navigation", true, false, true));
+    expectPreferences("route", true, false, true);
+    expect(state.load).toHaveBeenCalledTimes(3);
   });
 
-  it("restores saved preferences on mount and retains changes after remount", () => {
-    window.localStorage.setItem(storageKey, JSON.stringify({ ask: false, agent: true }));
-    const first = render(<Consumer name="first" />);
-    expectPreferences("first", false, true);
-    fireEvent.click(screen.getByRole("button", { name: "first ask" }));
-    fireEvent.click(screen.getByRole("button", { name: "first knowledge map" }));
+  it("ignores retired browser preferences and loads saved server settings after remount", async () => {
+    window.localStorage.setItem("dtxwiki:labs:owner", JSON.stringify({ ask: true, agent: true, knowledgeMap: true }));
+    state.load.mockResolvedValue(policy(false, true));
+    const first = render(<Consumer />);
+    await waitFor(() => expectPreferences("labs", false, true));
     first.unmount();
-    render(<Consumer name="second" />);
-    expectPreferences("second", true, true, true, true);
+    render(<Consumer />);
+    expectPreferences("labs", false, true);
+    expect(state.load).toHaveBeenCalledTimes(1);
   });
 
-  it("updates both consumers for another tab's changes, removal and clear", () => {
-    render(<><Consumer name="settings" /><Consumer name="navigation" /></>);
-    act(() => remoteChange(storageKey, JSON.stringify({ ask: true, agent: false, knowledgeMap: true })));
-    expectPreferences("settings", true, false, true, true);
-    expectPreferences("navigation", true, false, true, true);
-
-    act(() => remoteChange("dtxwiki:labs:other-user", JSON.stringify({ ask: false, agent: true })));
-    expectPreferences("settings", true, false, true, true);
-    act(() => remoteChange(storageKey, null));
-    expectPreferences("navigation", false, false);
-    fireEvent.click(screen.getByRole("button", { name: "settings agent" }));
-    act(() => remoteChange(null, null));
-    expectPreferences("navigation", false, false);
+  it("fences workspace changes and invalidated in-flight responses", async () => {
+    let resolveOld: (value: ReturnType<typeof policy>) => void = () => {};
+    state.load.mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve; }));
+    state.load.mockResolvedValueOnce(policy(false, true));
+    const view = render(<Consumer />);
+    expectPreferences("labs", false, false, false, false);
+    state.workspaceId = "workspace-two";
+    view.rerender(<Consumer />);
+    await waitFor(() => expectPreferences("labs", false, true));
+    act(() => invalidateWorkspaceLabsPreferences("workspace-one"));
+    await act(async () => resolveOld(policy(true, false, true)));
+    expectPreferences("labs", false, true);
+    expect(state.load).toHaveBeenNthCalledWith(2, "workspace-two");
   });
 
-  it.each(["invalid json", "null", "[]", "true", '{"ask":"true","agent":1,"knowledgeMap":"true"}'])(
-    "defaults safely for invalid storage: %s", (value) => {
-      window.localStorage.setItem(storageKey, value);
-      render(<Consumer name="settings" />);
-      expectPreferences("settings", false, false);
-    },
-  );
-
-  it("ignores retired Chats preferences while preserving Agent and leaving Ask hidden", () => {
-    window.localStorage.setItem(storageKey, JSON.stringify({ chats: true, agent: true }));
-    render(<Consumer name="settings" />);
-    expectPreferences("settings", false, true);
-    fireEvent.click(screen.getByRole("button", { name: "settings ask" }));
-    expect(JSON.parse(window.localStorage.getItem(storageKey)!)).toEqual({ ask: true, agent: true, knowledgeMap: false });
+  it("hides privileges immediately on account change and membership revocation", async () => {
+    state.load.mockResolvedValueOnce(policy(true, true, true));
+    const view = render(<Consumer />);
+    await waitFor(() => expectPreferences("labs", true, true, true));
+    state.auth = { status: "authenticated", user: { user_id: "other-owner" } };
+    view.rerender(<Consumer />);
+    expectPreferences("labs", false, false, false, false);
+    await waitFor(() => expectPreferences("labs", false, false));
+    state.load.mockResolvedValueOnce(policy(true, true, true));
+    act(() => invalidateWorkspaceLabsPreferences("workspace-one"));
+    await waitFor(() => expectPreferences("labs", true, true, true));
+    state.workspaces = [{ id: "workspace-one", role: "editor" }];
+    view.rerender(<Consumer />);
+    expectPreferences("labs", false, false, false, false);
+    expect(state.load).toHaveBeenCalledTimes(3);
+    state.auth = { status: "anonymous", user: { user_id: "other-owner" } };
+    view.rerender(<Consumer />);
+    state.workspaces = [{ id: "workspace-one", role: "owner" }];
+    state.auth = { status: "authenticated", user: { user_id: "other-owner" } };
+    state.load.mockResolvedValueOnce(policy(false, true));
+    view.rerender(<Consumer />);
+    await waitFor(() => expectPreferences("labs", false, true));
+    expect(state.load).toHaveBeenCalledTimes(4);
   });
 
-  it("retains local changes when storage writes fail", () => {
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("quota"); });
-    const first = render(<><Consumer name="settings" /><Consumer name="navigation" /></>);
-    fireEvent.click(screen.getByRole("button", { name: "settings ask" }));
-    expectPreferences("navigation", true, false);
-    first.unmount();
-    render(<Consumer name="remounted" />);
-    expectPreferences("remounted", true, false);
+  it("does not request Labs settings for members or unauthenticated accounts", async () => {
+    state.workspaces = [{ id: "workspace-one", role: "viewer" }];
+    const view = render(<Consumer />);
+    expectPreferences("labs", false, false, false, false);
+    state.workspaces = [{ id: "workspace-one", role: "owner" }];
+    state.auth = { status: "anonymous", user: { user_id: "owner" } };
+    view.rerender(<Consumer />);
+    expectPreferences("labs", false, false, false, false);
+    expect(state.load).not.toHaveBeenCalled();
   });
 
-  it("works in memory when accessing localStorage is denied", () => {
-    vi.spyOn(window, "localStorage", "get").mockImplementation(() => { throw new Error("denied"); });
-    render(<><Consumer name="settings" /><Consumer name="navigation" /></>);
-    expectPreferences("settings", false, false);
-    fireEvent.click(screen.getByRole("button", { name: "settings agent" }));
-    expectPreferences("navigation", false, true);
+  it("fails closed on a failed load and permits an explicit retry", async () => {
+    state.load.mockRejectedValueOnce(new Error("offline"));
+    const view = render(<Consumer />);
+    await waitFor(() => expect(state.load).toHaveBeenCalledOnce());
+    view.rerender(<Consumer />);
+    expectPreferences("labs", false, false, false, false);
+    state.load.mockResolvedValueOnce(policy(true));
+    act(() => invalidateWorkspaceLabsPreferences("workspace-one"));
+    await waitFor(() => expectPreferences("labs", true, false));
   });
-
-  it("switches accounts without exposing or overwriting the previous user's settings", () => {
-    const firstKey = storageKey;
-    window.localStorage.setItem(firstKey, JSON.stringify({ ask: true, agent: false, knowledgeMap: true }));
-    const view = render(<Consumer name="settings" />);
-    expectPreferences("settings", true, false, true, true);
-
-    authState.current = { status: "authenticated", user: { user_id: `${userId}-other` } };
-    const secondKey = `dtxwiki:labs:${userId}-other`;
-    view.rerender(<Consumer name="settings" />);
-    expectPreferences("settings", false, false);
-    expect(window.localStorage.getItem(secondKey)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "settings agent" }));
-    expect(JSON.parse(window.localStorage.getItem(firstKey)!)).toEqual({ ask: true, agent: false, knowledgeMap: true });
-    expect(JSON.parse(window.localStorage.getItem(secondKey)!)).toEqual({ ask: false, agent: true, knowledgeMap: false });
-
-    authState.current = { status: "anonymous", user: null };
-    view.rerender(<Consumer name="settings" />);
-    expectPreferences("settings", false, false, false);
-    fireEvent.click(screen.getByRole("button", { name: "settings ask" }));
-    expect(JSON.parse(window.localStorage.getItem(secondKey)!)).toEqual({ ask: false, agent: true, knowledgeMap: false });
-
-    authState.current = { status: "authenticated", user: { user_id: userId } };
-    view.rerender(<Consumer name="settings" />);
-    expectPreferences("settings", true, false, true, true);
-  });
-
-  it.each([null, { status: "checking", user: { user_id: "checking-user" } }])(
-    "stays unavailable until an authenticated account exists: %j", (auth) => {
-      authState.current = auth;
-      render(<Consumer name="settings" />);
-      expectPreferences("settings", false, false, false);
-      fireEvent.click(screen.getByRole("button", { name: "settings ask" }));
-      expect(window.localStorage.length).toBe(0);
-    },
-  );
 });

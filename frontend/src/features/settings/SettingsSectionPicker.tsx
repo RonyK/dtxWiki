@@ -35,6 +35,7 @@ export function SettingsSectionPicker({
   showAttachments,
   showDeployment,
   showUsers,
+  showLabs,
   tokenCount,
 }: {
   activeSection: SettingsSection;
@@ -58,9 +59,10 @@ export function SettingsSectionPicker({
         showAttachments,
         showDeployment,
         showUsers,
+        showLabs,
         tokenCount,
       }),
-    [t, consentCount, showAttachments, showDeployment, showUsers, tokenCount],
+    [t, consentCount, showAttachments, showDeployment, showUsers, showLabs, tokenCount],
   );
   const current = sections.find((section) => section.id === activeSection);
   const currentGroup = groups.find((group) => group.id === current?.group);
@@ -186,12 +188,20 @@ export function SettingsSectionPicker({
                               </span>
                             ) : null}
                           </span>
-                          {section.adminOnly ? (
-                            <span className="nav-admin-badge">
-                              {t("sectionGroups.adminChip", {
-                                defaultValue: "System admin",
-                              })}
-                            </span>
+                          {section.adminOnly || section.workspaceAdminOnly ? (
+                            <>
+                              {" "}
+                              <span
+                                className="nav-admin-badge"
+                                title={t(section.workspaceAdminOnly
+                                  ? "sectionGroups.workspaceAdminChipTitle"
+                                  : "sectionGroups.adminChipTitle")}
+                              >
+                                {t(section.workspaceAdminOnly
+                                  ? "sectionGroups.workspaceAdminChip"
+                                  : "sectionGroups.adminChip")}
+                              </span>
+                            </>
                           ) : null}
                           {section.badge ? (
                             <span title={section.badgeTitle}>

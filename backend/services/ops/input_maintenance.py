@@ -40,6 +40,7 @@ CONSTRAINED_REVISIONS = frozenset(
         REVISION,
         "ef53a0a7061c",
         "5b7e5c149279",
+        "fec23ff328e6",
     }
 )
 SUPPORTED = CONSTRAINED_REVISIONS | frozenset(
@@ -48,7 +49,7 @@ SUPPORTED = CONSTRAINED_REVISIONS | frozenset(
         "efcbcf724889",
     }
 )
-_OPTIONAL_NATIVE_EMAIL_REVISIONS = frozenset({"5b7e5c149279"})
+_OPTIONAL_NATIVE_EMAIL_REVISIONS = frozenset({"5b7e5c149279", "fec23ff328e6"})
 FIELDS = {
     "api-token": ("api_tokens", {"name": 128}),
     "workspace": ("workspace", {"title": 128, "name": 128, "goal": 512, "slug": 80}),

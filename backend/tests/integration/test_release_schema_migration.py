@@ -15,7 +15,11 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
+from backend.app.bootstrap import (
+    current_alembic_head,
+    resolve_alembic_ini,
+    resolve_migrations_dir,
+)
 from backend.models import Base, ContextPage, ContextPageVersion, PageLink
 from backend.models.graph import GraphHistoryCoverage, GraphObservation
 from backend.models.search_index import include_non_fts5_object
@@ -488,7 +492,7 @@ def test_release_head_matches_current_model_schema(head_engine):
             column["name"] for column in inspector.get_columns("library_item_version")
         }
 
-    assert version == schema_release_head("0.2.1")
+    assert version == current_alembic_head()
     assert set(Base.metadata.tables).issubset(table_names)
     assert diffs == []
     assert {"refresh_ttl_seconds", "sliding_enabled"}.issubset(consent_columns)

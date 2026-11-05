@@ -473,13 +473,26 @@ def test_release_cli_uses_the_extracted_mapping_not_the_checkout(tmp_path):
     manifest.parent.mkdir(parents=True)
     manifest.write_text('{"schema_releases": {}}', encoding="utf-8")
 
+    def retain_frozen_release(stage, _artifact_kind):
+        path = stage / "backend/migrations/release_manifest.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["schema_releases"]["0.2.1"] = {
+            "group": "v0_2",
+            "head": "5b7e5c149279",
+        }
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
     result = subprocess.run(
         [
             sys.executable,
             str(scripts / VERIFIER.name),
-            str(_release_dist(tmp_path)),
+            str(
+                _release_dist(
+                    tmp_path, "0.2.2", boundary="0.2.2", mutate=retain_frozen_release
+                )
+            ),
             "--release-version",
-            "0.2.1",
+            "0.2.2",
         ],
         cwd=checkout,
         capture_output=True,
@@ -488,8 +501,8 @@ def test_release_cli_uses_the_extracted_mapping_not_the_checkout(tmp_path):
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "dtxwiki-0.2.1-py3-none-any.whl:" in result.stdout
-    assert "dtxwiki-0.2.1.tar.gz:" in result.stdout
+    assert "dtxwiki-0.2.2-py3-none-any.whl:" in result.stdout
+    assert "dtxwiki-0.2.2.tar.gz:" in result.stdout
 
 
 def test_release_cli_rejects_current_graph_without_a_new_schema_boundary(tmp_path):

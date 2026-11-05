@@ -863,9 +863,10 @@
       "checking": "Checking whether the Knowledge Map is on for this workspace…",
       "checkFailed": "Could not check whether the Knowledge Map is on for this workspace.",
       "serviceUnavailable": "The Knowledge Map is temporarily turned off on this server. Graphs on individual documents are still available.",
-      "disabledOwner": "The Knowledge Map is off for this workspace. You can turn it on in Settings.",
-      "disabledMember": "The Knowledge Map is off for this workspace. A workspace owner can turn it on in Settings. Graphs on individual documents are still available.",
-      "openSettings": "Open Settings"
+      "disabledOwner": "Knowledge Map is off for this workspace. You can enable it in Settings > Labs.",
+      "disabledMember": "Only workspace administrators can use Knowledge Map. Document Graph tabs remain available.",
+      "openSettings": "Open Settings",
+      "permissionDenied": "Only workspace administrators can use Knowledge Map."
     }
   }
 }

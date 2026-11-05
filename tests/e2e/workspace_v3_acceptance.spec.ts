@@ -15,6 +15,7 @@ import { execFileSync } from "node:child_process";
 import {
   authenticatePage,
   backendBaseUrl,
+  configureWorkspaceLabs,
   currentWorkspace,
   e2ePassword,
   frontendBaseUrl,
@@ -1195,6 +1196,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
 
         await authenticatePage(page, testInfo, `v3-surface-${viewport.key}`);
         const workspace = await currentWorkspace(page.request);
+        await configureWorkspaceLabs(page.request, workspace.id, { agent_enabled: true });
         const suffix = `${viewport.key}-${testInfo.retry}-${Date.now()}`;
         const relatedTitle = `Related Context ${suffix}`;
         const decisionTitle = `Context decision ${suffix}`;

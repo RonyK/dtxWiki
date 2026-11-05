@@ -82,6 +82,7 @@ class SettingsPolicies(BaseModel):
     review: PolicyCard
     lint: PolicyCard
     graph: PolicyCard
+    labs: PolicyCard | None = None
     mcp_clients: list[SettingsMcpClientData]
     mcp_clients_next_cursor: str | None = None
 
@@ -104,6 +105,7 @@ class SettingsPolicyUpdateRequest(BaseModel):
         "review",
         "lint",
         "graph",
+        "labs",
     ]
     key: str = Field(min_length=1, max_length=128)
     value: Any
@@ -122,6 +124,7 @@ class SettingsPolicyBatchUpdateRequest(BaseModel):
         "review",
         "lint",
         "graph",
+        "labs",
     ]
     expected_revision: str = Field(min_length=64, max_length=64)
     changes: dict[str, Any] = Field(min_length=1, max_length=64)

@@ -24,12 +24,14 @@ def make_client(
             page_service=page_service,
         )
     )
-    authenticate_test_client_in_workspace(
+    workspace_id = authenticate_test_client_in_workspace(
         client,
         page_service.session_factory,
         email=email,
         role=role,
     )
+    with page_service.session_factory.begin() as session:
+        session.get(Workspace, UUID(workspace_id)).labs_policy = {"agent_enabled": True}
     return client
 
 
@@ -209,7 +211,7 @@ def test_agent_api_activation_uses_membership_role(page_service):
         },
     )
     assert denied.status_code == 403
-    assert denied.json()["error_code"] == "scope_denied"
+    assert denied.json()["error_code"] == "workspace_role_insufficient"
 
 
 def test_agent_api_activation_uses_target_workspace_role(page_service):

@@ -22302,6 +22302,16 @@
           "graph": {
             "$ref": "#/components/schemas/PolicyCard"
           },
+          "labs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyCard"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "library": {
             "$ref": "#/components/schemas/PolicyCard"
           },
@@ -22389,7 +22399,8 @@
               "agent_injection",
               "review",
               "lint",
-              "graph"
+              "graph",
+              "labs"
             ],
             "title": "Group",
             "type": "string"
@@ -22415,7 +22426,8 @@
               "agent_injection",
               "review",
               "lint",
-              "graph"
+              "graph",
+              "labs"
             ],
             "title": "Group",
             "type": "string"
@@ -25528,7 +25540,8 @@
             "enum": [
               "enabled",
               "disabled_by_workspace",
-              "service_unavailable"
+              "service_unavailable",
+              "permission_denied"
             ],
             "title": "Reason",
             "type": "string"
@@ -26852,7 +26865,7 @@
       "name": "AGPL-3.0-only OR Elastic-2.0"
     },
     "title": "dtxWiki",
-    "version": "0.2.1"
+    "version": "0.1.4"
   },
   "openapi": "3.1.0",
   "paths": {

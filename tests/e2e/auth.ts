@@ -62,10 +62,45 @@ export async function currentWorkspace(request: APIRequestContext) {
   return workspace!;
 }
 
-/** Opt the current account into the experimental map through its real Labs UI. */
+/** Set explicit workspace Labs flags for a feature fixture using the real policy API. */
+export async function configureWorkspaceLabs(
+  request: APIRequestContext,
+  workspaceId: string,
+  changes: { ask_enabled?: boolean; agent_enabled?: boolean; workspace_map_enabled?: boolean },
+) {
+  const endpoint = `${backendBaseUrl}/api/v1/workspaces/${workspaceId}/settings/policies`;
+  const current = await request.get(endpoint);
+  expect(current.ok()).toBeTruthy();
+  const revision = (await current.json()).data.labs.revision as string;
+  const saved = await request.patch(`${endpoint}/batch`, {
+    data: { group: "labs", expected_revision: revision, changes },
+  });
+  expect(saved.ok()).toBeTruthy();
+}
+
+/** Enable the current workspace map through its real Labs save form. */
 export async function enableKnowledgeMapLab(page: Page) {
-  await page.goto("/settings?section=labs");
-  await page.getByRole("checkbox", { name: /^(Show Knowledge Map menu|지식 지도 메뉴 표시)$/ }).check();
+  const workspace = await currentWorkspace(page.request);
+  await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=labs`);
+  await page.getByRole("checkbox", { name: /^(Workspace Knowledge Map|워크스페이스 지식 지도)$/ }).check();
+  await saveLabsSettings(page, "graph");
+}
+
+/** Save the Labs draft and wait for the server to accept its revision. */
+export async function saveLabsSettings(page: Page, group: "labs" | "graph" = "labs") {
+  const checkbox = page.getByRole("checkbox", {
+    name: group === "graph" ? /^(Workspace Knowledge Map|워크스페이스 지식 지도)$/ : /^Ask$/,
+  });
+  const card = page.locator(".policy-card").filter({ has: checkbox });
+  const save = card.getByRole("button", { name: /^(Save changes|변경사항 저장)$/ });
+  if (await save.isEnabled()) {
+    const saved = page.waitForResponse((response) => response.request().method() === "PATCH"
+      && response.url().endsWith("/settings/policies/batch")
+      && response.request().postDataJSON()?.group === group);
+    await save.click();
+    expect((await saved).ok()).toBeTruthy();
+    await expect(save).toBeDisabled();
+  }
 }
 
 /** Build a product URL whose workspace scope is explicit in its path. */

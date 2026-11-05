@@ -7,11 +7,11 @@ import { WorkspaceGraphGate } from "../WorkspaceGraphGate";
 
 const { capabilityState, labs } = vi.hoisted(() => ({
   capabilityState: { current: null as unknown as WorkspaceGraphCapabilityState },
-  labs: { knowledgeMap: true },
+  labs: { knowledgeMap: true, ready: true, status: "ready" },
 }));
 
 vi.mock("../../../shared/hooks/useLabsPreferences", () => ({
-  useLabsPreferences: () => ({ preferences: labs }),
+  useLabsPreferences: () => ({ preferences: labs, ready: labs.ready, status: labs.status }),
 }));
 vi.mock("../useWorkspaceGraphCapability", () => ({
   invalidateWorkspaceGraphCapability: vi.fn(),
@@ -59,17 +59,19 @@ function gateElement() {
 describe("WorkspaceGraphGate", () => {
   beforeEach(() => {
     labs.knowledgeMap = true;
+    labs.ready = true;
+    labs.status = "ready";
     capabilityState.current = { status: "loading", capability: null, enabled: false };
   });
 
-  it("blocks direct URLs without Labs opt-in and unmounts the map when opted out", () => {
+  it("keeps the canvas unmounted while off and points the owner to Labs", () => {
     capabilityState.current = ready("enabled", true);
     labs.knowledgeMap = false;
     const view = renderGate();
 
     expect(screen.queryByTestId("knowledge-map-screen")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("We couldn't find that page");
-    expect(useWorkspaceGraphCapability).toHaveBeenLastCalledWith(null);
+    expect(screen.getByRole("link", { name: "Open Settings" })).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/settings?section=labs");
+    expect(useWorkspaceGraphCapability).toHaveBeenLastCalledWith("11111111-1111-4111-8111-111111111111");
 
     labs.knowledgeMap = true;
     view.rerender(gateElement());
@@ -79,20 +81,26 @@ describe("WorkspaceGraphGate", () => {
     labs.knowledgeMap = false;
     view.rerender(gateElement());
     expect(screen.queryByTestId("knowledge-map-screen")).not.toBeInTheDocument();
-    expect(useWorkspaceGraphCapability).toHaveBeenLastCalledWith(null);
+    expect(useWorkspaceGraphCapability).toHaveBeenLastCalledWith("11111111-1111-4111-8111-111111111111");
   });
 
-  it("does not mount the map while the switch is unknown", () => {
-    renderGate();
+  it("does not mount the map while Labs is loading or after its load fails", () => {
+    labs.ready = false;
+    labs.status = "loading";
+    const view = renderGate();
 
     expect(screen.queryByTestId("knowledge-map-screen")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(
       "Checking whether the Knowledge Map is on for this workspace",
     );
+    labs.status = "error";
+    view.rerender(gateElement());
+    expect(screen.getByRole("heading", { name: "We couldn't find that page" })).toBeInTheDocument();
+    expect(screen.queryByTestId("knowledge-map-screen")).not.toBeInTheDocument();
   });
 
   it("mounts the map when the workspace has it on", () => {
-    capabilityState.current = ready("enabled", false);
+    capabilityState.current = ready("enabled", true);
 
     renderGate();
 
@@ -100,6 +108,7 @@ describe("WorkspaceGraphGate", () => {
   });
 
   it("points an owner to Settings when the workspace has it off", () => {
+    labs.knowledgeMap = false;
     capabilityState.current = ready("disabled_by_workspace", true);
 
     renderGate();
@@ -107,18 +116,19 @@ describe("WorkspaceGraphGate", () => {
     expect(screen.queryByTestId("knowledge-map-screen")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open Settings" })).toHaveAttribute(
       "href",
-      "/workspaces/11111111-1111-4111-8111-111111111111/settings?section=workspace",
+      "/workspaces/11111111-1111-4111-8111-111111111111/settings?section=labs",
     );
   });
 
-  it("tells a member who can turn it on, without a Settings link", () => {
-    capabilityState.current = ready("disabled_by_workspace", false);
+  it("blocks member direct URLs even if a cached map capability is available", () => {
+    labs.ready = false;
+    labs.status = "idle";
+    capabilityState.current = ready("enabled", true);
 
     renderGate();
 
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "A workspace owner can turn it on in Settings.",
-    );
+    expect(screen.getByRole("heading", { name: "We couldn't find that page" })).toBeInTheDocument();
+    expect(screen.queryByTestId("knowledge-map-screen")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Open Settings" })).not.toBeInTheDocument();
   });
 

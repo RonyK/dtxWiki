@@ -14,27 +14,31 @@ import {
 } from "./useWorkspaceGraphCapability";
 
 /**
- * Render the Knowledge Map only after Labs opt-in and workspace activation.
+ * Render the Knowledge Map only for owners after workspace Labs activation.
  *
- * Without Labs opt-in, use the same unavailable surface as other experiments.
- * Once opted in, a shared /graph link explains the workspace's availability.
- * Until both switches are on, the canvas and its scene query never mount.
+ * Other members use the same unavailable surface as other experiments.
+ * Once activated, a shared /graph link explains the workspace's availability.
+ * Until activation is saved, the canvas and its scene query never mount.
  */
 export function WorkspaceGraphGate({ children }: { children: ReactNode }) {
   const { t } = useTranslation("graph");
   const { selectedId: ambientWorkspaceId } = useWorkspaceContext();
   const route = useWorkspaceRoute();
   const selectedId = route?.workspaceId ?? ambientWorkspaceId;
-  const { preferences } = useLabsPreferences();
+  const { preferences, ready: labsReady, status: labsStatus } = useLabsPreferences();
   const { status, capability, enabled } = useWorkspaceGraphCapability(
-    preferences.knowledgeMap ? selectedId : null,
+    selectedId,
   );
 
-  if (!preferences.knowledgeMap) {
+  if (labsStatus === "loading") {
+    return <StatusBanner tone="info">{t("workspaceGraph.gate.checking")}</StatusBanner>;
+  }
+
+  if (!labsReady || (capability && !capability.can_manage)) {
     return <NotFoundScreen />;
   }
 
-  if (enabled) {
+  if (preferences.knowledgeMap && enabled) {
     return <>{children}</>;
   }
 
@@ -69,7 +73,7 @@ export function WorkspaceGraphGate({ children }: { children: ReactNode }) {
       <StatusBanner
         tone="info"
         action={capability.can_manage ? (
-          <Link className="workspace-graph-error-action" to={selectedId ? `${workspacePath(selectedId, "settings")}?section=workspace` : "/workspaces/find"}>
+          <Link className="workspace-graph-error-action" to={selectedId ? `${workspacePath(selectedId, "settings")}?section=labs` : "/workspaces/find"}>
             {t("workspaceGraph.gate.openSettings")}
           </Link>
         ) : undefined}

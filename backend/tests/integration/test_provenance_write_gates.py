@@ -562,6 +562,8 @@ def test_rest_agent_page_bearers_create_reviews_for_all_draft_writes(
 ):
     client = make_client(page_service)
     workspace_id = _workspace_id(client)
+    with page_service.session_factory.begin() as session:
+        session.get(Workspace, workspace_id).labs_policy = {"agent_enabled": True}
     human = _perform_agent_write(
         client,
         workspace_id,

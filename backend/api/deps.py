@@ -3,6 +3,7 @@ from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.container import DatabaseProvider, ServiceRegistry
@@ -13,12 +14,14 @@ from backend.app.state import (
     get_search_service_from_app,
     get_session_factory_from_app,
 )
+from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.policy.rbac import (
     GrantReplicaMissingError,
     WorkspaceAccess,
     WorkspacePlaneUnavailableError,
     require_workspace_role,
+    role_allows,
 )
 from backend.policy.rest_scopes import (
     defer_token_scope_until_target,
@@ -153,6 +156,74 @@ WorkspaceOwnerAccessDep = Annotated[
 ]
 WorkspaceAdminAccessDep = Annotated[
     WorkspaceAccess, Depends(workspace_access("admin"))
+]
+
+
+def workspace_labs_feature_enabled(
+    workspace_id: UUID,
+    access: WorkspaceAccess,
+    session_factory: sessionmaker[Session],
+    feature: str,
+) -> bool:
+    if not role_allows(access.role, "owner"):
+        return False
+    with session_factory() as session:
+        policy = session.scalar(
+            select(Workspace.labs_policy).where(Workspace.id == workspace_id)
+        )
+    return bool(policy and policy.get(f"{feature}_enabled") is True)
+
+
+def require_workspace_labs_feature(
+    workspace_id: UUID,
+    access: WorkspaceAccess,
+    session_factory: sessionmaker[Session],
+    feature: str,
+) -> None:
+    # Preserve each route's token scope while requiring owner membership.
+    if not role_allows(access.role, "owner"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error_code": "workspace_role_insufficient",
+                "message": "workspace experiments require an administrator",
+            },
+        )
+    if not workspace_labs_feature_enabled(
+        workspace_id, access, session_factory, feature
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "not_found",
+                "message": "workspace experiment is not enabled",
+            },
+        )
+
+
+def labs_workspace_access(feature: str):
+    """Authorize browser experiments before opening a workspace session.
+
+    MCP tools deliberately retain their own policy: these switches govern the
+    experimental REST product surfaces, not the core Agent tool protocol.
+    """
+
+    def check_labs_access(
+        workspace_id: UUID,
+        access: WorkspaceViewerAccessDep,
+        session_factory: SessionFactoryDep,
+    ) -> WorkspaceAccess:
+        require_workspace_labs_feature(workspace_id, access, session_factory, feature)
+        return access
+
+    return check_labs_access
+
+
+WorkspaceAskAccessDep = Annotated[
+    WorkspaceAccess, Depends(labs_workspace_access("ask"))
+]
+WorkspaceAgentAccessDep = Annotated[
+    WorkspaceAccess, Depends(labs_workspace_access("agent"))
 ]
 
 

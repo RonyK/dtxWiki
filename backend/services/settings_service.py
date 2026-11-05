@@ -277,6 +277,16 @@ def _graph_policy(workspace: Workspace) -> dict[str, object]:
     }
 
 
+def _labs_policy(workspace: Workspace) -> dict[str, object]:
+    policy = workspace.labs_policy or {}
+    return {
+        "ask_enabled": policy.get("ask_enabled") is True,
+        "agent_enabled": policy.get("agent_enabled") is True,
+        "ask_retrieval_mode": workspace.ask_retrieval_mode,
+        **_graph_policy(workspace),
+    }
+
+
 def _update_graph_setting(workspace: Workspace, key: str, value: object) -> None:
     column = _GRAPH_SETTING_COLUMNS.get(key)
     if column is None:
@@ -696,6 +706,11 @@ class SettingsService:
                 title="Knowledge graph",
                 policy=_graph_policy(workspace),
             ),
+            labs=_policy_card(
+                name="labs",
+                title="Labs",
+                policy=_labs_policy(workspace),
+            ),
             lint=_policy_card(
                 name="lint",
                 title="Lint rules",
@@ -789,9 +804,9 @@ class SettingsService:
         is no distributed transaction to reason about.
         """
 
-        if group == "attachments" and expected_revision is None:
+        if group in {"attachments", "labs"} and expected_revision is None:
             raise SettingsPolicyUpdateRejected(
-                "attachments requires a batch save with expected_revision"
+                f"{group} requires a batch save with expected_revision"
             )
         acquire_write_intent(control_session)
         workspace = control_session.scalar(
@@ -835,6 +850,22 @@ class SettingsService:
         elif group == "graph":
             for key, value in changes.items():
                 _update_graph_setting(workspace, key, value)
+        elif group == "labs":
+            policy = dict(workspace.labs_policy or {})
+            for key, value in changes.items():
+                if key in _GRAPH_SETTING_COLUMNS:
+                    _update_graph_setting(workspace, key, value)
+                elif key == "ask_retrieval_mode":
+                    self._update_workspace_field(control_session, workspace, key, value)
+                elif key in {"ask_enabled", "agent_enabled"}:
+                    if not isinstance(value, bool):
+                        raise SettingsPolicyUpdateRejected(
+                            f"{key} must be true or false"
+                        )
+                    policy[key] = value
+                else:
+                    raise SettingsPolicyUpdateRejected(f"unknown Labs setting: {key}")
+            workspace.labs_policy = policy
         elif group in POLICY_GROUP_ATTRS:
             # Deep copy: _set_path mutates nested dicts in place (for example
             # category_inclusion_policy.memory). The column is plain JSON, not a
@@ -972,6 +1003,8 @@ class SettingsService:
             return {}
         if group == "graph":
             return _graph_policy(workspace)
+        if group == "labs":
+            return _labs_policy(workspace)
         if group not in POLICY_GROUP_ATTRS:
             raise SettingsPolicyUpdateRejected("unknown settings group")
         policy = dict(getattr(workspace, POLICY_GROUP_ATTRS[group]) or {})
