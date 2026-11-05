@@ -296,7 +296,7 @@ def test_verifier_accepts_a_complete_dist(tmp_path):
         assert (
             f"{name}: alembic head {CURRENT_HEAD}, "
             f"{REVISION_MODULES} packaged core revision modules, "
-            "30 frozen migration files intact, "
+            "32 frozen migration files intact, "
             "frontend bundle intact"
         ) in result.stdout
 
@@ -371,9 +371,15 @@ def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_pat
         if name.startswith("backend.models")
     }
     assert leaked, resolved["foreign"]
-    assert all(Path(origin).is_relative_to(REPO_ROOT) for origin in leaked.values()), (
-        leaked
-    )
+    # A shared virtualenv may register a different checkout's editable finder.
+    # The isolation defect is resolving models outside the extracted artifact,
+    # regardless of which checkout supplied them.
+    assert all(
+        Path(origin).is_absolute()
+        and Path(origin).exists()
+        and not Path(origin).resolve().is_relative_to(stage.resolve())
+        for origin in leaked.values()
+    ), leaked
 
 
 @pytest.mark.parametrize(

@@ -62,6 +62,13 @@ def test_backend_target_runs_sqlite_media_lane_sequentially():
     assert "SQLITE_MEDIA_PARALLEL_IGNORES := $(foreach test," in makefile
     assert (
         "pytest backend/tests -q -n $(PYTEST_WORKERS) --dist loadgroup "
-        '-m "not release_scale" $(SQLITE_MEDIA_PARALLEL_IGNORES)'
+        '-m "not release_scale and not release_migration" '
+        "$(SQLITE_MEDIA_PARALLEL_IGNORES)"
     ) in makefile
     assert "pytest $(SQLITE_MEDIA_SERIAL_TESTS) -q" in makefile
+    assert 'pytest backend/tests -q -m "not release_migration"' in makefile
+    assert (
+        "test-migrations:\n"
+        "\t$(VENV_PYTHON) -m pytest backend/tests -q -n $(PYTEST_WORKERS) "
+        "--dist loadgroup -m release_migration"
+    ) in makefile

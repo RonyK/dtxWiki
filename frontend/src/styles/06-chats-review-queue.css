@@ -733,11 +733,11 @@
 }
 
 .mcp-chat-flow-node:hover {
-  background: var(--surface-hover);
+  background: rgba(148, 163, 184, 0.16);
 }
 
 .mcp-chat-flow-node[aria-selected="true"] {
-  background: var(--surface);
+  background: rgba(255, 255, 255, 0.6);
   border-color: var(--border);
   box-shadow: var(--shadow-2);
 }

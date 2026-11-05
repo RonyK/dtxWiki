@@ -1044,18 +1044,20 @@ def test_page_link_syntax_upgrade_backfills_and_enforces_server_contract(
         engine.dispose()
 
 
-def test_first_install_rolls_back_both_revisions_on_late_failure(tmp_path):
-    """Exercise the actual two-revision chain, including the baseline DDL."""
+def test_first_install_rolls_back_complete_schema_on_late_failure(tmp_path):
+    """A failure after the direct initializer DDL leaves no partial schema."""
 
     scripts = tmp_path / "migrations"
     shutil.copytree(
         resolve_migrations_dir(), scripts, ignore=shutil.ignore_patterns("__pycache__")
     )
-    core = scripts / "versions/v0_1/efcbcf724889_core_schema.py"
-    core.write_text(
-        core.read_text()
-        + "\n_original_upgrade = _upgrade_epic1\n"
-        + "def _upgrade_epic1():\n"
+    initializer = (
+        scripts / "initialization/versions/v0_2/5b7e5c149279_initial_schema.py"
+    )
+    initializer.write_text(
+        initializer.read_text()
+        + "\n_original_upgrade = upgrade\n"
+        + "def upgrade():\n"
         + "    _original_upgrade()\n"
         + '    raise RuntimeError("late first-install failure")\n'
     )
