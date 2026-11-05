@@ -103,7 +103,9 @@ jobs:
 
   e2e:
     name: E2E (${{ matrix.name }})
-    runs-on: ubuntu-latest
+    # Playwright 1.59 cannot install browser dependencies on ubuntu-26.04,
+    # which ubuntu-latest became in November 2026.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       # Together the legs must name every project in playwright.config.ts.
@@ -174,7 +176,9 @@ jobs:
   # their seeded corpus.
   graph-2k:
     name: Graph (2K)
-    runs-on: ubuntu-latest
+    # Playwright 1.59 cannot install browser dependencies on ubuntu-26.04,
+    # which ubuntu-latest became in November 2026.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
