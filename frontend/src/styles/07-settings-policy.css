@@ -580,8 +580,14 @@
 /* Scrolls independently of the toolbar above it so panels with content
    taller than the available height (e.g. a long version history) get
    a real scrollbar instead of being clipped by .inspector-panel's own
-   overflow:hidden (04-knowledge.css). */
+   overflow:hidden (04-knowledge.css).
+   `position: relative` makes it the containing block of its out-of-flow
+   content. Without it, a `.visually-hidden` label deep in a long panel
+   (Knowledge Map relation legends) resolves against <body>, escapes this
+   scroller's clip at its static position, and stretches the page into blank
+   space and a second scrollbar below the map. */
 .inspector-panel-body {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
