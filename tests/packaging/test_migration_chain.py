@@ -15,6 +15,7 @@ from alembic.script import ScriptDirectory
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.services.ops.alembic_migration_graph import (
     code_revisions,
+    initialization_script_directory,
     schema_release_head,
 )
 from backend.services.ops.db_revision_inventory import RETIRED_REVISION_IDS
@@ -33,7 +34,7 @@ INITIAL_REVISION = "bd62193d5cf6"
 # Frozen core schema boundary of the 0.1 release group.
 CORE_REVISION = "efcbcf724889"
 RELEASE_013_REVISION = "19db79d3e622"
-RELEASE_014_REVISION = "ef53a0a7061c"
+RELEASE_014_REVISION = "eb86fdacb1bb"
 RELEASE_021_REVISION = "5b7e5c149279"
 CURRENT_HEAD = schema_release_head("0.2.1")
 ALEMBIC_REVISION_METADATA = {
@@ -99,6 +100,9 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
     graph = _revision_graph(script)
     assert script.get_heads() == [CURRENT_HEAD]
     assert code_revisions() == set(graph)
+    initialization = initialization_script_directory()
+    initialization_graph = _revision_graph(initialization)
+    assert initialization.get_heads() == [CURRENT_HEAD]
     assert code_revisions().isdisjoint(RETIRED_REVISION_IDS)
 
     expected_prefix = {
@@ -113,6 +117,10 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
     } == expected_prefix
     # Future changes append after the single frozen 0.2 release migration.
     appended = set(graph) - expected_prefix.keys()
+    assert initialization_graph == {
+        RELEASE_021_REVISION: None,
+        **{revision: graph[revision] for revision in appended},
+    }
     assert _revision_ancestors(graph, CURRENT_HEAD) == set(graph)
     assert all(
         RELEASE_021_REVISION in _revision_ancestors(graph, revision)
@@ -184,7 +192,10 @@ def test_the_freeze_covers_every_released_migration_file():
         "versions/v0_1/19db79d3e622_release_0_1_3.py",
         "revision_modules/v0_1/content_event_backfill_v1.py",
         "revision_modules/v0_1/input_restrictions_v1.py",
-        "versions/v0_1/ef53a0a7061c_index_change_operation_change_set_id.py",
+        "versions/v0_1/eb86fdacb1bb_release_0_1_4.py",
+        "initialization/versions/v0_2/5b7e5c149279_initial_schema.py",
+        "initialization/schema/sqlite.json",
+        "initialization/schema/postgresql.json",
         *(
             f"revision_modules/v0_1/efcbcf724889_core_schema/{path.name}"
             for path in CORE_REVISION_DIR.glob("*.py")

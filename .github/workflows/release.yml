@@ -17,7 +17,9 @@ jobs:
 
   build:
     needs: release-checks
-    runs-on: ubuntu-latest
+    # Playwright 1.59 cannot install browser dependencies on ubuntu-26.04,
+    # which ubuntu-latest became in November 2026.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

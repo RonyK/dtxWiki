@@ -152,6 +152,7 @@ markers = [
   "real_argon2: opts out of the fast test hasher and exercises the production Argon2id cost",
   "counterexample(reason): builds a violating input and asserts its guard rejects it",
   "release_scale: capacity guard on production-scale input; the PR lane deselects it and Release checks run it",
+  "release_migration: dedicated versioned-schema migration regression; routine backend lanes deselect it and Release checks run both dialects",
 ]
 
 [tool.ruff]
