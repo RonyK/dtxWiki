@@ -16,6 +16,38 @@ const mermaidMock = vi.hoisted(() => ({
 vi.mock("mermaid", () => ({ default: mermaidMock }));
 
 describe("MarkdownView", () => {
+  it("numbers citations after a soft line break that trims trailing whitespace", () => {
+    const href = "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222";
+    const token = `@cite{${href}}`;
+    const title = "실험 기록과 참고문헌 검증";
+    const content = `# ${title}\n\n😀 관측 기록\n\n참고문헌 인용 위치: \n${token}`;
+    const body = `---\ntitle: ${title}\n---\n${content}`;
+    const reference = {
+      target_kind: "context_page" as const,
+      target_id: "22222222-2222-4222-8222-222222222222",
+      number: 1, href, title: "관측 기록 작성 가이드", state: "available" as const,
+      inline_count: 1, metadata_present: true,
+    };
+    const { rerender } = render(<MemoryRouter><MarkdownView body={body}
+      stripLeadingHeading={title} references={[{ ...reference, occurrences: [{
+        href, start: Array.from(body.slice(0, body.indexOf(token))).length,
+        end: Array.from(body).length,
+      }]}]} /></MemoryRouter>);
+    expect(screen.getByRole("link", { name: "[1]" })).toHaveAttribute("href", expect.stringContaining("#user-content-dtx-reference-"));
+    expect(screen.queryByText(new RegExp("@cite\\{"))).not.toBeInTheDocument();
+
+    // Editor spans use UTF-16. Raw indentation must be trimmed before entity
+    // decoding so the space authored as &#32; is still part of the text node.
+    const preview = content.replace(` \n${token}`, ` &#32;\r\n \t${token}`);
+    rerender(<MemoryRouter><MarkdownView body={preview} sourceLineNumbers
+      stripLeadingHeading={title} referenceOffsets="utf16" references={[{
+        ...reference, occurrences: [{ href, start: preview.indexOf(token), end: preview.length }],
+      }]} /></MemoryRouter>);
+    const citation = screen.getByRole("link", { name: "[1]" });
+    expect(document.getElementById(citation.getAttribute("href")!.slice(1))).toHaveTextContent(reference.title);
+    expect(screen.queryByText(new RegExp("@cite\\{"))).not.toBeInTheDocument();
+  });
+
   it("numbers a redacted unavailable citation from source offsets without exposing its raw address", () => {
     const href = "/p/11111111-1111-4111-8111-111111111111/33333333-3333-4333-8333-333333333333";
     const prefix = "😀 Claim ";

@@ -115,6 +115,7 @@ def _publish_context_change(
         actor_id=ACTOR_ID,
         actor_provenance="browser_session",
         expected_content_hash=staged.content_hash,
+        expected_references_hash=staged.references_hash,
     )
     assert published.page.version_id == staged.version_id
     with session_factory() as session:

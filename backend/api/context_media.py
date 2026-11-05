@@ -446,6 +446,7 @@ async def _register_upload(
                 actor_kind=actor.actor_kind,
                 actor_id=actor.actor_id,
                 policy_revision=policy_revision,
+                allow_shared_draft=actor.provenance == "browser_session",
             ),
         )
     except ContextImageIngestError as exc:

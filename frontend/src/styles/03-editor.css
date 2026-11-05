@@ -6040,6 +6040,7 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 
 .editor-publication-actions {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }

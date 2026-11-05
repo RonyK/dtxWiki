@@ -37,6 +37,7 @@ class RegisterMediaAsset:
         candidate: RegisterContextMediaAsset,
         *,
         now: datetime,
+        allow_shared_draft: bool = False,
     ) -> ContextMediaAssetRecord:
         # P3.1/P3.2: the caller's own open "editing" row is the asset's
         # owning context now, not a ContextMediaSession -- validated by
@@ -61,6 +62,8 @@ class RegisterMediaAsset:
             association_state=AssociationState.ACTIVE,
             revision=1,
         )
+        if allow_shared_draft:
+            return repository.add_asset(record, allow_shared_draft=True)
         return repository.add_asset(record)
 
 

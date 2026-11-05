@@ -16,6 +16,7 @@ from backend.models import (
     PageLink,
     PageNameIndex,
     ReviewItem,
+    User,
     Workspace,
     WorkspaceMembership,
     WorkspaceTreeNode,
@@ -24,6 +25,7 @@ from backend.policy.auth import ActorContext, get_rest_actor
 from backend.repositories import context_page_repo
 from backend.services.context_lifecycle import apply_context_publication
 from backend.services.domain_read import DomainReadService
+from backend.services.page_service import PageConflictError
 from backend.services.read_errors import StaleContextDraftError
 from backend.tests.conftest import (
     authenticate_test_client,
@@ -188,6 +190,532 @@ def _publish_created_version(client, page_service, created, **payload_overrides)
         f"{created['version_id']}/publish",
         json=payload,
     )
+
+
+def test_browser_reference_draft_stays_shared_through_save_review_and_publish(
+    page_service,
+):
+    # One DB/transport lifecycle: visibility, review evidence and publication
+    # pointers must agree after a reference-only edit and its retries.
+    owner = make_client(page_service)
+    base = pages_url(page_service)
+    target = create_published_page(
+        owner, page_service, title="Reference source", body_md="# Reference source"
+    )
+    created = owner.post(
+        base,
+        json={
+            "title": "Shared references",
+            "body_md": "# Shared references",
+            "share_draft": True,
+        },
+    )
+    assert created.status_code == 201, created.text
+    draft = created.json()["data"]
+    page_url = f"{base}/{draft['id']}"
+    editor = make_client(page_service, authenticated=False)
+    authenticate_test_client_in_workspace(
+        editor,
+        page_service.session_factory,
+        email="shared-reference-editor@example.com",
+        role="editor",
+    )
+    viewer = make_client(page_service, authenticated=False)
+    authenticate_test_client_in_workspace(
+        viewer,
+        page_service.session_factory,
+        email="shared-reference-viewer@example.com",
+        role="viewer",
+    )
+    assert draft["version_status"] == "draft"
+    assert editor.get(page_url).json()["data"]["version_id"] == draft["version_id"]
+    assert viewer.get(page_url).status_code == 404
+
+    def save(value, key, body=None):
+        response = owner.post(
+            f"{page_url}/autosave",
+            json={
+                "body_md": body or value["body_md"],
+                "base_version_id": value["version_id"],
+                "base_content_hash": value["content_hash"],
+                "expected_editing_revision": value["editing_revision"],
+                "session_version_id": value["version_id"],
+                "idempotency_key": key,
+                "share_draft": True,
+            },
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["data"]
+
+    reference = {"target_kind": "context_page", "target_id": target["id"]}
+    added = owner.post(
+        f"{page_url}/references",
+        json={
+            "version_id": draft["version_id"],
+            "expected_editing_revision": draft["editing_revision"],
+            "idempotency_key": "shared-reference-add",
+            "add": [reference],
+        },
+    )
+    assert added.status_code == 200, added.text
+    assert added.json()["data"]["publication_state"] == "draft"
+    draft = editor.get(page_url).json()["data"]
+    assert draft["references"][0]["target_id"] == target["id"]
+    assert _publish_created_version(owner, page_service, draft).status_code == 200
+    published = viewer.get(page_url).json()["data"]
+
+    # Even identical body bytes must stage a mutable shared successor before
+    # changing references on a published or reviewed version.
+    draft = save(published, "stage-reference-removal")
+    assert draft["version_id"] != published["version_id"]
+    removal = {
+        "version_id": draft["version_id"],
+        "expected_editing_revision": draft["editing_revision"],
+        "idempotency_key": "shared-reference-remove",
+        "remove": [reference],
+    }
+    removed = owner.post(f"{page_url}/references", json=removal)
+    assert removed.status_code == 200, removed.text
+    replay = owner.post(f"{page_url}/references", json=removal)
+    assert replay.status_code == 200 and replay.json()["data"]["replayed"]
+    assert (
+        replay.json()["data"]["editing_revision"]
+        == removed.json()["data"]["editing_revision"]
+    )
+    draft = editor.get(page_url).json()["data"]
+    assert not draft["references"]
+    assert viewer.get(page_url).json()["data"]["version_id"] == published["version_id"]
+    assert viewer.get(page_url).json()["data"]["references"]
+
+    submitted = owner.post(
+        f"{page_url}/submit-for-review",
+        json={
+            "version_id": draft["version_id"],
+            "expected_editing_revision": draft["editing_revision"],
+            "idempotency_key": "shared-reference-review",
+            "reason": "Check references",
+        },
+    )
+    assert submitted.status_code == 200, submitted.text
+    reviewed = submitted.json()["data"]
+    assert reviewed["review_item_id"] is not None
+    blocked = owner.post(
+        f"{page_url}/references",
+        json={
+            "version_id": reviewed["version_id"],
+            "expected_editing_revision": reviewed["editing_revision"],
+            "idempotency_key": "review-evidence-is-immutable",
+            "add": [reference],
+        },
+    )
+    assert blocked.status_code == 409, blocked.text
+    successor = save(reviewed, "fork-reviewed-references")
+    assert successor["version_id"] != reviewed["version_id"]
+    changed = owner.post(
+        f"{page_url}/references",
+        json={
+            "version_id": successor["version_id"],
+            "expected_editing_revision": successor["editing_revision"],
+            "idempotency_key": "shared-reference-readd",
+            "add": [reference],
+        },
+    )
+    assert changed.status_code == 200, changed.text
+    historical = owner.get(
+        page_url, params={"version_id": reviewed["version_id"]}
+    ).json()["data"]
+    assert not historical["references"]
+    current = editor.get(page_url).json()["data"]
+    current = save(
+        current,
+        "body-after-reference-change",
+        "# Shared references\n\nSaved after references.",
+    )
+    assert editor.get(page_url).json()["data"]["body_md"] == current["body_md"]
+    assert current["version_status"] == "draft"
+    stale = _publish_created_version(
+        owner,
+        page_service,
+        current,
+        expected_references_hash=successor["references_hash"],
+    )
+    assert stale.status_code == 409, stale.text
+    missing_hash = owner.post(
+        f"{page_url}/versions/{current['version_id']}/publish",
+        json={
+            "reason": "Missing reference fingerprint",
+            "expected_content_hash": current["content_hash"],
+        },
+    )
+    assert missing_hash.status_code == 422, missing_hash.text
+    assert _publish_created_version(owner, page_service, current).status_code == 200
+    assert (
+        viewer.get(page_url).json()["data"]["references"][0]["target_id"]
+        == target["id"]
+    )
+
+
+def _human_user_id(page_service, email="test@example.com") -> str:
+    with page_service.session_factory() as session:
+        return str(session.scalar(select(User.id).where(User.email == email)))
+
+
+def _editor_client(page_service, email):
+    client = make_client(page_service, authenticated=False)
+    authenticate_test_client_in_workspace(
+        client, page_service.session_factory, email=email, role="editor"
+    )
+    return client
+
+
+def _browser_save(client, page_url, value, key, body):
+    response = client.post(
+        f"{page_url}/autosave",
+        json={
+            "body_md": body,
+            "base_version_id": value["version_id"],
+            "base_content_hash": value["content_hash"],
+            "expected_editing_revision": value["editing_revision"],
+            "session_version_id": value["version_id"],
+            "idempotency_key": key,
+            "share_draft": True,
+        },
+    )
+    return response
+
+
+def _mcp_private_save(page_service, page_id, user_id, body, key):
+    """Open (or resume) the same human's private MCP edit and save ``body``."""
+
+    workspace_id = UUID(default_workspace_id(page_service))
+    mcp = {
+        "actor_kind": "human",
+        "actor_id": user_id,
+        "actor_provenance": "oauth_client",
+    }
+    edit = page_service.begin_context_edit(
+        page_id=UUID(page_id),
+        workspace_id=workspace_id,
+        idempotency_key=f"{key}-begin",
+        **mcp,
+    )
+    return page_service.autosave_page(
+        page_id=UUID(page_id),
+        workspace_id=workspace_id,
+        title=None,
+        body_md=body,
+        base_version_id=edit.version_id,
+        base_content_hash=edit.content_hash,
+        idempotency_key=key,
+        expected_editing_revision=edit.editing_revision,
+        editing_version_id=edit.version_id,
+        **mcp,
+    )
+
+
+def test_browser_save_keeps_the_same_users_mcp_edit_private(page_service):
+    # Browser and MCP authentication resolve to the same human. The browser
+    # continues the shared draft line; it neither shares nor ends the MCP edit.
+    owner = make_client(page_service)
+    page = create_published_page(
+        owner, page_service, title="Private edit", body_md="# Private edit"
+    )
+    target = create_published_page(
+        owner, page_service, title="Private source", body_md="# Private source"
+    )
+    page_url = f"{pages_url(page_service)}/{page['id']}"
+    user_id = _human_user_id(page_service)
+    edit = _mcp_private_save(
+        page_service,
+        page["id"],
+        user_id,
+        "# Private edit\n\nMCP private notes.",
+        "mcp-private-save",
+    )
+    editor = _editor_client(page_service, "private-edit-peer@example.com")
+    loaded = owner.get(page_url).json()["data"]
+    assert loaded["version_id"] == page["version_id"]
+
+    saved = _browser_save(
+        owner,
+        page_url,
+        loaded,
+        "browser-shared-save",
+        "# Private edit\n\nBrowser addition.",
+    )
+    assert saved.status_code == 200, saved.text
+    saved = saved.json()["data"]
+    assert saved["version_id"] not in {page["version_id"], str(edit.version_id)}
+    assert saved["version_status"] == "draft"
+    cited = owner.post(
+        f"{page_url}/references",
+        json={
+            "version_id": saved["version_id"],
+            "expected_editing_revision": saved["editing_revision"],
+            "idempotency_key": "browser-shared-reference",
+            "add": [{"target_kind": "context_page", "target_id": target["id"]}],
+        },
+    )
+    assert cited.status_code == 200, cited.text
+    assert cited.json()["data"]["publication_state"] == "draft"
+    peer = editor.get(page_url).json()["data"]
+    assert peer["version_id"] == saved["version_id"]
+    assert "MCP private notes" not in peer["body_md"]
+
+    continued = page_service.autosave_page(
+        page_id=UUID(page["id"]),
+        workspace_id=UUID(default_workspace_id(page_service)),
+        title=None,
+        body_md="# Private edit\n\nMCP continues privately.",
+        actor_kind="human",
+        actor_id=user_id,
+        base_version_id=edit.version_id,
+        base_content_hash=edit.content_hash,
+        actor_provenance="oauth_client",
+        idempotency_key="mcp-private-continue",
+        expected_editing_revision=edit.editing_revision,
+        editing_version_id=edit.version_id,
+    )
+    assert continued.version_id == edit.version_id
+    assert continued.version_status == "editing"
+    assert editor.get(page_url).json()["data"]["version_id"] == saved["version_id"]
+    # One draft line per page: the private edit cannot replace the pending
+    # shared draft by being submitted over it.
+    with pytest.raises(PageConflictError):
+        page_service.submit_context_edit_for_review(
+            page_id=UUID(page["id"]),
+            version_id=edit.version_id,
+            workspace_id=UUID(default_workspace_id(page_service)),
+            actor_kind="human",
+            actor_id=user_id,
+            actor_provenance="oauth_client",
+            expected_editing_revision=continued.editing_revision,
+            idempotency_key="mcp-private-submit",
+        )
+    assert editor.get(page_url).json()["data"]["version_id"] == saved["version_id"]
+
+
+def test_browser_keeps_an_opened_private_edit_private_until_review(page_service):
+    # A page created over MCP is the author's private edit and the page's only
+    # version, so the browser opens that edit. Saving and reference changes
+    # keep it private; only the explicit review request shares it.
+    owner = make_client(page_service)
+    target = create_published_page(
+        owner, page_service, title="Opened source", body_md="# Opened source"
+    )
+    user_id = _human_user_id(page_service)
+    created = page_service.create_page_first(
+        workspace_slug="default",
+        actor_kind="human",
+        actor_id=user_id,
+        actor_provenance="oauth_client",
+        title="MCP page",
+        body_md="# MCP page\n\nMCP private notes.",
+    )
+    page_url = f"{pages_url(page_service)}/{created.id}"
+    editor = _editor_client(page_service, "opened-edit-peer@example.com")
+    loaded = owner.get(page_url).json()["data"]
+    assert loaded["version_id"] == str(created.version_id)
+    assert loaded["version_status"] == "editing"
+    assert loaded["can_submit_for_review"] is True
+
+    saved = _browser_save(
+        owner,
+        page_url,
+        loaded,
+        "browser-opened-save",
+        loaded["body_md"] + "\n\nBrowser addition.",
+    )
+    assert saved.status_code == 200, saved.text
+    saved = saved.json()["data"]
+    assert saved["version_id"] == str(created.version_id)
+    assert saved["version_status"] == "editing"
+    cited = owner.post(
+        f"{page_url}/references",
+        json={
+            "version_id": saved["version_id"],
+            "expected_editing_revision": saved["editing_revision"],
+            "idempotency_key": "browser-opened-reference",
+            "add": [{"target_kind": "context_page", "target_id": target["id"]}],
+        },
+    )
+    assert cited.status_code == 200, cited.text
+    assert cited.json()["data"]["publication_state"] == "editing"
+    assert editor.get(page_url).status_code == 404
+
+    submitted = owner.post(
+        f"{page_url}/submit-for-review",
+        json={
+            "version_id": saved["version_id"],
+            "expected_editing_revision": cited.json()["data"]["editing_revision"],
+            "idempotency_key": "browser-opened-review",
+        },
+    )
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["data"]["can_submit_for_review"] is False
+    assert editor.get(page_url).json()["data"]["version_id"] == saved["version_id"]
+
+
+def test_private_mcp_save_neither_hides_nor_blocks_shared_drafts(page_service):
+    owner = make_client(page_service)
+    page = create_published_page(
+        owner, page_service, title="Shared line", body_md="# Shared line"
+    )
+    page_url = f"{pages_url(page_service)}/{page['id']}"
+    user_id = _human_user_id(page_service)
+    author = _editor_client(page_service, "shared-line-author@example.com")
+    reader = _editor_client(page_service, "shared-line-reader@example.com")
+
+    # A private save on a published page leaves every other editor able to
+    # start a shared draft from the version they can read.
+    edit = _mcp_private_save(
+        page_service, page["id"], user_id, "# Shared line\n\nMCP one.", "mcp-one"
+    )
+    loaded = author.get(page_url).json()["data"]
+    assert loaded["version_id"] == page["version_id"]
+    first = _browser_save(
+        author, page_url, loaded, "author-first", "# Shared line\n\nAuthor draft."
+    )
+    assert first.status_code == 200, first.text
+    draft = first.json()["data"]
+    assert draft["version_status"] == "draft"
+    assert reader.get(page_url).json()["data"]["version_id"] == draft["version_id"]
+
+    # Saving the private edit again neither hides that shared draft nor stops
+    # its author from continuing it.
+    page_service.autosave_page(
+        page_id=UUID(page["id"]),
+        workspace_id=UUID(default_workspace_id(page_service)),
+        title=None,
+        body_md="# Shared line\n\nMCP two.",
+        actor_kind="human",
+        actor_id=user_id,
+        base_version_id=edit.version_id,
+        base_content_hash=edit.content_hash,
+        actor_provenance="oauth_client",
+        idempotency_key="mcp-two",
+        expected_editing_revision=edit.editing_revision,
+        editing_version_id=edit.version_id,
+    )
+    assert reader.get(page_url).json()["data"]["version_id"] == draft["version_id"]
+    second = _browser_save(
+        author, page_url, draft, "author-second", "# Shared line\n\nAuthor again."
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["data"]["version_id"] == draft["version_id"]
+    with page_service.session_factory() as session:
+        stored = session.get(ContextPage, UUID(page["id"]))
+        assert stored.latest_draft_version_id == UUID(draft["version_id"])
+        private = session.get(ContextPageVersion, edit.version_id)
+        assert private.version_status == "editing"
+
+
+def test_shared_save_starts_from_the_readable_head_over_a_foreign_private_pointer(
+    page_service,
+):
+    # Rows written before private saves stopped moving the page pointers can
+    # still leave them on one author's private edit. Other editors start from
+    # the version they can read instead of failing as stale.
+    owner = make_client(page_service)
+    page = create_published_page(
+        owner, page_service, title="Legacy pointer", body_md="# Legacy pointer"
+    )
+    page_url = f"{pages_url(page_service)}/{page['id']}"
+    edit = _mcp_private_save(
+        page_service,
+        page["id"],
+        _human_user_id(page_service),
+        "# Legacy pointer\n\nMCP private notes.",
+        "legacy-mcp",
+    )
+    with page_service.session_factory() as session:
+        stored = session.get(ContextPage, UUID(page["id"]))
+        stored.current_version_id = edit.version_id
+        stored.latest_draft_version_id = edit.version_id
+        session.commit()
+    editor = _editor_client(page_service, "legacy-pointer-editor@example.com")
+    loaded = editor.get(page_url).json()["data"]
+    assert loaded["version_id"] == page["version_id"]
+
+    saved = _browser_save(
+        editor, page_url, loaded, "legacy-editor", "# Legacy pointer\n\nEditor."
+    )
+    assert saved.status_code == 200, saved.text
+    saved = saved.json()["data"]
+    assert saved["parent_version_id"] == page["version_id"]
+    assert "MCP private notes" not in saved["body_md"]
+    assert editor.get(page_url).json()["data"]["version_id"] == saved["version_id"]
+
+
+def test_only_the_author_can_request_review_of_a_shared_browser_draft(page_service):
+    owner = make_client(page_service)
+    base = pages_url(page_service)
+    created = owner.post(
+        base,
+        json={"title": "Shared review", "body_md": "# Shared", "share_draft": True},
+    )
+    assert created.status_code == 201, created.text
+    draft = created.json()["data"]
+    assert draft["can_submit_for_review"] is True
+    page_url = f"{base}/{draft['id']}"
+    assert owner.get(page_url).json()["data"]["can_submit_for_review"] is True
+    editor = make_client(page_service, authenticated=False)
+    authenticate_test_client_in_workspace(
+        editor,
+        page_service.session_factory,
+        email="shared-review-peer@example.com",
+        role="editor",
+    )
+    shared = editor.get(page_url).json()["data"]
+    assert shared["version_id"] == draft["version_id"]
+    assert shared["can_submit_for_review"] is False
+    review = {
+        "version_id": draft["version_id"],
+        "expected_editing_revision": draft["editing_revision"],
+        "idempotency_key": "shared-review-request",
+    }
+    assert editor.post(f"{page_url}/submit-for-review", json=review).status_code == 404
+
+    submitted = owner.post(f"{page_url}/submit-for-review", json=review)
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["data"]["can_submit_for_review"] is False
+    assert owner.get(page_url).json()["data"]["can_submit_for_review"] is False
+    replay = owner.post(f"{page_url}/submit-for-review", json=review)
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["data"]["can_submit_for_review"] is False
+
+    # A later save forks the reviewed draft; the successor can be requested.
+    saved = owner.post(
+        f"{page_url}/autosave",
+        json={
+            "body_md": "# Shared\n\nRevised.",
+            "base_version_id": draft["version_id"],
+            "base_content_hash": draft["content_hash"],
+            "expected_editing_revision": draft["editing_revision"],
+            "session_version_id": draft["version_id"],
+            "idempotency_key": "shared-review-revise",
+            "share_draft": True,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    saved = saved.json()["data"]
+    assert saved["version_id"] != draft["version_id"]
+    assert saved["superseded_review_count"] == 1
+    assert saved["can_submit_for_review"] is True
+    replayed_save = owner.post(
+        f"{page_url}/autosave",
+        json={
+            "body_md": "# Shared\n\nRevised.",
+            "base_version_id": draft["version_id"],
+            "base_content_hash": draft["content_hash"],
+            "expected_editing_revision": draft["editing_revision"],
+            "session_version_id": draft["version_id"],
+            "idempotency_key": "shared-review-revise",
+            "share_draft": True,
+        },
+    )
+    assert replayed_save.status_code == 200, replayed_save.text
+    assert replayed_save.json()["data"]["can_submit_for_review"] is True
 
 
 def test_browser_owner_can_publish_its_active_page_first_editing_version(page_service):
@@ -1495,7 +2023,10 @@ def test_autosave_session_version_mismatch_never_discloses_another_authors_editi
         },
     )
 
-    assert conflicted.status_code == 409, conflicted.text
+    # The page's only version is the owner's private edit, so this actor has
+    # no readable version to save onto: the save is not found rather than a
+    # conflict against the owner's row. Either way nothing of it is disclosed.
+    assert conflicted.status_code == 404, conflicted.text
     conflict_body = conflicted.json()
     assert conflict_body.get("server_version_id") is None
     assert conflict_body.get("server_content_hash") is None

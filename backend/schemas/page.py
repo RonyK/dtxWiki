@@ -138,6 +138,10 @@ class PagePayload(PageSummary):
     # payload stays unchanged. The command ledger retains it separately for
     # an identical receipt when an idempotent patch is replayed.
     _edit_receipt: EditReceipt | None = PrivateAttr(default=None)
+    # Whether the actor this payload was built for may submit this exact
+    # version for review now. Private so MCP tool schemas stay unchanged; REST
+    # exposes it as ``ContextPageDetail.can_submit_for_review``.
+    _can_submit_for_review: bool = PrivateAttr(default=False)
 
 
 class PublicPagePayload(BaseModel):
@@ -186,10 +190,7 @@ class PublishPageVersionRequest(InputRequest):
     expected_references_hash: str | None = Field(
         default=None,
         pattern=CONTENT_HASH_PATTERN,
-        description=(
-            "Required when publishing a mutable editing version; "
-            "frozen submitted versions already bind their references."
-        ),
+        description=("Required when a browser publishes an editing or draft version."),
     )
 
     model_config = ConfigDict(extra="forbid")
@@ -414,16 +415,17 @@ class PageUpdateRequest(InputRequest):
 
 
 class PageAutosaveRequest(PageUpdateRequest):
-    """P8.1: `expected_editing_revision` is a required CAS input here, not
-    optional -- unlike `PATCH /{page_id}` (`PageUpdateRequest`, which targets
-    the page's own shared head and has no per-author "editing" row of its
-    own), autosave always targets a specific actor's private "editing" row,
-    where `content_hash` alone cannot catch a stale write that only changes
-    title/tags/aliases/metadata (see `PageUpdateRequest.expected_editing_revision`'s
-    comment for why the hash-only check is insufficient). Inherits
-    `PageUpdateRequest`'s tag/alias length validators unchanged."""
+    """Save an actor's edit with revision CAS, including metadata changes.
+
+    Browser saves explicitly stage a shared draft with ``share_draft``;
+    private editing clients retain their existing default behavior.
+    """
 
     expected_editing_revision: int = Field(ge=1)
+    share_draft: bool = Field(
+        default=False,
+        description="Browser-session save: stage a shared, unpublished draft.",
+    )
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
     # P8.5: ask "what happened to this key" without executing anything. A
     # caller unsure whether its own prior send landed uses this instead of
@@ -629,8 +631,8 @@ class PageInlineCommentCreateRequest(InputRequest):
         return stripped
 
 
-class ContextPageCreateRequest(InputRequest):
-    """Canonical ``POST context/pages`` body (P8.1/P9.1).
+class PrivateContextPageCreateRequest(InputRequest):
+    """Private page-first creation input, also used by MCP.
 
     Deliberately has no ``slug``/``as_draft`` field: the canonical create
     command always runs ``create_page_first`` (new page + empty editing),
@@ -659,6 +661,15 @@ class ContextPageCreateRequest(InputRequest):
         return _check_alias_lengths(value)
 
 
+class ContextPageCreateRequest(PrivateContextPageCreateRequest):
+    """REST creation can explicitly save a shared draft in a browser session."""
+
+    share_draft: bool = Field(
+        default=False,
+        description="Browser-session creation: save a shared, unpublished draft.",
+    )
+
+
 class ContextPageDetail(PagePayload):
     """The single canonical Context page detail shape (P9.1).
 
@@ -676,6 +687,13 @@ class ContextPageDetail(PagePayload):
     """
 
     latest_draft_version_id: UUID | None = None
+    can_submit_for_review: bool = Field(
+        default=False,
+        description=(
+            "Whether the caller may submit this exact version for review now: "
+            "its own private edit or unreviewed shared browser draft."
+        ),
+    )
     published_version_info: PublishedVersionInfo | None = None
     tree_path: list[TreePathEntry] = Field(default_factory=list)
     parent_node_id: UUID | None = None

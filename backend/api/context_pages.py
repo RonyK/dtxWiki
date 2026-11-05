@@ -251,6 +251,7 @@ def create_context_page(
             actor_id=actor.actor_id,
             actor_provenance=actor.provenance,
             placement_parent_node_id=request_body.placement_parent_node_id,
+            share_draft=request_body.share_draft,
         )
     except PageServiceError as exc:
         return service_error_response(exc)
@@ -327,6 +328,7 @@ def get_context_page(
     detail = ContextPageDetail(
         **{
             **payload.model_dump(),
+            "can_submit_for_review": payload._can_submit_for_review,
             "latest_draft_version_id": latest_draft_version_id,
             **enrichment,
         }
@@ -857,6 +859,7 @@ def autosave_page(
             on_stale=request_body.on_stale,
             destination_node_id=request_body.destination_node_id,
             retry_only=request_body.retry_only,
+            share_draft=request_body.share_draft,
         )
     except PageServiceError as exc:
         return service_error_response(exc)
@@ -879,7 +882,9 @@ def _to_detail(page) -> ContextPageDetail:
     so the response shape never varies by route.
     """
 
-    return ContextPageDetail(**page.model_dump())
+    return ContextPageDetail(
+        **page.model_dump(), can_submit_for_review=page._can_submit_for_review
+    )
 
 
 def page_write_response(

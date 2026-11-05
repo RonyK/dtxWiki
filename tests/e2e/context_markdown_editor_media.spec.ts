@@ -110,6 +110,7 @@ type PagePayload = {
   body_md: string;
   version_id: string;
   content_hash: string;
+  references_hash: string;
   editing_revision: number;
   current_published_version_id: string | null;
 };
@@ -1251,6 +1252,7 @@ async function publishVersion(
         reason: "E2E retained Context media history",
         publish_despite_findings: false,
         expected_content_hash: version.content_hash,
+        expected_references_hash: version.references_hash,
       },
     },
   );

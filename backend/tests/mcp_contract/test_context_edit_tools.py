@@ -153,6 +153,32 @@ def test_update_then_submit_context_edit_happy_path(page_service, actor):
     assert submitted.data.review_item_id is not None
 
 
+def test_cite_changes_references_on_private_edit_and_replays(page_service, actor):
+    workspace_id = _workspace(page_service)
+    target = _create_page(page_service, actor, workspace_id, title="Cite target")
+    created = _create_page(page_service, actor, workspace_id)
+    payload = {
+        "workspace_id": str(workspace_id),
+        "page_id": str(created.id),
+        "version_id": str(created.version_id),
+        "expected_editing_revision": created.editing_revision,
+        "idempotency_key": "mcp-cite-happy-1",
+        "add": [{"target_kind": "context_page", "target_id": str(target.id)}],
+    }
+
+    cited = dispatch("cite", payload, actor=actor, page_service=page_service)
+    replayed = dispatch("cite", payload, actor=actor, page_service=page_service)
+
+    assert cited.envelope.result_status == "succeeded", cited.envelope
+    assert cited.data.publication_state == "editing"
+    assert cited.data.editing_revision == created.editing_revision + 1
+    assert [ref.target_id for ref in cited.data.added] == [target.id]
+    assert replayed.envelope.result_status == "succeeded", replayed.envelope
+    assert replayed.data.replayed is True
+    assert replayed.data.editing_revision == cited.data.editing_revision
+    assert _stored(page_service, created.version_id).version_status == "editing"
+
+
 def test_update_context_edit_rejects_stale_base_as_conflict(page_service, actor):
     workspace_id = _workspace(page_service)
     created = _create_page(page_service, actor, workspace_id)
@@ -269,30 +295,15 @@ def test_wrong_actor_gets_opaque_not_found_not_a_permission_error(
     assert response.data is None
 
 
-def test_update_context_edit_on_another_actors_editing_row_forks_a_draft(
+def test_update_context_edit_on_another_actors_private_page_is_not_found(
     page_service, actor, other_actor
 ):
-    """Documents a REAL, PRE-EXISTING boundary in ``PageService.autosave_page``
-    (used identically, unchanged, by Browser REST's ``/autosave`` route and by
-    the legacy PATCH ``update_page`` path): unlike
-    begin_context_edit/submit_context_edit_for_review/discard_context_edit
-    (which all explicitly compare ``version.created_by_actor_kind/id`` and
-    raise an opaque not_found), ``autosave_page`` resolves "the version to
-    save onto" via ``_editable_version_id_for_actor``, which falls back to
-    ``page.current_version_id`` -- a page-global pointer that P8.1 can
-    durably leave pointing at ANOTHER actor's private "editing" row -- when
-    the calling actor has no open editing row of their own. It does not then
-    404; it forks a NEW version, owned by the caller, parented on that
-    pointer, with the CALLER'S OWN supplied body (never the other actor's
-    private content -- there is no content leak here), landing it directly as
-    version_status="draft" (not "editing"), which is the pre-P8.2
-    multi-draft-fork behavior this pass does not touch. This is exactly the
-    class of gap the plan document (P2 완료기준, "이미 발행된 page에서
-    write_page/update_draft 계열이 만드는 동시-다중-draft 상황의 메타데이터
-    오염 가능성") already named and explicitly deferred -- it is not
-    introduced by this task's wrapper and fixing it is out of this task's
-    scope (it requires changing ``autosave_page``'s own multi-author
-    semantics, not the MCP wire wrapper around it).
+    """``autosave_page`` used to resolve a caller with no open edit of its
+    own onto the page-global pointer even when that pointer named ANOTHER
+    actor's private "editing" row, forking a draft parented on it. The pointer
+    is now skipped like any row the caller cannot read, so on a page whose only
+    version is A's private edit, B's update is the same opaque not_found that
+    begin/submit/discard give -- and A's row is untouched.
     """
 
     workspace_id = _workspace(page_service)
@@ -308,24 +319,22 @@ def test_update_context_edit_on_another_actors_editing_row_forks_a_draft(
             "base_version_id": str(created.version_id),
             "base_content_hash": created.content_hash,
             "expected_editing_revision": created.editing_revision,
-            "idempotency_key": "wrong-actor-update-forks",
+            "idempotency_key": "wrong-actor-update-not-found",
         },
         actor=other_actor,
         page_service=page_service,
     )
-    assert response.envelope.result_status == "succeeded", response.envelope
-    # A NEW version was created (not a 404, and not a mutation of A's row).
-    assert response.data.version_id != created.version_id
-    assert response.data.version_status == "draft"
-    forked = _stored(page_service, response.data.version_id)
-    assert forked.parent_version_id == created.version_id
-    assert forked.body_md == "# Hello\n\nActor B's own words, not A's."
-    # The receipt has no base to quote: A's private text, its size and its
-    # revision stay A's.
+    assert response.envelope.result_status == "failed", response.envelope
+    assert response.envelope.error_code == "not_found"
+    assert getattr(response, "data", None) is None
     assert "Initial body" not in response.model_dump_json()
-    assert response.data.edit_receipt.changes is None
-    assert response.data.edit_receipt.chars_removed == 0
-    assert response.data.edit_receipt.editing_revision_before is None
+    with page_service.session_factory() as session:
+        versions = session.scalars(
+            select(ContextPageVersion).where(
+                ContextPageVersion.page_id == created.id
+            )
+        ).all()
+    assert [version.id for version in versions] == [created.version_id]
 
     # And critically: A's own editing row is untouched by B's call.
     a_view = dispatch(

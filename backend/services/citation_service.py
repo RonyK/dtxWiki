@@ -20,7 +20,7 @@ from backend.services.mcp_write_idempotency import (
     execute_idempotent_write,
     request_fingerprint,
 )
-from backend.services.page_service import PageConflictError
+from backend.services.page_service import PageConflictError, PageService
 from backend.services.read_errors import (
     ReadNotFoundError,
     ReadValidationError,
@@ -80,8 +80,16 @@ class CitationService:
             # Refresh under the page lock: a long-lived identity map is not a
             # concurrency check, particularly for metadata-only changes.
             session.refresh(version)
+            # Browser saves share drafts with Editors. A reviewed version is
+            # immutable evidence: autosave must fork it before this command.
+            browser_draft = PageService._is_unreviewed_browser_draft(
+                session=session,
+                page=page,
+                version=version,
+                actor_provenance=actor.provenance,
+            )
             if (
-                version.version_status != "editing"
+                (version.version_status != "editing" and not browser_draft)
                 or version.graph_status != "linear"
                 or version.editing_revision != request.expected_editing_revision
             ):
@@ -90,7 +98,7 @@ class CitationService:
                     server_content_hash=version.content_hash,
                     server_editing_revision=(
                         version.editing_revision
-                        if version.version_status == "editing"
+                        if version.version_status in {"editing", "draft"}
                         else None
                     ),
                 )
@@ -135,6 +143,7 @@ class CitationService:
                 version_id=version.id,
                 editing_revision=version.editing_revision,
                 references_hash=document_references_hash(session, version),
+                publication_state=version.version_status,
                 receipt_id=receipt_id,
                 audit_event_id=audit_event_id,
                 # The receipt names changed registrations. Notes are authored

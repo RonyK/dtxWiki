@@ -17,6 +17,20 @@ access you grant.
 
 *Context preview: an actual dtxWiki screen with sample project content.*
 
+Browser **Save draft** and autosave share the saved Context draft with workspace
+Editors and Owners. Adding or removing references uses the same shared draft;
+it does not switch later saves to a private edit. Viewers keep reading the
+published version until **Publish**. MCP edits remain private until explicitly
+submitted for review; browser saves never share them, and an open MCP edit does
+not stop other Editors from continuing the shared draft. If the browser opens
+your own private edit, such as a never-published page created from an MCP
+client, saving keeps it private; choose **Request review** or **Publish** to
+share it.
+
+To ask for review in the browser, save the draft, then choose **Request review**.
+Only the draft's author can request review. Saving a change after requesting
+review withdraws the request; request review again when the draft is ready.
+
 ## Less explaining, more building
 
 - **Reuse the background you've already prepared.** Keep research, requirements,

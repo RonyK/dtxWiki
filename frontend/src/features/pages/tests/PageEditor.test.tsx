@@ -74,6 +74,7 @@ const page = {
   reconciliation_pending_count: 0,
   reconciliation_pending_count_truncated: false,
   superseded_review_count: 0,
+  can_submit_for_review: false,
 };
 const BASE = "http://127.0.0.1:21080";
 
@@ -350,12 +351,12 @@ describe("PageEditor", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
       if (url.endsWith("/search")) return jsonResponse({ data: { ranked_results: [{ type: "context_page", id: targetId, title: "Research source", location: ["Plan"] }] } });
-      if (url.endsWith("/begin-edit")) return jsonResponse({ data: { ...page, version_id: "v2", version_status: "editing", editing_revision: 1 } });
+      if (url.endsWith("/autosave")) return jsonResponse({ data: { ...page, version_id: "v2", version_status: "draft", editing_revision: 2 } });
       if (url.endsWith("/references")) return new Promise<Response>((_resolve, reject) => {
         referenceAttempts += 1;
         finishReference = () => reject(new TypeError("Connection lost after the server committed"));
       });
-      if (url.endsWith("?version_id=v2")) return jsonResponse({ data: { ...page, version_id: "v2", version_status: "editing", editing_revision: 3, references_hash: "c".repeat(64), references: [{ target_kind: "context_page", target_id: targetId, number: 1, href, title: "Research source", state: "available", note: "Background", inline_count: 0, metadata_present: true, occurrences: [] }] } });
+      if (url.endsWith("?version_id=v2")) return jsonResponse({ data: { ...page, version_id: "v2", version_status: "draft", editing_revision: 3, references_hash: "c".repeat(64), references: [{ target_kind: "context_page", target_id: targetId, number: 1, href, title: "Research source", state: "available", note: "Background", inline_count: 0, metadata_present: true, occurrences: [] }] } });
       return baseFetch(input, init);
     });
     renderWithRouter("/pages/hello/edit", <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />);
@@ -368,7 +369,7 @@ describe("PageEditor", () => {
     fireEvent.change(within(picker).getByLabelText("Note (optional)"), { target: { value: "Background" } });
     await typist().click(within(picker).getByRole("button", { name: "Add to references only" }));
     await waitFor(() => expect(finishReference).toBeTypeOf("function"));
-    // The new editing version has committed to React before the receipt
+    // The shared draft has committed to React before the receipt
     // answers; that legitimate version transition must retain command ownership.
     await act(async () => { finishReference!(); });
     await typist().click(await screen.findByRole("button", { name: "Retry reference change" }));
@@ -391,6 +392,8 @@ describe("PageEditor", () => {
     await waitFor(() => expect(autosaveCalls(fetchMock)).toHaveLength(2));
     const saved = JSON.parse(String(autosaveCalls(fetchMock)[1][1]?.body));
     expect(saved.expected_editing_revision).toBe(3);
+    expect(saved.share_draft).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/begin-edit"))).toBe(false);
     expect(parsePageDocument(saved.body_md).body).toBe(newerBody);
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/publish"))).toBe(false);
   });
@@ -399,13 +402,18 @@ describe("PageEditor", () => {
     const fetchMock = mockPublicationFlow();
     const baseFetch = fetchMock.getMockImplementation()!;
     const publishedReferenceId = "44444444-4444-4444-8444-444444444444";
+    let reviewAttempts = 0;
     const hidden = { target_kind: "context_page", target_id: null, metadata_id: publishedReferenceId, number: 1, state: "unavailable", inline_count: 0, metadata_present: false, occurrences: [] };
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
-      if (url.endsWith("/begin-edit")) return jsonResponse({ data: { ...page, version_id: "v2", version_status: "editing", references: [{ ...hidden, metadata_id: "55555555-5555-4555-8555-555555555555" }] } });
-      if (url.endsWith("/autosave")) return jsonResponse({ data: { ...page, version_id: "v2", version_status: "editing", editing_revision: 2, references: [hidden] } });
-      if (url.endsWith("/references")) return jsonResponse({ data: { page_id: page.id, version_id: "v2", editing_revision: 3, references_hash: "c".repeat(64), publication_state: "editing" } });
-      if (url.endsWith("?version_id=v2")) return jsonResponse({ data: { ...page, version_id: "v2", version_status: "editing", editing_revision: 3, references: [] } });
+      if (url.endsWith("/autosave")) return jsonResponse({ data: { ...page, version_id: "v2", version_status: "draft", editing_revision: 2, can_submit_for_review: true, references: [hidden] } });
+      if (url.endsWith("/references")) return jsonResponse({ data: { page_id: page.id, version_id: "v2", editing_revision: 3, references_hash: "c".repeat(64), publication_state: "draft" } });
+      if (url.endsWith("/submit-for-review")) {
+        reviewAttempts += 1;
+        if (reviewAttempts === 1) throw new TypeError("Review response lost");
+        return jsonResponse({ data: { ...page, version_id: "v2", version_status: "draft", editing_revision: 3, review_item_id: "review-references", can_submit_for_review: false, references: [] } });
+      }
+      if (url.endsWith("?version_id=v2")) return jsonResponse({ data: { ...page, version_id: "v2", version_status: "draft", editing_revision: 3, can_submit_for_review: true, references: [] } });
       if (url.endsWith(`/context/pages/${page.id}`)) return jsonResponse({ data: { ...page, current_published_version_id: page.version_id, version_status: "published_snapshot", references: [hidden] } });
       return baseFetch(input, init);
     });
@@ -415,11 +423,62 @@ describe("PageEditor", () => {
     await typist().click(screen.getByRole("button", { name: /Remove reference/ }));
     await waitFor(() => expect(screen.queryByRole("button", { name: /Remove reference/ })).not.toBeInTheDocument());
     const calls = fetchMock.mock.calls;
-    const begin = calls.findIndex(([input]) => String(input).endsWith("/begin-edit"));
+    const save = calls.findIndex(([input]) => String(input).endsWith("/autosave"));
     const remove = calls.findIndex(([input]) => String(input).endsWith("/references"));
-    expect(begin).toBeGreaterThanOrEqual(0);
-    expect(remove).toBeGreaterThan(begin);
+    expect(save).toBeGreaterThanOrEqual(0);
+    expect(remove).toBeGreaterThan(save);
+    expect(JSON.parse(String(calls[save][1]?.body)).share_draft).toBe(true);
+    expect(calls.some(([input]) => String(input).endsWith("/begin-edit"))).toBe(false);
     expect(JSON.parse(String(calls[remove][1]?.body))).toMatchObject({ version_id: "v2", add: [], remove: [{ reference_id: publishedReferenceId }] });
+    const request = publicationActions().getByRole("button", { name: "Request review" });
+    await waitFor(() => expect(request).toBeEnabled());
+    await typist().click(request);
+    await screen.findByText("Could not request review. Try again.");
+    await typist().click(request);
+    await screen.findByText("Review requested.");
+    const submissions = calls.filter(([input]) => String(input).endsWith("/submit-for-review"));
+    expect(submissions).toHaveLength(2);
+    expect(submissions[1][1]?.body).toBe(submissions[0][1]?.body);
+    expect(JSON.parse(String(submissions[0][1]?.body))).toMatchObject({ version_id: "v2", expected_editing_revision: 3 });
+    expect(request).toBeDisabled();
+  });
+
+  it.each([
+    [false, "another Editor's shared draft"],
+    [true, "the author's own saved draft"],
+  ])("enables Request review only when the server allows it (%s: %s)", async (allowed) => {
+    const fetchMock = mockPublicationFlow();
+    const baseFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith(`/context/pages/${page.id}`)) return jsonResponse({ data: { ...page, version_id: "v2", version_status: "draft", current_published_version_id: page.version_id, can_submit_for_review: allowed } });
+      return baseFetch(input, init);
+    });
+    renderWithRouter("/pages/hello/edit", <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />);
+    await findTitleEditor();
+    const request = publicationActions().getByRole("button", { name: "Request review" });
+    if (allowed) await waitFor(() => expect(request).toBeEnabled());
+    else expect(request).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/submit-for-review"))).toBe(false);
+  });
+
+  it("says when a save withdrew a pending review request", async () => {
+    const fetchMock = mockPublicationFlow();
+    const baseFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (init?.method === "POST" && url.endsWith("/autosave")) {
+        const payload = JSON.parse(String(init.body));
+        return jsonResponse({ data: { ...page, body_md: payload.body_md, version_id: "v3", parent_version_id: "v2", version_status: "draft", superseded_review_count: 1, can_submit_for_review: true } });
+      }
+      if (url.endsWith(`/context/pages/${page.id}`)) return jsonResponse({ data: { ...page, version_id: "v2", version_status: "draft", current_published_version_id: page.version_id, review_item_id: "review-1" } });
+      return baseFetch(input, init);
+    });
+    renderWithRouter("/pages/hello/edit", <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />);
+    await setEditorTitle(await findTitleEditor(), "Changed after review request");
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    await screen.findByText("A pending review request was withdrawn because the draft changed. Request review again when ready.");
+    await waitFor(() => expect(publicationActions().getByRole("button", { name: "Request review" })).toBeEnabled());
   });
 
   it("rejects a save when managed frontmatter puts the final body over its limit", async () => {

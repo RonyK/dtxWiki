@@ -104,6 +104,7 @@ class ContextMediaUploadService:
         validated_image: ValidatedContextImage,
         policy_revision: str = CONTEXT_MEDIA_POLICY_REVISION,
         legacy_upload_asset_id: UUID | None = None,
+        allow_shared_draft: bool = False,
     ) -> ContextMediaUploadResult:
         image_format = context_image_format_for_media_type(canonical_media_type)
         if image_format is None:
@@ -341,6 +342,7 @@ class ContextMediaUploadService:
                         legacy_upload_asset_id=legacy_upload_asset_id,
                     ),
                     now=now,
+                    allow_shared_draft=allow_shared_draft,
                 )
             transaction.add(
                 ContextMediaUploadRequest(

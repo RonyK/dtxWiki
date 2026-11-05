@@ -242,7 +242,11 @@ export function MarkdownView({
   const collectLinksToCheck = Boolean(onLinksToCheck);
   const inRouter = useInRouterContext();
   const pageSourceLineNumbers = renderPolicy === "page" && sourceLineNumbers;
-  const parsedBody = renderPolicy === "page" ? parsePageDocument(body).body : body;
+  // Reference positions are mapped to normalized line endings, including
+  // page bodies that have no managed frontmatter to normalize them first.
+  const parsedBody = renderPolicy === "page"
+    ? parsePageDocument(body).body.replace(/\r\n?/g, "\n")
+    : body;
   // The editor split preview renders from the full body (no string-level strip)
   // so data-source-line maps 1:1 to the CodeMirror body; the duplicate leading
   // title is dropped at the node level (remarkDropDuplicateHeading) so it still
@@ -1125,7 +1129,14 @@ function tokenizeTextNode(node: Text, options: DtxTokenOptions, sourceCitations?
     const citations = new Map<number, SourceCitation>();
     let rawCursor = 0, decodedCursor = 0;
     for (const candidate of rawText?.matchAll(/@cite\{([^\s{}]+)\}/g) ?? []) {
-      decodedCursor += decodeString(`${rawText!.slice(rawCursor, candidate.index)}@`).replace(/\r\n?/g, "\n").length - 1;
+      // Markdown trims trailing and continuation whitespace at soft line
+      // breaks before decoding escapes/entities. Match that text-node value
+      // while retaining the original source offset for reference lookup.
+      const prefix = rawText!.slice(rawCursor, candidate.index)
+        .replace(/\r\n?/g, "\n")
+        .replace(/[ \t]+/g, (space: string, index: number, source: string) =>
+          source[index - 1] === "\n" || source[index + space.length] === "\n" ? "" : space);
+      decodedCursor += decodeString(`${prefix}@`).length - 1;
       const escapes = /\\+$/.exec(rawText!.slice(0, candidate.index))?.[0].length ?? 0;
       citations.set(decodedCursor, { href: candidate[1], escaped: escapes % 2 === 1, start: (node.position?.start.offset ?? 0) + candidate.index! });
       decodedCursor += decodeString(candidate[0]).length;

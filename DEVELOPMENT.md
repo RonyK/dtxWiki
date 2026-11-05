@@ -975,6 +975,33 @@ Saving checks citation syntax and the combined 500-document budget without
 registering Graph edges. Historical `@cite{source-key}` display tokens remain
 unchanged and receive an unresolved-link warning; replace them with permanent
 document addresses to register citations.
+
+Browser create and autosave requests set `share_draft: true` to save a shared,
+unpublished draft. Only browser-session authentication accepts this option;
+MCP creation and editing keep their private defaults. Before changing reference
+metadata, the editor stages an owned draft even when the body is unchanged.
+Reviewed versions are forked first. The browser can explicitly submit its
+shared draft through `submit-for-review`; saving alone does not request review.
+Browser publication of a mutable version requires both content and reference
+hashes. Browser image uploads also accept the owner's current unreviewed draft.
+`share_draft` never changes an existing version's visibility. Browser and MCP
+authentication resolve to the same human actor, so a browser save continues the
+shared draft line and lands on the caller's own private `editing` row only when
+the request names it as its base or session version. That row stays private,
+including through reference changes, until it is submitted or published.
+
+Saving a private `editing` row moves `current_version_id` and
+`latest_draft_version_id` only on a never-published page whose pointers name no
+version other people can read. Otherwise the pointers keep naming the shared
+head; authors reach their private edit through their own editing row
+(`version: "my_edit"` in MCP reads). Submitting a private edit while another
+shared draft holds `latest_draft_version_id` is refused as a conflict. A save by
+another actor skips a pointer that still names someone else's private row (older
+data or a reopened submission) and starts from the version that actor can read.
+
+REST detail and write responses carry `can_submit_for_review` for the calling
+actor; the editor enables **Request review** only when it is true. MCP tool
+schemas do not expose this field.
 References are returned separately from the authored body; do not append a
 second generated copy to the Markdown. Old claim-based cite inputs are rejected,
 and reindex does not discover historical citations or reinterpret Chats records.

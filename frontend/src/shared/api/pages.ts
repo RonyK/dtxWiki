@@ -70,13 +70,12 @@ export type PageInlineCommentCreateInput = {
   anchor: PageInlineCommentAnchor;
 };
 
-export type PageCreateInput = components["schemas"]["ContextPageCreateRequest"];
+export type PageCreateInput = Omit<components["schemas"]["ContextPageCreateRequest"], "share_draft">;
 
 export type PageUpdateInput = components["schemas"]["PageUpdateRequest"];
 
-// P8.5: autosave targets the caller's own private "editing" row and requires
-// a client-held idempotency key.
-export type PageAutosaveInput = components["schemas"]["PageAutosaveRequest"];
+// Browser saves stage shared drafts and require a client-held retry key.
+export type PageAutosaveInput = Omit<components["schemas"]["PageAutosaveRequest"], "share_draft">;
 
 export type PageRestoreInput = components["schemas"]["PageRestoreRequest"];
 
@@ -182,6 +181,18 @@ export async function beginPageEdit(workspaceId: string, page: PagePayload) {
   return response.data;
 }
 
+export async function submitPageForReview(
+  workspaceId: string,
+  pageId: string,
+  payload: components["schemas"]["SubmitContextEditRequest"],
+) {
+  const response = await apiRequest<PageResponse>(pagesPath(workspaceId, `/${pageId}/submit-for-review`), {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return response.data;
+}
+
 export async function discardAlternativeDraft(
   workspaceId: string,
   id: string,
@@ -256,7 +267,7 @@ export async function createPage(
 ) {
   const response = await apiRequest<PageResponse>(pagesPath(workspaceId), {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, share_draft: true }),
     signal: options.signal,
   });
   return response.data;
@@ -289,7 +300,7 @@ export async function autosavePage(
     pagesPath(workspaceId, `/${id}/autosave`),
     {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, share_draft: true }),
       signal: options.signal,
     },
   );
@@ -339,7 +350,7 @@ export function sendPageAutosave(
   id: string,
   payload: PageAutosaveInput,
 ) {
-  const body = JSON.stringify(payload);
+  const body = JSON.stringify({ ...payload, share_draft: true });
   const apiToken = getApiToken();
   const url = `${getApiBaseUrl()}${pagesPath(workspaceId, `/${id}/autosave`)}`;
   const bodyBytes = utf8ByteLength(body);

@@ -3863,6 +3863,7 @@ function exactPage(workspaceId: string, pageId: string, versionId: string): page
     page_type: "guide", content_hash: "a".repeat(64), references_hash: "b".repeat(64), editing_revision: 1,
     created_at: "2026-05-09T00:00:00Z", updated_at: "2026-05-09T00:00:00Z",
     backlink_count: 0, children_count: 0, is_alternative: false, is_discarded: false,
+    can_submit_for_review: false,
     is_draft_head: true, is_public: false, is_published_head: false, is_visible_head: false,
     preserved_as_alternative: false, reconciliation_available: false,
     reconciliation_pending_count: 0, reconciliation_pending_count_truncated: false,

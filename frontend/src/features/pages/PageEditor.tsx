@@ -87,7 +87,6 @@ import {
 } from "../../shared/api/operations";
 import {
   autosavePage,
-  beginPageEdit,
   createPage,
   createPageComment,
   diffPageVersions,
@@ -97,6 +96,7 @@ import {
   publishPageVersion,
   readPage,
   sendPageAutosave,
+  submitPageForReview,
   updatePage,
 } from "../../shared/api/pages";
 import type { PagePayload, PageSummary, PageVersionDiff } from "../../shared/api/pages";
@@ -594,6 +594,7 @@ export function PageEditor({
   }, []);
   const editorViewRef = useRef<EditorViewType | null>(null);
   const referenceCommandOwnerRef = useRef<{ scope: string } | null>(null);
+  const reviewSubmissionRef = useRef<{ scope: string; key: string } | null>(null);
   const pendingReferenceCommandRef = useRef<{
     scope: string; page: PagePayload; request: Parameters<typeof changePageReferences>[2];
     target: ReferenceRemoval; operation: "add" | "remove";
@@ -1256,6 +1257,10 @@ export function PageEditor({
     stalePublishState === "idle" &&
     (saveState === "dirty" ||
       (saveState === "clean" && publicationState !== "published"));
+  // The server decides authorship and review state: another Editor's shared
+  // draft is readable here, but only its author can submit it.
+  const canRequestReview = canSave && saveState === "clean" && !conflict &&
+    Boolean(page?.can_submit_for_review);
   const activeEditorMode =
     singlePaneViewport && editorMode === "split" ? "source" : editorMode;
   const showSourcePane = activeEditorMode !== "reading";
@@ -3202,6 +3207,9 @@ export function PageEditor({
       acknowledgeEditorRevision(dispatchedRevision);
       pageIdRef.current = updated.id;
       setPage(updated);
+      if (!fromReview && (updated.superseded_review_count ?? 0) > 0) {
+        setStatus(t("editor.reviewRequestWithdrawn"));
+      }
       setSaveRelativeNow(Date.now());
       setPublicationState((current) =>
         current === "never-published" ? "never-published" : "staged",
@@ -4096,6 +4104,42 @@ export function PageEditor({
     view.focus();
   }
 
+  async function requestReview() {
+    if (!workspaceId || !page || !canRequestReview || savingRef.current) return;
+    const editorScope = referenceCommandScopeRef.current;
+    const scope = JSON.stringify([editorScope, page.version_id, page.editing_revision]);
+    if (reviewSubmissionRef.current?.scope !== scope) {
+      reviewSubmissionRef.current = { scope, key: newIdempotencyKey() };
+    }
+    const owner = { scope: editorScope };
+    referenceCommandOwnerRef.current = owner;
+    savingRef.current = true;
+    setIsSaving(true);
+    setStatus(null);
+    const isCurrent = () => isEditorMountedRef.current && referenceCommandOwnerRef.current === owner && referenceCommandScopeRef.current === editorScope;
+    try {
+      const submitted = await submitPageForReview(workspaceId, page.id, {
+        version_id: page.version_id,
+        expected_editing_revision: page.editing_revision ?? 1,
+        idempotency_key: reviewSubmissionRef.current.key,
+        reason: "Requested review from Page editor.",
+        retry_only: false,
+      });
+      if (!isCurrent()) return;
+      reviewSubmissionRef.current = null;
+      setPage(submitted);
+      setStatus(t("editor.reviewRequested"));
+    } catch (cause) {
+      if (isCurrent()) setStatus(apiErrorMessage(cause, t("editor.reviewRequestFailed")));
+    } finally {
+      if (referenceCommandOwnerRef.current === owner) {
+        referenceCommandOwnerRef.current = null;
+        savingRef.current = false;
+        if (isEditorMountedRef.current) setIsSaving(false);
+      }
+    }
+  }
+
   async function mutateReferences(target: ReferenceRemoval, operation: "add" | "remove") {
     if (!workspaceId || savingRef.current || referenceBusy) return;
     const owner = { scope: referenceCommandScopeRef.current };
@@ -4110,11 +4154,11 @@ export function PageEditor({
     setStatus(null);
     try {
       const pending = pendingReferenceCommandRef.current;
-      let editing = pending?.scope === owner.scope ? pending.page : page;
+      let savedPage = pending?.scope === owner.scope ? pending.page : page;
       if (!pending) {
-        if (!editing && pageCreationPromiseRef.current) editing = await pageCreationPromiseRef.current;
+        if (!savedPage && pageCreationPromiseRef.current) savedPage = await pageCreationPromiseRef.current;
         if (!isCurrent()) return;
-        if (!editing) {
+        if (!savedPage) {
           const creation = createPage(workspaceId, {
             title: snapshot.title.trim() || undefined,
             body_md: serializeDraftBody(snapshot, frontmatterExtraLinesRef.current),
@@ -4122,49 +4166,54 @@ export function PageEditor({
             placement_parent_node_id: snapshot.destinationNodeId || null,
           });
           pageCreationPromiseRef.current = creation;
-          try { editing = await creation; }
+          try { savedPage = await creation; }
           finally { if (pageCreationPromiseRef.current === creation) pageCreationPromiseRef.current = null; }
         } else {
-          if (editing.version_status !== "editing") editing = await beginPageEdit(workspaceId, editing);
-          if (!isCurrent()) return;
-          editing = await autosavePage(workspaceId, editing.id, {
-            title: snapshot.title.trim() || editing.title,
+          savedPage = await autosavePage(workspaceId, savedPage.id, {
+            title: snapshot.title.trim() || savedPage.title,
             body_md: serializeDraftBody(snapshot, frontmatterExtraLinesRef.current),
             page_type: snapshot.pageType, tags: snapshot.tags, aliases: snapshot.aliases,
-            base_version_id: editing.version_id, base_content_hash: editing.content_hash,
-            expected_editing_revision: editing.editing_revision, session_version_id: editing.version_id,
+            base_version_id: savedPage.version_id, base_content_hash: savedPage.content_hash,
+            expected_editing_revision: savedPage.editing_revision, session_version_id: savedPage.version_id,
             destination_node_id: snapshot.destinationNodeId || null,
             idempotency_key: newIdempotencyKey(), on_stale: "conflict", retry_only: false,
           });
         }
         if (!isCurrent()) return;
-        pageIdRef.current = editing.id;
-        baseVersionIdRef.current = editing.version_id;
-        sessionVersionIdRef.current = editing.version_id;
-        setPage(editing);
-        setPageSlug(editing.slug);
+        if (fromReview && (savedPage.superseded_review_count ?? 0) > 0) {
+          reviewEditCompletedRef.current = true;
+        }
+        pageIdRef.current = savedPage.id;
+        baseVersionIdRef.current = savedPage.version_id;
+        sessionVersionIdRef.current = savedPage.version_id;
+        setPage(savedPage);
+        setPageSlug(savedPage.slug);
         acknowledgeEditorRevision(dispatchedRevision);
-        lastSavedRef.current = { ...snapshot, title: editing.title, slug: editing.slug };
+        lastSavedRef.current = { ...snapshot, title: savedPage.title, slug: savedPage.slug };
         lastSavedFingerprintRef.current = fingerprint;
-        setPublicationState(editing.current_published_version_id ? "staged" : "never-published");
+        setPublicationState(savedPage.current_published_version_id ? "staged" : "never-published");
       }
-      if (!editing) return;
+      if (!savedPage) return;
       const request = pending?.request ?? {
-        version_id: editing.version_id, expected_editing_revision: editing.editing_revision ?? 1,
+        version_id: savedPage.version_id, expected_editing_revision: savedPage.editing_revision ?? 1,
         idempotency_key: newIdempotencyKey(),
         add: operation === "add" && "target_kind" in target ? [{ target_kind: target.target_kind, target_id: target.target_id, note: target.note ?? null }] : [],
         remove: operation === "remove" ? [target] : [],
       };
-      pendingReferenceCommandRef.current = { scope: owner.scope, page: editing, request, target, operation };
-      const changed = await changePageReferences(workspaceId, editing.id, request);
+      pendingReferenceCommandRef.current = { scope: owner.scope, page: savedPage, request, target, operation };
+      const changed = await changePageReferences(workspaceId, savedPage.id, request);
       if (!isCurrent()) return;
       pendingReferenceCommandRef.current = null;
       setReferenceRetryAvailable(false);
-      setPage({ ...editing, editing_revision: changed.editing_revision, references_hash: changed.references_hash });
+      setPage({ ...savedPage, version_status: changed.publication_state, editing_revision: changed.editing_revision, references_hash: changed.references_hash });
       setReferencePickerMode(null);
-      setStatus(t(operation === "add" ? "references.added" : "references.removed"));
+      const referenceStatus = t(operation === "add" ? "references.added" : "references.removed");
+      // Staging forks a reviewed draft and withdraws its pending review.
+      setStatus(!fromReview && (savedPage.superseded_review_count ?? 0) > 0
+        ? `${referenceStatus} ${t("editor.reviewRequestWithdrawn")}`
+        : referenceStatus);
       try {
-        const refreshed = await readPage(workspaceId, editing.id, editing.version_id);
+        const refreshed = await readPage(workspaceId, savedPage.id, savedPage.version_id);
         if (isCurrent()) setPage(refreshed);
       } catch {
         if (isCurrent()) setStatus(t("references.savedReloadFailed"));
@@ -4926,6 +4975,8 @@ export function PageEditor({
             ) : null}
             {!focusMode ? (
               <EditorPublicationActions
+                canRequestReview={Boolean(canRequestReview)}
+                onRequestReview={() => void requestReview()}
                 canPublish={canPublishFromEditor}
                 canSave={!saveBlockedReason && saveState === "dirty"}
                 saveDisabledReason={saveBlockedReason}
@@ -5453,6 +5504,8 @@ export function PageEditor({
               blockedReason={saveBlockedReason}
             />
             <EditorPublicationActions
+              canRequestReview={Boolean(canRequestReview)}
+              onRequestReview={() => void requestReview()}
               canPublish={canPublishFromEditor}
               canSave={!saveBlockedReason && saveState === "dirty"}
               saveDisabledReason={saveBlockedReason}
@@ -6570,6 +6623,8 @@ function SyncPill({
 }
 
 function EditorPublicationActions({
+  canRequestReview,
+  onRequestReview,
   canPublish,
   canSave,
   saving,
@@ -6577,6 +6632,8 @@ function EditorPublicationActions({
   onPublish,
   onSave,
 }: {
+  canRequestReview: boolean;
+  onRequestReview: () => void;
   canPublish: boolean;
   canSave: boolean;
   saving: boolean;
@@ -6604,6 +6661,14 @@ function EditorPublicationActions({
         {saving
           ? t("editor.syncSavingDraft", { defaultValue: "Saving…" })
           : t("editor.saveDraft", { defaultValue: "Save draft" })}
+      </button>
+      <button
+        className="icon-button text-button"
+        disabled={!canRequestReview || saving}
+        onClick={onRequestReview}
+        type="button"
+      >
+        {t("editor.requestReview")}
       </button>
       <button
         className={`icon-button text-button ${canPublish ? "primary" : ""}`}
