@@ -2,6 +2,7 @@ import logging
 import os
 import sqlite3
 from contextlib import contextmanager
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -75,6 +76,75 @@ if os.environ.get("DTXWIKI_TEST_SQLITE_DURABILITY") != "production":
     event.listen(Engine, "connect", _disable_test_sqlite_sync)
 
 event.listen(Base.metadata, "before_create", keep_sqlite_foreign_keys_inline)
+
+# Dedicated migration modules belong to Release checks. Mixed modules retain
+# their product/runtime cases in PR CI; only these real upgrade/round-trip
+# regressions move with the dedicated suites. Migrated setup fixtures alone do
+# not make an ordinary backend test a migration regression.
+_RELEASE_MIGRATION_MODULES = {
+    # Historical ID conversion mutates version bookkeeping after validating
+    # the released schema; it is part of the supported migration paths.
+    "test_revision_id_conversion.py",
+}
+_RELEASE_MIGRATION_CASES = {
+    "test_context_lifecycle_v3.py": {
+        "test_core_schema_migration_normalizes_only_same_page_published_pointer_lineage",
+        "test_migration_preserves_legacy_rejection_and_refuses_stale_restart",
+    },
+    "test_core_model_constraints.py": {
+        "test_core_migration_replaces_duplicate_search_columns_with_fts5",
+        "test_core_migration_accepts_runtime_precreated_fts_tables",
+    },
+    "test_input_storage_restrictions.py": {
+        "test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade",
+    },
+    "test_library_ready_version_ownership.py": {
+        "test_core_schema_migration_installs_and_removes_ready_version_ownership",
+    },
+    "test_mcp_authored_page_slugs.py": {
+        "test_migration_truncates_and_disambiguates_slugs_with_tree_sync",
+    },
+    "test_mcp_search_match_reclassification.py": {
+        "test_core_schema_upgrade_reclassifies_rows_from_the_initial_release",
+    },
+    "test_media_foundation.py": {
+        "test_media_phase_round_trips_from_mcp_boundary_and_refuses_lossy_downgrade",
+    },
+    "test_postgres_test_cleanup.py": {
+        "test_cleanup_removes_migration_guards_and_allows_a_second_upgrade",
+    },
+    "test_plugin_runtime.py": {
+        "test_plugin_migration_chain_preserves_core_stamp_and_validates_model_ownership",
+    },
+    "test_read_tree_projection_regressions.py": {
+        "test_migration_dedupe_renames_duplicate_visible_folder_slugs",
+    },
+    "test_version_mechanism.py": {
+        "test_direct_alembic_upgrade_rejects_old_schema_stamped_current",
+        "test_direct_alembic_stamp_cannot_launder_0001_as_current",
+        "test_direct_alembic_stamp_cannot_relabel_final_schema_as_0001",
+        "test_alembic_guard_allows_verified_noop_nonbase_stamps",
+        "test_alembic_guard_allows_recovery_unstamp_to_base",
+        "test_direct_alembic_upgrade_refuses_unidentifiable_start_state",
+    },
+}
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(items):
+    """Tag versioned-schema regressions before pytest applies ``-m`` filters."""
+    for item in items:
+        path = Path(str(item.path))
+        if path.parent.name != "integration":
+            continue
+        test_name = item.name.split("[", 1)[0]
+        if (
+            "migration" in path.stem
+            or path.name in _RELEASE_MIGRATION_MODULES
+            or test_name in _RELEASE_MIGRATION_CASES.get(path.name, ())
+        ):
+            item.add_marker(pytest.mark.release_migration)
+
 
 # Argon2id at the production cost (t=3, m=64MiB, p=4) takes ~45 ms to hash and
 # ~42 ms to verify. Every TestClient signup/login/PAT call pays it, and the suite

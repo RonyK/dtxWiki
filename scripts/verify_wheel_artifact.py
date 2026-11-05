@@ -89,6 +89,15 @@ GRAPH_RUNTIME_FILES = tuple(
 # re-hashing the manifest in the same change still fails here, and
 # tests/packaging/test_migration_chain.py holds the two copies equal.
 FROZEN_MIGRATIONS = {
+    "initialization/schema/postgresql.json": (
+        "d8678842142290152f348ce50206a5fd12d6ff426f94178d6c912d7ad567d8da"
+    ),
+    "initialization/schema/sqlite.json": (
+        "01195f58398685838f7029007fe8b49f4f839da2e9d4860ce21085b86b0458cf"
+    ),
+    "initialization/versions/v0_2/5b7e5c149279_initial_schema.py": (
+        "91d97a286c94e9d9ae1c278d0227e42b38ab67f20239d945da665400136e3f69"
+    ),
     "revision_modules/__init__.py": (
         "4a10c05f30c23333471d4ce1a16d2d768361fb82aac88f3862dbedff753bf7b6"
     ),
@@ -146,9 +155,6 @@ FROZEN_MIGRATIONS = {
     "revision_modules/v0_2/_5b7e5c149279_release_0_2/graph_schema.py": (
         "91c11dceb2c14394078fe17da5f87c97b8f8909a22e8c5f5d6f3531812f712b7"
     ),
-    "revision_modules/v0_2/_5b7e5c149279_release_0_2/identity_schema.py": (
-        "dcc057ba34a94e38fe0594ae13d1a27aeb2f990ddd4dfb582bece2f63b4e1350"
-    ),
     "revision_modules/v0_2/_5b7e5c149279_release_0_2/inbox_schema.py": (
         "0b2376bbfef03c351ebaaa3b1837f039c08c455dee1e43f80278b91337c27933"
     ),
@@ -170,14 +176,14 @@ FROZEN_MIGRATIONS = {
     "versions/v0_1/19db79d3e622_release_0_1_3.py": (
         "f6eade587f72c760ff86a37d2769355e22cbb647b9815c12c3e3ec084dcf5a0c"
     ),
-    "versions/v0_1/ef53a0a7061c_index_change_operation_change_set_id.py": (
-        "4ca7da3416959c22c15d39b453bb7d72024c9efca56e68253ea1e244a2066547"
+    "versions/v0_1/eb86fdacb1bb_release_0_1_4.py": (
+        "a639a8ce3a5b8678503f3d0bf7b493e394308869cc3274c0084cb3dbaf2b8557"
     ),
     "versions/v0_1/efcbcf724889_core_schema.py": (
         "1e4edcea3733bc4ea0f7407a9cd331a5f2f5e6913eebb289856cf87a45b9cd6b"
     ),
     "versions/v0_2/5b7e5c149279_release_0_2.py": (
-        "29f14554c195e4a03b52f0f78a9d44085e8d9aee984f17cd53cc57ecb61f19f9"
+        "37470ffd638a140a787c26b805711d0af4589bb58ed0001e4f342d739b094b56"
     ),
 }
 FROZEN_MANIFEST = Path("backend") / "migrations" / "frozen_revisions.json"
@@ -224,6 +230,9 @@ sys.path.insert(0, root)
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from backend.services.ops.alembic_migration_graph import (
+    initialization_script_directory,
+)
 
 config = Config(os.path.join(root, "backend", "alembic.ini"))
 config.set_main_option(
@@ -235,6 +244,21 @@ with warnings.catch_warnings():
     warnings.simplefilter("error", UserWarning)
     heads = sorted(script.get_heads())
     chain = [[entry.revision, entry.down_revision] for entry in script.walk_revisions()]
+    initialization_error = None
+    initialization_heads, initialization_chain = [], []
+    try:
+        initialization = initialization_script_directory()
+        initialization_heads = sorted(initialization.get_heads())
+        initialization_chain = [
+            [entry.revision, entry.down_revision]
+            for entry in initialization.walk_revisions()
+        ]
+    except Exception as error:
+        # Retain canonical graph evidence even when a corrupt branch cannot
+        # be composed into the direct-initialization route. The outer gate
+        # reports both failures; an alternate-route error must not obscure
+        # the independently checked published boundaries.
+        initialization_error = str(error)
 
 contained = os.path.realpath(root)
 foreign = {}
@@ -253,7 +277,12 @@ for name, module in list(sys.modules.items()):
         if resolved != contained and not resolved.startswith(contained + os.sep):
             foreign[name] = origin
 
-print(json.dumps({"heads": heads, "chain": chain, "foreign": foreign}))
+print(json.dumps({
+    "heads": heads, "chain": chain, "foreign": foreign,
+    "initialization_heads": initialization_heads,
+    "initialization_chain": initialization_chain,
+    "initialization_error": initialization_error,
+}))
 """
 
 
@@ -413,7 +442,7 @@ def _check_alembic_payload(root: Path) -> list[str]:
             "0.1.1": {"group": "v0_1", "head": "efcbcf724889"},
             "0.1.2": {"group": "v0_1", "head": "efcbcf724889"},
             "0.1.3": {"group": "v0_1", "head": "19db79d3e622"},
-            "0.1.4": {"group": "v0_1", "head": "ef53a0a7061c"},
+            "0.1.4": {"group": "v0_1", "head": "eb86fdacb1bb"},
             "0.2.1": {"group": "v0_2", "head": "5b7e5c149279"},
         }
         aliases = {
@@ -722,6 +751,21 @@ def _check_migration_graph(root: Path) -> tuple[list[str], str | None]:
         return [f"the packaged Alembic head probe returned {probe.stdout!r}"], None
 
     failures = _chain_failures(resolved["heads"], resolved["chain"])
+    if resolved["initialization_error"] is not None:
+        failures.append(f"initialization graph: {resolved['initialization_error']}")
+    else:
+        failures.extend(
+            f"initialization graph: {failure}"
+            for failure in _chain_failures(
+                resolved["initialization_heads"],
+                resolved["initialization_chain"],
+                baseline=(("5b7e5c149279", None),),
+            )
+        )
+        if resolved["initialization_heads"] != resolved["heads"]:
+            failures.append(
+                "initialization graph does not converge to the packaged head"
+            )
     failures.extend(
         f"{name} resolved from {origin}, outside the artifact"
         for name, origin in sorted(resolved["foreign"].items())
@@ -730,7 +774,9 @@ def _check_migration_graph(root: Path) -> tuple[list[str], str | None]:
     return failures, heads[0] if len(heads) == 1 else None
 
 
-def _chain_failures(heads: list[str], chain: list[list]) -> list[str]:
+def _chain_failures(
+    heads: list[str], chain: list[list], *, baseline=RELEASED_CHAIN_BASE
+) -> list[str]:
     """One current head with every later branch descending from frozen core.
 
     ``chain`` carries Alembic's revision edges. Walk order does not determine
@@ -754,12 +800,12 @@ def _chain_failures(heads: list[str], chain: list[list]) -> list[str]:
             failures.append(f"packaged revision {revision} repeats a parent")
         parents[revision] = ancestors
 
-    for revision, down_revision in RELEASED_CHAIN_BASE:
+    for revision, down_revision in baseline:
         expected = () if down_revision is None else (down_revision,)
         if parents.get(revision) != expected:
             failures.append(
                 "packaged revision graph must preserve released boundaries "
-                f"{RELEASED_CHAIN_BASE}; {revision} has parents "
+                f"{baseline}; {revision} has parents "
                 f"{parents.get(revision)!r}"
             )
 
@@ -776,7 +822,7 @@ def _chain_failures(heads: list[str], chain: list[list]) -> list[str]:
             f"packaged Alembic heads {heads} do not match graph heads {graph_heads}"
         )
 
-    core = RELEASED_CHAIN_BASE[-1][0]
+    core = baseline[-1][0]
     visiting: set[str] = set()
     reaches_core: dict[str, bool] = {}
 
@@ -797,7 +843,7 @@ def _chain_failures(heads: list[str], chain: list[list]) -> list[str]:
         reaches_core[revision] = bool(paths) and all(paths)
         return reaches_core[revision]
 
-    frozen = {revision for revision, _ in RELEASED_CHAIN_BASE}
+    frozen = {revision for revision, _ in baseline}
     for revision in sorted(set(parents) - frozen):
         if not descends_from_core(revision):
             failures.append(

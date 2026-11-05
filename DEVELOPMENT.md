@@ -270,6 +270,10 @@ WebGL gate(`npm run test:graph-webgl -- --project=chromium`)와 `DTXWIKI_E2E_GRA
 backend 용량 검사는 `release_scale` marker를 붙입니다. PR의 `make test-backend`는 이를
 제외하고, `Release checks`의 `postgres-migration` job이 실행합니다(로컬:
 `make test-backend-scale`).
+실제 schema upgrade·downgrade·호환성 회귀 검사는 `release_migration` marker로 분리합니다.
+일반 backend CI와 serial lane에서는 제외하고, `Release checks`에서
+`VENV=.venv make test-migrations`로 SQLite·PostgreSQL을 함께 실행합니다. 일반 startup,
+inventory 단위 테스트와 제품 테스트의 DB 준비 fixture는 PR 검증에 유지합니다.
 `graph-10k`, `docker-frontend`, `packaging`, `postgres-migration`은 별도의
 `Release checks` 워크플로(`.github/workflows/release-checks.yml`)에서 실행합니다.
 `packaging` job에는 acceptance·release-gate 검증과 정제된 로그 업로드도 포함됩니다.
@@ -650,8 +654,8 @@ sha256sum "$WHEEL" infra/prod/install.sh
 ```
 
 `verify_wheel_artifact.py` 는 릴리스 워크플로가 태그 시점에 돌리는 것과 같은 검사입니다 —
-SPA 번들과 그 index HTML이 참조하는 asset, alembic.ini, 배포된 다섯 migration과
-그 helper의 고정 해시를 확인합니다. 추출본 안에서 Alembic graph를 실제로 걸어
+SPA 번들과 그 index HTML이 참조하는 asset, alembic.ini, 배포된 migration·직접 초기화·
+helper의 고정 해시를 확인합니다. 추출본 안에서 Alembic graph를 실제로 걸어
 0.2.1 schema head `5b7e5c149279`와 release manifest를 대조합니다. 인자는 dist 디렉터리이며 wheel 경로를
 넘기면 사용법 오류(exit 2)입니다. 이미 만든 `dist/` 에 이전 빌드가 있으면(`make build-wheel` 은 그것을
 `dist/prev/` 로 옮깁니다) 검사 대상이 모호해지므로 위처럼 `rm -rf dist` 로 시작하세요.
@@ -675,21 +679,50 @@ revision 파일만 둡니다. 릴리스의 DB head 매핑은 `release_manifest.j
 
 여러 브랜치에서 같은 head 뒤에 migration을 추가한 경우에는 기존 revision을
 유지하고, 두 revision을 부모로 지정한 병합 revision을 추가합니다. 최종 그래프는
-head가 하나여야 하며, 모든 신규 경로가 고정된 core revision
-`efcbcf724889`를 거쳐야 합니다. 패키지 검증기는 이 그래프와 고정 파일의 해시를
-함께 확인합니다.
+head가 하나여야 합니다. 기존 DB 업그레이드는 고정된 core revision
+`efcbcf724889`의 이력을 보존하고, 새 설치는 아래의 직접 초기화 경로를 사용합니다.
+패키지 검증기는 각 그래프와 고정 파일의 해시를 함께 확인합니다.
 
-0.2.1은 0.1.4 이후 미배포 migration 13개를
-`versions/v0_2/5b7e5c149279_release_0_2.py` 하나로 통합합니다.
-`down_revision`은 배포된 0.1.4 head `ef53a0a7061c`이며, 전체 실행 chain은 다섯
-revision입니다. 0.1.4 이하의 배포 파일·helper·해시는 유지하고 0.2.1 구현을 새로
-고정합니다. 통합 migration은 SSO·계정 보존·Review·Inbox·링크 locator·Graph·문서
-참고문헌·Chats 인덱스를 포함하며, 기존 최종 head의 schema와 데이터를 유지합니다.
+새 DB의 `upgrade head`는 `initialization/versions/v0_2/5b7e5c149279_initial_schema.py`
+하나로 전체 v0.2.1 schema를 생성합니다. SQLite·PostgreSQL의 최종 DDL은
+`initialization/schema/`에 고정되어 있으며, 과거 table rebuild·backfill이나 현재 ORM
+metadata를 실행하지 않습니다. 비어 있음이 증명된 DB에서만 이 경로를 선택합니다.
+후속 schema 변경은 같은 `5b7e5c149279` 뒤에 추가합니다.
+
+기존 DB의 upgrade graph는 배포된 릴리스 경계 하나로만 이어집니다.
+
+```text
+bd62193d5cf6 (0.0.1) → efcbcf724889 (0.1.1·0.1.2) → 19db79d3e622 (0.1.3)
+  → eb86fdacb1bb (0.1.4) → 5b7e5c149279 (0.2.1)
+```
+
+`versions/v0_1/eb86fdacb1bb_release_0_1_4.py`는 v0.1.4 태그의 파일과 같습니다.
+`versions/v0_2/5b7e5c149279_release_0_2.py`는 0.1.4가 이미 적용한 로그인·계정
+보존·Review 변경을 반복하지 않고 나머지 v0.2 변경만 적용합니다. downgrade는 0.1.4
+schema로 정확히 돌아가며 0.1.4의 외부 로그인·계정 보존 데이터를 유지합니다. 상대
+대상(`upgrade +1`, `downgrade -1`)도 이 graph를 따릅니다.
+
+0.2.1 패키지는 같은 `5b7e5c149279`를 개발 전용 index revision `ef53a0a7061c` 뒤에
+두었습니다. `ef53a0a7061c`는 어떤 릴리스의 head도 아니며 배포에서 제거했습니다.
+`RETIRED_REVISION_IDS`에 있으므로 이 stamp는 지원하지 않는 revision으로 거부됩니다.
+0.2.1은 이 revision을 한 upgrade transaction 안에서만 거쳤으므로, Alembic 명령으로
+직접 지정하지 않았다면 이 stamp는 남지 않습니다. 그 경로로 `5b7e5c149279`에 도달한
+DB는 schema가 같아 그대로 인식합니다.
 
 DB가 이미 `5b7e5c149279`이면 통합 migration을 다시 실행하지 않습니다.
-제거된 미배포 중간 revision의 DB는 원래 checkout으로 먼저 최종 head에 도달하고,
-백업과 schema 검증을 마친 뒤 0.2.1로 전환합니다. 임의로 stamp를 바꾸지 않습니다.
-새 설치와 0.1.4 이하 배포본에서는 정식 chain을 따라 통합 migration을 적용합니다.
+제거된 미배포·개발 revision의 DB는 원래 checkout으로 먼저 최종 head에 도달하고,
+백업과 schema 검증을 마친 뒤 전환합니다. 임의로 stamp를 바꾸지 않습니다.
+
+지원되는 업그레이드 시작점은 최소 v0.1.2부터 유지합니다. v0.1.2의
+`efcbcf724889`, v0.1.3의 `19db79d3e622`, v0.1.4의 `eb86fdacb1bb`에서 현재 head로
+직접 업그레이드할 수 있어야 합니다. 현재 head까지 연결된다는 검사에 더해,
+이전 버전의 데이터가 있는 DB를 시작 경로로 업그레이드하는 회귀 검증을 유지합니다.
+
+초기 schema snapshot의 재현은 `scripts/generate_initial_schema.py`를 사용합니다.
+SQLite·PostgreSQL의 별도 빈 테스트 DB를 대상으로 `--database-url-env`와 `--output`을
+지정합니다. 이 도구는 배포된 release chain으로 reference DB를 만든 뒤 최종 DDL을
+추출합니다. 이미 배포한 snapshot과 해시를 재생성해 덮어쓰지 않고, schema가 달라지면
+후속 revision을 추가합니다.
 
 ### Migration 테스트 수 제한
 
