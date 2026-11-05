@@ -3168,7 +3168,7 @@ function ContextReader({
             badge: {
               label: tShell("preview.badge", { defaultValue: "Preview" }),
               title: tShell("preview.description", {
-                defaultValue: "Preview: this area is still being refined.",
+                defaultValue: "Labs preview: this feature is still being refined and may change.",
               }),
             },
           },

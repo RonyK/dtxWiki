@@ -99,12 +99,12 @@ describe("Shell", () => {
     for (const label of ["Review queue"]) {
       const link = within(sidebar).getByText(label).closest("a");
       expect(link).not.toBeNull();
-      expect(within(link as HTMLElement).getByText("Preview")).toHaveClass(
+      expect(within(link as HTMLElement).getByText("Preview").parentElement).toHaveClass(
         "nav-preview-badge",
       );
       expect(link).toHaveAttribute(
         "title",
-        expect.stringContaining("Preview: this area is still being refined."),
+        expect.stringContaining("Labs preview: this feature is still being refined and may change."),
       );
     }
 

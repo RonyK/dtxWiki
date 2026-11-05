@@ -105,7 +105,7 @@ describe("ReaderTabs", () => {
     expect(screen.getByText("3")).toHaveAttribute("aria-hidden", "true");
   });
 
-  it("renders a tab badge in the accessible name with its explanatory title", () => {
+  it("renders a tab badge in the accessible name with its explanatory title and hover tooltip", async () => {
     render(
       <ReaderTabs
         active="graph"
@@ -130,8 +130,15 @@ describe("ReaderTabs", () => {
       "title",
       "Preview: this area is still being refined.",
     );
-    expect(within(graphTab).getByText("Preview")).toHaveClass(
-      "nav-preview-badge",
+    const badge = within(graphTab).getByText("Preview").parentElement!;
+    expect(badge).toHaveClass("nav-preview-badge");
+    // The chip's own tooltip replaces the tab's native title while hovered.
+    expect(badge).toHaveAttribute("title", "");
+    await userEvent.hover(badge);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "Preview: this area is still being refined.",
     );
+    await userEvent.unhover(badge);
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 });

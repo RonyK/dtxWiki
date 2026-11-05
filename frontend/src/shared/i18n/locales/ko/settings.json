@@ -61,7 +61,7 @@
       "label": "에이전트 주입",
       "description": "AI에 전달할 규칙과 에이전트 페이지입니다.",
       "previewBadge": "미리 보기",
-      "previewDescription": "미리 보기: 이 영역은 아직 다듬는 중입니다."
+      "previewDescription": "실험 기능(미리보기): 이 영역은 아직 다듬는 중이라 바뀔 수 있습니다."
     },
     "review": {
       "label": "리뷰 정책",

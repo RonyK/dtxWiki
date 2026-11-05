@@ -63,6 +63,10 @@ describe("shared chrome CSS regressions", () => {
 
     expect(Math.max(...featureLocalLayers)).toBeLessThan(navigationLayer);
     expect(navigationLayer).toBeLessThan(dialogLayer);
+    // The Preview chip's tooltip is portaled from the mobile drawer and dialogs.
+    const tooltipLayer = Number(styles.match(/--z-tooltip:\s*(\d+);/)?.[1]);
+    expect(dialogLayer).toBeLessThan(tooltipLayer);
+    expect(ruleBlock(".preview-badge-tooltip")).toContain("z-index: var(--z-tooltip)");
     expect(ruleBlock(".mobile-nav-backdrop")).toContain(
       "z-index: var(--z-navigation-overlay)",
     );

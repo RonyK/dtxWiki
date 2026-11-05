@@ -60,6 +60,7 @@ import {
 import { useInboxUnread } from "../inbox/useInboxUnread";
 import { PanelVisibilityIcon } from "./PanelVisibilityIcon";
 import { PrismGlyph } from "./PrismGlyph";
+import { PreviewBadge } from "./PreviewBadge";
 import { RouteLoading } from "./RouteLoading";
 import { StatusBanner } from "./StatusBanner";
 import { useExplicitInertRef } from "./useExplicitInertRef";
@@ -342,7 +343,7 @@ function shellLabelsFromT(t: TFunction<"shell">): ShellLabels {
     }),
     previewBadge: t("preview.badge", { defaultValue: "Preview" }),
     previewDescription: t("preview.description", {
-      defaultValue: "Preview: this area is still being refined.",
+      defaultValue: "Labs preview: this feature is still being refined and may change.",
     }),
   };
 }
@@ -2221,11 +2222,7 @@ function Sidebar({
                     <NavLink
                       aria-label={collapsed ? title : undefined}
                       className={({ isActive }) =>
-                        `nav-item${
-                          item.key === "graph" && item.preview
-                            ? " nav-item--graph-preview"
-                            : ""
-                        }${isActive ? " active" : ""}`
+                        `nav-item${isActive ? " active" : ""}`
                       }
                       key={item.key}
                       title={title}
@@ -2284,7 +2281,10 @@ function NavItemContent({
       <Icon size={16} aria-hidden="true" />
       <span className="nav-item-label">{item.label}</span>
       {item.preview ? (
-        <span className="nav-preview-badge">{labels.previewBadge}</span>
+        <PreviewBadge
+          description={labels.previewDescription}
+          label={labels.previewBadge}
+        />
       ) : null}
     </>
   );

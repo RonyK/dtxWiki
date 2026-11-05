@@ -1198,10 +1198,12 @@ describe("ContextScreen", () => {
     const englishGraphTab = readerTabs.getByRole("tab", {
       name: "Graph, Preview",
     });
-    expect(readerTabs.getByText("Preview")).toHaveClass("nav-preview-badge");
+    expect(readerTabs.getByText("Preview").parentElement).toHaveClass(
+      "nav-preview-badge",
+    );
     expect(englishGraphTab).toHaveAttribute(
       "title",
-      "Preview: this area is still being refined.",
+      "Labs preview: this feature is still being refined and may change.",
     );
 
     try {
@@ -1211,12 +1213,12 @@ describe("ContextScreen", () => {
       const koreanGraphTab = readerTabs.getByRole("tab", {
         name: "그래프, 미리보기",
       });
-      expect(readerTabs.getByText("미리보기")).toHaveClass(
+      expect(readerTabs.getByText("미리보기").parentElement).toHaveClass(
         "nav-preview-badge",
       );
       expect(koreanGraphTab).toHaveAttribute(
         "title",
-        "미리보기: 아직 기능이 완성 단계가 아닙니다.",
+        "실험 기능(미리보기): 아직 다듬는 중이라 바뀔 수 있습니다.",
       );
     } finally {
       await act(async () => {

@@ -2,12 +2,11 @@ import { Activity, History, Info, Network, Scan, ZoomIn, ZoomOut } from "lucide-
 import { useId, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { GraphEdge, GraphHistoryMode, GraphRange, GraphTimelineEvent } from "../../../shared/api/graph";
+import { PreviewBadge } from "../../../shared/components/PreviewBadge";
 
 export function GraphPreviewBadge() {
   const { t } = useTranslation("shell");
-  return <span className="nav-preview-badge" title={t("preview.description")}>
-    {t("preview.badge")}
-  </span>;
+  return <PreviewBadge description={t("preview.description")} label={t("preview.badge")} />;
 }
 
 function navigateChoices(event: KeyboardEvent<HTMLButtonElement>) {

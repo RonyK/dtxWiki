@@ -7133,7 +7133,6 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 .graph-type-options button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; border: 1px solid transparent; border-radius: 7px; padding: 5px 10px; color: var(--ink-muted); background: transparent; font: inherit; font-weight: 650; cursor: pointer; }
 .graph-type-options button[aria-checked="true"] { background: var(--surface); border-color: color-mix(in srgb, var(--context) 35%, var(--border)); color: var(--context); box-shadow: 0 1px 2px #0000000c; }
 .graph-type-options button[aria-disabled="true"] { cursor: wait; }
-.graph-view .nav-preview-badge { white-space: nowrap; font-size: 9px; line-height: 1.2; }
 .graph-type-description { margin: 0; color: var(--ink-muted); font-size: 12px; line-height: 1.65; }
 .graph-type-description strong { color: var(--ink); }
 .graph-type-comparison { position: relative; flex-shrink: 0; }

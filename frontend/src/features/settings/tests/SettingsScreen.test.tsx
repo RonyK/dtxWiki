@@ -307,12 +307,12 @@ describe("SettingsScreen", () => {
     const agentInjectionNav = policyTabs.getByRole("tab", {
       name: /Agent injection/i,
     });
-    expect(within(agentInjectionNav).getByText("Preview")).toHaveClass(
+    expect(within(agentInjectionNav).getByText("Preview").parentElement).toHaveClass(
       "nav-preview-badge",
     );
     expect(agentInjectionNav).toHaveAttribute(
       "title",
-      expect.stringContaining("Preview: this area is still being refined."),
+      expect.stringContaining("Labs preview: this area is still being refined and may change."),
     );
 
     await user.click(

@@ -38,6 +38,7 @@ export * from "./NumericPagination";
 export * from "./PaginatedCredentialList";
 export * from "./PanelVisibilityIcon";
 export * from "./PrismGlyph";
+export * from "./PreviewBadge";
 export * from "./RailResizeIcon";
 export * from "./ReaderTabs";
 export * from "./RecentItemsList";

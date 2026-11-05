@@ -61,7 +61,7 @@
       "label": "Agent injection",
       "description": "What rules and Agent pages reach the AI.",
       "previewBadge": "Preview",
-      "previewDescription": "Preview: this area is still being refined."
+      "previewDescription": "Labs preview: this area is still being refined and may change."
     },
     "review": {
       "label": "Review policy",

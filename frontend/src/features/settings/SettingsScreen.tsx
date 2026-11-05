@@ -112,6 +112,7 @@ import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
 import { CountChip } from "../../shared/components/CountChip";
 import { ListPanelHeader } from "../../shared/components/ListPanelHeader";
+import { PreviewBadge } from "../../shared/components/PreviewBadge";
 import { PaginatedCredentialList } from "../../shared/components/PaginatedCredentialList";
 import { RouteLoading } from "../../shared/components/RouteLoading";
 import { ReaderTabs } from "../../shared/components/ReaderTabs";
@@ -6930,7 +6931,7 @@ export function settingsPolicyTabs(t: TFunction<"settings">) {
           defaultValue: "Preview",
         }),
         title: t("sections.agentInjection.previewDescription", {
-          defaultValue: "Preview: this area is still being refined.",
+          defaultValue: "Labs preview: this area is still being refined and may change.",
         }),
       },
     },
@@ -7244,12 +7245,10 @@ function SettingsSectionNav({
                       {section.label}
                     </span>
                     {section.preview ? (
-                      <span
-                        className="nav-preview-badge"
-                        title={section.preview.description}
-                      >
-                        {section.preview.label}
-                      </span>
+                      <PreviewBadge
+                        description={section.preview.description}
+                        label={section.preview.label}
+                      />
                     ) : null}
                   </span>
                   {/* A sibling of the title, not a child of it: the button is a

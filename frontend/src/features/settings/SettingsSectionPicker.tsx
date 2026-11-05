@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { CountChip } from "../../shared/components/CountChip";
 import { Dialog } from "../../shared/components/Dialog";
+import { PreviewBadge } from "../../shared/components/PreviewBadge";
 import { SearchField } from "../../shared/components/SearchField";
 import type {
   SettingsDestination,
@@ -183,9 +184,10 @@ export function SettingsSectionPicker({
                               {section.label}
                             </span>
                             {section.preview ? (
-                              <span className="nav-preview-badge">
-                                {section.preview.label}
-                              </span>
+                              <PreviewBadge
+                                description={section.preview.description}
+                                label={section.preview.label}
+                              />
                             ) : null}
                           </span>
                           {section.adminOnly || section.workspaceAdminOnly ? (

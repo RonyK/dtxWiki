@@ -154,9 +154,12 @@ button {
 :root {
   --control-size-small: 28px;
   /* Global overlay order: feature-local popovers/drawers/inspectors stay at or
-     below 80, shell navigation covers them, and a portaled modal covers both. */
+     below 80, shell navigation covers them, and a portaled modal covers both.
+     A pointer-transparent hover tooltip is portaled from whichever layer owns
+     its anchor (the mobile drawer, a dialog), so it sits above all of them. */
   --z-navigation-overlay: 90;
   --z-dialog: 100;
+  --z-tooltip: 150;
   --z-skip-link: 200;
   --bg: #f8fafc;
   --surface: #ffffff;
