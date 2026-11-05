@@ -1744,7 +1744,12 @@ def test_capped_map_api_serializes_a_meaningful_scene_and_legacy_title(page_serv
         )
 
     route = f"/api/v1/workspaces/{workspace_id}/graph/overview/query"
-    body = {"budget": {"documents": 2_000, "relations": 6_000}}
+    # The owner can also see the seeded Agent guide; this boundary fixture
+    # intentionally measures only the Context corpus created above.
+    body = {
+        "document_kinds": ["context"],
+        "budget": {"documents": 2_000, "relations": 6_000},
+    }
     response = client.post(route, json=body)
     assert response.status_code == 200, response.text
     scene = response.json()["data"]

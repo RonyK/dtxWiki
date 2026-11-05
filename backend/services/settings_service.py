@@ -287,6 +287,19 @@ def _labs_policy(workspace: Workspace) -> dict[str, object]:
     }
 
 
+def labs_feature_enabled(
+    control_session: Session,
+    workspace_id: UUID,
+    feature: str,
+) -> bool:
+    """Read one experiment switch from its control-plane workspace policy."""
+
+    policy = control_session.scalar(
+        select(Workspace.labs_policy).where(Workspace.id == workspace_id)
+    )
+    return bool(policy and policy.get(f"{feature}_enabled") is True)
+
+
 def _update_graph_setting(workspace: Workspace, key: str, value: object) -> None:
     column = _GRAPH_SETTING_COLUMNS.get(key)
     if column is None:

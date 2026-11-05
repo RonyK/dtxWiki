@@ -54,7 +54,6 @@ from backend.mcp.envelope import advisory_warnings
 from backend.media.application import if_none_match_matches
 from backend.media.domain import MediaStagingError
 from backend.media.ports import MediaInstallInProgressError
-from backend.models.tree import WorkspaceTreeNode
 from backend.policy.auth import ActorContext
 from backend.policy.rbac import (
     WorkspaceAccess,
@@ -258,7 +257,7 @@ from backend.services.settings_service import (
     normalized_library_policy,
     settings_policy_revision,
 )
-from backend.services.tree_service import resolve_tree_parent
+from backend.services.tree_service import require_tree_node, resolve_tree_parent
 from backend.services.workspace_purge_grant import (
     consume_purge_grant,
     issue_purge_grant,
@@ -1081,9 +1080,7 @@ def _require_labs_tree_section(section, workspace_id, access, control_session_fa
 def _require_labs_tree_node(
     session, workspace_id, node_id, access, control_session_factory
 ):
-    node = session.get(WorkspaceTreeNode, node_id)
-    if node is None or node.workspace_id != workspace_id:
-        raise ReadNotFoundError("tree node not found")
+    node = require_tree_node(session, workspace_id, node_id)
     _require_labs_tree_section(
         node.section, workspace_id, access, control_session_factory
     )

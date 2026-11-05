@@ -3,7 +3,6 @@ from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.container import DatabaseProvider, ServiceRegistry
@@ -14,7 +13,6 @@ from backend.app.state import (
     get_search_service_from_app,
     get_session_factory_from_app,
 )
-from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.policy.rbac import (
     GrantReplicaMissingError,
@@ -42,6 +40,7 @@ from backend.services.read_errors import (
     UnsupportedRetrievalModeError,
 )
 from backend.services.search_service import SearchService
+from backend.services.settings_service import labs_feature_enabled
 
 
 def get_session_factory(request: Request) -> sessionmaker[Session]:
@@ -168,10 +167,7 @@ def workspace_labs_feature_enabled(
     if not role_allows(access.role, "owner"):
         return False
     with session_factory() as session:
-        policy = session.scalar(
-            select(Workspace.labs_policy).where(Workspace.id == workspace_id)
-        )
-    return bool(policy and policy.get(f"{feature}_enabled") is True)
+        return labs_feature_enabled(session, workspace_id, feature)
 
 
 def require_workspace_labs_feature(

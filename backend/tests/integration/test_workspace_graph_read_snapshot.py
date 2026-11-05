@@ -42,7 +42,7 @@ def _client(page_service, *, enabled=True, service_available=True):
             page_service.session_factory,
             email="workspace-map-read-snapshot@example.com",
             workspace_slug="default",
-            role="viewer",
+            role="owner",
         )
     )
     with page_service.session_factory.begin() as session:
@@ -53,7 +53,9 @@ def _client(page_service, *, enabled=True, service_available=True):
 def _read_map(client, workspace_id):
     return client.post(
         f"/api/v1/workspaces/{workspace_id}/graph/overview/query",
-        json={"lens": "links"},
+        # Exercise Context publication snapshots without the owner's seeded
+        # sensitive Agent guide changing the document universe.
+        json={"lens": "links", "document_kinds": ["context"]},
     )
 
 
