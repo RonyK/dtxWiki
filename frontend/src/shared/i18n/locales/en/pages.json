@@ -104,6 +104,7 @@
     "requestReview": "Request review",
     "reviewRequested": "Review requested.",
     "reviewRequestFailed": "Could not request review. Try again.",
+    "reviewRequestWithdrawn": "A pending review request was withdrawn because the draft changed. Request review again when ready.",
     "publish": "Publish",
     "publishFailed": "Publish failed. Your saved draft is still available.",
     "publishSaveFailed": "Could not save your latest changes, so nothing was published. Try again.",

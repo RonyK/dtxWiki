@@ -328,6 +328,7 @@ def get_context_page(
     detail = ContextPageDetail(
         **{
             **payload.model_dump(),
+            "can_submit_for_review": payload._can_submit_for_review,
             "latest_draft_version_id": latest_draft_version_id,
             **enrichment,
         }
@@ -881,7 +882,9 @@ def _to_detail(page) -> ContextPageDetail:
     so the response shape never varies by route.
     """
 
-    return ContextPageDetail(**page.model_dump())
+    return ContextPageDetail(
+        **page.model_dump(), can_submit_for_review=page._can_submit_for_review
+    )
 
 
 def page_write_response(

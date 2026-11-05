@@ -82,13 +82,11 @@ class CitationService:
             session.refresh(version)
             # Browser saves share drafts with Editors. A reviewed version is
             # immutable evidence: autosave must fork it before this command.
-            browser_draft = (
-                actor.provenance == "browser_session"
-                and version.version_status == "draft"
-                and page.latest_draft_version_id == version.id
-                and not PageService._context_reviews_for_version(
-                    session=session, page=page, version=version
-                )
+            browser_draft = PageService._is_unreviewed_browser_draft(
+                session=session,
+                page=page,
+                version=version,
+                actor_provenance=actor.provenance,
             )
             if (
                 (version.version_status != "editing" and not browser_draft)

@@ -796,9 +796,10 @@ def test_public_read_title_from_published_body_not_draft_page_row(page_service):
         # A later draft rename mutates the page row but not the published head.
         page.title = "Secret Draft Title"
 
-    # The same title boundary applies to authenticated References, including
-    # an editor's private renamed head. Its owner sees the exact staged title;
-    # a viewer continues to see only the published version's title.
+    # The same title boundary applies to authenticated References. Saving a
+    # private edit no longer makes it the page head on a published page, so
+    # its owner and a viewer both see the published version's title; the
+    # staged title stays on the owner's own edit.
     opened = page_service.begin_context_edit(
         page_id=created.id,
         workspace_id=created.workspace_id,
@@ -827,7 +828,9 @@ def test_public_read_title_from_published_body_not_draft_page_row(page_service):
         )[reference.key].title == visible_title
         assert resolve_document_targets(
             session, created.workspace_id, [reference], author
-        )[reference.key].title == "Private staged title"
+        )[reference.key].title == visible_title
+        private = session.get(ContextPageVersion, opened.version_id)
+        assert private.version_status == "editing"
 
     anon = _anon_client(page_service)
     resp = anon.get("/api/v1/public/w/default/pages/title-page")

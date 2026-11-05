@@ -5677,6 +5677,12 @@ export interface components {
             backlink_count: number;
             /** Body Md */
             body_md: string;
+            /**
+             * Can Submit For Review
+             * @description Whether the caller may submit this exact version for review now: its own private edit or unreviewed shared browser draft.
+             * @default false
+             */
+            can_submit_for_review: boolean;
             /** Change Set Id */
             change_set_id?: string | null;
             /**

@@ -1257,9 +1257,10 @@ export function PageEditor({
     stalePublishState === "idle" &&
     (saveState === "dirty" ||
       (saveState === "clean" && publicationState !== "published"));
+  // The server decides authorship and review state: another Editor's shared
+  // draft is readable here, but only its author can submit it.
   const canRequestReview = canSave && saveState === "clean" && !conflict &&
-    page?.version_status === "draft" && !page.is_alternative && !page.is_discarded &&
-    !page.review_item_id && !page.pending_review;
+    Boolean(page?.can_submit_for_review);
   const activeEditorMode =
     singlePaneViewport && editorMode === "split" ? "source" : editorMode;
   const showSourcePane = activeEditorMode !== "reading";
@@ -3206,6 +3207,9 @@ export function PageEditor({
       acknowledgeEditorRevision(dispatchedRevision);
       pageIdRef.current = updated.id;
       setPage(updated);
+      if (!fromReview && (updated.superseded_review_count ?? 0) > 0) {
+        setStatus(t("editor.reviewRequestWithdrawn"));
+      }
       setSaveRelativeNow(Date.now());
       setPublicationState((current) =>
         current === "never-published" ? "never-published" : "staged",
@@ -4203,7 +4207,11 @@ export function PageEditor({
       setReferenceRetryAvailable(false);
       setPage({ ...savedPage, version_status: changed.publication_state, editing_revision: changed.editing_revision, references_hash: changed.references_hash });
       setReferencePickerMode(null);
-      setStatus(t(operation === "add" ? "references.added" : "references.removed"));
+      const referenceStatus = t(operation === "add" ? "references.added" : "references.removed");
+      // Staging forks a reviewed draft and withdraws its pending review.
+      setStatus(!fromReview && (savedPage.superseded_review_count ?? 0) > 0
+        ? `${referenceStatus} ${t("editor.reviewRequestWithdrawn")}`
+        : referenceStatus);
       try {
         const refreshed = await readPage(workspaceId, savedPage.id, savedPage.version_id);
         if (isCurrent()) setPage(refreshed);

@@ -9,6 +9,13 @@
 - Allow explicit review submission of a shared browser draft. Reference edits
   fork reviewed versions and preserve their evidence; publication checks both
   the body and reference fingerprints.
+- Browser saves and reference changes never share a user's own private edit,
+  such as one opened over MCP; **Request review** or **Publish** shares it.
+- Saving a private edit no longer takes over the page's draft. Other Editors
+  keep seeing and continuing the shared draft, and can start one while an MCP
+  edit is open.
+- Enable **Request review** only for the draft's author, and say when a later
+  save withdraws a pending review request.
 
 ## 0.2.1 — 2026-11-04
 

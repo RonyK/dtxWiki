@@ -135,6 +135,8 @@ def execute_idempotent_write[ResultT: BaseModel](
             # Keep command metadata internal; PagePayload's REST schema and
             # ordinary model serialization still omit this private receipt.
             payload["_edit_receipt"] = result._edit_receipt.model_dump(mode="json")
+        if isinstance(result, PagePayload) and result._can_submit_for_review:
+            payload["_can_submit_for_review"] = True
         claim.result_payload = payload
         session.flush()
     except BaseException:
@@ -174,9 +176,12 @@ def _replay_result[ResultT: BaseModel](
         raise RuntimeError("idempotency claim has no committed result")
     payload = dict(row.result_payload)
     receipt = payload.pop("_edit_receipt", None)
+    can_submit_for_review = payload.pop("_can_submit_for_review", False) is True
     result = result_model.model_validate(payload)
     if isinstance(result, PagePayload) and receipt is not None:
         result._edit_receipt = _stored_edit_receipt(receipt)
+    if isinstance(result, PagePayload):
+        result._can_submit_for_review = can_submit_for_review
     if replay_transform is not None:
         return replay_transform(result)
     return result

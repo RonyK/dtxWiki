@@ -5969,6 +5969,12 @@
             "title": "Body Md",
             "type": "string"
           },
+          "can_submit_for_review": {
+            "default": false,
+            "description": "Whether the caller may submit this exact version for review now: its own private edit or unreviewed shared browser draft.",
+            "title": "Can Submit For Review",
+            "type": "boolean"
+          },
           "change_set_id": {
             "anyOf": [
               {

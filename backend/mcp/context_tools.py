@@ -19,6 +19,7 @@ from backend.schemas.mcp.context_tools import (
     BeginContextEditInput,
     BeginContextEditToolOutput,
     CiteInput,
+    CiteResult,
     CiteToolOutput,
     ContextEditResult,
     CreateContextPageInput,
@@ -81,7 +82,12 @@ def cite(payload: dict, ctx: ToolCallContext) -> CiteToolOutput:
         return CiteToolOutput(
             envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
         )
-    return CiteToolOutput(envelope=ok_envelope(actor), data=data)
+    # The service returns the shared REST result. MCP edits are always private
+    # ``editing`` rows, so its narrower result model must be built explicitly.
+    return CiteToolOutput(
+        envelope=ok_envelope(actor),
+        data=CiteResult.model_validate(data.model_dump()),
+    )
 
 
 def submit_feedback(payload: dict, ctx: ToolCallContext) -> SubmitFeedbackToolOutput:

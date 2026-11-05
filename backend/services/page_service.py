@@ -7,7 +7,7 @@ import hashlib
 import json
 import re
 from collections import Counter, OrderedDict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from threading import RLock
@@ -38,6 +38,7 @@ from backend.models.review import ReviewItem
 from backend.models.workspace import Workspace
 from backend.policy.trust_boundaries import actor_can_read_drafts
 from backend.repositories import context_page_repo, workspace_repo
+from backend.repositories.context_visibility import PRIVATE_VERSION_STATUSES
 from backend.repositories.workspace_scoped import (
     delete_in_workspace,
     get_in_workspace,
@@ -1394,9 +1395,11 @@ class PageService:
                         server_version_id=disclosed_id,
                         server_content_hash=disclosed_hash,
                     )
-            # Page-first browser creation and autosave intentionally keep the
-            # author's working row private as ``editing``. The explicit Publish
-            # action may submit that exact row without manufacturing a review:
+            # Browser creation now shares its draft, but an author can still
+            # hold a private ``editing`` row: one opened over MCP, or created
+            # before browser drafts were shared. Saving never shares it. The
+            # explicit Publish action may submit that exact row without
+            # manufacturing a review:
             # browser-authored writes are trusted to go live directly, while
             # AI/bearer writes retain the staged review lifecycle. Perform this
             # narrow bridge under the page/write lock so the canonical publisher
@@ -2389,13 +2392,11 @@ class PageService:
                 or version.created_by_actor_id != actor_id
             ):
                 raise PageNotFoundError("page version not found")
-            browser_draft = (
-                actor_provenance == "browser_session"
-                and version.version_status == "draft"
-                and page.latest_draft_version_id == version.id
-                and not self._context_reviews_for_version(
-                    session=session, page=page, version=version
-                )
+            browser_draft = self._is_unreviewed_browser_draft(
+                session=session,
+                page=page,
+                version=version,
+                actor_provenance=actor_provenance,
             )
             if version.version_status != "editing" and not browser_draft:
                 raise PageConflictError(
@@ -3962,7 +3963,14 @@ class PageService:
                     session_version_id=session_version_id,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
+                    browser_named_ids=(
+                        (base_version_id, session_version_id) if share_draft else None
+                    ),
                 )
+                # The editor opened this actor's private edit, but a shared
+                # draft has since become the page's draft. Report the conflict
+                # so the browser reloads that draft instead of continuing to
+                # save a row no other Editor can see.
                 if (
                     share_draft
                     and current.version_status == "editing"
@@ -4067,6 +4075,10 @@ class PageService:
                 # Bytes, not content_hash: the hash ignores trailing spaces, so
                 # a save that only added or removed a hard break (two trailing
                 # spaces) was answered as succeeded and silently not stored.
+                # A browser reference change saves first even when nothing else
+                # changed, so it must still stage a mutable version of its own:
+                # fork a published, foreign or reviewed draft. The actor's own
+                # private edit is already mutable and stays private.
                 if (
                     prepared.body == current.body_md
                     and not metadata_patch
@@ -4075,9 +4087,11 @@ class PageService:
                         share_draft
                         and (
                             not same_actor_draft
-                            or current.version_status != "draft"
-                            or self._context_reviews_for_version(
-                                session=session, page=page, version=current
+                            or (
+                                current.version_status == "draft"
+                                and self._context_reviews_for_version(
+                                    session=session, page=page, version=current
+                                )
                             )
                         )
                     )
@@ -4134,7 +4148,6 @@ class PageService:
                     session_version_id=session_version_id,
                     same_actor_draft=same_actor_draft,
                     own_open_edit=own_open_edit,
-                    share_draft=share_draft,
                     baseline_patch=baseline_patch,
                     metadata_patch=metadata_patch,
                     restart=resume_parent,
@@ -4291,9 +4304,14 @@ class PageService:
         session_version_id: UUID | None,
         actor_kind: str,
         actor_id: str,
+        browser_named_ids: Collection[UUID | None] | None = None,
     ) -> tuple[ContextPageVersion, RejectedDraftRestart | None]:
         editable_version_id = self._editable_version_id_for_actor(
-            session, page, actor_kind, actor_id
+            session,
+            page,
+            actor_kind,
+            actor_id,
+            browser_named_ids=browser_named_ids,
         )
         # Rejection may leave no head. Resolve the submitting session's
         # retired draft before deciding whether there is an editable version.
@@ -4432,7 +4450,6 @@ class PageService:
         session_version_id: UUID | None,
         same_actor_draft: bool,
         own_open_edit: bool,
-        share_draft: bool = False,
         baseline_patch: dict[str, object] | None,
         metadata_patch: dict[str, object],
         restart: RejectedDraftRestart | None = None,
@@ -4484,8 +4501,10 @@ class PageService:
         else:
             version = current
             version.editing_revision += 1
-        if share_draft:
-            version.version_status = "draft"
+        # Saving never changes who can read a version. New browser drafts are
+        # created shared; this actor's private ``editing`` row (an MCP edit, or
+        # one opened before browser drafts were shared) stays private until an
+        # explicit review request or publish.
         session_operation = (
             None
             if created_session_draft
@@ -4535,7 +4554,7 @@ class PageService:
                         if version.parent_version_id
                         else None
                     ),
-                    "was_private_edit": not share_draft,
+                    "was_private_edit": version.version_status == "editing",
                     "editing_revision": version.editing_revision,
                     "before_content_hash": current.content_hash,
                     "after_content_hash": prepared.content_hash,
@@ -5035,6 +5054,62 @@ class PageService:
         )
 
     @staticmethod
+    def _is_unreviewed_browser_draft(
+        *,
+        session: Session,
+        page: ContextPage,
+        version: ContextPageVersion,
+        actor_provenance: str | None,
+    ) -> bool:
+        """A shared browser draft that its author may still change or submit.
+
+        Browser saves share drafts with Editors. A version that a review
+        already names is immutable evidence, so a later save forks it instead.
+        """
+        return (
+            actor_provenance == "browser_session"
+            and version.version_status == "draft"
+            and page.latest_draft_version_id == version.id
+            and not PageService._context_reviews_for_version(
+                session=session, page=page, version=version
+            )
+        )
+
+    def _can_submit_for_review(
+        self,
+        session: Session,
+        page: ContextPage,
+        version: ContextPageVersion,
+        actor: ActorContext | None,
+    ) -> bool:
+        """Whether ``actor`` may submit this exact version for review now.
+
+        Mirrors ``_submit_context_edit_in_session``: the author's own private
+        edit or unreviewed shared browser draft, with no other submitted draft
+        holding the page's draft pointer. The editing revision is the caller's
+        own CAS input, so it is not part of this answer.
+        """
+        if actor is None or (
+            version.created_by_actor_kind != actor.actor_kind
+            or version.created_by_actor_id != actor.actor_id
+        ):
+            return False
+        if version.version_status != "editing" and not (
+            self._is_unreviewed_browser_draft(
+                session=session,
+                page=page,
+                version=version,
+                actor_provenance=actor.provenance,
+            )
+        ):
+            return False
+        other_id = page.latest_draft_version_id
+        if other_id is None or other_id == version.id:
+            return True
+        other = context_page_repo.get_version(session, other_id)
+        return other is None or other.version_status != "draft"
+
+    @staticmethod
     def _rewrite_body_in_place(
         version: ContextPageVersion,
         prepared: PreparedBody,
@@ -5214,8 +5289,11 @@ class PageService:
             # to "draft"; this pointer-update helper must never do so as a
             # side effect of an ordinary save, or the privacy window closes
             # itself on the very first autosave.
-            page.current_version_id = version.id
-            page.latest_draft_version_id = version.id
+            if version.version_status != "editing" or self._private_edit_may_hold_head(
+                session, page, version
+            ):
+                page.current_version_id = version.id
+                page.latest_draft_version_id = version.id
             if page.lifecycle_status != "archived":
                 page.lifecycle_status = (
                     "published" if page.current_published_version_id else "draft"
@@ -5255,6 +5333,31 @@ class PageService:
         session.add(page)
         session.flush()
         return page
+
+    @staticmethod
+    def _private_edit_may_hold_head(
+        session: Session,
+        page: ContextPage,
+        version: ContextPageVersion,
+    ) -> bool:
+        """Whether saving a private edit may move the page-global pointers.
+
+        Only on a page nobody else can read yet: never published, and no
+        pointer naming a version other people can see. Otherwise every other
+        reader falls back to the published version, and every other editor's
+        save is based on a row they cannot read, so it is refused as stale.
+        The author reaches the private edit through its own editing row.
+        """
+
+        if page.current_published_version_id is not None:
+            return False
+        for pointer_id in (page.latest_draft_version_id, page.current_version_id):
+            if pointer_id is None or pointer_id == version.id:
+                continue
+            head = context_page_repo.get_version(session, pointer_id)
+            if head is not None and head.version_status not in PRIVATE_VERSION_STATUSES:
+                return False
+        return True
 
     @staticmethod
     def _ensure_context_tree_placement(
@@ -5470,6 +5573,8 @@ class PageService:
         page: ContextPage,
         actor_kind: str,
         actor_id: str,
+        *,
+        browser_named_ids: Collection[UUID | None] | None = None,
     ) -> UUID | None:
         """The version an ordinary save by THIS actor should land on (P8.1/P8.4).
 
@@ -5477,9 +5582,18 @@ class PageService:
         cannot tell two authors' own open "editing" rows apart, so it would
         collide them onto the same version, exactly the ambiguity P2.2 was
         meant to rule out. Prefer this actor's own open "editing" row when
-        one exists; otherwise fall back to the page-global pointer unchanged
-        (ordinary single-author save, or a submitted draft this actor is
-        continuing to amend before review).
+        one exists; otherwise fall back to the page-global pointer (ordinary
+        single-author save, or a submitted draft this actor is continuing to
+        amend before review).
+
+        A browser save (``browser_named_ids``) continues the shared draft
+        line. It lands on this actor's private edit -- an MCP edit, say --
+        only when the request names that row, i.e. the editor opened it.
+
+        The page-global pointer can still name another author's private edit
+        (written before private saves stopped moving it, or a reopened
+        submission). This actor cannot read that row, so the save starts from
+        the version they can see instead of failing as stale forever.
         """
 
         own_editing_id = session.scalar(
@@ -5490,7 +5604,25 @@ class PageService:
                 ContextPageVersion.created_by_actor_id == actor_id,
             )
         )
-        return own_editing_id or editable_context_version_id(page)
+        if own_editing_id is not None and (
+            browser_named_ids is None or own_editing_id in browser_named_ids
+        ):
+            return own_editing_id
+        for pointer_id in (page.latest_draft_version_id, page.current_version_id):
+            if pointer_id is None:
+                continue
+            head = context_page_repo.get_version(session, pointer_id)
+            if (
+                head is not None
+                and head.version_status in PRIVATE_VERSION_STATUSES
+                and (
+                    head.created_by_actor_kind != actor_kind
+                    or head.created_by_actor_id != actor_id
+                )
+            ):
+                continue
+            return pointer_id
+        return page.current_published_version_id
 
     @staticmethod
     def _highest_editing_revision(
@@ -5817,7 +5949,7 @@ class PageService:
                 parent,
                 parent_visibility_actor,
             )[1]
-        return PagePayload(
+        payload = PagePayload(
             id=page.id,
             workspace_id=page.workspace_id,
             slug=page.slug,
@@ -5876,6 +6008,10 @@ class PageService:
                 else {"fixes": [], "findings": []}
             ),
         )
+        payload._can_submit_for_review = self._can_submit_for_review(
+            session, page, version, parent_visibility_actor or self.actor_context
+        )
+        return payload
 
 
 def _publish_blocked_reasons(

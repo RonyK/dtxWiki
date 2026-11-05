@@ -138,6 +138,10 @@ class PagePayload(PageSummary):
     # payload stays unchanged. The command ledger retains it separately for
     # an identical receipt when an idempotent patch is replayed.
     _edit_receipt: EditReceipt | None = PrivateAttr(default=None)
+    # Whether the actor this payload was built for may submit this exact
+    # version for review now. Private so MCP tool schemas stay unchanged; REST
+    # exposes it as ``ContextPageDetail.can_submit_for_review``.
+    _can_submit_for_review: bool = PrivateAttr(default=False)
 
 
 class PublicPagePayload(BaseModel):
@@ -683,6 +687,13 @@ class ContextPageDetail(PagePayload):
     """
 
     latest_draft_version_id: UUID | None = None
+    can_submit_for_review: bool = Field(
+        default=False,
+        description=(
+            "Whether the caller may submit this exact version for review now: "
+            "its own private edit or unreviewed shared browser draft."
+        ),
+    )
     published_version_info: PublishedVersionInfo | None = None
     tree_path: list[TreePathEntry] = Field(default_factory=list)
     parent_node_id: UUID | None = None
