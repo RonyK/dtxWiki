@@ -736,9 +736,9 @@ docker compose up -d app worker
 색인과 pin이 삭제되므로 다시 업그레이드한 뒤에도 재색인이 필요합니다.
 
 미배포 중간 revision을 사용한 DB는 해당 revision의 원래 checkout으로 먼저
-`5b7e5c149279`까지 업그레이드하고 백업·schema 검증을 마친 뒤 0.2.1을 설치하세요.
+`5b7e5c149279`까지 업그레이드하고 백업·schema 검증을 마친 뒤 0.2.2를 설치하세요.
 이미 이 head인 DB는 schema를 유지합니다. 제거된 revision을 `alembic stamp`로
-우회하지 마세요. 배포된 0.1.4 이하 DB는 0.2.1 chain으로 직접 업그레이드합니다.
+우회하지 마세요. 배포된 0.1.4 이하 DB는 0.2.2 chain으로 직접 업그레이드합니다.
 
 ### 관리자 화면에서 버전 확인
 
@@ -791,7 +791,7 @@ readiness를 수행하며, 실패 시 자동 rollback하지 않고 복구 명령
 ```bash
 # systemd + private wheel index
 sudo dtxwiki update --check               # 새 버전 유무만 (가능하면 exit 10)
-sudo dtxwiki update --version 0.2.1       # 특정 버전 핀
+sudo dtxwiki update --version 0.2.2       # 특정 버전 핀
 sudo dtxwiki update --index-url https://pypi.internal/simple   # 사설 wheel index
 ```
 
@@ -1283,7 +1283,7 @@ v0.1.2부터의 배포본은 중간 버전을 따로 설치하지 않고 현재 
 | v0.1.2 | `efcbcf724889` | 정식 0.1.3 → 0.1.4 → v0.2 경로 적용 |
 | v0.1.3 | `19db79d3e622` | 정식 0.1.4 → v0.2 경로 적용 |
 | v0.1.4 | `eb86fdacb1bb` | 남은 v0.2 변경만 적용, 0.1.4 로그인·계정 보존 데이터 유지 |
-| v0.2.1 | `5b7e5c149279` | 이미 최신 schema이면 migration 생략 |
+| v0.2.1·v0.2.2 | `5b7e5c149279` | 이미 최신 schema이면 migration 생략 |
 
 ```text
 기존 배포본: efcbcf724889 (0.1.2) → 19db79d3e622 (0.1.3)
@@ -1397,12 +1397,12 @@ backend/migrations/
 
 ### 새 DB 변경 추가
 
-개발 checkout의 저장소 루트에서 다음 helper로 실행 파일을 생성합니다. 아래 `0.2.2`는
-0.2.1 이후 schema 변경을 추가하는 예시입니다. 버전만 바뀌고 DB 변경이 없으면
+개발 checkout의 저장소 루트에서 다음 helper로 실행 파일을 생성합니다. 아래 `0.2.3`은
+0.2.2 이후 schema 변경을 추가하는 예시입니다. 버전만 바뀌고 DB 변경이 없으면
 새 migration이 필요하지 않습니다.
 
 ```bash
-.venv/bin/python scripts/new_migration.py --release 0.2.2 -m "add workspace settings"
+.venv/bin/python scripts/new_migration.py --release 0.2.3 -m "add workspace settings"
 ```
 
 이 명령은 `versions/v0_2/<생성된 ID>_add_workspace_settings.py`를 만들고 직전 head와

@@ -648,7 +648,7 @@ make test-packaged                        # frontend + wheel build, packaged UI/
 
 # 검증은 wheel 파일이 아니라 dist 디렉터리를 받으며, 이전 빌드 잔여물이 섞이지 않도록 깨끗한 dist 에서 합니다.
 rm -rf dist && make build-wheel
-.venv/bin/python scripts/verify_wheel_artifact.py dist --release-version 0.2.1
+.venv/bin/python scripts/verify_wheel_artifact.py dist --release-version 0.2.2
 WHEEL="$(find dist -maxdepth 1 -name 'dtxwiki-*.whl' -print -quit)"
 sha256sum "$WHEEL" infra/prod/install.sh
 ```
@@ -666,7 +666,7 @@ Migration은 `backend/migrations/versions/v<major>_<minor>/<id>_<description>.py
 새 migration이 필요하지 않습니다. 새 파일은 다음 명령으로 생성합니다.
 
 ```bash
-.venv/bin/python scripts/new_migration.py --release 0.2.2 -m "add workspace settings"
+.venv/bin/python scripts/new_migration.py --release 0.2.3 -m "add workspace settings"
 ```
 
 보조 모듈이 필요하면 `revision_modules/v0_2/<id>_add_workspace_settings/`에
