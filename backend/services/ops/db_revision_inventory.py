@@ -37,13 +37,16 @@ RETIRED_REVISION_IDS = frozenset(
         "0013_context_content_hash_fix",
         "0014_job_failure_notification",
         "0015_consolidated",
+        # Development-only index step that published 0.1.4 (eb86fdacb1bb)
+        # already contains. The 0.2.1 package passed through it only inside
+        # the same upgrade transaction; it is no longer distributed.
+        "ef53a0a7061c",
         # Unpublished steps replaced by the consolidated 0.2 release. The
         # terminal 5b7e5c149279 ID still describes the same complete schema;
         # intermediate databases must reach it with the old checkout first.
         "5c3395a75eb0",
         "da94025713de",
         "333a67e22cd7",
-        "eb86fdacb1bb",
         "175b9664724e",
         "af62c98d0731",
         "9aeab6944f25",

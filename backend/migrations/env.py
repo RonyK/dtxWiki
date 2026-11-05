@@ -2,10 +2,16 @@ from collections import Counter
 from logging.config import fileConfig
 
 from alembic import context
+from alembic.migration import MigrationContext
+from alembic.util import CommandError
 from sqlalchemy import engine_from_config, event, pool
 
 from backend.models import Base
 from backend.models.search_index import include_non_fts5_object
+from backend.services.ops.alembic_migration_graph import (
+    RELEASE_02_REVISION,
+    initialization_script_directory,
+)
 from backend.services.ops.db_revision_inventory import (
     classify_revision_consistency,
 )
@@ -20,6 +26,46 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+
+
+def _select_initialization_route(connection) -> None:
+    """Initialize a proven-empty database directly at the v0.2 release schema.
+
+    Every existing database, every non-upgrade command, and every explicit
+    historical or relative target uses the release graph unchanged. Only an
+    upgrade of an unversioned, empty database to v0.2 or later swaps in the
+    complete baseline, which skips the historical DDL and backfills. Alembic's
+    command callback shares this script object, so direct Alembic commands and
+    application bootstrap select the same graph. Alembic still records the
+    stamp after the DDL succeeds.
+    """
+    migration_fn = context.get_context().opts.get("fn")
+    if getattr(migration_fn, "__name__", "") != "upgrade":
+        return
+    if MigrationContext.configure(connection).get_current_heads():
+        return
+    try:
+        targets = context.script.get_revisions(context.get_revision_argument())
+    except (KeyError, CommandError):
+        # Relative steps such as ``+1`` are not absolute targets; Alembic
+        # resolves them against the release graph from base.
+        return
+    if not targets or not all(
+        RELEASE_02_REVISION
+        in {
+            entry.revision
+            for entry in context.script.iterate_revisions(target.revision, "base")
+        }
+        for target in targets
+    ):
+        return
+    preflight = evaluate_connection_preflight(
+        connection, known_revisions=_script_revisions()
+    )
+    if preflight.verdict == "fresh":
+        context.script.revision_map = initialization_script_directory(
+            context.script.dir
+        ).revision_map
 
 
 def _script_revisions() -> frozenset[str]:
@@ -205,6 +251,7 @@ def run_migrations_online() -> None:
             **({"transactional_ddl": True} if sqlite else {}),
         )
 
+        _select_initialization_route(connection)
         _reject_blind_nonbase_stamp(connection)
         _reject_unidentifiable_upgrade_start(connection)
 

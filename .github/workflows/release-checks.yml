@@ -56,20 +56,24 @@ jobs:
                   connection.execute(text(f"DROP DATABASE IF EXISTS {database}"))
                   connection.execute(text(f"CREATE DATABASE {database}"))
           PY
-      - name: Execute all PostgreSQL suites through xdist loadgroup
+      - name: Execute PostgreSQL runtime suites through xdist loadgroup
         # Selection by marker covers every shared-database case and proves the
         # postgres group stays on one worker. Configured URLs turn missing or
         # unreachable databases into failures instead of collection skips.
         run: >-
           .venv/bin/python -m pytest backend/tests -q -n 4 --dist loadgroup
-          -m xdist_group --tb=short
+          -m "xdist_group and not release_migration" --tb=short
+      - name: Execute SQLite and PostgreSQL migration regressions
+        # This selects every migration case once, including SQLite cases
+        # without a postgres group. Shared PostgreSQL storage stays on one worker.
+        run: VENV=.venv make test-migrations
       # PR CI deselects the capacity guards (`make test-backend` runs
-      # -m "not release_scale"). The step above already runs those that are
-      # also PostgreSQL suites, on both dialects; this one runs the rest.
+      # -m "not release_scale and not release_migration"). The steps above
+      # already run PostgreSQL and migration guards; this one runs the rest.
       - name: Execute the release-scale backend guards
         run: >-
           .venv/bin/python -m pytest backend/tests -q -n 4 --dist loadgroup
-          -m "release_scale and not xdist_group" --tb=short
+          -m "release_scale and not xdist_group and not release_migration" --tb=short
 
   packaging:
     runs-on: ubuntu-latest

@@ -90,12 +90,15 @@ def _assert_release_checks_gate(workflow, checks, ci):
     for job in checks["jobs"].values():
         assert "if" not in job, "Every requested release check must run."
         assert not job.get("continue-on-error", False)
-    # `make test-backend` (PR CI) deselects `release_scale`; these steps run it.
+    # Routine backend checks exclude versioned migrations and capacity guards.
+    # Release checks must select both SQLite and PostgreSQL migrations once,
+    # while the runtime PostgreSQL and scale steps exclude those same cases.
     backend = " ".join(
         step.get("run", "") for step in checks["jobs"]["postgres-migration"]["steps"]
     )
-    assert "-m xdist_group" in backend
-    assert '-m "release_scale and not xdist_group"' in backend
+    assert '-m "xdist_group and not release_migration"' in backend
+    assert backend.count("VENV=.venv make test-migrations") == 1
+    assert '-m "release_scale and not xdist_group and not release_migration"' in backend
 
     gate = workflow["jobs"]["release-checks"]
     assert gate["uses"] == "./.github/workflows/release-checks.yml"

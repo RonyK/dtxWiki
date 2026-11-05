@@ -1,18 +1,23 @@
-"""One populated 0.1.4 -> 0.2 -> 0.1.4 -> 0.2 traversal per dialect.
+"""The v0.2 release migration: two traversals per dialect, four collected cases.
 
-There are two collected cases. Each uses the same data for backfills, schema
-contracts, one nullable-native-account refusal, one auth-evidence refusal, one
-deletion refusal, and upgrade/downgrade late-DDL rollback. Those five refusal
-and fault inputs plus one locator duplicate write per dialect exercise distinct
-data-loss/transaction/constraint paths;
-none introduces another database traversal. Scalar validation matrices belong
-to existing policy tests rather than this consolidated release migration.
+* Published 0.1.4 (eb86fdacb1bb) -> 0.2 -> 0.1.4 -> 0.2 on one populated
+  database: backfills, schema contracts, retained 0.1.4 login/deletion
+  evidence, the parent stamp/schema guard, late-DDL rollback in both
+  directions and the startup upgrade from 0.1.4. Those fault inputs and one
+  locator duplicate write share the traversal; none adds a database scenario.
+* A fresh installation initialized directly at 0.2, then the same populated
+  database started from 0.1.2 and 0.1.3. The first traversal starts after the
+  0.1.3 input constraints and publication-time backfill, and only this one
+  compares the frozen initialization DDL with the real release upgrades.
+
+Scalar validation matrices belong to existing policy tests rather than this
+release migration.
 """
 
 import os
 import shutil
 from datetime import UTC, datetime, timedelta
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -24,30 +29,30 @@ from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
 
-from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
+from backend.app.bootstrap import (
+    ensure_app_version_synced,
+    resolve_alembic_ini,
+    resolve_migrations_dir,
+)
+from backend.app.settings import Settings
 from backend.models import Base
-from backend.models.workspace import WorkspaceMembership
 from backend.services.ops.input_maintenance import audit_inputs
 from backend.services.page_service import PageService
 from backend.tests.integration.test_release_schema_migration import (
     _assert_each_table_rebuilt_at_most_once,
     _captured_statements,
+    _config,
     _schema_snapshot,
 )
 
-PARENT = "ef53a0a7061c"
+# Published 0.1.4. The 0.2.1 package used a development-only parent instead.
+PARENT = "eb86fdacb1bb"
 REVISION = "5b7e5c149279"
 
 
-@pytest.mark.parametrize(
-    "dialect",
-    ["sqlite", pytest.param("postgresql", marks=pytest.mark.xdist_group("postgres"))],
-)
-def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
-    """One traversal per dialect covers data, defaults, constraints and refusal."""
-
+def _migration_engine(tmp_path, dialect, filename):
     database_url = (
-        f"sqlite+pysqlite:///{tmp_path / 'release-02.db'}"
+        f"sqlite+pysqlite:///{tmp_path / filename}"
         if dialect == "sqlite"
         else os.getenv("DTXWIKI_POSTGRES_MIGRATION_TEST_DATABASE_URL")
     )
@@ -68,398 +73,234 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
             assert not connection.scalar(
                 sa.text("SELECT count(*) FROM alembic_version")
             )
-    config = Config(str(resolve_alembic_ini()))
-    config.set_main_option("script_location", str(resolve_migrations_dir()))
-    config.set_main_option("sqlalchemy.url", database_url)
+    return database_url, engine
+
+
+def _stamp(engine):
+    with engine.connect() as connection:
+        return connection.scalar(sa.text("SELECT version_num FROM alembic_version"))
+
+
+@pytest.mark.parametrize(
+    "dialect",
+    ["sqlite", pytest.param("postgresql", marks=pytest.mark.xdist_group("postgres"))],
+)
+def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
+    """One populated traversal per dialect from the published 0.1.4 boundary."""
+
+    database_url, engine = _migration_engine(tmp_path, dialect, "release-02.db")
+    config = _config(database_url)
     now = datetime.now(UTC)
+    existing_id, external_id, workspace_id = uuid4(), uuid4(), uuid4()
+    accounts = (existing_id, external_id)
 
-    def _id():
-        value = uuid4()
-        return value.hex if dialect == "sqlite" else value
-
-    existing_id, external_id, preserved_outbox_id = _id(), _id(), _id()
-    workspace_id = uuid4()
-
-    def _user(user_id, password_hash, email):
-        return {
-            "id": user_id,
-            "email": email,
-            "password_hash": password_hash,
-            "display_name": "Migration User",
-            "member_search_key": f"migration user {email}",
-            "status": "active",
-            "session_generation": 0,
-            "created_at": now,
-            "updated_at": now,
-        }
-
-    def _tables():
-        metadata = sa.MetaData()
-        return tuple(
-            sa.Table(name, metadata, autoload_with=engine)
-            for name in ("users", "user_identities", "auth_login_transactions")
-        )
-
-    def retained_account_state(connection):
-        return (
-            connection.execute(
-                sa.select(
-                    users.c.id,
-                    users.c.email,
-                    users.c.password_hash,
-                    users.c.default_workspace_id,
-                ).where(users.c.id == existing_id)
-            ).one(),
-            # Reflected: the current model maps workspace columns added later.
-            connection.execute(
-                sa.text("SELECT id, slug, owner_user_id FROM workspace ORDER BY id")
-            ).all(),
-            connection.execute(sa.select(WorkspaceMembership.__table__)).all(),
-        )
+    def retained_account_state():
+        # 0.1.4 owns credentials, linked identities, login transactions and
+        # deletion evidence. Neither direction of this revision may touch them.
+        with engine.connect() as connection:
+            users = _table(connection, "users")
+            workspaces = _table(connection, "workspace")
+            memberships = _table(connection, "workspace_memberships")
+            identities = _table(connection, "user_identities")
+            transactions = _table(connection, "auth_login_transactions")
+            outbox = _table(connection, "email_outbox")
+            return (
+                connection.execute(
+                    sa.select(
+                        users.c.id,
+                        users.c.email,
+                        users.c.password_hash,
+                        users.c.default_workspace_id,
+                        users.c.status,
+                        users.c.deletion_requested_at,
+                        users.c.purge_after,
+                        users.c.deletion_retention_days,
+                        users.c.deletion_last_error,
+                    )
+                    .where(users.c.id.in_(accounts))
+                    .order_by(users.c.id)
+                ).all(),
+                connection.execute(
+                    sa.select(
+                        workspaces.c.id,
+                        workspaces.c.slug,
+                        workspaces.c.owner_user_id,
+                        workspaces.c.account_deletion_user_id,
+                    ).order_by(workspaces.c.id)
+                ).all(),
+                connection.execute(sa.select(memberships)).all(),
+                connection.execute(sa.select(identities)).all(),
+                connection.execute(sa.select(transactions)).all(),
+                connection.execute(
+                    sa.select(
+                        outbox.c.id,
+                        outbox.c.recipient_user_id,
+                        outbox.c.message_kind,
+                        outbox.c.attempt_count,
+                    )
+                ).all(),
+            )
 
     upgraded = False
     try:
+        # The byte-identical published 0.1.4 migration builds the parent; a
+        # current schema is never stamped with a historical identifier.
         command.upgrade(config, PARENT)
         upgraded = True
-        users = sa.Table("users", sa.MetaData(), autoload_with=engine)
-        workspaces = sa.Table("workspace", sa.MetaData(), autoload_with=engine)
         with engine.begin() as connection:
-            connection.execute(
-                # Reflect the parent revision: ORM Python defaults include
-                # Graph View columns which are added after this migration.
-                workspaces.insert(),
-                {
-                    "id": workspace_id.hex if dialect == "sqlite" else workspace_id,
-                    "slug": "retained-workspace",
-                    "directory_title_key": "retained workspace",
-                    "name": "Retained workspace",
-                    "title": "Retained workspace",
-                    "goal": "Preserve external-login migration data",
-                    "default_language": "en",
-                    "context_media_policy": {},
-                    "library_policy": {},
-                    "write_policy": {},
-                    "citation_policy": {},
-                    "agent_injection_policy": {},
-                    "review_policy": {},
-                    "lint_policy": {},
-                    "auto_fix_enabled": False,
-                    "visibility": "private",
-                    "created_by_actor_id": _id(),
-                    "owner_actor_id": _id(),
-                    "created_at": now,
-                    "updated_at": now,
-                },
+            _insert(
+                connection,
+                "users",
+                id=existing_id,
+                email="existing@example.com",
+                password_hash="preserved-local-hash",
+                display_name="Existing User",
+                member_search_key="existing user existing@example.com",
+                status="active",
             )
-            connection.execute(
-                users.insert(),
-                {
-                    **_user(
-                        existing_id, "preserved-local-hash", "existing@example.com"
-                    ),
-                    "default_workspace_id": workspace_id.hex
-                    if dialect == "sqlite"
-                    else workspace_id,
-                },
+            _insert(
+                connection,
+                "users",
+                id=external_id,
+                email=None,
+                password_hash=None,
+                display_name="External User",
+                member_search_key="external user",
+                status="deletion_pending",
+                deletion_requested_at=now,
+                purge_after=now + timedelta(days=14),
+                deletion_retention_days=14,
+                deletion_prior_status="active",
+                deletion_failure_count=1,
+                deletion_last_error="retained-cleanup-error",
             )
-            connection.execute(workspaces.update().values(owner_user_id=existing_id))
-            connection.execute(
-                WorkspaceMembership.__table__.insert(),
-                {
-                    "user_id": UUID(str(existing_id)),
-                    "workspace_id": workspace_id,
-                    "role": "owner",
-                },
+            _insert(
+                connection,
+                "workspace",
+                id=workspace_id,
+                slug="retained-workspace",
+                title="Retained workspace",
+                name="Retained workspace",
+                directory_title_key="retained workspace",
+                owner_user_id=existing_id,
+                account_deletion_user_id=external_id,
+                # Legacy authority state before the v0.2 co-access projection.
+                authority_projection_version=0,
             )
-            outbox = sa.Table("email_outbox", sa.MetaData(), autoload_with=connection)
+            users = _table(connection, "users")
             connection.execute(
-                outbox.insert(),
-                {
-                    "id": preserved_outbox_id,
-                    "recipient_user_id": existing_id,
-                    "recipient_email": "existing@example.com",
-                    "message_kind": "password_changed",
-                    "status": "queued",
-                    "attempt_count": 2,
-                    "created_at": now,
-                    "updated_at": now,
-                },
+                users.update()
+                .where(users.c.id == existing_id)
+                .values(default_workspace_id=workspace_id)
             )
-            connection.execute(
-                users.update().values(
-                    personal_workspace_id=workspace_id.hex
-                    if dialect == "sqlite"
-                    else workspace_id
-                )
+            _insert(
+                connection,
+                "workspace_memberships",
+                user_id=existing_id,
+                workspace_id=workspace_id,
+                role="owner",
             )
-            retained = retained_account_state(connection)
-        release_data = _seed_release_data(
-            engine, workspace_id, UUID(str(existing_id)), now
-        )
+            _insert(
+                connection,
+                "email_outbox",
+                id=uuid4(),
+                recipient_user_id=existing_id,
+                recipient_email="existing@example.com",
+                message_kind="password_changed",
+                status="queued",
+                attempt_count=2,
+                created_at=now,
+                updated_at=now,
+            )
+            _insert(
+                connection,
+                "user_identities",
+                id=uuid4(),
+                user_id=external_id,
+                provider_slug="company",
+                issuer="https://issuer.example",
+                subject="retained-external-user",
+                linked_via="jit",
+            )
+            _insert(
+                connection,
+                "auth_login_transactions",
+                id=uuid4(),
+                state_digest="retained-state",
+                binding_digest="retained-binding",
+                provider_slug="company",
+                redirect_uri="https://wiki.example/callback",
+                purpose="link",
+                user_id=external_id,
+                session_generation=0,
+                session_digest="retained-browser-session",
+                return_to="/settings",
+                expires_at=now + timedelta(minutes=10),
+            )
+        retained = retained_account_state()
+        parent_schema = _schema_snapshot(engine)
+        assert audit_inputs(database_url) == []
+        release_data = _seed_release_data(engine, workspace_id, existing_id, now)
+
+        # A stamp alone is not 0.1.4 evidence: refuse before the first DDL.
+        with engine.begin() as connection:
+            connection.exec_driver_sql("DROP INDEX ix_users_purge_after")
+        invalid_schema = _schema_snapshot(engine)
+        with pytest.raises(RuntimeError, match="published 0.1.4 stamp/schema conflict"):
+            command.upgrade(config, REVISION)
+        assert _schema_snapshot(engine) == invalid_schema
+        assert _stamp(engine) == PARENT
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE INDEX ix_users_purge_after ON users (purge_after)"
+            )
+        assert _schema_snapshot(engine) == parent_schema
+
         with _captured_statements() as statements:
             command.upgrade(config, REVISION)
         if dialect == "sqlite":
             _assert_each_table_rebuilt_at_most_once(statements)
         _assert_release_upgrade(engine, release_data, now, first=True)
+        _assert_model_parity(engine)
         _seed_runtime_links(engine, release_data)
-        users, identities, transactions = _tables()
-        with engine.connect() as connection:
-            assert retained_account_state(connection) == retained
-        identity = {
-            "id": _id(),
-            "user_id": external_id,
-            "provider_slug": "example",
-            "issuer": "https://issuer.example",
-            "subject": "external-user",
-            "linked_via": "jit",
-            "created_at": now,
-        }
-        transaction = {
-            "id": _id(),
-            "state_digest": "state-digest",
-            "binding_digest": "binding-digest",
-            "provider_slug": "example",
-            "redirect_uri": "https://wiki.example/api/v1/auth/sso/example/callback",
-            "purpose": "link",
-            "user_id": external_id,
-            "session_generation": 0,
-            "session_digest": "stable-browser-session",
-            "return_to": "/settings",
-            "created_at": now,
-            "expires_at": now + timedelta(minutes=10),
-        }
-        with engine.begin() as connection:
-            connection.execute(users.insert(), _user(external_id, None, None))
-            connection.execute(identities.insert(), identity)
-            connection.execute(transactions.insert(), transaction)
-            assert (
-                connection.scalar(sa.select(identities.c.last_email_verified)) is False
-            )
-            assert connection.scalar(sa.select(transactions.c.remember_me)) is False
-            assert connection.scalar(sa.select(identities.c.directory_tenant)) is None
-            assert (
-                connection.scalar(sa.select(transactions.c.session_digest))
-                == "stable-browser-session"
-            )
-
+        assert retained_account_state() == retained
         assert audit_inputs(database_url) == []
-        # Independent ORM parity covers every changed table on both dialects.
-        # Frozen library/workspace tables have unrelated redundant constraints.
-        auth_tables = {
-            "users",
-            "user_identities",
-            "auth_login_transactions",
-            "email_reauthentication_challenges",
-            "email_outbox",
-            "auth_email_conflict_requests",
-        }
 
-        def include_auth_object(obj, name, kind, reflected, compare_to):
-            if kind == "table":
-                return name in auth_tables
-            return getattr(getattr(obj, "table", None), "name", None) in auth_tables
-
-        assert "auth_pending_signups" not in inspect(engine).get_table_names()
-        metadata = sa.MetaData()
-        challenges = sa.Table(
-            "email_reauthentication_challenges", metadata, autoload_with=engine
-        )
-        outbox = sa.Table("email_outbox", metadata, autoload_with=engine)
-        conflicts = sa.Table(
-            "auth_email_conflict_requests", metadata, autoload_with=engine
-        )
-        assert not outbox.c.recipient_user_id.nullable
-        assert "pending_signup_id" not in outbox.c
-        assert {"ix_email_reauth_expires_at", "ix_email_reauth_user_created_at"} <= {
-            index["name"] for index in inspect(engine).get_indexes(challenges.name)
-        }
-        challenge = {
-            "id": _id(),
-            "user_id": existing_id,
-            "session_generation": 0,
-            "session_digest": "stable-native-session",
-            "binding_digest": "email-browser",
-            "recipient_digest": "email-digest",
-            "token_digest": "email-token",
-            "scope": "admin",
-            "return_to": "/settings/admin",
-            "created_at": now,
-            "expires_at": now + timedelta(minutes=5),
-        }
-        message = {
-            "id": _id(),
-            "recipient_user_id": existing_id,
-            "recipient_email": "existing@example.com",
-            "reauthentication_challenge_id": challenge["id"],
-            "message_kind": "email_reauthentication",
-            "status": "queued",
-            "attempt_count": 0,
-            "created_at": now,
-            "updated_at": now,
-        }
-        conflict = {
-            "id": _id(),
-            "target_user_id": existing_id,
-            "email": "existing@example.com",
-            "provider_slug": "company",
-            "issuer": "https://idp.example.com",
-            "subject": "claimant",
-            "status": "pending",
-            "created_at": now,
-        }
-        with engine.begin() as connection:
-            connection.execute(conflicts.insert(), conflict)
-            preserved = (
-                connection.execute(
-                    sa.select(outbox).where(outbox.c.id == preserved_outbox_id)
-                )
-                .mappings()
-                .one()
-            )
-            assert preserved["recipient_user_id"] == existing_id
-            assert preserved["attempt_count"] == 2
-            assert preserved["reauthentication_challenge_id"] is None
-            connection.execute(challenges.insert(), challenge)
-            connection.execute(outbox.insert(), message)
-
-        def assert_downgrade_refused(message):
-            with pytest.raises(RuntimeError, match=message):
-                command.downgrade(config, PARENT)
-            # Every guard belongs to the same revision and must preserve the
-            # complete schema, including tables created later in upgrade().
-            inspector = inspect(engine)
-            assert auth_tables <= set(inspector.get_table_names())
-            assert "reauthentication_challenge_id" in {
-                column["name"] for column in inspector.get_columns("email_outbox")
-            }
-            with engine.connect() as connection:
-                assert (
-                    connection.scalar(
-                        sa.text("SELECT version_num FROM alembic_version")
-                    )
-                    == REVISION
-                )
-
-        assert_downgrade_refused("incompatible account")
-
-        with engine.begin() as connection:
-            connection.execute(
-                users.update()
-                .where(users.c.id == external_id)
-                .values(
-                    password_hash="external-local-hash",
-                    email="external@example.com",
-                    pending_email=None,
-                )
-            )
-            connection.execute(identities.delete())
-            connection.execute(transactions.delete())
-            connection.execute(conflicts.delete())
-        # Isolate the evidence tables: a populated sibling must not hide a
-        # missing guard. Consumed/expired records still cannot be discarded.
-        assert_downgrade_refused("email_reauthentication_challenges")
-        with engine.begin() as connection:
-            connection.execute(challenges.delete())
-            # The new cascade removes only the challenge's message; the
-            # native recipient and original password-change outbox survive.
-            assert (
-                connection.scalar(sa.select(sa.func.count()).select_from(outbox)) == 1
-            )
-
-        _assert_deletion_guard(config, engine, users, existing_id, now)
         _assert_atomic_release_failures(config, engine, tmp_path, direction="downgrade")
         with _captured_statements() as statements:
             command.downgrade(config, PARENT)
         if dialect == "sqlite":
             _assert_each_table_rebuilt_at_most_once(statements)
+        # Exactly the published 0.1.4 schema returns, with its login and
+        # deletion evidence: no 0.1.4 downgrade guard is crossed here.
+        assert _schema_snapshot(engine) == parent_schema
         _assert_release_downgrade(engine, release_data)
-        assert (auth_tables - {"users", "email_outbox"}).isdisjoint(
-            inspect(engine).get_table_names()
-        )
-        columns = {
-            column["name"]: column for column in inspect(engine).get_columns("users")
-        }
-        assert not columns["email"]["nullable"]
-        assert not columns["password_hash"]["nullable"]
-        assert "pending_email" not in columns
-        assert "personal_workspace_id" in columns
-        old_outbox = sa.Table("email_outbox", sa.MetaData(), autoload_with=engine)
-        assert "reauthentication_challenge_id" not in old_outbox.c
-        with engine.begin() as connection:
-            assert retained_account_state(connection) == retained
-            assert connection.scalar(sa.select(old_outbox.c.attempt_count)) == 2
+        assert retained_account_state() == retained
+
         _assert_atomic_release_failures(config, engine, tmp_path, direction="upgrade")
+        # Application startup upgrades a 0.1.4 database without stamp edits.
         with _captured_statements() as statements:
-            command.upgrade(config, REVISION)
+            ensure_app_version_synced(Settings(database_url=database_url))
         if dialect == "sqlite":
             _assert_each_table_rebuilt_at_most_once(statements)
+        assert _stamp(engine) == REVISION
         _assert_release_upgrade(engine, release_data, now, first=False)
+        assert retained_account_state() == retained
         assert audit_inputs(database_url) == []
-        users, identities, transactions = _tables()
-        with engine.begin() as connection:
-            assert retained_account_state(connection) == retained
-            connection.execute(
-                users.update()
-                .where(users.c.id == external_id)
-                .values(password_hash=None, email=None)
-            )
-            connection.execute(identities.insert(), identity)
-            connection.execute(transactions.insert(), transaction)
-            assert (
-                connection.scalar(
-                    sa.select(users.c.password_hash).where(users.c.id == existing_id)
-                )
-                == "preserved-local-hash"
-            )
-            assert (
-                connection.scalar(
-                    sa.select(users.c.email).where(users.c.id == existing_id)
-                )
-                == "existing@example.com"
-            )
-            # Deleting an external account cascades both new user-owned tables.
-            connection.execute(users.delete().where(users.c.id == external_id))
-            assert (
-                connection.scalar(sa.select(sa.func.count()).select_from(identities))
-                == 0
-            )
-            assert (
-                connection.scalar(sa.select(sa.func.count()).select_from(transactions))
-                == 0
-            )
-        if dialect == "postgresql":
-            # SQLite model parity is already checked by the shared release
-            # head test. PostgreSQL types/constraints need this real DB, at
-            # head because later revisions can add their own user columns.
-            command.upgrade(config, "head")
-            with engine.connect() as connection:
-                context = MigrationContext.configure(
-                    connection, opts={"include_object": include_auth_object}
-                )
-                assert compare_metadata(context, Base.metadata) == []
     finally:
         try:
             if upgraded:
-                # Dedicated DB starts empty. Cleanup includes refusal evidence.
+                # The dedicated DB starts empty. The 0.1.4 downgrade refuses
+                # retained login and deletion evidence, so remove it first.
                 with engine.begin() as connection:
-                    present = set(inspect(connection).get_table_names())
-                    for table in (
-                        "email_outbox",
-                        "auth_email_conflict_requests",
-                        "email_reauthentication_challenges",
-                        "auth_login_transactions",
-                        "user_identities",
-                    ):
-                        if table in present:
-                            connection.execute(sa.text(f"DELETE FROM {table}"))
-                    columns = {
-                        column["name"]
-                        for column in inspect(connection).get_columns("users")
-                    }
-                    predicate = "password_hash IS NULL OR email IS NULL"
-                    if "pending_email" in columns:
-                        predicate += " OR pending_email IS NOT NULL"
-                    connection.execute(sa.text("DELETE FROM users WHERE " + predicate))
+                    connection.execute(sa.text("DELETE FROM auth_login_transactions"))
+                    connection.execute(sa.text("DELETE FROM user_identities"))
+                    connection.execute(
+                        sa.text(
+                            "DELETE FROM users WHERE password_hash IS NULL "
+                            "OR email IS NULL OR status = 'deletion_pending'"
+                        )
+                    )
                 command.downgrade(config, "base")
                 with engine.begin() as connection:
                     connection.execute(sa.text("DROP TABLE IF EXISTS alembic_version"))
@@ -478,13 +319,19 @@ RELEASE_TABLES = {
     "context_published_citation",
     "context_citation_publication",
 }
-DELETION_COLUMNS = {
-    "deletion_requested_at",
-    "purge_after",
-    "deletion_retention_days",
-    "deletion_prior_status",
-    "deletion_failure_count",
-    "deletion_last_error",
+# ORM parity covers every table the release or its 0.1.4 parent shapes.
+PARITY_TABLES = RELEASE_TABLES | {
+    "users",
+    "workspace",
+    "user_identities",
+    "auth_login_transactions",
+    "email_outbox",
+    "email_reauthentication_challenges",
+    "auth_email_conflict_requests",
+    "page_links",
+    "edge_projection",
+    "mcp_tool_call",
+    "review_decision",
 }
 
 
@@ -683,13 +530,6 @@ def _seed_release_data(engine, workspace_id, existing_id, now):
 def _assert_release_upgrade(engine, data, now, *, first):
     inspector = inspect(engine)
     assert RELEASE_TABLES <= set(inspector.get_table_names())
-    columns = {c["name"]: c for c in inspector.get_columns("users")}
-    assert "personal_workspace_id" not in columns
-    assert DELETION_COLUMNS <= columns.keys()
-    assert all(
-        columns[name]["nullable"] and columns[name]["default"] is None
-        for name in DELETION_COLUMNS
-    )
     indexes = {i["name"]: i for i in inspector.get_indexes("mcp_tool_call")}
     assert indexes["ix_mcp_tool_call_workspace_session_started"]["column_names"] == [
         "workspace_id",
@@ -698,13 +538,6 @@ def _assert_release_upgrade(engine, data, now, *, first):
         "id",
     ]
     assert not indexes["ix_mcp_tool_call_workspace_session_started"]["unique"]
-    assert "ix_review_decision_review_created_id" in {
-        i["name"] for i in inspector.get_indexes("review_decision")
-    }
-    assert "ix_users_purge_after" in {i["name"] for i in inspector.get_indexes("users")}
-    assert "ix_workspace_account_deletion_user_id" in {
-        i["name"] for i in inspector.get_indexes("workspace")
-    }
     locator = {c["name"]: c for c in inspector.get_columns("page_links")}
     assert not locator["locator_key"]["nullable"] and locator["target_slug"]["nullable"]
     assert inspector.get_foreign_keys("workspace_inbox_recipient") == []
@@ -836,25 +669,7 @@ def _assert_release_upgrade(engine, data, now, *, first):
 
 
 def _assert_release_downgrade(engine, data):
-    inspector = inspect(engine)
-    assert RELEASE_TABLES.isdisjoint(inspector.get_table_names())
-    assert DELETION_COLUMNS.isdisjoint(
-        c["name"] for c in inspector.get_columns("users")
-    )
-    assert "locator_key" not in {c["name"] for c in inspector.get_columns("page_links")}
-    assert "ix_mcp_tool_call_workspace_session_started" not in {
-        i["name"] for i in inspector.get_indexes("mcp_tool_call")
-    }
     with engine.connect() as connection:
-        users = _table(connection, "users")
-        assert (
-            connection.scalar(
-                sa.select(users.c.personal_workspace_id).where(
-                    users.c.id == data["existing_id"]
-                )
-            )
-            is None
-        )
         links = _table(connection, "page_links")
         # Only the durable wikilink survives; permanent URL projections can be
         # regenerated after re-upgrade and never rewrite published source bytes.
@@ -883,40 +698,17 @@ def _assert_release_downgrade(engine, data):
         )
 
 
-def _assert_deletion_guard(config, engine, users, user_id, now):
-    with engine.begin() as connection:
-        connection.execute(
-            users.update()
-            .where(users.c.id == user_id)
-            .values(
-                status="deletion_pending",
-                deletion_requested_at=now,
-                purge_after=now + timedelta(days=30),
-                deletion_retention_days=30,
-            )
+def _assert_model_parity(engine):
+    def include(obj, name, kind, reflected, compare_to):
+        if kind == "table":
+            return name in PARITY_TABLES
+        return getattr(getattr(obj, "table", None), "name", None) in PARITY_TABLES
+
+    with engine.connect() as connection:
+        context = MigrationContext.configure(
+            connection, opts={"include_object": include}
         )
-    before = _schema_snapshot(engine)
-    with pytest.raises(RuntimeError, match="deletion requests are pending"):
-        command.downgrade(config, PARENT)
-    assert _schema_snapshot(engine) == before
-    with engine.begin() as connection:
-        row = connection.execute(sa.select(users).where(users.c.id == user_id)).one()
-        assert row.deletion_retention_days == 30
-        assert row.purge_after - row.deletion_requested_at == timedelta(days=30)
-        assert (
-            connection.scalar(sa.text("SELECT version_num FROM alembic_version"))
-            == REVISION
-        )
-        connection.execute(
-            users.update()
-            .where(users.c.id == user_id)
-            .values(
-                status="active",
-                deletion_requested_at=None,
-                purge_after=None,
-                deletion_retention_days=None,
-            )
-        )
+        assert compare_metadata(context, Base.metadata) == []
 
 
 def _assert_atomic_release_failures(config, engine, tmp_path, *, direction):
@@ -1004,3 +796,231 @@ def _seed_runtime_links(engine, data):
         assert wiki["occurrence_count"] == 2
         data["runtime_link"] = wiki["id"]
         data["runtime_target"] = target.id
+
+
+@pytest.mark.parametrize(
+    "dialect",
+    ["sqlite", pytest.param("postgresql", marks=pytest.mark.xdist_group("postgres"))],
+)
+def test_older_releases_upgrade_directly_at_startup(tmp_path, dialect):
+    """Fresh initialization, then startup from 0.1.2 and 0.1.3, per dialect.
+
+    The 0.1.4 traversal starts after the 0.1.3 input constraints and
+    publication-time backfill. Startup upgrades 0.1.2 and 0.1.3 directly
+    through the published 0.1.4 boundary, without an intermediate install.
+    The same database is first initialized directly at 0.2 and its schema is
+    compared with those populated upgrades, which catches snapshot drift and
+    accidental replay of historical migrations without another matrix.
+    """
+    database_url, engine = _migration_engine(tmp_path, dialect, "older-releases.db")
+    config = _config(database_url)
+    settings = Settings(database_url=database_url)
+    native, workspace, source, target, version, link = (uuid4() for _ in range(6))
+    publication_time = datetime.now(UTC) - timedelta(days=5)
+    retained_fields = {
+        "users": "id, email, password_hash, display_name, default_workspace_id",
+        "workspace": "id, slug, title, name, owner_user_id",
+        "context_page": "id, workspace_id, slug, title, current_published_version_id",
+        "context_page_version": "id, page_id, workspace_id, body_md, content_hash",
+        "page_links": "id, workspace_id, source_page_id, source_version_id, "
+        "target_slug, target_page_id, occurrence_count, first_snippet",
+        "audit_event": "id, workspace_id, action, target_id, payload, created_at",
+    }
+
+    def retained_state():
+        with engine.connect() as connection:
+            return {
+                name: connection.execute(
+                    sa.text(f"SELECT {fields} FROM {name} ORDER BY id")
+                ).all()
+                for name, fields in retained_fields.items()
+            }
+
+    migrated = False
+    try:
+        with _captured_statements() as statements:
+            ensure_app_version_synced(settings)
+        migrated = True
+        # A fresh install records only the final revision. Historical replay
+        # would insert a baseline stamp and update it repeatedly, rebuilding
+        # SQLite tables along the way.
+        stamp_writes = [
+            statement
+            for statement in statements
+            if statement.lstrip().startswith(
+                ("INSERT INTO alembic_version", "UPDATE alembic_version")
+            )
+        ]
+        assert len(stamp_writes) == 1
+        assert stamp_writes[0].lstrip().startswith("INSERT INTO alembic_version")
+        assert not any("_alembic_tmp_" in statement for statement in statements)
+        initialized_schema = _schema_snapshot(engine)
+        command.downgrade(config, "efcbcf724889")
+        with engine.begin() as connection:
+            _insert(
+                connection,
+                "users",
+                id=native,
+                email="older@example.com",
+                password_hash="retained-older-hash",
+                display_name="Older User",
+                member_search_key="older user older@example.com",
+            )
+            _insert(
+                connection,
+                "workspace",
+                id=workspace,
+                slug="older-workspace",
+                title="Older workspace",
+                name="Older workspace",
+                directory_title_key="older workspace",
+                owner_user_id=native,
+            )
+            users = _table(connection, "users")
+            connection.execute(
+                users.update()
+                .where(users.c.id == native)
+                .values(
+                    default_workspace_id=workspace,
+                    personal_workspace_id=workspace.hex
+                    if dialect == "sqlite"
+                    else workspace,
+                )
+            )
+            _insert(
+                connection,
+                "context_page",
+                id=source,
+                workspace_id=workspace,
+                slug="older-source",
+                title="Older source",
+            )
+            _insert(
+                connection,
+                "context_page",
+                id=target,
+                workspace_id=workspace,
+                slug="older-target",
+                title="Older target",
+            )
+            _insert(
+                connection,
+                "context_page_version",
+                id=version,
+                workspace_id=workspace,
+                page_id=source,
+                body_md="# Older content\n\n[[older-target]]",
+                content_hash="retained-older-content",
+                actor_type="human",
+                version_status="published_snapshot",
+                created_by_actor_kind="human",
+                created_by_actor_id=str(native),
+            )
+            pages = _table(connection, "context_page")
+            connection.execute(
+                pages.update()
+                .where(pages.c.id == source)
+                .values(
+                    current_version_id=version,
+                    current_published_version_id=version,
+                    lifecycle_status="published",
+                )
+            )
+            _insert(
+                connection,
+                "page_links",
+                id=link,
+                workspace_id=workspace,
+                source_page_id=source,
+                source_version_id=version,
+                target_slug="older-target",
+                target_page_id=target,
+                occurrence_count=2,
+                first_snippet="Retained older snippet",
+            )
+            _insert(
+                connection,
+                "audit_event",
+                id=uuid4(),
+                workspace_id=workspace,
+                actor_kind="human",
+                actor_id=str(native),
+                action="context_page.draft.publish",
+                target_kind="context_page",
+                target_id=source,
+                payload={
+                    "version_id": str(version),
+                    "previous_published_version_id": None,
+                },
+                created_at=publication_time,
+            )
+        retained = retained_state()
+        for old_version, revision in (
+            ("0.1.2", "efcbcf724889"),
+            ("0.1.3", "19db79d3e622"),
+        ):
+            if old_version == "0.1.3":
+                command.downgrade(config, revision)
+            with engine.begin() as connection:
+                assert (
+                    connection.scalar(
+                        sa.text("SELECT version_num FROM alembic_version")
+                    )
+                    == revision
+                )
+                connection.execute(
+                    sa.text("DELETE FROM app_metadata WHERE key = 'dtxwiki_version'")
+                )
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO app_metadata (key, value) "
+                        "VALUES ('dtxwiki_version', :version)"
+                    ),
+                    {"version": old_version},
+                )
+            # A direct startup upgrade from each actual old schema/stamp.
+            ensure_app_version_synced(settings)
+            assert retained_state() == retained
+            assert _schema_snapshot(engine) == initialized_schema
+            with engine.connect() as connection:
+                assert (
+                    connection.scalar(
+                        sa.text("SELECT version_num FROM alembic_version")
+                    )
+                    == REVISION
+                )
+                assert (
+                    connection.scalar(
+                        sa.text(
+                            "SELECT value FROM app_metadata "
+                            "WHERE key = 'dtxwiki_version'"
+                        )
+                    )
+                    == settings.app_version
+                )
+                pages = _table(connection, "context_page")
+                assert (
+                    connection.scalar(
+                        sa.select(pages.c.content_changed_at).where(
+                            pages.c.id == source
+                        )
+                    )
+                    == publication_time
+                )
+                assert connection.scalar(
+                    sa.text("SELECT locator_key FROM page_links")
+                ) == ("wikilink:older-target")
+                if dialect == "sqlite":
+                    assert (
+                        connection.exec_driver_sql("PRAGMA foreign_key_check").all()
+                        == []
+                    )
+            assert audit_inputs(database_url) == []
+    finally:
+        try:
+            if migrated:
+                command.downgrade(config, "base")
+                with engine.begin() as connection:
+                    connection.execute(sa.text("DROP TABLE IF EXISTS alembic_version"))
+        finally:
+            engine.dispose()
