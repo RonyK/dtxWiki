@@ -1,4 +1,4 @@
-.PHONY: install dev-db-up dev-db-down migrate seed backend-dev frontend-dev export-schemas gen-client verify-gen-client verify-generated-schemas bundle-frontend build-wheel docker-image docker-build test-backend test-backend-scale test-backend-serial test-backend-benchmarks test-graph-view test-frontend test-e2e test-packaged test-acceptance test-static test-release-gate test lint check-i18n sync-csp
+.PHONY: install dev-db-up dev-db-down migrate seed backend-dev frontend-dev export-schemas gen-client verify-gen-client verify-generated-schemas bundle-frontend build-wheel docker-image docker-build test-backend test-backend-scale test-backend-serial test-backend-benchmarks test-migrations test-graph-view test-frontend test-e2e test-packaged test-acceptance test-static test-release-gate test lint check-i18n sync-csp
 
 PYTHON ?= python3
 VENV ?= .venv
@@ -98,21 +98,28 @@ docker-build:
 	$(DOCKER) build -f $(DOCKERFILE) -t $(DOCKER_IMAGE) .
 
 # Capacity guards on production-scale input (`release_scale`) run in Release
-# checks (`make test-backend-scale`), not on every pull request.
+# checks (`make test-backend-scale`), not on every pull request. Dedicated
+# migration regressions run there through `make test-migrations` as well.
 test-backend:
-	$(VENV_PYTHON) -m pytest backend/tests -q -n $(PYTEST_WORKERS) --dist loadgroup -m "not release_scale" $(SQLITE_MEDIA_PARALLEL_IGNORES)
+	$(VENV_PYTHON) -m pytest backend/tests -q -n $(PYTEST_WORKERS) --dist loadgroup -m "not release_scale and not release_migration" $(SQLITE_MEDIA_PARALLEL_IGNORES)
 	$(VENV_PYTHON) -m pytest $(SQLITE_MEDIA_SERIAL_TESTS) -q
 
 # Parity canary. `--dist loadgroup` keeps the PostgreSQL suites -- which reset
 # the database they are pointed at -- on one worker, but distribution should
 # never be the only way the suite is run. This target proves the same tests
 # pass with no workers at all. It runs the functional suite only: the
-# wall-clock budgets are `test-backend-benchmarks`, kept apart on purpose.
+# wall-clock budgets are `test-backend-benchmarks`; migration regressions
+# remain in their separate Release lane.
 test-backend-serial:
-	$(VENV_PYTHON) -m pytest backend/tests -q
+	$(VENV_PYTHON) -m pytest backend/tests -q -m "not release_migration"
 
 test-backend-scale:
-	$(VENV_PYTHON) -m pytest backend/tests -q -n $(PYTEST_WORKERS) --dist loadgroup -m release_scale
+	$(VENV_PYTHON) -m pytest backend/tests -q -n $(PYTEST_WORKERS) --dist loadgroup -m "release_scale and not release_migration"
+
+# Both SQLite and PostgreSQL traversals run in Release checks. PostgreSQL
+# cases share the postgres xdist group and require a dedicated empty database.
+test-migrations:
+	$(VENV_PYTHON) -m pytest backend/tests -q -n $(PYTEST_WORKERS) --dist loadgroup -m release_migration
 
 # A latency measured on a shared runner, or beside xdist workers, cannot tell a
 # slow host from a slow change, so the functional lanes assert counted work

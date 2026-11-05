@@ -52,7 +52,8 @@ jobs:
         run: uv sync --locked --extra dev
       - name: Lint backend and tests
         run: .venv/bin/ruff check backend tests scripts
-      - name: Run backend and static tests
+      # Dedicated SQLite/PostgreSQL migration regressions run in Release checks.
+      - name: Run backend functional and static tests
         run: |
           VENV=.venv make test-backend
           VENV=.venv make test-static

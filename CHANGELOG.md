@@ -490,14 +490,31 @@ MCP workflows. Installation and package metadata now target 0.2.1.
 
 ### Database upgrade
 
-- Consolidate the 13 unpublished migrations after 0.1.4 into
-  `versions/v0_2/5b7e5c149279_release_0_2.py`, directly after the unchanged
-  0.1.4 revision `ef53a0a7061c`. Freeze the release migration and its helpers;
-  the five published migration files form one linear chain.
-- The consolidated upgrade includes external login and account retention,
-  review-decision history, removal of the personal-workspace pointer, Inbox,
-  Context link locators, Graph observation and relationship evidence, lifetime
-  read-together pairs, document references, and the Chats tool-call lookup index.
+- Restore the published 0.1.4 migration `eb86fdacb1bb`, byte-identical to the
+  v0.1.4 tag, as the parent of `5b7e5c149279`. The 0.2 migration applies only
+  the changes after 0.1.4: existing 0.1.4 databases keep their login and
+  account-retention data, and 0.1.2 and 0.1.3 databases pass through the
+  published 0.1.4 boundary. Downgrade returns exactly to the 0.1.4 schema.
+- Remove the development-only index revision `ef53a0a7061c`, which no release
+  recorded as its head; the 0.2.1 package passed through it only inside one
+  upgrade transaction. Databases already at `5b7e5c149279` keep that head and
+  schema. A database stamped `ef53a0a7061c` is refused as an unsupported
+  revision.
+- Initialize a proven-empty database directly at the complete v0.2.1 schema
+  in one revision, using frozen SQLite/PostgreSQL DDL captured from the real
+  release schema. Fresh installs do not replay historical migrations or use
+  mutable ORM metadata to create their schema.
+- Run dedicated migration regressions in Release checks for SQLite and
+  PostgreSQL; exclude them from ordinary PR backend and serial test lanes.
+- Support direct upgrades from published v0.1.2 (`efcbcf724889`), v0.1.3
+  (`19db79d3e622`), and v0.1.4 (`eb86fdacb1bb`) without installing intervening
+  application versions. Preserve these release boundaries when consolidating
+  later migrations.
+- The 0.2 upgrade adds Inbox, Context link locators, Graph observation and
+  relationship evidence, lifetime read-together pairs, document references,
+  and the Chats tool-call lookup index. External login, account retention,
+  review-decision history and removal of the personal-workspace pointer belong
+  to the published 0.1.4 migration.
 - Databases already at `5b7e5c149279` retain that head. An unpublished
   intermediate revision must first reach that head using its original checkout;
   back up and verify it before installing 0.2.1. Do not use `alembic stamp` to

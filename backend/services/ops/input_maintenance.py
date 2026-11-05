@@ -38,7 +38,7 @@ from backend.services.ops.migration_preflight import (
 CONSTRAINED_REVISIONS = frozenset(
     {
         REVISION,
-        "ef53a0a7061c",
+        "eb86fdacb1bb",
         "5b7e5c149279",
     }
 )
@@ -48,7 +48,7 @@ SUPPORTED = CONSTRAINED_REVISIONS | frozenset(
         "efcbcf724889",
     }
 )
-_OPTIONAL_NATIVE_EMAIL_REVISIONS = frozenset({"5b7e5c149279"})
+_OPTIONAL_NATIVE_EMAIL_REVISIONS = frozenset({"eb86fdacb1bb", "5b7e5c149279"})
 FIELDS = {
     "api-token": ("api_tokens", {"name": 128}),
     "workspace": ("workspace", {"title": 128, "name": 128, "goal": 512, "slug": 80}),

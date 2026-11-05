@@ -5,13 +5,47 @@ from functools import lru_cache
 from pathlib import Path
 
 from alembic.config import Config
-from alembic.script import ScriptDirectory
+from alembic.script import Script, ScriptDirectory
+from alembic.script.revision import RevisionMap
 
 from backend.services.ops.db_revision_inventory import is_revision_id
 
 # backend/services/ops/ -> backend/migrations; resolved here rather than through
 # backend.app.bootstrap, which imports the migration preflight that uses this.
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
+RELEASE_02_REVISION = "5b7e5c149279"
+
+
+def initialization_script_directory(
+    migrations_dir: str | Path | None = None,
+) -> ScriptDirectory:
+    """Create an empty DB at the frozen 0.2 schema in one revision.
+
+    Historical upgrades retain their original operations. Fresh installations
+    use an independent baseline with the same terminal schema and revision;
+    subsequent releases append the same operations after that boundary.
+    """
+    root = Path(migrations_dir) if migrations_dir is not None else _MIGRATIONS_DIR
+    script = ScriptDirectory(str(root), recursive_version_locations=True)
+    canonical_map = script.revision_map
+    replaced = {
+        revision.revision
+        for revision in canonical_map.iterate_revisions(RELEASE_02_REVISION, "base")
+    }
+    initializer = ScriptDirectory(
+        str(root / "initialization"), recursive_version_locations=True
+    )
+
+    def revisions():
+        yield from (
+            Script(revision.module, revision.revision, revision.path)
+            for revision in canonical_map.iterate_revisions("heads", "base")
+            if revision.revision not in replaced
+        )
+        yield from initializer._load_revisions()
+
+    script.revision_map = RevisionMap(revisions)
+    return script
 
 
 def schema_release_head(release: str) -> str:

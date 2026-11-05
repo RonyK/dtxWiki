@@ -1,5 +1,5 @@
 {
-  "description": "Frozen migration implementations through 0.2.1. Published 0.0 and 0.1 boundaries remain unchanged. All unpublished changes after 0.1.4 are consolidated into the single 0.2 release revision. Frozen files must not be edited after publication; new database changes extend the chain.",
+  "description": "Frozen migration implementations through 0.2.1 and the direct v0.2 initialization. Released upgrades follow the published boundaries 0.0.1, 0.1.1, 0.1.3, 0.1.4 and 0.2.1; an empty database is initialized at the same 0.2 schema in one revision. Frozen files must not be edited; new database changes extend the chain.",
   "released_in": "0.2.1",
   "schema_origins": [
     "0.0.1",
@@ -28,7 +28,6 @@
     "revision_modules/v0_2/_5b7e5c149279_release_0_2/co_access_schema.py": "ad1b0ad0c25f2f3067991ed6cb9e1eeaf6a36bef9f5b67eefd7620e8efe4a3e9",
     "revision_modules/v0_2/_5b7e5c149279_release_0_2/document_reference_schema.py": "c3d8ef2050f9f97f6bfef5e500596493f94be9bd19358649bc5b0facbcb84663",
     "revision_modules/v0_2/_5b7e5c149279_release_0_2/graph_schema.py": "91c11dceb2c14394078fe17da5f87c97b8f8909a22e8c5f5d6f3531812f712b7",
-    "revision_modules/v0_2/_5b7e5c149279_release_0_2/identity_schema.py": "dcc057ba34a94e38fe0594ae13d1a27aeb2f990ddd4dfb582bece2f63b4e1350",
     "revision_modules/v0_2/_5b7e5c149279_release_0_2/inbox_schema.py": "0b2376bbfef03c351ebaaa3b1837f039c08c455dee1e43f80278b91337c27933",
     "revision_modules/v0_2/__init__.py": "5f3eb4116f07bb24e42375b4804692461fe4795f19107cfbff39e5ed19ff5686",
     "revision_modules/v0_2/co_read_v1.py": "d2d76a36e06862a42b661b8773f9bdd6ba58a94cdfb2610a9f1d0760147d5a88",
@@ -36,8 +35,11 @@
     "revision_modules/v0_2/lifetime_co_access_v1.py": "d86ff3130305d73bda12f8618b4ce6066b35e22b58a41df8046f4d934f49567f",
     "versions/v0_0/bd62193d5cf6_initial_schema.py": "1c944d1f3c1d5427ff40470aacf1fbf611092a8e7e1111f19bc4089d13bd45e8",
     "versions/v0_1/19db79d3e622_release_0_1_3.py": "f6eade587f72c760ff86a37d2769355e22cbb647b9815c12c3e3ec084dcf5a0c",
-    "versions/v0_1/ef53a0a7061c_index_change_operation_change_set_id.py": "4ca7da3416959c22c15d39b453bb7d72024c9efca56e68253ea1e244a2066547",
     "versions/v0_1/efcbcf724889_core_schema.py": "1e4edcea3733bc4ea0f7407a9cd331a5f2f5e6913eebb289856cf87a45b9cd6b",
-    "versions/v0_2/5b7e5c149279_release_0_2.py": "29f14554c195e4a03b52f0f78a9d44085e8d9aee984f17cd53cc57ecb61f19f9"
+    "versions/v0_2/5b7e5c149279_release_0_2.py": "37470ffd638a140a787c26b805711d0af4589bb58ed0001e4f342d739b094b56",
+    "initialization/schema/postgresql.json": "d8678842142290152f348ce50206a5fd12d6ff426f94178d6c912d7ad567d8da",
+    "initialization/schema/sqlite.json": "01195f58398685838f7029007fe8b49f4f839da2e9d4860ce21085b86b0458cf",
+    "initialization/versions/v0_2/5b7e5c149279_initial_schema.py": "91d97a286c94e9d9ae1c278d0227e42b38ab67f20239d945da665400136e3f69",
+    "versions/v0_1/eb86fdacb1bb_release_0_1_4.py": "a639a8ce3a5b8678503f3d0bf7b493e394308869cc3274c0084cb3dbaf2b8557"
   }
 }
