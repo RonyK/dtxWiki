@@ -1,4 +1,5 @@
 import type { GraphVisualTokens } from "../shared/graphTokens";
+import { FORCED_OUTLINE_INSETS, RING_BAND_FACTOR } from "../shared/nodeShapes";
 import { WORKSPACE_MAP_NODE_KIND, type WorkspaceMapColumns } from "../map/sceneColumns";
 import { isWorkspaceMapWithinBudget, WORKSPACE_MAP_DEFAULT_BUDGET, type WorkspaceMapBudget } from "../shared/workspaceMapBudget";
 import { buildWorkspaceRelationLinkStrength } from "./relationPhysics";
@@ -15,6 +16,9 @@ export type CosmosSceneBuffers = {
    * emphasis. Layout and collision continue to read only `pointSizes`.
    */
   drawPointSizes: Float32Array;
+  /** Per point: an image index (cluster ring, forced-colours Agent outline) or -1 (no image). */
+  pointImageIndices: Float32Array;
+  pointImageSizes: Float32Array;
   links: Float32Array;
   linkColors: Float32Array;
   linkStyles: Float32Array;
@@ -78,6 +82,54 @@ function stableHash(value: string): number {
     hash = Math.imul(hash, 16777619);
   }
   return hash >>> 0;
+}
+
+/** Image list given to the native graph: the grouping ring, then the Agent outline gap. */
+export const WORKSPACE_CLUSTER_RING_IMAGE = 0;
+export const WORKSPACE_AGENT_OUTLINE_IMAGE = 1;
+// Close to the drawn sizes: the atlas is sampled without mipmaps, so a much
+// larger source would alias into a dotted ring when scaled down.
+const RING_IMAGE_SIZE = 40;
+
+/** An antialiased annulus between two radii (fractions of the half-size). */
+function annulusImage(color: string, innerFactor: number, outerFactor: number): ImageData | null {
+  if (typeof ImageData === "undefined") return null;
+  const [red, green, blue] = rgb(color).map((value) => Math.round(value * 255));
+  const size = RING_IMAGE_SIZE;
+  const half = size / 2;
+  const outer = half * outerFactor;
+  const inner = half * innerFactor;
+  const data = new Uint8ClampedArray(size * size * 4);
+  const samples = 4;
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      let covered = 0;
+      for (let sy = 0; sy < samples; sy += 1) {
+        for (let sx = 0; sx < samples; sx += 1) {
+          const distance = Math.hypot(x + (sx + .5) / samples - half, y + (sy + .5) / samples - half);
+          if (distance <= outer && distance >= inner) covered += 1;
+        }
+      }
+      const offset = (y * size + x) * 4;
+      data[offset] = red;
+      data[offset + 1] = green;
+      data[offset + 2] = blue;
+      data[offset + 3] = Math.round((covered / (samples * samples)) * 255);
+    }
+  }
+  return new ImageData(data, size, size);
+}
+
+/**
+ * The images the Map draws over native discs. A cluster is a grouping, drawn
+ * like a Local folder: a grey ring over a surface-coloured disc that keeps its
+ * picking footprint. In forced colours an Agent disc gets a surface-coloured
+ * gap, the same thin outline the Local graph and the legends draw.
+ */
+export function buildWorkspacePointImages(tokens: GraphVisualTokens): ImageData[] | null {
+  const ring = annulusImage(tokens.node.folder, 1 - RING_BAND_FACTOR, 1);
+  const outline = annulusImage(tokens.surface, FORCED_OUTLINE_INSETS.circle[1], FORCED_OUTLINE_INSETS.circle[0]);
+  return ring && outline ? [ring, outline] : null;
 }
 
 /** CSS tokens are resolved once per scene; WebGL receives normalized RGBA. */
@@ -152,6 +204,7 @@ export function buildCosmosSceneBuffers(
   columns: WorkspaceMapColumns,
   tokens: GraphVisualTokens,
   budget: WorkspaceMapBudget = WORKSPACE_MAP_DEFAULT_BUDGET,
+  { forcedColors = false }: { forcedColors?: boolean } = {},
 ): CosmosSceneBuffers {
   const count = columns.nodeIds.length;
   const edges = columns.edgeIds.length;
@@ -170,13 +223,14 @@ export function buildCosmosSceneBuffers(
   const context = rgb(tokens.node.context);
   const library = rgb(tokens.node.library);
   const agent = rgb(tokens.node.agent);
-  const folder = rgb(tokens.node.folder);
+  const surface = rgb(tokens.surface);
   const overviewScale = count > 1_000 ? 0.8 : 2;
   for (let node = 0; node < count; node += 1) {
     const kind = columns.nodeKinds[node];
     if (kind > 2 && kind !== 4) throw new Error("Unknown Workspace Map node kind");
-    writeColor(pointColors, node, kind === 0 ? context : kind === 1 ? library : kind === 4 ? agent : folder, 1);
-    pointShapes[node] = kind === 1 ? 1 : kind === 4 ? 3 : 0; // Native Library square, Agent diamond, Context/aggregate circle
+    // A cluster disc takes the surface colour; its grey ring is an image on top.
+    writeColor(pointColors, node, kind === 0 ? context : kind === 1 ? library : kind === 4 ? agent : surface, 1);
+    pointShapes[node] = kind === 1 ? 1 : 0; // Native Library square; documents and cluster discs are circles
     // At a 2k-node fit, full-size points cover their short intra-community
     // links. Retain the degree ordering but reserve enough pixel space for
     // relationships in the overview; focused zoom can show the full scene.
@@ -200,6 +254,16 @@ export function buildCosmosSceneBuffers(
       if (drawPointSizes === pointSizes) drawPointSizes = pointSizes.slice();
       drawPointSizes[node] = emphasised;
     }
+  }
+  const pointImageIndices = new Float32Array(count).fill(-1);
+  const pointImageSizes = new Float32Array(count);
+  for (let node = 0; node < count; node += 1) {
+    const kind = columns.nodeKinds[node];
+    const image = kind === WORKSPACE_MAP_NODE_KIND.cluster ? WORKSPACE_CLUSTER_RING_IMAGE
+      : forcedColors && kind === WORKSPACE_MAP_NODE_KIND.agent ? WORKSPACE_AGENT_OUTLINE_IMAGE : -1;
+    if (image < 0) continue;
+    pointImageIndices[node] = image;
+    pointImageSizes[node] = drawPointSizes[node];
   }
   const links = new Float32Array(edges * 2);
   const linkColors = new Float32Array(edges * 4);
@@ -244,6 +308,7 @@ export function buildCosmosSceneBuffers(
   }
   return {
     positions: initialPositions(columns), pointColors, pointShapes, pointSizes, drawPointSizes,
+    pointImageIndices, pointImageSizes,
     links, linkColors, linkStyles, linkStrength: buildWorkspaceRelationLinkStrength(columns),
     adjacencyOffsets: offsets, adjacencyNodes, adjacencyEdges,
   };

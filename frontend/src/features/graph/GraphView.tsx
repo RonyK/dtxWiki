@@ -6,10 +6,10 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
 import { MarkdownView } from "../pages/MarkdownView";
-import { LOCAL_EDGE_VISUAL_KIND_ORDER, localEdgeVisualKind } from "./local/edgeKinds";
+import { LOCAL_EDGE_VISUAL_KIND_ORDER, localEdgeKindsFor, localEdgeVisualKind } from "./local/edgeKinds";
 import { localNodeVisualKind } from "./local/nodeVisual";
 import { GraphCameraControls, GraphPreviewBadge, GraphScopeSelector, GraphTypeSelector, eventInvolves } from "./local/LocalGraphChrome";
-import { LocalGraphTimeline } from "./local/LocalGraphTimeline";
+import { LocalGraphTimeline, LocalTimelineMark } from "./local/LocalGraphTimeline";
 import { timelinePresentation } from "./local/timelinePresentation";
 import { historySceneCatalog, renderHistoryScene } from "./local/historyScene";
 import { LocalGraphCoverageInfo } from "./local/LocalGraphCoverageInfo";
@@ -17,7 +17,8 @@ import { CitationEvidenceSection, type CitationPair } from "./shared/CitationEvi
 import { LocalGraphList, type LocalGraphSelectionOrigin } from "./local/LocalGraphList";
 import { localSceneScopeKey } from "./local/sceneScope";
 import { buildSceneNavigation, type SceneNavigation } from "./sceneNavigation";
-import { GRAPH_EDGE_PATTERN, readGraphTokens, type GraphEdgeVisualKind, type GraphNodeVisualKind, type GraphVisualTokens } from "./shared/graphTokens";
+import { GraphEdgeCue, GraphNodeCue, GraphSeedCue } from "./shared/GraphCues";
+import { GRAPH_NODE_VISUALS, readGraphTokens, type GraphEdgeVisualKind, type GraphNodeVisualKind, type GraphVisualTokens } from "./shared/graphTokens";
 import type { GraphRenderScene } from "./shared/rendererTypes";
 import type {
   GraphEdge,
@@ -41,7 +42,6 @@ import {
 import {
   coAccessSentence,
   deriveGraphScene,
-  graphActionFamily,
   graphFacets,
   graphSceneToMermaid,
   sortedTimeline,
@@ -660,13 +660,15 @@ export function GraphView({
               aria-label={`${localRelationLabel(t, kind)} ${count}`} aria-pressed={enabled}
               className={`graph-local-relation-chip graph-local-relation-chip-${kind}`} key={kind}
               onClick={() => toggleRelationKinds(edgeKinds)} type="button">
-              <span aria-hidden="true" className="graph-local-relation-line" />{localRelationLabel(t, kind)}
+              <GraphEdgeCue className="graph-local-relation-line" color={nodeVisuals.tokens.edge[kind]} kind={kind} width={18} />
+              {localRelationLabel(t, kind)}
               <span className="graph-local-relation-count">{count}</span>
             </button>) : (["background", "recorded"] as const).map((kind) => <button key={kind} type="button"
               className={`graph-local-relation-chip graph-local-relation-chip-${kind === "recorded" ? "action" : "link"}`}
               aria-pressed={historyVisibility[kind]} title={kind === "background" ? t("graph.historyUi.baseline") : undefined}
               onClick={() => setHistoryVisibility((state) => ({ ...state, [kind]: !state[kind] }))}>
-              <span aria-hidden="true" className="graph-local-relation-line" />
+              <GraphEdgeCue className="graph-local-relation-line" kind={kind === "recorded" ? "action" : "link"} width={18}
+                color={nodeVisuals.tokens.edge[kind === "recorded" ? "action" : "link"]} />
               {t(kind === "recorded" ? "graph.historyUi.historyRelations" : "graph.historyUi.currentRelations")}
               {kind === "recorded" ? <GraphPreviewBadge /> : null}
               <span>{kind === "recorded" ? recordedEdgeIds.size : payload.edges.filter((edge) => !recordedEdgeIds.has(edge.id)).length}</span>
@@ -917,7 +919,7 @@ export function GraphView({
             <button type="button" aria-expanded={legendOpen} onClick={() => setLegendOpen((open) => !open)}><Layers size={15} aria-hidden="true" />{t("graph.view.legend")}</button>
           </div>
         </footer>
-        <div hidden={!legendOpen}><GraphLegend nodeVisuals={nodeVisuals} scene={scene} /></div>
+        <div hidden={!legendOpen}><GraphLegend historical={historical} nodeVisuals={nodeVisuals} /></div>
       </div>
 
       <p className="visually-hidden" aria-live="polite" aria-atomic="true">{announcement}</p>
@@ -1036,74 +1038,71 @@ function GraphFilterGroup({
   );
 }
 
-function GraphLegend({ nodeVisuals, scene }: { nodeVisuals: LocalNodeVisuals; scene: GraphScene }) {
+const LEGEND_NODE_KINDS = {
+  current: ["context", "agent", "library", "conversation", "folder"],
+  history: ["context", "version", "agent", "library", "conversation", "folder"],
+} as const satisfies Record<string, readonly GraphNodeVisualKind[]>;
+const LEGEND_TIMELINE_MARKS = ["version", "ask", "tool", "review", "activity", "added", "removed"] as const;
+
+/**
+ * A fixed legend per mode: every glyph and line this mode can draw, in one
+ * order, whatever the current scene happens to contain. Each line style
+ * carries the relationship names it draws.
+ */
+function GraphLegend({ historical, nodeVisuals }: { historical: boolean; nodeVisuals: LocalNodeVisuals }) {
   const { t } = useTranslation("graph");
   const { tokens, forcedColors } = nodeVisuals;
-  const visibleNodeKinds = new Set(scene.nodes.map((node) => localNodeVisualKind(node.entity_kind, node.family)));
-  const nodeKinds = (["context", "library", "agent", "conversation", "folder"] as const)
-    .filter((kind) => visibleNodeKinds.has(kind));
-  const visibleEdgeKinds = new Set(scene.edges.map((edge) => localEdgeVisualKind(edge.edge_kind)));
-  const edgeVisualKinds = LOCAL_EDGE_VISUAL_KIND_ORDER.filter((kind) => visibleEdgeKinds.has(kind));
-  const edgeKinds = uniqueSceneValues(scene.edges.map((edge) => edge.edge_kind));
-  const actionKinds = uniqueSceneValues(
-    scene.edges.flatMap((edge) => edge.action_kind ? [edge.action_kind] : []),
-  );
+  const relationNames = (kind: GraphEdgeVisualKind) => {
+    if (kind === "action") return t("graph.legend.edgeNote.action");
+    const names = [...new Set(localEdgeKindsFor(kind).map((edgeKind) => graphLabel(t, "graphEdgeKind", edgeKind)))]
+      .filter((name) => name !== t(`graph.legend.edge.${kind}`));
+    return names.join(" · ");
+  };
   return (
-    <div className="graph-legend">
+    <div className="graph-legend" data-legend-mode={historical ? "history" : "current"}>
       <h4 className="visually-hidden">{t("graph.legend.heading", { defaultValue: "Legend" })}</h4>
-      {scene.edges.some((edge) => localEdgeVisualKind(edge.edge_kind) === "action") ? (
-        <p className="graph-local-action-legend graph-local-relation-chip-action">
-          <span aria-hidden="true" className="graph-local-relation-line" />
-          {t("graph.legend.actionLines", {
-            defaultValue: "Long-dashed lines show action occurrences, not document links or citations.",
-          })}
-        </p>
-      ) : null}
       <div className="graph-legend-groups">
         <ul aria-label={t("graph.legend.nodes", { defaultValue: "Node types" })}>
-          {nodeKinds.map((kind) => (
+          <li data-node-visual-kind="seed">
+            <GraphSeedCue color={tokens.node.context} />
+            {t("graph.legend.node.seed")}
+          </li>
+          {LEGEND_NODE_KINDS[historical ? "history" : "current"].map((kind) => (
             <li data-node-visual-kind={kind} key={kind}>
-              <LocalNodeSwatch color={tokens.node[kind]} forcedColors={forcedColors} kind={kind} surface={tokens.surface} />
+              <GraphNodeCue className="graph-local-node-cue" color={tokens.node[GRAPH_NODE_VISUALS[kind].color]}
+                forcedColors={forcedColors} kind={kind} surface={tokens.surface} />
               {t(`graph.legend.node.${kind}`)}
             </li>
           ))}
-          {scene.nodes.some((node) => node.is_seed) ? (
-            <li data-node-visual-kind="seed">
-              <svg aria-hidden="true" height="16" viewBox="0 0 16 16" width="16">
-                <circle cx="8" cy="8" fill={tokens.node.context} r="5.5" stroke="currentColor" strokeWidth="2.64" />
-              </svg>
-              {t("graph.legend.node.seed")}
+        </ul>
+        <ul aria-label={t("graph.legend.edges", { defaultValue: "Relationship line styles" })} className="graph-legend-stack">
+          {LOCAL_EDGE_VISUAL_KIND_ORDER.map((kind) => {
+            const names = relationNames(kind);
+            return (
+              <li data-edge-visual-kind={kind} key={kind}>
+                <GraphEdgeCue color={tokens.edge[kind]} kind={kind} />
+                <span>{t(`graph.legend.edge.${kind}`)}{names ? <small>{names}</small> : null}</span>
+              </li>
+            );
+          })}
+          {historical ? (
+            <li data-edge-visual-kind="removed">
+              <GraphEdgeCue kind="removed" />
+              <span>{t("graph.legend.edge.removed")}</span>
             </li>
           ) : null}
         </ul>
-        <ul aria-label={t("graph.legend.edges", { defaultValue: "Relationship line styles" })}>
-          {edgeVisualKinds.map((kind) => (
-            <li data-edge-visual-kind={kind} key={kind}>
-              <svg aria-hidden="true" height="16" viewBox="0 0 34 16" width="34">
-                <line stroke={tokens.edge[kind]} strokeDasharray={GRAPH_EDGE_PATTERN[kind]?.join(" ")}
-                  strokeWidth={kind === "membership" ? 1.1 : kind === "action" ? 1.7 : 2} x1="1" x2="33" y1="8" y2="8" />
-              </svg>
-              {t(`graph.legend.edge.${kind}`)}
+        {historical ? (
+          <ul aria-label={t("graph.legend.history", { defaultValue: "History marks" })} className="graph-legend-stack">
+            <li data-legend-mark="event-target">
+              <GraphNodeCue className="graph-local-node-cue" color={tokens.node.library} forcedColors={forcedColors}
+                kind="library" ring={tokens.highlight} surface={tokens.surface} />
+              {t("graph.legend.eventTarget")}
             </li>
-          ))}
-        </ul>
-        {(edgeKinds.length || actionKinds.length) ? (
-          <ul aria-label={t("graph.legend.meanings", { defaultValue: "Relationship meanings" })}>
-            {edgeKinds.map((kind) => (
-              <li key={`kind:${kind}`}>
-                <span aria-hidden="true" className="graph-kind-cue">→</span>
-                {graphLabel(t, "graphEdgeKind", kind)}
-              </li>
-            ))}
-            {actionKinds.map((kind) => (
-              <li key={`action:${kind}`}>
-                <span
-                  aria-hidden="true"
-                  className={`graph-action-cue graph-action-cue-${graphActionFamily(kind)}`}
-                >
-                  {graphActionFamilyCue(kind)}
-                </span>
-                {graphLabel(t, "graphActionKind", kind)}
+            {LEGEND_TIMELINE_MARKS.map((kind) => (
+              <li data-legend-mark={`timeline-${kind}`} key={kind}>
+                <LocalTimelineMark kind={kind} />
+                {t(`graph.historyUi.kind.${kind}`)}
               </li>
             ))}
           </ul>
@@ -1113,26 +1112,10 @@ function GraphLegend({ nodeVisuals, scene }: { nodeVisuals: LocalNodeVisuals; sc
   );
 }
 
-function LocalNodeSwatch({ color, forcedColors, kind, surface }: {
-  color: string; forcedColors: boolean; kind: GraphNodeVisualKind; surface: string;
-}) {
-  return (
-    <svg aria-hidden="true" className="graph-local-node-cue" data-node-visual-kind={kind} height="16" viewBox="0 0 16 16" width="16">
-      {kind === "library" ? <rect fill={color} height="11" width="11" x="2.5" y="2.5" />
-        : kind === "agent" ? <polygon fill={color} points="8,1.4 13.5,8 8,14.6 2.5,8" />
-        : kind === "folder" ? <circle cx="8" cy="8" fill="none" r="5.5" stroke={color} strokeWidth="2.64" />
-        : <circle cx="8" cy="8" fill={color} r="5.5" />}
-      {kind === "conversation" && forcedColors ? (
-        <><circle cx="8" cy="8" fill={surface} r="4.4" /><circle cx="8" cy="8" fill={color} r="3.025" /></>
-      ) : null}
-    </svg>
-  );
-}
-
 function LocalNodeCue({ node, visuals }: { node: GraphNode; visuals: LocalNodeVisuals }) {
   const kind = localNodeVisualKind(node.entity_kind, node.family);
-  return <LocalNodeSwatch color={visuals.tokens.node[kind]} forcedColors={visuals.forcedColors}
-    kind={kind} surface={visuals.tokens.surface} />;
+  return <GraphNodeCue className="graph-local-node-cue" color={visuals.tokens.node[GRAPH_NODE_VISUALS[kind].color]}
+    forcedColors={visuals.forcedColors} kind={kind} surface={visuals.tokens.surface} />;
 }
 
 function GraphRelationshipList({
@@ -1160,8 +1143,11 @@ function GraphRelationshipList({
   const nodeLabels = useMemo(() => new Map(nodes.map((node) => [node.id, node.label])), [nodes]);
   const renderNode = useCallback((node: GraphNode) => <><LocalNodeCue node={node} visuals={nodeVisuals} />
     <span><strong>{node.label}</strong><small>{graphLabel(t, "graphNodeFamily", node.family)}{node.status ? ` · ${graphLabel(t, "graphStatus", node.status)}` : ""}</small></span></>, [nodeVisuals, t]);
-  const renderEdge = useCallback((edge: GraphEdge) => <><span className={`graph-edge-swatch graph-edge-swatch-${edge.layer}`} aria-hidden="true" />
-    <span><strong>{edge.label}</strong><small>{nodeLabels.get(edge.source) ?? edge.source} → {nodeLabels.get(edge.target) ?? edge.target}</small></span></>, [nodeLabels]);
+  const renderEdge = useCallback((edge: GraphEdge) => {
+    const visual = localEdgeVisualKind(edge.edge_kind);
+    return <><GraphEdgeCue color={visual ? nodeVisuals.tokens.edge[visual] : undefined} kind={visual ?? "other"} width={22} />
+      <span><strong>{edge.label}</strong><small>{nodeLabels.get(edge.source) ?? edge.source} → {nodeLabels.get(edge.target) ?? edge.target}</small></span></>;
+  }, [nodeLabels, nodeVisuals]);
   const scopeKey = workspaceId ?? "";
   return (
     <section className="graph-relationship-list" aria-labelledby="graph-relationship-list-heading">
@@ -1656,17 +1642,6 @@ function localRelationLabel(t: TFunction, kind: GraphEdgeVisualKind) {
     action: t("graph.localToolbar.action", { defaultValue: "Actions" }),
   };
   return labels[kind];
-}
-
-function graphActionFamilyCue(actionKind: string) {
-  const cues = {
-    authoring: "✎",
-    governance: "✓",
-    retrieval: "◇",
-    tool: "⚙",
-    other: "A",
-  } as const;
-  return cues[graphActionFamily(actionKind)];
 }
 
 function graphLabelGroupForFilter(key: keyof GraphFilters): GraphLabelGroup {

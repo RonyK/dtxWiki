@@ -1547,7 +1547,9 @@ async function expectLocalSceneNavigation(
 function localWireCueKind(node: GraphNode) {
   // Independent API-kind oracle: family=document alone cannot distinguish
   // real Library versions/artifacts from Context pages and their versions.
-  if (node.entity_kind === "context_page" || node.entity_kind === "context_page_version") return "context";
+  if (node.entity_kind === "context_page") return "context";
+  if (node.entity_kind === "context_page_version") return "version";
+  if (node.entity_kind === "agent_page") return "agent";
   if (["library_item_version", "library_artifact", "library_item"].includes(node.entity_kind)) return "library";
   return node.family === "structural" ? "folder" : "conversation";
 }
@@ -1557,8 +1559,10 @@ async function expectLocalNodeCues(page: Page, buttons: Locator, expected: Graph
   const mode = await page.evaluate(() => matchMedia("(forced-colors: active)").matches ? "forced"
     : document.documentElement.dataset.theme === "dark" ? "dark" : "light");
   const palettes = {
-    light: { context: "rgb(124, 58, 237)", library: "rgb(15, 159, 143)", conversation: "rgb(234, 88, 12)", folder: "rgb(100, 116, 139)" },
-    dark: { context: "rgb(139, 92, 246)", library: "rgb(13, 148, 136)", conversation: "rgb(234, 88, 12)", folder: "rgb(148, 163, 184)" },
+    light: { context: "rgb(124, 58, 237)", version: "rgb(124, 58, 237)", agent: "rgb(217, 119, 6)",
+      library: "rgb(15, 159, 143)", conversation: "rgb(2, 132, 199)", folder: "rgb(100, 116, 139)" },
+    dark: { context: "rgb(139, 92, 246)", version: "rgb(139, 92, 246)", agent: "rgb(245, 158, 11)",
+      library: "rgb(13, 148, 136)", conversation: "rgb(56, 189, 248)", folder: "rgb(148, 163, 184)" },
   } as const;
   const actual = await buttons.evaluateAll((elements) => elements.map((button) => {
     const cue = button.querySelector(":scope > svg[data-node-visual-kind]");
@@ -1575,7 +1579,7 @@ async function expectLocalNodeCues(page: Page, buttons: Locator, expected: Graph
       // inherited color is not CanvasText. Read the auto-adjusted graph root.
       foreground: getComputedStyle(button.closest(".graph-view") ?? button).color, surface,
       legacy: Boolean(button.querySelector(".graph-node-swatch")),
-      shapes: cue ? Array.from(cue.querySelectorAll("rect,circle")).map((shape) => ({
+      shapes: cue ? Array.from(cue.querySelectorAll(":scope > path, :scope > circle")).map((shape) => ({
         name: shape.tagName.toLowerCase(), fill: getComputedStyle(shape).fill, stroke: getComputedStyle(shape).stroke,
         radius: Number(shape.getAttribute("r")),
       })) : [],
@@ -1590,16 +1594,10 @@ async function expectLocalNodeCues(page: Page, buttons: Locator, expected: Graph
     const color = mode === "forced" ? row.foreground : palettes[mode][kind];
     expect(row.hidden).toBe("true");
     expect(row.legacy).toBe(false);
-    expect(row.shapes.map((shape) => shape.name)).toEqual(kind === "library" ? ["rect"]
-      : kind === "conversation" && mode === "forced" ? ["circle", "circle", "circle"] : ["circle"]);
+    // One outline per glyph from the shared shape geometry; a folder is a stroked ring.
+    expect(row.shapes.map((shape) => shape.name)).toEqual(kind === "folder" ? ["circle"] : ["path"]);
     expect(row.shapes[0].fill).toBe(kind === "folder" ? "none" : color);
     if (kind === "folder") expect(row.shapes[0].stroke).toBe(color);
-    if (kind === "conversation" && mode === "forced") {
-      expect(row.shapes[1].fill).toBe(row.surface);
-      expect(row.shapes[2].fill).toBe(color);
-      expect(row.shapes[0].radius).toBeGreaterThan(row.shapes[1].radius);
-      expect(row.shapes[1].radius).toBeGreaterThan(row.shapes[2].radius);
-    }
   }
   return actual;
 }

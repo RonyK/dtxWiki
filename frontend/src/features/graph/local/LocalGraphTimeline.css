@@ -41,12 +41,14 @@
 .local-history-playhead { position: absolute; top: 0; height: calc(100px + var(--history-scrubber-height) / 2); width: 2px; transform: translateX(-1px); background: var(--history-accent); opacity: .65; pointer-events: none; z-index: 0; }
 .local-history-playhead::after { content: ""; position: absolute; left: -3px; bottom: -4px; width: 8px; height: 8px; border-radius: 50%; background: var(--history-accent); }
 .local-history .local-history-mark { position: absolute; top: 0; z-index: 1; width: 44px; height: 44px; padding: 0; transform: translateX(-50%); display: grid; place-items: center; background: transparent; border: 0; border-radius: 8px; cursor: pointer; color: var(--history-accent); }
-.local-history-symbol { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 26px; width: 26px; height: 26px; border: 1px solid currentColor; border-radius: 7px; color: var(--history-accent); background: var(--surface); font-size: 12px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.local-history-symbol { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 26px; width: 26px; height: 26px; border: 1px solid currentColor; border-radius: 7px; color: var(--history-accent, var(--context)); background: var(--surface); font-size: 12px; font-weight: 750; font-variant-numeric: tabular-nums; }
 .local-history-symbol.is-version { border-color: transparent; background: transparent; }
 .local-history-symbol.is-version svg { fill: currentColor; width: 17px; height: 17px; }
-.local-history-symbol.is-review { color: #2563a6; }
-.local-history-symbol.is-ask { color: #9a5b12; }
-.local-history-symbol.is-tool { color: #087f86; border-radius: 3px; }
+/* Colour = the subject's node colour: versions are Context purple, every
+   chat/activity mark is the chat/activity colour and differs by its icon. */
+.local-history-symbol.is-review, .local-history-symbol.is-ask, .local-history-symbol.is-tool,
+.local-history-symbol.is-activity { color: var(--graph-node-conversation, #0284c7); }
+.local-history-symbol.is-tool { border-radius: 3px; }
 .local-history-symbol.is-added, .local-history-symbol.is-removed { border-radius: 50%; }
 .local-history-symbol.is-added { color: #168344; }
 .local-history-symbol.is-removed { color: #c43b3b; border-style: dashed; }

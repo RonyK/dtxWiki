@@ -5,13 +5,29 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
 import type { WorkspaceGraphEdge, WorkspaceGraphNode } from "../../../shared/api/workspaceGraph";
-import { workspaceRelationVisual, type WorkspaceRelationVisual } from "../map/sceneColumns";
+import { localEdgeVisualKind } from "../local/edgeKinds";
+import { GraphEdgeCue, GraphNodeCue, type GraphEdgeCueKind } from "../shared/GraphCues";
+import type { GraphNodeVisualKind } from "../shared/graphTokens";
 import type { WorkspaceGraphNodeRelations } from "../workspaceGraphModel";
 import type { WorkspaceGraphDocumentNavigation } from "./WorkspaceGraphNodeActions";
 import { formatCount, workspaceGraphEnumLabel } from "./workspaceGraphLabels";
 
 /** Same shape and colour as the map point and the legend cue. */
 export type WorkspaceGraphNodeCueKind = "context" | "library" | "agent" | "cluster";
+
+/** A Map cluster is a grouping, drawn like a folder: the grey ring. */
+export const WORKSPACE_GRAPH_CUE_VISUAL = {
+  context: "context", library: "library", agent: "agent", cluster: "folder",
+} as const satisfies Record<WorkspaceGraphNodeCueKind, GraphNodeVisualKind>;
+
+/**
+ * The line style a relation kind has in either graph. The Map canvas draws
+ * only links and citations; its lists still name every kind in the shared style.
+ */
+export type WorkspaceRelationCue = GraphEdgeCueKind;
+export function workspaceRelationCue(kind: string): WorkspaceRelationCue {
+  return localEdgeVisualKind(kind) ?? "other";
+}
 
 export function workspaceGraphNodeCueKind(node: WorkspaceGraphNode): WorkspaceGraphNodeCueKind {
   return node.grain === "cluster" ? "cluster" : node.entity_kind;
@@ -21,13 +37,17 @@ export function workspaceGraphNodeCueKind(node: WorkspaceGraphNode): WorkspaceGr
 export const WORKSPACE_GRAPH_RESULT_PAGE = 10;
 export const WORKSPACE_GRAPH_RELATION_FLOW_PAGE = 5;
 
-export function WorkspaceGraphNodeCue({ kind }: { kind: WorkspaceGraphNodeCueKind }) {
-  return <span aria-hidden="true" className={`workspace-graph-node-cue is-${kind} is-inline`} />;
+export function WorkspaceGraphNodeCue({ className = "workspace-graph-node-cue is-inline", kind, size = "inline" }: {
+  className?: string;
+  kind: WorkspaceGraphNodeCueKind;
+  size?: "inline" | "legend";
+}) {
+  return <GraphNodeCue className={size === "legend" ? undefined : className} kind={WORKSPACE_GRAPH_CUE_VISUAL[kind]} />;
 }
 
-/** A short stroke in the map's line style. */
-export function WorkspaceGraphEdgeCue({ visual }: { visual: WorkspaceRelationVisual | null }) {
-  return <span aria-hidden="true" className="workspace-graph-edge-cue" data-visual={visual ?? "other"} />;
+/** A short stroke in the shared line style. */
+export function WorkspaceGraphEdgeCue({ visual }: { visual: WorkspaceRelationCue }) {
+  return <GraphEdgeCue className="workspace-graph-edge-cue" kind={visual} width={16} />;
 }
 
 /** Short chip text; the full kind name stays in the tooltip and accessible name. */
@@ -56,8 +76,8 @@ export function WorkspaceGraphNodeChip({ node }: { node: WorkspaceGraphNode }) {
 
 export function WorkspaceGraphRelationChip({ kind }: { kind: string }) {
   const { t } = useTranslation("graph");
-  const visual = workspaceRelationVisual(kind);
-  return <span className="workspace-graph-chip" data-visual={visual ?? "other"} title={workspaceGraphEnumLabel(kind, t)}>
+  const visual = workspaceRelationCue(kind);
+  return <span className="workspace-graph-chip" data-visual={visual} title={workspaceGraphEnumLabel(kind, t)}>
     <WorkspaceGraphEdgeCue visual={visual} />{workspaceGraphRelationChipLabel(kind, t)}
   </span>;
 }
@@ -135,16 +155,16 @@ export function WorkspaceGraphNodeSummary({ nodes }: { nodes: readonly Workspace
 export function WorkspaceGraphLineSummary({ edges }: { edges: readonly WorkspaceGraphEdge[] }) {
   const { t } = useTranslation("graph");
   const counts = useMemo(() => {
-    const result = new Map<WorkspaceRelationVisual | "other", number>();
+    const result = new Map<WorkspaceRelationCue, number>();
     for (const edge of edges) {
-      const visual = workspaceRelationVisual(edge.relation_kind) ?? "other";
+      const visual = workspaceRelationCue(edge.relation_kind);
       result.set(visual, (result.get(visual) ?? 0) + 1);
     }
     return result;
   }, [edges]);
-  return <>{(["link", "citation", "other"] as const).filter((visual) => counts.has(visual)).map((visual) => (
+  return <>{(["link", "citation", "coAccess", "membership", "action", "other"] as const).filter((visual) => counts.has(visual)).map((visual) => (
     <span className="workspace-graph-fold-summary-item" key={visual}>
-      <WorkspaceGraphEdgeCue visual={visual === "other" ? null : visual} />
+      <WorkspaceGraphEdgeCue visual={visual} />
       <span className="visually-hidden">{t(`workspaceGraph.chips.line.${visual}`)}</span>{formatCount(counts.get(visual)!)}
     </span>
   ))}</>;
@@ -181,12 +201,12 @@ export function WorkspaceGraphRelationMiniMap({ edge, nodesById }: {
 }) {
   const source = nodesById.get(edge.source);
   const target = nodesById.get(edge.target);
-  const visual = workspaceRelationVisual(edge.relation_kind);
+  const visual = workspaceRelationCue(edge.relation_kind);
   return <span className="workspace-graph-relation-map">
     <span className="workspace-graph-relation-cue">{source ? <WorkspaceGraphNodeCue kind={workspaceGraphNodeCueKind(source)} /> : null}</span>
     <strong className="workspace-graph-relation-end">{source?.label ?? "—"}</strong>
     <span aria-hidden="true" className="workspace-graph-relation-stroke" data-directed={edge.direction === "directed"}
-      data-visual={visual ?? "other"} />
+      data-visual={visual} />
     <span className="workspace-graph-relation-kind"><WorkspaceGraphRelationChip kind={edge.relation_kind} /></span>
     <span className="workspace-graph-relation-cue">{target ? <WorkspaceGraphNodeCue kind={workspaceGraphNodeCueKind(target)} /> : null}</span>
     <strong className="workspace-graph-relation-end">{target?.label ?? "—"}</strong>
@@ -194,9 +214,9 @@ export function WorkspaceGraphRelationMiniMap({ edge, nodesById }: {
 }
 
 type RelationDirection = keyof WorkspaceGraphNodeRelations;
-type FlowStroke = WorkspaceRelationVisual | "other";
+type FlowStroke = WorkspaceRelationCue;
 
-const flowStroke = (edge: WorkspaceGraphEdge): FlowStroke => workspaceRelationVisual(edge.relation_kind) ?? "other";
+const flowStroke = (edge: WorkspaceGraphEdge): FlowStroke => workspaceRelationCue(edge.relation_kind);
 /** Where a branch meets the rail: incoming relations merge below the name line, outgoing ones split above it. */
 const FLOW_JOINT: Record<RelationDirection, number> = { incoming: 24, outgoing: 8 };
 
@@ -437,7 +457,7 @@ export function WorkspaceGraphRelationEnds({ edge, nodesById, onNavigate }: {
   onNavigate: WorkspaceGraphDocumentNavigation;
 }) {
   const { t } = useTranslation("graph");
-  const visual = workspaceRelationVisual(edge.relation_kind);
+  const visual = workspaceRelationCue(edge.relation_kind);
   const roles = visual === "citation" ? "Citation" : visual === "link" ? "Link" : "";
   const end = (id: string, role: "source" | "target") => {
     const node = nodesById.get(id);
@@ -459,7 +479,7 @@ export function WorkspaceGraphRelationEnds({ edge, nodesById, onNavigate }: {
     {end(edge.source, "source")}
     <div className="workspace-graph-relation-ends-stroke">
       <span aria-hidden="true" className="workspace-graph-relation-stroke" data-directed={edge.direction === "directed"}
-        data-visual={visual ?? "other"} />
+        data-visual={visual} />
       <WorkspaceGraphRelationChip kind={edge.relation_kind} />
     </div>
     {end(edge.target, "target")}

@@ -1,4 +1,4 @@
-import { Activity, ArrowUpRight, Check, ChevronLeft, ChevronRight, Clock3, Diamond, Info, MessageSquare, Minus, Pause, Play, Plus, SkipForward, Terminal } from "lucide-react";
+import { Activity, ArrowUpRight, Check, ChevronLeft, ChevronRight, Clock3, Info, MessageSquare, Minus, Pause, Play, Plus, SkipForward, Terminal, Triangle } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { GraphQueryPayload, GraphTimelineEvent } from "../../../shared/api/graph";
@@ -7,10 +7,17 @@ import { eventInvolves, GraphPreviewBadge, type LocalTimelineEvent } from "./Loc
 import type { TimelineMarkKind } from "./timelinePresentation";
 import "./LocalGraphTimeline.css";
 
-const icons = { version: Diamond, review: Check, ask: MessageSquare, tool: Terminal, added: Plus, removed: Minus, activity: Activity };
+// A version mark is the canvas version glyph (a filled triangle); every
+// activity mark shares the chat/activity colour and differs by icon.
+const icons = { version: Triangle, review: Check, ask: MessageSquare, tool: Terminal, added: Plus, removed: Minus, activity: Activity };
 function MarkIcon({ kind }: { kind: TimelineMarkKind }) {
   const Icon = icons[kind];
   return <Icon size={14} strokeWidth={2.5} aria-hidden="true" />;
+}
+
+/** One timeline mark glyph, shared with the history legend. */
+export function LocalTimelineMark({ kind }: { kind: TimelineMarkKind }) {
+  return <span aria-hidden="true" className={`local-history-symbol is-${kind}`}><MarkIcon kind={kind} /></span>;
 }
 
 export function LocalGraphTimeline({ cursor, onCursorChange, onPause, onPlay, onSpeedChange, onStep,

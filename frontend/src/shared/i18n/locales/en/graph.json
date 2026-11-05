@@ -223,25 +223,30 @@
     },
     "legend": {
       "heading": "Legend",
-      "actionLines": "Long-dashed lines show action occurrences, not document links or citations.",
       "nodes": "Node types",
       "edges": "Relationship line styles",
       "node": {
-        "context": "Context page or version",
+        "context": "Context document",
+        "version": "Document version",
+        "agent": "Agent document",
         "library": "Library material",
-        "conversation": "Conversation or activity",
+        "conversation": "Chat or activity record",
         "folder": "Folder",
-        "seed": "Seed",
-        "agent": "Agent document"
+        "seed": "This document"
       },
       "edge": {
         "link": "Link",
         "citation": "Citation",
         "coAccess": "Often read together",
         "membership": "Folder membership",
-        "action": "Action occurrence"
+        "action": "Action occurrence",
+        "removed": "Removed relationship"
       },
-      "meanings": "Relationship meanings"
+      "edgeNote": {
+        "action": "Recorded activity such as creating, editing, reviewing, searching and citing"
+      },
+      "history": "History marks",
+      "eventTarget": "Current event target"
     },
     "timeline": {
       "heading": "Timeline",
@@ -610,18 +615,17 @@
       "title": "Legend and metric meaning",
       "shapes": "Node colors and shapes",
       "context": "Context document",
-      "library": "Library document",
+      "library": "Library material",
       "cluster": "Aggregate cluster · larger means more documents",
       "lines": "Relationship line styles",
-      "knowledge": "Knowledge relationship",
-      "evidence": "Evidence relationship",
-      "crossFolder": "Cross-folder relationship",
       "size": "Node size metric",
       "visibleRelationMetric": "Node size: relationships shown in this map (bounded square-root scale).",
       "linksMetric": "Node size: Referenced by N visible documents (bounded square-root scale).",
       "evidenceMetric": "Node size: visible evidence relationship count (bounded square-root scale).",
       "uniformMetric": "Node size is uniform for this lens; it does not encode importance.",
-      "agent": "Agent document"
+      "agent": "Agent document",
+      "link": "Link",
+      "citation": "Citation"
     },
     "enums": {
       "context": "Context",
@@ -752,6 +756,7 @@
     "chips": {
       "context": "Context",
       "library": "Library",
+      "agent": "Agent",
       "cluster": "Cluster",
       "folder_cluster": "Folder",
       "link_cluster": "Cluster",
@@ -763,7 +768,10 @@
       "line": {
         "link": "Links (solid line)",
         "citation": "Citations and sources (dashed line)",
-        "other": "Other relationships"
+        "other": "Other relationships",
+        "coAccess": "Read together (dotted line)",
+        "membership": "Folder membership (dashed line)",
+        "action": "Actions (long dashes)"
       }
     },
     "drawer": {

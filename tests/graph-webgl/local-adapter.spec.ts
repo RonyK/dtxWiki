@@ -282,7 +282,7 @@ async function nodePixels(page: Page, id: string): Promise<{ painted: number; br
 }
 
 async function nodeShapePixels(page: Page, id: string): Promise<{
-  center: number[]; ring: number[]; middle: number[]; corner: number[];
+  center: number[]; ring: number[]; middle: number[]; corner: number[]; axis: number[];
 }> {
   await page.evaluate((nodeId) => window.__graphLocalFixture.detail(nodeId), id);
   const point = await page.evaluate((nodeId) => window.__graphLocalFixture.node(nodeId).point, id);
@@ -301,7 +301,8 @@ async function nodeShapePixels(page: Page, id: string): Promise<{
     const pixel = (x: number, y: number) => Array.from(context.getImageData(Math.round(center.x) + x, Math.round(center.y) + y, 1, 1).data).slice(0, 3);
     // A 3 px point at camera ratio 1/6 is ~7.35 px in radius: the square's
     // (6,6) corner is outside a circle, and a folder's (0,0) is transparent.
-    return { center: pixel(0, 0), ring: pixel(6, 0), middle: pixel(4, 2), corner: pixel(6, 6) };
+    // Only a diamond reaches (9,0) on its axis (√2 × 7.35 ≈ 10.4 px).
+    return { center: pixel(0, 0), ring: pixel(6, 0), middle: pixel(4, 2), corner: pixel(6, 6), axis: pixel(9, 0) };
   }, { encoded: screenshot.toString("base64"), point });
 }
 
@@ -624,7 +625,7 @@ for (const forcedColors of [false, true]) {
     await page.emulateMedia({ forcedColors: forcedColors ? "active" : "none" });
     const errors = await mountFixture(page);
     await page.evaluate(() => window.__graphLocalFixture.kinds());
-    expect(await page.evaluate(() => window.__graphLocalFixture.counts())).toEqual({ nodes: 7, relations: 0 });
+    expect(await page.evaluate(() => window.__graphLocalFixture.counts())).toEqual({ nodes: 8, relations: 0 });
     await testInfo.attach(`local-actual-kinds-${forcedColors ? "forced" : "light"}.png`, {
       body: await page.locator("#graph").screenshot(), contentType: "image/png",
     });
@@ -635,35 +636,42 @@ for (const forcedColors of [false, true]) {
     const folder = await nodeShapePixels(page, "kind:4");
     const conversation = await nodeShapePixels(page, "kind:5");
     const seed = await nodeShapePixels(page, "kind:6");
+    const agent = await nodeShapePixels(page, "kind:7");
     await testInfo.attach(`local-actual-kinds-${forcedColors ? "forced" : "light"}-pixels.json`, {
-      body: JSON.stringify({ context, contextVersion, libraryVersion, libraryArtifact, folder, conversation, seed }),
+      body: JSON.stringify({ context, contextVersion, libraryVersion, libraryArtifact, folder, conversation, seed, agent }),
       contentType: "application/json",
     });
     const isWhite = (pixel: number[]) => pixel.every((channel) => channel > 245);
     expect(isWhite(context.corner), "Context is a circle, not a square").toBe(true);
-    expect(isWhite(contextVersion.corner), "Context versions retain the Context circle").toBe(true);
+    expect(isWhite(contextVersion.corner), "A Context version is a triangle, not a square").toBe(true);
+    expect(isWhite(context.axis), "Context is a circle, not a diamond").toBe(true);
+    expect(isWhite(conversation.axis), "Chat/activity records are diamonds").toBe(false);
+    expect(isWhite(conversation.corner), "A diamond leaves the square corner empty").toBe(true);
     expect(isWhite(libraryVersion.corner), "Real library_item_version must paint its square corner").toBe(false);
     expect(isWhite(libraryArtifact.corner), "Real library_artifact must paint its square corner").toBe(false);
     expect(isWhite(folder.center), "Folder ring center must remain unfilled").toBe(true);
     expect(isWhite(folder.ring), "Folder ring outline must still paint").toBe(false);
     if (forcedColors) {
       expect(isWhite(context.center), "Context remains a filled point in forced colors").toBe(false);
-      expect(isWhite(conversation.center), "Conversation bullseye has a filled center").toBe(false);
+      // An Agent disc keeps a thin outline once colours are forced.
+      expect(isWhite(agent.center), "Agent bullseye has a filled center").toBe(false);
       // The border program's 2 px antialias blends the narrow gap into gray at
       // this zoom. Require a strong actual gap, not a pure-white center sample.
-      expect(Math.min(...conversation.middle), "Conversation bullseye has a contrasting inner gap").toBeGreaterThan(150);
-      expect(Math.min(...conversation.middle) - Math.max(...context.middle), "The bullseye gap must differ visibly from a Context's filled circle").toBeGreaterThan(150);
-      expect(isWhite(conversation.ring), "Conversation bullseye retains its outer ring").toBe(false);
-      expect(isWhite(context.middle), "Conversation's gap is distinct from the Context filled circle").toBe(false);
+      expect(Math.min(...agent.middle), "Agent bullseye has a contrasting inner gap").toBeGreaterThan(150);
+      expect(Math.min(...agent.middle) - Math.max(...context.middle), "The bullseye gap must differ visibly from a Context's filled circle").toBeGreaterThan(150);
+      expect(isWhite(agent.ring), "Agent bullseye retains its outer ring").toBe(false);
+      expect(isWhite(context.middle), "The Agent gap is distinct from the Context filled circle").toBe(false);
     } else {
       const isPurple = ([red, green, blue]: number[]) => red > 75 && red < 190 && green < 125 && blue > 110 && blue > red;
       const isTeal = ([red, green, blue]: number[]) => red < 90 && green > 100 && blue > 75 && blue < 200 && green > red;
-      const isOrange = ([red, green, blue]: number[]) => red > 180 && green > 45 && green < 150 && blue < 80;
+      const isAmber = ([red, green, blue]: number[]) => red > 180 && green > 45 && green < 150 && blue < 80;
+      const isSky = ([red, green, blue]: number[]) => red < 70 && green > 100 && green < 180 && blue > 170;
       expect(isPurple(context.center)).toBe(true);
-      expect(isPurple(contextVersion.center), "context_page_version must not fall into conversation orange").toBe(true);
-      expect(isTeal(libraryVersion.center), "library_item_version must not fall into conversation orange").toBe(true);
-      expect(isTeal(libraryArtifact.center), "library_artifact must not fall into conversation orange").toBe(true);
-      expect(isOrange(conversation.center)).toBe(true);
+      expect(isPurple(contextVersion.center), "context_page_version keeps the Context colour").toBe(true);
+      expect(isTeal(libraryVersion.center), "library_item_version must not fall into the chat/activity colour").toBe(true);
+      expect(isTeal(libraryArtifact.center), "library_artifact must not fall into the chat/activity colour").toBe(true);
+      expect(isSky(conversation.center)).toBe(true);
+      expect(isAmber(agent.center), "Agent documents use the Agent colour").toBe(true);
       expect(isPurple(seed.center)).toBe(true);
       expect(seed.ring[2], "Seed outline must use contrast ink instead of a subpixel border").toBeLessThan(100);
     }

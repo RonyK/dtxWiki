@@ -2998,14 +2998,23 @@ describe("Cosmos Map interaction contracts", () => {
     expect(selection?.[0]).toMatchObject({ highlightedPointIndices: [1, 2, 0], highlightedLinkIndices: [2, 0, 1] });
   });
 
-  it.each(["light", "dark"])("uses a contrasting %s focus ring and disables hover rings", async (mode) => {
+  it.each(["light", "dark"])("draws a contrasting %s selection ring that follows the glyph, not the native circle", async (mode) => {
     document.documentElement.setAttribute("data-theme", mode);
     try {
-      await mount();
+      const input = columns();
+      input.nodeKinds[1] = 1; // "b" is a Library document: a square glyph.
+      const adapter = await mount(input);
       expect(createGraph.mock.calls[0][1]).toMatchObject({
-        focusedPointRingColor: mode === "dark" ? "#f8fafc" : "#0f172a",
-        hoveredPointRingColor: mode === "dark" ? "#f8fafc" : "#0f172a", renderHoveredPointRing: false,
+        focusedPointRingColor: [0, 0, 0, 0], renderHoveredPointRing: false,
       });
+      const ring = [...document.querySelectorAll<SVGSVGElement>("[data-workspace-map-selection-ring]")].at(-1)!;
+      expect(ring.style.display).toBe("none");
+      adapter.select("b");
+      const [gap, band] = ring.querySelectorAll("path");
+      expect(band).toHaveAttribute("stroke", mode === "dark" ? "#f8fafc" : "#0f172a");
+      expect(gap).toHaveAttribute("stroke", mode === "dark" ? "#0f172a" : "#ffffff");
+      expect(ring.style.display).toBe("block");
+      expect(band.getAttribute("d")!.split("L")).toHaveLength(4);
     } finally { document.documentElement.removeAttribute("data-theme"); }
   });
 

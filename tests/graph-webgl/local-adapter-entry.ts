@@ -136,18 +136,21 @@ Object.assign(window, {
         ["context_page", "Context"], ["context_page_version", "Context version"],
         ["library_item_version", "Library version"], ["library_artifact", "Library artifact"],
         ["workspace_tree_node", "Folder"], ["mcp_chat_session", "Conversation"],
-        ["context_page", "Seed Context"],
+        ["context_page", "Seed Context"], ["agent_page", "Agent"],
       ];
       replaceScene({
         nodes: kinds.map(([kind, label], index) => ({
           id: `kind:${index}`, entity_kind: kind, entity_id: `kind-${index}`, label,
-          family: kind === "workspace_tree_node" ? "structural" : kind === "mcp_chat_session" ? "chat" : "document", is_seed: index === 6,
+          family: kind === "workspace_tree_node" ? "structural" : kind === "mcp_chat_session" ? "chat"
+            : kind === "agent_page" ? "agent" : "document", is_seed: index === 6,
         })),
         edges: [],
       });
       for (let index = 0; index < 6; index++) {
         adapter.pin(`kind:${index}`, true, { x: (index % 3 - 1) * 140, y: index < 3 ? 100 : -100 });
       }
+      // Inside the existing pinned extent, so fitting the scene keeps its camera.
+      adapter.pin("kind:7", true, { x: -140, y: 0 });
       adapter.fit();
     },
     node: (id: string) => {

@@ -35,7 +35,7 @@ vi.mock("@sigma/node-border", () => ({
 vi.mock("@sigma/node-square", () => ({
   NodeSquareProgram: class { drawLabel = state.nativeSquareLabel; },
 }));
-vi.mock("sigma/rendering", () => ({ NodeCircleProgram: class {} }));
+vi.mock("sigma/rendering", () => ({ NodeCircleProgram: class {}, createNodeCompoundProgram: () => class {} }));
 vi.mock("../edgePrograms", () => ({ LOCAL_EDGE_PROGRAMS: {} }));
 vi.mock("../layout", () => ({ createLocalLayout: vi.fn(() => state.layout) }));
 vi.mock("sigma", () => ({
@@ -69,6 +69,8 @@ vi.mock("sigma", () => ({
     graphToViewport(point: unknown) { return point; }
     scaleSize(size: number) { return size; }
     getCanvases() { return { nodes: state.nodeCanvas! }; }
+    createCanvasContext() { return this; }
+    resize() { return this; }
     viewportToGraph(point: unknown) { return point; }
     getBBox() { return { x: [-10, 10], y: [-10, 10] }; }
     setCustomBBox = state.setCustomBBox;
@@ -664,15 +666,22 @@ describe("Local Sigma interactions", () => {
     },
   );
 
-  it("renders Context versions as Context points and structural folders as hollow rings", () => {
+  it("renders Context versions as purple triangles, folders as rings, and keeps a history event's glyph", () => {
     adapter.replaceScene({ nodes: [
-      { id: "version", entity_id: "version", entity_kind: "context_page_version", family: "document", label: "Version" },
+      { id: "version", entity_id: "version", entity_kind: "context_page_version", family: "document", label: "Version",
+        highlighted: true },
       { id: "folder", entity_id: "folder", entity_kind: "workspace_tree_node", family: "structural", label: "Folder" },
     ], edges: [] });
     expect(state.sigma.graph.getNodeAttributes("context_page_version:version")).toMatchObject({
-      color: "#7c3aed", type: "circle",
+      color: "#7c3aed", type: "triangle", shape: "triangle",
     });
     expect(state.sigma.graph.getNodeAttributes("workspace_tree_node:folder").type).toBe("folder");
+    // A history event is marked by the ring layer; the glyph and size stay.
+    const reducer = state.sigma.settings.nodeReducer as (key: string, data: Record<string, unknown>) => Record<string, unknown>;
+    const attributes = state.sigma.graph.getNodeAttributes("context_page_version:version");
+    expect(reducer("context_page_version:version", attributes)).toMatchObject({
+      type: "triangle", size: attributes.size, highlighted: true,
+    });
   });
 
   it("keeps non-color shape distinctions for Library, Agent, conversations and folders in forced colors", () => {

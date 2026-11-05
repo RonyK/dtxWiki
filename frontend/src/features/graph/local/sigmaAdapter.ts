@@ -2,13 +2,14 @@ import { createNodeBorderProgram } from "@sigma/node-border";
 import { NodeSquareProgram } from "@sigma/node-square";
 import Graph from "graphology";
 import Sigma from "sigma";
-import { NodeCircleProgram } from "sigma/rendering";
+import { NodeCircleProgram, createNodeCompoundProgram } from "sigma/rendering";
 import type { SigmaEdgeEventPayload, SigmaNodeEventPayload, SigmaStageEventPayload } from "sigma/types";
-import { colorToArray } from "sigma/utils";
+import { colorToArray, floatColor } from "sigma/utils";
 
 import type { GraphRenderScene, GraphPoint, GraphViewport } from "../shared/rendererTypes";
 import { createGraphHoverChip, GRAPH_EDGE_CHIP_OFFSET_PX, graphEdgeChipAnchor } from "../shared/hoverChip";
-import { readGraphTokens } from "../shared/graphTokens";
+import { GRAPH_NODE_VISUALS, GRAPH_REMOVED_EDGE_COLOR, readGraphTokens, type GraphNodeShape } from "../shared/graphTokens";
+import { FORCED_OUTLINE_INSETS, GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, TRIANGLE_RADIUS_FACTOR, drawShapeRing } from "../shared/nodeShapes";
 import { LOCAL_EDGE_PROGRAMS } from "./edgePrograms";
 import { createLocalLayout, type LocalLayout } from "./layout";
 import { buildLocalScene, type LocalScene, type LocalSceneNode, type LocalSceneEdge } from "./sceneInput";
@@ -61,13 +62,83 @@ class LocalSquareNodeProgram extends NodeSquareProgram {
     (context, data, settings) => settings.defaultDrawNodeLabel(context, data, settings);
 }
 
-/** Rotate the square mesh: a distinct Agent glyph in every color mode. */
+/** Rotate the square mesh: the chat/activity glyph in every color mode. */
 class LocalDiamondNodeProgram extends LocalSquareNodeProgram {
   override getDefinition(): ReturnType<NodeSquareProgram["getDefinition"]> {
     const definition = super.getDefinition();
     return { ...definition, CONSTANT_DATA: definition.CONSTANT_DATA.map(([angle]) => [angle - Math.PI / 4]) };
   }
 }
+
+// The square program's mesh with three vertices on a circle. Sigma's disc
+// radius is 2 × size in its corrected space, so the triangle's circumradius is
+// 2 × TRIANGLE_RADIUS_FACTOR × size; `scale` shrinks it for an inner outline.
+const TRIANGLE_VERTEX_SHADER = (scale: number) => `
+attribute vec4 a_id;
+attribute vec4 a_color;
+attribute vec2 a_position;
+attribute float a_size;
+attribute float a_angle;
+
+uniform mat3 u_matrix;
+uniform float u_sizeRatio;
+uniform float u_cameraAngle;
+uniform float u_correctionRatio;
+
+varying vec4 v_color;
+
+const float bias = 255.0 / 254.0;
+
+void main() {
+  float size = a_size * u_correctionRatio / u_sizeRatio * ${(2 * TRIANGLE_RADIUS_FACTOR * scale).toFixed(4)};
+  float angle = a_angle + u_cameraAngle;
+  vec2 diffVector = size * vec2(cos(angle), sin(angle));
+  vec2 position = a_position + diffVector;
+  gl_Position = vec4((u_matrix * vec3(position, 1)).xy, 0, 1);
+
+  #ifdef PICKING_MODE
+  v_color = a_id;
+  #else
+  v_color = a_color;
+  #endif
+
+  v_color.a *= bias;
+}
+`;
+
+/** A filled, upward triangle: one point in a document's history. */
+function createTriangleNodeProgram(scale = 1, colorAttribute: "color" | "surfaceColor" = "color") {
+  return class LocalTriangleNodeProgram extends LocalSquareNodeProgram {
+    override getDefinition(): ReturnType<NodeSquareProgram["getDefinition"]> {
+      const definition = super.getDefinition();
+      // Graph space points y up, so π/2 is the top vertex on screen.
+      const top = Math.PI / 2;
+      return {
+        ...definition,
+        VERTICES: 3,
+        VERTEX_SHADER_SOURCE: TRIANGLE_VERTEX_SHADER(scale),
+        CONSTANT_DATA: [[top], [top + (2 * Math.PI) / 3], [top + (4 * Math.PI) / 3]],
+      };
+    }
+
+    override processVisibleItem(nodeIndex: number, startIndex: number, data: Parameters<NodeSquareProgram["processVisibleItem"]>[2]) {
+      const array = this.array;
+      array[startIndex++] = data.x;
+      array[startIndex++] = data.y;
+      array[startIndex++] = data.size;
+      array[startIndex++] = floatColor(String((data as unknown as Record<string, unknown>)[colorAttribute] ?? data.color));
+      array[startIndex++] = nodeIndex;
+    }
+  };
+}
+const TriangleNodeProgram = createTriangleNodeProgram();
+// Forced colours: an Agent version keeps its triangle and gains the same thin
+// inner outline as an Agent disc (outer band, surface gap, inner fill).
+const OutlinedTriangleNodeProgram = createNodeCompoundProgram([
+  createTriangleNodeProgram(),
+  createTriangleNodeProgram(FORCED_OUTLINE_INSETS.triangle[0], "surfaceColor"),
+  createTriangleNodeProgram(FORCED_OUTLINE_INSETS.triangle[1]),
+], (context, data, settings) => settings.defaultDrawNodeLabel(context, data, settings), () => undefined);
 
 const FolderNodeProgram = createNodeBorderProgram({
   borders: [
@@ -81,15 +152,22 @@ const SeedNodeProgram = createNodeBorderProgram({
     { size: { fill: true }, color: { attribute: "color" } },
   ],
 });
-// In forced colors, shape still distinguishes a conversation from a Context:
-// a bullseye, versus a solid point, Library square, and hollow folder ring.
-const ConversationNodeProgram = createNodeBorderProgram({
+// Forced colours: an Agent disc keeps a thin outline, gap and inner fill, so
+// it still differs from a Context disc when every colour is the same ink.
+const OutlinedCircleNodeProgram = createNodeBorderProgram({
   borders: [
-    { size: { value: 0.2 }, color: { attribute: "color" } },
-    { size: { value: 0.25 }, color: { attribute: "surfaceColor" } },
+    { size: { value: 1 - FORCED_OUTLINE_INSETS.circle[0] }, color: { attribute: "color" } },
+    { size: { value: FORCED_OUTLINE_INSETS.circle[0] - FORCED_OUTLINE_INSETS.circle[1] }, color: { attribute: "surfaceColor" } },
     { size: { fill: true }, color: { attribute: "color" } },
   ],
 });
+
+/** Sigma program per glyph; forced colours outline Agent shapes. */
+function nodeProgramType(shape: GraphNodeShape, forcedOutline: boolean): string {
+  if (forcedOutline && shape === "circle") return "outlinedCircle";
+  if (forcedOutline && shape === "triangle") return "outlinedTriangle";
+  return shape === "ring" ? "folder" : shape;
+}
 
 function finitePoint(point: GraphPoint | undefined): point is GraphPoint {
   return Boolean(point && Number.isFinite(point.x) && Number.isFinite(point.y));
@@ -208,21 +286,20 @@ export function createSigmaGraphAdapter(
   };
 
   const nodeAttributes = (node: LocalSceneNode) => {
-    const kind = localNodeVisualKind(node.entityKind, node.family);
+    const visual = GRAPH_NODE_VISUALS[localNodeVisualKind(node.entityKind, node.family)];
+    const color = tokens.node[visual.color];
     return {
       size: node.radiusPx,
-      color: tokens.node[kind],
-      quietColor: quietColor(tokens.node[kind], tokens.surface),
+      color,
+      quietColor: quietColor(color, tokens.surface),
       borderColor: ink,
       surfaceColor: tokens.surface,
       quietBorderColor: quietColor(ink, tokens.surface),
       isSeed: node.isSeed,
       label: node.label,
-      type: node.isSeed ? "seed"
-        : kind === "library" ? "square"
-        : kind === "agent" ? "diamond"
-        : kind === "folder" ? "folder"
-        : kind === "conversation" && mode === "forced" ? "conversation" : "circle",
+      // The emphasis ring follows the drawn glyph; a seed is a disc.
+      shape: node.isSeed ? "circle" : visual.shape,
+      type: node.isSeed ? "seed" : nodeProgramType(visual.shape, visual.forcedOutline && mode === "forced"),
     };
   };
   const edgeAttributes = (edge: LocalSceneEdge, label: string) => ({
@@ -298,9 +375,11 @@ export function createSigmaGraphAdapter(
       circle: NodeCircleProgram,
       square: LocalSquareNodeProgram,
       diamond: LocalDiamondNodeProgram,
+      triangle: TriangleNodeProgram,
       seed: SeedNodeProgram,
       folder: FolderNodeProgram,
-      conversation: ConversationNodeProgram,
+      outlinedCircle: OutlinedCircleNodeProgram,
+      outlinedTriangle: OutlinedTriangleNodeProgram,
     },
     edgeProgramClasses: LOCAL_EDGE_PROGRAMS,
     defaultEdgeType: "link",
@@ -440,10 +519,10 @@ export function createSigmaGraphAdapter(
       return {
         ...data,
         hidden: presentation?.hidden ?? false,
-        type: presentation?.highlighted ? "seed" : data.type,
-        size: presentation?.highlighted ? Number(data.size) + 2 : data.size,
+        // A history event keeps its glyph; the ring layer marks it instead.
+        highlighted: Boolean(presentation?.highlighted),
         color: quiet ? data.quietColor : data.color,
-        borderColor: presentation?.highlighted ? tokens.edge.action : quiet ? data.quietBorderColor : data.borderColor,
+        borderColor: quiet ? data.quietBorderColor : data.borderColor,
         label: importantLabel || (showOrdinaryLabels && !quiet) ? data.label : null,
         forceLabel: importantLabel,
       };
@@ -455,7 +534,7 @@ export function createSigmaGraphAdapter(
         ...data,
         size: presentation?.highlighted ? 2.5 : hoveredId === key ? Number(data.size) * 1.5 : data.size,
         type: presentation?.removed ? "action" : data.type,
-        color: presentation?.removed ? "#dc2626" : presentation?.highlighted ? tokens.edge.action : quiet ? data.quietColor : data.color,
+        color: presentation?.removed ? GRAPH_REMOVED_EDGE_COLOR : presentation?.highlighted ? tokens.highlight : quiet ? data.quietColor : data.color,
         forceLabel: Boolean(presentation?.eventCaption),
         hidden: presentation?.hidden ?? false,
       };
@@ -463,6 +542,39 @@ export function createSigmaGraphAdapter(
   });
 
   const sigma = renderer;
+  // Emphasis rings sit above the glyphs and below the titles. Sigma sizes and
+  // clears nothing here, so each frame repaints only the current rings.
+  // Sigma accepts layer placement here at runtime; its declared type omits it.
+  // Its constructor already sized the built-in layers: size this one too.
+  sigma.createCanvasContext("rings", { afterLayer: "nodes" } as Parameters<Sigma["createCanvasContext"]>[1]);
+  sigma.resize(true);
+  const drawRings = () => {
+    const canvas = sigma.getCanvases().rings;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
+    context.save();
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.restore();
+    if (destroyed || contextLost) return;
+    const active = activeId();
+    const activeKey = active ? localScene.keyByGraphId.get(active) : undefined;
+    for (const key of graph.nodes()) {
+      const display = sigma.getNodeDisplayData(key) as (ReturnType<typeof sigma.getNodeDisplayData> & { highlighted?: boolean }) | undefined;
+      const selected = key === activeKey;
+      if (!display || display.hidden || (!display.highlighted && !selected)) continue;
+      const attributes = graph.getNodeAttributes(key);
+      const center = sigma.graphToViewport({ x: Number(attributes.x), y: Number(attributes.y) });
+      const radius = sigma.scaleSize(display.size);
+      const shape = attributes.shape as GraphNodeShape;
+      if (display.highlighted) drawShapeRing(context, shape, center.x, center.y, radius, tokens.highlight, tokens.surface);
+      // A selected event target keeps both: the selection ring sits outside.
+      if (selected) {
+        drawShapeRing(context, shape, center.x, center.y, radius, tokens.selection, tokens.surface,
+          display.highlighted ? GRAPH_RING_GAP_PX + GRAPH_RING_WIDTH_PX : 0);
+      }
+    }
+  };
   sigma.on("beforeRender", () => {
     labelBounds.length = 0;
     priorityLabelsPrepared = false;
@@ -532,7 +644,10 @@ export function createSigmaGraphAdapter(
     hoveredId = null;
     chip.hide();
   }
-  sigma.on("afterRender", updateHoverChip);
+  sigma.on("afterRender", () => {
+    drawRings();
+    updateHoverChip();
+  });
   const endDrag = (cancelled = false) => {
     if (!draggingKey) return;
     const key = draggingKey;

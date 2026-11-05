@@ -6,14 +6,18 @@ import {
   workspaceMapCommunityIdentityKey,
   type WorkspaceMapCommunityOutcome,
 } from "../map/communityJob";
-import type { WorkspaceMapColumns } from "../map/sceneColumns";
+import { WORKSPACE_MAP_NODE_KIND, type WorkspaceMapColumns } from "../map/sceneColumns";
 import { createGraphHoverChip, GRAPH_EDGE_CHIP_OFFSET_PX, graphEdgeChipAnchor } from "../shared/hoverChip";
 import { readGraphTokens } from "../shared/graphTokens";
+import { GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, outlinePathData, shapeOutline } from "../shared/nodeShapes";
 import { sameGraphVisibleIdentity, type GraphPoint, type GraphViewport, type GraphVisibleIdentity } from "../shared/rendererTypes";
 import { canAnimateWorkspaceRelationLayout } from "../shared/workspaceLayoutPolicy";
 import { assertWorkspaceMapWithinBudget, isWorkspaceMapWithinBudget, WORKSPACE_MAP_DEFAULT_BUDGET, type WorkspaceMapBudget } from "../shared/workspaceMapBudget";
 import { sameWorkspaceMapIndexedGeometry } from "../shared/workspaceMapGeometry";
-import { buildCosmosRelationColors, buildCosmosSceneBuffers, incidentStar, isReadableWorkspaceMapScene, type CosmosSceneBuffers } from "./cosmosScene";
+import {
+  buildCosmosRelationColors, buildCosmosSceneBuffers, buildWorkspacePointImages, incidentStar,
+  isReadableWorkspaceMapScene, type CosmosSceneBuffers,
+} from "./cosmosScene";
 import { buildWorkspaceRelationCollisionBasis, buildWorkspaceRelationForceConfig, type WorkspaceRelationCollisionBasis } from "./relationPhysics";
 import { detectWorkspaceMapWebGL } from "./webglSupport";
 import { createInitialWorkspaceCamera, type InitialWorkspaceCamera } from "./initialCamera";
@@ -190,7 +194,7 @@ export function createWorkspaceCosmosAdapter(
   // The explicit renderer budget bounds forces as well as drawing. This is
   // not a target-hardware performance qualification. Folders remain metadata.
   const canAnimateLayout = () => canAnimateWorkspaceRelationLayout(columns.nodeIds.length, budget);
-  let buffers = buildCosmosSceneBuffers(columns, tokens, budget);
+  let buffers = buildCosmosSceneBuffers(columns, tokens, budget, { forcedColors: options.forcedColors });
   // Canonical worker/public/snapshot units never depend on GPU capability.
   // Resolve this SDK-only conversion before the first coordinate upload.
   let nativeSpace = createWorkspaceNativeCoordinateSpace(WORKSPACE_MAP_CANONICAL_SPACE_SIZE * 2);
@@ -277,6 +281,7 @@ export function createWorkspaceCosmosAdapter(
   // metadata updates must not accumulate aliases for all intermediate IDs.
   const retiredPinIds = new Map<string, number>();
   let labelLayer: HTMLDivElement | null = null;
+  let selectionRing: { svg: SVGSVGElement; gap: SVGPathElement; ring: SVGPathElement } | null = null;
   let labelElements: HTMLSpanElement[] = [];
   let rankedLabelIndices: number[] = [];
   let labelIndices: number[] = [];
@@ -424,7 +429,9 @@ export function createWorkspaceCosmosAdapter(
     pointGreyoutColor: keepOverviewContext() ? tokens.node.folder : undefined,
     pointGreyoutOpacity: keepOverviewContext() ? 0.3 : undefined,
     linkGreyoutOpacity: keepOverviewContext() ? 0.08 : 0.1,
-    focusedPointRingColor: interactionInk,
+    // The selection ring is drawn by the shape-following overlay below, like
+    // the Context graph's; the native ring is always a circle, so hide it.
+    focusedPointRingColor: [0, 0, 0, 0],
     hoveredPointRingColor: interactionInk,
     renderHoveredPointRing: false,
     hoveredPointCursor: "pointer",
@@ -589,6 +596,9 @@ export function createWorkspaceCosmosAdapter(
       else updateLabels(undefined, true);
     },
   });
+
+  const pointImages = buildWorkspacePointImages(tokens);
+  if (pointImages) graph.setImageData(pointImages);
 
   function readPositions(): Float32Array {
     return nativeSpace.fromNativePositions(graph.getPointPositions());
@@ -1161,6 +1171,10 @@ export function createWorkspaceCosmosAdapter(
     writePositions(next.positions);
     graph.setPointColors(next.pointColors);
     graph.setPointShapes(next.pointShapes);
+    if (pointImages) {
+      graph.setPointImageIndices(next.pointImageIndices);
+      graph.setPointImageSizes(next.pointImageSizes);
+    }
     // Draw and pick the emphasised sizes; layout, FA2 units and collision keep reading pointSizes.
     graph.setPointSizes(next.drawPointSizes);
     graph.setLinks(next.links);
@@ -1176,7 +1190,9 @@ export function createWorkspaceCosmosAdapter(
         const getFrame = graph.getTrackedPointPositionsFrame.bind(graph);
         const owner = workspaceMapCommunityIdentityKey(columns);
         trackedPositions = createWorkspaceTrackedPositions({
-          getFrame: () => destroyed || contextLost || simulationFailed || (!showLabels && hoveredIndex === null && hoveredEdge === null) || document.visibilityState === "hidden"
+          getFrame: () => destroyed || contextLost || simulationFailed
+            || (!showLabels && hoveredIndex === null && hoveredEdge === null && activeIndex() === null)
+            || document.visibilityState === "hidden"
             ? null : getFrame(),
           onPositions(positions) {
             if (destroyed || contextLost || simulationFailed || owner !== workspaceMapCommunityIdentityKey(columns)) return;
@@ -1282,7 +1298,8 @@ export function createWorkspaceCosmosAdapter(
   }
 
   function updateLabels(positions?: Float32Array, reprojectOnly = false) {
-    if (!ready || destroyed || contextLost || !labelLayer || (!showLabels && hoveredIndex === null && hoveredEdge === null)) return;
+    if (!ready || destroyed || contextLost || !labelLayer
+      || (!showLabels && hoveredIndex === null && hoveredEdge === null && activeIndex() === null)) return;
     const now = performance.now();
     // Hover/focus may change faster than the 5Hz timer. They still share one
     // bounded GPU label readback budget, rather than adding per-pointer reads.
@@ -1388,6 +1405,29 @@ export function createWorkspaceCosmosAdapter(
     }
   }
 
+  function attachSelectionRing() {
+    const namespace = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(namespace, "svg");
+    svg.setAttribute("aria-hidden", "true");
+    svg.dataset.workspaceMapSelectionRing = "";
+    Object.assign(svg.style, {
+      // Above the title boxes, which are opaque and may sit beside the point.
+      position: "absolute", inset: "0", width: "100%", height: "100%", zIndex: "3",
+      pointerEvents: "none", overflow: "visible", display: "none",
+    });
+    const path = (stroke: string, width: number) => {
+      const element = document.createElementNS(namespace, "path");
+      element.setAttribute("fill", "none");
+      element.setAttribute("stroke", stroke);
+      element.setAttribute("stroke-width", String(width));
+      element.setAttribute("stroke-linejoin", "miter");
+      svg.appendChild(element);
+      return element;
+    };
+    selectionRing = { svg, gap: path(tokens.surface, GRAPH_RING_GAP_PX), ring: path(tokens.selection, GRAPH_RING_WIDTH_PX) };
+    container.appendChild(svg);
+  }
+
   function attachLabelLayer() {
     labelLayer = document.createElement("div");
     labelLayer.setAttribute("aria-hidden", "true");
@@ -1438,15 +1478,41 @@ export function createWorkspaceCosmosAdapter(
     if (hadHover && !destroyed && !contextLost) { trackHover(); options.callbacks.onHover(null); }
   }
 
+  // Native picks resolve asynchronously, so a hovered index can outlive its
+  // row or meet a not-yet-placed one. Name nothing rather than throw from a
+  // pointer callback inside the native frame.
+  function trackedPoint(index: number): [number, number] | undefined {
+    const position: [number, number] | undefined = usesCpuLayout()
+      ? [buffers.positions[index * 2], buffers.positions[index * 2 + 1]] : cachedLabelPositions?.get(index);
+    return position && Number.isFinite(position[0]) && Number.isFinite(position[1]) ? position : undefined;
+  }
+
+  /**
+   * The active point's ring follows its glyph (a Library square or a disc),
+   * 2px clear of it, in the selection ink. The active point is always a
+   * priority label candidate, so its tracked position is already bounded.
+   */
+  function updateSelectionRing() {
+    if (!selectionRing) return;
+    const index = destroyed || contextLost || !ready ? null : activeIndex();
+    const position = index === null ? undefined : trackedPoint(index);
+    if (index === null || !position) {
+      selectionRing.svg.style.display = "none";
+      return;
+    }
+    const [x, y] = projectPoint(position);
+    const library = columns.nodeKinds[index] === WORKSPACE_MAP_NODE_KIND.library;
+    // The native square fills 0.8 of the point radius; discs fill all of it.
+    const radius = buffers.drawPointSizes[index] / 2 * (library ? 0.8 : 1);
+    const shape = library ? "square" : "circle";
+    selectionRing.gap.setAttribute("d", outlinePathData(shapeOutline(shape, x, y, radius, GRAPH_RING_GAP_PX / 2)));
+    selectionRing.ring.setAttribute("d", outlinePathData(shapeOutline(shape, x, y, radius, GRAPH_RING_GAP_PX + GRAPH_RING_WIDTH_PX / 2)));
+    selectionRing.svg.style.display = "block";
+  }
+
   function updateHoverChip() {
-    // Native picks resolve asynchronously, so a hovered index can outlive its
-    // row or meet a not-yet-placed one. Name nothing rather than throw from a
-    // pointer callback inside the native frame.
-    const point = (index: number): [number, number] | undefined => {
-      const position: [number, number] | undefined = usesCpuLayout()
-        ? [buffers.positions[index * 2], buffers.positions[index * 2 + 1]] : cachedLabelPositions?.get(index);
-      return position && Number.isFinite(position[0]) && Number.isFinite(position[1]) ? position : undefined;
-    };
+    updateSelectionRing();
+    const point = trackedPoint;
     if (hoveredIndex !== null) {
       const position = point(hoveredIndex);
       if (position) {
@@ -1549,6 +1615,7 @@ export function createWorkspaceCosmosAdapter(
       const active = activeIndex();
       if (active === null || !cachedLabelPositions?.has(active)) updateLabels();
     }
+    updateSelectionRing();
   }
 
   function getViewport(): GraphViewport | null {
@@ -1620,6 +1687,7 @@ export function createWorkspaceCosmosAdapter(
     dataCommitted = true;
     initializeRelationCollision();
     if (pendingCommunity) applyCommunity(pendingCommunity);
+    attachSelectionRing();
     attachLabelLayer();
     // fitView reads the committed GPU positions. A fit in the same JS turn as
     // render can use the pre-upload empty bounds and leave the graph off-center.
@@ -1746,6 +1814,8 @@ export function createWorkspaceCosmosAdapter(
       trackedPositions?.destroy(); trackedPositions = null;
       labelLayer?.remove();
       labelLayer = null;
+      selectionRing?.svg.remove();
+      selectionRing = null;
       labelElements = [];
       cachedLabelPositions = null;
       graph.destroy();
@@ -1807,7 +1877,7 @@ export function createWorkspaceCosmosAdapter(
       assertExplicitForceAtlas2Supported(nextColumns.nodeIds.length, options.physics);
       initialCamera?.cancel();
       const sameIdentity = sameGraphVisibleIdentity(columns.identity, nextColumns.identity);
-      const next = buildCosmosSceneBuffers(nextColumns, tokens, budget);
+      const next = buildCosmosSceneBuffers(nextColumns, tokens, budget, { forcedColors: options.forcedColors });
       const sameScope = columns.identity.actorId === nextColumns.identity.actorId
         && columns.identity.workspaceId === nextColumns.identity.workspaceId;
       if (sameIdentity && sameWorkspaceMapIndexedGeometry(columns, nextColumns)) {

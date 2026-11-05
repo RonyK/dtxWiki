@@ -467,27 +467,7 @@ body[data-focus-mode="true"] .main-surface {
 .graph-local-relation-chip:focus-visible,
 .graph-local-label-toggle:focus-visible { outline: 2px solid var(--context); outline-offset: 2px; }
 
-.graph-local-relation-chip-link { --relation-ink: #64748b; }
-.graph-local-relation-chip-citation { --relation-ink: #0f9f8f; }
-.graph-local-relation-chip-coAccess { --relation-ink: #ea580c; }
-.graph-local-relation-chip-membership { --relation-ink: #64748b; }
-.graph-local-relation-chip-action { --relation-ink: #7c3aed; }
-
-.graph-local-relation-line {
-  display: inline-block;
-  width: 18px;
-  border-top: 2px solid var(--relation-ink);
-}
-.graph-local-relation-chip-citation .graph-local-relation-line { border-top-style: dashed; }
-.graph-local-relation-chip-coAccess .graph-local-relation-line { border-top-style: dotted; }
-.graph-local-relation-chip-membership .graph-local-relation-line { border-top-style: dashed; }
-.graph-local-relation-chip-action .graph-local-relation-line {
-  height: 2px;
-  border: 0;
-  background: repeating-linear-gradient(to right, var(--relation-ink) 0 10px, transparent 10px 13px);
-}
-.graph-local-action-legend { display: flex; align-items: center; gap: 6px; }
-.graph-local-action-legend .graph-local-relation-line { flex-shrink: 0; }
+.graph-local-relation-line { flex: 0 0 auto; }
 
 .graph-local-relation-count {
   padding: 1px 5px;
@@ -666,6 +646,12 @@ body[data-focus-mode="true"] .main-surface {
   font-size: 11px;
 }
 
+.graph-legend-groups ul.graph-legend-stack { flex-direction: column; flex-wrap: nowrap; }
+.graph-legend-groups li > span { display: grid; min-width: 0; }
+.graph-legend-groups li small { color: var(--ink-soft, var(--ink-muted)); font-size: 10.5px; }
+.graph-legend-groups .local-history-symbol { flex: 0 0 22px; width: 22px; height: 22px; }
+.graph-legend-groups .local-history-symbol svg { width: 13px; height: 13px; }
+
 .graph-local-node-cue {
   display: inline-block;
   flex: 0 0 auto;
@@ -673,38 +659,18 @@ body[data-focus-mode="true"] .main-surface {
   height: 16px;
 }
 
-.graph-edge-swatch {
+.graph-node-cue,
+.graph-edge-cue {
   display: inline-block;
   flex: 0 0 auto;
-  width: 26px;
-  height: 0;
-  border-top: 2px solid var(--ink-muted);
+  overflow: visible;
 }
 
-.graph-edge-swatch-evidence,
-.graph-edge-swatch-action { border-top-style: dashed; }
-.graph-edge-swatch-activity { border-top-style: dotted; }
-.graph-edge-swatch-action { border-top-width: 3px; }
-
-.graph-kind-cue,
-.graph-action-cue {
-  display: inline-grid;
-  place-items: center;
-  flex: 0 0 auto;
-  min-width: 24px;
-  height: 18px;
-  border: 1px solid currentColor;
-  border-radius: 4px;
-  color: var(--ink);
-  font-size: 11px;
-  font-weight: 900;
+/* An Agent's thin inner outline is its only cue once colours are forced. */
+.graph-node-cue-forced-outline { display: none; }
+@media (forced-colors: active) {
+  .graph-node-cue-forced-outline { display: inline; }
 }
-
-.graph-action-cue { border-style: dashed; }
-.graph-action-cue-authoring { border-style: dashed; }
-.graph-action-cue-governance { border-radius: 50%; border-style: solid; }
-.graph-action-cue-retrieval { border-style: dotted; }
-.graph-action-cue-tool { border-style: double; }
 
 .graph-canvas-toolbar {
   display: flex;
@@ -772,20 +738,62 @@ body[data-focus-mode="true"] .main-surface {
   min-height: 300px;
 }
 
-/* The WebGL renderer reads optional --graph-* tokens with literal fallbacks.
-   Match the existing document theme as well as an isolated graph theme. */
-:root[data-theme="dark"] .graph-canvas,
+/* One set of graph tokens for the WebGL canvases and every legend, list cue
+   and chip outside them (graphTokens.ts keeps the same values as fallbacks).
+   Colour = whose: Context purple, Agent amber, Library teal, chat/activity
+   and read-together sky, folder grey. Shape and dash carry the rest. */
+:root {
+  --graph-surface: #ffffff;
+  --graph-node-context: #7c3aed;
+  --graph-node-library: #0f9f8f;
+  --graph-node-agent: #d97706;
+  --graph-node-conversation: #0284c7;
+  --graph-node-folder: #64748b;
+  --graph-edge-link: #64748b;
+  --graph-edge-citation: #0f9f8f;
+  --graph-edge-co-access: #0284c7;
+  --graph-edge-membership: #8391a7;
+  --graph-edge-action: #475569;
+  --graph-highlight: #7c3aed;
+  --graph-selection: #0f172a;
+}
+
+:root[data-theme="dark"],
 .graph-canvas[data-graph-theme="dark"] {
-  color: #e5e7eb;
   --graph-surface: #0f172a;
   --graph-node-context: #8b5cf6;
   --graph-node-library: #0d9488;
-  --graph-node-agent: #60a5fa;
+  --graph-node-agent: #f59e0b;
+  --graph-node-conversation: #38bdf8;
   --graph-node-folder: #94a3b8;
   --graph-edge-link: #64748b;
   --graph-edge-citation: #0d9488;
+  --graph-edge-co-access: #38bdf8;
   --graph-edge-membership: #64748b;
-  --graph-edge-action: #a78bfa;
+  --graph-edge-action: #94a3b8;
+  --graph-highlight: #a78bfa;
+  --graph-selection: #f8fafc;
+}
+
+:root[data-theme="dark"] .graph-canvas,
+.graph-canvas[data-graph-theme="dark"] { color: #e5e7eb; }
+
+@media (forced-colors: active) {
+  :root {
+    --graph-surface: Canvas;
+    --graph-node-context: CanvasText;
+    --graph-node-library: CanvasText;
+    --graph-node-agent: CanvasText;
+    --graph-node-conversation: CanvasText;
+    --graph-node-folder: CanvasText;
+    --graph-edge-link: CanvasText;
+    --graph-edge-citation: CanvasText;
+    --graph-edge-co-access: CanvasText;
+    --graph-edge-membership: CanvasText;
+    --graph-edge-action: CanvasText;
+    --graph-highlight: CanvasText;
+    --graph-selection: Highlight;
+  }
 }
 
 .graph-canvas-status {
@@ -1247,16 +1255,12 @@ body[data-focus-mode="true"] .main-surface {
   }
 
   .graph-canvas-frame { background: Canvas; }
-  .graph-kind-cue,
-  .graph-action-cue,
   .graph-local-relation-chip,
   .graph-local-label-toggle { border-color: CanvasText; }
-  /* The SVG already uses the system ink/surface read by GraphView. Automatic
-     recoloring would fill the inner conversation ring with the outer ink. */
-  .graph-local-node-cue { forced-color-adjust: none; }
-  .graph-edge-swatch { border-top-color: CanvasText; }
-  .graph-local-relation-chip-action { --relation-ink: CanvasText; }
-  .graph-local-relation-chip-action .graph-local-relation-line { forced-color-adjust: none; }
+  /* The SVG cues already use the system ink/surface. Automatic recoloring
+     would fill an Agent's inner outline gap with the outer ink. */
+  .graph-node-cue,
+  .graph-edge-cue { forced-color-adjust: none; }
   .graph-list-select[aria-pressed="true"] { outline: 3px solid Highlight; }
 }
 
@@ -1925,33 +1929,6 @@ body[data-focus-mode="true"] .main-surface {
   color: var(--context);
 }
 
-.workspace-graph-node-cue {
-  display: inline-block;
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  background: var(--graph-node-context, #7c3aed);
-  border-radius: 50%;
-}
-
-.workspace-graph-node-cue.is-library {
-  background: var(--graph-node-library, #0f9f8f);
-  border-radius: 2px;
-}
-
-.workspace-graph-node-cue.is-agent,
-.workspace-map-member-dot.is-agent {
-  background: var(--graph-node-agent, #2563eb);
-  border-radius: 0;
-  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-}
-
-.workspace-graph-node-cue.is-cluster {
-  width: 20px;
-  height: 20px;
-  background: var(--graph-node-folder, #64748b);
-}
-
 .workspace-graph-stage {
   min-width: 0;
   min-height: 0;
@@ -2031,18 +2008,7 @@ body[data-focus-mode="true"] .main-surface {
 }
 .workspace-map-folder-bundles li { flex-wrap: wrap; margin: 6px 0; }
 .workspace-map-folder-bundles small { flex-basis: 100%; }
-.workspace-map-member-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 6px;
-  border-radius: 50%;
-  background: var(--graph-node-context, #7c3aed);
-}
-.workspace-map-member-dot.is-library {
-  border-radius: 0;
-  background: var(--graph-node-library, #0f9f8f);
-}
+.workspace-map-member-dot { width: 12px; height: 12px; margin-right: 6px; vertical-align: -2px; }
 
 .workspace-graph-orphan-summary button {
   min-height: 44px;
@@ -2249,35 +2215,8 @@ p.workspace-graph-list-window-hint {
 
 /* Sidebar results, chips and the Details relation flow. Shapes, colours and
    strokes reuse the map and legend tokens (cosmosScene, GRAPH_EDGE_PATTERN). */
-.workspace-graph-node-cue.is-inline {
-  width: 10px;
-  height: 10px;
-}
-
-.workspace-graph-node-cue.is-inline.is-library { border-radius: 1px; }
-.workspace-graph-node-cue.is-inline.is-cluster { width: 12px; height: 12px; }
-
-/* Dashes are drawn, not bordered: a short dashed border can render as one
-   dash. 4px dash / 3px gap keeps the map's 7/4 rhythm at list size. */
-.workspace-graph-edge-cue {
-  --edge-ink: var(--graph-edge-link, #64748b);
-  position: relative;
-  display: inline-block;
-  flex: none;
-  width: 16px;
-  height: 2px;
-  background: var(--edge-ink);
-}
-
-.workspace-graph-edge-cue[data-visual="citation"] {
-  --edge-ink: var(--graph-edge-citation, #0f9f8f);
-  background: repeating-linear-gradient(to right, var(--edge-ink) 0 4px, transparent 4px 7px);
-}
-
-.workspace-graph-edge-cue[data-visual="other"] {
-  --edge-ink: var(--ink-muted);
-  background: repeating-linear-gradient(to right, var(--edge-ink) 0 2px, transparent 2px 4px);
-}
+.workspace-graph-node-cue.is-inline { width: 12px; height: 12px; }
+.workspace-graph-edge-cue { width: 16px; }
 
 .workspace-graph-chip {
   --chip-ink: var(--ink-muted);
@@ -2299,10 +2238,14 @@ p.workspace-graph-list-window-hint {
 
 .workspace-graph-chip[data-node-kind="context"] { --chip-ink: var(--graph-node-context, #7c3aed); }
 .workspace-graph-chip[data-node-kind="library"] { --chip-ink: var(--graph-node-library, #0f9f8f); }
+.workspace-graph-chip[data-node-kind="agent"] { --chip-ink: var(--graph-node-agent, #d97706); }
 .workspace-graph-chip[data-node-kind="cluster"] { --chip-ink: var(--graph-node-folder, #64748b); }
 .workspace-graph-chip[data-visual="link"] { --chip-ink: var(--graph-edge-link, #64748b); }
 .workspace-graph-chip[data-visual="citation"] { --chip-ink: var(--graph-edge-citation, #0f9f8f); }
-.workspace-graph-chip .workspace-graph-node-cue.is-inline { width: 8px; height: 8px; }
+.workspace-graph-chip[data-visual="coAccess"] { --chip-ink: var(--graph-edge-co-access, #0284c7); }
+.workspace-graph-chip[data-visual="membership"] { --chip-ink: var(--graph-edge-membership, #8391a7); }
+.workspace-graph-chip[data-visual="action"] { --chip-ink: var(--graph-edge-action, #475569); }
+.workspace-graph-chip .workspace-graph-node-cue.is-inline { width: 10px; height: 10px; }
 .workspace-graph-chip .workspace-graph-edge-cue { width: 12px; }
 
 .workspace-graph-row-meta {
@@ -2492,6 +2435,21 @@ p.workspace-graph-list-window-hint {
   background: repeating-linear-gradient(to bottom, var(--edge-ink) 0 4px, transparent 4px 7px);
 }
 
+.workspace-graph-relation-stroke[data-visual="coAccess"] {
+  --edge-ink: var(--graph-edge-co-access, #0284c7);
+  background: repeating-linear-gradient(to bottom, var(--edge-ink) 0 2px, transparent 2px 4px);
+}
+
+.workspace-graph-relation-stroke[data-visual="membership"] {
+  --edge-ink: var(--graph-edge-membership, #8391a7);
+  background: repeating-linear-gradient(to bottom, var(--edge-ink) 0 3px, transparent 3px 6px);
+}
+
+.workspace-graph-relation-stroke[data-visual="action"] {
+  --edge-ink: var(--graph-edge-action, #475569);
+  background: repeating-linear-gradient(to bottom, var(--edge-ink) 0 7px, transparent 7px 9px);
+}
+
 .workspace-graph-relation-stroke[data-visual="other"] {
   --edge-ink: var(--ink-muted);
   background: repeating-linear-gradient(to bottom, var(--edge-ink) 0 2px, transparent 2px 4px);
@@ -2629,6 +2587,21 @@ p.workspace-graph-list-window-hint {
   stroke-dasharray: 4 3;
 }
 
+.workspace-graph-flow-stroke[data-visual="coAccess"] {
+  stroke: var(--graph-edge-co-access, #0284c7);
+  stroke-dasharray: 2 3;
+}
+
+.workspace-graph-flow-stroke[data-visual="membership"] {
+  stroke: var(--graph-edge-membership, #8391a7);
+  stroke-dasharray: 3 3;
+}
+
+.workspace-graph-flow-stroke[data-visual="action"] {
+  stroke: var(--graph-edge-action, #475569);
+  stroke-dasharray: 7 2;
+}
+
 .workspace-graph-flow-stroke[data-visual="other"] {
   stroke: var(--ink-muted);
   stroke-dasharray: 2 2;
@@ -2636,6 +2609,9 @@ p.workspace-graph-list-window-hint {
 
 .workspace-graph-flow-arrow { fill: var(--graph-edge-link, #64748b); }
 .workspace-graph-flow-arrow[data-visual="citation"] { fill: var(--graph-edge-citation, #0f9f8f); }
+.workspace-graph-flow-arrow[data-visual="coAccess"] { fill: var(--graph-edge-co-access, #0284c7); }
+.workspace-graph-flow-arrow[data-visual="membership"] { fill: var(--graph-edge-membership, #8391a7); }
+.workspace-graph-flow-arrow[data-visual="action"] { fill: var(--graph-edge-action, #475569); }
 .workspace-graph-flow-arrow[data-visual="other"] { fill: var(--ink-muted); }
 
 .workspace-graph-flow-row {
@@ -3413,24 +3389,8 @@ p.workspace-graph-list-window-hint {
     outline: 3px solid Highlight;
   }
 
-  .workspace-map-member-dot,
-  .workspace-map-member-dot.is-library,
-  .workspace-map-member-dot.is-agent,
-  .workspace-graph-node-cue.is-agent {
-    background: CanvasText;
-    border: 1px solid CanvasText;
-    forced-color-adjust: none;
-  }
-
-  /* Shape and dash keep their meaning when colours are forced. */
-  .workspace-graph-node-cue.is-inline {
-    background: CanvasText;
-    forced-color-adjust: none;
-  }
-
   .workspace-graph-chip { border-color: CanvasText; }
 
-  .workspace-graph-edge-cue[data-visual],
   .workspace-graph-relation-stroke[data-visual] {
     --edge-ink: CanvasText;
     forced-color-adjust: none;
