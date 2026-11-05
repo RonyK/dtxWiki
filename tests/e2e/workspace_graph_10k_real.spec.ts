@@ -6,7 +6,7 @@ import type { GraphRenderScene } from "../../frontend/src/features/graph/shared/
 import type { GraphQueryPayload, GraphQueryRequest } from "../../frontend/src/shared/api/graph";
 import type { components } from "../../frontend/src/shared/api/types.gen";
 import type { WorkspaceGraphDocumentNode, WorkspaceGraphOverviewRequest, WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
-import { backendBaseUrl, currentWorkspace, e2ePassword, login, enableKnowledgeMapLab } from "./auth";
+import { backendBaseUrl, configureWorkspaceLabs, currentWorkspace, e2ePassword, login, enableKnowledgeMapLab, saveLabsSettings } from "./auth";
 import { createOverviewResponseReader } from "./workspace_graph_response_reader";
 import { expectNativeCounts, installNativeDrawMeter, readNativeDraw } from "./workspace_graph_native_draw";
 
@@ -361,13 +361,10 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
     expect(create.ok()).toBe(true);
     const secondary = (await create.json()).data as { id: string; title: string };
     expect(secondary.id).not.toBe(primary.id);
-    const policies = await page.request.get(`${backendBaseUrl}/api/v1/workspaces/${secondary.id}/settings/policies`);
-    expect(policies.ok()).toBe(true);
-    const graphPolicy = (await policies.json()).data.graph as { revision: string };
-    const enabled = await page.request.patch(`${backendBaseUrl}/api/v1/workspaces/${secondary.id}/settings/policies/batch`, {
-      data: { group: "graph", expected_revision: graphPolicy.revision, changes: { workspace_map_enabled: true } },
+    await configureWorkspaceLabs(page.request, secondary.id, {
+      workspace_map_enabled: true,
+      agent_enabled: true,
     });
-    expect(enabled.ok()).toBe(true);
     const agentInventory = await page.request.get(
       `${backendBaseUrl}/api/v1/workspaces/${secondary.id}/agent/pages?lifecycle_status=active`,
     );
@@ -862,13 +859,14 @@ async function openAccountWorkspaceMapThroughUi(
   await switcher.locator(".workspace-menu-item").filter({ has: page.getByText(workspace.title, { exact: true }) }).click();
   await expect(switcher).not.toBeVisible();
   await expect(page.locator(".workspace-switcher-button")).toHaveAttribute("aria-label", `Switch workspace, current: ${workspace.title}`);
-  // Fresh sign-ins start outside the Map and opt in through the real Labs UI.
+  // Workspace administrators activate the Map through the real Labs save form.
   // A same-actor picker transition already opened its Map: leaving and returning
   // would issue a second overview and abandon the original UI response.
   if (enableLab) {
     await page.locator(`.sidebar-nav a[href="/workspaces/${workspace.id}/settings"]`).click();
-    await page.getByRole("button", { name: "Labs", exact: true }).click();
-    await page.getByRole("checkbox", { name: "Show Knowledge Map menu", exact: true }).check();
+    await page.getByRole("button", { name: "Labs Workspace admin", exact: true }).click();
+    await page.getByRole("checkbox", { name: "Workspace Knowledge Map", exact: true }).check();
+    await saveLabsSettings(page, "graph");
     await page.locator(`.sidebar-nav a[href="/workspaces/${workspace.id}/graph"]`).click();
   }
   await expect(page).toHaveURL(/\/graph$/);

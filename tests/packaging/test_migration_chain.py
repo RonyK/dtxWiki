@@ -16,7 +16,6 @@ from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.services.ops.alembic_migration_graph import (
     code_revisions,
     initialization_script_directory,
-    schema_release_head,
 )
 from backend.services.ops.db_revision_inventory import RETIRED_REVISION_IDS
 from backend.services.ops.revision_rename import LEGACY_REVISION_ALIASES
@@ -36,7 +35,7 @@ CORE_REVISION = "efcbcf724889"
 RELEASE_013_REVISION = "19db79d3e622"
 RELEASE_014_REVISION = "eb86fdacb1bb"
 RELEASE_021_REVISION = "5b7e5c149279"
-CURRENT_HEAD = schema_release_head("0.2.1")
+CURRENT_HEAD = "fec23ff328e6"
 ALEMBIC_REVISION_METADATA = {
     "revision",
     "down_revision",

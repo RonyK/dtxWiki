@@ -190,6 +190,11 @@ class Workspace(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         nullable=False,
         default=False,
     )
+    # Workspace-owned experiments; missing switches are disabled. Graph
+    # switches retain their existing columns as the single source of truth.
+    labs_policy: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
     # Knowledge graph Settings card. The workspace-wide map is an owner
     # choice and starts off; per-document Local Graphs do not depend on it.
     workspace_graph_enabled: Mapped[bool] = mapped_column(

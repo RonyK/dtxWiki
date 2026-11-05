@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "../../../shared/i18n";
 import { isWorkspaceGraphResponse, type WorkspaceGraphScene } from "../../../shared/api/workspaceGraph";
 import { ApiError } from "../../../shared/api/client";
+import * as settingsApi from "../../../shared/api/operations";
+import { invalidateWorkspaceLabsPreferences } from "../../../shared/hooks/useLabsPreferences";
 import * as graphApi from "../../../shared/api/graph";
 import { clearLegacyWorkspaceGraphStorage, clearWorkspaceGraphStorage, workspaceGraphStorageEpoch, workspaceGraphStorageScope } from "../../../shared/lib/workspaceGraphStorage";
 import { WorkspaceGraphScreen } from "../WorkspaceGraphScreen";
@@ -162,6 +164,8 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockReset();
     getWorkspaceGraphCapabilityMock.mockReset();
     invalidateWorkspaceGraphCapability();
+    invalidateWorkspaceLabsPreferences();
+    vi.spyOn(settingsApi, "getSettingsPolicies").mockResolvedValue({ labs: { policy: { workspace_map_enabled: true } } } as unknown as settingsApi.SettingsPolicies);
     window.sessionStorage.clear();
     window.localStorage.clear();
     authState.userId = "actor-one";
@@ -1466,8 +1470,7 @@ describe("WorkspaceGraphScreen", () => {
   });
 
   it.each([false, true])("purges owner restoration when capability revalidation unmounts the Screen (already invalidated: %s)", async (alreadyInvalidated) => {
-    // Exercise workspace capability revalidation after the account's Labs opt-in.
-    window.localStorage.setItem(`dtxwiki:labs:${authState.userId}`, JSON.stringify({ knowledgeMap: true }));
+    // Exercise workspace capability revalidation after Labs activation on the server.
     const enabled = {
       workspace_map: { effective_enabled: true, workspace_enabled: true, service_available: true, reason: "enabled" },
       usage_relation_signals_enabled: true,
@@ -1503,6 +1506,14 @@ describe("WorkspaceGraphScreen", () => {
     act(() => window.dispatchEvent(new Event("pagehide")));
     expect(window.sessionStorage.getItem(key)).toBeNull();
     await act(async () => capabilityResolvers.at(-1)!({ ...enabled, can_manage: false }));
+    expect(screen.getByRole("heading", { name: "We couldn't find that page" })).toBeInTheDocument();
+    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
+    // Restoring owner access starts with a fresh scene, without owner-only
+    // filters saved before revocation.
+    workspaceState.selectedWorkspace = { id: "workspace-one", role: "owner" };
+    view.rerender(tree());
+    await waitFor(() => expect(getWorkspaceGraphCapabilityMock).toHaveBeenCalledTimes(alreadyInvalidated ? 4 : 3));
+    await act(async () => capabilityResolvers.at(-1)!(enabled));
     await findMapLabels("Viewer document");
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2);
     expect(queryWorkspaceGraphMock.mock.calls[1]?.[1]).not.toHaveProperty("search");
@@ -1513,7 +1524,7 @@ describe("WorkspaceGraphScreen", () => {
     if (alreadyInvalidated) {
       await act(async () => capabilityResolvers[0](enabled));
       expect(screen.getByTestId("workspace-graph-canvas")).toBe(canvas);
-      expect(getWorkspaceGraphCapabilityMock).toHaveBeenCalledTimes(3);
+      expect(getWorkspaceGraphCapabilityMock).toHaveBeenCalledTimes(4);
     }
   });
 

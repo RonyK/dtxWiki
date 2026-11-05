@@ -173,7 +173,6 @@ test.describe("Workspace Knowledge Map real-route regression", () => {
         page.request,
         `graph-off-${testInfo.project.name}-${testInfo.retry}-${Date.now()}@example.com`,
       );
-      await enableKnowledgeMapLab(page);
       const workspace = await currentWorkspace(page.request);
       const sceneQueries: string[] = [];
       page.on("request", (request) => {
@@ -185,10 +184,10 @@ test.describe("Workspace Knowledge Map real-route regression", () => {
       await expect(page.getByRole("heading", { name: "Knowledge Map", exact: true }))
         .toBeVisible();
       await expect(page.getByText(
-        "The Knowledge Map is off for this workspace. You can turn it on in Settings.",
+        "Knowledge Map is off for this workspace. You can enable it in Settings > Labs.",
       )).toBeVisible();
       await expect(page.getByRole("link", { name: "Open Settings" }))
-        .toHaveAttribute("href", `/workspaces/${workspace.id}/settings?section=workspace`);
+        .toHaveAttribute("href", `/workspaces/${workspace.id}/settings?section=labs`);
       await expect(page.getByRole("link", { name: /Knowledge Map/ })).toHaveCount(0);
       expect(sceneQueries).toEqual([]);
     });

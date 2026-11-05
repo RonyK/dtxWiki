@@ -21,6 +21,7 @@ import {
 import { i18n, setLocale } from "../../../shared/i18n";
 import { useWorkspaceRoute } from "../../../shared/lib/workspaceRoutes";
 import { SettingsScreen } from "../SettingsScreen";
+import { invalidateWorkspaceGraphCapability } from "../../graph/useWorkspaceGraphCapability";
 
 const BASE = "https://wiki.example.test";
 const LOOPBACK_BASE = "http://127.0.0.1:21080";
@@ -31,6 +32,7 @@ let confirmAnswer = true;
 
 describe("SettingsScreen", () => {
   beforeEach(() => {
+    invalidateWorkspaceGraphCapability();
     vi.restoreAllMocks();
     vi.stubEnv("VITE_API_BASE_URL", BASE);
     // jsdom ships confirm() as a not-implemented stub returning undefined,
@@ -305,12 +307,12 @@ describe("SettingsScreen", () => {
     const agentInjectionNav = policyTabs.getByRole("tab", {
       name: /Agent injection/i,
     });
-    expect(within(agentInjectionNav).getByText("Preview")).toHaveClass(
+    expect(within(agentInjectionNav).getByText("Preview").parentElement).toHaveClass(
       "nav-preview-badge",
     );
     expect(agentInjectionNav).toHaveAttribute(
       "title",
-      expect.stringContaining("Preview: this area is still being refined."),
+      expect.stringContaining("Labs preview: this area is still being refined and may change."),
     );
 
     await user.click(
@@ -3157,15 +3159,15 @@ describe("SettingsScreen", () => {
     const citationRevision = "b".repeat(64);
     const agentRevision = "c".repeat(64);
     const policyState = {
+      labs: { ...policy("labs", "Experimental features", { ask_enabled: false, agent_enabled: false, ask_retrieval_mode: "auto" }), revision: workspaceRevision },
       workspace: {
         ...policy("workspace", "Workspace policy", {
           title: "Workspace",
           goal: "Local-first MCP-native Markdown wiki",
           default_language: "en",
           ask_retrieval_mode: "auto",
-          // UI-04: still present in a real GET response (get_policies still
-          // reads it), but no longer editable through this screen -- see the
-          // dropdown swapped to "Ask retrieval mode" below.
+          // Legacy workspace policy values remain readable, but the Ask
+          // mode is edited only in Labs.
           visibility: "private",
         }),
         revision: workspaceRevision,
@@ -3241,15 +3243,9 @@ describe("SettingsScreen", () => {
       </MemoryRouter>,
     );
 
-    // UI-04: "Visibility" no longer renders here (it's Access & sharing's
-    // field now, the only path that enforces the invariants a visibility
-    // change requires) -- "Ask retrieval mode" exercises the same
-    // literal-dropdown-save mechanism within the same workspace policy card
-    // (unlike "Default language", it has no side effect on which language
-    // the rest of this screen renders in).
-    expect(
-      screen.queryByRole("combobox", { name: "Visibility" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Visibility" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Ask retrieval mode" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /^Labs/ }));
     await user.selectOptions(
       await screen.findByRole("combobox", { name: "Ask retrieval mode" }),
       "keyword",
@@ -3292,7 +3288,7 @@ describe("SettingsScreen", () => {
 
     expect(patchBodies).toEqual([
       {
-        group: "workspace",
+        group: "labs",
         expected_revision: workspaceRevision,
         changes: { ask_retrieval_mode: "keyword" },
       },
@@ -3309,20 +3305,26 @@ describe("SettingsScreen", () => {
     ]);
   });
 
-  it("switches the workspace Knowledge Map from its Settings card", async () => {
+  it("saves experimental features and Knowledge graph in separate Labs sections", async () => {
     const user = userEvent.setup();
     const patchBodies: SettingsPolicyBatchRequest[] = [];
     const graphRevision = "d".repeat(64);
     const policyState = {
       ...basicSettingsPolicies(),
-      graph: {
-        ...policy("graph", "Knowledge graph", {
+      graph: { ...policy("graph", "Knowledge graph", { workspace_map_enabled: false, usage_relation_signals_enabled: true }), revision: graphRevision },
+      labs: {
+        ...policy("labs", "Experimental features", {
+          ask_enabled: false,
+          agent_enabled: false,
+          ask_retrieval_mode: "auto",
           workspace_map_enabled: false,
           usage_relation_signals_enabled: true,
         }),
         revision: graphRevision,
       },
     };
+    let finishGraphSave!: () => void;
+    const graphSave = new Promise<void>((resolve) => { finishGraphSave = resolve; });
     let capabilityRequests = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
@@ -3346,7 +3348,7 @@ describe("SettingsScreen", () => {
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/graph/capability`) {
         capabilityRequests += 1;
         const enabled = Boolean(
-          (policyState.graph.policy as Record<string, unknown>).workspace_map_enabled,
+          (policyState.labs.policy as Record<string, unknown>).workspace_map_enabled,
         );
         return jsonResponse({
           data: {
@@ -3370,7 +3372,9 @@ describe("SettingsScreen", () => {
           String(init?.body),
         ) as SettingsPolicyBatchRequest;
         patchBodies.push(body);
+        if (body.group === "graph" && patchBodies.length === 1) await graphSave;
         applyPolicyBatch(policyState, body);
+        if (body.group === "graph") Object.assign(policyState.labs.policy, body.changes);
         return jsonResponse({ data: policyState });
       }
       if (
@@ -3383,7 +3387,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=workspace`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=labs`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -3404,26 +3408,32 @@ describe("SettingsScreen", () => {
     });
     expect(usageSwitch).toBeChecked();
 
+    const askSwitch = screen.getByRole("checkbox", { name: "Ask" });
+    const agentSwitch = screen.getByRole("checkbox", { name: "Agent" });
+    expect(screen.getByRole("heading", { name: /Experimental features/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Knowledge graph/ })).toBeInTheDocument();
+    await user.click(askSwitch);
+    await user.click(agentSwitch);
+    const mode = screen.getByRole("combobox", { name: "Ask retrieval mode" });
+    await user.selectOptions(mode, "keyword");
     await user.click(mapSwitch);
-    await user.click(
-      within(mapSwitch.closest(".policy-card") as HTMLElement).getByRole(
-        "button",
-        { name: "Save changes" },
-      ),
-    );
-
-    expect(
-      await screen.findByText("Knowledge Map is on for this workspace."),
-    ).toBeInTheDocument();
-    expect(patchBodies).toEqual([
-      {
-        group: "graph",
-        expected_revision: graphRevision,
-        changes: { workspace_map_enabled: true },
-      },
-    ]);
-    // The save dropped the cached answer, so the status was asked again.
-    expect(capabilityRequests).toBe(2);
+    expect(patchBodies).toHaveLength(0);
+    const featureCard = within(askSwitch.closest(".policy-card") as HTMLElement);
+    const graphCard = within(mapSwitch.closest(".policy-card") as HTMLElement);
+    expect(featureCard.queryByRole("checkbox", { name: "Workspace Knowledge Map" })).not.toBeInTheDocument();
+    expect(graphCard.queryByRole("combobox", { name: "Ask retrieval mode" })).not.toBeInTheDocument();
+    await user.click(graphCard.getByRole("button", { name: "Save changes" }));
+    expect(featureCard.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    await act(async () => finishGraphSave());
+    expect(await screen.findByText("Knowledge Map is on for this workspace.")).toBeInTheDocument();
+    expect(patchBodies).toEqual([{ group: "graph", expected_revision: graphRevision, changes: { workspace_map_enabled: true } }]);
+    // Saving one section preserves the other section's pending draft.
+    expect(mode).toHaveValue("keyword");
+    expect(featureCard.getByRole("button", { name: "Save changes" })).toBeEnabled();
+    await user.click(featureCard.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(patchBodies).toHaveLength(2));
+    expect(patchBodies[1]).toEqual({ group: "labs", expected_revision: graphRevision, changes: { ask_enabled: true, ask_retrieval_mode: "keyword", agent_enabled: true } });
+    expect(capabilityRequests).toBe(3);
 
     // The read-together switch saves from the same card.
     await user.click(usageSwitch);
@@ -3433,8 +3443,8 @@ describe("SettingsScreen", () => {
         { name: "Save changes" },
       ),
     );
-    await waitFor(() => expect(patchBodies).toHaveLength(2));
-    expect(patchBodies[1]).toMatchObject({
+    await waitFor(() => expect(patchBodies).toHaveLength(3));
+    expect(patchBodies[2]).toMatchObject({
       group: "graph",
       changes: { usage_relation_signals_enabled: false },
     });
@@ -9141,6 +9151,7 @@ describe("SettingsScreen", () => {
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {
         data: {
+          ...basicSettingsPolicies(),
           workspace: policy("workspace", "Workspace policy"),
           library: policy("library", "Library policy"),
           citation: policy("citation", "Citation policy"),
@@ -9163,6 +9174,64 @@ describe("SettingsScreen", () => {
       },
     };
   }
+
+  it("keeps a pending Labs save and loaded drafts in their original workspace", async () => {
+    const user = userEvent.setup();
+    const otherId = "00000000-0000-4000-8000-000000000002";
+    const first = basicSettingsPolicies();
+    const other = basicSettingsPolicies();
+    other.labs.policy.ask_enabled = true;
+    let finishOther!: (value: unknown) => void;
+    let finishSave!: (value: unknown) => void;
+    const otherLoad = new Promise((resolve) => { finishOther = resolve; });
+    const save = new Promise((resolve) => { finishSave = resolve; });
+    const fetchMock = mockFetch({
+      ...navFixture(false),
+      [`${BASE}/api/v1/workspaces`]: { data: { current_workspace_id: WORKSPACE_ID, workspaces: [
+        workspaceSummary(WORKSPACE_ID, "First", "first"), workspaceSummary(otherId, "Other", "other"),
+      ] } },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: { data: first },
+      [`${BASE}/api/v1/workspaces/${otherId}/settings/policies`]: () => otherLoad,
+      [`PATCH ${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies/batch`]: () => save,
+    });
+    function RoutedSettings() {
+      const workspaceId = useWorkspaceRoute()?.workspaceId ?? null;
+      return <WorkspaceProvider routeWorkspaceId={workspaceId}><WorkspaceRefreshGate>
+        <Link to={`/workspaces/${otherId}/settings?section=labs`}>Other workspace</Link>
+        <SettingsScreen />
+      </WorkspaceRefreshGate></WorkspaceProvider>;
+    }
+    render(<MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=labs`]}><RoutedSettings /></MemoryRouter>);
+    await user.click(await screen.findByRole("checkbox", { name: "Agent" }));
+    const features = () => within(screen.getByRole("checkbox", { name: "Agent" }).closest(".policy-card") as HTMLElement);
+    await user.click(features().getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies/batch`, expect.objectContaining({ method: "PATCH" })));
+    await user.click(screen.getByRole("link", { name: "Other workspace" }));
+    expect(screen.queryByRole("checkbox", { name: "Agent" })).not.toBeInTheDocument();
+    await act(async () => finishOther({ data: other }));
+    expect(await screen.findByRole("checkbox", { name: "Ask" })).toBeChecked();
+    first.labs.policy.agent_enabled = true;
+    await act(async () => finishSave({ data: first }));
+    expect(screen.getByRole("checkbox", { name: "Ask" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Agent" })).not.toBeChecked();
+    expect(features().getByRole("button", { name: "Save changes" })).toBeDisabled();
+  });
+
+  it("blocks a member's direct Labs URL even when saved and browser switches are on", async () => {
+    const fixture = navFixture(false);
+    fixture[`${BASE}/api/v1/workspaces`].data.workspaces[0].role = "editor";
+    fixture[`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`].data.labs.policy = {
+      ask_enabled: true, agent_enabled: true, workspace_map_enabled: true, usage_relation_signals_enabled: true,
+    };
+    window.localStorage.setItem("dtxwiki:labs:user-1", JSON.stringify({ ask: true, agent: true, knowledgeMap: true }));
+    mockFetch(fixture);
+    render(<MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=labs`]}><SettingsScreen /></MemoryRouter>);
+    expect(await screen.findByText("Only workspace administrators can manage and use Labs features.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("navigation", { name: "Settings sections" })).toBeInTheDocument());
+    expect(within(screen.getByRole("navigation", { name: "Settings sections" })).queryByRole("button", { name: /^Labs/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+  });
 
   it("keeps the URL workspace when browsing Labs, MCP access, and content policies", async () => {
     const user = userEvent.setup();
@@ -9205,13 +9274,14 @@ describe("SettingsScreen", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Labs", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "Show Ask menu" })).not.toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Show Agent menu" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Ask" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Agent" })).not.toBeChecked();
 
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    const labs = within(nav).getByRole("button", { name: "Labs" });
+    const labs = within(nav).getByRole("button", { name: "Labs Workspace admin" });
     expect(labs).toHaveAttribute("aria-current", "page");
-    expect(labs.closest(".settings-subnav-group")).toHaveTextContent("Your account");
+    expect(labs.closest(".settings-subnav-group")).toHaveTextContent("This workspace");
+    expect(within(labs).getByText("Workspace admin")).toHaveClass("nav-admin-badge");
 
     await user.click(within(nav).getByRole("button", { name: "Workspace" }));
     await screen.findByRole("heading", { name: "Workspace", level: 1 });
@@ -9220,9 +9290,9 @@ describe("SettingsScreen", () => {
       "experimental",
     );
     expect(within(nav).queryByRole("button", { name: "Workspace" })).not.toBeInTheDocument();
-    await user.click(within(nav).getByRole("button", { name: "Labs" }));
+    await user.click(within(nav).getByRole("button", { name: "Labs Workspace admin" }));
     expect(await screen.findByRole("heading", { name: "Labs", level: 1 })).toBeInTheDocument();
-    expect(screen.getByTestId("settings-navigation-location")).toHaveTextContent("/account/integrations?section=labs");
+    expect(screen.getByTestId("settings-navigation-location")).toHaveTextContent(`/workspaces/${WORKSPACE_ID}/settings?section=labs`);
 
     const navigation = () => within(screen.getByRole("navigation", { name: "Settings sections" }));
     await user.clear(navigation().getByRole("searchbox", { name: "Filter settings sections" }));
@@ -9231,7 +9301,7 @@ describe("SettingsScreen", () => {
     expect(screen.getByTestId("settings-navigation-location")).toHaveTextContent(`/workspaces/${WORKSPACE_ID}/settings/integrations?section=mcp`);
     expect(screen.queryByRole("combobox", { name: "Choose a workspace to set up a connection" })).not.toBeInTheDocument();
 
-    await user.click(navigation().getByRole("button", { name: "Labs" }));
+    await user.click(navigation().getByRole("button", { name: "Labs Workspace admin" }));
     await screen.findByRole("heading", { name: "Labs", level: 1 });
     await user.click(navigation().getByRole("button", { name: /^Content policies/ }));
     expect(await screen.findByRole("tablist", { name: "Content policies" })).toBeInTheDocument();
@@ -9269,8 +9339,11 @@ describe("SettingsScreen", () => {
     });
     expect(deploymentEntry.querySelector(".nav-admin-badge")).not.toBeNull();
 
-    // Workspace-scoped entries must not carry it, or the chip would mean
-    // nothing.
+    const labsEntry = within(nav).getByRole("button", { name: "Labs Workspace admin" });
+    expect(labsEntry.querySelector(".nav-admin-badge")).toHaveTextContent("Workspace admin");
+    expect(within(labsEntry).queryByText("System admin")).not.toBeInTheDocument();
+
+    // A regular workspace entry has no administrator chip.
     const membersEntry = within(nav).getByRole("button", {
       name: /Members & access/,
     });
@@ -9303,7 +9376,9 @@ describe("SettingsScreen", () => {
     expect(
       within(nav).queryByRole("button", { name: /User accounts/ }),
     ).not.toBeInTheDocument();
-    expect(nav.querySelector(".nav-admin-badge")).toBeNull();
+    const labsEntry = await within(nav).findByRole("button", { name: "Labs Workspace admin" });
+    expect(labsEntry.querySelector(".nav-admin-badge")).toHaveTextContent("Workspace admin");
+    expect(within(nav).queryByText("System admin")).not.toBeInTheDocument();
   });
 
   it("shows a viewer read-only attachments without calling a server-admin endpoint", async () => {
@@ -10730,6 +10805,8 @@ function policy(
 
 function basicSettingsPolicies() {
   return {
+    labs: { ...policy("labs", "Experimental features", { ask_enabled: false, agent_enabled: false, ask_retrieval_mode: "auto", workspace_map_enabled: false, usage_relation_signals_enabled: true }), revision: "e".repeat(64) },
+    graph: { ...policy("graph", "Knowledge graph", { workspace_map_enabled: false, usage_relation_signals_enabled: true }), revision: "d".repeat(64) },
     workspace: policy("workspace", "Workspace policy"),
     library: policy("library", "Library policy"),
     citation: policy("citation", "Citation policy"),

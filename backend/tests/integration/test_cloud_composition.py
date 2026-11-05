@@ -1673,6 +1673,7 @@ def test_split_provider_routes_rest_workspace_reads_to_data_db(tmp_path):
                 slug="split",
                 title="Control Workspace",
                 name="Control Workspace",
+                labs_policy={"agent_enabled": True},
             )
         )
 

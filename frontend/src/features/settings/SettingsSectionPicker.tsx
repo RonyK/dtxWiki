@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { CountChip } from "../../shared/components/CountChip";
 import { Dialog } from "../../shared/components/Dialog";
+import { PreviewBadge } from "../../shared/components/PreviewBadge";
 import { SearchField } from "../../shared/components/SearchField";
 import type {
   SettingsDestination,
@@ -35,6 +36,7 @@ export function SettingsSectionPicker({
   showAttachments,
   showDeployment,
   showUsers,
+  showLabs,
   tokenCount,
 }: {
   activeSection: SettingsSection;
@@ -58,9 +60,10 @@ export function SettingsSectionPicker({
         showAttachments,
         showDeployment,
         showUsers,
+        showLabs,
         tokenCount,
       }),
-    [t, consentCount, showAttachments, showDeployment, showUsers, tokenCount],
+    [t, consentCount, showAttachments, showDeployment, showUsers, showLabs, tokenCount],
   );
   const current = sections.find((section) => section.id === activeSection);
   const currentGroup = groups.find((group) => group.id === current?.group);
@@ -181,17 +184,26 @@ export function SettingsSectionPicker({
                               {section.label}
                             </span>
                             {section.preview ? (
-                              <span className="nav-preview-badge">
-                                {section.preview.label}
-                              </span>
+                              <PreviewBadge
+                                description={section.preview.description}
+                                label={section.preview.label}
+                              />
                             ) : null}
                           </span>
-                          {section.adminOnly ? (
-                            <span className="nav-admin-badge">
-                              {t("sectionGroups.adminChip", {
-                                defaultValue: "System admin",
-                              })}
-                            </span>
+                          {section.adminOnly || section.workspaceAdminOnly ? (
+                            <>
+                              {" "}
+                              <span
+                                className="nav-admin-badge"
+                                title={t(section.workspaceAdminOnly
+                                  ? "sectionGroups.workspaceAdminChipTitle"
+                                  : "sectionGroups.adminChipTitle")}
+                              >
+                                {t(section.workspaceAdminOnly
+                                  ? "sectionGroups.workspaceAdminChip"
+                                  : "sectionGroups.adminChip")}
+                              </span>
+                            </>
                           ) : null}
                           {section.badge ? (
                             <span title={section.badgeTitle}>

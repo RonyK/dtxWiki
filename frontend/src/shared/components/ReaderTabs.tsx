@@ -1,6 +1,8 @@
 import type { KeyboardEvent, ReactNode } from "react";
 import { useRef } from "react";
 
+import { PreviewBadge } from "./PreviewBadge";
+
 export type ReaderAccent =
   | "context"
   | "agent"
@@ -139,13 +141,11 @@ export function ReaderTabs<Key extends string>({
             >
               <span>{tab.label}</span>
               {tab.badge ? (
-                <span
-                  aria-hidden="true"
-                  className="nav-preview-badge"
-                  title={tab.badge.title}
-                >
-                  {tab.badge.label}
-                </span>
+                <PreviewBadge
+                  decorative
+                  description={tab.badge.title ?? tab.badge.label}
+                  label={tab.badge.label}
+                />
               ) : null}
               {showCount ? (
                 <>

@@ -6,7 +6,7 @@ import {
   type Page,
 } from "./fixtures";
 
-import { authenticatePage, backendBaseUrl, currentWorkspace, login, signUp, workspaceUrl } from "./auth";
+import { authenticatePage, backendBaseUrl, currentWorkspace, login, saveLabsSettings, signUp, workspaceUrl } from "./auth";
 
 type Surface =
   | { path: string; heading: string; reviewRail?: never; textbox?: never }
@@ -81,6 +81,11 @@ test.describe("UI surface", () => {
 
       await authenticatePage(page, testInfo, surface.path);
       const workspace = await currentWorkspace(page.request);
+      if (surface.path === "/agent") {
+        await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=labs`);
+        await page.getByRole("checkbox", { name: "Agent", exact: true }).check();
+        await saveLabsSettings(page);
+      }
       const suffix = surface.path === "/context/new"
         ? "context/pages/new"
         : surface.path.slice(1);
@@ -177,17 +182,18 @@ test.describe("UI surface", () => {
 
     await page.locator(".topbar-actions").getByRole("link", { name: "Settings", exact: true })
       .click();
-    await page.getByRole("button", { name: "Labs", exact: true }).click();
-    await expect(page).toHaveURL(`/account/integrations?section=labs`);
+    await page.getByRole("button", { name: "Labs Workspace admin", exact: true }).click();
+    await expect(page).toHaveURL(`${workspaceUrl(workspace.id, "settings")}?section=labs`);
     await expect(page.getByRole("heading", { name: "Labs", exact: true }))
       .toBeVisible();
-    const ask = page.getByRole("checkbox", { name: "Show Ask menu", exact: true });
-    const agent = page.getByRole("checkbox", { name: "Show Agent menu", exact: true });
+    const ask = page.getByRole("checkbox", { name: "Ask", exact: true });
+    const agent = page.getByRole("checkbox", { name: "Agent", exact: true });
     await expect(ask).not.toBeChecked();
     await expect(agent).not.toBeChecked();
     await expect(page.getByRole("checkbox", { name: "Show Chats menu", exact: true })).toHaveCount(0);
 
     await ask.check();
+    await saveLabsSettings(page);
     await expectLabsMenus(sidebar, { ask: true, agent: false }, workspace.id);
     await expectLabsCommands(page, { ask: true, agent: false });
 
@@ -195,18 +201,20 @@ test.describe("UI surface", () => {
     await expect(page).toHaveURL(new RegExp(`/workspaces/${workspace.id}/ask$`));
     await expect(page.locator(".ask-main")).toBeVisible();
     await expect(page.getByRole("heading", { name: "We couldn't find that page" })).toHaveCount(0);
-    await page.goto(`/account/integrations?section=labs`);
+    await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=labs`);
 
     await agent.check();
+    await saveLabsSettings(page);
     await expectLabsMenus(sidebar, { ask: true, agent: true }, workspace.id);
     await expectLabsCommands(page, { ask: true, agent: true });
 
     await page.goto(workspaceUrl(workspace.id, "setup"));
     await expect(page.getByText(/^\d+ of 3 · /)).toBeVisible();
     await expect(page.locator(".main-surface").locator(`a[href="${workspaceUrl(workspace.id, "agent")}"]`)).toBeVisible();
-    await page.goto(`/account/integrations?section=labs`);
+    await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=labs`);
 
     await ask.uncheck();
+    await saveLabsSettings(page);
     await expectLabsMenus(sidebar, { ask: false, agent: true }, workspace.id);
     await page.reload();
     await expect(page.getByRole("heading", { name: "Labs", exact: true }))
@@ -219,8 +227,9 @@ test.describe("UI surface", () => {
     await gotoWorkspaceDashboard(page);
     await expect(page.locator(".main-surface").locator(`a[href="${workspaceUrl(workspace.id, "agent")}"]`))
       .toBeVisible();
-    await page.goto(`/account/integrations?section=labs`);
+    await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=labs`);
     await ask.check();
+    await saveLabsSettings(page);
     await page.setViewportSize({ width: 390, height: 844 });
     const mobile = page.getByRole("navigation", { name: "Mobile" });
     const openNavigation = page.getByRole("button", { name: "Open navigation" });
@@ -230,12 +239,14 @@ test.describe("UI surface", () => {
     await expect(mobile).toBeHidden();
 
     await agent.uncheck();
+    await saveLabsSettings(page);
     await openNavigation.click();
     await expectLabsMenus(mobile, { ask: true, agent: false }, workspace.id);
     await page.keyboard.press("Escape");
     await expect(mobile).toBeHidden();
 
     await ask.uncheck();
+    await saveLabsSettings(page);
     await openNavigation.click();
     await expectLabsMenus(mobile, { ask: false, agent: false }, workspace.id);
     await page.keyboard.press("Escape");
@@ -246,7 +257,7 @@ test.describe("UI surface", () => {
     await expectLabsMenus(mobile, { ask: false, agent: false }, workspace.id);
   });
 
-  test("Labs choices stay with their account in the same browser", async ({
+  test("Labs choices stay with their workspace across account sign-ins", async ({
     page,
   }, testInfo) => {
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -256,10 +267,11 @@ test.describe("UI surface", () => {
     await signUp(page.request, firstEmail);
     const firstWorkspace = await currentWorkspace(page.request);
     await page.goto(`${workspaceUrl(firstWorkspace.id, "settings")}?section=labs`);
-    const ask = page.getByRole("checkbox", { name: "Show Ask menu", exact: true });
-    const agent = page.getByRole("checkbox", { name: "Show Agent menu", exact: true });
+    const ask = page.getByRole("checkbox", { name: "Ask", exact: true });
+    const agent = page.getByRole("checkbox", { name: "Agent", exact: true });
     const sidebar = page.getByRole("navigation", { name: "Sidebar" });
     await ask.check();
+    await saveLabsSettings(page);
     await expectLabsMenus(sidebar, { ask: true, agent: false }, firstWorkspace.id);
 
     const firstLogout = await page.request.post(`${backendBaseUrl}/api/v1/auth/logout`);
@@ -271,6 +283,7 @@ test.describe("UI surface", () => {
     await expect(agent).not.toBeChecked();
     await expectLabsMenus(sidebar, { ask: false, agent: false }, secondWorkspace.id);
     await agent.check();
+    await saveLabsSettings(page);
     await expectLabsMenus(sidebar, { ask: false, agent: true }, secondWorkspace.id);
 
     const secondLogout = await page.request.post(`${backendBaseUrl}/api/v1/auth/logout`);

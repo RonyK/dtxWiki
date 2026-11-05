@@ -11,7 +11,7 @@ import {
   type Page,
   type TestInfo,
 } from "./fixtures";
-import { authenticatePage, backendBaseUrl, currentWorkspace, signUp, workspaceUrl } from "./auth";
+import { authenticatePage, backendBaseUrl, configureWorkspaceLabs, currentWorkspace, signUp, workspaceUrl } from "./auth";
 import { evidenceLocatorScreenshot, evidenceScreenshot } from "./evidence";
 
 type Section = "context" | "library" | "agent";
@@ -409,6 +409,7 @@ test.describe("TreeRail document states and personal favorites", () => {
       endpoint(workspace.id, "/library/items"),
       { multipart: { file: { name: "favorite-persistence.txt", mimeType: "text/plain", buffer: Buffer.from("Library favorite persistence fixture.") } } },
     ));
+    await configureWorkspaceLabs(page.request, workspace.id, { agent_enabled: true });
     const agent = await responseData<{ agent_page_id: string; draft_version_id: string }>(await page.request.post(
       endpoint(workspace.id, "/agent/pages"),
       { data: { category: "skill", title: "Favorite persistence Agent", slug: `favorite-${randomUUID()}`, body_markdown: "# Skill\n\nFavorite persistence fixture.", reason: "E2E TreeRail favorites" } },

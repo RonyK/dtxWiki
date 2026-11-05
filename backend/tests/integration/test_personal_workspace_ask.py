@@ -7,6 +7,7 @@ from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models.ask import AskSession
 from backend.models.tree import TreePolicy, WorkspaceTreeNode
+from backend.models.workspace import Workspace
 
 
 def test_ask_sessions_create_a_missing_ask_root_once(page_service):
@@ -30,6 +31,7 @@ def test_ask_sessions_create_a_missing_ask_root_once(page_service):
     # Starter workspaces created by 0.1.4 and earlier have no Ask root or policy;
     # the first Ask session must create them, and later sessions reuse them.
     with page_service.session_factory.begin() as session:
+        session.get(Workspace, workspace_id).labs_policy = {"ask_enabled": True}
         session.execute(
             delete(TreePolicy).where(
                 TreePolicy.workspace_id == workspace_id, TreePolicy.section == "ask"

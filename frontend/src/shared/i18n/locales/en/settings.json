@@ -36,7 +36,9 @@
     "account": "Your account",
     "system": "System administration",
     "adminChip": "System admin",
-    "adminChipTitle": "Server-wide setting, visible to server admins only — not scoped to this workspace."
+    "adminChipTitle": "Server-wide setting, visible to server admins only — not scoped to this workspace.",
+    "workspaceAdminChip": "Workspace admin",
+    "workspaceAdminChipTitle": "Workspace setting, visible only to administrators of this workspace."
   },
   "sections": {
     "workspace": {
@@ -59,7 +61,7 @@
       "label": "Agent injection",
       "description": "What rules and Agent pages reach the AI.",
       "previewBadge": "Preview",
-      "previewDescription": "Preview: this area is still being refined."
+      "previewDescription": "Labs preview: this area is still being refined and may change."
     },
     "review": {
       "label": "Review policy",
@@ -96,7 +98,7 @@
     },
     "labs": {
       "label": "Labs",
-      "description": "Choose which experimental menus appear."
+      "description": "Manage experimental features for this workspace."
     }
   },
   "crossLinks": {
@@ -652,7 +654,7 @@
     "contextWrite": "When knowledge pages can be drafted and published.",
     "agentInjection": "Choose which Agent pages and workspace rules are sent to the AI.",
     "review": "Control review risk scoring, manual review thresholds, risk rules, and per-risk auto-approval delays.",
-    "graph": "Choose whether members can open the workspace-wide Knowledge Map."
+    "graph": "Manage the workspace Knowledge Map and relationship signals."
   },
   "policy": {
     "cardTitles": {
@@ -663,7 +665,8 @@
       "agent_injection": "Agent injection policy",
       "review": "Review risk policy",
       "lint": "Lint rules",
-      "graph": "Knowledge graph"
+      "graph": "Knowledge graph",
+      "labs": "Experimental features"
     },
     "workspace": {
       "title": {
@@ -689,10 +692,6 @@
       "decision": {
         "label": "Review decision",
         "hint": "How workspace policy changes are handled."
-      },
-      "askRetrievalMode": {
-        "label": "Ask retrieval mode",
-        "hint": "Automatic uses the best mode this server can serve; a fixed choice falls back with a notice when it cannot."
       }
     },
     "library": {
@@ -1113,11 +1112,25 @@
     "graph": {
       "workspaceMapEnabled": {
         "label": "Workspace Knowledge Map",
-        "hint": "Let members open the map of published Context and Library documents in this workspace. The Graph tab on each document stays available either way."
+        "hint": "Allow workspace administrators to open the Knowledge Map. Document Graph tabs remain available independently."
       },
       "usageRelationSignalsEnabled": {
         "label": "Read-together relationships",
         "hint": "Show documents that an MCP conversation read one after another, with no more than 30 minutes between reads, as “read together” relationships in Graph tabs, with how many conversations did so and over how many days. Turning this off hides them from Graph tabs at once and removes them everywhere at the next background run, usually within minutes; no new lint link suggestions are made from them. The MCP read history is kept, so turning this back on rebuilds them."
+      }
+    },
+    "labs": {
+      "askEnabled": {
+        "label": "Ask",
+        "hint": "Allow workspace administrators to use Ask in this workspace."
+      },
+      "agentEnabled": {
+        "label": "Agent",
+        "hint": "Allow workspace administrators to use Agent in this workspace."
+      },
+      "askRetrievalMode": {
+        "label": "Ask retrieval mode",
+        "hint": "Automatic uses the best mode this server can serve; a fixed choice falls back with a notice when it cannot."
       }
     }
   },
@@ -2073,7 +2086,8 @@
     "status": {
       "enabled": "Knowledge Map is on for this workspace.",
       "disabled_by_workspace": "Knowledge Map is off for this workspace.",
-      "service_unavailable": "Knowledge Map is temporarily turned off on this server, whatever this setting says."
+      "service_unavailable": "Knowledge Map is temporarily turned off on this server, whatever this setting says.",
+      "permission_denied": "Only workspace administrators can use Knowledge Map."
     }
   },
   "workspacePicker": {
@@ -2114,13 +2128,9 @@
     "expiry": "Expiry"
   },
   "labs": {
-    "title": "Experimental menus",
-    "description": "These features are still being developed. Turn on the menus you want to try.",
-    "showKnowledgeMap": "Show Knowledge Map menu",
-    "knowledgeMapHint": "Also requires a workspace owner to enable Knowledge Map in Settings > Workspace > Knowledge graph.",
-    "showAsk": "Show Ask menu",
-    "showAgent": "Show Agent menu",
-    "savedLocally": "Changes apply immediately and are saved for your account in this browser."
+    "description": "These experimental features are available only to workspace administrators. Changes apply to this workspace after you save.",
+    "ownerOnly": "Only workspace administrators can manage and use Labs features.",
+    "loading": "Loading workspace Labs settings…"
   },
   "userDeletion": {
     "action": "Delete account",

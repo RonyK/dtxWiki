@@ -132,6 +132,7 @@ export type SettingsPolicies = Omit<
   | "review"
   | "lint"
   | "graph"
+  | "labs"
 > & {
   workspace: PolicyCard;
   library: PolicyCard;
@@ -141,6 +142,7 @@ export type SettingsPolicies = Omit<
   review: PolicyCard;
   lint: PolicyCard;
   graph: PolicyCard;
+  labs?: PolicyCard | null;
 };
 
 export type McpClientStatus = "active" | "disabled";
@@ -153,7 +155,8 @@ export type SettingsPolicyGroup =
   | "agent_injection"
   | "review"
   | "lint"
-  | "graph";
+  | "graph"
+  | "labs";
 
 export type SearchScope =
   | "all"
@@ -523,7 +526,7 @@ export async function updateSettingsPolicyBatch(
     if (
       !(error instanceof ApiError) ||
       error.status !== 404 ||
-      request.group === "library"
+      (request.group === "library" || request.group === "labs")
     ) {
       throw error;
     }

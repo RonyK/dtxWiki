@@ -53,9 +53,11 @@ def workspace_graph_capability(
     if row is None:
         raise ReadNotFoundError("workspace not found")
     workspace_enabled, usage_signals_enabled = row
-    # The operator switch is reported first: when both are off, the owner
-    # cannot fix it from Settings, so the reason must not suggest they can.
-    if not service_available:
+    # Members cannot use this experiment. For administrators the operator
+    # switch takes precedence: an unavailable service cannot be fixed in Labs.
+    if not role_allows(actor_role, "owner"):
+        reason = "permission_denied"
+    elif not service_available:
         reason = "service_unavailable"
     elif not workspace_enabled:
         reason = "disabled_by_workspace"

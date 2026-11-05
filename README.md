@@ -40,10 +40,9 @@ review withdraws the request; request review again when the draft is ready.
   notes, and decisions behind it. When you return to a project, you can understand
   how it got there as well as what needs to happen next.
 - **Explore the connections.** Open a Context page's Local Graph to follow
-  links, citations, and documents read together. A workspace owner can enable
-  the Workspace Knowledge Map (Preview) in **Settings > Workspace > Knowledge graph**.
-  To try it, also turn on **Show Knowledge Map menu** in **Settings > Labs**;
-  this experimental menu is off by default for each account and browser.
+  links, citations, and documents read together. Workspace administrators can
+  enable and use the Workspace Knowledge Map (Preview) in **Settings > Labs**.
+  Experimental features are saved on the server for each workspace.
 - **See what your AI did.** **Chats** shows the searches, reads, and updates
   performed through dtxWiki's MCP tools. Inspect each call's inputs, results,
   and linked materials, and review changes in document history. Chats records

@@ -112,6 +112,7 @@ import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
 import { CountChip } from "../../shared/components/CountChip";
 import { ListPanelHeader } from "../../shared/components/ListPanelHeader";
+import { PreviewBadge } from "../../shared/components/PreviewBadge";
 import { PaginatedCredentialList } from "../../shared/components/PaginatedCredentialList";
 import { RouteLoading } from "../../shared/components/RouteLoading";
 import { ReaderTabs } from "../../shared/components/ReaderTabs";
@@ -120,6 +121,7 @@ import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { LintRulesSection } from "./LintRulesSection";
 import { LabsSection } from "./LabsSection";
+import { invalidateWorkspaceLabsPreferences } from "../../shared/hooks/useLabsPreferences";
 import { DeploymentUpdateCard } from "./DeploymentUpdateCard";
 import { AdminJobsSection } from "./AdminJobsSection";
 import { AdminUserRecoverySection } from "./AdminUserRecoverySection";
@@ -635,6 +637,9 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
     // consents, the issued secret and the create form are the account's, and
     // wiping them on a workspace switch would contradict the banner that says
     // this section is not limited to the current workspace (D-01v2-g).
+    setPolicyBusyKey(null);
+    setPolicySaved(null);
+    setPolicySaveError(null);
     setSelectedAppSetup(null);
     setMcpAppCatalog(null);
     setMcpAppCatalogError(null);
@@ -657,6 +662,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
         "You have unsaved changes here. Leave without saving them?",
     }),
   );
+  const [policiesWorkspaceId, setPoliciesWorkspaceId] = useState<string | null>(null);
   const {
     data: policies,
     error,
@@ -674,6 +680,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
     },
     [routeWorkspaceId, scope],
     {
+      onSuccess: () => setPoliciesWorkspaceId(routeWorkspaceId),
       errorMessage: t("errors.loadFailed", {
         defaultValue: "Could not load Settings.",
       }),
@@ -688,6 +695,11 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
     );
   const activeSection: SettingsSection = scope === "account" ? routeSettings.section === "labs" ? "labs" : "mcp" : scope === "server" ? (["deployment", "users", "jobs", "attachments"].includes(routeSettings.section) ? routeSettings.section : "deployment") : routeSettings.section;
   const activePolicyTab = routeSettings.tab;
+  useEffect(() => {
+    if (scope === "account" && routeSettings.section === "labs" && navigationWorkspaceId) {
+      navigate(`${workspacePath(navigationWorkspaceId, "settings")}?section=labs`, { replace: true });
+    }
+  }, [scope, routeSettings.section, navigationWorkspaceId, navigate]);
   useEffect(() => {
     // An unrecognised ?section= silently rendered Workspace while the bogus
     // value stayed in the address bar, so a mistyped or retired link looked
@@ -1948,6 +1960,11 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
     }
     const validation = policyGroupValidationMessages(group, Object.fromEntries(updates.map(({field, value}) => [field.key, value])));
     if (Object.keys(validation).length) { setPolicySaveError(Object.values(validation)[0]); return false; }
+    const saveWorkspaceKey = selectedWorkspaceId;
+    const saveGeneration = workspaceStateGeneration.current;
+    const canApplySave = () => settingsMountedRef.current
+      && selectedWorkspaceKeyRef.current === saveWorkspaceKey
+      && workspaceStateGeneration.current === saveGeneration;
     const busyKey = `${group}:*`;
     setPolicyBusyKey(busyKey);
     setPolicySaveError(null);
@@ -1958,7 +1975,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
       if (!workspaceId) {
         throw new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable);
       }
-      const revision = policies?.[group].revision ?? "0".repeat(64);
+      const revision = policies?.[group]?.revision ?? "0".repeat(64);
       updatedPolicies = await updateSettingsPolicyBatch(workspaceId, {
         group,
         expected_revision: revision,
@@ -1966,16 +1983,16 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
           updates.map((update) => [update.field.key, update.value]),
         ),
       });
+      if (group === "graph" || group === "labs") {
+        invalidateWorkspaceLabsPreferences(workspaceId);
+        invalidateWorkspaceGraphCapability(workspaceId);
+      }
+      if (!canApplySave()) return true;
       const languageUpdate = updates.find(
         (update) => group === "workspace" && update.field.key === "default_language",
       );
       if (languageUpdate) {
         setLocale(String(languageUpdate.value), { persist: false });
-      }
-      if (group === "graph") {
-        // Navigation, /graph and Context links read the switch from this
-        // cache; drop it so they follow the save without a reload.
-        invalidateWorkspaceGraphCapability(workspaceId);
       }
       // Set in the same tick the write resolves, exactly where the page-level
       // banner used to be set; only where it renders has changed.
@@ -1989,6 +2006,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
       policySavedTimer.current = setTimeout(() => setPolicySaved(null), 3000);
       saved = true;
     } catch (caught) {
+      if (!canApplySave()) return false;
       if (
         caught instanceof ApiError &&
         caught.body.error_code === "settings_revision_conflict"
@@ -2001,10 +2019,10 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
     } finally {
       // Batch writes are all-or-nothing; adopting the returned card revisions
       // rebaselines every draft from the same committed transaction.
-      if (updatedPolicies) {
-        setPolicies(updatedPolicies);
+      if (canApplySave()) {
+        if (updatedPolicies) setPolicies(updatedPolicies);
+        setPolicyBusyKey(null);
       }
-      setPolicyBusyKey(null);
     }
     // The caller shows the confirmation inline, beside its own Save button.
     return saved;
@@ -2012,7 +2030,6 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
 
   function settingsDestination(section: SettingsSection) {
     if (["deployment", "users"].includes(section) || scope === "server" && ["jobs", "attachments"].includes(section)) return "/settings/server";
-    if (section === "labs") return "/account/integrations";
     if (section === "mcp") {
       return navigationWorkspaceId
         ? workspacePath(navigationWorkspaceId, "settings/integrations")
@@ -2070,6 +2087,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
     showAttachments: true,
     showDeployment: true,
     showUsers: true,
+    showLabs: true,
     tokenCount: activeTokenCount,
   });
   const activeDestination = (() => {
@@ -3621,6 +3639,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
               showAttachments={canViewAttachments}
               showDeployment={isServerAdmin}
               showUsers={isServerAdmin}
+              showLabs={canEditPolicies && Boolean(routeWorkspaceId)}
               tokenCount={activeTokenCount}
             />
           ) : (
@@ -3636,6 +3655,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
             // Listing attachments requires membership in the selected workspace.
             showAttachments={canViewAttachments}
             showUsers={isServerAdmin}
+            showLabs={canEditPolicies && Boolean(routeWorkspaceId)}
             tokenCount={activeTokenCount}
           />
           )}
@@ -3643,7 +3663,38 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
             className="settings-content"
           >
             {activeSection === "labs" ? (
-              <LabsSection labelledBy={SETTINGS_DESTINATION_HEADING_ID} />
+              <LabsSection labelledBy={SETTINGS_DESTINATION_HEADING_ID} canManage={canEditPolicies && scope === "workspace"}>
+                {policySaveError ? <StatusBanner tone="warning">{policySaveError}</StatusBanner> : null}
+                {policiesWorkspaceId === routeWorkspaceId && policies?.labs ? (
+                  <>
+                    <PolicyGroupView
+                      key={routeWorkspaceId}
+                      card={policies.labs}
+                      fields={labsPolicyFields(policies.labs.policy)}
+                      group="labs"
+                      busyKey={policyBusyKey}
+                      saveBlocked={policyBusyKey !== null}
+                      onFieldsSave={onPolicyFieldsSave}
+                      saveNotice={policySaved}
+                      summary={t("labs.description")}
+                    />
+                    {policies.graph ? (
+                      <PolicyGroupView
+                        key={`${routeWorkspaceId}:graph`}
+                        card={policies.graph}
+                        fields={graphPolicyFields(policies.graph.policy)}
+                        group="graph"
+                        busyKey={policyBusyKey}
+                        saveBlocked={policyBusyKey !== null}
+                        onFieldsSave={onPolicyFieldsSave}
+                        saveNotice={policySaved}
+                        summary={t("summary.graph")}
+                      />
+                    ) : null}
+                    <KnowledgeMapStatus />
+                  </>
+                ) : !error ? <SettingsLoadingRow>{t("labs.loading")}</SettingsLoadingRow> : null}
+              </LabsSection>
             ) : null}
             {activeSection === "deployment" ? (
               isServerAdmin ? (
@@ -5571,21 +5622,6 @@ export function WorkspaceSettingsSection({
         readOnly={readOnly}
         summary={t("summary.workspace")}
       />
-      {policies.graph ? (
-        <>
-          <PolicyGroupView
-            card={policies.graph}
-            fields={graphPolicyFields(policies.graph.policy)}
-            group="graph"
-            busyKey={busyKey}
-            onFieldsSave={onFieldsSave}
-            saveNotice={saveNotice}
-            readOnly={readOnly}
-            summary={t("summary.graph")}
-          />
-          <KnowledgeMapStatus />
-        </>
-      ) : null}
       <WorkspaceDangerZone
         workspace={workspace}
         workspaceLoading={workspaceLoading}
@@ -6852,6 +6888,7 @@ export type SettingsDestinationFlags = {
   showAttachments: boolean;
   showDeployment: boolean;
   showUsers: boolean;
+  showLabs?: boolean;
   tokenCount: number;
 };
 
@@ -6871,6 +6908,8 @@ export type SettingsDestination = {
    * and "User accounts" (every account on the server) created while they sat
    * next to each other in one flat list. */
   adminOnly?: boolean;
+  /** Visible only to administrators of the current workspace. */
+  workspaceAdminOnly?: boolean;
 };
 
 /** The five policy tabs, in the order they are worked through. */
@@ -6892,7 +6931,7 @@ export function settingsPolicyTabs(t: TFunction<"settings">) {
           defaultValue: "Preview",
         }),
         title: t("sections.agentInjection.previewDescription", {
-          defaultValue: "Preview: this area is still being refined.",
+          defaultValue: "Labs preview: this area is still being refined and may change.",
         }),
       },
     },
@@ -6916,7 +6955,7 @@ export function settingsPolicyTabs(t: TFunction<"settings">) {
  */
 export function settingsDestinations(
   t: TFunction<"settings">,
-  { consentCount, showAttachments, showDeployment, showUsers, tokenCount }:
+  { consentCount, showAttachments, showDeployment, showUsers, showLabs = false, tokenCount }:
     SettingsDestinationFlags,
 ): { sections: SettingsDestination[]; groups: Array<{ id: SettingsSectionGroup; label: string }> } {
   const sections: SettingsDestination[] = [
@@ -6976,8 +7015,9 @@ export function settingsDestinations(
     },
     {
       id: "labs",
-      group: "account",
+      group: "workspace",
       icon: FlaskConical,
+      workspaceAdminOnly: true,
       label: t("sections.labs.label"),
       description: t("sections.labs.description"),
     },
@@ -7071,7 +7111,7 @@ export function settingsDestinations(
     },
   ];
 
-  return { sections, groups };
+  return { sections: showLabs ? sections : sections.filter((section) => section.id !== "labs"), groups };
 }
 
 function SettingsSectionNav({
@@ -7081,6 +7121,7 @@ function SettingsSectionNav({
   showDeployment,
   showAttachments,
   showUsers,
+  showLabs,
   tokenCount,
 }: {
   activeSection: SettingsSection;
@@ -7089,6 +7130,7 @@ function SettingsSectionNav({
   showDeployment: boolean;
   showAttachments: boolean;
   showUsers: boolean;
+  showLabs: boolean;
   tokenCount: number;
 }) {
   const { t } = useTranslation("settings");
@@ -7098,6 +7140,7 @@ function SettingsSectionNav({
     showAttachments,
     showDeployment,
     showUsers,
+    showLabs,
     tokenCount,
   });
   // The same pure filter the picker uses, so the two lists cannot disagree
@@ -7111,6 +7154,8 @@ function SettingsSectionNav({
     defaultValue:
       "Server-wide setting, visible to server admins only — not scoped to this workspace.",
   });
+  const workspaceAdminChipLabel = t("sectionGroups.workspaceAdminChip");
+  const workspaceAdminChipTitle = t("sectionGroups.workspaceAdminChipTitle");
 
   return (
     <nav
@@ -7200,12 +7245,10 @@ function SettingsSectionNav({
                       {section.label}
                     </span>
                     {section.preview ? (
-                      <span
-                        className="nav-preview-badge"
-                        title={section.preview.description}
-                      >
-                        {section.preview.label}
-                      </span>
+                      <PreviewBadge
+                        description={section.preview.description}
+                        label={section.preview.label}
+                      />
                     ) : null}
                   </span>
                   {/* A sibling of the title, not a child of it: the button is a
@@ -7226,10 +7269,16 @@ function SettingsSectionNav({
                       })}
                     </span>
                   ) : null}
-                  {section.adminOnly ? (
-                    <span className="nav-admin-badge" title={adminChipTitle}>
-                      {adminChipLabel}
-                    </span>
+                  {section.adminOnly || section.workspaceAdminOnly ? (
+                    <>
+                      {" "}
+                      <span
+                        className="nav-admin-badge"
+                        title={section.workspaceAdminOnly ? workspaceAdminChipTitle : adminChipTitle}
+                      >
+                        {section.workspaceAdminOnly ? workspaceAdminChipLabel : adminChipLabel}
+                      </span>
+                    </>
                   ) : null}
                   {section.badge ? (
                     <span title={section.badgeTitle}>
@@ -8158,6 +8207,7 @@ export function PolicyGroupView({
   onFieldsSave,
   saveNotice,
   readOnly = false,
+  saveBlocked = false,
   summary,
 }: {
   busyKey: string | null;
@@ -8171,6 +8221,7 @@ export function PolicyGroupView({
   ) => Promise<boolean>;
   saveNotice: PolicySaveNotice | null;
   readOnly?: boolean;
+  saveBlocked?: boolean;
   summary: string;
 }) {
   const { t } = useTranslation("settings");
@@ -8211,12 +8262,12 @@ export function PolicyGroupView({
   const hasValidationErrors = Object.keys(validationMessages).length > 0;
   const hasDirtyFields = dirtyFields.length > 0;
   useRegisterSettingsDirty(`policy:${group}`, hasDirtyFields);
-  const saveDisabled = !hasDirtyFields || hasValidationErrors || busy;
+  const saveDisabled = !hasDirtyFields || hasValidationErrors || busy || saveBlocked;
   const cardTitle = t(`policy.cardTitles.${card.name}`, {
     defaultValue: card.title,
   });
   const saveTitle = policySaveButtonTitle({
-    busy,
+    busy: busy || saveBlocked,
     hasDirtyFields,
     hasValidationErrors,
   });
@@ -8236,7 +8287,7 @@ export function PolicyGroupView({
   }
 
   function saveDrafts() {
-    if (!hasDirtyFields || hasValidationErrors || busy) {
+    if (!hasDirtyFields || hasValidationErrors || busy || saveBlocked) {
       return;
     }
     const updates = dirtyFields.map((field) => ({
@@ -9358,7 +9409,7 @@ function workspacePolicyFields(policy: Record<string, unknown>) {
   // this field outright (settings_service.py's WORKSPACE_EDITABLE_FIELDS), so
   // hiding it here isn't just avoiding duplication -- without this the control
   // would render and always fail when touched.
-  const hiddenKeys = ["slug", "owner_id", "visibility"];
+  const hiddenKeys = ["slug", "owner_id", "visibility", "ask_retrieval_mode"];
   if (hasPolicyPath(policy, "title")) {
     hiddenKeys.push("name");
   }
@@ -9368,7 +9419,6 @@ function workspacePolicyFields(policy: Record<string, unknown>) {
     settingField("workspace.goal", "goal", "Goal", "The AI uses this to understand workspace purpose."),
     settingField("workspace.defaultLanguage", "default_language", "Default language", "Used when a question does not specify a language."),
     settingField("workspace.owner", "owner", "Owner", "Person or team responsible for this workspace."),
-    settingField("workspace.askRetrievalMode", "ask_retrieval_mode", "Ask retrieval mode", "Automatic uses the best mode this server can serve; a fixed choice falls back with a notice when it cannot."),
     settingField("workspace.decision", "decision", "Review decision", "How workspace policy changes are handled."),
   ]);
 }
@@ -9470,13 +9520,21 @@ function ContextWriteGateCard({
   );
 }
 
+function labsPolicyFields(policy: Record<string, unknown>) {
+  return labelledPolicyFields(policyWithoutKeys(policy, ["workspace_map_enabled", "usage_relation_signals_enabled"]), [
+    settingField("labs.askEnabled", "ask_enabled", "Ask", "Allow workspace administrators to use Ask in this workspace."),
+    settingField("labs.askRetrievalMode", "ask_retrieval_mode", "Ask retrieval mode", "Automatic uses the best mode this server can serve; a fixed choice falls back with a notice when it cannot."),
+    settingField("labs.agentEnabled", "agent_enabled", "Agent", "Allow workspace administrators to use Agent in this workspace."),
+  ]);
+}
+
 function graphPolicyFields(policy: Record<string, unknown>) {
   return labelledPolicyFields(policy, [
     settingField(
       "graph.workspaceMapEnabled",
       "workspace_map_enabled",
       "Workspace Knowledge Map",
-      "Let members open the map of published Context and Library documents in this workspace. The Graph tab on each document stays available either way.",
+      "Let workspace administrators open the map of published Context and Library documents in this workspace. The Graph tab on each document stays available either way.",
     ),
     settingField(
       "graph.usageRelationSignalsEnabled",

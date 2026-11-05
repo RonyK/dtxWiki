@@ -19,6 +19,7 @@ import {
   isAuthBootstrapPath,
   RequireAuth,
   RequireAskEnabled,
+  RequireAgentEnabled,
   RequireEditor,
   RootRouteError,
 } from "./App";
@@ -446,6 +447,16 @@ describe("appRoutes role gating", () => {
       expect(child.type).toBe(RequireEditor);
     },
   );
+
+  it("gates every Agent destination behind the workspace experiment", () => {
+    for (const path of ["agent", "agent/pages/new", "agent/pages/:agentPageId", "agent/pages/:agentPageId/edit", "agent/folders/new", "agent/folders/:nodeId"]) {
+      const route = findRoute(appRoutes, `/workspaces/:workspaceId/${path}`);
+      const element = route?.element;
+      expect(isValidElement(element) && element.type === RequireAuth).toBe(true);
+      const child = isValidElement<{ children: ReactNode }>(element) ? element.props.children : null;
+      expect(isValidElement(child) && child.type === RequireAgentEnabled).toBe(true);
+    }
+  });
 
   it("does not register the retired /context-map alias", () => {
     expect(findRoute(appRoutes, "/context-map")).toBeNull();

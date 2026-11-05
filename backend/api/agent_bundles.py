@@ -5,8 +5,8 @@ from fastapi import APIRouter
 from backend.api.deps import (
     RestActorDep,
     ServicesDep,
+    WorkspaceAgentAccessDep,
     WorkspaceSessionFactoryDep,
-    WorkspaceViewerAccessDep,
     read_service_error_response,
 )
 from backend.schemas.agent import AgentPageBundleListResponse
@@ -35,7 +35,7 @@ def list_agent_page_bundles(
     workspace_id: UUID,
     agent_page_id: UUID,
     actor: RestActorDep,
-    _access: WorkspaceViewerAccessDep,
+    _access: WorkspaceAgentAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
 ):
     try:

@@ -728,7 +728,9 @@ class WorkspaceGraphMapCapability(BaseModel):
     effective_enabled: bool
     workspace_enabled: bool
     service_available: bool
-    reason: Literal["enabled", "disabled_by_workspace", "service_unavailable"]
+    reason: Literal[
+        "enabled", "disabled_by_workspace", "service_unavailable", "permission_denied"
+    ]
 
     model_config = ConfigDict(extra="forbid")
 
@@ -736,7 +738,7 @@ class WorkspaceGraphMapCapability(BaseModel):
 class WorkspaceGraphCapability(BaseModel):
     workspace_map: WorkspaceGraphMapCapability
     usage_relation_signals_enabled: bool
-    # Owners change these switches in Settings; everyone else sees them.
+    # Workspace administrators configure and use this experiment.
     can_manage: bool
 
     model_config = ConfigDict(extra="forbid")

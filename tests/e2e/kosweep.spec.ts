@@ -7,7 +7,7 @@
 import { expect, test } from "./fixtures";
 import fs from "node:fs";
 
-import { authenticatePage, backendBaseUrl, currentWorkspace, workspaceUrl } from "./auth";
+import { authenticatePage, backendBaseUrl, configureWorkspaceLabs, currentWorkspace, workspaceUrl } from "./auth";
 import { evidenceEnabled } from "./evidence";
 
 // English chrome that MUST be Korean in ko after the i18n round. Proper nouns
@@ -47,6 +47,7 @@ test("ko sweep: no English chrome leaks across screens", async ({ page }, testIn
   test.setTimeout(180_000);
   await authenticatePage(page, testInfo, "kosweep");
   const workspace = await currentWorkspace(page.request);
+  await configureWorkspaceLabs(page.request, workspace.id, { agent_enabled: true });
   // Seed one Context page so the selected Context reader is swept too.
   const readerResponse = await page.request.post(
     `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages`,

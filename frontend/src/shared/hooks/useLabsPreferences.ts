@@ -1,114 +1,119 @@
-import { useCallback, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 
+import { getSettingsPolicies } from "../api/operations";
 import { useOptionalAuth } from "../auth/AuthContext";
+import { useWorkspaceRoute } from "../lib/workspaceRoutes";
+import { useOptionalWorkspaceContext } from "../workspace/WorkspaceContext";
 
-type LabsMenu = "ask" | "agent" | "knowledgeMap";
-type LabsPreferences = Readonly<Record<LabsMenu, boolean>>;
+export type LabsPreferences = Readonly<{
+  ask: boolean;
+  agent: boolean;
+  knowledgeMap: boolean;
+}>;
 
-const menuFlags: Record<LabsMenu, number> = { ask: 1, agent: 2, knowledgeMap: 4 };
-const snapshots: readonly LabsPreferences[] = Array.from({ length: 8 }, (_, flags) => ({
-  ask: (flags & menuFlags.ask) !== 0,
-  agent: (flags & menuFlags.agent) !== 0,
-  knowledgeMap: (flags & menuFlags.knowledgeMap) !== 0,
-}));
-
-function parseSnapshot(value: string | null): number {
-  try {
-    const parsed: unknown = JSON.parse(value ?? "null");
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return 0;
-    const record = parsed as Record<string, unknown>;
-    return (record.ask === true ? menuFlags.ask : 0)
-      | (record.agent === true ? menuFlags.agent : 0)
-      | (record.knowledgeMap === true ? menuFlags.knowledgeMap : 0);
-  } catch {
-    return 0;
-  }
+const disabled: LabsPreferences = { ask: false, agent: false, knowledgeMap: false };
+type Entry = { status: "loading" | "ready" | "error"; preferences: LabsPreferences };
+const entries = new Map<string, Entry>();
+const listeners = new Set<() => void>();
+const notify = () => listeners.forEach((listener) => listener());
+function onFocus() {
+  invalidateWorkspaceLabsPreferences();
 }
-
-function createStore(key: string) {
-  let lastSnapshot = 0;
-  // Keep a successful local change usable when browser storage is denied or full.
-  let fallbackSnapshot: number | undefined;
-  const listeners = new Set<() => void>();
-  const notify = () => listeners.forEach((listener) => listener());
-
-  const getSnapshot = () => {
-    if (fallbackSnapshot !== undefined) return fallbackSnapshot;
-    try {
-      lastSnapshot = parseSnapshot(window.localStorage.getItem(key));
-    } catch {
-      // Reading localStorage can throw in restricted browser profiles.
+function onPageShow(event: PageTransitionEvent) {
+  if (event.persisted) invalidateWorkspaceLabsPreferences();
+}
+const subscribe = (listener: () => void) => {
+  if (listeners.size === 0) {
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("pageshow", onPageShow);
+  }
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("pageshow", onPageShow);
     }
-    return lastSnapshot;
   };
+};
 
-  const onStorage = (event: StorageEvent) => {
-    if (event.key !== null && event.key !== key) return;
-    try {
-      if (event.storageArea && event.storageArea !== window.localStorage) return;
-    } catch {
-      return;
-    }
-    fallbackSnapshot = undefined;
-    lastSnapshot = parseSnapshot(event.newValue);
+function load(key: string, workspaceId: string) {
+  if (entries.has(key)) return;
+  const pending: Entry = { status: "loading", preferences: disabled };
+  entries.set(key, pending);
+  notify();
+  void getSettingsPolicies(workspaceId).then((policies) => {
+    if (entries.get(key) !== pending) return;
+    const policy = policies.labs?.policy;
+    entries.set(key, {
+      status: "ready",
+      preferences: {
+        ask: policy?.ask_enabled === true,
+        agent: policy?.agent_enabled === true,
+        knowledgeMap: policy?.workspace_map_enabled === true,
+      },
+    });
     notify();
-  };
-
-  return {
-    getSnapshot,
-    subscribe(listener: () => void) {
-      if (listeners.size === 0) window.addEventListener("storage", onStorage);
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-        if (listeners.size === 0) window.removeEventListener("storage", onStorage);
-      };
-    },
-    setMenuVisible(menu: LabsMenu, visible: boolean) {
-      const current = getSnapshot();
-      const flag = menuFlags[menu];
-      const next = visible ? current | flag : current & ~flag;
-      if (next === current) return;
-      lastSnapshot = next;
-      try {
-        window.localStorage.setItem(key, JSON.stringify(snapshots[next]));
-        fallbackSnapshot = undefined;
-      } catch {
-        fallbackSnapshot = next;
-      }
-      notify();
-    },
-  };
+  }).catch(() => {
+    if (entries.get(key) !== pending) return;
+    entries.set(key, { status: "error", preferences: disabled });
+    notify();
+  });
 }
 
-const stores = new Map<string, ReturnType<typeof createStore>>();
-const emptySubscribe = () => () => {};
-const emptySnapshot = () => 0;
-
-function getStore(userId: string) {
-  const key = `dtxwiki:labs:${userId}`;
-  let store = stores.get(key);
-  if (!store) {
-    store = createStore(key);
-    stores.set(key, store);
-  }
-  return store;
+/** Revalidate mounted readers after a successful workspace settings save. */
+export function invalidateWorkspaceLabsPreferences(workspaceId?: string | null) {
+  if (workspaceId) {
+    for (const key of entries.keys()) {
+      if (key.endsWith(`:${workspaceId}`)) entries.delete(key);
+    }
+  } else entries.clear();
+  notify();
 }
 
 export function useLabsPreferences() {
   const auth = useOptionalAuth();
-  const userId = auth?.status === "authenticated" ? auth.user?.user_id : undefined;
-  const store = userId ? getStore(userId) : null;
-  // Selecting the account's store during render avoids showing or persisting the
-  // previous account's preferences while an effect catches up after sign-in.
-  const snapshot = useSyncExternalStore(
-    store?.subscribe ?? emptySubscribe,
-    store?.getSnapshot ?? emptySnapshot,
-    emptySnapshot,
+  const workspaceContext = useOptionalWorkspaceContext();
+  const route = useWorkspaceRoute();
+  const workspaceId = route?.workspaceId ?? workspaceContext?.selectedId;
+  const selected = workspaceContext?.selectedWorkspace;
+  const workspace = workspaceContext?.workspaces?.find((item) => item.id === workspaceId)
+    ?? (selected?.id === workspaceId ? selected : null);
+  const userId = auth?.status === "authenticated" ? auth.user?.user_id : null;
+  // Labs are workspace administration tools. Neither browser storage nor a
+  // cached answer from another workspace or membership can grant access.
+  const checking = auth?.status === "checking"
+    || Boolean(userId && workspaceId && workspaceContext?.initialized === false);
+  const eligible = !checking && Boolean(userId && workspaceId && workspace?.role?.toLowerCase() === "owner");
+  const key = userId && workspaceId ? `${userId}:${workspaceId}` : null;
+  const previousUserId = useRef(userId);
+  const entry = useSyncExternalStore(
+    subscribe,
+    () => eligible && key ? entries.get(key) : undefined,
+    () => undefined,
   );
-  const setMenuVisible = useCallback((menu: LabsMenu, visible: boolean) => {
-    store?.setMenuVisible(menu, visible);
-  }, [store]);
+  useEffect(() => {
+    const previous = previousUserId.current;
+    previousUserId.current = userId;
+    if (previous && previous !== userId) {
+      for (const cachedKey of entries.keys()) {
+        if (cachedKey.startsWith(`${previous}:`)) entries.delete(cachedKey);
+      }
+      notify();
+    }
+  }, [userId]);
+  useEffect(() => {
+    if (eligible && key && workspaceId && !entry) load(key, workspaceId);
+    else if (!eligible && key && entries.has(key)) {
+      entries.delete(key);
+      notify();
+    }
+  }, [eligible, entry, key, workspaceId]);
 
-  return { preferences: snapshots[snapshot], setMenuVisible, ready: store !== null };
+  const status = checking ? "loading" : eligible ? entry?.status ?? "loading" : "idle";
+  return {
+    preferences: eligible ? entry?.preferences ?? disabled : disabled,
+    ready: eligible && entry?.status === "ready",
+    status,
+  };
 }

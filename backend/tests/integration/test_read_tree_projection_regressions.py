@@ -1429,6 +1429,8 @@ def test_index_preview_renders_agent_section_folder(page_service, session_factor
         session_factory,
         email="agent-preview@example.com",
     )
+    with session_factory.begin() as session:
+        session.get(Workspace, workspace_id).labs_policy = {"agent_enabled": True}
     response = client.get(
         f"/api/v1/workspaces/{workspace_id}/tree/nodes/{guide_folder_id}"
         "/index-preview"
@@ -1766,7 +1768,7 @@ def test_reindex_tolerates_duplicate_placement_edges(session_factory, page_servi
 
 
 def test_sensitive_agent_page_body_is_owner_gated_on_rest(page_service):
-    """Sensitive AgentPage metadata and bodies stay owner-only on REST."""
+    """Labs Agent metadata and bodies require workspace administration on REST."""
     from backend.models.user import User
     from backend.policy.rbac import grant_workspace_membership
 
@@ -1782,6 +1784,8 @@ def test_sensitive_agent_page_body_is_owner_gated_on_rest(page_service):
         owner_client,
         page_service.session_factory,
     )
+    with page_service.session_factory.begin() as session:
+        session.get(Workspace, UUID(ws_id)).labs_policy = {"agent_enabled": True}
     guide_id = owner_client.get(
         f"/api/v1/workspaces/{ws_id}/agent/pages?category=agent_guide"
     ).json()["data"][0]["id"]
@@ -1824,15 +1828,10 @@ def test_sensitive_agent_page_body_is_owner_gated_on_rest(page_service):
             workspace_id=UUID(ws_id),
             role="viewer",
         )
-    # Sensitive titles are private metadata, so the viewer sees only ordinary
-    # workspace-visible pages.
+    # Labs Agent is administrator-only, including ordinary personas.
     listed = viewer_client.get(f"/api/v1/workspaces/{ws_id}/agent/pages")
-    assert listed.status_code == 200
-    assert not any(page["category"] == "agent_guide" for page in listed.json()["data"])
-    assert any(page["id"] == persona_id for page in listed.json()["data"])
-    # but its BODY is owner-only -> 403
+    assert listed.status_code == 403
     denied = viewer_client.get(f"/api/v1/workspaces/{ws_id}/agent/pages/{guide_id}")
     assert denied.status_code == 403
-    # a non-sensitive persona body stays readable by the viewer
-    allowed = viewer_client.get(f"/api/v1/workspaces/{ws_id}/agent/pages/{persona_id}")
-    assert allowed.status_code == 200
+    ordinary = viewer_client.get(f"/api/v1/workspaces/{ws_id}/agent/pages/{persona_id}")
+    assert ordinary.status_code == 403

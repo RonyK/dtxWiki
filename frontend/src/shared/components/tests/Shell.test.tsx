@@ -20,13 +20,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider } from "../../auth/AuthContext";
 import { invalidateWorkspaceListCache, type WorkspaceSummary } from "../../api/workspace";
 import { i18n } from "../../i18n";
-import { useLabsPreferences } from "../../hooks/useLabsPreferences";
+import { invalidateWorkspaceLabsPreferences, useLabsPreferences } from "../../hooks/useLabsPreferences";
 import { WorkspaceProvider } from "../../workspace/WorkspaceContext";
 import { Shell } from "../Shell";
 import { parseWorkspaceRoute } from "../../lib/workspaceRoutes";
 import { RequireAuth } from "../../../app/App";
 
 const BASE = "http://127.0.0.1:21080";
+let savedLabs = { ask_enabled: false, agent_enabled: false, workspace_map_enabled: false };
 
 // Explicit named-list contract for Shell sidebar navigation. Updating the Shell
 // must update this contract so a silent swap between groups will fail the test.
@@ -65,6 +66,8 @@ describe("Shell", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     window.localStorage.clear();
+    savedLabs = { ask_enabled: false, agent_enabled: false, workspace_map_enabled: false };
+    invalidateWorkspaceLabsPreferences();
   });
 
   it("renders grouped shell navigation and authenticated topbar actions", async () => {
@@ -96,12 +99,12 @@ describe("Shell", () => {
     for (const label of ["Review queue"]) {
       const link = within(sidebar).getByText(label).closest("a");
       expect(link).not.toBeNull();
-      expect(within(link as HTMLElement).getByText("Preview")).toHaveClass(
+      expect(within(link as HTMLElement).getByText("Preview").parentElement).toHaveClass(
         "nav-preview-badge",
       );
       expect(link).toHaveAttribute(
         "title",
-        expect.stringContaining("Preview: this area is still being refined."),
+        expect.stringContaining("Labs preview: this feature is still being refined and may change."),
       );
     }
 
@@ -160,14 +163,14 @@ describe("Shell", () => {
     await waitFor(() => {
       expect(within(sidebar).queryByText("Chats")).not.toBeInTheDocument();
     });
-    expect(within(sidebar).getByText("Agent")).toBeInTheDocument();
+    expect(within(sidebar).queryByText("Agent")).not.toBeInTheDocument();
     expect(within(sidebar).getByText("Dashboard")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /Create/ }),
     ).not.toBeInTheDocument();
   });
 
-  it("updates navigation and route commands when Labs menus are toggled independently", async () => {
+  it("updates navigation and route commands after workspace Labs settings are saved", async () => {
     const user = userEvent.setup();
     mockSession(true);
     renderShell(["/workspaces/11111111-1111-4111-8111-111111111111/dashboard"], <LabsControlsProbe />);
@@ -193,11 +196,11 @@ describe("Shell", () => {
     expect(screen.queryByRole("option", { name: "Knowledge MapKnowledge" })).not.toBeInTheDocument();
 
     await user.click(agentToggle);
-    expect(within(sidebar).getByText("Agent").closest("a")).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/agent");
+    expect((await within(sidebar).findByText("Agent")).closest("a")).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/agent");
     expect(within(sidebar).queryByText("Ask")).not.toBeInTheDocument();
 
     await user.click(askToggle);
-    expect(within(sidebar).getByText("Ask").closest("a")).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/ask");
+    expect((await within(sidebar).findByText("Ask")).closest("a")).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/ask");
     const searchbox = screen.getByRole("combobox", { name: "Search workspace" });
     await user.click(searchbox);
     expect(screen.getByRole("option", { name: "AgentKnowledge" })).toBeInTheDocument();
@@ -2058,16 +2061,20 @@ function LocationProbe() {
 }
 
 function LabsControlsProbe() {
-  const { preferences, setMenuVisible, ready } = useLabsPreferences();
+  const { ready } = useLabsPreferences();
+  const save = (key: keyof typeof savedLabs) => {
+    savedLabs = { ...savedLabs, [key]: !savedLabs[key] };
+    invalidateWorkspaceLabsPreferences("11111111-1111-4111-8111-111111111111");
+  };
   return (
     <>
-      <button disabled={!ready} onClick={() => setMenuVisible("agent", !preferences.agent)}>
+      <button disabled={!ready} onClick={() => save("agent_enabled")}>
         Toggle Agent menu
       </button>
-      <button disabled={!ready} onClick={() => setMenuVisible("ask", !preferences.ask)}>
+      <button disabled={!ready} onClick={() => save("ask_enabled")}>
         Toggle Ask menu
       </button>
-      <button disabled={!ready} onClick={() => setMenuVisible("knowledgeMap", !preferences.knowledgeMap)}>
+      <button disabled={!ready} onClick={() => save("workspace_map_enabled")}>
         Toggle Knowledge Map menu
       </button>
     </>
@@ -2119,6 +2126,9 @@ function mockSession(
     }
     if (url === `${BASE}/api/v1/auth/capabilities`) {
       return jsonResponse({ data: capabilities });
+    }
+    if (url.endsWith("/settings/policies")) {
+      return jsonResponse({ data: { labs: { name: "labs", title: "Labs", policy: savedLabs } } });
     }
     if (url.endsWith("/graph/capability")) {
       return jsonResponse({ data: {

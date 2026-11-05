@@ -19,6 +19,7 @@ from backend.policy.rbac import (
     WorkspaceAccess,
     WorkspacePlaneUnavailableError,
     require_workspace_role,
+    role_allows,
 )
 from backend.policy.rest_scopes import (
     defer_token_scope_until_target,
@@ -39,6 +40,7 @@ from backend.services.read_errors import (
     UnsupportedRetrievalModeError,
 )
 from backend.services.search_service import SearchService
+from backend.services.settings_service import labs_feature_enabled
 
 
 def get_session_factory(request: Request) -> sessionmaker[Session]:
@@ -153,6 +155,71 @@ WorkspaceOwnerAccessDep = Annotated[
 ]
 WorkspaceAdminAccessDep = Annotated[
     WorkspaceAccess, Depends(workspace_access("admin"))
+]
+
+
+def workspace_labs_feature_enabled(
+    workspace_id: UUID,
+    access: WorkspaceAccess,
+    session_factory: sessionmaker[Session],
+    feature: str,
+) -> bool:
+    if not role_allows(access.role, "owner"):
+        return False
+    with session_factory() as session:
+        return labs_feature_enabled(session, workspace_id, feature)
+
+
+def require_workspace_labs_feature(
+    workspace_id: UUID,
+    access: WorkspaceAccess,
+    session_factory: sessionmaker[Session],
+    feature: str,
+) -> None:
+    # Preserve each route's token scope while requiring owner membership.
+    if not role_allows(access.role, "owner"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error_code": "workspace_role_insufficient",
+                "message": "workspace experiments require an administrator",
+            },
+        )
+    if not workspace_labs_feature_enabled(
+        workspace_id, access, session_factory, feature
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "not_found",
+                "message": "workspace experiment is not enabled",
+            },
+        )
+
+
+def labs_workspace_access(feature: str):
+    """Authorize browser experiments before opening a workspace session.
+
+    MCP tools deliberately retain their own policy: these switches govern the
+    experimental REST product surfaces, not the core Agent tool protocol.
+    """
+
+    def check_labs_access(
+        workspace_id: UUID,
+        access: WorkspaceViewerAccessDep,
+        session_factory: SessionFactoryDep,
+    ) -> WorkspaceAccess:
+        require_workspace_labs_feature(workspace_id, access, session_factory, feature)
+        return access
+
+    return check_labs_access
+
+
+WorkspaceAskAccessDep = Annotated[
+    WorkspaceAccess, Depends(labs_workspace_access("ask"))
+]
+WorkspaceAgentAccessDep = Annotated[
+    WorkspaceAccess, Depends(labs_workspace_access("agent"))
 ]
 
 

@@ -29,11 +29,15 @@ from backend.api.deps import (
     ServicesDep,
     SessionFactoryDep,
     WorkspaceAdminAccessDep,
+    WorkspaceAgentAccessDep,
+    WorkspaceAskAccessDep,
     WorkspaceEditorAccessDep,
     WorkspaceOwnerAccessDep,
     WorkspaceSessionFactoryDep,
     WorkspaceViewerAccessDep,
     read_service_error_response,
+    require_workspace_labs_feature,
+    workspace_labs_feature_enabled,
 )
 from backend.api.media_errors import media_staging_error_response
 from backend.api.middleware.request_body_limit import BodyLimit, request_body_limit
@@ -253,7 +257,7 @@ from backend.services.settings_service import (
     normalized_library_policy,
     settings_policy_revision,
 )
-from backend.services.tree_service import resolve_tree_parent
+from backend.services.tree_service import require_tree_node, resolve_tree_parent
 from backend.services.workspace_purge_grant import (
     consume_purge_grant,
     issue_purge_grant,
@@ -473,8 +477,13 @@ def update_favorite(
     actor: RestActorDep,
     _access: WorkspaceViewerAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
+    control_session_factory: SessionFactoryDep,
 ):
     try:
+        if target_kind == "agent_page":
+            require_workspace_labs_feature(
+                workspace_id, _access, control_session_factory, "agent"
+            )
         with session_factory.begin() as session:
             return {
                 "data": set_favorite(
@@ -861,7 +870,7 @@ def update_settings_policy_batch(
                 expected_revision=request_body.expected_revision,
             )
         if (
-            request_body.group == "graph"
+            request_body.group in {"graph", "labs"}
             and "usage_relation_signals_enabled" in request_body.changes
         ):
             _request_trail_tick(
@@ -1061,6 +1070,29 @@ def delete_settings_mcp_client(
         return read_service_error_response(exc)
 
 
+def _require_labs_tree_section(section, workspace_id, access, control_session_factory):
+    if section in {"agent", "ask"}:
+        require_workspace_labs_feature(
+            workspace_id, access, control_session_factory, section
+        )
+
+
+def _require_labs_tree_node(
+    session, workspace_id, node_id, access, control_session_factory
+):
+    node = require_tree_node(session, workspace_id, node_id)
+    _require_labs_tree_section(
+        node.section, workspace_id, access, control_session_factory
+    )
+    if node.target_kind in {"agent_page", "ask_session"}:
+        require_workspace_labs_feature(
+            workspace_id,
+            access,
+            control_session_factory,
+            "agent" if node.target_kind == "agent_page" else "ask",
+        )
+
+
 @router.get(
     "/{workspace_id}/tree",
     response_model=TreeListResponse,
@@ -1072,24 +1104,44 @@ def get_tree(
     actor: RestActorDep,
     _access: WorkspaceViewerAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
+    control_session_factory: SessionFactoryDep,
     section: str | None = None,
     include_archived: bool = False,
 ):
+    _require_labs_tree_section(section, workspace_id, _access, control_session_factory)
+    hidden_sections = {
+        feature
+        for feature in ("agent", "ask")
+        if not workspace_labs_feature_enabled(
+            workspace_id, _access, control_session_factory, feature
+        )
+    }
     with session_factory() as session:
-        return {
-            "data": svc.tree_read.list_tree_data(
-                session=session,
-                workspace_id=workspace_id,
-                section=section,
-                # archived titles (folders, ask-session refs) are an editor
-                # affordance; a viewer's request silently degrades to the
-                # visible tree instead of leaking them (design 3.3)
-                include_archived=include_archived and actor_can_read_drafts(actor),
-                # A-9: the tree is an access surface — filter per actor like
-                # get_index/resources instead of serving every node title.
-                actor=actor,
-            )
+        data = svc.tree_read.list_tree_data(
+            session=session,
+            workspace_id=workspace_id,
+            section=section,
+            # archived titles (folders, ask-session refs) are an editor
+            # affordance; a viewer's request silently degrades to the
+            # visible tree instead of leaking them (design 3.3)
+            include_archived=include_archived and actor_can_read_drafts(actor),
+            # A-9: the tree is an access surface — filter per actor like
+            # get_index/resources instead of serving every node title.
+            actor=actor,
+        )
+        data.nodes = [
+            node
+            for node in data.nodes
+            if node.section not in hidden_sections
+            and not ("agent" in hidden_sections and node.target_kind == "agent_page")
+            and not ("ask" in hidden_sections and node.target_kind == "ask_session")
+        ]
+        data.policies = {
+            section: policy
+            for section, policy in data.policies.items()
+            if section not in hidden_sections
         }
+        return {"data": data}
 
 
 @router.post(
@@ -1105,9 +1157,21 @@ def create_tree_folder(
     actor: RestActorDep,
     _access: WorkspaceEditorAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
+    control_session_factory: SessionFactoryDep,
 ):
     try:
+        _require_labs_tree_section(
+            request_body.section, workspace_id, _access, control_session_factory
+        )
         with session_factory.begin() as session:
+            if request_body.parent_id is not None:
+                _require_labs_tree_node(
+                    session,
+                    workspace_id,
+                    request_body.parent_id,
+                    _access,
+                    control_session_factory,
+                )
             return {
                 "data": svc.tree.create_folder(
                     session=session,
@@ -1133,9 +1197,13 @@ def get_tree_node(
     actor: RestActorDep,
     _access: WorkspaceViewerAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
+    control_session_factory: SessionFactoryDep,
 ):
     try:
         with session_factory() as session:
+            _require_labs_tree_node(
+                session, workspace_id, node_id, _access, control_session_factory
+            )
             return {
                 "data": svc.tree_read.get_node(
                     session=session,
@@ -1162,6 +1230,7 @@ def get_tree_node_index_preview(
     actor: RestActorDep,
     _access: WorkspaceViewerAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
+    control_session_factory: SessionFactoryDep,
 ):
     # C-6 (design 12.1). Kept as a comment, not a docstring: FastAPI publishes
     # a route docstring as the OpenAPI `description` in the unauthenticated
@@ -1182,6 +1251,9 @@ def get_tree_node_index_preview(
 
     try:
         with session_factory() as session:
+            _require_labs_tree_node(
+                session, workspace_id, node_id, _access, control_session_factory
+            )
             workspace_slug = resolve_workspace_slug(session, workspace_id)
             if workspace_slug is None:
                 raise ReadNotFoundError("workspace not found")
@@ -1240,9 +1312,13 @@ def update_tree_node(
     actor: RestActorDep,
     _access: WorkspaceEditorAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
+    control_session_factory: SessionFactoryDep,
 ):
     try:
         with session_factory.begin() as session:
+            _require_labs_tree_node(
+                session, workspace_id, node_id, _access, control_session_factory
+            )
             return {
                 "data": svc.tree.update_node(
                     session=session,
@@ -1270,9 +1346,13 @@ def delete_tree_node(
     actor: RestActorDep,
     _access: WorkspaceEditorAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
+    control_session_factory: SessionFactoryDep,
 ):
     try:
         with session_factory.begin() as session:
+            _require_labs_tree_node(
+                session, workspace_id, node_id, _access, control_session_factory
+            )
             return {
                 "data": svc.tree.archive_node(
                     session=session,
@@ -1299,9 +1379,14 @@ def move_tree_node(
     actor: RestActorDep,
     _access: WorkspaceEditorAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
+    control_session_factory: SessionFactoryDep,
 ):
     try:
         with session_factory.begin() as session:
+            for node_id in (request_body.node_id, request_body.new_parent_id):
+                _require_labs_tree_node(
+                    session, workspace_id, node_id, _access, control_session_factory
+                )
             return {
                 "data": svc.tree.move_node(
                     session=session,
@@ -1328,9 +1413,18 @@ def reorder_tree_node(
     actor: RestActorDep,
     _access: WorkspaceEditorAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
+    control_session_factory: SessionFactoryDep,
 ):
     try:
         with session_factory.begin() as session:
+            node_ids = [request_body.root.node_id]
+            anchor_id = getattr(request_body.root, "anchor_node_id", None)
+            if anchor_id is not None:
+                node_ids.append(anchor_id)
+            for node_id in node_ids:
+                _require_labs_tree_node(
+                    session, workspace_id, node_id, _access, control_session_factory
+                )
             return {
                 "data": svc.tree.reorder_node(
                     session=session,
@@ -2514,7 +2608,7 @@ def list_agent_categories(
     svc: ServicesDep,
     workspace_id: UUID,
     _actor: RestActorDep,
-    _access: WorkspaceViewerAccessDep,
+    _access: WorkspaceAgentAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
 ):
     try:
@@ -2538,7 +2632,7 @@ def list_agent_pages(
     svc: ServicesDep,
     workspace_id: UUID,
     actor: RestActorDep,
-    _access: WorkspaceViewerAccessDep,
+    _access: WorkspaceAgentAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
     category: str | None = None,
     lifecycle_status: str | None = None,
@@ -2577,7 +2671,7 @@ def create_agent_page_draft(
     workspace_id: UUID,
     request_body: AgentPageDraftRequest,
     actor: RestActorDep,
-    access: WorkspaceViewerAccessDep,
+    access: WorkspaceAgentAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
     response: Response,
 ):
@@ -2614,7 +2708,7 @@ def get_agent_page(
     workspace_id: UUID,
     agent_page_id: UUID,
     actor: RestActorDep,
-    access: WorkspaceViewerAccessDep,
+    access: WorkspaceAgentAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
     version: str = "active",
 ):
@@ -2684,7 +2778,7 @@ def diff_agent_page_versions(
     from_version_id: UUID,
     to_version_id: UUID,
     actor: RestActorDep,
-    access: WorkspaceViewerAccessDep,
+    access: WorkspaceAgentAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
 ):
     try:
@@ -2719,7 +2813,7 @@ def update_agent_page_draft(
     agent_page_id: UUID,
     request_body: AgentPageDraftRequest,
     actor: RestActorDep,
-    access: WorkspaceViewerAccessDep,
+    access: WorkspaceAgentAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
 ):
     try:
@@ -2751,7 +2845,7 @@ def restore_agent_page_version(
     agent_page_id: UUID,
     request_body: AgentPageRestoreRequest,
     actor: RestActorDep,
-    _access: WorkspaceViewerAccessDep,
+    _access: WorkspaceAgentAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
 ):
     try:
@@ -2782,7 +2876,7 @@ def activate_agent_page(
     agent_page_id: UUID,
     request_body: AgentPageActivateRequest,
     actor: RestActorDep,
-    access: WorkspaceViewerAccessDep,
+    access: WorkspaceAgentAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
 ):
     try:
@@ -2898,7 +2992,7 @@ def build_bundle_preview(
     workspace_id: UUID,
     request_body: BuildBundleRequest,
     actor: RestActorDep,
-    _access: WorkspaceViewerAccessDep,
+    _access: WorkspaceAgentAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
 ):
     try:
@@ -2927,7 +3021,7 @@ def get_bundle(
     workspace_id: UUID,
     bundle_id: UUID,
     actor: RestActorDep,
-    _access: WorkspaceViewerAccessDep,
+    _access: WorkspaceAgentAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
 ):
     try:
@@ -2952,7 +3046,7 @@ def get_bundle(
 def list_ask_sessions(
     workspace_id: UUID,
     _actor: RestActorDep,
-    _access: WorkspaceViewerAccessDep,
+    _access: WorkspaceAskAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
     ask_service: AskServiceDep,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -2979,7 +3073,7 @@ def create_ask_session(
     workspace_id: UUID,
     request_body: AskSessionCreate,
     actor: RestActorDep,
-    _access: WorkspaceEditorAccessDep,
+    _access: WorkspaceAskAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
     ask_service: AskServiceDep,
 ):
@@ -3008,7 +3102,7 @@ def get_ask_session(
     workspace_id: UUID,
     ask_session_id: UUID,
     actor: RestActorDep,
-    _access: WorkspaceViewerAccessDep,
+    _access: WorkspaceAskAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
     ask_service: AskServiceDep,
 ):
@@ -3036,7 +3130,7 @@ def create_ask_turn(
     ask_session_id: UUID,
     request_body: AskTurnCreate,
     actor: RestActorDep,
-    _access: WorkspaceEditorAccessDep,
+    _access: WorkspaceAskAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
     ask_service: AskServiceDep,
 ):
@@ -3077,7 +3171,7 @@ def promote_ask_turn(
     ask_turn_id: UUID,
     request_body: AskTurnPromoteRequest,
     actor: RestActorDep,
-    _access: WorkspaceEditorAccessDep,
+    _access: WorkspaceAskAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
 ):
     try:
@@ -4539,18 +4633,28 @@ def search(
     workspace_id: UUID,
     request_body: SearchRequest,
     actor: RestActorDep,
-    _access: WorkspaceViewerAccessDep,
+    access: WorkspaceViewerAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
+    control_session_factory: SessionFactoryDep,
     search_service: SearchServiceDep,
 ):
     try:
+        if request_body.scope == "agent_page":
+            require_workspace_labs_feature(
+                workspace_id, access, control_session_factory, "agent"
+            )
+        filters = request_body.filters
+        if filters.include_agents and not workspace_labs_feature_enabled(
+            workspace_id, access, control_session_factory, "agent"
+        ):
+            filters = filters.model_copy(update={"include_agents": False})
         with session_factory.begin() as session:
             payload = search_service.search(
                 session=session,
                 workspace_id=workspace_id,
                 query=request_body.query,
                 scope=request_body.scope,
-                filters=request_body.filters,
+                filters=filters,
                 retrieval_mode=request_body.retrieval_mode,
                 limit=request_body.limit,
                 cursor=request_body.cursor,

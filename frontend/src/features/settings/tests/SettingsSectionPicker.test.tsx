@@ -5,10 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import { SettingsSectionPicker } from "../SettingsSectionPicker";
 
 describe("SettingsSectionPicker", () => {
-  it("finds Labs in the account group and selects its destination", async () => {
+  it("shows Labs with a workspace admin chip only after owner eligibility resolves", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
-    render(
+    const picker = (showLabs?: boolean) => (
       <SettingsSectionPicker
         activeSection="workspace"
         consentCount={0}
@@ -16,9 +16,11 @@ describe("SettingsSectionPicker", () => {
         showAttachments={false}
         showDeployment={false}
         showUsers={false}
+        showLabs={showLabs}
         tokenCount={0}
-      />,
+      />
     );
+    const view = render(picker());
 
     await user.click(screen.getByRole("button", { expanded: false }));
     const dialog = screen.getByRole("dialog");
@@ -26,8 +28,13 @@ describe("SettingsSectionPicker", () => {
       within(dialog).getByRole("searchbox", { name: "Filter settings sections" }),
       "experimental",
     );
-    const group = within(dialog).getByRole("group", { name: "Your account" });
-    await user.click(within(group).getByRole("button", { name: /^Labs/ }));
+    expect(within(dialog).queryByRole("button", { name: /^Labs/ })).not.toBeInTheDocument();
+    view.rerender(picker(true));
+    const group = within(dialog).getByRole("group", { name: "This workspace" });
+    const labs = within(group).getByRole("button", { name: /^Labs Workspace admin/ });
+    expect(within(labs).getByText("Workspace admin")).toHaveClass("nav-admin-badge");
+    expect(within(labs).queryByText("System admin")).not.toBeInTheDocument();
+    await user.click(labs);
 
     expect(onSelect).toHaveBeenCalledWith("labs", undefined);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

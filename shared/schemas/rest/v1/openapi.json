@@ -22323,6 +22323,16 @@
           "graph": {
             "$ref": "#/components/schemas/PolicyCard"
           },
+          "labs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyCard"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "library": {
             "$ref": "#/components/schemas/PolicyCard"
           },
@@ -22410,7 +22420,8 @@
               "agent_injection",
               "review",
               "lint",
-              "graph"
+              "graph",
+              "labs"
             ],
             "title": "Group",
             "type": "string"
@@ -22436,7 +22447,8 @@
               "agent_injection",
               "review",
               "lint",
-              "graph"
+              "graph",
+              "labs"
             ],
             "title": "Group",
             "type": "string"
@@ -25549,7 +25561,8 @@
             "enum": [
               "enabled",
               "disabled_by_workspace",
-              "service_unavailable"
+              "service_unavailable",
+              "permission_denied"
             ],
             "title": "Reason",
             "type": "string"

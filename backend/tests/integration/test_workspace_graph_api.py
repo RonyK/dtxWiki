@@ -21,7 +21,7 @@ def _client(
     enabled,
     service_available=True,
     email="workspace-graph@example.com",
-    role="viewer",
+    role="owner",
 ):
     """A client whose workspace map switch is the owner's Settings choice."""
 
@@ -238,7 +238,7 @@ def test_capability_reports_the_effective_map_state(
             "reason": reason,
         },
         "usage_relation_signals_enabled": True,
-        "can_manage": False,
+        "can_manage": True,
     }
     overview = client.post(
         f"/api/v1/workspaces/{workspace_id}/graph/overview/query",
@@ -334,7 +334,7 @@ def test_map_api_applies_its_unplaced_facet_without_422(page_service, mode):
     unplaced = {str(page_id) for page_id in fixture["pages"].values()} - {folder_page}
     response = client.post(
         f"/api/v1/workspaces/{workspace_id}/graph/overview/query",
-        json={"folders": {mode: ["unplaced"]}},
+        json={"document_kinds": ["context"], "folders": {mode: ["unplaced"]}},
     )
     assert response.status_code == 200, response.text
     scene = response.json()["data"]

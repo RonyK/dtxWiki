@@ -113,6 +113,8 @@ def test_ask_session_list_survives_a_misconfigured_provider(
         email="ask-degrade@example.com",
     )
     workspace_id = _workspace_id(session_factory)
+    with session_factory.begin() as session:
+        session.get(Workspace, workspace_id).labs_policy = {"ask_enabled": True}
 
     response = client.get(f"/api/v1/workspaces/{workspace_id}/ask/sessions")
 
@@ -135,6 +137,8 @@ def test_ask_turn_answers_and_discloses_why_the_model_was_skipped(
         email="ask-degrade-turn@example.com",
     )
     workspace_id = _workspace_id(session_factory)
+    with session_factory.begin() as session:
+        session.get(Workspace, workspace_id).labs_policy = {"ask_enabled": True}
     page_service.write_page(
         workspace_slug="default",
         slug="degrade-evidence",
@@ -186,6 +190,8 @@ def test_composer_failure_is_disclosed_instead_of_silently_swallowed(
             raise LLMProviderError("anthropic API returned 401", provider="anthropic")
 
     workspace_id = _workspace_id(session_factory)
+    with session_factory.begin() as session:
+        session.get(Workspace, workspace_id).labs_policy = {"ask_enabled": True}
     page_service.write_page(
         workspace_slug="default",
         slug="composer-failure-evidence",
@@ -238,6 +244,8 @@ def test_an_unexpected_composer_exception_does_not_promise_a_retry(
             raise TypeError("composer bug, not an upstream failure")
 
     workspace_id = _workspace_id(session_factory)
+    with session_factory.begin() as session:
+        session.get(Workspace, workspace_id).labs_policy = {"ask_enabled": True}
     page_service.write_page(
         workspace_slug="default",
         slug="composer-bug-evidence",

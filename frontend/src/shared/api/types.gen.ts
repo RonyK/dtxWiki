@@ -11452,6 +11452,7 @@ export interface components {
             citation: components["schemas"]["PolicyCard"];
             context_write: components["schemas"]["PolicyCard"];
             graph: components["schemas"]["PolicyCard"];
+            labs?: components["schemas"]["PolicyCard"] | null;
             library: components["schemas"]["PolicyCard"];
             lint: components["schemas"]["PolicyCard"];
             /** Mcp Clients */
@@ -11478,7 +11479,7 @@ export interface components {
              * Group
              * @enum {string}
              */
-            group: "workspace" | "attachments" | "library" | "citation" | "context_write" | "agent_injection" | "review" | "lint" | "graph";
+            group: "workspace" | "attachments" | "library" | "citation" | "context_write" | "agent_injection" | "review" | "lint" | "graph" | "labs";
         };
         /** SettingsPolicyUpdateRequest */
         SettingsPolicyUpdateRequest: {
@@ -11486,7 +11487,7 @@ export interface components {
              * Group
              * @enum {string}
              */
-            group: "workspace" | "library" | "citation" | "context_write" | "agent_injection" | "review" | "lint" | "graph";
+            group: "workspace" | "library" | "citation" | "context_write" | "agent_injection" | "review" | "lint" | "graph" | "labs";
             /** Key */
             key: string;
             /** Value */
@@ -12763,7 +12764,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "enabled" | "disabled_by_workspace" | "service_unavailable";
+            reason: "enabled" | "disabled_by_workspace" | "service_unavailable" | "permission_denied";
             /** Service Available */
             service_available: boolean;
             /** Workspace Enabled */

@@ -54,5 +54,7 @@
   "review.json:workflow.documentKinds.library",
   "review.json:document.kind.context",
   "review.json:document.kind.agent",
-  "review.json:document.kind.library"
+  "review.json:document.kind.library",
+  "settings.json:policy.labs.askEnabled.label",
+  "settings.json:policy.labs.agentEnabled.label"
 ]

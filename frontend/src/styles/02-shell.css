@@ -746,47 +746,50 @@
   white-space: nowrap;
 }
 
+/* Preview marker (shared/components/PreviewBadge.tsx): the Settings > Labs
+   flask in a round chip. Icon-only so "Knowledge Map" plus the marker fits on
+   one line of the 207px inner sidebar; the word is visually hidden text and
+   the description is the chip's own hover tooltip. */
 .nav-preview-badge {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
-  min-height: 17px;
+  justify-content: center;
+  width: 20px;
+  height: 18px;
   border: 1px solid color-mix(in srgb, var(--ink-muted) 26%, transparent);
   border-radius: 999px;
   background: var(--surface-subtle);
   color: var(--ink-soft);
-  font-size: 9px;
-  font-weight: 800;
-  line-height: 1;
-  padding: 2px 5px;
-  text-transform: uppercase;
+  vertical-align: middle;
 }
 
-/* The full Knowledge Map label plus Preview badge is wider than the 207px
-   inner sidebar. Keep both readable without letting grid's auto min-content
-   column stretch a selected nav item beyond the sidebar border. The mobile
-   drawer has more room and keeps its usual single-line navigation. */
-.sidebar[data-collapsed="false"] .nav-item--graph-preview {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  column-gap: 8px;
-  row-gap: 2px;
+/* Navigation rows (sidebar and mobile drawer) line their markers up at the
+   row end instead of after labels of different lengths. */
+.nav-item > .nav-preview-badge {
+  margin-left: auto;
 }
 
-.sidebar[data-collapsed="false"] .nav-item--graph-preview > svg {
-  grid-column: 1;
-  grid-row: 1 / 3;
-  align-self: center;
-}
-
-.sidebar[data-collapsed="false"] .nav-item--graph-preview .nav-item-label {
-  grid-column: 2;
-  grid-row: 1;
-}
-
-.sidebar[data-collapsed="false"] .nav-item--graph-preview .nav-preview-badge {
-  grid-column: 2;
-  grid-row: 2;
-  justify-self: start;
+.preview-badge-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-tooltip);
+  max-width: min(280px, calc(100vw - 16px));
+  border-radius: 5px;
+  background: var(--ink);
+  color: var(--surface);
+  box-shadow: 0 2px 8px rgb(15 23 42 / 18%);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: normal;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  padding: 6px 9px;
+  pointer-events: none;
+  text-align: start;
+  text-transform: none;
+  white-space: normal;
 }
 
 /* UI-04: gate hover-only backgrounds to devices that truly hover (mouse/
