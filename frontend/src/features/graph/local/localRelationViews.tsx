@@ -14,7 +14,6 @@ export type LocalViewContext = {
   /** The document the graph is opened from: its rows show the legend's "This document" glyph. */
   currentId: string | null;
   hrefFor: (node: GraphNode) => string | null;
-  seeds: ReadonlySet<string>;
   t: TFunction<"graph">;
   visuals: LocalNodeVisuals;
 };
@@ -39,8 +38,12 @@ export function localStrokeLabel(t: TFunction<"graph">) {
   return (stroke: RelationListStroke) => t(`relationList.lines.${stroke}`);
 }
 
-export function LocalSeedBadge({ t }: { t: TFunction<"graph"> }) {
-  return <span className="graph-seed-badge">{t("graph.view.seed")}</span>;
+/**
+ * The current document is shown by its glyph alone; the glyph is hidden from
+ * assistive technology, so it hears the legend's name for it instead.
+ */
+function LocalCurrentMark({ t }: { t: TFunction<"graph"> }) {
+  return <span className="visually-hidden">{t("graph.legend.node.seed")}</span>;
 }
 
 /** Short chip name; activity-like nodes use their node type (conversation, ask turn …). */
@@ -57,9 +60,9 @@ export function localNodeSearchText(node: GraphNode, t: TFunction<"graph">) {
 }
 
 export function localNodeView(node: GraphNode, context: LocalViewContext): RelationListNodeView {
-  const { hrefFor, seeds, t, visuals } = context;
+  const { hrefFor, t, visuals } = context;
   return {
-    badge: seeds.has(node.id) ? <LocalSeedBadge t={t} /> : null,
+    badge: node.id === context.currentId ? <LocalCurrentMark t={t} /> : null,
     chip: {
       cue: <LocalNodeCue node={node} visuals={visuals} />,
       label: nodeChipLabel(node, t),

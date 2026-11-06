@@ -7193,7 +7193,7 @@ button.graph-seed-pill:focus-visible { outline: 2px solid var(--context); outlin
    line a flow rail joins at its centre, with the cue and badge on it; rows
    grow downward and the rail below the joint stretches with them. */
 .graph-list-view .relation-list-flow-name { display: flex; align-items: flex-start; gap: 6px; min-width: 0; height: auto; }
-.graph-list-view .relation-list-flow-name > :is(svg, .graph-seed-badge) { margin-top: 2px; }
+.graph-list-view .relation-list-flow-name > svg { margin-top: 2px; }
 .graph-list-view .relation-list-flow-name strong { display: -webkit-box; min-width: 0; overflow: hidden; font-size: 13px; line-height: 20px; overflow-wrap: anywhere; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .relation-list-relations[data-embedded] { margin-top: 0; padding-top: 0; border-top: 0; }
 .relation-list-relations[data-embedded] > .relation-list-relations-head { display: none; }
@@ -7223,7 +7223,6 @@ button.graph-seed-pill:focus-visible { outline: 2px solid var(--context); outlin
 .graph-list-bowtie-stroke[data-directed="true"]::after { content: ""; position: absolute; top: -4px; right: -4px; border-left: 7px solid var(--edge-ink); border-block: 5px solid transparent; }
 
 /* Details: the kind chip line, the seed mark, and the path from the seed. */
-.graph-seed-badge { display: inline-flex; flex: none; align-items: center; height: 16px; padding: 0 6px; border-radius: 4px; background: var(--ink); color: var(--surface); font-size: 10px; font-weight: 700; line-height: 1; }
 .graph-details-meta { display: grid; gap: 3px; min-width: 0; }
 .graph-details-meta-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .graph-details-status { color: var(--ink-muted); font-size: 11px; }
@@ -7267,7 +7266,6 @@ button.graph-seed-path-node:hover { background: var(--surface-hover); }
   .graph-view button.graph-seed-pill { min-height: 44px; }
 }
 @media (forced-colors: active) {
-  .graph-seed-badge { border: 1px solid CanvasText; }
   .graph-list-bowtie-stroke[data-visual] { --edge-ink: CanvasText; forced-color-adjust: none; }
   .graph-status-actions .graph-view-switch button[aria-pressed="true"] { outline: 2px solid Highlight; }
 }

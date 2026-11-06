@@ -199,10 +199,9 @@ export function GraphView({
   const listContext = useMemo<LocalViewContext>(() => ({
     currentId: currentNode?.id ?? null,
     hrefFor: (node) => nodeHref(node, workspaceId ?? null),
-    seeds: new Set(sceneAnalysis.seeds),
     t,
     visuals: nodeVisuals,
-  }), [currentNode, nodeVisuals, sceneAnalysis, t, workspaceId]);
+  }), [currentNode, nodeVisuals, t, workspaceId]);
   const canvasScene = useMemo<GraphRenderScene>(() => {
     const hoveredIndex = timeline.findIndex((event) => event.id === hoveredEventId);
     const eventIndex = hoveredIndex >= 0 ? hoveredIndex : visibleCursor;

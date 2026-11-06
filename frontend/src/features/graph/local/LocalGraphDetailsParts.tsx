@@ -9,7 +9,6 @@ import { RelationFlow } from "../shared/relationList/RelationFlow";
 import type { RovingSelectionOrigin } from "../shared/relationList/useRovingList";
 import { localNodeRelations, localSeedPath, type LocalSceneAnalysis } from "./localGraphList";
 import {
-  LocalSeedBadge,
   localEdgeSearchText,
   localEdgeView,
   localNodeView,
@@ -21,7 +20,7 @@ import {
 
 type Select = (id: string, origin: RovingSelectionOrigin) => void;
 
-/** Under the title: the kind chip, the seed mark and status, then the location. */
+/** Under the title: the kind chip and status, then the location. */
 export function LocalNodeMeta({ context, node }: { context: LocalViewContext; node: GraphNode }) {
   const { t } = useTranslation("graph");
   const view = localNodeView(node, context);
@@ -67,7 +66,8 @@ export function LocalSeedPath({ analysis, context, node, onSelect }: {
         const content = <>
           {view.cue}<strong>{view.label}</strong>
           {self ? <span className="relation-list-flow-self">{t(`graph.relations.self.${localSelfKind(node)}`)}</span>
-            : view.badge ?? <span className="graph-seed-path-via">{t("graph.seedPath.via")}</span>}
+            // The path starts at a seed; every node between it and this one is passed through.
+            : index === 0 ? view.badge : <span className="graph-seed-path-via">{t("graph.seedPath.via")}</span>}
         </>;
         return <li key={id}>
           {self ? <span className="graph-seed-path-node">{content}</span>
@@ -177,4 +177,3 @@ export function LocalRelationEnds({ analysis, context, edge, onSelect }: {
   />;
 }
 
-export { LocalSeedBadge };
