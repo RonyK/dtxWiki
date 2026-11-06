@@ -2478,7 +2478,7 @@ describe("Cosmos Map native lifecycle and semantic ownership", () => {
     config.onPointClick?.(0, [0, 0], new MouseEvent("click"));
     expect(onSelect).toHaveBeenLastCalledWith("projection:a");
     adapter.select("projection:b");
-    expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({ focusedPointIndex: 1 }));
+    expect([...document.querySelectorAll<SVGSVGElement>("[data-workspace-map-selection-ring]")].at(-1)!.dataset.selectedPoint).toBe("1");
     adapter.focus("projection:a"); adapter.setSearchMatches(new Set(["projection:a"])); adapter.resize();
     expect(graph.setConfigPartial).toHaveBeenCalledWith(expect.objectContaining({ highlightedPointIndices: expect.arrayContaining([0]) }));
     config.onLinkClick?.(0, new MouseEvent("click", { clientX: 100, clientY: 100 }));
@@ -2998,14 +2998,37 @@ describe("Cosmos Map interaction contracts", () => {
     expect(selection?.[0]).toMatchObject({ highlightedPointIndices: [1, 2, 0], highlightedLinkIndices: [2, 0, 1] });
   });
 
-  it.each(["light", "dark"])("uses a contrasting %s focus ring and disables hover rings", async (mode) => {
+  it.each(["light", "dark"])("draws a contrasting %s selection ring that follows the glyph, not the native circle", async (mode) => {
     document.documentElement.setAttribute("data-theme", mode);
     try {
-      await mount();
-      expect(createGraph.mock.calls[0][1]).toMatchObject({
-        focusedPointRingColor: mode === "dark" ? "#f8fafc" : "#0f172a",
-        hoveredPointRingColor: mode === "dark" ? "#f8fafc" : "#0f172a", renderHoveredPointRing: false,
-      });
+      const input = columns();
+      input.nodeKinds[1] = 1; // "b" is a Library document: a square glyph.
+      const adapter = await mount(input);
+      // No native focused point: its ring would be an opaque circle under the overlay.
+      expect(createGraph.mock.calls[0][1]).toMatchObject({ renderHoveredPointRing: false });
+      const ring = [...document.querySelectorAll<SVGSVGElement>("[data-workspace-map-selection-ring]")].at(-1)!;
+      expect(ring.style.display).toBe("none");
+      const config = createGraph.mock.calls[0][1];
+      // A native pick publishes the point's position without waiting for a GPU readback.
+      config.onPointMouseOver?.(1, [0, 0], undefined, false, false);
+      adapter.select("b");
+      expect(graph.setConfigPartial.mock.calls.some(([next]) => next.focusedPointIndex !== undefined)).toBe(false);
+      const [gap, band] = ring.querySelectorAll("path");
+      expect(band).toHaveAttribute("stroke", mode === "dark" ? "#f8fafc" : "#0f172a");
+      expect(gap).toHaveAttribute("stroke", mode === "dark" ? "#0f172a" : "#ffffff");
+      expect(ring.style.display).toBe("block");
+      expect(band.getAttribute("d")!.split("L")).toHaveLength(4);
+      // Zooming in grows the native glyph (pointSizeScale); the ring grows with it.
+      const width = () => {
+        const xs = band.getAttribute("d")!.match(/-?\d+(?:\.\d+)?/g)!.map(Number).filter((_, index) => index % 2 === 0);
+        return Math.max(...xs) - Math.min(...xs);
+      };
+      const fitWidth = width();
+      config.onZoom?.({ transform: { k: graph.getZoomLevel() * 16 } } as never, true);
+      expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({ pointSizeScale: 4 }));
+      // The glyph is 4x larger; the ring keeps its fixed 2px gap + 2px band outside it.
+      const outside = 2 * (2 + 2 / 2);
+      expect(width() - outside).toBeCloseTo((fitWidth - outside) * 4, 5);
     } finally { document.documentElement.removeAttribute("data-theme"); }
   });
 
@@ -3427,18 +3450,19 @@ describe("Cosmos Map interaction contracts", () => {
     graph.setLinks.mockClear();
     graph.setZoomLevel.mockClear();
     graph.setZoomTransformByPointPositions.mockClear();
+    const ring = [...document.querySelectorAll<SVGSVGElement>("[data-workspace-map-selection-ring]")].at(-1)!;
     adapter.focus("bc");
     expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({
-      focusedPointIndex: 0,
       highlightedPointIndices: [1, 2],
       highlightedLinkIndices: [1],
     }));
+    expect(ring.dataset.selectedPoint).toBe("0");
     adapter.focus(null);
     expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({
-      focusedPointIndex: 0,
       highlightedPointIndices: [0, 1],
       highlightedLinkIndices: [0],
     }));
+    expect(ring.dataset.selectedPoint).toBe("0");
     expect(graph.setPointPositions).not.toHaveBeenCalled();
     expect(graph.setLinks).not.toHaveBeenCalled();
     expect(graph.setZoomLevel).not.toHaveBeenCalled();

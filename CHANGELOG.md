@@ -17,6 +17,26 @@
 - Enable **Request review** only for the draft's author, and say when a later
   save withdraws a pending review request.
 
+### Graph legend
+
+- Use one node vocabulary in the Context graph, the Knowledge Map, their
+  legends, lists and chips: circles for edited documents (Context purple,
+  Agent amber), filled triangles for document versions, squares for Library
+  material, sky-blue diamonds for chat and activity records, and grey rings
+  for folders and Map clusters. In forced colours an Agent keeps its shape
+  with a thin inner outline.
+- Mark a history event target and the selected node with a ring that follows
+  the node's shape, instead of turning the node into a circle; the Map's
+  selection ring follows Library squares too.
+- Draw read-together lines in sky blue, folder membership in a grey that meets
+  3:1 contrast, and action lines in dark grey; timeline version marks are
+  triangles and activity marks share the chat/activity colour.
+- Show a fixed legend for each mode (current relationships, history, Map) with
+  the relationship names each line draws, without the arrow and action-glyph
+  columns. Map legend lines match the map and use the Link and Citation names.
+- Define the graph colour tokens once for the light, dark and forced-colours
+  themes, so legends, lists and chips outside the canvas follow dark mode.
+
 ## 0.2.1 — 2026-11-04
 
 Beta release with Graph View, document references, Inbox, and workspace-scoped

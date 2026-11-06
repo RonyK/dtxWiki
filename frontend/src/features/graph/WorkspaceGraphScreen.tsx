@@ -65,6 +65,7 @@ import {
   WorkspaceGraphLineSummary,
   WorkspaceGraphMoreButton,
   WorkspaceGraphNodeChip,
+  WorkspaceGraphNodeCue,
   WorkspaceGraphNodeSummary,
   WorkspaceGraphOpenLink,
   WorkspaceGraphRelationEnds,
@@ -73,6 +74,7 @@ import {
   workspaceGraphRelationName,
   workspaceGraphRelationNames,
 } from "./workspace/WorkspaceGraphSidebarParts";
+import { GraphEdgeCue } from "./shared/GraphCues";
 import { WorkspaceGraphSelectionCard } from "./workspace/WorkspaceGraphSelectionCard";
 import { RETAINED_EXPANSION_LIMIT, retainedExpansions, type WorkspaceGraphExpansionStep } from "./workspace/workspaceGraphExpansion";
 import { formatCount, workspaceGraphEnumLabel } from "./workspace/workspaceGraphLabels";
@@ -2084,6 +2086,7 @@ function WorkspaceGraphMetadata({ scene }: { scene: WorkspaceGraphScene }) {
   );
 }
 
+/** The Map's fixed legend: the glyphs and lines this view can draw. */
 function WorkspaceGraphLegend() {
   const { t } = useTranslation("graph");
   return (
@@ -2091,14 +2094,20 @@ function WorkspaceGraphLegend() {
       <summary>{t("workspaceGraph.legend.title")}</summary>
       <div className="graph-legend-groups">
         <ul aria-label={t("workspaceGraph.legend.shapes")}>
-          <li><span aria-hidden="true" className="workspace-graph-node-cue is-context" />{t("workspaceGraph.legend.context")}</li>
-          <li><span aria-hidden="true" className="workspace-graph-node-cue is-library" />{t("workspaceGraph.legend.library")}</li>
-          <li><span aria-hidden="true" className="workspace-graph-node-cue is-agent" />{t("workspaceGraph.legend.agent")}</li>
-          <li><span aria-hidden="true" className="workspace-graph-node-cue is-cluster" />{t("workspaceGraph.legend.cluster")}</li>
+          {(["context", "agent", "library", "cluster"] as const).map((kind) => (
+            <li data-node-cue-kind={kind} key={kind}>
+              <WorkspaceGraphNodeCue kind={kind} size="legend" />
+              {t(`workspaceGraph.legend.${kind}`)}
+            </li>
+          ))}
         </ul>
         <ul aria-label={t("workspaceGraph.legend.lines")}>
-          <li><span aria-hidden="true" className="graph-edge-swatch" />{t("workspaceGraph.legend.knowledge")}</li>
-          <li><span aria-hidden="true" className="graph-edge-swatch graph-edge-swatch-evidence" />{t("workspaceGraph.legend.evidence")}</li>
+          {(["link", "citation"] as const).map((kind) => (
+            <li data-edge-visual-kind={kind} key={kind}>
+              <GraphEdgeCue kind={kind} />
+              {t(`workspaceGraph.legend.${kind}`)}
+            </li>
+          ))}
         </ul>
         <ul aria-label={t("workspaceGraph.legend.size")}>
           <li>{t("workspaceGraph.legend.visibleRelationMetric")}</li>
@@ -2430,7 +2439,7 @@ function WorkspaceMapFolderDetails({ folderId, mobileLayout, memberLimit, onClos
           <button className="workspace-graph-list-select"
             data-list-index={virtualized ? index : undefined}
             onClick={() => onSelect(point.sourceNodeId)} onKeyDown={onKeyDown} type="button">
-            <strong><span aria-hidden="true" className={`workspace-map-member-dot is-${point.entityKind}`} />{point.label}</strong>
+            <strong><WorkspaceGraphNodeCue className="workspace-map-member-dot" kind={point.entityKind} />{point.label}</strong>
             <small>{t(`workspaceGraph.enums.${point.entityKind}`)}{point.grain === "fragment"
               ? ` · ${t("workspaceGraph.folders.fragment", { count: point.memberCount })}` : ""}</small>
           </button>

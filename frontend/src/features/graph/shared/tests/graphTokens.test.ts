@@ -14,17 +14,19 @@ describe("Graph visual tokens", () => {
     expect(readGraphTokens(element, "light").node).toMatchObject({
       context: "#7c3aed",
       library: "#0f9f8f",
-      conversation: "#ea580c",
+      agent: "#d97706",
+      conversation: "#0284c7",
     });
-    // The actual canvas receives dark overrides from the document theme,
-    // rather than needing a data attribute that GraphCanvas never sets.
+    // Canvases, legends and list cues outside them all inherit the theme from
+    // the document root, rather than from a canvas-only rule.
     const graphCss = readFileSync("src/styles/03-editor.css", "utf8");
-    expect(graphCss).toContain(':root[data-theme="dark"] .graph-canvas,');
-    expect(graphCss).toContain("--graph-node-context: #8b5cf6;");
+    const darkTokens = graphCss.slice(graphCss.indexOf(':root[data-theme="dark"],\n.graph-canvas[data-graph-theme="dark"] {'));
+    expect(darkTokens.slice(0, darkTokens.indexOf("}"))).toContain("--graph-node-agent: #f59e0b;");
     expect(readGraphTokens(element, "dark").node).toMatchObject({
       context: "#8b5cf6",
       library: "#0d9488",
-      conversation: "#ea580c",
+      agent: "#f59e0b",
+      conversation: "#38bdf8",
     });
   });
 

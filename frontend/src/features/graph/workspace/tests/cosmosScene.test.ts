@@ -3,12 +3,13 @@ import { describe, expect, it } from "vitest";
 import type { WorkspaceMapColumns } from "../../map/sceneColumns";
 import type { GraphVisualTokens } from "../../shared/graphTokens";
 import { WORKSPACE_MAP_PC_10K_BUDGET } from "../../shared/workspaceMapBudget";
-import { buildCosmosRelationColors, buildCosmosSceneBuffers, incidentStar, isDenseWorkspaceMapOverview, isReadableWorkspaceMapScene } from "../cosmosScene";
+import { WORKSPACE_CLUSTER_RING_IMAGE, buildCosmosRelationColors, buildCosmosSceneBuffers, incidentStar, isDenseWorkspaceMapOverview, isReadableWorkspaceMapScene } from "../cosmosScene";
 
 const tokens: GraphVisualTokens = {
   surface: "#101827",
   node: { context: "#8b5cf6", library: "#0d9488", agent: "#60a5fa", conversation: "#ea580c", folder: "#94a3b8" },
   edge: { link: "#64748b", citation: "#0d9488", coAccess: "#ea580c", membership: "#64748b", action: "#a78bfa" },
+  highlight: "#a78bfa", selection: "#f8fafc",
 };
 
 function columns(): WorkspaceMapColumns {
@@ -105,8 +106,11 @@ describe("Workspace Cosmos typed scene", () => {
     expect(buffers.links).toHaveLength(originalEdgeIds.length * 2);
     expect(buffers.pointShapes).toEqual(Float32Array.from([0, 1, 0]));
     expect(buffers.pointColors.slice(0, 4)).not.toEqual(buffers.pointColors.slice(4, 8));
-    expect(buffers).not.toHaveProperty("pointImageIndices");
-    expect(buffers).not.toHaveProperty("pointImageSizes");
+    // Only the aggregate gets the grey grouping ring image, at its drawn size,
+    // over a surface-coloured disc that keeps its picking footprint.
+    expect(Array.from(buffers.pointImageIndices)).toEqual([-1, -1, WORKSPACE_CLUSTER_RING_IMAGE]);
+    expect(buffers.pointImageSizes[2]).toBe(buffers.drawPointSizes[2]);
+    [16, 24, 39].forEach((channel, index) => expect(buffers.pointColors[8 + index]).toBeCloseTo(channel / 255));
     expect(buffers).not.toHaveProperty("linkWidths");
     input.edgeCrossFolder.forEach((crossFolder, index) => {
       if (crossFolder) expect(buffers.linkColors[index * 4 + 3]).toBeGreaterThan(0);
@@ -165,7 +169,7 @@ describe("Workspace Cosmos typed scene", () => {
     const input = columns();
     input.nodeKinds[2] = 4; // Same scene, now with an Agent instead of an aggregate.
     const buffers = buildCosmosSceneBuffers(input, tokens);
-    expect(Array.from(buffers.pointShapes)).toEqual([0, 1, 3]);
+    expect(Array.from(buffers.pointShapes)).toEqual([0, 1, 0]); // Agent documents are discs too.
     expect(Array.from(buffers.pointSizes)).toEqual([4, 6, 8]);
     expect(Array.from(buffers.drawPointSizes)).toEqual([5, 6, 8]);
     expect(Array.from(buffers.linkStyles)).toEqual([0, 1, 0]);

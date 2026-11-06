@@ -1261,22 +1261,24 @@ async function expectNativeRovingList(page: Page, graph: Locator, disclosure: Lo
   await page.keyboard.press("Tab");
 }
 
-type CueKind = "context" | "library" | "conversation" | "folder";
+type CueKind = "context" | "version" | "library" | "conversation" | "folder";
 type CueMode = "light" | "dark" | "forced";
 type CueRow = { label: string; kind: CueKind; family: "document" | "ask" | "chat" | "structural" };
 const NODE_CUE_ROWS: CueRow[] = [
   { label: "Decision Log", kind: "context", family: "document" },
   { label: "Architecture Notes", kind: "context", family: "document" },
   { label: "Why was this chosen?", kind: "conversation", family: "ask" },
-  { label: "Shared source title", kind: "context", family: "document" },
+  { label: "Shared source title", kind: "version", family: "document" },
   { label: "Shared source title", kind: "library", family: "document" },
   { label: "Source Artifact", kind: "library", family: "document" },
   { label: "MCP Conversation", kind: "conversation", family: "chat" },
   { label: "Visible Source Folder", kind: "folder", family: "structural" },
 ];
 const CUE_COLORS = {
-  light: { context: "rgb(124, 58, 237)", library: "rgb(15, 159, 143)", conversation: "rgb(234, 88, 12)", folder: "rgb(100, 116, 139)" },
-  dark: { context: "rgb(139, 92, 246)", library: "rgb(13, 148, 136)", conversation: "rgb(234, 88, 12)", folder: "rgb(148, 163, 184)" },
+  light: { context: "rgb(124, 58, 237)", version: "rgb(124, 58, 237)", library: "rgb(15, 159, 143)",
+    conversation: "rgb(2, 132, 199)", folder: "rgb(100, 116, 139)" },
+  dark: { context: "rgb(139, 92, 246)", version: "rgb(139, 92, 246)", library: "rgb(13, 148, 136)",
+    conversation: "rgb(56, 189, 248)", folder: "rgb(148, 163, 184)" },
 } as const;
 const NAVIGATION_COPY = {
   en: { members: "Members in this scene", neighbors: "Direct neighbors in this scene", folders: "Folders in this scene",
@@ -1328,8 +1330,8 @@ for (const { locale, mode } of [
       NODE_CUE_ROWS.filter((node) => node.kind === "folder"), locale, mode);
 
     // Check the composited row SVG screenshots, not only attributes: a square
-    // has filled corners, a folder has a hole, and forced conversation keeps
-    // a gap between its central disc and outer ring.
+    // has filled corners, a folder has a hole, and a chat/activity diamond
+    // reaches past the disc along its axes in every colour mode.
     const silhouettes = [];
     for (const [region, buttons] of [["main", mainButtons], ["neighbors", neighborButtons]] as const) {
       for (const kind of ["context", "library", "conversation", "folder"] as const) {
@@ -1346,12 +1348,10 @@ for (const { locale, mode } of [
         const pixels = await inspectCuePixels(page, screenshot);
         expect(pixels.center, `${region} ${kind} visible center`).toBe(kind !== "folder");
         if (kind === "library") expect(pixels.corner, `${region} Library must paint square corners`).toBe(true);
-        if (kind === "context" || kind === "conversation") expect(pixels.corner, `${region} ${kind} must remain circular`).toBe(false);
+        if (kind === "context" || kind === "conversation") expect(pixels.corner, `${region} ${kind} must not paint square corners`).toBe(false);
         if (kind === "folder") expect(pixels.rim, `${region} folder must have a visible rim`).toBe(true);
-        if (kind === "conversation" && mode === "forced") {
-          expect(pixels.gap, `${region} forced conversation must retain its concentric gap`).toBe(false);
-          expect(pixels.outer, `${region} forced conversation must retain its outer ring`).toBe(true);
-        }
+        if (kind === "context") expect(pixels.axis, `${region} Context must remain a disc`).toBe(false);
+        if (kind === "conversation") expect(pixels.axis, `${region} chat/activity must be a diamond`).toBe(true);
         silhouettes.push({ region, kind, ...pixels });
         await testInfo.attach(`local-${locale}-${mode}-${region}-${kind}-cue.png`, { body: screenshot, contentType: "image/png" });
       }
@@ -1399,7 +1399,7 @@ async function expectNodeCueRows(buttons: Locator, expected: CueRow[], locale: k
       // not a system-ink oracle. GraphView's auto-adjusted read surface is.
       foreground: getComputedStyle(element.closest(".graph-view") ?? element).color, surface,
       legacy: Boolean(element.querySelector(".graph-node-swatch")),
-      shapes: cue ? Array.from(cue.querySelectorAll("rect,circle")).map((shape) => ({
+      shapes: cue ? Array.from(cue.querySelectorAll("path,circle")).map((shape) => ({
         name: shape.tagName.toLowerCase(), fill: getComputedStyle(shape).fill, stroke: getComputedStyle(shape).stroke,
         radius: Number(shape.getAttribute("r")),
       })) : [],
@@ -1418,16 +1418,10 @@ async function expectNodeCueRows(buttons: Locator, expected: CueRow[], locale: k
     expect(row.legacy).toBe(false);
     expect(row.width).toBe(16);
     expect(row.height).toBe(16);
-    expect(row.shapes.map((shape) => shape.name)).toEqual(kind === "library" ? ["rect"]
-      : kind === "conversation" && mode === "forced" ? ["circle", "circle", "circle"] : ["circle"]);
+    // One outline per glyph from the shared shape geometry; a folder is a stroked ring.
+    expect(row.shapes.map((shape) => shape.name)).toEqual(kind === "folder" ? ["circle"] : ["path"]);
     expect(row.shapes[0].fill).toBe(kind === "folder" ? "none" : color);
     if (kind === "folder") expect(row.shapes[0].stroke).toBe(color);
-    if (kind === "conversation" && mode === "forced") {
-      expect(row.shapes[1].fill).toBe(row.surface);
-      expect(row.shapes[2].fill).toBe(color);
-      expect(row.shapes[0].radius).toBeGreaterThan(row.shapes[1].radius);
-      expect(row.shapes[1].radius).toBeGreaterThan(row.shapes[2].radius);
-    }
   }
 }
 
@@ -1447,7 +1441,8 @@ async function inspectCuePixels(page: Page, screenshot: Buffer) {
     };
     const background = pixel(0, 0);
     const painted = (x: number, y: number) => pixel(x, y).some((value, index) => Math.abs(value - background[index]) > 25);
-    return { center: painted(8, 8), corner: painted(3, 3), rim: painted(2, 8), gap: painted(11, 8), outer: painted(13, 8) };
+    // `axis` lies past a disc's antialiased edge but inside a diamond's vertex.
+    return { center: painted(8, 8), corner: painted(3, 3), rim: painted(2, 8), axis: painted(1.5, 8) };
   }, screenshot.toString("base64"));
 }
 

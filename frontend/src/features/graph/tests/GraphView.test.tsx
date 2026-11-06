@@ -323,25 +323,39 @@ describe("GraphView", () => {
     }
   });
 
-  it("explains actual point/square/ring encodings and relationship patterns instead of retired families", () => {
+  it("lists every glyph and line of the mode in the shared shape and colour vocabulary", () => {
     const payload = graphFixture();
     payload.nodes.push(
       { ...payload.nodes[1], id: "node:library", entity_kind: "library_item_version", entity_id: "library", label: "Source" },
       { ...payload.nodes[1], id: "node:agent", entity_kind: "agent_page", entity_id: "agent", label: "Agent" },
-      { ...payload.nodes[1], id: "node:folder", entity_kind: "workspace_tree_node", entity_id: "folder", family: "structural", label: "Folder" },
     );
-    payload.edges.push({ ...payload.edges[0], id: "edge:action", edge_kind: "edited", action_kind: "edited", layer: "action" });
-    renderGraph({ payload });
-    const legend = screen.getByTestId("graph-view").querySelector(".graph-legend")!;
-    expect(legend.querySelector('[data-node-visual-kind="context"] circle')).toHaveAttribute("fill", "#7c3aed");
-    expect(legend.querySelector('[data-node-visual-kind="library"] rect')).toHaveAttribute("fill", "#0f9f8f");
-    expect(legend.querySelector('[data-node-visual-kind="agent"] polygon')).toHaveAttribute("points", "8,1.4 13.5,8 8,14.6 2.5,8");
-    expect(legend.querySelector('[data-node-visual-kind="folder"] circle')).toHaveAttribute("fill", "none");
-    expect(legend.querySelector('[data-node-visual-kind="conversation"] circle')).toHaveAttribute("fill", "#ea580c");
-    expect(legend.querySelector('[data-node-visual-kind="seed"] circle')).toHaveAttribute("stroke-width", "2.64");
-    expect(legend.querySelector('[data-edge-visual-kind="action"] line')).toHaveAttribute("stroke-dasharray", "10 3");
-    expect(legend.querySelector('[data-edge-visual-kind="link"] line')).not.toHaveAttribute("stroke-dasharray");
-    expect(legend.querySelector(".graph-node-swatch-ask,.graph-edge-swatch-knowledge")).toBeNull();
+    const history = renderGraph({ payload });
+    let legend = screen.getByTestId("graph-view").querySelector(".graph-legend")!;
+    const kinds = (selector: string, attribute: string) =>
+      [...legend.querySelectorAll(selector)].map((item) => item.getAttribute(attribute));
+    // A fixed list per mode, not only what this scene happens to contain.
+    expect(kinds("li[data-node-visual-kind]", "data-node-visual-kind"))
+      .toEqual(["seed", "context", "version", "agent", "library", "conversation", "folder"]);
+    expect(kinds("li[data-edge-visual-kind]", "data-edge-visual-kind"))
+      .toEqual(["link", "citation", "coAccess", "membership", "action", "removed"]);
+    expect(legend.querySelector('[data-legend-mark="event-target"] svg path[fill="none"]')).toHaveAttribute("stroke", "#7c3aed");
+    expect(legend.querySelector('svg[data-node-visual-kind="version"] path')).toHaveAttribute("fill", "#7c3aed");
+    expect(legend.querySelector('svg[data-node-visual-kind="context"] path')).toHaveAttribute("fill", "#7c3aed");
+    expect(legend.querySelector('svg[data-node-visual-kind="agent"] path')).toHaveAttribute("fill", "#d97706");
+    expect(legend.querySelector('svg[data-node-visual-kind="library"] path')).toHaveAttribute("fill", "#0f9f8f");
+    expect(legend.querySelector('svg[data-node-visual-kind="conversation"] path')).toHaveAttribute("fill", "#0284c7");
+    expect(legend.querySelector('svg[data-node-visual-kind="folder"] circle')).toHaveAttribute("fill", "none");
+    expect(legend.querySelector('li[data-edge-visual-kind="action"] line')).toHaveAttribute("stroke-dasharray", "10 3");
+    expect(legend.querySelector('li[data-edge-visual-kind="link"] line')).not.toHaveAttribute("stroke-dasharray");
+    expect(legend.querySelector(".graph-action-cue,.graph-kind-cue")).toBeNull();
+    history.unmount();
+
+    renderGraph({ payload: graphRowCueFixture() });
+    legend = screen.getByTestId("graph-view").querySelector(".graph-legend")!;
+    expect(kinds("li[data-node-visual-kind]", "data-node-visual-kind"))
+      .toEqual(["seed", "context", "agent", "library", "conversation", "folder"]);
+    expect(kinds("li[data-edge-visual-kind]", "data-edge-visual-kind"))
+      .toEqual(["link", "citation", "coAccess", "membership", "action"]);
   });
 
   it.each([false, true])("uses canonical actual-API node cues in main rows with forced colors=%s without changing labels or scene counts", (forcedColors) => {
@@ -437,23 +451,23 @@ describe("GraphView", () => {
         graph.style.setProperty("--graph-surface", "#abcdef");
       });
       const libraryRow = rowFor("Source Version");
-      expect(libraryRow.querySelector('[data-node-visual-kind="library"] rect'))
+      expect(libraryRow.querySelector('[data-node-visual-kind="library"] path'))
         .toHaveAttribute("fill", "#123456");
       const legend = graph.querySelector(".graph-legend")!;
-      expect(legend.querySelector('[data-node-visual-kind="library"] rect'))
+      expect(legend.querySelector('svg[data-node-visual-kind="library"] path'))
         .toHaveAttribute("fill", "#123456");
       const user = userEvent.setup();
       await user.click(rowFor("Decision Log").querySelector<HTMLButtonElement>(":scope > button.graph-list-select")!);
       const details = screen.getByRole("heading", { name: "Details" }).closest("aside")!;
       const neighbors = within(details).getByRole("list", { name: "Direct neighbors in this scene" });
       expect(within(neighbors).getByRole("button", { name: /Source Version/ })
-        .querySelector('[data-node-visual-kind="library"] rect')).toHaveAttribute("fill", "#123456");
+        .querySelector('[data-node-visual-kind="library"] path')).toHaveAttribute("fill", "#123456");
       await act(async () => { document.documentElement.setAttribute("data-theme", "dark"); });
-      expect(rowFor("Decision Log").querySelector('[data-node-visual-kind="context"] circle'))
+      expect(rowFor("Decision Log").querySelector('[data-node-visual-kind="context"] path'))
         .toHaveAttribute("fill", "#8b5cf6");
-      expect(legend.querySelector('[data-node-visual-kind="context"] circle'))
+      expect(legend.querySelector('svg[data-node-visual-kind="context"] path'))
         .toHaveAttribute("fill", "#8b5cf6");
-      expect(libraryRow.querySelector('[data-node-visual-kind="library"] rect'))
+      expect(libraryRow.querySelector('[data-node-visual-kind="library"] path'))
         .toHaveAttribute("fill", "#123456");
       expect(observerFactory).toHaveBeenCalledTimes(1);
       view.unmount();
@@ -578,7 +592,8 @@ describe("GraphView", () => {
     expect(relationshipList.children).toHaveLength(2);
     expect(screen.getByText("4 nodes · 2 edges")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Legend" }));
-    expect(screen.getByText("Long-dashed lines show action occurrences, not document links or citations."))
+    // The action line names what it draws: recorded activity, not links or citations.
+    expect(screen.getByText("Recorded activity such as creating, editing, reviewing, searching and citing"))
       .toBeVisible();
   });
 
@@ -2256,14 +2271,21 @@ function graphRowCueFixture(): GraphQueryPayload {
 }
 
 function rowCueKind(entityKind: string, family: string) {
-  if (entityKind === "context_page" || entityKind === "context_page_version") return "context";
+  if (entityKind === "context_page") return "context";
+  if (entityKind === "context_page_version") return "version";
   if (entityKind === "library_item_version" || entityKind === "library_artifact") return "library";
   return family === "structural" ? "folder" : "conversation";
 }
 
+/** Circle paths are drawn with arcs; polygons by their vertex count. */
+function cueOutline(path: Element | null) {
+  const data = path?.getAttribute("d") ?? "";
+  return data.includes("a") ? "circle" : `${data.split("L").length}-gon`;
+}
+
 function expectCanonicalRowCue(
   button: HTMLElement,
-  kind: "context" | "library" | "conversation" | "folder",
+  kind: "context" | "version" | "library" | "conversation" | "folder",
   forcedColors: boolean,
 ) {
   const cue = button.querySelector(`[data-node-visual-kind="${kind}"]`);
@@ -2271,27 +2293,19 @@ function expectCanonicalRowCue(
   if (!cue) return;
   expect(cue.tagName.toLowerCase()).toBe("svg");
   expect(cue).toHaveAttribute("aria-hidden", "true");
-  const palette = { context: "#7c3aed", library: "#0f9f8f", conversation: "#ea580c", folder: "#64748b" };
+  const palette = { context: "#7c3aed", version: "#7c3aed", library: "#0f9f8f", conversation: "#0284c7", folder: "#64748b" };
   const color = forcedColors ? "rgb(255, 255, 255)" : palette[kind];
-  if (kind === "library") {
-    expect(cue.querySelectorAll("rect")).toHaveLength(1);
-    expect(cue.querySelector("rect")).toHaveAttribute("fill", color);
-    expect(cue.querySelectorAll("circle")).toHaveLength(0);
-  } else {
-    expect(cue.querySelectorAll("rect")).toHaveLength(0);
-    const circles = cue.querySelectorAll("circle");
-    expect(circles).toHaveLength(kind === "conversation" && forcedColors ? 3 : 1);
-    expect(circles[0]).toHaveAttribute("fill", kind === "folder" ? "none" : color);
-    if (kind === "folder") expect(circles[0]).toHaveAttribute("stroke", color);
-    if (kind === "conversation" && forcedColors) {
-      expect(circles[1]).toHaveAttribute("fill", "rgb(0, 0, 0)");
-      expect(circles[2]).toHaveAttribute("fill", color);
-      expect(Number(circles[0].getAttribute("r"))).toBeGreaterThan(Number(circles[1].getAttribute("r")));
-      expect(Number(circles[1].getAttribute("r"))).toBeGreaterThan(Number(circles[2].getAttribute("r")));
-    }
+  if (kind === "folder") {
+    expect(cue.querySelectorAll("path")).toHaveLength(0);
+    expect(cue.querySelector("circle")).toHaveAttribute("fill", "none");
+    expect(cue.querySelector("circle")).toHaveAttribute("stroke", color);
+    return;
   }
-  expect(button.querySelector(".graph-node-swatch-document,.graph-node-swatch-structural,.graph-node-swatch-chat,.graph-node-swatch-ask"))
-    .toBeNull();
+  // Shape says what it is: disc document, triangle version, square source, diamond record.
+  const paths = cue.querySelectorAll("path");
+  expect(paths).toHaveLength(1);
+  expect(paths[0]).toHaveAttribute("fill", color);
+  expect(cueOutline(paths[0])).toBe({ context: "circle", version: "3-gon", library: "4-gon", conversation: "4-gon" }[kind]);
 }
 
 function setGraphForcedColorsPreference(matches: boolean) {
