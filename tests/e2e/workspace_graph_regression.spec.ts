@@ -306,6 +306,15 @@ test.describe("Knowledge Map unified Refine workflow", () => {
         const apply = dialog.getByRole("button", { name: "Apply data filters" });
         await expect(apply).toHaveCount(1);
         await expect(apply).toBeDisabled();
+        // The filters overflow the panel, so the sticky Cancel/Apply footer must
+        // sit flush on its bottom edge: a strip below it shows the scrolled filters.
+        const footerGap = await dialog.evaluate((element) => {
+          const panel = element.getBoundingClientRect();
+          return { overflow: element.scrollHeight > element.clientHeight,
+            gap: panel.bottom - element.querySelector("footer")!.getBoundingClientRect().bottom };
+        });
+        expect(footerGap.overflow).toBe(true);
+        expect(footerGap.gap).toBeCloseTo(0, 0);
         await dialog.getByRole("button", { name: "Orphans", exact: true }).click();
         await dialog.getByRole("searchbox", { name: "Search published documents" }).fill("Discard this");
         await expect(apply).toBeEnabled();
