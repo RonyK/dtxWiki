@@ -385,12 +385,12 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
 const SCENE_NAVIGATION_LABELS = {
   en: {
     listMode: "List", listSearch: "Find in the graph list", incoming: "Incoming", outgoing: "Outgoing",
-    membership: "Membership", documentSearch: "Find in this document's relationships",
+    membership: "Membership", documentSearch: "Find in the selected document's relationships",
     empty: "Select a node or relationship to inspect it.",
   },
   ko: {
     listMode: "목록", listSearch: "그래프 목록에서 찾기", incoming: "들어오는 관계", outgoing: "나가는 관계",
-    membership: "소속", documentSearch: "이 문서의 관계에서 찾기",
+    membership: "소속", documentSearch: "선택한 문서의 관계에서 찾기",
     empty: "확인할 노드 또는 관계를 선택하세요.",
   },
 } as const;

@@ -1247,7 +1247,7 @@ describe("GraphView", () => {
       await user.click(rowByLabel(list, "Primary Folder"));
       const details = screen.getByRole("heading", { name: "상세 정보" }).closest("aside")!;
       expect(within(within(details).getByRole("list", { name: "나가는 관계" })).getAllByRole("button")).toHaveLength(2);
-      expect(details).toHaveTextContent("이 폴더가 가리킴");
+      expect(details).toHaveTextContent("선택한 폴더가 가리킴");
       expect(details).toHaveTextContent("기준 문서와의 관계");
       expect(details).not.toHaveTextContent(/Incoming|Outgoing|Relationship to the seed/);
     } finally {

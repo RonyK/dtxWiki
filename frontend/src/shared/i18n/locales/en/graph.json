@@ -476,28 +476,28 @@
       "title": "Relationships",
       "none": "No relationships are shown in this scene.",
       "search": {
-        "document": "Find in this document's relationships",
-        "library": "Find in this source's relationships",
-        "folder": "Find in this folder's relationships",
-        "other": "Find in this item's relationships"
+        "document": "Find in the selected document's relationships",
+        "library": "Find in the selected source's relationships",
+        "folder": "Find in the selected folder's relationships",
+        "other": "Find in the selected item's relationships"
       },
       "self": {
-        "document": "This document",
-        "library": "This source",
-        "folder": "This folder",
-        "other": "This item"
+        "document": "Selected document",
+        "library": "Selected source",
+        "folder": "Selected folder",
+        "other": "Selected item"
       },
       "incomingNote": {
-        "document": "to this document",
-        "library": "to this source",
-        "folder": "to this folder",
-        "other": "to this item"
+        "document": "to the selected document",
+        "library": "to the selected source",
+        "folder": "to the selected folder",
+        "other": "to the selected item"
       },
       "outgoingNote": {
-        "document": "from this document",
-        "library": "from this source",
-        "folder": "from this folder",
-        "other": "from this item"
+        "document": "from the selected document",
+        "library": "from the selected source",
+        "folder": "from the selected folder",
+        "other": "from the selected item"
       },
       "undirectedNote": "connected both ways"
     },

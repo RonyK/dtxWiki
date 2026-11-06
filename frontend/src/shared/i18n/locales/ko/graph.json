@@ -476,28 +476,28 @@
       "title": "관계",
       "none": "이 장면에 표시된 관계가 없습니다.",
       "search": {
-        "document": "이 문서의 관계에서 찾기",
-        "library": "이 자료의 관계에서 찾기",
-        "folder": "이 폴더의 관계에서 찾기",
-        "other": "이 항목의 관계에서 찾기"
+        "document": "선택한 문서의 관계에서 찾기",
+        "library": "선택한 자료의 관계에서 찾기",
+        "folder": "선택한 폴더의 관계에서 찾기",
+        "other": "선택한 항목의 관계에서 찾기"
       },
       "self": {
-        "document": "이 문서",
-        "library": "이 자료",
-        "folder": "이 폴더",
-        "other": "이 항목"
+        "document": "선택한 문서",
+        "library": "선택한 자료",
+        "folder": "선택한 폴더",
+        "other": "선택한 항목"
       },
       "incomingNote": {
-        "document": "이 문서를 가리킴",
-        "library": "이 자료를 가리킴",
-        "folder": "이 폴더를 가리킴",
-        "other": "이 항목을 가리킴"
+        "document": "선택한 문서를 가리킴",
+        "library": "선택한 자료를 가리킴",
+        "folder": "선택한 폴더를 가리킴",
+        "other": "선택한 항목을 가리킴"
       },
       "outgoingNote": {
-        "document": "이 문서가 가리킴",
-        "library": "이 자료가 가리킴",
-        "folder": "이 폴더가 가리킴",
-        "other": "이 항목이 가리킴"
+        "document": "선택한 문서가 가리킴",
+        "library": "선택한 자료가 가리킴",
+        "folder": "선택한 폴더가 가리킴",
+        "other": "선택한 항목이 가리킴"
       },
       "undirectedNote": "서로 연결"
     },
