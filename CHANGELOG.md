@@ -42,6 +42,31 @@
   The static view now spans the full graph width, and **Export filtered
   graph** writes the same styles.
 
+### Inbox
+
+- Allow every Inbox item to be archived and moved back to the Inbox, including
+  reviews awaiting action, workspace join requests/results and Access Key
+  expiry notices, under one rule for all kinds. Archived lists newest archive
+  first and pages through every archived item; read marks do not reorder it.
+- Show when each item leaves on its own: a chip with the remaining time where
+  the server states an end date, otherwise an info button. Either one opens the
+  kind's full condition. Archived explains once that archiving does not extend
+  an item's visibility or keep it after its source disappears.
+- Show Inbox items in two lines under "Live" and "Messages" headings, with icon
+  actions, and explain an empty scan that still has older items to check.
+- Label the workspace scope "Workspace" and show the workspace's name beside
+  it, shortened when long with the full name on hover.
+- Look up the items of a listed page in one batched source query per kind
+  instead of one query per item.
+- Refill capped Inbox lists after marks while retaining loaded message pages.
+  Update removal countdowns while the screen is open and refresh loaded pages
+  when an item's stated visibility ends. If the server still lists the item,
+  for example because its clock runs behind the browser's, refresh again after
+  5 seconds, 30 seconds and 2 minutes, then stop.
+- Migration `00ba02774c4a` adds partial indexes on archived entries of
+  `workspace_inbox_entry` and `account_inbox_entry` in Archived list order, so
+  an Archived page no longer reads and sorts the recipient's whole history.
+
 ## 0.2.1 — 2026-11-04
 
 Beta release with Graph View, document references, Inbox, and workspace-scoped

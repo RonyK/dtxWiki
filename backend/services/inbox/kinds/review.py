@@ -1,10 +1,11 @@
 """Review kinds: reviews to act on now, and decisions on your changes.
 
 ``review_attention`` is current state, derived on read: a review the viewer
-can decide now (``ReviewService.actionable_reviews``). It leaves the inbox
-when it is decided, superseded, claimed by someone else or no longer routed
-to the viewer. A withdrawn request for changes brings back the pending item
-with its earlier key, revision and read mark, and nothing new is announced.
+can decide now (``ReviewService.actionable_reviews``; the scan and the lookup
+by key apply one rule). It leaves the inbox when it is decided, superseded,
+claimed by someone else or no longer routed to the viewer. A withdrawn
+request for changes brings back the pending item with its earlier key,
+revision and read mark, and nothing new is announced.
 
 ``review_result`` is a message: a person approved or rejected your change.
 ``ReviewResultNotifier`` writes it when the decision is made. Automatic
@@ -100,23 +101,20 @@ def _attention_scan(session: Session, viewer: InboxViewer, limit: int) -> Comput
     )
 
 
-def _attention_get(
-    session: Session, viewer: InboxViewer, item_key: str
-) -> InboxSnapshot | None:
-    review_id = _review_id(item_key)
-    if review_id is None:
-        return None
-    found = _reviews().actionable_review(
+def _attention_lookup(
+    session: Session, viewer: InboxViewer, item_keys: Sequence[str]
+) -> Mapping[str, InboxSnapshot]:
+    # A review's key names its stage, so a pending key no longer matches once
+    # changes are requested; the caller compares keys exactly.
+    rows = _reviews().actionable_reviews_by_id(
         session,
         _workspace_id(viewer),
-        review_id,
+        {review_id for key in item_keys if (review_id := _review_id(key))},
         principal=viewer.user_id,
         principal_role=viewer.role,
     )
-    if found is None:
-        return None
-    snapshot = _attention_snapshot(*found)
-    return snapshot if snapshot.item_key == item_key else None
+    snapshots = (_attention_snapshot(review, request) for review, request in rows)
+    return {snapshot.item_key: snapshot for snapshot in snapshots}
 
 
 def _attention_resolve(
@@ -148,7 +146,7 @@ def review_attention_kind() -> InboxKind:
     return InboxKind(
         REVIEW_ATTENTION,
         WorkspaceInbox.name,
-        ComputedSource(scan=_attention_scan, get=_attention_get),
+        ComputedSource(scan=_attention_scan, lookup=_attention_lookup),
         _attention_resolve,
         reopen_on_new_revision=True,
     )

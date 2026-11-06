@@ -125,18 +125,31 @@ def marks_for(
     }
 
 
-def count_read_marks(
-    session: Session, scope: InboxScope, user_id: UUID, kind: str, *, cap: int
+def count_hidden_marks(
+    session: Session,
+    scope: InboxScope,
+    user_id: UUID,
+    kind: str,
+    *,
+    state: InboxState,
+    cap: int,
 ) -> int:
-    """How many of the viewer's items of a kind carry a read mark, up to cap."""
+    """Bound extra candidates for items hidden by archive or read marks.
+
+    Count a row once even when both marks hide it. Old revisions may make
+    this an overestimate, which is safe for the bounded source scan.
+    """
 
     model = scope.model
+    hidden = model.archived_revision.is_not(None)
+    if state == "unread":
+        hidden = or_(hidden, model.read_revision.is_not(None))
     marked = (
         select(model.item_key)
         .where(
             *_equal(model, scope.owner(user_id)),
             model.kind == kind,
-            model.read_revision.is_not(None),
+            hidden,
         )
         .limit(cap)
         .subquery()
@@ -144,7 +157,20 @@ def count_read_marks(
     return session.scalar(select(func.count()).select_from(marked)) or 0
 
 
-def stored_page(
+def _order_at(model: Any, state: InboxState) -> Any:
+    # The Archived list is newest archive first for every entry; the others
+    # follow when each message happened. ``updated_at`` is set by a producer
+    # write and by archive or restore, never by a read mark.
+    return model.updated_at if state == "archived" else model.event_at
+
+
+def list_position(entry: InboxEntryRow, state: InboxState) -> tuple[datetime, str, str]:
+    """The keyset position of an entry in ``message_page`` for this state."""
+
+    return (_order_at(entry, state), entry.kind, entry.item_key)
+
+
+def message_page(
     session: Session,
     scope: InboxScope,
     user_id: UUID,
@@ -154,32 +180,41 @@ def stored_page(
     after: tuple[datetime, str, str] | None,
     limit: int,
 ) -> Sequence[InboxEntryRow]:
-    """Stored rows in keyset order (event_at, kind, item_key), newest first."""
+    """The entries a message page reads, in keyset order, newest first.
+
+    Inbox and Unread read stored messages; computed items come from their
+    source's status scan. Archived reads every archived entry, stored or
+    marks-only, so archived computed items page past the source's first scan.
+    The caller rechecks each entry's current revision and visibility.
+    """
 
     model = scope.model
     archived = and_(
         model.archived_revision.is_not(None),
         or_(
             model.kind.not_in(reopen_kinds),
+            # A marks-only row's revision lives at its source.
+            model.revision.is_(None),
             model.archived_revision == model.revision,
         ),
     )
-    conditions = [
-        *_equal(model, scope.owner(user_id)),
-        model.mode == STORED_MODE,
-        archived if state == "archived" else not_(archived),
-    ]
+    conditions = [*_equal(model, scope.owner(user_id))]
+    if state == "archived":
+        conditions.append(archived)
+    else:
+        conditions += [model.mode == STORED_MODE, not_(archived)]
     if state == "unread":
         conditions.append(
             or_(model.read_revision.is_(None), model.read_revision != model.revision)
         )
+    order_at = _order_at(model, state)
     if after is not None:
-        event_at, kind, item_key = after
+        position_at, kind, item_key = after
         conditions.append(
             or_(
-                model.event_at < event_at,
+                order_at < position_at,
                 and_(
-                    model.event_at == event_at,
+                    order_at == position_at,
                     or_(
                         model.kind < kind,
                         and_(model.kind == kind, model.item_key < item_key),
@@ -190,7 +225,7 @@ def stored_page(
     return session.scalars(
         select(model)
         .where(*conditions)
-        .order_by(model.event_at.desc(), model.kind.desc(), model.item_key.desc())
+        .order_by(order_at.desc(), model.kind.desc(), model.item_key.desc())
         .limit(limit)
     ).all()
 

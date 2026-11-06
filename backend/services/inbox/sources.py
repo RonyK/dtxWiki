@@ -7,7 +7,7 @@ the status group. A new source type implements ``WritableSource`` or
 ``StatusSource``; the registry routes kinds by that capability.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -49,10 +49,9 @@ class StoredSource(WritableSource):
         session: Session,
         viewer: InboxViewer,
         kind: str,
-        item_key: str,
-        stored: InboxSnapshot | None,
-    ) -> InboxSnapshot | None:
-        return stored
+        stored: Mapping[str, InboxSnapshot | None],
+    ) -> Mapping[str, InboxSnapshot]:
+        return {key: snapshot for key, snapshot in stored.items() if snapshot}
 
 
 STORED = StoredSource()
@@ -63,12 +62,13 @@ class ComputedSource(StatusSource):
     """Items derived on read from data the kind already owns.
 
     ``scan`` returns at most ``limit`` items plus the full total; a source with
-    more items aggregates them or lets the overflow show. ``get`` returns one
-    item by key, or None when it no longer exists for this viewer.
+    more items aggregates them or lets the overflow show. ``lookup`` returns
+    the items that still exist for this viewer among the given keys, in one
+    query batch, keyed by their own ``item_key``.
     """
 
     scan: Callable[[Session, InboxViewer, int], ComputedScan]
-    get: Callable[[Session, InboxViewer, str], InboxSnapshot | None]
+    lookup: Callable[[Session, InboxViewer, Sequence[str]], Mapping[str, InboxSnapshot]]
 
     def status(
         self, session: Session, viewer: InboxViewer, kind: str, limit: int
@@ -80,7 +80,9 @@ class ComputedSource(StatusSource):
         session: Session,
         viewer: InboxViewer,
         kind: str,
-        item_key: str,
-        stored: InboxSnapshot | None,
-    ) -> InboxSnapshot | None:
-        return self.get(session, viewer, item_key)
+        stored: Mapping[str, InboxSnapshot | None],
+    ) -> Mapping[str, InboxSnapshot]:
+        # Only exact keys count: a key that parses to the same source row but
+        # is spelled differently names no item.
+        found = self.lookup(session, viewer, list(stored)) if stored else {}
+        return {key: found[key] for key in stored if key in found}

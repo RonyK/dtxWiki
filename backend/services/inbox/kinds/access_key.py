@@ -57,7 +57,13 @@ class _ExpiringKeys:
             str(token.id),
             "expired" if expired else "expiring",
             expires_at if expired else expires_at - self.config.warn_before,
-            {"name": token.name, "expires_at": expires_at.isoformat()},
+            {
+                "name": token.name,
+                "expires_at": expires_at.isoformat(),
+                "visible_until": (
+                    expires_at + self.config.keep_after_expiry
+                ).isoformat(),
+            },
         )
 
     def scan(self, session: Session, viewer: InboxViewer, limit: int) -> ComputedScan:
@@ -76,17 +82,20 @@ class _ExpiringKeys:
             [self._snapshot(token, now) for token in tokens], total or 0
         )
 
-    def get(
-        self, session: Session, viewer: InboxViewer, item_key: str
-    ) -> InboxSnapshot | None:
+    def lookup(
+        self, session: Session, viewer: InboxViewer, item_keys: Sequence[str]
+    ) -> Mapping[str, InboxSnapshot]:
+        ids = {token_id for key in item_keys if (token_id := parse_uuid_or_none(key))}
+        if not ids:
+            return {}
         now = utc_now()
-        token = session.scalar(
-            select(ApiToken).where(
-                ApiToken.id == parse_uuid_or_none(item_key),
-                *self._conditions(viewer, now),
-            )
+        tokens = session.scalars(
+            select(ApiToken).where(ApiToken.id.in_(ids), *self._conditions(viewer, now))
         )
-        return self._snapshot(token, now) if token is not None else None
+        return {
+            snapshot.item_key: snapshot
+            for snapshot in (self._snapshot(token, now) for token in tokens)
+        }
 
 
 def _resolve(
@@ -100,6 +109,7 @@ def _resolve(
             params={
                 "stage": snapshot.revision,
                 "expires_at": (snapshot.ref or {}).get("expires_at"),
+                "visible_until": (snapshot.ref or {}).get("visible_until"),
             },
         )
         for snapshot in snapshots
@@ -111,7 +121,7 @@ def access_key_expiry_kind(config: AccessKeyExpiryConfig) -> InboxKind:
     return InboxKind(
         ACCESS_KEY_EXPIRY,
         AccountInbox.name,
-        ComputedSource(scan=keys.scan, get=keys.get),
+        ComputedSource(scan=keys.scan, lookup=keys.lookup),
         _resolve,
         reopen_on_new_revision=True,
     )

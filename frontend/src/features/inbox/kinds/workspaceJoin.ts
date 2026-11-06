@@ -17,5 +17,9 @@ export const workspaceJoinRenderer: InboxRenderer = {
         return t("kinds.workspace_join.pending", { requester, workspace });
     }
   },
+  removal: (item, t) =>
+    item.display?.params?.status === "pending"
+      ? t("kinds.workspace_join.pendingRemoval")
+      : t("kinds.workspace_join.resultRemoval"),
   icon: UserPlus,
 };

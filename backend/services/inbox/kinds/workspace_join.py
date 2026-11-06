@@ -121,18 +121,27 @@ class _JoinRequests:
         ).all()
         return ComputedScan([_snapshot(request) for request in requests], total or 0)
 
-    def get(
-        self, session: Session, viewer: InboxViewer, item_key: str
-    ) -> InboxSnapshot | None:
-        workspace_id, _, request_id = item_key.partition(":")
-        request = session.scalar(
+    def lookup(
+        self, session: Session, viewer: InboxViewer, item_keys: Sequence[str]
+    ) -> Mapping[str, InboxSnapshot]:
+        # A key is "<workspace>:<request>"; the snapshot's own key must match,
+        # so a request id paired with another workspace names nothing.
+        ids = {
+            request_id
+            for key in item_keys
+            if (request_id := parse_uuid_or_none(key.partition(":")[2]))
+        }
+        if not ids:
+            return {}
+        requests = session.scalars(
             select(WorkspaceJoinRequest).where(
-                WorkspaceJoinRequest.id == parse_uuid_or_none(request_id),
-                WorkspaceJoinRequest.workspace_id == parse_uuid_or_none(workspace_id),
-                self._visible(viewer),
+                WorkspaceJoinRequest.id.in_(ids), self._visible(viewer)
             )
         )
-        return _snapshot(request) if request is not None else None
+        return {
+            snapshot.item_key: snapshot
+            for snapshot in (_snapshot(request) for request in requests)
+        }
 
     def resolve(
         self, session: Session, viewer: InboxViewer, snapshots: Sequence[InboxSnapshot]
@@ -165,7 +174,17 @@ class _JoinRequests:
                     if status == "approved"
                     else None
                 ),
-                params={"status": status, "requester": requester_name},
+                params={
+                    "status": status,
+                    "requester": requester_name,
+                    "visible_until": (
+                        (
+                            request.decided_at + self.config.result_visible_for
+                        ).isoformat()
+                        if status in RESULTS and request.decided_at is not None
+                        else None
+                    ),
+                },
             )
         return displays
 
@@ -175,7 +194,7 @@ def workspace_join_kind(config: WorkspaceJoinConfig) -> InboxKind:
     return InboxKind(
         WORKSPACE_JOIN,
         AccountInbox.name,
-        ComputedSource(scan=requests.scan, get=requests.get),
+        ComputedSource(scan=requests.scan, lookup=requests.lookup),
         requests.resolve,
         reopen_on_new_revision=True,
     )

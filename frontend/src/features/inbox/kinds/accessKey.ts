@@ -14,5 +14,6 @@ export const accessKeyExpiryRenderer: InboxRenderer = {
       ? t("kinds.access_key_expiry.expired", { date })
       : t("kinds.access_key_expiry.expiring", { date });
   },
+  removal: (_item, t) => t("kinds.access_key_expiry.removal"),
   icon: KeyRound,
 };

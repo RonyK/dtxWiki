@@ -31,8 +31,8 @@ class InboxListingConfig:
     page_size_max: int = 100
     # Status items returned per kind; more show as an overflow count.
     status_items_per_kind: int = 20
-    # Unread lists ask a status source for this many extra candidates at most,
-    # one per item the viewer has read, so read items do not crowd out unread.
+    # Ask a status source for this many extra candidates at most, one per
+    # archive/read mark hiding a candidate from the requested view.
     read_mark_scan_cap: int = 100
     # Batches the message stream reads ahead past items the viewer cannot see.
     stream_scan_batches: int = 5

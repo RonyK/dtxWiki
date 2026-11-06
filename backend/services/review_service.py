@@ -1,6 +1,6 @@
 import base64
 import json
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -844,18 +844,65 @@ class ReviewService:
         limit: int,
     ) -> tuple[list[tuple[ReviewItem, ReviewDecision | None]], int]:
         """Reviews the principal can decide now, most recently active first,
-        and how many there are.
+        and how many there are. A changes_requested review comes with its
+        current request for changes."""
 
-        The same gates as ``_action_unavailable_reason`` in SQL: no
+        statement = self._actionable_statement(
+            workspace_id, principal=principal, principal_role=principal_role
+        )
+        if statement is None:
+            return [], 0
+        total = session.scalar(select(func.count()).select_from(statement.subquery()))
+        reviews = session.scalars(
+            statement.order_by(
+                ReviewItem.updated_at.desc(), ReviewItem.id.desc()
+            ).limit(limit)
+        ).all()
+        return self._with_current_requests(session, workspace_id, reviews), int(
+            total or 0
+        )
+
+    def actionable_reviews_by_id(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        review_ids: Iterable[UUID],
+        *,
+        principal: UUID,
+        principal_role: str | None,
+    ) -> list[tuple[ReviewItem, ReviewDecision | None]]:
+        """The given reviews the principal can decide now, by the same rule
+        as ``actionable_reviews``, in one query batch."""
+
+        ids = set(review_ids)
+        statement = self._actionable_statement(
+            workspace_id,
+            principal=principal,
+            principal_role=principal_role,
+            narrowed_by=(ReviewItem.id.in_(ids),),
+        )
+        if statement is None or not ids:
+            return []
+        reviews = session.scalars(statement).all()
+        return self._with_current_requests(session, workspace_id, reviews)
+
+    def _actionable_statement(
+        self,
+        workspace_id: UUID,
+        *,
+        principal: UUID,
+        principal_role: str | None,
+        narrowed_by: tuple = (),
+    ):
+        """The gates of ``_action_unavailable_reason`` in SQL: no
         reconciliation review, pending or routed to the principal, editor
-        role, and no live claim by someone else. A changes_requested review
-        comes with its current request for changes.
-        """
+        role, and no live claim by someone else. None without the role.
+        ``narrowed_by`` adds conditions inside the workspace-scoped select."""
 
         if not role_allows(principal_role or "none", "editor"):
-            return [], 0
+            return None
         cutoff = utc_now() - timedelta(minutes=CLAIM_TTL_MINUTES)
-        statement = select_in_workspace(
+        return select_in_workspace(
             ReviewItem,
             workspace_id=workspace_id,
             conditions=(
@@ -875,50 +922,19 @@ class ReviewService:
                     ReviewItem.claimed_at <= cutoff,
                     ReviewItem.claimed_by == principal,
                 ),
+                *narrowed_by,
             ),
         )
-        total = session.scalar(select(func.count()).select_from(statement.subquery()))
-        reviews = session.scalars(
-            statement.order_by(
-                ReviewItem.updated_at.desc(), ReviewItem.id.desc()
-            ).limit(limit)
-        ).all()
+
+    def _with_current_requests(
+        self, session: Session, workspace_id: UUID, reviews: Sequence[ReviewItem]
+    ) -> list[tuple[ReviewItem, ReviewDecision | None]]:
         requests = self._latest_requests_for_changes(
             session,
             workspace_id,
             [r.id for r in reviews if r.status == CHANGES_REQUESTED_STATUS],
         )
-        return [(review, requests.get(review.id)) for review in reviews], int(
-            total or 0
-        )
-
-    def actionable_review(
-        self,
-        session: Session,
-        workspace_id: UUID,
-        review_id: UUID,
-        *,
-        principal: UUID,
-        principal_role: str | None,
-    ) -> tuple[ReviewItem, ReviewDecision | None] | None:
-        """One review the principal can decide now, with its current request
-        for changes when changes are requested; else None."""
-
-        review = get_in_workspace(
-            session, ReviewItem, workspace_id=workspace_id, resource_id=review_id
-        )
-        if review is None or self._action_unavailable_reason(
-            session,
-            review,
-            actor_user_id=principal,
-            actor_role=principal_role,
-            claimant_id=principal,
-        ):
-            return None
-        if review.status != CHANGES_REQUESTED_STATUS:
-            return review, None
-        requests = self._latest_requests_for_changes(session, workspace_id, [review.id])
-        return review, requests.get(review.id)
+        return [(review, requests.get(review.id)) for review in reviews]
 
     def latest_decisions(
         self, session: Session, workspace_id: UUID, review_ids: Iterable[UUID]

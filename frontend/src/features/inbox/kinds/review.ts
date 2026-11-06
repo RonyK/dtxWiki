@@ -10,6 +10,7 @@ export const reviewAttentionRenderer: InboxRenderer = {
     item.display?.params?.state === "changes_requested"
       ? t("kinds.review_attention.changesRequested")
       : t("kinds.review_attention.pending"),
+  removal: (_item, t) => t("kinds.review_attention.removal"),
   icon: ClipboardCheck,
 };
 
@@ -20,5 +21,6 @@ export const reviewResultRenderer: InboxRenderer = {
     item.display?.params?.decision === "reject"
       ? t("kinds.review_result.rejected")
       : t("kinds.review_result.approved"),
+  removal: (_item, t) => t("kinds.review_result.removal"),
   icon: FileCheck2,
 };

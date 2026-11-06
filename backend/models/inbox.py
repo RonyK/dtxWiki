@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import JSON, CheckConstraint, ForeignKey, Index, Text, Uuid
+from sqlalchemy import JSON, CheckConstraint, ForeignKey, Index, Text, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.models.base import Base, UTCDateTime, utc_now
@@ -27,6 +27,22 @@ _MODE_COLUMNS_CHECK = (
     " OR (mode = 'mark' AND revision IS NULL AND ref IS NULL"
     " AND event_at IS NULL)"
 )
+# The Archived list reads archived entries newest archive first. A partial
+# index keeps that page bounded by the page size, not the recipient's history,
+# and read marks never touch it.
+_ARCHIVED = "archived_revision IS NOT NULL"
+
+
+def _archived_index(name: str, *owner: str) -> Index:
+    return Index(
+        name,
+        *owner,
+        "updated_at",
+        "kind",
+        "item_key",
+        sqlite_where=text(_ARCHIVED),
+        postgresql_where=text(_ARCHIVED),
+    )
 
 
 class WorkspaceInboxRecipient(Base):
@@ -53,6 +69,7 @@ class WorkspaceInboxEntry(Base):
             "kind",
             "item_key",
         ),
+        _archived_index("ix_workspace_inbox_entry_archived", "workspace_id", "user_id"),
     )
 
     # Bare UUIDs keep this per-user workspace data shard-resident, as with
@@ -68,6 +85,8 @@ class WorkspaceInboxEntry(Base):
     event_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     read_revision: Mapped[str | None] = mapped_column(Text)
     archived_revision: Mapped[str | None] = mapped_column(Text)
+    # Set when the row is created, a producer writes it, or the recipient
+    # archives or restores it; read marks leave it. Orders the Archived list.
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=utc_now, nullable=False
     )
@@ -88,6 +107,7 @@ class AccountInboxEntry(Base):
             "kind",
             "item_key",
         ),
+        _archived_index("ix_account_inbox_entry_archived", "user_id"),
     )
 
     user_id: Mapped[UUID] = mapped_column(
@@ -103,6 +123,8 @@ class AccountInboxEntry(Base):
     event_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     read_revision: Mapped[str | None] = mapped_column(Text)
     archived_revision: Mapped[str | None] = mapped_column(Text)
+    # Set when the row is created, a producer writes it, or the recipient
+    # archives or restores it; read marks leave it. Orders the Archived list.
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=utc_now, nullable=False
     )

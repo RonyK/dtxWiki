@@ -11,6 +11,9 @@ import { workspaceJoinRenderer } from "./kinds/workspaceJoin";
 export type InboxRenderer = {
   title?: (item: InboxItem, t: TFunction<"inbox">) => string;
   summary?: (item: InboxItem, t: TFunction<"inbox">) => string | null;
+  // When the item leaves on its own. A date the server states in
+  // display.params.visible_until is shown by the row for every kind.
+  removal?: (item: InboxItem, t: TFunction<"inbox">) => string | null;
   icon?: LucideIcon;
 };
 
@@ -23,7 +26,12 @@ export const INBOX_RENDERERS: Readonly<Record<string, InboxRenderer>> = {
   access_key_expiry: accessKeyExpiryRenderer,
 };
 
-export type InboxPresentation = { title: string; summary: string | null; icon: LucideIcon | null };
+export type InboxPresentation = {
+  title: string;
+  summary: string | null;
+  removal: string | null;
+  icon: LucideIcon | null;
+};
 
 // A kind the server no longer has shows a fallback without content or link.
 export function presentInboxItem(
@@ -31,11 +39,12 @@ export function presentInboxItem(
   t: TFunction<"inbox">,
   renderers: Readonly<Record<string, InboxRenderer>> = INBOX_RENDERERS,
 ): InboxPresentation {
-  if (!item.display) return { title: t("item.unknown"), summary: null, icon: null };
+  if (!item.display) return { title: t("item.unknown"), summary: null, removal: null, icon: null };
   const renderer = renderers[item.kind] ?? {};
   return {
     title: renderer.title?.(item, t) ?? item.display.title ?? t("item.untitled"),
     summary: renderer.summary?.(item, t) ?? null,
+    removal: renderer.removal?.(item, t) ?? null,
     icon: renderer.icon ?? null,
   };
 }

@@ -100,7 +100,8 @@ class InboxViewer:
 
 
 class InboxSource(ABC):
-    """Where a kind's items come from. Every source answers for one item."""
+    """Where a kind's items come from. Every source answers for items by key,
+    in one call per batch, so a list costs the same for one item or many."""
 
     @abstractmethod
     def current(
@@ -108,11 +109,11 @@ class InboxSource(ABC):
         session: Session,
         viewer: InboxViewer,
         kind: str,
-        item_key: str,
-        stored: InboxSnapshot | None,
-    ) -> InboxSnapshot | None:
-        """The item's state now, or None if it is gone. ``stored`` is what
-        the inbox itself holds for the item, if anything."""
+        stored: Mapping[str, InboxSnapshot | None],
+    ) -> Mapping[str, InboxSnapshot]:
+        """The items' state now, by key; a requested key left out is gone.
+        ``stored`` maps each requested key to what the inbox itself holds for
+        it, if anything."""
 
 
 class WritableSource(InboxSource):

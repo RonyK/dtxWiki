@@ -42,6 +42,7 @@ from backend.app.bootstrap import (
 )
 from backend.app.settings import Settings
 from backend.models import Base
+from backend.services.ops.alembic_migration_graph import initialization_script_directory
 from backend.services.ops.input_maintenance import audit_inputs
 from backend.services.page_service import PageService
 from backend.tests.integration.test_release_schema_migration import (
@@ -268,12 +269,14 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
             _assert_each_table_rebuilt_at_most_once(statements)
         _assert_release_upgrade(engine, release_data, now, first=True)
         _assert_labs_policy_upgrade(engine, config, workspace_id)
+        _assert_archived_inbox_indexes(engine, config)
         _assert_model_parity(engine)
         _seed_runtime_links(engine, release_data)
         command.downgrade(config, REVISION)
         assert "labs_policy" not in {
             column["name"] for column in inspect(engine).get_columns("workspace")
         }
+        _assert_archived_inbox_indexes(engine, config, present=False)
         with engine.connect() as connection:
             workspaces = _table(connection, "workspace")
             assert connection.execute(
@@ -307,6 +310,7 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
         _assert_labs_policy_upgrade(
             engine, config, workspace_id, upgrade=False, raw_default=True
         )
+        _assert_archived_inbox_indexes(engine, config, upgrade=False)
         assert retained_account_state() == retained
         assert audit_inputs(database_url) == []
     finally:
@@ -357,6 +361,7 @@ def _assert_labs_policy_upgrade(
     else:
         # Startup already performed the one re-upgrade in this traversal.
         assert original.pop("labs_policy") == {}
+        revision = current_alembic_head()
         assert _stamp(engine) == revision
     columns = {
         column["name"]: column for column in inspect(engine).get_columns("workspace")
@@ -413,6 +418,29 @@ def _assert_labs_policy_upgrade(
         )
         # Leave the retained-account snapshot unchanged after the raw-default probe.
         connection.execute(workspaces.delete().where(workspaces.c.id == inserted_id))
+
+
+def _assert_archived_inbox_indexes(engine, config, *, upgrade=True, present=True):
+    """The appended partial indexes that keep Archived pages bounded."""
+
+    revision = "00ba02774c4a"
+    if present and upgrade:
+        command.upgrade(config, revision)
+    if present:
+        assert _stamp(engine) == revision
+    inspector = inspect(engine)
+    for table, owner in (
+        ("workspace_inbox_entry", ["workspace_id", "user_id"]),
+        ("account_inbox_entry", ["user_id"]),
+    ):
+        indexes = {index["name"]: index for index in inspector.get_indexes(table)}
+        index = indexes.get(f"ix_{table}_archived")
+        if not present:
+            assert index is None
+            continue
+        assert index["column_names"] == [*owner, "updated_at", "kind", "item_key"]
+        where = index["dialect_options"][f"{engine.dialect.name}_where"]
+        assert "archived_revision IS NOT NULL" in str(where)
 
 
 RELEASE_TABLES = {
@@ -948,8 +976,8 @@ def test_older_releases_upgrade_directly_at_startup(tmp_path, dialect):
         with _captured_statements() as statements:
             ensure_app_version_synced(settings)
         migrated = True
-        # A fresh install records the frozen release baseline, then the
-        # appended Labs revision. Historical replay would add earlier stamps
+        # A fresh install records the frozen release baseline, then each
+        # appended revision once. Historical replay would add earlier stamps
         # and rebuild SQLite tables along the way.
         stamp_writes = [
             statement
@@ -958,11 +986,15 @@ def test_older_releases_upgrade_directly_at_startup(tmp_path, dialect):
                 ("INSERT INTO alembic_version", "UPDATE alembic_version")
             )
         ]
-        assert len(stamp_writes) == 2
+        initialization = list(initialization_script_directory().walk_revisions())
+        assert len(stamp_writes) == len(initialization)
         assert stamp_writes[0].lstrip().startswith("INSERT INTO alembic_version")
         assert REVISION in stamp_writes[0]
-        assert stamp_writes[1].lstrip().startswith("UPDATE alembic_version")
-        assert current_alembic_head() in stamp_writes[1]
+        assert all(
+            statement.lstrip().startswith("UPDATE alembic_version")
+            for statement in stamp_writes[1:]
+        )
+        assert current_alembic_head() in stamp_writes[-1]
         assert not any("_alembic_tmp_" in statement for statement in statements)
         initialized_schema = _schema_snapshot(engine)
         command.downgrade(config, "efcbcf724889")
