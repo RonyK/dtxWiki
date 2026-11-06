@@ -605,7 +605,7 @@
     "externalSource": "외부 공급",
     "loading": "린트 규칙을 불러오는 중…",
     "loadError": "린트 규칙을 불러오지 못했습니다.",
-    "saveError": "규칙을 변경하지 못했습니다.",
+    "saveError": "린트 설정을 저장하지 못했습니다. 편집 내용은 유지됩니다.",
     "layer": {
       "format": "포맷",
       "knowledge": "지식",
@@ -633,6 +633,9 @@
     "saveGroup": "저장 시 정리",
     "reviewGroup": "검토·게시",
     "currentEffect": "현재 효과",
+    "effectAfterSaving": "저장 후 적용될 내용",
+    "workspaceSaveHint": "변경사항 저장을 누르면 이 워크스페이스에 적용됩니다. 워크스페이스 관리자만 편집할 수 있습니다.",
+    "revisionConflict": "다른 곳에서 린트 설정이 변경되었습니다. 최신 설정을 불러왔으며 편집 내용은 유지됩니다. 확인 후 다시 저장하세요.",
     "effectLinksAuto": "링크 자동 수정은 게시 문서의 안전한 링크 수정에도 참여합니다.",
     "effectLinksSuggest": "일반 내부 링크는 수정 사항을 제안합니다. 링크 수정으로 게시 문서 유지보수를 시작하지 않습니다.",
     "effectFormatOn": "Context 작성 저장과 게시 링크 수정에 서식 정리를 적용합니다. 안전한 서식 전용 저장은 링크 수정 자동 승인을 꺼도 즉시 승인될 수 있으며, 기존 검토 안전 조건은 유지됩니다. 서식만으로 기존 게시 문서를 고치지는 않습니다.",
@@ -644,8 +647,7 @@
     "checksHint": "선택적 검사는 켜고 끌 수 있습니다. 필수 게시 안전 검사는 항상 켜져 있으며 외부에서 제공하는 결과는 읽기 전용입니다.",
     "searchRules": "검사 검색",
     "noMatches": "일치하는 검사가 없습니다.",
-    "unknownValue": "확인 전",
-    "optionSaveError": "옵션을 변경하지 못했습니다."
+    "unknownValue": "확인 전"
   },
   "summary": {
     "workspace": "이 워크스페이스의 이름, 소유자, 기본 언어입니다.",

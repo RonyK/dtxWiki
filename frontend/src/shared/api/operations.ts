@@ -522,11 +522,11 @@ export async function updateSettingsPolicyBatch(
   } catch (error) {
     // One-release compatibility for pre-batch servers. Current servers always
     // take the atomic path; only an explicit missing route may use legacy
-    // single-key writes.
+    // single-key writes. Policies with atomic Save flows must never downgrade.
     if (
       !(error instanceof ApiError) ||
       error.status !== 404 ||
-      (request.group === "library" || request.group === "labs")
+      (request.group === "library" || request.group === "labs" || request.group === "lint")
     ) {
       throw error;
     }

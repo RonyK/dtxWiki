@@ -6,9 +6,12 @@ import { Link } from "react-router-dom";
 import {
   getLintRules,
   getSettingsPolicies,
-  updateSettingsPolicy,
+  updateSettingsPolicyBatch,
+  type PolicyCard,
   type LintRuleInfo,
 } from "../../shared/api/operations";
+import { ApiError } from "../../shared/api/client";
+import { useRegisterSettingsDirty, useGuardedSettingsChange } from "./SettingsDirtyRegistry";
 import { workspacePath } from "../../shared/lib/workspaceRoutes";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
@@ -30,32 +33,56 @@ function isEditable(rule: LintRuleInfo): boolean {
   return rule.runtime_checkable && !rule.policy_locked;
 }
 
-// Settings > Lint: per-workspace rule toggles, grouped by layer. The catalog
-// (GET /lint/rules) carries every rule's effective enabled state; flipping a
-// toggle writes the `lint` policy ({rule_id: bool}) via updateSettingsPolicy.
+// The policy card is the saved baseline. Every control edits a local draft;
+// only Save changes writes the workspace policy, as one revision-guarded batch.
 export function LintRulesSection({ readOnly, workspaceId: routeWorkspaceId }: { readOnly: boolean; workspaceId: string }) {
+  // A workspace switch discards private edits and reloads the saved view.
   return <WorkspaceLintRules key={routeWorkspaceId} readOnly={readOnly} workspaceId={routeWorkspaceId} />;
+}
+
+/** The lint card when it is a complete baseline for editing, otherwise null. */
+function validCard(card: PolicyCard | undefined): PolicyCard | null {
+  const policy = card?.policy;
+  return card && policy && /^[a-f0-9]{64}$/i.test(card.revision) &&
+    typeof policy.auto_fix === "boolean" &&
+    (policy.link_fix_mode === "auto" || policy.link_fix_mode === "suggest") &&
+    typeof policy.auto_approve_link_fixes === "boolean" ? card : null;
 }
 
 function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; workspaceId: string }) {
   const { t } = useTranslation("settings");
   const { t: lintT } = useTranslation("lint");
-  const [rules, setRules] = useState<LintRuleInfo[] | null>(null);
-  const [autoFix, setAutoFix] = useState<boolean | null>(null);
-  const [linkFixMode, setLinkFixMode] = useState<"auto" | "suggest" | null>(null);
-  const [autoApproveLinkFixes, setAutoApproveLinkFixes] = useState<boolean | null>(null);
-  const [policyReady, setPolicyReady] = useState(false);
+  const [catalog, setCatalog] = useState<LintRuleInfo[] | null>(null);
+  const [card, setCard] = useState<PolicyCard | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, unknown>>({});
   const [policyError, setPolicyError] = useState(false);
   const [rulesError, setRulesError] = useState(false);
   const [policyAttempt, setPolicyAttempt] = useState(0);
   const [rulesAttempt, setRulesAttempt] = useState(0);
   const [query, setQuery] = useState("");
   const active = useRef(true);
-  // Per-rule, so saving one rule no longer freezes every other checkbox on the
-  // page. `auto_fix` shares the set under its own key.
-  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A save hit a newer revision; announced once that revision has loaded.
+  const [conflict, setConflict] = useState(false);
   const [savedNotice, setSavedNotice] = useState("");
+  const [wasReadOnly, setWasReadOnly] = useState(readOnly);
+  const guardNavigation = useGuardedSettingsChange(t("nav.discardDraftsConfirm"));
+
+  function clearNotices() {
+    setError(null);
+    setConflict(false);
+    setSavedNotice("");
+  }
+
+  // Losing edit permission discards private edits; the saved view stays.
+  if (wasReadOnly !== readOnly) {
+    setWasReadOnly(readOnly);
+    if (readOnly) {
+      setDrafts({});
+      clearNotices();
+    }
+  }
 
   useEffect(() => {
     active.current = true;
@@ -66,172 +93,107 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
     let cancelled = false;
     setRulesError(false);
     void getLintRules(workspaceId).then((data) => {
-      if (!cancelled) setRules(data.rules);
+      if (!cancelled) setCatalog(data.rules);
     }).catch(() => { if (!cancelled) setRulesError(true); });
     return () => { cancelled = true; };
   }, [workspaceId, rulesAttempt]);
 
   useEffect(() => {
     let cancelled = false;
-    setPolicyReady(false);
     setPolicyError(false);
-    setAutoFix(null);
-    setLinkFixMode(null);
-    setAutoApproveLinkFixes(null);
     void getSettingsPolicies(workspaceId).then((policies) => {
-      const policy = policies.lint?.policy;
-      // Effective defaults belong to the server. A partial response is also
-      // unknown policy, never permission to write guessed values.
-      if (!policy || typeof policy.auto_fix !== "boolean" ||
-          (policy.link_fix_mode !== "auto" && policy.link_fix_mode !== "suggest") ||
-          typeof policy.auto_approve_link_fixes !== "boolean") throw new Error("Incomplete lint policy");
-      if (!cancelled) {
-        setAutoFix(policy.auto_fix);
-        setLinkFixMode(policy.link_fix_mode);
-        setAutoApproveLinkFixes(policy.auto_approve_link_fixes);
-        setPolicyReady(true);
-      }
+      const loaded = validCard(policies.lint);
+      if (cancelled) return;
+      if (loaded) setCard(loaded);
+      else setPolicyError(true);
     }).catch(() => { if (!cancelled) setPolicyError(true); });
     return () => { cancelled = true; };
   }, [workspaceId, policyAttempt]);
 
-  function markBusy(keys: string[], value: boolean) {
-    setBusy((current) => {
-      const next = new Set(current);
-      for (const key of keys) {
-        if (value) {
-          next.add(key);
-        } else {
-          next.delete(key);
-        }
-      }
-      return next;
-    });
+  const policyReady = card !== null && !policyError;
+  const ready = policyReady && catalog !== null && !rulesError;
+  const disabled = readOnly || !ready || busy;
+  // Overrides come from the same revision as the options; the catalog adds
+  // defaults and capabilities. Until that revision loads, the catalog's own
+  // server-computed state stands in, so the list never shows bare defaults.
+  function savedRuleValue(rule: LintRuleInfo) {
+    return card ? card.policy[rule.rule_id] ?? rule.default_enabled : rule.enabled;
+  }
+  function savedValue(key: string) {
+    const rule = catalog?.find((item) => item.rule_id === key);
+    return rule ? savedRuleValue(rule) : card?.policy[key];
+  }
+  const changes = Object.fromEntries(Object.entries(drafts).filter(([key, value]) => value !== savedValue(key)));
+  const dirtyCount = Object.keys(changes).length;
+  useRegisterSettingsDirty("policy:lint", dirtyCount > 0 && !readOnly);
+  const policy = { ...card?.policy, ...drafts };
+  const autoFix = policyReady ? policy.auto_fix : null;
+  const linkFixMode = policyReady ? policy.link_fix_mode : null;
+  const autoApproveLinkFixes = policyReady ? policy.auto_approve_link_fixes : null;
+  const rules = catalog?.map((rule) => ({
+    ...rule,
+    enabled: rule.policy_locked ||
+      (rule.rule_id in drafts ? drafts[rule.rule_id] : savedRuleValue(rule)) === true,
+  })) ?? null;
+
+  function updateDraft(key: string, value: unknown) {
+    if (disabled) return;
+    clearNotices();
+    setDrafts((current) => ({ ...current, [key]: value }));
   }
 
-  function setRuleEnabled(ruleId: string, enabled: boolean) {
-    setRules((current) =>
-      current
-        ? current.map((item) =>
-            item.rule_id === ruleId ? { ...item, enabled } : item,
-          )
-        : current,
-    );
+  function toggle(rule: LintRuleInfo) {
+    if (isEditable(rule)) updateDraft(rule.rule_id, !rule.enabled);
   }
 
-  function announceSaved() {
-    setSavedNotice(t("lint.saved", { defaultValue: "Saved" }));
+  function toggleLayer(layerRules: LintRuleInfo[], enabled: boolean) {
+    if (disabled) return;
+    clearNotices();
+    setDrafts((current) => ({
+      ...current,
+      ...Object.fromEntries(layerRules.filter(isEditable).map((rule) => [rule.rule_id, enabled])),
+    }));
   }
 
-  // Optimistic: the checkbox moves on click and rolls back if the write fails,
-  // so the control itself is the save feedback. Callers own the busy marking —
-  // a rule must stay locked for as long as any write covering it is in flight,
-  // which a per-write flag cannot express once one write spans several rules.
-  async function writeRule(ruleId: string, enabled: boolean, previous: boolean) {
-    if (!active.current) {
-      return false;
-    }
-    setRuleEnabled(ruleId, enabled);
+  function discardDrafts() {
+    if (busy) return;
+    setDrafts({});
+    clearNotices();
+  }
+
+  async function saveDrafts() {
+    if (disabled || !card || !dirtyCount) return;
+    setBusy(true);
+    clearNotices();
     try {
-      await updateSettingsPolicy(workspaceId, {
+      const saved = await updateSettingsPolicyBatch(workspaceId, {
         group: "lint",
-        key: ruleId,
-        value: enabled,
+        expected_revision: card.revision,
+        changes,
       });
-      return true;
-    } catch {
-      setRuleEnabled(ruleId, previous);
-      return false;
-    }
-  }
-
-  async function toggle(rule: LintRuleInfo) {
-    if (readOnly || !isEditable(rule) || busy.has(rule.rule_id)) {
-      return;
-    }
-    setError(null);
-    setSavedNotice("");
-    markBusy([rule.rule_id], true);
-    try {
-      if (await writeRule(rule.rule_id, !rule.enabled, rule.enabled)) {
-        announceSaved();
+      if (!active.current) return;
+      // The batch has committed. An unusable response card only means the
+      // baseline must be reloaded; it is never reported as a failed save.
+      const nextCard = validCard(saved.lint);
+      setCard(nextCard);
+      if (!nextCard) setPolicyAttempt((value) => value + 1);
+      setDrafts({});
+      setSavedNotice(t("lint.saved"));
+    } catch (caught) {
+      if (!active.current) return;
+      if (caught instanceof ApiError && caught.body.error_code === "settings_revision_conflict") {
+        // Keep the attempted edits and reload only the policy baseline: the
+        // catalog's defaults and capabilities do not depend on its revision.
+        // Unedited values come from the latest card.
+        setDrafts(changes);
+        setCard(null);
+        setConflict(true);
+        setPolicyAttempt((value) => value + 1);
       } else {
-        setError(t("lint.saveError", { defaultValue: "Failed to update the rule." }));
+        setError(t("lint.saveError"));
       }
     } finally {
-      markBusy([rule.rule_id], false);
-    }
-  }
-
-  async function toggleLayer(layerRules: LintRuleInfo[], enabled: boolean) {
-    if (readOnly) return;
-    const targets = layerRules.filter(
-      (rule) => isEditable(rule) && rule.enabled !== enabled,
-    );
-    if (targets.length === 0 || targets.some((rule) => busy.has(rule.rule_id))) {
-      return;
-    }
-    setError(null);
-    setSavedNotice("");
-    // Every rule this toggle will write is locked up front. Writing them one at
-    // a time while their rows stayed live let a rule be changed individually
-    // mid-run, and the loop would then overwrite that newer choice with the
-    // value it captured when the group toggle was clicked.
-    const ids = targets.map((rule) => rule.rule_id);
-    markBusy(ids, true);
-    try {
-      let failed = 0;
-      for (const rule of targets) {
-        if (!(await writeRule(rule.rule_id, enabled, rule.enabled))) {
-          failed += 1;
-        }
-      }
-      if (failed > 0) {
-        setError(t("lint.saveError", { defaultValue: "Failed to update the rule." }));
-      } else {
-        announceSaved();
-      }
-    } finally {
-      markBusy(ids, false);
-    }
-  }
-
-  async function toggleAutoFix() {
-    if (readOnly || !policyReady || busy.has("auto_fix")) {
-      return;
-    }
-    markBusy(["auto_fix"], true);
-    setError(null);
-    setSavedNotice("");
-    try {
-      await updateSettingsPolicy(workspaceId, {
-        group: "lint",
-        key: "auto_fix",
-        value: !autoFix,
-      });
-      setAutoFix((value) => value === null ? null : !value);
-      announceSaved();
-    } catch {
-      setError(t("lint.optionSaveError"));
-    } finally {
-      markBusy(["auto_fix"], false);
-    }
-  }
-
-  async function saveLinkPolicy(key: "link_fix_mode" | "auto_approve_link_fixes", value: string | boolean) {
-    if (readOnly || !policyReady || busy.has(key)) return;
-    markBusy([key], true);
-    setError(null);
-    setSavedNotice("");
-    try {
-      await updateSettingsPolicy(workspaceId, { group: "lint", key, value });
-      if (key === "link_fix_mode") setLinkFixMode(value === "suggest" ? "suggest" : "auto");
-      else setAutoApproveLinkFixes(Boolean(value));
-      announceSaved();
-    } catch {
-      setError(t("lint.optionSaveError"));
-    } finally {
-      markBusy([key], false);
+      if (active.current) setBusy(false);
     }
   }
 
@@ -254,22 +216,30 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
             <span>{t("lint.eyebrow", { defaultValue: "Lint rules" })}</span>
             <PolicyStateChip
               label={
-                readOnly
+                dirtyCount > 0 && !readOnly ? t("state.unsaved", { count: dirtyCount }) : readOnly
                   ? t("state.ownerOnly", { defaultValue: "Owner only" })
                   : t("state.editable", { defaultValue: "Editable" })
               }
-              state={readOnly ? "ownerOnly" : "editable"}
+              state={readOnly ? "ownerOnly" : dirtyCount > 0 ? "unsaved" : "editable"}
             />
           </h2>
-          <span aria-live="polite" className="policy-card-saved">
-            {savedNotice}
-          </span>
-          <Link className="icon-button text-button" to={workspacePath(workspaceId, "lint")}>
+          <Link className="icon-button text-button" to={workspacePath(workspaceId, "lint")}
+            onClick={(event) => {
+              // A modified or non-primary click opens elsewhere and loses nothing.
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              // Let the existing Settings guard also cover the queue link.
+              let allowed = false;
+              guardNavigation(() => { allowed = true; });
+              if (!allowed) event.preventDefault();
+            }}
+          >
             {t("lint.openQueue", { defaultValue: "Open lint queue" })}
           </Link>
         </div>
         <p>{t("lint.description")}</p>
+        {readOnly ? null : <p className="meta-line">{t("lint.workspaceSaveHint")}</p>}
         {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+        {conflict && policyReady ? <StatusBanner tone="warning">{t("lint.revisionConflict")}</StatusBanner> : null}
         {policyError ? (
           <StatusBanner tone="warning">
             <span>{t("lint.policyLoadError")}</span>{" "}
@@ -295,8 +265,8 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
               checked={autoFix === true}
               title={autoFix === null ? t("lint.unknownValue") : undefined}
               ref={(input) => { if (input) input.indeterminate = autoFix === null; }}
-              disabled={readOnly || !policyReady || busy.has("auto_fix")}
-              onChange={toggleAutoFix}
+              disabled={disabled}
+              onChange={() => updateDraft("auto_fix", !autoFix)}
             />
             <div className="lint-rule-copy">
               <span className="lint-rule-label">
@@ -318,9 +288,9 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
             </label>
             <select
               id="lint-link-fix-mode"
-              value={linkFixMode ?? ""}
-              disabled={readOnly || !policyReady || busy.has("link_fix_mode")}
-              onChange={(event) => void saveLinkPolicy("link_fix_mode", event.target.value)}
+              value={typeof linkFixMode === "string" ? linkFixMode : ""}
+              disabled={disabled}
+              onChange={(event) => updateDraft("link_fix_mode", event.target.value)}
             >
               {linkFixMode === null ? (
                 <option value="" disabled aria-label={t("lint.unknownValue")}>—</option>
@@ -340,8 +310,8 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
               aria-describedby="lint-auto-approve-link-fixes-hint"
               title={autoApproveLinkFixes === null ? t("lint.unknownValue") : undefined}
               ref={(input) => { if (input) input.indeterminate = autoApproveLinkFixes === null; }}
-              disabled={readOnly || !policyReady || busy.has("auto_approve_link_fixes")}
-              onChange={() => void saveLinkPolicy("auto_approve_link_fixes", !autoApproveLinkFixes)}
+              disabled={disabled}
+              onChange={() => updateDraft("auto_approve_link_fixes", !autoApproveLinkFixes)}
             />
             <div className="lint-rule-copy">
               <span className="lint-rule-label">
@@ -355,7 +325,7 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
         </div>
         {policyReady ? (
           <div className="lint-current-effect">
-            <h3>{t("lint.currentEffect")}</h3>
+            <h3>{t(dirtyCount > 0 ? "lint.effectAfterSaving" : "lint.currentEffect")}</h3>
             <p>{t(linkFixMode === "auto" ? "lint.effectLinksAuto" : "lint.effectLinksSuggest")}</p>
             <p>{t(autoFix ? "lint.effectFormatOn" : "lint.effectFormatOff")}</p>
             <p>{t(autoApproveLinkFixes ? "lint.effectApprovalOn" : "lint.effectApprovalOff")}</p>
@@ -411,10 +381,10 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
                           defaultValue: "Toggle every {{layer}} rule",
                           layer: t(`lint.layer.${layer}`, { defaultValue: layer }),
                         })}
-                        disabled={readOnly || toggleable.some((rule) => busy.has(rule.rule_id))}
+                        disabled={disabled}
                         enabledCount={enabledCount}
                         total={toggleable.length}
-                        onToggle={(next) => void toggleLayer(toggleable, next)}
+                        onToggle={(next) => toggleLayer(toggleable, next)}
                       />
                     </div>
                   ) : null}
@@ -429,7 +399,7 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
                       // it stays reachable on hover instead of on screen.
                       <li
                         className={`lint-rule-row ${
-                          busy.has(rule.rule_id) ? "lint-rule-row--busy" : ""
+                          busy ? "lint-rule-row--busy" : ""
                         }`}
                         key={rule.rule_id}
                       >
@@ -438,8 +408,8 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
                             id={inputId}
                             type="checkbox"
                             checked={rule.enabled}
-                            disabled={readOnly || busy.has(rule.rule_id)}
-                            onChange={() => void toggle(rule)}
+                            disabled={disabled}
+                            onChange={() => toggle(rule)}
                           />
                         ) : (
                           <Lock
@@ -490,6 +460,19 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
             );
           })}
         </details>
+        {!readOnly ? (
+          <div className="policy-card-actions">
+            <span aria-live="polite" className="policy-card-saved">{savedNotice}</span>
+            <button className="icon-button" type="button" disabled={!dirtyCount || busy} onClick={discardDrafts}>
+              {t("actions.discard")}
+            </button>
+            <button className="icon-button primary" type="button" disabled={disabled || !dirtyCount}
+              title={t(busy ? "saveTitle.busy" : dirtyCount ? "saveTitle.ready" : "saveTitle.clean")}
+              onClick={() => void saveDrafts()}>
+              {busy ? t("actions.saving") : t("actions.save")}
+            </button>
+          </div>
+        ) : null}
       </div>
     </section>
   );

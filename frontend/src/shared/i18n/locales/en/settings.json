@@ -605,7 +605,7 @@
     "externalSource": "External source",
     "loading": "Loading lint rules…",
     "loadError": "Failed to load lint rules.",
-    "saveError": "Failed to update the rule.",
+    "saveError": "Failed to save lint settings. Your changes have been kept.",
     "layer": {
       "format": "Format",
       "knowledge": "Knowledge",
@@ -633,6 +633,9 @@
     "saveGroup": "Clean up on save",
     "reviewGroup": "Review and publication",
     "currentEffect": "Current effect",
+    "effectAfterSaving": "Effect after saving",
+    "workspaceSaveHint": "Save changes to apply these settings to this workspace. Only workspace owners can edit them.",
+    "revisionConflict": "Lint settings changed elsewhere. The latest settings have been loaded and your edits kept. Review them before saving again.",
     "effectLinksAuto": "Automatic link fixing also participates in safe repairs of published documents.",
     "effectLinksSuggest": "Ordinary internal links receive suggestions. Link repairs do not start published maintenance.",
     "effectFormatOn": "Safe formatting runs on authored Context saves and accompanies published link repairs. Safe formatting-only saves may be approved immediately, even when link-fix approval is off; existing review safeguards still apply. Formatting alone never starts a published repair.",
@@ -644,8 +647,7 @@
     "checksHint": "Optional checks can be toggled. Required publication safeguards stay on; findings from external sources are read-only.",
     "searchRules": "Search checks",
     "noMatches": "No matching checks.",
-    "unknownValue": "Not loaded",
-    "optionSaveError": "Failed to update the option."
+    "unknownValue": "Not loaded"
   },
   "summary": {
     "workspace": "The name, owner, and default language for this workspace.",

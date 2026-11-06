@@ -37,6 +37,15 @@
 - Define the graph colour tokens once for the light, dark and forced-colours
   themes, so legends, lists and chips outside the canvas follow dark mode.
 
+### Lint settings
+
+- Turn the Orphan page and Missing backlink checks off by default, including
+  in existing workspaces that never changed them. Their open findings leave
+  the lint queue until an Owner turns the checks on in Settings.
+- Edit lint settings as a draft and apply them with **Save changes** in one
+  revision-checked save; **Discard** reverts them. If the settings changed
+  elsewhere, the latest values load and your edits are kept for another save.
+
 ## 0.2.1 — 2026-11-04
 
 Beta release with Graph View, document references, Inbox, and workspace-scoped

@@ -42,7 +42,10 @@ def _finding(
 class _OrphanPageRule:
     rule_id = "kb.orphan_page"
     layer = "knowledge"
-    default_enabled = True
+    # DECISION (owner, 2026-11-06): orphan and missing-backlink checks are
+    # workspace opt-in. This supersedes the Sprint-6 default-on decision for
+    # existing workspaces too; only a saved lint policy value turns them on.
+    default_enabled = False
     applies_to = _TARGETS
     stages = frozenset({LintStage.RUN})
 
@@ -80,7 +83,7 @@ class _OrphanPageRule:
 class _MissingBacklinkRule:
     rule_id = "kb.missing_backlink"
     layer = "knowledge"
-    default_enabled = True
+    default_enabled = False  # Opt-in; see the DECISION on _OrphanPageRule.
     applies_to = _TARGETS
     stages = frozenset({LintStage.RUN})
 

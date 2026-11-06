@@ -55,6 +55,28 @@ def test_enabled_rules_respects_policy_and_defaults():
     assert {r.rule_id for r in flipped} == {"t.b"}
 
 
+def test_backlink_and_orphan_checks_require_workspace_opt_in():
+    registry = LintRegistry.builtin()
+    opt_in_rules = {"kb.orphan_page", "kb.missing_backlink"}
+    defaults = {
+        rule.rule_id
+        for rule in registry.rules_for(LintStage.RUN, None, target_type="context_page")
+    }
+    assert defaults.isdisjoint(opt_in_rules)
+    assert "kb.duplicate_concept" in defaults
+    # Persisted selections still override the new defaults for existing
+    # workspaces, and the execution-stage selector honors that opt-in.
+    opted_in = {
+        rule.rule_id
+        for rule in registry.rules_for(
+            LintStage.RUN,
+            {"kb.orphan_page": True, "kb.missing_backlink": True},
+            target_type="context_page",
+        )
+    }
+    assert opted_in == defaults | opt_in_rules
+
+
 def test_enabled_rules_filters_layer_and_target_type():
     rules = [
         _Dummy("t.fmt", layer="format"),
