@@ -13,7 +13,7 @@
   "graph.json:graph.timeline.edgeEvent",
   "graph.json:graph.historyUi.kind.ask",
   "graph.json:graph.historyUi.kind.tool",
-  "graph.json:graph.details.edgeSentence",
+  "graph.json:graph.list.counts",
   "graph.json:workspaceGraph.list.documentSummary",
   "graph.json:workspaceGraph.expandedGroups.count",
   "library.json:labels.format.csv",
