@@ -26,7 +26,8 @@ Toolchain and publication rules, with counterexamples for reusable checkers:
    author field.
 5. The ordinary E2E job uses the official Playwright image at the version
    recorded in package-lock.json. A package update without a matching image
-   update leaves the requested browser executable revision unavailable.
+   update leaves the requested browser executable revision unavailable. Its
+   execution user also matches Actions' HOME owner so Firefox can launch.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import shlex
 from pathlib import Path
 
 import pytest
@@ -468,7 +470,7 @@ def test_every_setup_node_pins_the_nvmrc_version():
     assert misplaced_node_pins(workflows, NODE_PIN) == []
 
 
-def test_ci_playwright_container_matches_the_locked_browser_version():
+def test_ci_playwright_container_matches_the_browser_version_and_home_owner():
     job = load_workflows()["ci.yml"]["jobs"]["e2e"]
     container = job.get("container", {})
     image = container if isinstance(container, str) else container.get("image", "")
@@ -486,6 +488,20 @@ def test_ci_playwright_container_matches_the_locked_browser_version():
     assert versions == {match[1]}, (
         "Update the Playwright image together with package-lock.json: "
         f"image {match[1]}, locked packages {sorted(versions)}"
+    )
+    # GitHub mounts /github/home from runner UID 1001. Firefox refuses to
+    # launch as root when that directory belongs to a regular user.
+    assert isinstance(container, dict), "The E2E image needs a container user."
+    options = shlex.split(container.get("options", ""))
+    users = [
+        option.split("=", 1)[1]
+        if option.startswith("--user=")
+        else next(iter(options[index + 1 : index + 2]), None)
+        for index, option in enumerate(options)
+        if option == "--user" or option.startswith("--user=") or option == "-u"
+    ]
+    assert users == ["1001"], (
+        "Run the E2E container as the owner of Actions' /github/home (UID 1001)."
     )
 
 
