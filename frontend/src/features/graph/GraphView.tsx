@@ -137,9 +137,9 @@ export function GraphView({
   const [retryAction, setRetryAction] = useState<{ key: string; action: () => Promise<void> } | null>(null);
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const forcedColors = useMediaQuery("(forced-colors: active)");
-  const { tokens, ink } = useLocalGraphTokens(graphRegionRef, forcedColors);
+  const tokens = useLocalGraphTokens(graphRegionRef, forcedColors);
   const nodeVisuals = useMemo(() => ({ tokens, forcedColors }), [tokens, forcedColors]);
-  const staticVisuals = useMemo<StaticDiagramVisuals>(() => ({ tokens, ink, forcedColors }), [tokens, ink, forcedColors]);
+  const staticVisuals = useMemo<StaticDiagramVisuals>(() => ({ tokens, forcedColors }), [tokens, forcedColors]);
   const expansionAvailability = payload.capabilities?.expand === false
     ? "unsupported"
     : payload.query.seeds.length >= 8
@@ -1782,15 +1782,11 @@ function graphWarningMessages(t: TFunction, codes: string[], currentMode: boolea
 function readLocalGraphTokens(element: Element, forcedColors: boolean) {
   const theme = element.closest("[data-graph-theme]")?.getAttribute("data-graph-theme")
     ?? element.closest("[data-theme]")?.getAttribute("data-theme");
-  return {
-    tokens: readGraphTokens(element, forcedColors ? "forced" : theme === "dark" ? "dark" : "light"),
-    // Static diagram titles take the view's own text colour.
-    ink: getComputedStyle(element).color || "#0f172a",
-  };
+  return readGraphTokens(element, forcedColors ? "forced" : theme === "dark" ? "dark" : "light");
 }
 
 function useLocalGraphTokens(regionRef: { current: HTMLElement | null }, forcedColors: boolean) {
-  const [visuals, setVisuals] = useState(() => readLocalGraphTokens(document.documentElement, forcedColors));
+  const [tokens, setTokens] = useState(() => readLocalGraphTokens(document.documentElement, forcedColors));
   useLayoutEffect(() => {
     const region = regionRef.current;
     if (!region) return undefined;
@@ -1798,7 +1794,7 @@ function useLocalGraphTokens(regionRef: { current: HTMLElement | null }, forcedC
     // unchanged values keep their identity, so nothing downstream redraws.
     const update = () => {
       const next = readLocalGraphTokens(region, forcedColors);
-      setVisuals((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+      setTokens((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
     };
     update();
     if (typeof MutationObserver === "undefined") return undefined;
@@ -1809,7 +1805,7 @@ function useLocalGraphTokens(regionRef: { current: HTMLElement | null }, forcedC
     for (let element: Element | null = region; element; element = element.parentElement) observer.observe(element, attributes);
     return () => observer.disconnect();
   }, [forcedColors, regionRef]);
-  return visuals;
+  return tokens;
 }
 
 function useMediaQuery(query: string) {

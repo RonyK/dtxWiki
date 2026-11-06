@@ -34,6 +34,8 @@ export type GraphVisualTokens = {
   highlight: string;
   /** Selection/focus ring around the active node. */
   selection: string;
+  /** Text and labels on the graph surface. */
+  ink: string;
 };
 
 // Dash lengths are screen pixels, independent of graph zoom. A null dash
@@ -80,6 +82,7 @@ const DEFAULT_COLORS = {
     },
     highlight: "#7c3aed",
     selection: "#0f172a",
+    ink: "#0f172a",
   },
   dark: {
     surface: "#0f172a",
@@ -99,6 +102,7 @@ const DEFAULT_COLORS = {
     },
     highlight: "#a78bfa",
     selection: "#f8fafc",
+    ink: "#e5e7eb",
   },
 } as const satisfies Record<"light" | "dark", GraphVisualTokens>;
 
@@ -122,6 +126,7 @@ export function readGraphTokens(
       highlight: ink,
       // Selection uses the system highlight so it never reads as an Agent outline.
       selection: systemColor(element, "Highlight") ?? ink,
+      ink,
     };
   }
 
@@ -144,6 +149,7 @@ export function readGraphTokens(
     },
     highlight: css("--graph-highlight", defaults.highlight),
     selection: css("--graph-selection", defaults.selection),
+    ink: css("--graph-ink", defaults.ink),
   };
 }
 

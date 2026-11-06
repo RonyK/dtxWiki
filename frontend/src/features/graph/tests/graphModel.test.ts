@@ -227,7 +227,7 @@ describe("graphModel", () => {
 
     const scene = deriveGraphScene(payload, graphFacets(payload), null);
     scene.nodes[0] = { ...scene.nodes[0], label: `unsafe "|<tag>` };
-    const visuals = { tokens: readGraphTokens(document.documentElement), ink: "#0f172a", forcedColors: false };
+    const visuals = { tokens: readGraphTokens(document.documentElement), forcedColors: false };
     const diagram = graphSceneToMermaid(scene, visuals, { iconSlot: true });
     expect(diagram.source).toContain("&quot;&#124;&lt;tag&gt;");
     expect(diagram.source).not.toContain(`"|<tag>`);
@@ -236,11 +236,17 @@ describe("graphModel", () => {
       { kind: "context", seed: true }, { kind: "conversation", seed: false }, { kind: "context", seed: false },
     ]);
     expect(diagram.source).toContain('n0("Mm unsafe');
-    expect(diagram.source).toContain('"themeCSS":".contextSeed .text-inner-tspan { font-weight: bold; }"');
+    expect(diagram.source).toContain(".contextSeed .text-inner-tspan { font-weight: bold; }");
     expect(diagram.source).toContain("classDef contextSeed fill:#7c3aed,stroke:#7c3aed,stroke-width:1.5px,color:#ffffff");
     expect(diagram.source).toContain("classDef conversation fill:#e6f3f9,stroke:#0284c7,stroke-width:1.5px,color:#0f172a");
     expect(diagram.source).toMatch(/^ {2}linkStyle \d+ stroke:#64748b,stroke-width:2px$/m);
     expect(diagram.source).toMatch(/^ {2}linkStyle \d+ stroke:#0f9f8f,stroke-width:2px,stroke-dasharray:7 4$/m);
+    // In the dark graph theme, titles and relationship labels take the graph ink.
+    const dark = graphSceneToMermaid(
+      scene, { tokens: readGraphTokens(document.documentElement, "dark"), forcedColors: false }, { iconSlot: true },
+    ).source;
+    expect(dark).toMatch(/classDef conversation fill:#[\da-f]{6},stroke:#38bdf8,stroke-width:1\.5px,color:#e5e7eb/);
+    expect(dark).toContain(".edgeLabel text { fill: #e5e7eb !important; }");
     // An exported file has no slot words for a renderer that cannot draw glyphs.
     expect(graphSceneToMermaid(scene, visuals, { iconSlot: false }).source).not.toMatch(/\bMm\b|wrappingWidth/);
   });

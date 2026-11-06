@@ -10,8 +10,6 @@ import { localNodeVisualKind } from "./nodeVisual";
 /** The static diagram reads the same tokens as the canvas and its legend. */
 export type StaticDiagramVisuals = {
   tokens: GraphVisualTokens;
-  /** Title ink and the seed cue's ring: the graph view's text colour. */
-  ink: string;
   forcedColors: boolean;
 };
 
@@ -52,15 +50,10 @@ export function graphSceneToMermaid(
     kind: localNodeVisualKind(node.entity_kind, node.family),
     seed: Boolean(node.is_seed),
   }));
-  // A seed's bold title is a stylesheet rule, not a later change, so Mermaid
-  // lays out and sizes its card at the weight it is drawn. (A classDef's
-  // font-weight never reaches the words, which carry their own weight.)
-  const seedClasses = [...new Set(nodes.filter((node) => node.seed).map((node) => `.${node.kind}Seed`))];
+  const themeCSS = diagramCss(nodes, visuals);
   const init = {
     ...(iconSlot ? { flowchart: { wrappingWidth: WRAPPING_WIDTH_PX } } : {}),
-    ...(seedClasses.length
-      ? { themeCSS: `${seedClasses.map((name) => `${name} .text-inner-tspan`).join(", ")} { font-weight: bold; }` }
-      : {}),
+    ...(themeCSS ? { themeCSS } : {}),
   };
   const lines = Object.keys(init).length ? [`%%{init: ${JSON.stringify(init)}}%%`] : [];
   lines.push("flowchart LR");
@@ -128,6 +121,9 @@ export function decorateStaticDiagramSvg(
   host.innerHTML = svg;
   document.body.append(host);
   try {
+    // The cards and labels are coloured for the graph surface; the SVG
+    // carries it, so the zoom viewer shows them on the same ground.
+    host.querySelector("svg")?.style.setProperty("background-color", visuals.tokens.surface);
     for (const group of Array.from(host.querySelectorAll<SVGGElement>("svg g.node"))) {
       const index = /-flowchart-n(\d+)-/.exec(group.id)?.[1];
       const node = index === undefined ? undefined : nodes[Number(index)];
@@ -204,7 +200,7 @@ function glyphElements(node: StaticDiagramNode, cx: number, cy: number, visuals:
     return [
       svgElement("circle", { cx, cy, r: GRAPH_CUE_SIZE / 2 }, { fill: surface }),
       svgElement("circle", { cx, cy, r: GRAPH_SEED_CUE.radius, "stroke-width": GRAPH_SEED_CUE.ringWidth },
-        { fill: color, stroke: visuals.ink }),
+        { fill: color, stroke: visuals.tokens.ink }),
     ];
   }
   const { body, forcedOutline } = graphNodeCueParts(node.kind, cx, cy);
@@ -238,10 +234,28 @@ function svgElement(
   return element;
 }
 
+/**
+ * Diagram rules Mermaid applies while it lays out. A seed's bold title is a
+ * rule, not a later change, so its card is sized at the weight it is drawn
+ * (a classDef's font-weight never reaches the words, which carry their own).
+ * Relationship labels take the graph ink on the graph surface, not
+ * Mermaid's fixed black on white.
+ */
+function diagramCss(nodes: StaticDiagramNode[], visuals: StaticDiagramVisuals) {
+  const seedClasses = [...new Set(nodes.filter((node) => node.seed).map((node) => `.${node.kind}Seed`))];
+  const ink = hexColor(visuals.tokens.ink);
+  const surface = hexColor(visuals.tokens.surface);
+  return [
+    seedClasses.length ? `${seedClasses.map((name) => `${name} .text-inner-tspan`).join(", ")} { font-weight: bold; }` : "",
+    ink ? `.edgeLabel text { fill: ${ink} !important; }` : "",
+    surface ? `.edgeLabel rect.background { fill: ${surface} !important; }` : "",
+  ].filter(Boolean).join(" ");
+}
+
 function cardStyle(node: StaticDiagramNode, visuals: StaticDiagramVisuals) {
   const color = hexColor(visuals.tokens.node[GRAPH_NODE_VISUALS[node.kind].color]);
   const surface = hexColor(visuals.tokens.surface);
-  const ink = hexColor(visuals.ink);
+  const ink = hexColor(visuals.tokens.ink);
   if (!color || !surface || !ink) {
     return null;
   }
