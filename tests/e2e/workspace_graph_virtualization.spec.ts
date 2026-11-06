@@ -293,7 +293,7 @@ async function expectBoundedRows(
 /** Without a search the sidebar sections start folded; opening one browses ten rows at a time. */
 async function openMapList(page: Page) {
   for (const testId of ["workspace-graph-node-list", "workspace-graph-edge-list"]) {
-    const head = page.getByTestId(testId).locator(".workspace-graph-fold-head").first();
+    const head = page.getByTestId(testId).locator(".relation-list-fold-head").first();
     if (await head.getAttribute("aria-expanded") === "false") await head.click();
   }
 }

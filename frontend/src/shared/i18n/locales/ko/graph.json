@@ -178,7 +178,6 @@
     "staticFallbackFailed": "정적 그래프 대체 보기",
     "staticFallbackList": "이 장면은 다이어그램의 관계 {{limit}}개 한도를 넘습니다. 모든 노드와 관계를 목록으로 표시합니다.",
     "printFallback": "관계 그래프",
-    "relationshipList": "접근 가능한 그래프 내용",
     "relationshipListDescription": "Tab으로 각 목록에 한 번 진입하세요. 방향키로 항목을 강조하고 Enter 또는 Space로 선택하면 상세에서 동작을 사용할 수 있습니다.",
     "nodes": "노드",
     "edges": "관계",
@@ -278,15 +277,6 @@
       "edgeEvent": "{{source}} —{{action}}→ {{target}}",
       "filteredEvent": "현재 필터에서는 보이는 변화가 없습니다."
     },
-    "sceneNavigation": {
-      "members": "이 장면의 소속 항목",
-      "folders": "이 장면의 소속 폴더",
-      "neighbors": "이 장면의 직접 이웃",
-      "noMembers": "이 장면에 연결된 소속 항목이 없습니다.",
-      "noFolders": "이 장면에 연결된 소속 폴더가 없습니다.",
-      "noNeighbors": "이 장면에 연결된 직접 이웃이 없습니다.",
-      "keyboardHint": "Tab으로 목록에 한 번 진입하세요. 위/아래 방향키 또는 Home/End로 항목을 강조하고 Enter 또는 Space로 선택하면 상세로 이동합니다."
-    },
     "details": {
       "heading": "상세 정보",
       "empty": "확인할 노드 또는 관계를 선택하세요.",
@@ -351,7 +341,6 @@
       "fullscreenUnavailable": "이 브라우저에서 전체 화면을 열 수 없습니다.",
       "dismissNotice": "생략 안내 접기",
       "fetched": "{{time}} 조회",
-      "list": "목록으로 보기",
       "legend": "범례",
       "rows": {
         "question": "알 수 있는 것",
@@ -454,6 +443,103 @@
       "restoredLatest": "보던 기록이 새 조회 결과에 없어 최신 기록으로 이동했습니다.",
       "groupRecords": "가까운 기록 {{count}}건",
       "closeGroup": "닫기"
+    },
+    "list": {
+      "title": "그래프 목록",
+      "counts": "노드 {{nodes}} · 관계 {{edges}}",
+      "search": "그래프 목록에서 찾기",
+      "searchPlaceholder": "이름·종류로 찾기",
+      "clearSearch": "목록 검색어 지우기",
+      "status": "‘{{query}}’ 일치: 노드 {{nodes}} · 관계 {{edges}}",
+      "noMatch": "‘{{query}}’와 일치하는 항목이 없습니다.",
+      "incomingNote": "기준 문서를 가리킴",
+      "outgoingNote": "기준 문서가 가리킴",
+      "undirectedNote": "서로 연결",
+      "groups": {
+        "seed": "기준 문서의 관계",
+        "seedNamed": "기준 문서 {{label}}의 관계",
+        "neighbors": "이웃끼리의 관계",
+        "neighborsNote": "직접 연결된 항목끼리",
+        "ringNodes": "2단계 항목",
+        "ringNodesNote": "이웃을 거쳐 닿는 항목",
+        "ringRelations": "2단계 관계",
+        "ringRelationsNote": "이웃과 2단계 항목 사이",
+        "unlinked": "기준 문서와 이어지지 않는 항목",
+        "unlinkedNote": "기준 문서까지의 관계가 숨겨졌거나 없음"
+      },
+      "via": "경유 {{label}}",
+      "viaMore": "경유 {{label}} 외 {{count}}",
+      "steps": "{{count}}단계"
+    },
+    "relations": {
+      "title": "관계",
+      "none": "이 장면에 표시된 관계가 없습니다.",
+      "search": {
+        "document": "이 문서의 관계에서 찾기",
+        "library": "이 자료의 관계에서 찾기",
+        "folder": "이 폴더의 관계에서 찾기",
+        "other": "이 항목의 관계에서 찾기"
+      },
+      "self": {
+        "document": "이 문서",
+        "library": "이 자료",
+        "folder": "이 폴더",
+        "other": "이 항목"
+      },
+      "incomingNote": {
+        "document": "이 문서를 가리킴",
+        "library": "이 자료를 가리킴",
+        "folder": "이 폴더를 가리킴",
+        "other": "이 항목을 가리킴"
+      },
+      "outgoingNote": {
+        "document": "이 문서가 가리킴",
+        "library": "이 자료가 가리킴",
+        "folder": "이 폴더가 가리킴",
+        "other": "이 항목이 가리킴"
+      },
+      "undirectedNote": "서로 연결"
+    },
+    "seedPath": {
+      "direct": "직접 연결",
+      "steps": "{{steps}}단계 · 경유 {{via}}곳",
+      "via": "경유",
+      "alternatives": "다른 경유 {{count}}곳: {{labels}}",
+      "alternativesMore": "다른 경유 {{count}}곳: {{labels}} 외"
+    },
+    "listChips": {
+      "node": {
+        "context": "컨텍스트",
+        "version": "버전",
+        "library": "라이브러리",
+        "agent": "에이전트",
+        "agentVersion": "에이전트 버전",
+        "folder": "폴더"
+      },
+      "edge": {
+        "wikilink": "링크",
+        "citation_page": "인용",
+        "citation_source": "출처",
+        "citation_agent": "인용",
+        "ask_citation": "근거",
+        "tree": "소속",
+        "co_access": "함께 읽음"
+      }
+    },
+    "roles": {
+      "source": "출발",
+      "target": "대상",
+      "sourceLink": "출발 · 링크한 문서",
+      "targetLink": "대상 · 링크된 문서",
+      "sourceCitation": "출발 · 인용한 문서",
+      "targetCitation": "대상 · 인용된 문서",
+      "sourceMembership": "출발 · 폴더",
+      "targetMembership": "대상 · 소속 항목"
+    },
+    "viewMode": {
+      "group": "보기 방식",
+      "graph": "그래프",
+      "list": "목록"
     }
   },
   "workspaceGraph": {
@@ -693,11 +779,7 @@
         "outgoing": "검색 결과 → 다른 문서",
         "incoming": "다른 문서 → 검색 결과"
       },
-      "more": "{{count}}개 더 보기 (남은 {{remaining}}개)",
-      "openDocument": "문서 열기: {{label}}",
       "expandCluster": "군집 펼치기: {{label}}",
-      "relationName": "{{source}}에서 {{target}}(으)로, {{kind}}",
-      "relationNameUndirected": "{{source}}와(과) {{target}}, {{kind}}",
       "clusterMeta": "구성원 {{members}} · 관계 {{relations}}",
       "referenceMetricShort_one": "참조 {{count}}",
       "referenceMetricShort_other": "참조 {{count}}",
@@ -740,12 +822,6 @@
       "none": "지도에 표시된 관계가 없습니다.",
       "searchDocument": "이 문서의 관계에서 찾기",
       "searchCluster": "이 군집의 관계에서 찾기",
-      "searchPlaceholder": "이름·폴더·종류로 찾기",
-      "clearSearch": "관계 검색어 지우기",
-      "searchStatus": "{{total}}개 중 {{shown}}개 일치",
-      "noMatch": "‘{{query}}’와 일치하는 관계가 없습니다.",
-      "incoming": "들어오는 관계",
-      "outgoing": "나가는 관계",
       "incomingNoteDocument": "이 문서를 가리킴",
       "incomingNoteCluster": "이 군집을 가리킴",
       "outgoingNoteDocument": "이 문서가 가리킴",
@@ -764,15 +840,7 @@
       "wikilink": "링크",
       "citation_page": "인용",
       "citation_source": "출처",
-      "ask_citation": "근거",
-      "line": {
-        "link": "링크(실선)",
-        "citation": "인용·출처(점선)",
-        "other": "기타 관계",
-        "coAccess": "함께 읽음(점선)",
-        "membership": "폴더 소속(점선)",
-        "action": "액션 발생(긴 점선)"
-      }
+      "ask_citation": "근거"
     },
     "drawer": {
       "close": "세부 데이터 필터 닫기",
@@ -875,6 +943,27 @@
       "disabledMember": "워크스페이스 관리자만 지식 지도를 사용할 수 있습니다. 문서별 그래프는 계속 쓸 수 있습니다.",
       "openSettings": "설정 열기",
       "permissionDenied": "워크스페이스 관리자만 지식 지도를 사용할 수 있습니다."
+    }
+  },
+  "relationList": {
+    "more": "{{count}}개 더 보기 (남은 {{remaining}}개)",
+    "openDocument": "문서 열기: {{label}}",
+    "relationName": "{{source}}에서 {{target}}(으)로, {{kind}}",
+    "relationNameUndirected": "{{source}}와(과) {{target}}, {{kind}}",
+    "searchPlaceholder": "이름·폴더·종류로 찾기",
+    "clearSearch": "관계 검색어 지우기",
+    "searchStatus": "{{total}}개 중 {{shown}}개 일치",
+    "noMatch": "‘{{query}}’와 일치하는 관계가 없습니다.",
+    "incoming": "들어오는 관계",
+    "outgoing": "나가는 관계",
+    "undirected": "방향 없는 관계",
+    "lines": {
+      "link": "링크(실선)",
+      "citation": "인용·출처(점선)",
+      "coAccess": "함께 읽음(점선)",
+      "membership": "폴더 소속(점선)",
+      "action": "액션 발생(긴 점선)",
+      "other": "기타 관계"
     }
   }
 }

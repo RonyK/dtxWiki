@@ -2193,9 +2193,9 @@ function WorkspaceGraphList({
       <button aria-pressed={selectedId === node.id} className="workspace-graph-list-select"
         onClick={() => onSelect(node.id)} title={nodeSummary(node, lens, t)} type="button">
         <strong>{node.label}</strong>
-        <span className="workspace-graph-row-meta">
+        <span className="relation-list-row-meta">
           <WorkspaceGraphNodeChip node={node} />
-          <span className="workspace-graph-row-meta-text">{nodeMeta(node, lens, t)}</span>
+          <span className="relation-list-row-meta-text">{nodeMeta(node, lens, t)}</span>
         </span>
       </button>
       {node.grain === "document" ? <WorkspaceGraphOpenLink node={node} onNavigate={onNavigate} />

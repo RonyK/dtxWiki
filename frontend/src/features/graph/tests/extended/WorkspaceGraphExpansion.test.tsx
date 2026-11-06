@@ -91,7 +91,7 @@ function outcome(clusterId: string, status: WorkspaceGraphExpansionOutcome["stat
 
 async function expand(clusterId: string) {
   // Without a search the sidebar list starts folded; open it to reach the row.
-  const head = screen.getByTestId("workspace-graph-node-list").querySelector<HTMLButtonElement>(".workspace-graph-fold-head");
+  const head = screen.getByTestId("workspace-graph-node-list").querySelector<HTMLButtonElement>(".relation-list-fold-head");
   if (head?.getAttribute("aria-expanded") === "false") await userEvent.click(head);
   const button = document.querySelector<HTMLButtonElement>(`li[data-graph-node-id="${clusterId}"] .workspace-graph-list-expand`);
   expect(button).not.toBeNull();

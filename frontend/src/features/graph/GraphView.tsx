@@ -1,4 +1,4 @@
-import { Clock3, Download, Focus, Layers, List, Maximize2, Minimize2, MoreHorizontal, RefreshCw, RotateCcw, SlidersHorizontal, X } from "lucide-react";
+import { Clock3, Download, Focus, Layers, List, Maximize2, Minimize2, MoreHorizontal, Network, RefreshCw, RotateCcw, SlidersHorizontal, X } from "lucide-react";
 import type { TFunction } from "i18next";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -7,7 +7,6 @@ import { Link } from "react-router-dom";
 
 import { MermaidDiagram } from "../pages/MarkdownView";
 import { LOCAL_EDGE_VISUAL_KIND_ORDER, localEdgeKindsFor, localEdgeVisualKind } from "./local/edgeKinds";
-import { localNodeVisualKind } from "./local/nodeVisual";
 import { decorateStaticDiagramSvg, graphSceneToMermaid, type StaticDiagramVisuals } from "./local/staticDiagram";
 import { GraphCameraControls, GraphPreviewBadge, GraphScopeSelector, GraphTypeSelector, eventInvolves } from "./local/LocalGraphChrome";
 import { LocalGraphTimeline, LocalTimelineMark } from "./local/LocalGraphTimeline";
@@ -15,11 +14,15 @@ import { timelinePresentation } from "./local/timelinePresentation";
 import { historySceneCatalog, renderHistoryScene } from "./local/historyScene";
 import { LocalGraphCoverageInfo } from "./local/LocalGraphCoverageInfo";
 import { CitationEvidenceSection, type CitationPair } from "./shared/CitationEvidenceSection";
-import { LocalGraphList, type LocalGraphSelectionOrigin } from "./local/LocalGraphList";
+import { analyzeLocalScene, type LocalSceneAnalysis } from "./local/localGraphList";
+import { LocalGraphListView } from "./local/LocalGraphListView";
+import { LocalNodeMeta, LocalRelationEnds, LocalRelationFlow, LocalSeedPath } from "./local/LocalGraphDetailsParts";
+import type { LocalNodeVisuals } from "./local/LocalNodeCue";
+import { localEdgeKindLabel, type LocalViewContext } from "./local/localRelationViews";
+import type { RovingSelectionOrigin as LocalGraphSelectionOrigin } from "./shared/relationList/useRovingList";
 import { localSceneScopeKey } from "./local/sceneScope";
-import { buildSceneNavigation, type SceneNavigation } from "./sceneNavigation";
 import { GraphEdgeCue, GraphNodeCue, GraphSeedCue } from "./shared/GraphCues";
-import { GRAPH_NODE_VISUALS, readGraphTokens, type GraphEdgeVisualKind, type GraphNodeVisualKind, type GraphVisualTokens } from "./shared/graphTokens";
+import { GRAPH_NODE_VISUALS, readGraphTokens, type GraphEdgeVisualKind, type GraphNodeVisualKind } from "./shared/graphTokens";
 import type { GraphRenderScene } from "./shared/rendererTypes";
 import type {
   GraphEdge,
@@ -67,7 +70,6 @@ type GraphViewProps = {
 // Match Mermaid's default parsing limit. Larger Local scenes keep the
 // complete text fallback rather than mounting a diagram that cannot render.
 const STATIC_DIAGRAM_EDGE_LIMIT = 500;
-type LocalNodeVisuals = { tokens: GraphVisualTokens; forcedColors: boolean };
 
 export function GraphView({
   active,
@@ -187,7 +189,13 @@ export function GraphView({
   const scene = useMemo(() => localizedGraphScene(filteredScene, t), [filteredScene, t]);
   const historyCatalog = useMemo(() => localizedGraphScene(applyHistoryVisibility(historySceneCatalog(payload, filters)), t),
     [applyHistoryVisibility, filters, payload, t]);
-  const sceneNavigation = useMemo(() => buildSceneNavigation(scene), [scene]);
+  const sceneAnalysis = useMemo(() => analyzeLocalScene(scene, payload.query.seeds), [payload.query.seeds, scene]);
+  const listContext = useMemo<LocalViewContext>(() => ({
+    hrefFor: (node) => nodeHref(node, workspaceId ?? null),
+    seeds: new Set(sceneAnalysis.seeds),
+    t,
+    visuals: nodeVisuals,
+  }), [nodeVisuals, sceneAnalysis, t, workspaceId]);
   const canvasScene = useMemo<GraphRenderScene>(() => {
     const hoveredIndex = timeline.findIndex((event) => event.id === hoveredEventId);
     const eventIndex = hoveredIndex >= 0 ? hoveredIndex : visibleCursor;
@@ -795,7 +803,7 @@ export function GraphView({
       </details>
 
         </div>
-      <div className={`graph-local-stage ${busyAction ? "is-loading" : ""}`} aria-busy={!!busyAction}>
+      <div className={`graph-local-stage ${busyAction ? "is-loading" : ""} ${listOpen ? "is-list-view" : ""}`} aria-busy={!!busyAction}>
         {busyAction ? <div className="graph-canvas-loading" role="status"><RefreshCw size={20} aria-hidden="true" />
           {t("graph.view.loading", { view: busyAction.startsWith("mode:") ? t(`graph.view.${busyAction.slice(5)}.name`) : t(`graph.view.${payload.history.mode}.name`) })}</div> : null}
         {!busyAction && !historical && scene.edges.length === 0 ? <div className="graph-canvas-empty" role="status">
@@ -835,6 +843,10 @@ export function GraphView({
             folderOnly={coverageNotice.folderOnly} tone={coverageNotice.tone}
             budgetNote={hasDisplayQuota ? t("graph.omissions.appliedBudget", { nodes: payload.budget.applied.nodes, edges: payload.budget.applied.edges }) : undefined} />
           <button type="button" aria-label={t("graph.view.dismissNotice")} onClick={() => setDismissedCoverageKey(coverageKey)}><X size={14} aria-hidden="true" /></button>
+        </div> : null}
+        {listOpen ? <div className="graph-list-layer">
+          <LocalGraphListView active={active} analysis={sceneAnalysis} context={listContext} onBlur={clearItemFocus}
+            onFocus={setFocusedId} onSelect={selectItem} scopeKey={canvasScopeKey} selectedId={effectiveSelectedId} />
         </div> : null}
         <GraphCameraControls disabled={rendererStatus !== "ready"} onZoomIn={() => canvasRef.current?.zoomIn()} onZoomOut={() => canvasRef.current?.zoomOut()} onFit={() => canvasRef.current?.fit()} />
         {canvasScene.nodes.length ? (
@@ -890,9 +902,8 @@ export function GraphView({
           edge={selectedEdge}
           node={selectedNode}
           nodes={scene.nodes}
-          navigation={sceneNavigation}
-          sceneEdges={scene.edges}
-          nodeVisuals={nodeVisuals}
+          analysis={sceneAnalysis}
+          listContext={listContext}
           onCenter={(id) => canvasRef.current?.centerOn(id)}
           onClearSelection={clearSelection}
           onBlur={clearItemFocus}
@@ -920,7 +931,10 @@ export function GraphView({
           <time dateTime={payload.generated_at}>{t("graph.view.fetched", { time: formatVersionTimestamp(payload.generated_at) })}</time>
           {coverageNotice ? <span className="graph-status-omitted">{t("graph.view.omitted")}</span> : null}
           <div className="graph-status-actions">
-            {!fullscreen ? <button type="button" aria-expanded={listOpen} onClick={() => setListOpen((open) => !open)}><List size={15} aria-hidden="true" />{t("graph.view.list")}</button> : null}
+            <span className="graph-view-switch" role="group" aria-label={t("graph.viewMode.group")}>
+              <button type="button" aria-pressed={!listOpen} onClick={() => setListOpen(false)}><Network size={15} aria-hidden="true" />{t("graph.viewMode.graph")}</button>
+              <button type="button" aria-pressed={listOpen} onClick={() => setListOpen(true)}><List size={15} aria-hidden="true" />{t("graph.viewMode.list")}</button>
+            </span>
             <button type="button" aria-expanded={legendOpen} onClick={() => setLegendOpen((open) => !open)}><Layers size={15} aria-hidden="true" />{t("graph.view.legend")}</button>
           </div>
         </footer>
@@ -929,19 +943,6 @@ export function GraphView({
 
       <p className="visually-hidden" aria-live="polite" aria-atomic="true">{announcement}</p>
 
-      <div className="graph-parity-grid" hidden={!listOpen}>
-        <GraphRelationshipList
-          active={active}
-          edges={scene.edges}
-          nodes={scene.nodes}
-          nodeVisuals={nodeVisuals}
-          onBlur={clearItemFocus}
-          onFocus={setFocusedId}
-          onSelect={selectItem}
-          selectedId={effectiveSelectedId}
-          workspaceId={workspaceId}
-        />
-      </div>
 
       <details
         className="graph-static-fallback"
@@ -1114,64 +1115,7 @@ function GraphLegend({ historical, nodeVisuals }: { historical: boolean; nodeVis
   );
 }
 
-function LocalNodeCue({ node, visuals }: { node: GraphNode; visuals: LocalNodeVisuals }) {
-  const kind = localNodeVisualKind(node.entity_kind, node.family);
-  return <GraphNodeCue className="graph-local-node-cue" color={visuals.tokens.node[GRAPH_NODE_VISUALS[kind].color]}
-    forcedColors={visuals.forcedColors} kind={kind} surface={visuals.tokens.surface} />;
-}
 
-function GraphRelationshipList({
-  active,
-  edges,
-  nodes,
-  nodeVisuals,
-  onBlur,
-  onFocus,
-  onSelect,
-  selectedId,
-  workspaceId,
-}: {
-  active: boolean;
-  edges: GraphEdge[];
-  nodes: GraphNode[];
-  nodeVisuals: LocalNodeVisuals;
-  onBlur: (id: string) => void;
-  onFocus: (id: string) => void;
-  onSelect: (id: string, origin: LocalGraphSelectionOrigin) => void;
-  selectedId: string | null;
-  workspaceId: string | null;
-}) {
-  const { t } = useTranslation("graph");
-  const nodeLabels = useMemo(() => new Map(nodes.map((node) => [node.id, node.label])), [nodes]);
-  const renderNode = useCallback((node: GraphNode) => <><LocalNodeCue node={node} visuals={nodeVisuals} />
-    <span><strong>{node.label}</strong><small>{graphLabel(t, "graphNodeFamily", node.family)}{node.status ? ` · ${graphLabel(t, "graphStatus", node.status)}` : ""}</small></span></>, [nodeVisuals, t]);
-  const renderEdge = useCallback((edge: GraphEdge) => {
-    const visual = localEdgeVisualKind(edge.edge_kind);
-    return <><GraphEdgeCue color={visual ? nodeVisuals.tokens.edge[visual] : undefined} kind={visual ?? "other"} width={22} />
-      <span><strong>{edge.label}</strong><small>{nodeLabels.get(edge.source) ?? edge.source} → {nodeLabels.get(edge.target) ?? edge.target}</small></span></>;
-  }, [nodeLabels, nodeVisuals]);
-  const scopeKey = workspaceId ?? "";
-  return (
-    <section className="graph-relationship-list" aria-labelledby="graph-relationship-list-heading">
-      <h4 id="graph-relationship-list-heading">{t("graph.relationshipList", { defaultValue: "Accessible graph contents" })}</h4>
-      <p>{t("graph.relationshipListDescription", { defaultValue: "Tab into each list once. Use arrow keys to highlight items, then Enter or Space to select and access their actions in Details." })}</p>
-      <LocalGraphList
-        active={active} defaultOpen empty={t("graph.emptyFiltered")} items={nodes}
-        label={t("graph.nodes", { defaultValue: "Nodes" })}
-        onBlur={onBlur} onFocus={onFocus} onSelect={onSelect}
-        renderItem={renderNode}
-        scopeKey={scopeKey} selectedId={selectedId}
-      />
-      <LocalGraphList
-        active={active} empty={t("graph.emptyFiltered")} items={edges}
-        label={t("graph.edges", { defaultValue: "Relationships" })}
-        onBlur={onBlur} onFocus={onFocus} onSelect={onSelect}
-        renderItem={renderEdge}
-        scopeKey={scopeKey} selectedId={selectedId}
-      />
-    </section>
-  );
-}
 
 function GraphDetails({
   active,
@@ -1186,9 +1130,8 @@ function GraphDetails({
   edge,
   node,
   nodes,
-  sceneEdges,
-  navigation,
-  nodeVisuals,
+  analysis,
+  listContext,
   onCenter,
   onClearSelection,
   onBlur,
@@ -1215,9 +1158,8 @@ function GraphDetails({
   edge: GraphEdge | null;
   node: GraphNode | null;
   nodes: GraphNode[];
-  sceneEdges: GraphEdge[];
-  navigation: SceneNavigation;
-  nodeVisuals: LocalNodeVisuals;
+  analysis: LocalSceneAnalysis;
+  listContext: LocalViewContext;
   onCenter: (id: string) => void;
   onClearSelection: () => void;
   onBlur: (id: string) => void;
@@ -1258,15 +1200,6 @@ function GraphDetails({
   }
   const evidence = node?.evidence ?? edge?.evidence;
   const href = node ? nodeHref(node, workspaceId) : null;
-  const nodeLabels = new Map(nodes.map((entry) => [entry.id, entry.label]));
-  const edgeSentence = edge ? t("graph.details.edgeSentence", {
-    action: edge.action_kind
-      ? graphLabel(t, "graphActionKind", edge.action_kind)
-      : graphLabel(t, "graphEdgeKind", edge.edge_kind),
-    defaultValue: "{{source}} —{{action}}→ {{target}}",
-    source: nodeLabels.get(edge.source) ?? edge.source,
-    target: nodeLabels.get(edge.target) ?? edge.target,
-  }) : null;
   const coAccess = edge ? coAccessSentence(edge, t) : null;
   const citationSource = edge && ["citation_page", "citation_source", "citation_agent"].includes(edge.edge_kind)
     ? nodes.find((item) => item.id === edge.source && item.entity_kind === "context_page") : undefined;
@@ -1284,18 +1217,13 @@ function GraphDetails({
         <button aria-label={clearLabel} className="graph-details-close" onClick={onClearSelection} type="button"><X size={17} aria-hidden="true" /></button>
       </div>
       <button className="graph-details-sheet-toggle" type="button" aria-expanded={sheetExpanded} onClick={() => setSheetExpanded((value) => !value)}>{t(sheetExpanded ? "graph.details.collapseSheet" : "graph.details.expandSheet")}</button>
-      <h5 className="graph-details-title">{node?.label ?? edge?.label}</h5>
+      <h5 className="graph-details-title">{node?.label ?? (edge ? localEdgeKindLabel(edge, t) : null)}</h5>
       {historicalOnly ? <p className="graph-history-inactive">{t("graph.historyUi.notPresent")}</p> : null}
-      {node ? <p className="graph-details-location">{graphLabel(t, "graphEntityKind", node.entity_kind)}{node.path ? ` · ${node.path}` : ""}</p> : null}
+      {node ? <LocalNodeMeta context={listContext} node={node} /> : null}
       {nodeActions?.reason ? <p className="graph-action-reason" id={actionReasonId}>{nodeActions.reason}</p> : null}
-      {edgeSentence ? <p className="graph-edge-summary">{edgeSentence}</p> : null}
+      {edge ? <LocalRelationEnds analysis={analysis} context={listContext} edge={edge} onSelect={onSelect} /> : null}
       {coAccess ? <p className="graph-edge-summary">{coAccess}</p> : null}
-      {node && !node.is_seed ? <div className="graph-seed-relationships"><h5>{t("graph.details.seedRelationships")}</h5>
-        {sceneEdges.filter((entry) => (entry.source === node.id || entry.target === node.id) && querySeeds.some((seed) => {
-          const other = nodes.find((item) => item.id === (entry.source === node.id ? entry.target : entry.source));
-          return other?.entity_kind === seed.kind && other.entity_id === seed.id;
-        })).map((entry) => <p key={entry.id}><span aria-hidden="true">{entry.direction === "undirected" ? "↔" : entry.source === node.id ? "→" : "←"}</span> {entry.label}</p>)}
-      </div> : null}
+      {node && !node.is_seed ? <LocalSeedPath analysis={analysis} context={listContext} node={node} onSelect={onSelect} /> : null}
       {historyEvents ? <div className="graph-item-history">
         <h5>{t("graph.historyUi.itemRecords")} <GraphPreviewBadge /></h5>
         <ul>{historyEvents.filter((event) => eventInvolves(event, node?.id ?? edge?.id ?? null, historyEdges)).map((event) => <li key={event.id}>
@@ -1306,53 +1234,14 @@ function GraphDetails({
         {!historyEvents.some((event) => eventInvolves(event, node?.id ?? edge?.id ?? null, historyEdges)) ? <p>{t("graph.historyUi.noItemRecords")}</p> : null}
       </div> : null}
       <dl>
-        {node ? <><GraphDetail label={t("graph.details.type", { defaultValue: "Type" })} value={graphLabel(t, "graphNodeFamily", node.family)} /><GraphDetail label={t("graph.details.kind", { defaultValue: "Kind" })} value={graphLabel(t, "graphEntityKind", node.entity_kind)} />{node.status ? <GraphDetail label={t("graph.details.status", { defaultValue: "Status" })} value={graphLabel(t, "graphStatus", node.status)} /> : null}{node.actor_label ? <GraphDetail label={t("graph.details.actor", { defaultValue: "Actor" })} value={node.actor_label} /> : null}</> : null}
+        {node ? <>{node.actor_label ? <GraphDetail label={t("graph.details.actor", { defaultValue: "Actor" })} value={node.actor_label} /> : null}</> : null}
         {edge ? <><GraphDetail label={t("graph.details.layer", { defaultValue: "Layer" })} value={graphLabel(t, "graphLayer", edge.layer)} /><GraphDetail label={t("graph.details.relationship", { defaultValue: "Relationship" })} value={graphLabel(t, "graphEdgeKind", edge.edge_kind)} />{edge.action_kind ? <GraphDetail label={t("graph.details.action", { defaultValue: "Action" })} value={graphLabel(t, "graphActionKind", edge.action_kind)} /> : null}<GraphDetail label={t("graph.details.direction", { defaultValue: "Direction" })} value={graphLabel(t, "graphDirection", edge.direction)} /><GraphDetail label={t("graph.details.provenance", { defaultValue: "Provenance" })} value={graphLabel(t, "graphProvenance", edge.provenance)} />{edge.aggregate && !coAccess ? <GraphDetail label={t("graph.details.aggregate", { defaultValue: "Aggregate" })} value={String(edge.count ?? edge.weight)} /> : null}</> : null}
         {(node?.occurred_at || edge?.occurred_at) ? <GraphDetail label={t("graph.details.time", { defaultValue: "Time" })} value={formatVersionTimestamp((node?.occurred_at ?? edge?.occurred_at)!, "long")} /> : null}
         {evidence ? <><GraphDetail label={t("graph.details.evidence", { defaultValue: "Evidence" })} value={evidence.label ?? graphLabel(t, "graphEvidenceKind", evidence.kind)} /><GraphDetail label={t("graph.details.evidenceRef", { defaultValue: "Evidence reference" })} value={evidence.available ? evidence.ref ?? evidence.id ?? t("graph.details.available", { defaultValue: "Available" }) : t("graph.details.unavailable", { defaultValue: "Unavailable" })} /></> : null}
       </dl>
       {workspaceId && citationPair ? <CitationEvidenceSection active={citationEvidenceActive} pair={citationPair} revision={citationEvidenceRevision} workspaceId={workspaceId} /> : null}
-      {node ? <>
-        <GraphSceneNodeList
-          active={active}
-          heading={t("graph.sceneNavigation.neighbors", { defaultValue: "Direct neighbors in this scene" })}
-          empty={t("graph.sceneNavigation.noNeighbors", { defaultValue: "No direct neighbors are connected in this scene." })}
-          nodes={navigation.neighborsByNode.get(node.id) ?? []}
-          nodeVisuals={nodeVisuals}
-          onBlur={onBlur}
-          onFocus={onFocus}
-          onSelect={onSelect}
-          open
-          selectedId={node.id}
-          showKeyboardHint
-          scopeKey={`${workspaceId ?? ""}:${node.id}`}
-        />
-        {navigation.membersByFolder.has(node.id) ? <GraphSceneNodeList
-          active={active}
-          heading={t("graph.sceneNavigation.members", { defaultValue: "Members in this scene" })}
-          empty={t("graph.sceneNavigation.noMembers", { defaultValue: "No members are connected in this scene." })}
-          nodes={navigation.membersByFolder.get(node.id)!}
-          nodeVisuals={nodeVisuals}
-          onBlur={onBlur}
-          onFocus={onFocus}
-          onSelect={onSelect}
-          open
-          selectedId={node.id}
-          scopeKey={`${workspaceId ?? ""}:${node.id}`}
-        /> : null}
-        {navigation.foldersByMember.has(node.id) ? <GraphSceneNodeList
-          active={active}
-          heading={t("graph.sceneNavigation.folders", { defaultValue: "Folders in this scene" })}
-          empty={t("graph.sceneNavigation.noFolders", { defaultValue: "No folders are connected in this scene." })}
-          nodes={navigation.foldersByMember.get(node.id)!}
-          nodeVisuals={nodeVisuals}
-          onBlur={onBlur}
-          onFocus={onFocus}
-          onSelect={onSelect}
-          selectedId={node.id}
-          scopeKey={`${workspaceId ?? ""}:${node.id}`}
-        /> : null}
-      </> : null}
+      {node ? <LocalRelationFlow active={active} analysis={analysis} context={listContext} key={node.id} node={node}
+        onBlur={onBlur} onFocus={onFocus} onSelect={onSelect} scopeKey={`${workspaceId ?? ""}:${node.id}`} /> : null}
       <div className="graph-details-footer">
         {href ? <Link className="graph-details-open" to={href}>{t("graph.open")}</Link> : null}
         {node && nodeActions ? <GraphSelectedNodeActions actions={{ ...nodeActions, href: null }} node={node} onCollapse={onCollapse} onExpand={onExpand} reasonId={actionReasonId} /> : null}
@@ -1371,48 +1260,6 @@ function GraphDetails({
   );
 }
 
-function GraphSceneNodeList({
-  active,
-  heading,
-  empty,
-  nodes,
-  nodeVisuals,
-  onBlur,
-  onFocus,
-  onSelect,
-  open = false,
-  selectedId,
-  scopeKey,
-  showKeyboardHint = false,
-}: {
-  active: boolean;
-  heading: string;
-  empty: string;
-  nodes: GraphNode[];
-  nodeVisuals: LocalNodeVisuals;
-  onBlur: (id: string) => void;
-  onFocus: (id: string) => void;
-  onSelect: (id: string, origin: LocalGraphSelectionOrigin) => void;
-  open?: boolean;
-  selectedId: string | null;
-  scopeKey: string;
-  showKeyboardHint?: boolean;
-}) {
-  const { t } = useTranslation("graph");
-  return <LocalGraphList
-    active={active}
-    className="graph-scene-navigation"
-    defaultOpen={open}
-    description={showKeyboardHint ? t("graph.sceneNavigation.keyboardHint", {
-      defaultValue: "Tab into this list once. Use Up/Down or Home/End to highlight items. Press Enter or Space to select and focus Details.",
-    }) : undefined}
-    empty={empty} items={nodes} label={heading}
-    onBlur={onBlur} onFocus={onFocus} onSelect={onSelect}
-    renderItem={(node) => <><LocalNodeCue node={node} visuals={nodeVisuals} />
-      <span><strong>{node.label}</strong><small>{graphLabel(t, "graphNodeFamily", node.family)}</small></span></>}
-    scopeKey={scopeKey} selectedId={selectedId}
-  />;
-}
 
 type SelectedNodeActions = {
   action: "expand" | "collapse";

@@ -67,6 +67,23 @@
   `workspace_inbox_entry` and `account_inbox_entry` in Archived list order, so
   an Archived page no longer reads and sorts the recipient's whole history.
 
+### Context graph lists
+
+- Show the Graph tab's list in the canvas area through a Graph | List switch,
+  so a selected item's Details open beside the list, also in fullscreen. The
+  list starts from the seed document's incoming and outgoing relations, then
+  folds what the relation scope adds (relations between neighbors, two-step
+  items and relations, items not connected to the seed), ten rows at a time
+  with one search box.
+- Show a selected node's relations in Details as one searchable flow (incoming,
+  this item, outgoing; five per direction) and how the item is reached from the
+  seed, replacing the separate neighbor, member and folder lists. A relation
+  chip on that path opens the relation's own Details.
+- Share the Knowledge Map sidebar's chips, relation rows and flow with the Graph
+  tab; the map sidebar looks the same.
+- Keep the retained citation evidence table readable in the Details panel
+  instead of squeezing its second column to a letter's width.
+
 ## 0.2.1 — 2026-11-04
 
 Beta release with Graph View, document references, Inbox, and workspace-scoped

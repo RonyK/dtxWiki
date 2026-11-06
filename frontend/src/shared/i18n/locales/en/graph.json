@@ -178,7 +178,6 @@
     "staticFallbackFailed": "Static graph fallback",
     "staticFallbackList": "This scene exceeds the diagram limit of {{limit}} relationships. All nodes and relationships are listed here.",
     "printFallback": "Graph relationships",
-    "relationshipList": "Accessible graph contents",
     "relationshipListDescription": "Tab into each list once. Use arrow keys to highlight items, then Enter or Space to select and access their actions in Details.",
     "nodes": "Nodes",
     "edges": "Relationships",
@@ -278,15 +277,6 @@
       "edgeEvent": "{{source}} —{{action}}→ {{target}}",
       "filteredEvent": "No visible change under the current filters."
     },
-    "sceneNavigation": {
-      "members": "Members in this scene",
-      "folders": "Folders in this scene",
-      "neighbors": "Direct neighbors in this scene",
-      "noMembers": "No members are connected in this scene.",
-      "noFolders": "No folders are connected in this scene.",
-      "noNeighbors": "No direct neighbors are connected in this scene.",
-      "keyboardHint": "Tab into this list once. Use Up/Down or Home/End to highlight items. Press Enter or Space to select and focus Details."
-    },
     "details": {
       "heading": "Details",
       "empty": "Select a node or relationship to inspect it.",
@@ -351,7 +341,6 @@
       "fullscreenUnavailable": "Fullscreen is unavailable in this browser.",
       "dismissNotice": "Dismiss coverage notice",
       "fetched": "Fetched {{time}}",
-      "list": "View as list",
       "legend": "Legend",
       "rows": {
         "question": "Question",
@@ -454,6 +443,103 @@
       "restoredLatest": "The record you were viewing is no longer in the results. Moved to the latest record.",
       "groupRecords": "{{count}} nearby records",
       "closeGroup": "Close"
+    },
+    "list": {
+      "title": "Graph list",
+      "counts": "{{nodes}} nodes · {{edges}} relationships",
+      "search": "Find in the graph list",
+      "searchPlaceholder": "Name or kind",
+      "clearSearch": "Clear list search",
+      "status": "“{{query}}” matches {{nodes}} nodes · {{edges}} relationships",
+      "noMatch": "Nothing matches “{{query}}”.",
+      "incomingNote": "point to the seed",
+      "outgoingNote": "the seed points to",
+      "undirectedNote": "connected both ways",
+      "groups": {
+        "seed": "Seed relationships",
+        "seedNamed": "Relationships of {{label}}",
+        "neighbors": "Between neighbors",
+        "neighborsNote": "both ends are direct neighbors",
+        "ringNodes": "Two steps away",
+        "ringNodesNote": "reached through a neighbor",
+        "ringRelations": "Two-step relationships",
+        "ringRelationsNote": "between neighbors and two-step items",
+        "unlinked": "Not connected to the seed",
+        "unlinkedNote": "their relationships to the seed are hidden or absent"
+      },
+      "via": "via {{label}}",
+      "viaMore": "via {{label}} and {{count}} more",
+      "steps": "{{count}} steps"
+    },
+    "relations": {
+      "title": "Relationships",
+      "none": "No relationships are shown in this scene.",
+      "search": {
+        "document": "Find in this document's relationships",
+        "library": "Find in this source's relationships",
+        "folder": "Find in this folder's relationships",
+        "other": "Find in this item's relationships"
+      },
+      "self": {
+        "document": "This document",
+        "library": "This source",
+        "folder": "This folder",
+        "other": "This item"
+      },
+      "incomingNote": {
+        "document": "to this document",
+        "library": "to this source",
+        "folder": "to this folder",
+        "other": "to this item"
+      },
+      "outgoingNote": {
+        "document": "from this document",
+        "library": "from this source",
+        "folder": "from this folder",
+        "other": "from this item"
+      },
+      "undirectedNote": "connected both ways"
+    },
+    "seedPath": {
+      "direct": "Direct",
+      "steps": "{{steps}} steps · {{via}} in between",
+      "via": "via",
+      "alternatives": "Also via {{count}}: {{labels}}",
+      "alternativesMore": "Also via {{count}}: {{labels}} and more"
+    },
+    "listChips": {
+      "node": {
+        "context": "Context",
+        "version": "Version",
+        "library": "Library",
+        "agent": "Agent",
+        "agentVersion": "Agent version",
+        "folder": "Folder"
+      },
+      "edge": {
+        "wikilink": "Link",
+        "citation_page": "Citation",
+        "citation_source": "Source",
+        "citation_agent": "Citation",
+        "ask_citation": "Evidence",
+        "tree": "Membership",
+        "co_access": "Read together"
+      }
+    },
+    "roles": {
+      "source": "Source",
+      "target": "Target",
+      "sourceLink": "Source · linking document",
+      "targetLink": "Target · linked document",
+      "sourceCitation": "Source · citing document",
+      "targetCitation": "Target · cited item",
+      "sourceMembership": "Source · folder",
+      "targetMembership": "Target · member"
+    },
+    "viewMode": {
+      "group": "View",
+      "graph": "Graph",
+      "list": "List"
     }
   },
   "workspaceGraph": {
@@ -693,11 +779,7 @@
         "outgoing": "Matches → other documents",
         "incoming": "Other documents → matches"
       },
-      "more": "Show {{count}} more ({{remaining}} left)",
-      "openDocument": "Open document: {{label}}",
       "expandCluster": "Expand cluster: {{label}}",
-      "relationName": "{{source}} to {{target}}, {{kind}}",
-      "relationNameUndirected": "{{source}} and {{target}}, {{kind}}",
       "clusterMeta": "{{members}} members · {{relations}} relations",
       "referenceMetricShort_one": "{{count}} reference",
       "referenceMetricShort_other": "{{count}} references",
@@ -740,12 +822,6 @@
       "none": "No relationships in the visible map.",
       "searchDocument": "Find in this document's relationships",
       "searchCluster": "Find in this cluster's relationships",
-      "searchPlaceholder": "Name, folder or kind",
-      "clearSearch": "Clear relationship search",
-      "searchStatus": "{{shown}} of {{total}} match",
-      "noMatch": "No relationships match “{{query}}”.",
-      "incoming": "Incoming",
-      "outgoing": "Outgoing",
       "incomingNoteDocument": "to this document",
       "incomingNoteCluster": "to this cluster",
       "outgoingNoteDocument": "from this document",
@@ -764,15 +840,7 @@
       "wikilink": "Link",
       "citation_page": "Citation",
       "citation_source": "Source",
-      "ask_citation": "Evidence",
-      "line": {
-        "link": "Links (solid line)",
-        "citation": "Citations and sources (dashed line)",
-        "other": "Other relationships",
-        "coAccess": "Read together (dotted line)",
-        "membership": "Folder membership (dashed line)",
-        "action": "Actions (long dashes)"
-      }
+      "ask_citation": "Evidence"
     },
     "drawer": {
       "close": "Close Refine data",
@@ -875,6 +943,27 @@
       "disabledMember": "Only workspace administrators can use Knowledge Map. Document Graph tabs remain available.",
       "openSettings": "Open Settings",
       "permissionDenied": "Only workspace administrators can use Knowledge Map."
+    }
+  },
+  "relationList": {
+    "more": "Show {{count}} more ({{remaining}} left)",
+    "openDocument": "Open document: {{label}}",
+    "relationName": "{{source}} to {{target}}, {{kind}}",
+    "relationNameUndirected": "{{source}} and {{target}}, {{kind}}",
+    "searchPlaceholder": "Name, folder or kind",
+    "clearSearch": "Clear relationship search",
+    "searchStatus": "{{shown}} of {{total}} match",
+    "noMatch": "No relationships match “{{query}}”.",
+    "incoming": "Incoming",
+    "outgoing": "Outgoing",
+    "undirected": "No direction",
+    "lines": {
+      "link": "Links (solid line)",
+      "citation": "Citations and sources (dashed line)",
+      "coAccess": "Read together (dotted line)",
+      "membership": "Folder membership (dashed line)",
+      "action": "Actions (long dashes)",
+      "other": "Other relationships"
     }
   }
 }

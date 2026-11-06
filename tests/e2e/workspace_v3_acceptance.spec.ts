@@ -1266,12 +1266,12 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await expect(
             graphPanel.getByRole("heading", { name: "Graph relationships" }),
           ).toBeVisible();
-          await graphPanel.getByRole("button", { name: "View as list" }).click();
-          const relatedRow = graphPanel
-            .locator(".graph-relationship-list > details > ul > li")
-            .filter({ hasText: relatedTitle })
+          await graphPanel.getByRole("button", { name: "List", exact: true }).click();
+          const relatedRow = graphPanel.getByTestId("graph-list-view")
+            .locator("button[data-local-graph-id]")
+            .filter({ has: page.locator("strong", { hasText: relatedTitle }) })
             .first();
-          await relatedRow.locator(":scope > .graph-list-select").click();
+          await relatedRow.click();
           const graphDetails = graphPanel.locator(".graph-details");
           await expect(graphDetails.locator("h5.graph-details-title")).toHaveText(relatedTitle);
           await expect(
@@ -1329,7 +1329,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             });
           }
 
-          await relatedRow.locator(":scope > .graph-list-select").click();
+          await relatedRow.click();
           await expect(graphDetails.locator("h5.graph-details-title")).toHaveText(relatedTitle);
           await graphDetails.locator(".graph-details-more > summary").click();
           await graphDetails.getByRole("button", { name: "Pin", exact: true }).click();
@@ -1344,7 +1344,9 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           ).toHaveCount(0);
           await graphPanel.locator(".graph-frame-filters").getByRole("button", { name: "Clear all" }).click();
           await expect(relatedRow).toHaveCount(1);
-          await relatedRow.locator(":scope > .graph-list-select").click();
+          // The filter popover floats over the canvas area, where the list now is.
+          await graphPanel.locator(".graph-frame-filters > summary").click();
+          await relatedRow.click();
           await expect(graphDetails.locator("h5.graph-details-title")).toHaveText(relatedTitle);
           await graphDetails.locator(".graph-details-more > summary").click();
           await expect(
@@ -1405,10 +1407,14 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             .toHaveAttribute("data-renderer-status", "ready");
           // The compact frame exposes the same filter in the mobile popover.
           const historicalFilter = graphPanel.locator(".graph-frame-filters").getByRole("checkbox", { name: /Historical relationships/ });
-          const relationships = graphPanel.locator(".graph-relationship-list > details").nth(1);
-          await relationships.locator("summary").click();
-          const createdRow = relationships.getByRole("button", { name: /^Created / }).first();
-          await createdRow.click();
+          // A seed relation opens from its chip on the selected item's path card.
+          const createdRows = graphPanel.getByTestId("graph-list-view").locator(".graph-list-bowtie-row, .relation-list-flow-row")
+            .filter({ has: page.locator(".relation-list-chip", { hasText: /^Created$/ }) });
+          // An expanded phone Details sheet covers the list; collapse it as a reader would.
+          const collapseSheet = graphPanel.locator(".graph-details").getByRole("button", { name: "Collapse details", exact: true });
+          if (await collapseSheet.isVisible()) await collapseSheet.click();
+          await createdRows.first().locator("button[data-local-graph-id]").click();
+          await graphPanel.locator(".graph-seed-path .graph-seed-path-relation").filter({ hasText: /^Created$/ }).first().click();
           await expect(graphPanel.locator("h5.graph-details-title")).toHaveText("Created");
           await graphPanel.locator(".graph-details-more > summary").click();
           await graphPanel.locator(".graph-details").getByRole("button", { name: "Center", exact: true }).click();
@@ -1421,11 +1427,11 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await graphPanel.locator(".graph-frame-filters > summary").click();
           await expect(historicalFilter).toBeChecked();
           await historicalFilter.uncheck();
-          await expect(relationships.getByRole("button", { name: /^Created / })).toHaveCount(0);
+          await expect(createdRows).toHaveCount(0);
           await expect(graphPanel.locator("h5.graph-details-title")).toHaveCount(0);
           await historicalFilter.check();
           await graphPanel.locator(".graph-frame-filters > summary").click();
-          await expect(relationships.getByRole("button", { name: /^Created / }).first()).toBeVisible();
+          await expect(createdRows.first()).toBeVisible();
           await expectViewportFits(page);
           const appearanceResponsePromise = page.waitForResponse((response) =>
             response.url().endsWith(`/api/v1/workspaces/${workspace.id}/graph/query`)
@@ -1448,7 +1454,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           expect(Number(timelineMax)).toBeGreaterThan(0);
           await timeline.press("End");
           await expect(relatedRow).toHaveCount(1);
-          await relatedRow.locator(":scope > .graph-list-select").click();
+          await relatedRow.click();
           await expect(graphDetails.locator("h5.graph-details-title")).toHaveText(relatedTitle);
           await expect(
             graphDetails.getByRole("link", { name: "Open", exact: true }),

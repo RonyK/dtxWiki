@@ -885,7 +885,7 @@ for (const mode of ["desktop", "mobile-fullscreen"] as const) {
 
 /** Without a search the sidebar sections start folded; opening one lists rows in scene order. */
 async function openListSection(list: Locator): Promise<void> {
-  const head = list.locator(".workspace-graph-fold-head").first();
+  const head = list.locator(".relation-list-fold-head").first();
   if (await head.getAttribute("aria-expanded") === "false") await head.click();
 }
 
@@ -914,7 +914,7 @@ for (const { language, mobile } of [
     await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2000");
     await expectSettledNativeScene(page);
     // The phone sheet is closed here; open the folded section without a pointer.
-    await page.getByTestId("workspace-graph-node-list").locator(".workspace-graph-fold-head").first()
+    await page.getByTestId("workspace-graph-node-list").locator(".relation-list-fold-head").first()
       .evaluate((head) => (head as HTMLButtonElement).click());
     const geometry = await page.evaluate(() => {
       const rectangle = (selector: string) => {
@@ -929,7 +929,7 @@ for (const { language, mobile } of [
         search: rectangle("#workspace-graph-visible-search"), stage: rectangle(".workspace-graph-stage"),
         list: rectangle(".workspace-graph-list"),
         nodeRow: rectangle("[data-testid='workspace-graph-node-list'] li[data-graph-node-id]"),
-        nodeAction: rectangle("[data-testid='workspace-graph-node-list'] li[data-graph-node-id] .workspace-graph-open-link"),
+        nodeAction: rectangle("[data-testid='workspace-graph-node-list'] li[data-graph-node-id] .relation-list-open-link"),
         canvas: rectangle(".graph-canvas-frame"),
         inspector: rectangle(".inspector-panel"),
       };

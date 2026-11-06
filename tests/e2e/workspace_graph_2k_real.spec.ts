@@ -176,7 +176,7 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
     await afterAnimationFrame(page);
 
     // Without a search the sections are folded; opening one browses ten rows at a time.
-    for (const list of [nodeList, edgeList]) await list.locator(".workspace-graph-fold-head").first().click();
+    for (const list of [nodeList, edgeList]) await list.locator(".relation-list-fold-head").first().click();
     await expect(nodeList.locator("li[data-graph-node-id]")).toHaveCount(10);
     const lastNode = nodeList.locator("li[data-graph-node-id]").last();
     await expect(lastNode).toBeVisible();
@@ -384,12 +384,14 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
 
 const SCENE_NAVIGATION_LABELS = {
   en: {
-    members: "Members in this scene", folders: "Folders in this scene",
-    neighbors: "Direct neighbors in this scene", empty: "Select a node or relationship to inspect it.",
+    listMode: "List", listSearch: "Find in the graph list", incoming: "Incoming", outgoing: "Outgoing",
+    membership: "Membership", documentSearch: "Find in this document's relationships",
+    empty: "Select a node or relationship to inspect it.",
   },
   ko: {
-    members: "이 장면의 소속 항목", folders: "이 장면의 소속 폴더",
-    neighbors: "이 장면의 직접 이웃", empty: "확인할 노드 또는 관계를 선택하세요.",
+    listMode: "목록", listSearch: "그래프 목록에서 찾기", incoming: "들어오는 관계", outgoing: "나가는 관계",
+    membership: "소속", documentSearch: "이 문서의 관계에서 찾기",
+    empty: "확인할 노드 또는 관계를 선택하세요.",
   },
 } as const;
 
@@ -1285,8 +1287,9 @@ async function expectLocalSceneNavigation(
   language: keyof typeof SCENE_NAVIGATION_LABELS,
 ) {
   const labels = SCENE_NAVIGATION_LABELS[language];
-  const listToggle = panel.getByRole("button", { name: language === "en" ? "View as list" : "목록으로 보기" });
-  if (await listToggle.getAttribute("aria-expanded") === "false") await listToggle.click();
+  // The list is a view of the canvas area (Graph | List); the canvas stays mounted underneath.
+  const listToggle = panel.locator(".graph-view-switch").getByRole("button", { name: labels.listMode, exact: true });
+  if (await listToggle.getAttribute("aria-pressed") === "false") await listToggle.click();
   const suffix = `${language}-${page.viewportSize()!.width}`;
   const details = panel.locator(".graph-details");
   const canvasFrame = panel.getByTestId("graph-canvas").locator("..");
@@ -1347,17 +1350,11 @@ async function expectLocalSceneNavigation(
       .toEqual([]);
     return controls;
   };
-  const rows = panel.locator(".graph-relationship-list > details").first().locator(":scope > ul > li");
-  const mainLabels = await rows.locator(":scope > button.graph-list-select strong").allTextContents();
-  // Fresh browser defaults show the whole current response. This assertion
-  // prevents deriving expectations from endpoints absent from the real DOM.
-  expect([...mainLabels].sort()).toEqual(scene.nodes.map((node) => node.label).sort());
-  const mainCueRows = await expectLocalNodeCues(
-    page, rows.locator(":scope > button.graph-list-select"), scene.nodes,
-  );
+  const list = panel.getByTestId("graph-list-view");
+  const search = list.getByRole("searchbox", { name: labels.listSearch, exact: true });
   const nodes = new Map(scene.nodes.map((node) => [node.id, node]));
-  // Independent wire-kind oracle, deliberately not the production navigation
-  // helper: unknown kinds and dangling/self endpoints are not rendered links.
+  // Independent wire-kind oracle, deliberately not the production list model:
+  // unknown kinds and dangling/self endpoints are not rendered relations.
   const visibleKinds = new Set([
     "wikilink", "citation_page", "citation_source", "ask_citation", "co_access", "tree",
     "searched", "returned", "retrieved", "included", "cited", "created", "edited",
@@ -1370,41 +1367,47 @@ async function expectLocalSceneNavigation(
     return source && target && visibleKinds.has(edge.edge_kind)
       && !(source.entity_kind === target.entity_kind && source.entity_id === target.entity_id);
   });
-  const relatedNodes = (ids: string[]) => [...new Set(ids)].map((id) => nodes.get(id)!);
-  const membersOf = (id: string) => relatedNodes(edges
-    .filter((edge) => edge.edge_kind === "tree" && edge.source === id).map((edge) => edge.target));
-  const neighborsOf = (id: string) => relatedNodes(edges.flatMap((edge) =>
-    edge.source === id ? [edge.target] : edge.target === id ? [edge.source] : []));
-  const foldersOf = (id: string) => relatedNodes(edges.filter((edge) =>
-    edge.edge_kind === "tree" && edge.target === id
-    && nodes.get(edge.source)?.entity_kind === "workspace_tree_node"
-    && nodes.get(edge.source)?.family === "structural").map((edge) => edge.source));
-  const uniqueLabel = (node: GraphNode) => mainLabels.filter((label) => label === node.label).length === 1;
-  const folder = scene.nodes.filter((node) => node.entity_kind === "workspace_tree_node"
-    && node.family === "structural" && uniqueLabel(node) && membersOf(node.id).length > 0)
+  const seed = scene.nodes.find((node) => node.is_seed);
+  expect(seed, "real Local scene must contain its seed").toBeTruthy();
+  if (!seed) throw new Error("Real Local scene has no seed");
+  const touching = (id: string) => edges.filter((edge) => edge.source === id || edge.target === id);
+  const incomingOf = (id: string) => edges.filter((edge) => edge.direction === "directed" && edge.target === id);
+  const outgoingOf = (id: string) => edges.filter((edge) => edge.direction === "directed" && edge.source === id);
+  const isFolder = (node: GraphNode | undefined) => node?.entity_kind === "workspace_tree_node" && node.family === "structural";
+  const membersOf = (id: string) => outgoingOf(id).filter((edge) => edge.edge_kind === "tree").map((edge) => nodes.get(edge.target)!);
+  const folder = scene.nodes.filter((node) => isFolder(node) && membersOf(node.id).length > 0
+    && touching(seed.id).some((edge) => edge.source === node.id || edge.target === node.id))
     .sort((left, right) => membersOf(right.id).length - membersOf(left.id).length)[0];
-  expect(folder, "real Local scene must contain a folder and at least one direct rendered member").toBeTruthy();
+  expect(folder, "real Local scene must contain a folder of the seed with at least one rendered member").toBeTruthy();
   if (!folder) throw new Error("Real Local scene has no testable folder membership");
-  const members = membersOf(folder.id);
-  const contextNode = scene.nodes.find((node) => node.entity_kind === "context_page"
-    && uniqueLabel(node) && foldersOf(node.id).length > 0
-    && neighborsOf(node.id).length >= 2 && neighborsOf(node.id).every(uniqueLabel));
-  expect(contextNode, "real Local scene must expose a placed document with two direct neighbors").toBeTruthy();
-  if (!contextNode) throw new Error("Real Local scene has no testable document navigation");
-  const rowFor = (node: GraphNode) => rows.nth(mainLabels.indexOf(node.label));
-  const selectMain = async (node: GraphNode) => {
-    await rowFor(node).locator(":scope > button.graph-list-select").click();
+
+  // The seed's relations are the open first group; every relation is counted, ten rows per side drawn.
+  const seedRows = list.locator(".graph-list-bowtie-row > button[data-local-graph-id], .relation-list-flow-row > button[data-local-graph-id]");
+  await expect(list.locator('.graph-list-group[data-list-group^="seed:"] > .relation-list-fold-head').first())
+    .toContainText(touching(seed.id).length.toLocaleString(language));
+  const rowIds = await seedRows.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-local-graph-id")!));
+  expect(rowIds.length).toBeGreaterThan(0);
+  expect(rowIds.length).toBeLessThanOrEqual(30);
+  expect(rowIds.every((id) => nodes.has(id)), "rows must name endpoints present in the real response").toBe(true);
+  const mainCueRows = await expectLocalNodeCues(page, seedRows, rowIds.map((id) => nodes.get(id)!));
+
+  const selectFromList = async (node: GraphNode) => {
+    // The list search narrows every group; the row selects the node it names.
+    await search.fill(node.label);
+    await list.locator(`button[data-local-graph-id="${node.id}"]`).first().click();
     await expect(details.locator("h5.graph-details-title")).toHaveText(node.label);
+    await search.fill("");
   };
-  const listFor = (scope: Locator, name: string) => scope.getByRole("list", { name, exact: true });
-  const expectList = async (list: Locator, expected: GraphNode[]) => {
-    await expect(list.locator(":scope > li > button")).toHaveCount(expected.length);
-    await expect(list.locator(":scope > li > button[tabindex='0']")).toHaveCount(expected.length ? 1 : 0);
-    await expect(list.locator(":scope > li > button[tabindex='-1']"))
-      .toHaveCount(Math.max(0, expected.length - 1));
-    expect((await list.locator("strong").allTextContents()).sort())
-      .toEqual(expected.map((node) => node.label).sort());
-    await expectLocalNodeCues(page, list.locator(":scope > li > button"), expected);
+  const flowList = (name: string) => details.getByRole("list", { name, exact: true });
+  const expectFlowRows = async (rows: Locator, expected: GraphNode[]) => {
+    // Five rows per direction, one Tab entry, the far ends of real relations.
+    const count = Math.min(expected.length, 5);
+    await expect(rows).toHaveCount(count);
+    await expect(rows.and(details.locator("button[tabindex='0']"))).toHaveCount(count ? 1 : 0);
+    const shown = await rows.evaluateAll((buttons) => buttons.map((button) => button.getAttribute("data-local-graph-id")!));
+    const expectedIds = new Set(expected.map((node) => node.id));
+    expect(shown.every((id) => expectedIds.has(id))).toBe(true);
+    await expectLocalNodeCues(page, rows, shown.map((id) => nodes.get(id)!));
   };
   const expectEmptyDetails = async () => {
     // Keep the stable aside DOM, but a blank inspector must not take canvas
@@ -1424,20 +1427,20 @@ async function expectLocalSceneNavigation(
   };
   page.on("request", observeQuery);
   try {
-    const mainButtons = rows.locator(":scope > button.graph-list-select");
-    // The list's original wire rows remain complete, but only one is a Tab
-    // entry. Arrow navigation must not select or issue a query.
-    await expect(rows.locator(":scope > button[tabindex='0']")).toHaveCount(1);
-    await mainButtons.first().focus();
+    // Each list is one Tab entry; arrows highlight without selecting or querying.
+    const firstColumn = list.locator(".graph-list-bowtie-list, .relation-list-flow-list").first().locator(":scope > li > button");
+    await expect(firstColumn.and(list.locator("button[tabindex='0']"))).toHaveCount(1);
+    await firstColumn.first().focus();
     await page.keyboard.press("End");
-    await expect(mainButtons.last()).toBeFocused();
+    await expect(firstColumn.last()).toBeFocused();
     await expectEmptyDetails();
     await page.keyboard.press("Home");
-    await expect(mainButtons.first()).toBeFocused();
+    await expect(firstColumn.first()).toBeFocused();
     await expectEmptyDetails();
-    await selectMain(folder);
-    const memberList = listFor(details, labels.members);
-    await expectList(memberList, members);
+
+    await selectFromList(folder);
+    const members = flowList(labels.outgoing).locator(":scope > li > button");
+    await expectFlowRows(members, membersOf(folder.id));
     await expectCanvasSizeRetained();
     await expectDetailsAtTop();
     const folderDetailsSize = await details.evaluate((element) => ({
@@ -1446,30 +1449,34 @@ async function expectLocalSceneNavigation(
       scrollHeight: element.scrollHeight,
     }));
     expect(folderDetailsSize.height).toBeLessThanOrEqual(initialCanvasBox!.height + 1);
-    expect(folderDetailsSize.scrollHeight, "large-folder navigation must remain internally scrollable")
-      .toBeGreaterThan(folderDetailsSize.clientHeight);
     await panel.locator(".graph-local-stage").scrollIntoViewIfNeeded();
     await capture(page, testInfo, `real-api-2k-local-members-${suffix}.png`);
 
     await details.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-    expect(await details.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-    await selectMain(contextNode);
+    await list.locator(".graph-list-bowtie-hub button, .relation-list-flow-hub button").first().click();
+    await expect(details.locator("h5.graph-details-title")).toHaveText(seed.label);
     await expectDetailsAtTop();
-    const neighbors = neighborsOf(contextNode.id);
-    const neighborList = listFor(details, labels.neighbors);
-    await expectList(neighborList, neighbors);
-    const incomingFolders = details.locator("details.graph-scene-navigation")
-      .filter({ has: page.locator("summary", { hasText: labels.folders }) });
-    await incomingFolders.locator(":scope > summary").click();
-    await expectList(listFor(incomingFolders, labels.folders), foldersOf(contextNode.id));
+    const incoming = flowList(labels.incoming).locator(":scope > li > button");
+    const outgoing = flowList(labels.outgoing).locator(":scope > li > button");
+    await expectFlowRows(incoming, incomingOf(seed.id).map((edge) => nodes.get(edge.source)!));
+    await expectFlowRows(outgoing, outgoingOf(seed.id).map((edge) => nodes.get(edge.target)!));
+    await expect(details.locator(".relation-list-relations-head .relation-list-fold-count"))
+      .toHaveText(touching(seed.id).length.toLocaleString(language));
+    // The seed's folder is one of its incoming relations, found by the flow search.
+    await details.getByRole("searchbox", { name: labels.documentSearch, exact: true }).fill(folder.label);
+    await expect(flowList(labels.incoming).locator(`button[data-local-graph-id="${folder.id}"]`).first())
+      .toContainText(labels.membership);
+    await details.getByRole("searchbox", { name: labels.documentSearch, exact: true }).fill("");
     await expectCanvasSizeRetained();
     await panel.locator(".graph-local-stage").scrollIntoViewIfNeeded();
     await capture(page, testInfo, `real-api-2k-local-neighbors-${suffix}.png`);
 
+    const keyboardList = (await incoming.count()) >= 2 ? incoming : outgoing;
     const keyboardResults: Array<{ key: string; selected: string; focus: string }> = [];
     for (const key of ["Enter", "Space"]) {
-      await selectMain(contextNode);
-      const buttons = listFor(details, labels.neighbors).locator(":scope > li > button");
+      await selectFromList(seed);
+      const buttons = (await flowList(labels.incoming).locator(":scope > li > button").count()) >= 2
+        ? flowList(labels.incoming).locator(":scope > li > button") : flowList(labels.outgoing).locator(":scope > li > button");
       await buttons.first().focus(); // Enter once; subsequent movement is native keyboard input.
       await page.keyboard.press("ArrowDown");
       await expect(buttons.nth(1)).toBeFocused();
@@ -1485,22 +1492,20 @@ async function expectLocalSceneNavigation(
       await capture(page, testInfo, `real-api-2k-local-all-actions-${suffix}-${key}.png`);
       keyboardResults.push({ key, selected, focus: ".graph-details[tabindex=-1]" });
       // No manual focus, intermediate Tab, or click may mask the disappearing
-      // neighbor before Escape. The Page capture above does not reveal a
-      // locator or move focus/scroll.
+      // row before Escape. The Page capture above does not move focus/scroll.
       await page.keyboard.press("Escape");
       await expectEmptyDetails();
     }
 
-    await selectMain(contextNode);
-    const pointerNeighbor = listFor(details, labels.neighbors).locator(":scope > li > button").first();
-    const pointerLabel = await pointerNeighbor.locator("strong").innerText();
-    await pointerNeighbor.click();
+    await selectFromList(seed);
+    const pointerRow = keyboardList.first();
+    const pointerLabel = await pointerRow.locator("strong").innerText();
+    await pointerRow.click();
     await expect(details.locator("h5.graph-details-title")).toHaveText(pointerLabel);
     await expect(details).not.toBeFocused();
-    // Membership now lives in selected Details, not repeated in every main
-    // folder row. Keyboard activation deliberately hands off to Details.
-    await selectMain(folder);
-    const memberButton = memberList.locator(":scope > li > button").first();
+    // Keyboard activation in a folder's relations deliberately hands off to Details.
+    await selectFromList(folder);
+    const memberButton = members.first();
     const memberLabel = await memberButton.locator("strong").innerText();
     await memberButton.focus();
     await page.keyboard.press("Enter");
@@ -1508,20 +1513,21 @@ async function expectLocalSceneNavigation(
     await expect(details).toBeFocused();
     await expectAllDetailsActionsPainted();
     await page.keyboard.press("Tab");
-    await expect(details.locator(".graph-details-close"))
-      .toBeFocused();
+    await expect(details.locator(".graph-details-close")).toBeFocused();
     await page.keyboard.press("Escape");
     await expectEmptyDetails();
 
     await expectCanvasSizeRetained();
-    await selectMain(folder);
-    const summaries = await details.locator(".graph-scene-navigation > summary").evaluateAll((elements) =>
+    await selectFromList(folder);
+    const summaries = await details.locator(".relation-list-fold-head").evaluateAll((elements) =>
       elements.filter((element) => element.getClientRects().length > 0).map((element) => ({
         label: element.textContent?.trim(), height: element.getBoundingClientRect().height,
       })));
     expect(summaries.length).toBeGreaterThan(0);
-    for (const summary of summaries) expect(summary.height).toBeGreaterThanOrEqual(44);
-    await memberButton.click();
+    // 44px on phones, as in the Knowledge Map sidebar; at least the WCAG 2.5.8 24px elsewhere.
+    const minimumTarget = page.viewportSize()!.width <= 640 ? 44 : 24;
+    for (const summary of summaries) expect(summary.height).toBeGreaterThanOrEqual(minimumTarget);
+    await members.first().click();
     await expect(details.locator("h5.graph-details-title")).toHaveText(memberLabel);
     await expect(details).not.toBeFocused();
     await page.keyboard.press("Escape");
@@ -1529,13 +1535,12 @@ async function expectLocalSceneNavigation(
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
     await afterAnimationFrame(page);
-    expect(requestPaths, "scene list focus/selection must not issue new graph queries").toEqual([]);
+    expect(requestPaths, "list focus, search and selection must not issue new graph queries").toEqual([]);
     await attachJson(testInfo, `real-api-2k-local-navigation-${suffix}.json`, {
       language, viewport: page.viewportSize(), forcedColors: await page.evaluate(() => matchMedia("(forced-colors: active)").matches),
-      renderedNodes: mainLabels.length, recognizedSceneEdges: edges.length,
+      seedRelations: touching(seed.id).length, shownSeedRows: rowIds.length, recognizedSceneEdges: edges.length,
       mainCueRows,
-      folder: { id: folder.id, label: folder.label, directMembers: members.map((node) => node.id) },
-      document: { id: contextNode.id, label: contextNode.label, directNeighbors: neighbors.map((node) => node.id) },
+      folder: { id: folder.id, label: folder.label, directMembers: membersOf(folder.id).map((node) => node.id) },
       keyboardResults, summaries, navigationQueryRequests: requestPaths,
       initialCanvasBox, folderDetailsSize,
     });
@@ -1565,7 +1570,7 @@ async function expectLocalNodeCues(page: Page, buttons: Locator, expected: Graph
       library: "rgb(13, 148, 136)", conversation: "rgb(56, 189, 248)", folder: "rgb(148, 163, 184)" },
   } as const;
   const actual = await buttons.evaluateAll((elements) => elements.map((button) => {
-    const cue = button.querySelector(":scope > svg[data-node-visual-kind]");
+    const cue = button.querySelector(".relation-list-flow-name > svg[data-node-visual-kind], :scope > svg[data-node-visual-kind]");
     let surface = "";
     for (let ancestor: Element | null = cue ?? button; ancestor; ancestor = ancestor.parentElement) {
       const background = getComputedStyle(ancestor).backgroundColor;

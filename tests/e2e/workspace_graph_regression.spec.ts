@@ -484,10 +484,10 @@ async function expectRendererReady(scope: Page | ReturnType<Page["getByRole"]>) 
 async function selectKnowledgeDocument00(page: Page) {
   // Browse the folded list a page at a time; keyboard focus stays in the sidebar.
   const list = page.getByTestId("workspace-graph-node-list");
-  const head = list.locator(".workspace-graph-fold-head").first();
+  const head = list.locator(".relation-list-fold-head").first();
   if (await head.getAttribute("aria-expanded") === "false") await head.click();
   const row = list.locator("li").filter({ hasText: "Knowledge Document 00" }).first();
-  const more = list.locator(".workspace-graph-more");
+  const more = list.locator(".relation-list-more");
   while (!await row.count() && await more.count()) await more.click();
   await row.locator("button.workspace-graph-list-select").click();
   await expect(page.locator(".workspace-graph-details").getByRole("heading", {
