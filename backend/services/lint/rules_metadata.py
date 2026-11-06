@@ -11,6 +11,10 @@ class _ExternalRule:
     default_enabled: bool = True
     runtime_checkable: bool = False
     stages: frozenset[LintStage] = frozenset()
+    # The suggested_action key naming the other Context page this finding is
+    # about. The finding is meaningless without that page, so readers see it
+    # only alongside it (see LintService._hidden_by_related_page).
+    related_page_key: str | None = None
 
     def check_target(self, target, ctx):
         return []
@@ -51,14 +55,23 @@ MODULE = LintModule(
             frozenset({"workspace"}),
         ),
         _ExternalRule(
-            "kb.hot_path_unmaterialized", "knowledge", frozenset({"context_page"})
+            "kb.hot_path_unmaterialized",
+            "knowledge",
+            frozenset({"context_page"}),
+            related_page_key="related_page_id",
         ),
         _ExternalRule(
-            "kb.semantic_near_duplicate", "knowledge", frozenset({"context_page"})
+            "kb.semantic_near_duplicate",
+            "knowledge",
+            frozenset({"context_page"}),
+            related_page_key="candidate_page_id",
         ),
         _ExternalRule("kb.misplaced_page", "knowledge", frozenset({"context_page"})),
         _ExternalRule(
-            "kb.dependent_maybe_stale", "knowledge", frozenset({"context_page"})
+            "kb.dependent_maybe_stale",
+            "knowledge",
+            frozenset({"context_page"}),
+            related_page_key="published_page_id",
         ),
     ),
 )

@@ -8232,6 +8232,11 @@ export interface components {
             };
             /** Message Key */
             message_key?: string | null;
+            /**
+             * Related Targets
+             * @description Other entities the finding is about (for example, the second page of a pair), each titled at read time. A finding whose related page the actor cannot read is not returned at all.
+             */
+            related_targets?: components["schemas"]["LintRelatedTarget"][];
             /** Resolved At */
             resolved_at?: string | null;
             /** Rule Id */
@@ -8273,6 +8278,21 @@ export interface components {
         LintFormatResponse: {
             data: components["schemas"]["LintFormatData"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /**
+         * LintRelatedTarget
+         * @description Another entity a finding is about, readable by the requesting actor.
+         */
+        LintRelatedTarget: {
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /** Target Type */
+            target_type: string;
+            /** Title */
+            title?: string | null;
         };
         /** LintRuleInfo */
         LintRuleInfo: {

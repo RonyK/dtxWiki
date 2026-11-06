@@ -25,10 +25,25 @@ export function lintRuleDescription(t: TFunction, ruleId: string): string {
   return t(`rules.${lintRuleKey(ruleId)}.description`, { defaultValue: "" });
 }
 
+/**
+ * Interpolation values for a finding's message: its stored arguments plus the
+ * read-time titles of its target and of the other page it is about, so a pair
+ * finding can name both pages ("{{target_title}} and {{related_title}} ...").
+ */
+function lintMessageArgs(t: TFunction, finding: LintFinding) {
+  return {
+    ...(finding.message_args ?? {}),
+    target_title:
+      finding.target_title || t(`targetType.${finding.target_type}`),
+    related_title:
+      finding.related_targets?.[0]?.title || t("relatedTargetFallback"),
+  };
+}
+
 export function lintFindingMessage(t: TFunction, finding: LintFinding): string {
   const messageKey = finding.message_key || finding.rule_id;
   return t(`rules.${lintRuleKey(messageKey)}.message`, {
-    ...(finding.message_args ?? {}),
+    ...lintMessageArgs(t, finding),
     defaultValue: t("findingFallback", {
       target: finding.target_title || t(`targetType.${finding.target_type}`),
     }),
@@ -54,7 +69,7 @@ export function lintMessageIsSpecific(
   const messageKey = finding.message_key || finding.rule_id;
   const path = `rules.${lintRuleKey(messageKey)}.message`;
   const withArgs = t(path, {
-    ...(finding.message_args ?? {}),
+    ...lintMessageArgs(t, finding),
     defaultValue: "",
   });
   return withArgs !== "" && withArgs !== t(path, { defaultValue: "" });

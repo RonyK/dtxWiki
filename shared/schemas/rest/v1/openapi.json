@@ -13019,6 +13019,14 @@
             ],
             "title": "Message Key"
           },
+          "related_targets": {
+            "description": "Other entities the finding is about (for example, the second page of a pair), each titled at read time. A finding whose related page the actor cannot read is not returned at all.",
+            "items": {
+              "$ref": "#/components/schemas/LintRelatedTarget"
+            },
+            "title": "Related Targets",
+            "type": "array"
+          },
           "resolved_at": {
             "anyOf": [
               {
@@ -13159,6 +13167,38 @@
           "data"
         ],
         "title": "LintFormatResponse",
+        "type": "object"
+      },
+      "LintRelatedTarget": {
+        "additionalProperties": false,
+        "description": "Another entity a finding is about, readable by the requesting actor.",
+        "properties": {
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_type": {
+            "title": "Target Type",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "target_type",
+          "target_id"
+        ],
+        "title": "LintRelatedTarget",
         "type": "object"
       },
       "LintRuleInfo": {

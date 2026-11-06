@@ -962,8 +962,9 @@ describe("LintScreen", () => {
     expect(pollAttempts).toBe(2);
   });
 
-  it("links page and tree targets while keeping null targets as text", async () => {
+  it("links page, tree and related targets while keeping null targets as text", async () => {
     const contextId = "11111111-1111-4111-8111-111111111111";
+    const relatedId = "44444444-4444-4444-8444-444444444444";
     const treeId = "22222222-2222-4222-8222-222222222222";
     const secondTreeId = "33333333-3333-4333-8333-333333333333";
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -1001,6 +1002,26 @@ describe("LintScreen", () => {
                 id: "null-finding",
                 rule_id: "null_target",
                 target_id: null,
+              }),
+              finding({
+                id: "pair-finding",
+                rule_id: "kb.hot_path_unmaterialized",
+                severity: "info",
+                target_id: contextId,
+                target_title: "Ranking guide",
+                related_targets: [
+                  {
+                    target_type: "context_page",
+                    target_id: relatedId,
+                    title: "Incident runbook",
+                  },
+                ],
+                suggested_action: JSON.stringify({
+                  proposal: "add_cross_link",
+                  related_page_id: relatedId,
+                  session_count: 7,
+                  tree_distance: 6,
+                }),
               }),
             ],
             next_cursor: null,
@@ -1062,6 +1083,23 @@ describe("LintScreen", () => {
     expect(fetchSpy.mock.calls.some(([input]) => String(input).includes("/tree/nodes/"))).toBe(false);
     expect(within(nullRow).queryByRole("link")).toBeNull();
     expect(within(nullRow).getByText("Context page")).toBeInTheDocument();
+    // A pair finding names both pages, links the second one, and states the
+    // proposal as a step instead of its code.
+    const pairRow = screen
+      .getByText("Read together, not linked")
+      .closest(".lint-finding-card") as HTMLElement;
+    expect(
+      within(pairRow).getByText(
+        "AI conversations often read Ranking guide and Incident runbook together, but neither links to the other.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(pairRow).getByRole("link", { name: "Open related Incident runbook" }),
+    ).toHaveAttribute("href", `/workspaces/00000000-0000-4000-8000-000000000001/context/pages/${relatedId}`);
+    expect(
+      within(pairRow).getByText(/^Add a link from either page's body to the other\./),
+    ).toBeInTheDocument();
+    expect(within(pairRow).queryByText("add_cross_link")).toBeNull();
   });
 
   it("supports bulk selection, indeterminate select-all, and partial failure", async () => {

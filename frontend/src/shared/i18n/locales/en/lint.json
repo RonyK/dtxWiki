@@ -101,14 +101,20 @@
       "concept_path": "Concept path",
       "queries": "Evaluation queries",
       "similarity": "Similarity",
-      "session_count": "Sessions",
-      "tree_distance": "Tree distance",
+      "session_count": "AI conversations that read both (last 30 days)",
+      "tree_distance": "Tree distance (steps)",
       "supported": "Support",
       "contradicts": "Contradiction",
       "client_llm_verdict": "AI assessment"
+    },
+    "proposals": {
+      "add_cross_link": "Add a link from either page's body to the other. Either direction works; once published, the next analysis resolves this automatically.",
+      "review_merge_or_distinguish": "Merge the two pages, or state in their bodies how they differ.",
+      "review_placement": "Check whether this page belongs in its folder, and move it if a better one fits."
     }
   },
   "findingFallback": "Review the quality issue for {{target}}.",
+  "relatedTargetFallback": "another page",
   "rules": {
     "md_heading_hierarchy": {
       "label": "Heading hierarchy",
@@ -186,13 +192,13 @@
       "description": "Flags content with no visible path through the primary tree."
     },
     "kb_hot_path_unmaterialized": {
-      "label": "Repeated navigation path",
-      "message": "A frequently repeated navigation path may need a direct link.",
-      "description": "Flags a frequently repeated navigation path that may deserve a direct link."
+      "label": "Read together, not linked",
+      "message": "AI conversations often read {{target_title}} and {{related_title}} together, but neither links to the other.",
+      "description": "Flags two pages that AI conversations often read together but that do not link to each other."
     },
     "kb_semantic_near_duplicate": {
       "label": "Possible duplicate",
-      "message": "Two pages are semantically similar and need merge-or-distinguish review.",
+      "message": "{{target_title}} and {{related_title}} are semantically similar. Merge them or make the difference clear.",
       "description": "Flags two pages similar enough to need a merge-or-distinguish decision."
     },
     "kb_misplaced_page": {
@@ -202,7 +208,7 @@
     },
     "kb_dependent_maybe_stale": {
       "label": "Possibly stale dependency",
-      "message": "A page this content depends on changed; review the affected passage.",
+      "message": "This page links to or cites {{related_title}}, which changed. Review the affected passage.",
       "description": "Flags a page whose source changed, so a passage may now be out of date."
     },
     "maintenance_nav_summary_suggestion": {
@@ -267,7 +273,8 @@
     "selectRow": "Select {{title}} on {{target}}",
     "openTarget": "Open target {{title}}",
     "more": "More actions for {{title}} on {{target}}",
-    "bulkActions": "Bulk actions"
+    "bulkActions": "Bulk actions",
+    "openRelated": "Open related {{title}}"
   },
   "details": {
     "suggestedAction": "Suggested next step"

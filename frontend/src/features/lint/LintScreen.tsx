@@ -1437,6 +1437,40 @@ function FindingList({
                             {targetLabel}
                           </span>
                         )}
+                        {/* A pair finding is about a second page too; the
+                            reader has to open either one to act on it. */}
+                        {(finding.related_targets ?? []).map((related) => {
+                          const relatedLabel =
+                            related.title ||
+                            t(`targetType.${related.target_type}`, {
+                              defaultValue: labelFor(related.target_type),
+                            });
+                          const relatedHref = searchResultHref(
+                            { id: related.target_id, type: related.target_type },
+                            routeWorkspaceId,
+                          );
+                          return relatedHref ? (
+                            <Link
+                              className="lint-target-chip"
+                              key={related.target_id}
+                              to={relatedHref}
+                              aria-label={t("actions.openRelated", {
+                                title: relatedLabel,
+                                defaultValue: `Open related ${relatedLabel}`,
+                              })}
+                            >
+                              <ExternalLink size={13} aria-hidden="true" />
+                              <span>{relatedLabel}</span>
+                            </Link>
+                          ) : (
+                            <span
+                              className="lint-target-chip is-static"
+                              key={related.target_id}
+                            >
+                              {relatedLabel}
+                            </span>
+                          );
+                        })}
                       </span>
                       {/* Every row in the open queue is "Open", so the pill
                           only earns its place once the status is something
@@ -1616,7 +1650,14 @@ function SuggestedAction({ value }: { value: Record<string, unknown> }) {
             })}
             :
           </strong>
-          <SuggestedValue value={entry} />
+          {key === "proposal" && typeof entry === "string" ? (
+            // A producer's proposal is a code; the reader needs the step.
+            <span>
+              {t(`suggestedAction.proposals.${entry}`, { defaultValue: entry })}
+            </span>
+          ) : (
+            <SuggestedValue value={entry} />
+          )}
         </div>
       ))}
     </div>

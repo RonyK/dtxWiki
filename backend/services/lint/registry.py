@@ -84,6 +84,13 @@ class LintRegistry:
                     or rule.applies_to != frozenset({"context_page"})
                 ):
                     raise ValueError(f"invalid version scope for {rule.rule_id}")
+                related_page_key = getattr(rule, "related_page_key", None)
+                if related_page_key is not None and (
+                    not isinstance(related_page_key, str)
+                    or not related_page_key
+                    or rule.applies_to != frozenset({"context_page"})
+                ):
+                    raise ValueError(f"invalid related_page_key for {rule.rule_id}")
                 if rule.rule_id in rules:
                     raise ValueError(f"duplicate lint rule_id: {rule.rule_id}")
                 rules[rule.rule_id] = rule
@@ -103,6 +110,14 @@ class LintRegistry:
 
     def rule_ids(self) -> frozenset[str]:
         return frozenset(self._rules)
+
+    def related_page_keys(self) -> dict[str, str]:
+        """Map each rule that names a second Context page to its action key."""
+        return {
+            rule_id: key
+            for rule_id, rule in self._rules.items()
+            if (key := getattr(rule, "related_page_key", None)) is not None
+        }
 
     def enabled(
         self,

@@ -907,6 +907,27 @@ def test_trail_tick_stages_only_consumed_unlinked_repeated_distant_paths(
         if expected_findings:
             assert finding is not None
             assert json.loads(finding.suggested_action)["session_count"] == 5
+            # No lint run produces this rule, so the tick itself must close the
+            # finding once either page links to the other.
+            session.add(
+                EdgeProjection(
+                    workspace_id=workspace_id,
+                    source_kind="context_page",
+                    source_id=right.id,
+                    target_kind="context_page",
+                    target_id=left.id,
+                    edge_kind="wikilink",
+                    provenance="curated",
+                    weight=1.0,
+                    source_ref={"table": "page_links"},
+                )
+            )
+            session.flush()
+            result = run_trail_tick(
+                session, workspace_id, now=now, usage_signals_enabled=True
+            )
+            assert result["hot_path_findings"] == 0
+            assert (finding.status, finding.resolved_at) == ("fixed", now)
         else:
             assert finding is None
 

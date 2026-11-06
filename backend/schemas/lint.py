@@ -19,6 +19,16 @@ class LintScope(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class LintRelatedTarget(BaseModel):
+    """Another entity a finding is about, readable by the requesting actor."""
+
+    target_type: str
+    target_id: UUID
+    title: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class LintFindingRead(BaseModel):
     id: UUID
     lint_run_id: UUID
@@ -32,6 +42,14 @@ class LintFindingRead(BaseModel):
     message_key: str | None = None
     message_args: dict[str, Any] = Field(default_factory=dict)
     target_title: str | None = None
+    related_targets: list[LintRelatedTarget] = Field(
+        default_factory=list,
+        description=(
+            "Other entities the finding is about (for example, the second page"
+            " of a pair), each titled at read time. A finding whose related"
+            " page the actor cannot read is not returned at all."
+        ),
+    )
     created_at: datetime
     resolved_at: datetime | None = None
 

@@ -585,6 +585,136 @@ def test_decide_finding_404s_for_draft_only_finding_even_by_direct_id(
         assert decided.status == "acknowledged"
 
 
+def test_pair_finding_names_its_related_page_only_to_actors_who_can_read_it(
+    session_factory,
+):
+    # A pair finding ("these two pages ...") carries its second page only as an
+    # id in suggested_action. Readers get that page titled at read time, and a
+    # finding whose second page they cannot read is excluded before the total,
+    # also on a direct-id decide; a missing second page fails closed.
+    import json
+
+    from backend.models.context import ContextPageVersion
+    from backend.schemas.lint import LintRelatedTarget
+    from backend.services.read_errors import ReadNotFoundError
+
+    def page(session, wsid, slug, title, *, published):
+        row = ContextPage(
+            workspace_id=wsid,
+            slug=slug,
+            title=title,
+            page_type="concept",
+            lifecycle_status="published" if published else "draft",
+        )
+        session.add(row)
+        session.flush()
+        version = ContextPageVersion(
+            workspace_id=wsid,
+            page_id=row.id,
+            version_no=1,
+            body_md=f"# {title}\n",
+            content_hash=f"{slug}-v1",
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id="tester",
+            version_status="published_snapshot" if published else "draft",
+        )
+        session.add(version)
+        session.flush()
+        row.current_version_id = version.id
+        if published:
+            row.current_published_version_id = version.id
+        else:
+            row.latest_draft_version_id = version.id
+        return row
+
+    svc = LintService()
+    with session_factory.begin() as session:
+        wsid = _ws(session)
+        run = LintRun(
+            workspace_id=wsid,
+            lint_scope={"kind": "maintenance"},
+            trigger_type="trail_tick",
+            status="completed",
+            finding_count_by_severity={"info": 3},
+        )
+        session.add(run)
+        session.flush()
+        target = page(session, wsid, "pair-target", "Ranking guide", published=True)
+        shared = page(session, wsid, "pair-shared", "Incident runbook", published=True)
+        draft = page(session, wsid, "pair-draft", "Unreleased plan", published=False)
+        findings = {}
+        for name, related_id in (
+            ("shared", shared.id),
+            ("draft", draft.id),
+            ("missing", uuid4()),
+        ):
+            findings[name] = LintFinding(
+                lint_run_id=run.id,
+                workspace_id=wsid,
+                target_type="context_page",
+                target_id=target.id,
+                rule_id="kb.hot_path_unmaterialized",
+                severity="info",
+                status="open",
+                suggested_action=json.dumps(
+                    {"proposal": "add_cross_link", "related_page_id": str(related_id)}
+                ),
+                fingerprint=f"hot-path:{name}",
+            )
+            session.add(findings[name])
+        session.flush()
+
+        viewer = ActorContext(
+            actor_kind="human",
+            actor_id="viewer-user",
+            token_kind="session",
+            scopes=("read",),
+            workspace_id=wsid,
+            workspace_role="viewer",
+            role="viewer",
+        )
+        owner = ActorContext(
+            actor_kind="system",
+            actor_id="owner",
+            scopes=("*",),
+            workspace_id=wsid,
+            workspace_role="owner",
+            role="owner",
+        )
+        viewer_list = svc.list_findings(session, wsid, actor=viewer)
+        owner_list = svc.list_findings(session, wsid, actor=owner)
+        with pytest.raises(ReadNotFoundError):
+            svc.decide_finding(
+                session,
+                wsid,
+                findings["draft"].id,
+                LintFindingDecisionRequest(decision="acknowledge"),
+                actor_kind="human",
+                actor_id="viewer-user",
+                actor=viewer,
+            )
+
+    assert viewer_list.total == 1
+    assert [(item.id, item.related_targets) for item in viewer_list.findings] == [
+        (
+            findings["shared"].id,
+            [
+                LintRelatedTarget(
+                    target_type="context_page",
+                    target_id=shared.id,
+                    title="Incident runbook",
+                )
+            ],
+        )
+    ]
+    assert owner_list.total == 2
+    assert {item.id: item.related_targets[0].title for item in owner_list.findings} == {
+        findings["shared"].id: "Incident runbook",
+        findings["draft"].id: "Unreleased plan",
+    }
+
+
 def test_get_run_hides_draft_only_finding_count_from_viewer(session_factory):
     # LEAK-01 (third surface): finding_count_by_severity is a raw tally
     # persisted at run-completion time over EVERY finding the run reproduced,

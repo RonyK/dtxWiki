@@ -1,3 +1,5 @@
+import json
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -26,6 +28,7 @@ from backend.schemas.lint import (
     LintFindingDecisionRequest,
     LintFindingListData,
     LintFindingRead,
+    LintRelatedTarget,
     LintRuleInfo,
     LintRuleListData,
     LintRunCreateRequest,
@@ -69,6 +72,15 @@ STATUS_BY_DECISION = {
 # `maintenance.near_duplicate_verdict` joined the set when Q-5 moved to enriching
 # the originating `kb.semantic_near_duplicate` finding instead of minting its own.
 _REMOVED_RULE_IDS = frozenset({"md.frontmatter", "maintenance.near_duplicate_verdict"})
+
+
+def _action_page_id(suggested_action: str | None, key: str) -> UUID | None:
+    """Read one page id out of a JSON ``suggested_action``; None if absent."""
+    try:
+        action = json.loads(suggested_action or "")
+        return UUID(str(action[key]))
+    except (TypeError, ValueError, KeyError):
+        return None
 
 
 class LintService:
@@ -217,17 +229,8 @@ class LintService:
                 if has_more and finding_rows
                 else None
             )
-        target_titles = self._target_titles(session, finding_rows)
         return LintFindingListData(
-            findings=[
-                self._finding_read(
-                    finding,
-                    target_title=target_titles.get(
-                        (finding.target_type, finding.target_id)
-                    ),
-                )
-                for finding in finding_rows
-            ],
+            findings=self._finding_reads(session, finding_rows),
             next_cursor=next_cursor,
             total=total,
             has_more=has_more,
@@ -282,9 +285,8 @@ class LintService:
             LintFinding, workspace_id=workspace_id, conditions=conditions
         )
 
-    @classmethod
     def _apply_finding_visibility_filters(
-        cls,
+        self,
         session: Session,
         workspace_id: UUID,
         base,
@@ -339,9 +341,88 @@ class LintService:
                             ),
                         ),
                     )
+            base = self._exclude_hidden_related_pages(
+                session, workspace_id, base, actor
+            )
         if actor is not None and not actor_can_read_drafts(actor):
-            base = cls._exclude_draft_only_findings(session, base)
+            base = self._exclude_draft_only_findings(session, base)
         return base
+
+    def _exclude_hidden_related_pages(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        base,
+        actor: ActorContext,
+    ):
+        """Drop findings whose related Context page the actor cannot read.
+
+        A pair finding ("these two pages ...") says nothing without its second
+        page and would leak that page's identifier, so it follows its target's
+        rule: excluded BEFORE count/pagination, failing CLOSED when the related
+        page is missing. Only rows of rules that declare a related page are
+        read, and the stored action is parsed here rather than in SQL so both
+        dialects share one path without a column of its own.
+        """
+        related_page_keys = self.lint_registry.related_page_keys()
+        if not related_page_keys:
+            return base
+        scoped = base.subquery()
+        rows = session.execute(
+            select(scoped.c.id, scoped.c.rule_id, scoped.c.suggested_action).where(
+                scoped.c.rule_id.in_(related_page_keys)
+            )
+        ).all()
+        hidden = self._hidden_by_related_page(session, workspace_id, rows, actor)
+        if hidden:
+            base = where_in_workspace(
+                base,
+                LintFinding,
+                workspace_id=workspace_id,
+                conditions=(LintFinding.id.not_in(hidden),),
+            )
+        return base
+
+    def _related_page_ids(
+        self, rows: Iterable[tuple[UUID, str, str | None]]
+    ) -> dict[UUID, UUID | None]:
+        """Each related-page finding's page id; None when its action names none."""
+        related_page_keys = self.lint_registry.related_page_keys()
+        related: dict[UUID, UUID | None] = {}
+        for finding_id, rule_id, suggested_action in rows:
+            key = related_page_keys.get(rule_id)
+            if key is not None:
+                related[finding_id] = _action_page_id(suggested_action, key)
+        return related
+
+    def _hidden_by_related_page(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        rows: Iterable[tuple[UUID, str, str | None]],
+        actor: ActorContext | None,
+    ) -> set[UUID]:
+        related = self._related_page_ids(rows)
+        wanted = list({page_id for page_id in related.values() if page_id})
+        visible: set[UUID] = set()
+        for offset in range(0, len(wanted), 400):
+            visible.update(
+                session.scalars(
+                    select_in_workspace(
+                        ContextPage,
+                        workspace_id=workspace_id,
+                        conditions=(
+                            ContextPage.id.in_(wanted[offset : offset + 400]),
+                            visible_context_version_expression(actor).is_not(None),
+                        ),
+                    ).with_only_columns(ContextPage.id)
+                ).all()
+            )
+        return {
+            finding_id
+            for finding_id, page_id in related.items()
+            if page_id not in visible
+        }
 
     def run_lint(
         self,
@@ -992,6 +1073,15 @@ class LintService:
         # defect only exists in a draft body the actor cannot read.
         if self._draft_only_hidden(finding, actor):
             raise ReadNotFoundError("lint finding not found")
+        # Same for a pair finding whose second page the actor cannot read;
+        # like LEAK-01 this fails closed for a missing actor (published only).
+        if self._hidden_by_related_page(
+            session,
+            workspace_id,
+            [(finding.id, finding.rule_id, finding.suggested_action)],
+            actor,
+        ):
+            raise ReadNotFoundError("lint finding not found")
         target_status = STATUS_BY_DECISION[request.decision]
 
         reason = request.reason
@@ -1003,10 +1093,7 @@ class LintService:
             reason = reason.strip()
 
         if finding.status == target_status:
-            target_title = self._target_titles(session, [finding]).get(
-                (finding.target_type, finding.target_id)
-            )
-            return self._finding_read(finding, target_title=target_title)
+            return self._finding_reads(session, [finding])[0]
 
         if finding.status in {"dismissed", "fixed"}:
             raise ReadValidationError("resolved lint finding cannot be changed")
@@ -1053,10 +1140,7 @@ class LintService:
             payload={"decision": request.decision, "reason": reason},
         )
         session.flush()
-        target_title = self._target_titles(session, [finding]).get(
-            (finding.target_type, finding.target_id)
-        )
-        return self._finding_read(finding, target_title=target_title)
+        return self._finding_reads(session, [finding])[0]
 
     def batch_decide_findings(
         self,
@@ -1096,9 +1180,49 @@ class LintService:
 
         return {"updated": updated, "failed": failed}
 
+    def _finding_reads(
+        self, session: Session, findings: list[LintFinding]
+    ) -> list[LintFindingRead]:
+        """Read models titled in one lookup for targets and related pages."""
+        related = self._related_page_ids(
+            (finding.id, finding.rule_id, finding.suggested_action)
+            for finding in findings
+        )
+        titles = self._target_titles(
+            session,
+            findings,
+            related_page_ids={page_id for page_id in related.values() if page_id},
+        )
+        reads = []
+        for finding in findings:
+            related_id = related.get(finding.id)
+            # A page the title lookup did not find no longer exists.
+            related_targets = (
+                [
+                    LintRelatedTarget(
+                        target_type="context_page",
+                        target_id=related_id,
+                        title=titles[("context_page", related_id)],
+                    )
+                ]
+                if related_id is not None and ("context_page", related_id) in titles
+                else []
+            )
+            reads.append(
+                self._finding_read(
+                    finding,
+                    target_title=titles.get((finding.target_type, finding.target_id)),
+                    related_targets=related_targets,
+                )
+            )
+        return reads
+
     @staticmethod
     def _finding_read(
-        finding: LintFinding, *, target_title: str | None = None
+        finding: LintFinding,
+        *,
+        target_title: str | None = None,
+        related_targets: list[LintRelatedTarget] | None = None,
     ) -> LintFindingRead:
         return LintFindingRead(
             id=finding.id,
@@ -1113,19 +1237,23 @@ class LintService:
             message_key=finding.message_key or finding.rule_id,
             message_args=finding.message_args or {},
             target_title=target_title,
+            related_targets=related_targets or [],
             created_at=finding.created_at,
             resolved_at=finding.resolved_at,
         )
 
     @staticmethod
     def _target_titles(
-        session: Session, findings: list[LintFinding]
+        session: Session,
+        findings: list[LintFinding],
+        *,
+        related_page_ids: set[UUID] | None = None,
     ) -> dict[tuple[str, UUID | None], str]:
         page_ids = {
             finding.target_id
             for finding in findings
             if finding.target_type == "context_page" and finding.target_id is not None
-        }
+        } | (related_page_ids or set())
         node_ids = {
             finding.target_id
             for finding in findings
