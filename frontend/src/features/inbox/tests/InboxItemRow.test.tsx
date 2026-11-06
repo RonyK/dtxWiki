@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -26,6 +26,7 @@ const base: InboxItem = {
 
 describe("InboxItemRow", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     workspaceContext.current = null;
   });
@@ -184,5 +185,120 @@ describe("InboxItemRow", () => {
     } finally {
       window.removeEventListener("dtxwiki:inbox-changed", changed);
     }
+  });
+
+  it("refills the capped live list after archiving while keeping loaded message pages", async () => {
+    let keys: InboxItem[] = Array.from({ length: 21 }, (_, index) => ({
+      ...base, kind: "access_key_expiry", item_key: String(index + 1),
+      display: { title: `Key ${index + 1}`, params: {} },
+    }));
+    const messages: InboxItem[] = [
+      { ...base, item_key: "message-1", unread: false, display: { title: "Message 1", params: {} } },
+      { ...base, item_key: "message-2", display: { title: "Message 2", params: {} } },
+    ];
+    let pauseRefresh = false;
+    let releaseRefresh: (() => void) | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      let data: unknown;
+      if (init?.method === "POST") {
+        const marks = JSON.parse(String(init.body));
+        keys = keys.map((item) => item.item_key === marks.item_key ? { ...item, archived: marks.archived } : item);
+        data = { applied: true, item: keys.find((item) => item.item_key === marks.item_key) };
+      } else {
+        const query = new URL(String(url)).searchParams;
+        const more = query.has("cursor");
+        const live = keys.filter((item) => !item.archived);
+        const visibleMessages = messages.filter((item) => query.get("state") !== "unread" || item.unread);
+        data = {
+          status_items: more ? [] : live.slice(0, 20),
+          status_overflow: !more && live.length > 20 ? [{ kind: "access_key_expiry", total: live.length }] : [],
+          items: [visibleMessages[more ? 1 : 0]],
+          next_cursor: !more && visibleMessages.length > 1 ? "message-next" : null,
+        };
+        if (pauseRefresh && !more && query.get("state") === "all") {
+          pauseRefresh = false;
+          return new Promise<Response>((resolve) => {
+            releaseRefresh = () => resolve({ ok: true, status: 200, json: async () => ({ data }) } as Response);
+          });
+        }
+      }
+      return { ok: true, status: 200, json: async () => ({ data }) } as Response;
+    });
+    render(<MemoryRouter initialEntries={["/inbox"]}><InboxScreen /></MemoryRouter>);
+    await screen.findByText("Key 1");
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await screen.findByText("Message 2");
+
+    // The 21st source item must stay reachable after removing the initial 20.
+    for (let index = 1; index <= 20; index++) {
+      const row = screen.getByText(`Key ${index}`).closest("li")!;
+      fireEvent.click(within(row).getByRole("button", { name: "Archive" }));
+      await waitFor(() => expect(row).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.getAllByRole("button", { name: "Archive" }))
+        .toHaveLength(Math.min(20, 21 - index) + 2));
+    }
+    expect(screen.getByText("Key 21")).toBeVisible();
+    expect(screen.getByText("Message 1")).toBeVisible();
+    expect(screen.getByText("Message 2")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+
+    // A pending refill belongs to its original view, even after switching filters.
+    pauseRefresh = true;
+    fireEvent.click(within(screen.getByText("Key 21").closest("li")!).getByRole("button", { name: "Archive" }));
+    await waitFor(() => expect(releaseRefresh).toBeDefined());
+    fireEvent.click(screen.getByRole("radio", { name: "Unread" }));
+    await screen.findByText("Message 2");
+    expect(screen.queryByText("Message 1")).not.toBeInTheDocument();
+    await act(async () => { releaseRefresh!(); });
+    expect(screen.queryByText("Message 1")).not.toBeInTheDocument();
+  });
+
+  it("updates the countdown and refreshes all loaded archive pages at the deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2031-01-01T00:00:00Z"));
+    const until = "2031-01-01T00:01:30Z";
+    const expiring: InboxItem = {
+      ...base, kind: "access_key_expiry", archived: true,
+      display: { title: "Expiring notice", params: { stage: "expired", visible_until: until } },
+    };
+    const kept: InboxItem[] = [
+      { ...base, item_key: "first", archived: true, display: { title: "First archive", params: {} } },
+      { ...base, item_key: "last", archived: true, display: { title: "Last archive", params: {} } },
+    ];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const query = new URL(String(url)).searchParams;
+      const archived = query.get("state") === "archived";
+      const more = query.has("cursor");
+      const items = !archived ? [] : !more ? [kept[0]]
+        : Date.now() < new Date(until).getTime() ? [expiring, kept[1]] : [kept[1]];
+      return {
+        ok: true, status: 200,
+        json: async () => ({ data: {
+          status_items: [], status_overflow: [], items,
+          next_cursor: archived && !more ? "archive-next" : null,
+        } }),
+      } as Response;
+    });
+    let unmount!: () => void;
+    await act(async () => {
+      ({ unmount } = render(<MemoryRouter initialEntries={["/inbox"]}><InboxScreen /></MemoryRouter>));
+    });
+    await act(async () => { fireEvent.click(screen.getByRole("radio", { name: "Archived" })); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Load more" })); });
+    expect(screen.getByRole("button", { name: "Auto-removed in 2 minutes" })).toBeVisible();
+    const initialRequests = fetchMock.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(screen.getByRole("button", { name: "Auto-removed in 1 minute" })).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledTimes(initialRequests);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(screen.queryByText("Expiring notice")).not.toBeInTheDocument();
+    expect(screen.getByText("First archive")).toBeVisible();
+    expect(screen.getByText("Last archive")).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledTimes(initialRequests + 2);
+
+    unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+    expect(fetchMock).toHaveBeenCalledTimes(initialRequests + 2);
   });
 });

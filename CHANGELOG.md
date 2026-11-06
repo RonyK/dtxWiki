@@ -58,6 +58,9 @@
   it, shortened when long with the full name on hover.
 - Look up the items of a listed page in one batched source query per kind
   instead of one query per item.
+- Refill capped Inbox lists after marks while retaining loaded message pages.
+  Update removal countdowns while the screen is open and refresh loaded pages
+  when an item's stated visibility ends.
 
 ## 0.2.1 — 2026-11-04
 

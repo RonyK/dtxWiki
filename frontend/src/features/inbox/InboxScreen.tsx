@@ -65,6 +65,15 @@ function InboxRemovalToggle({
   onToggle: () => void;
 }) {
   const { t, i18n } = useTranslation("inbox");
+  // Only the label ticks; list requests are scheduled separately at expiry.
+  const [now, setNow] = useState(() => Date.now());
+  const untilAt = until?.getTime();
+  const interval = untilAt !== undefined && Math.abs(untilAt - now) <= 60_000 ? 1_000 : 30_000;
+  useEffect(() => {
+    if (untilAt === undefined) return;
+    const timer = window.setInterval(() => setNow(Date.now()), interval);
+    return () => window.clearInterval(timer);
+  }, [untilAt, interval]);
   return (
     <button
       aria-controls={detailId}
@@ -202,11 +211,21 @@ export function InboxScreen() {
   const [page, setPage] = useState<InboxPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const requestRef = useRef(0);
+  const refreshRef = useRef(0);
+  const loadedPagesRef = useRef(1);
+  const expiredThroughRef = useRef(-Infinity);
 
   const load = useCallback(async () => {
     const request = ++requestRef.current;
+    ++refreshRef.current;
+    loadedPagesRef.current = 1;
+    expiredThroughRef.current = -Infinity;
+    setLoadingMore(false);
+    setRefreshing(false);
+    setBusyKey(null);
     setError(null);
     try {
       const next = await listInbox(activeScope, { state });
@@ -221,20 +240,86 @@ export function InboxScreen() {
   useEffect(() => {
     setPage(null);
     void load();
+    return () => {
+      requestRef.current += 1;
+      refreshRef.current += 1;
+    };
   }, [load]);
 
-  async function loadMore() {
-    if (!page?.next_cursor) return;
+  // Refresh the live group and every already-loaded message page together.
+  // This refills capped lists without sending the reader back to page one.
+  const refresh = useCallback(async () => {
     const request = requestRef.current;
+    const revision = ++refreshRef.current;
+    const pageCount = loadedPagesRef.current;
+    const current = () => request === requestRef.current && revision === refreshRef.current;
+    setRefreshing(true);
+    setLoadingMore(false);
+    setError(null);
+    try {
+      let next = await listInbox(activeScope, { state });
+      let loaded = 1;
+      while (current() && loaded < pageCount && next.next_cursor) {
+        const more = await listInbox(activeScope, { state, cursor: next.next_cursor });
+        next = { ...next, items: [...next.items, ...more.items], next_cursor: more.next_cursor };
+        loaded++;
+      }
+      if (!current()) return false;
+      loadedPagesRef.current = loaded;
+      setPage(next);
+      return true;
+    } catch (caught) {
+      if (current()) setError(apiErrorMessage(caught));
+      return false;
+    } finally {
+      if (current()) setRefreshing(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeScope.key, state]);
+
+  useEffect(() => {
+    if (!page || refreshing) return;
+    const deadlines = [...page.status_items, ...page.items]
+      .map((item) => inboxVisibleUntil(item)?.getTime())
+      .filter((at): at is number => at !== undefined && at > expiredThroughRef.current);
+    const deadline = Math.min(...deadlines);
+    if (!Number.isFinite(deadline)) return;
+    let timer: number;
+    function schedule() {
+      // setTimeout overflows beyond about 25 days. Recheck a distant deadline
+      // locally, and only query the server once its stated time is reached.
+      const remaining = deadline - Date.now();
+      timer = window.setTimeout(() => {
+        if (Date.now() < deadline) {
+          schedule();
+          return;
+        }
+        // A failed request or a clock difference must not create a retry loop.
+        expiredThroughRef.current = deadline;
+        void refresh().then((applied) => { if (applied) notifyInboxChanged(); });
+      }, Math.max(0, Math.min(remaining, 2_147_483_647)));
+    }
+    schedule();
+    return () => window.clearTimeout(timer);
+  }, [page, refresh, refreshing]);
+
+  async function loadMore() {
+    if (!page?.next_cursor || refreshing || loadingMore) return;
+    const request = requestRef.current;
+    const revision = refreshRef.current;
+    const current = () => request === requestRef.current && revision === refreshRef.current;
     setLoadingMore(true);
     try {
       const next = await listInbox(activeScope, { state, cursor: page.next_cursor });
-      if (request !== requestRef.current) return;
-      setPage({ ...page, items: [...page.items, ...next.items], next_cursor: next.next_cursor });
+      if (!current()) return;
+      loadedPagesRef.current++;
+      setPage((loaded) => loaded && {
+        ...loaded, items: [...loaded.items, ...next.items], next_cursor: next.next_cursor,
+      });
     } catch (caught) {
-      if (request === requestRef.current) setError(apiErrorMessage(caught));
+      if (current()) setError(apiErrorMessage(caught));
     } finally {
-      setLoadingMore(false);
+      if (current()) setLoadingMore(false);
     }
   }
 
@@ -242,17 +327,20 @@ export function InboxScreen() {
     const request = requestRef.current;
     setBusyKey(itemKey(item));
     try {
-      // The response carries the item's current state, including a newer
-      // revision when the mark was not applied, so loaded pages stay in place.
+      // Apply the response immediately, then refill from the server. The
+      // refresh keeps loaded pages and supersedes older in-flight list reads.
       const result = await markInboxItem(activeScope, item, marks);
       notifyInboxChanged();
       if (request === requestRef.current) {
         setPage((current) => current && withItem(current, result.item, state));
+        await refresh();
       }
     } catch (caught) {
       if (request === requestRef.current) setError(apiErrorMessage(caught));
     } finally {
-      setBusyKey(null);
+      if (request === requestRef.current) {
+        setBusyKey((current) => current === itemKey(item) ? null : current);
+      }
     }
   }
 
@@ -282,7 +370,7 @@ export function InboxScreen() {
 
   return (
     <div className="workspace-screen single-column">
-      <section className="feature-main inbox-screen">
+      <section aria-busy={refreshing} className="feature-main inbox-screen">
         <Breadcrumbs items={[{ label: t("title") }]} />
         <div className="feature-header">
           <div>
@@ -367,7 +455,7 @@ export function InboxScreen() {
               <div className="load-more-row">
                 <button
                   className="icon-button text-button"
-                  disabled={loadingMore}
+                  disabled={loadingMore || refreshing}
                   onClick={() => void loadMore()}
                   type="button"
                 >
