@@ -74,11 +74,12 @@ async function zoomAndPanLocalGraph(page: Page) {
   await page.getByRole("button", { name: "Zoom in", exact: true }).click();
   const bounds = await page.getByTestId("graph-canvas").boundingBox();
   if (!bounds) throw new Error("The Local Graph canvas has no bounds");
-  // Real stage input, away from the three document glyphs. Observe native
-  // camera animation completion instead of guessing a drag-inertia delay.
-  await page.mouse.move(bounds.x + 35, bounds.y + 35);
+  // Real stage input, away from the three document glyphs and below the seed
+  // pill, a button over the stage's top-left corner. Observe native camera
+  // animation completion instead of guessing a drag-inertia delay.
+  await page.mouse.move(bounds.x + 35, bounds.y + 80);
   await page.mouse.down();
-  await page.mouse.move(bounds.x + 73, bounds.y + 61, { steps: 5 });
+  await page.mouse.move(bounds.x + 73, bounds.y + 106, { steps: 5 });
   await page.mouse.up();
   await expect.poll(() => page.evaluate(() => window.__localCoverageFixture.cameraAnimated())).toBe(false);
   const moved = await page.evaluate(() => window.__localCoverageFixture.read());
@@ -1285,12 +1286,13 @@ async function expectNativeRovingList(page: Page, graph: Locator, list: Locator,
   await page.keyboard.press("Tab");
 }
 
-type CueKind = "context" | "version" | "library" | "conversation" | "folder";
+// "seed": the current document's rows show the legend's "This document" glyph.
+type CueKind = "seed" | "context" | "version" | "library" | "conversation" | "folder";
 type CueMode = "light" | "dark" | "forced";
 // `chip` names the row's kind chip: canvas kind, or the family for conversations.
 type CueRow = { label: string; kind: CueKind; chip: "context" | "version" | "library" | "ask" | "chat" | "folder" };
 const NODE_CUE_ROWS: CueRow[] = [
-  { label: "Decision Log", kind: "context", chip: "context" },
+  { label: "Decision Log", kind: "seed", chip: "context" },
   { label: "Architecture Notes", kind: "context", chip: "context" },
   { label: "Why was this chosen?", kind: "conversation", chip: "ask" },
   { label: "Shared source title", kind: "version", chip: "version" },
@@ -1300,9 +1302,9 @@ const NODE_CUE_ROWS: CueRow[] = [
   { label: "Visible Source Folder", kind: "folder", chip: "folder" },
 ];
 const CUE_COLORS = {
-  light: { context: "rgb(124, 58, 237)", version: "rgb(124, 58, 237)", library: "rgb(15, 159, 143)",
+  light: { seed: "rgb(124, 58, 237)", context: "rgb(124, 58, 237)", version: "rgb(124, 58, 237)", library: "rgb(15, 159, 143)",
     conversation: "rgb(2, 132, 199)", folder: "rgb(100, 116, 139)" },
-  dark: { context: "rgb(139, 92, 246)", version: "rgb(139, 92, 246)", library: "rgb(13, 148, 136)",
+  dark: { seed: "rgb(139, 92, 246)", context: "rgb(139, 92, 246)", version: "rgb(139, 92, 246)", library: "rgb(13, 148, 136)",
     conversation: "rgb(56, 189, 248)", folder: "rgb(148, 163, 184)" },
 } as const;
 const NAVIGATION_COPY = {
@@ -1452,8 +1454,9 @@ async function expectNodeCueRows(buttons: Locator, expected: CueRow[], locale: k
     expect(row.legacy).toBe(false);
     expect(row.width).toBe(16);
     expect(row.height).toBe(16);
-    // One outline per glyph from the shared shape geometry; a folder is a stroked ring.
-    expect(row.shapes.map((shape) => shape.name)).toEqual(kind === "folder" ? ["circle"] : ["path"]);
+    // One outline per glyph from the shared shape geometry; a folder is a stroked
+    // ring and the current document a filled disc in an ink ring.
+    expect(row.shapes.map((shape) => shape.name)).toEqual(kind === "folder" || kind === "seed" ? ["circle"] : ["path"]);
     expect(row.shapes[0].fill).toBe(kind === "folder" ? "none" : color);
     if (kind === "folder") expect(row.shapes[0].stroke).toBe(color);
   }

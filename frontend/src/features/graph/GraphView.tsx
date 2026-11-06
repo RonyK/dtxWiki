@@ -190,12 +190,19 @@ export function GraphView({
   const historyCatalog = useMemo(() => localizedGraphScene(applyHistoryVisibility(historySceneCatalog(payload, filters)), t),
     [applyHistoryVisibility, filters, payload, t]);
   const sceneAnalysis = useMemo(() => analyzeLocalScene(scene, payload.query.seeds), [payload.query.seeds, scene]);
+  // The document the graph is opened from is the primary query seed; seeds
+  // added by expanding follow it and are not the current document.
+  const currentNode = useMemo(() => {
+    const primary = payload.query.seeds[0];
+    return primary ? payload.nodes.find((node) => node.entity_kind === primary.kind && node.entity_id === primary.id) ?? null : null;
+  }, [payload.nodes, payload.query.seeds]);
   const listContext = useMemo<LocalViewContext>(() => ({
+    currentId: currentNode?.id ?? null,
     hrefFor: (node) => nodeHref(node, workspaceId ?? null),
     seeds: new Set(sceneAnalysis.seeds),
     t,
     visuals: nodeVisuals,
-  }), [nodeVisuals, sceneAnalysis, t, workspaceId]);
+  }), [currentNode, nodeVisuals, sceneAnalysis, t, workspaceId]);
   const canvasScene = useMemo<GraphRenderScene>(() => {
     const hoveredIndex = timeline.findIndex((event) => event.id === hoveredEventId);
     const eventIndex = hoveredIndex >= 0 ? hoveredIndex : visibleCursor;
@@ -212,8 +219,9 @@ export function GraphView({
         : withCoAccessLabels(scene, t)),
       scopeKey: canvasScopeKey,
       freezeLayout: historical,
+      currentId: currentNode?.id ?? null,
     };
-  }, [applyHistoryVisibility, canvasScopeKey, filters, historical, historyCatalog, hoveredEventId, payload, scene, showFuture, t, timeline, visibleCursor]);
+  }, [applyHistoryVisibility, canvasScopeKey, currentNode, filters, historical, historyCatalog, hoveredEventId, payload, scene, showFuture, t, timeline, visibleCursor]);
   const staticScene = useMemo(() => localizedGraphScene(applyHistoryVisibility(
     deriveGraphScene(staticPayload, filters, timelineCursor)), t),
   [applyHistoryVisibility, filters, staticPayload, t, timelineCursor]);
@@ -811,10 +819,11 @@ export function GraphView({
           {activeFilters.length ? <button className="inline-action" type="button" onClick={() => setFilters(facets)}>{t("graph.filters.clearAll")}</button> : <small>{t("graph.view.addRelations")}</small>}
         </div> : null}
         <div className="graph-canvas-context">
-          <span className="graph-seed-pill" title={payload.nodes.find((node) => node.is_seed)?.label}>
-            {t("graph.view.seed")} <strong>{payload.nodes.find((node) => node.is_seed)?.label}</strong>
+          {currentNode ? <button aria-label={t("graph.view.locateCurrent", { label: currentNode.label })} className="graph-seed-pill"
+            onClick={() => canvasRef.current?.locate(currentNode.id)} title={t("graph.view.locateCurrent", { label: currentNode.label })} type="button">
+            <GraphSeedCue color={tokens.node.context} />{t("graph.view.seed")} <strong>{currentNode.label}</strong>
             {payload.query.seeds.length > 1 ? <small>+{payload.query.seeds.length - 1}</small> : null}
-          </span>
+          </button> : null}
           {historical ? <span className="graph-time-pill"><Clock3 size={16} aria-hidden="true" />
             {t("graph.historyUi.recordedAt")} <strong>{currentEvent ? formatVersionTimestamp(currentEvent.occurred_at) : t("graph.timeline.start")}</strong>
             {Math.max(0, visibleCursor + 1)}/{timeline.length}</span> : null}

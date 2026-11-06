@@ -3,6 +3,7 @@ import type { TFunction } from "i18next";
 import type { GraphEdge, GraphNode } from "../../../shared/api/graph";
 import { domainLabel } from "../../../shared/lib/domainLabel";
 import { GRAPH_NODE_VISUALS } from "../shared/graphTokens";
+import { GraphSeedCue } from "../shared/GraphCues";
 import { RelationListStrokeCue } from "../shared/relationList/parts";
 import type { RelationListEdgeView, RelationListNodeView, RelationListStroke } from "../shared/relationList/types";
 import { localEdgeVisualKind } from "./edgeKinds";
@@ -10,6 +11,8 @@ import { LocalNodeCue, type LocalNodeVisuals } from "./LocalNodeCue";
 import { localNodeVisualKind } from "./nodeVisual";
 
 export type LocalViewContext = {
+  /** The document the graph is opened from: its rows show the legend's "This document" glyph. */
+  currentId: string | null;
   hrefFor: (node: GraphNode) => string | null;
   seeds: ReadonlySet<string>;
   t: TFunction<"graph">;
@@ -64,7 +67,8 @@ export function localNodeView(node: GraphNode, context: LocalViewContext): Relat
       // Colour says whose: a version takes its document's colour.
       tone: GRAPH_NODE_VISUALS[localNodeVisualKind(node.entity_kind, node.family)].color,
     },
-    cue: <LocalNodeCue node={node} visuals={visuals} />,
+    cue: node.id === context.currentId ? <GraphSeedCue color={visuals.tokens.node.context} />
+      : <LocalNodeCue node={node} visuals={visuals} />,
     href: hrefFor(node),
     id: node.id,
     label: node.label,

@@ -1389,7 +1389,7 @@ async function expectLocalSceneNavigation(
   expect(rowIds.length).toBeGreaterThan(0);
   expect(rowIds.length).toBeLessThanOrEqual(30);
   expect(rowIds.every((id) => nodes.has(id)), "rows must name endpoints present in the real response").toBe(true);
-  const mainCueRows = await expectLocalNodeCues(page, seedRows, rowIds.map((id) => nodes.get(id)!));
+  const mainCueRows = await expectLocalNodeCues(page, seedRows, rowIds.map((id) => nodes.get(id)!), seed.id);
 
   const selectFromList = async (node: GraphNode) => {
     // The list search narrows every group; the row selects the node it names.
@@ -1407,7 +1407,7 @@ async function expectLocalSceneNavigation(
     const shown = await rows.evaluateAll((buttons) => buttons.map((button) => button.getAttribute("data-local-graph-id")!));
     const expectedIds = new Set(expected.map((node) => node.id));
     expect(shown.every((id) => expectedIds.has(id))).toBe(true);
-    await expectLocalNodeCues(page, rows, shown.map((id) => nodes.get(id)!));
+    await expectLocalNodeCues(page, rows, shown.map((id) => nodes.get(id)!), seed.id);
   };
   const expectEmptyDetails = async () => {
     // Keep the stable aside DOM, but a blank inspector must not take canvas
@@ -1559,14 +1559,15 @@ function localWireCueKind(node: GraphNode) {
   return node.family === "structural" ? "folder" : "conversation";
 }
 
-async function expectLocalNodeCues(page: Page, buttons: Locator, expected: GraphNode[]) {
+/** `currentId`: the document the graph is opened from; its rows show the legend's "This document" glyph. */
+async function expectLocalNodeCues(page: Page, buttons: Locator, expected: GraphNode[], currentId: string) {
   await expect(buttons).toHaveCount(expected.length);
   const mode = await page.evaluate(() => matchMedia("(forced-colors: active)").matches ? "forced"
     : document.documentElement.dataset.theme === "dark" ? "dark" : "light");
   const palettes = {
-    light: { context: "rgb(124, 58, 237)", version: "rgb(124, 58, 237)", agent: "rgb(217, 119, 6)",
+    light: { seed: "rgb(124, 58, 237)", context: "rgb(124, 58, 237)", version: "rgb(124, 58, 237)", agent: "rgb(217, 119, 6)",
       library: "rgb(15, 159, 143)", conversation: "rgb(2, 132, 199)", folder: "rgb(100, 116, 139)" },
-    dark: { context: "rgb(139, 92, 246)", version: "rgb(139, 92, 246)", agent: "rgb(245, 158, 11)",
+    dark: { seed: "rgb(139, 92, 246)", context: "rgb(139, 92, 246)", version: "rgb(139, 92, 246)", agent: "rgb(245, 158, 11)",
       library: "rgb(13, 148, 136)", conversation: "rgb(56, 189, 248)", folder: "rgb(148, 163, 184)" },
   } as const;
   const actual = await buttons.evaluateAll((elements) => elements.map((button) => {
@@ -1593,14 +1594,15 @@ async function expectLocalNodeCues(page: Page, buttons: Locator, expected: Graph
   // Titles are intentionally not an identity key. A multiset retains every
   // (title, kind) occurrence even when Context and Library share one title.
   expect(actual.map((row) => JSON.stringify([row.label, row.kind])).sort())
-    .toEqual(expected.map((node) => JSON.stringify([node.label, localWireCueKind(node)])).sort());
+    .toEqual(expected.map((node) => JSON.stringify([node.label, node.id === currentId ? "seed" : localWireCueKind(node)])).sort());
   for (const row of actual) {
-    const kind = row.kind as ReturnType<typeof localWireCueKind>;
+    const kind = row.kind as ReturnType<typeof localWireCueKind> | "seed";
     const color = mode === "forced" ? row.foreground : palettes[mode][kind];
     expect(row.hidden).toBe("true");
     expect(row.legacy).toBe(false);
-    // One outline per glyph from the shared shape geometry; a folder is a stroked ring.
-    expect(row.shapes.map((shape) => shape.name)).toEqual(kind === "folder" ? ["circle"] : ["path"]);
+    // One outline per glyph from the shared shape geometry; a folder is a stroked
+    // ring and the current document a filled disc in an ink ring.
+    expect(row.shapes.map((shape) => shape.name)).toEqual(kind === "folder" || kind === "seed" ? ["circle"] : ["path"]);
     expect(row.shapes[0].fill).toBe(kind === "folder" ? "none" : color);
     if (kind === "folder") expect(row.shapes[0].stroke).toBe(color);
   }

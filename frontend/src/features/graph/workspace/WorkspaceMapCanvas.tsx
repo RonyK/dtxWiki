@@ -213,6 +213,8 @@ export const WorkspaceMapCanvas = forwardRef<GraphCanvasHandle, WorkspaceMapCanv
 
     useImperativeHandle(ref, () => ({
       centerOn: (id) => { cancelNavigationReveal(); adapterRef.current?.centerOn(id); },
+      // The Map has no current-document ring to trace.
+      locate: (id) => { cancelNavigationReveal(); adapterRef.current?.centerOn(id); },
       fit: () => { cancelNavigationReveal(); adapterRef.current?.fit(); },
       pauseLayout: () => {
         cancelNavigationReveal();

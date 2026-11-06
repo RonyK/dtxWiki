@@ -12,6 +12,7 @@ import { GRAPH_NODE_VISUALS, GRAPH_REMOVED_EDGE_COLOR, readGraphTokens, type Gra
 import { FORCED_OUTLINE_INSETS, GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, TRIANGLE_RADIUS_FACTOR, drawShapeRing } from "../shared/nodeShapes";
 import { LOCAL_EDGE_PROGRAMS } from "./edgePrograms";
 import { createLocalLayout, type LocalLayout } from "./layout";
+import { createLocateTrace } from "./locateTrace";
 import { buildLocalScene, type LocalScene, type LocalSceneNode, type LocalSceneEdge } from "./sceneInput";
 import { localNodeVisualKind } from "./nodeVisual";
 
@@ -41,6 +42,8 @@ export interface SigmaGraphAdapter {
   destroy(): void;
   fit(): void;
   focus(id: string | null): void;
+  /** Center on the current document and trace its ring once (not with reduced motion). */
+  locate(id: string): void;
   pin(id: string, pinned: boolean, position?: GraphPoint): GraphPoint | null;
   replaceScene(scene: GraphRenderScene): LocalSceneUpdate | void;
   reset(): void;
@@ -146,9 +149,11 @@ const FolderNodeProgram = createNodeBorderProgram({
     { size: { fill: true }, color: { transparent: true } },
   ],
 });
+/** The seed's solid ink ring: this share of the drawn radius, inside the disc. */
+const SEED_RING_SHARE = 0.24;
 const SeedNodeProgram = createNodeBorderProgram({
   borders: [
-    { size: { value: 0.24 }, color: { attribute: "borderColor" } },
+    { size: { value: SEED_RING_SHARE }, color: { attribute: "borderColor" } },
     { size: { fill: true }, color: { attribute: "color" } },
   ],
 });
@@ -230,6 +235,11 @@ export function createSigmaGraphAdapter(
   let contextLost = false;
   let restorationRequested = false;
   const chip = createGraphHoverChip(container, options.hoverChip);
+  let tracingKey: string | null = null;
+  const trace = createLocateTrace(container, () => {
+    tracingKey = null;
+    if (!destroyed && !contextLost) sigma.refresh({ skipIndexation: true });
+  });
   let hoverFrame: number | null = null;
   let hoverEvent: SigmaStageEventPayload["event"] | null = null;
   let pickedEdge: string | null = null;
@@ -247,6 +257,7 @@ export function createSigmaGraphAdapter(
   const paintedPriorityLabels = new Set<string>();
 
   const priorityLabelKeys = () => [...new Set([
+    ...localScene.nodes.filter((node) => node.isCurrent).map((node) => node.key),
     ...localScene.nodes.filter((node) => node.isSeed).map((node) => node.key).sort(),
     ...[selectedId, focusedId].flatMap((id) => {
       const key = id ? localScene.keyByGraphId.get(id) : undefined;
@@ -296,10 +307,14 @@ export function createSigmaGraphAdapter(
       surfaceColor: tokens.surface,
       quietBorderColor: quietColor(ink, tokens.surface),
       isSeed: node.isSeed,
+      isCurrent: node.isCurrent,
+      // Drawn last, above the dense centre where it is pinned.
+      zIndex: node.isCurrent ? 1 : 0,
       label: node.label,
-      // The emphasis ring follows the drawn glyph; a seed is a disc.
-      shape: node.isSeed ? "circle" : visual.shape,
-      type: node.isSeed ? "seed" : nodeProgramType(visual.shape, visual.forcedOutline && mode === "forced"),
+      // The current document is the legend's "This document" glyph: its disc in
+      // a solid ink ring. Seeds added by expanding keep their own glyph.
+      shape: node.seedGlyph ? "circle" : visual.shape,
+      type: node.seedGlyph ? "seed" : nodeProgramType(visual.shape, visual.forcedOutline && mode === "forced"),
     };
   };
   const edgeAttributes = (edge: LocalSceneEdge, label: string) => ({
@@ -388,6 +403,7 @@ export function createSigmaGraphAdapter(
     hideLabelsOnMove: false,
     // The ordinary-label toggle must not suppress seed/active labels as well.
     renderLabels: true,
+    zIndex: true,
     renderEdgeLabels: true,
     defaultDrawEdgeLabel: (context, edge, source, target) => {
       if (!edge.forceLabel || !edge.label || edge.hidden) return;
@@ -441,9 +457,11 @@ export function createSigmaGraphAdapter(
       // Priority is a visible-node contract, not a reason to pull offscreen
       // titles into the viewport or inherit labels from an old scene.
       if (forced && (data.x < 0 || data.x > viewportWidth || data.y < 0 || data.y > viewportHeight)) return;
-      const label = Array.from(data.label).slice(0, 24).join("");
+      // The current document's name is a chip and keeps more of its title.
+      const current = Boolean((data as { isCurrent?: boolean }).isCurrent);
+      const label = Array.from(data.label).slice(0, current ? 40 : 24).join("");
       const shortened = label.length < Array.from(data.label).length ? `${label}…` : label;
-      const offset = data.size + 5;
+      const offset = data.size + (current ? 6 : 5);
       const margin = Math.min(8, viewportWidth / 4);
       const roomRight = viewportWidth - data.x - offset - 8;
       const roomLeft = data.x - offset - 8;
@@ -453,7 +471,7 @@ export function createSigmaGraphAdapter(
       if (room < 18 && !forced) return;
       const fontSize = forced ? Math.min(settings.labelSize, Math.max(1, viewportHeight - 4)) : settings.labelSize;
       context.save();
-      context.font = `${settings.labelWeight} ${fontSize}px ${settings.labelFont}`;
+      context.font = `${current ? 700 : settings.labelWeight} ${fontSize}px ${settings.labelFont}`;
       context.textAlign = right ? "left" : "right";
       context.textBaseline = "middle";
       const graphemes = Array.from(shortened);
@@ -497,8 +515,23 @@ export function createSigmaGraphAdapter(
         context.restore();
         return;
       }
-      labelBounds.push(chosen);
       const y = chosen.y;
+      if (current) {
+        // Ink chip with surface text: the canvas form of the list's seed badge.
+        const left = right ? x - 7 : x - width - 7;
+        const half = fontSize / 2 + 5;
+        labelBounds.push({ left: left - 2, right: left + width + 16, top: y - half - 2, bottom: y + half + 2 });
+        context.fillStyle = ink;
+        context.beginPath();
+        context.roundRect(left, y - half, width + 14, half * 2, 6);
+        context.fill();
+        context.fillStyle = tokens.surface;
+        context.fillText(visible, x, y, room);
+        context.restore();
+        if (forced && data.key) paintedPriorityLabels.add(data.key);
+        return;
+      }
+      labelBounds.push(chosen);
       context.lineWidth = 3;
       context.strokeStyle = tokens.surface;
       context.strokeText(visible, x, y, room);
@@ -514,13 +547,17 @@ export function createSigmaGraphAdapter(
     nodeReducer: (key, data) => {
       const id = localScene.graphIdByKey.get(key);
       const presentation = id ? nodePresentation.get(id) : undefined;
-      const quiet = presentation?.muted || highlightedStar !== null && !highlightedStar.nodes.has(key);
+      // The current document never fades with a selection or activity: it is the reader's anchor.
+      const current = Boolean(data.isCurrent);
+      const quiet = !current && (presentation?.muted || highlightedStar !== null && !highlightedStar.nodes.has(key));
       const importantLabel = Boolean(data.isSeed || (id && [selectedId, focusedId].includes(id)));
       return {
         ...data,
         hidden: presentation?.hidden ?? false,
         // A history event keeps its glyph; the ring layer marks it instead.
         highlighted: Boolean(presentation?.highlighted),
+        // While its ink ring is traced, the current document draws only its disc.
+        ...(key === tracingKey ? { type: "circle" } : {}),
         color: quiet ? data.quietColor : data.color,
         borderColor: quiet ? data.quietBorderColor : data.borderColor,
         label: importantLabel || (showOrdinaryLabels && !quiet) ? data.label : null,
@@ -644,9 +681,21 @@ export function createSigmaGraphAdapter(
     hoveredId = null;
     chip.hide();
   }
+  // The trace follows its node through camera moves and layout settling.
+  function placeTrace() {
+    if (!trace.playing) return;
+    const display = tracingKey && graph.hasNode(tracingKey) ? sigma.getNodeDisplayData(tracingKey) : null;
+    if (!tracingKey || !display || display.hidden) { trace.place(null); return; }
+    const attributes = graph.getNodeAttributes(tracingKey);
+    const point = sigma.graphToViewport({ x: Number(attributes.x), y: Number(attributes.y) });
+    const outer = sigma.scaleSize(display.size);
+    const width = outer * SEED_RING_SHARE;
+    trace.place({ x: point.x, y: point.y, radius: outer - width / 2, width, color: String(attributes.borderColor) });
+  }
   sigma.on("afterRender", () => {
     drawRings();
     updateHoverChip();
+    placeTrace();
   });
   const endDrag = (cancelled = false) => {
     if (!draggingKey) return;
@@ -854,6 +903,15 @@ export function createSigmaGraphAdapter(
   sigma.refresh({ partialGraph: { nodes: [], edges: [] }, skipIndexation: true });
 
   return {
+    locate(id) {
+      if (destroyed || contextLost) return;
+      this.centerOn(id);
+      const key = localScene.keyByGraphId.get(id);
+      if (options.reducedMotion || !key || !graph.hasNode(key) || !graph.getNodeAttribute(key, "isCurrent")) return;
+      tracingKey = key;
+      trace.play();
+      sigma.refresh({ skipIndexation: true });
+    },
     centerOn(id) {
       if (destroyed || contextLost) return;
       const key = localScene.keyByGraphId.get(id);
@@ -883,6 +941,7 @@ export function createSigmaGraphAdapter(
       destroyed = true;
       clearHover();
       chip.destroy();
+      trace.destroy();
       draggingKey = null;
       layout?.destroy();
       for (const canvas of contextCanvases) {

@@ -333,6 +333,7 @@
       "heading": "그래프 보기",
       "compare": "보기 차이",
       "seed": "기준",
+      "locateCurrent": "그래프에서 {{label}} 위치로 이동",
       "refresh": "그래프 새로고침",
       "fullscreen": "그래프 전체 화면",
       "exitFullscreen": "전체 화면 종료",

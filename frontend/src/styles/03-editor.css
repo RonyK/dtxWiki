@@ -7071,10 +7071,15 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 .graph-frame .graph-local-stage { overflow: hidden; }
 .graph-view .graph-frame .graph-canvas-frame { height: 560px; min-height: 560px; border: 0; border-radius: 0; }
 .graph-view .graph-frame-history .graph-canvas-frame { height: 440px; min-height: 440px; }
-.graph-canvas-context { position: absolute; z-index: 1; left: 10px; top: 10px; display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: 7px; max-width: calc(100% - 140px); pointer-events: none; }
+.graph-canvas-context { position: absolute; z-index: 6; left: 10px; top: 10px; display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: 7px; max-width: calc(100% - 140px); pointer-events: none; }
 .graph-seed-pill, .graph-time-pill { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 5px 10px; border: 1px solid var(--border); border-radius: 20px; background: var(--surface); box-shadow: 0 1px 2px #0001; color: var(--ink-muted); font-size: 11px; }
 .graph-seed-pill strong { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .graph-seed-pill { white-space: nowrap; }
+/* The seed pill names the current document and moves the view to it. */
+button.graph-seed-pill { font: inherit; font-size: 11px; cursor: pointer; pointer-events: auto; }
+button.graph-seed-pill:hover { border-color: var(--context); }
+button.graph-seed-pill:focus-visible { outline: 2px solid var(--context); outline-offset: 2px; }
+.graph-seed-pill > svg { flex: none; color: var(--ink); }
 .graph-time-pill { border-color: color-mix(in srgb, var(--context) 50%, var(--border)); color: var(--context); white-space: nowrap; }
 .graph-time-pill strong { color: var(--ink); }
 .graph-canvas-utilities, .graph-camera-controls { position: absolute; z-index: 3; display: flex; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; box-shadow: 0 1px 3px #0001; }
@@ -7259,6 +7264,7 @@ button.graph-seed-path-node:hover { background: var(--surface-hover); }
 /* Phones: every fold header in the Graph tab is a 44px target (group level included). */
 @media screen and (max-width: 640px) {
   .graph-view .relation-list-fold-head { min-height: 44px; }
+  .graph-view button.graph-seed-pill { min-height: 44px; }
 }
 @media (forced-colors: active) {
   .graph-seed-badge { border: 1px solid CanvasText; }
@@ -7310,6 +7316,11 @@ button.graph-seed-path-node:hover { background: var(--surface-hover); }
 }
 .graph-frame:fullscreen .graph-local-stage .graph-details { inset: 60px 12px auto auto; width: min(300px, calc(100% - 24px)); max-height: calc(100% - 72px); border-radius: 10px; }
 .graph-frame:fullscreen .graph-details-sheet-toggle { display: none; }
+
+/* The current document's ink ring, traced once after the seed pill locates it. */
+.graph-locate-trace { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.graph-locate-trace circle { fill: none; stroke-dasharray: 1; stroke-dashoffset: 1; animation: graph-locate-trace 800ms cubic-bezier(0.33, 1, 0.68, 1) forwards; }
+@keyframes graph-locate-trace { to { stroke-dashoffset: 0; } }
 
 .graph-hover-chip {
   position: absolute;

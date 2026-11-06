@@ -19,7 +19,7 @@ import type { Ref } from "react";
 import type { GraphCanvasHandle } from "../GraphCanvas";
 
 const { canvasHandle } = vi.hoisted(() => ({ canvasHandle: {
-  centerOn: vi.fn(), fit: vi.fn(), pauseLayout: vi.fn(), resumeLayout: vi.fn(),
+  centerOn: vi.fn(), fit: vi.fn(), locate: vi.fn(), pauseLayout: vi.fn(), resumeLayout: vi.fn(),
   pin: vi.fn(() => null), reset: vi.fn(), setViewport: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn(),
 } }));
 
@@ -58,6 +58,7 @@ vi.mock("../GraphCanvas", async () => {
       data-edges={scene.edges.filter((edge) => !edge.hidden && !edge.removed).length}
       data-removed-edges={scene.edges.filter((edge) => !edge.hidden && edge.removed).length}
       data-active={String(active)}
+      data-current={scene.currentId ?? ""}
       data-focused={focusedId ?? ""}
       data-nodes={scene.nodes.filter((node) => !node.hidden).length}
       data-pinned={pinnedIds.join("|")}
@@ -137,6 +138,22 @@ describe("GraphView", () => {
     // The list replaces the canvas area inside the frame; the canvas stays mounted underneath.
     expect(stage.querySelector(".graph-list-layer")).toContainElement(screen.getByTestId("graph-list-view"));
     expect(stage).toContainElement(screen.getByTestId("mock-graph-canvas"));
+  });
+
+  it("names and locates the current document, not an expanded seed the payload lists first", async () => {
+    const user = userEvent.setup();
+    const base = graphFixture();
+    // "Architecture Notes" was expanded: a seed after the primary one, listed first by the payload.
+    const expanded = { ...base.nodes[1], is_seed: true };
+    renderGraph({ openContents: false, payload: {
+      ...base, nodes: [expanded, base.nodes[0], ...base.nodes.slice(2)],
+      query: { ...base.query, seeds: [...base.query.seeds, { kind: expanded.entity_kind!, id: expanded.entity_id! }] },
+    } });
+    expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-current", "node:seed");
+    const locate = screen.getByRole("button", { name: "Show Decision Log on the graph" });
+    expect(locate).toHaveTextContent("Seed Decision Log+1");
+    await user.click(locate);
+    expect(canvasHandle.locate).toHaveBeenCalledExactlyOnceWith("node:seed");
   });
 
   it("keeps unselected Details hidden from navigation and does not open it for canvas hover", () => {
@@ -363,7 +380,7 @@ describe("GraphView", () => {
         expect(button).toHaveTextContent(node.label);
         expect(button).toHaveAccessibleName(new RegExp(node.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
         expect(button).toHaveAttribute("aria-pressed", "false");
-        expectCanonicalRowCue(button, rowCueKind(node.entity_kind, node.family), forcedColors);
+        expectRowCue(payload, button, node, forcedColors);
       }
       const canvas = screen.getByTestId("mock-graph-canvas");
       expect(canvas).toHaveAttribute("data-nodes", "8");
@@ -390,7 +407,7 @@ describe("GraphView", () => {
           .toEqual([...expectedLabels].sort());
         for (const button of buttons) {
           const node = payload.nodes.find((candidate) => candidate.label === button.querySelector("strong")!.textContent)!;
-          expectCanonicalRowCue(button, rowCueKind(node.entity_kind, node.family), forcedColors);
+          expectRowCue(payload, button, node, forcedColors);
         }
       };
       const memberLabels = ["Decision Log", "Source Version", "Source Artifact", "Published Snapshot", "Chat Session"];
@@ -442,7 +459,8 @@ describe("GraphView", () => {
       expect(detailsRelationRows(details).find((row) => row.textContent?.includes("Source Version"))!
         .querySelector('[data-node-visual-kind="library"] path')).toHaveAttribute("fill", "#123456");
       await act(async () => { document.documentElement.setAttribute("data-theme", "dark"); });
-      expect(rowFor("Decision Log").querySelector('[data-node-visual-kind="context"] path'))
+      // The current document's row shows the "This document" glyph in the Context colour.
+      expect(rowFor("Decision Log").querySelector('[data-node-visual-kind="seed"] circle'))
         .toHaveAttribute("fill", "#8b5cf6");
       expect(legend.querySelector('svg[data-node-visual-kind="context"] path'))
         .toHaveAttribute("fill", "#8b5cf6");
@@ -2289,6 +2307,18 @@ function rowCueKind(entityKind: string, family: string) {
 function cueOutline(path: Element | null) {
   const data = path?.getAttribute("d") ?? "";
   return data.includes("a") ? "circle" : `${data.split("L").length}-gon`;
+}
+
+/** The current document's rows show the legend's "This document" glyph; others their kind's. */
+function expectRowCue(payload: GraphQueryPayload, button: HTMLElement, node: GraphNode, forcedColors: boolean) {
+  const primary = payload.query.seeds[0];
+  if (node.entity_kind !== primary.kind || node.entity_id !== primary.id) {
+    expectCanonicalRowCue(button, rowCueKind(node.entity_kind, node.family), forcedColors);
+    return;
+  }
+  const cue = button.querySelector('[data-node-visual-kind="seed"]');
+  expect.soft(cue, `Missing seed cue on ${button.textContent}`).not.toBeNull();
+  expect(cue?.querySelector("circle")).toHaveAttribute("fill", forcedColors ? "rgb(255, 255, 255)" : "#7c3aed");
 }
 
 function expectCanonicalRowCue(

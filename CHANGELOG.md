@@ -67,8 +67,15 @@
   `workspace_inbox_entry` and `account_inbox_entry` in Archived list order, so
   an Archived page no longer reads and sorts the recipient's whole history.
 
-### Context graph lists
+### Context graph tab
 
+- Mark the document the Graph tab is opened from with the legend's "This
+  document" glyph on its map: its Context disc in a solid ink ring, at its
+  relation-count size, with its name on a dark chip, drawn above other points
+  and never faded by a selection. Documents added by expanding keep their own
+  glyph. The seed pill shows that glyph and the document's name (after Expand
+  it named the expanded one), moves the view to it and traces the ink ring
+  once (not with reduced motion).
 - Show the Graph tab's list in the canvas area through a Graph | List switch,
   so a selected item's Details open beside the list, also in fullscreen. The
   list starts from the seed document's incoming and outgoing relations, then

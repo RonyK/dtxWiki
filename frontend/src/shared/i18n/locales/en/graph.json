@@ -333,6 +333,7 @@
       "heading": "Graph view",
       "compare": "Compare views",
       "seed": "Seed",
+      "locateCurrent": "Show {{label}} on the graph",
       "refresh": "Refresh graph",
       "fullscreen": "Graph fullscreen",
       "exitFullscreen": "Exit fullscreen",
