@@ -261,6 +261,12 @@ describe("InboxItemRow", () => {
       ...base, kind: "access_key_expiry", archived: true,
       display: { title: "Expiring notice", params: { stage: "expired", visible_until: until } },
     };
+    // The server's clock runs 5 seconds behind the browser for this notice.
+    const laggingUntil = "2031-01-01T00:03:00Z";
+    const lagging: InboxItem = {
+      ...base, kind: "access_key_expiry", item_key: "lagging", archived: true,
+      display: { title: "Lagging notice", params: { stage: "expired", visible_until: laggingUntil } },
+    };
     const kept: InboxItem[] = [
       { ...base, item_key: "first", archived: true, display: { title: "First archive", params: {} } },
       { ...base, item_key: "last", archived: true, display: { title: "Last archive", params: {} } },
@@ -269,8 +275,11 @@ describe("InboxItemRow", () => {
       const query = new URL(String(url)).searchParams;
       const archived = query.get("state") === "archived";
       const more = query.has("cursor");
-      const items = !archived ? [] : !more ? [kept[0]]
-        : Date.now() < new Date(until).getTime() ? [expiring, kept[1]] : [kept[1]];
+      const items = !archived ? [] : !more ? [kept[0]] : [
+        ...(Date.now() < new Date(until).getTime() ? [expiring] : []),
+        ...(Date.now() < new Date(laggingUntil).getTime() + 5_000 ? [lagging] : []),
+        kept[1],
+      ];
       return {
         ok: true, status: 200,
         json: async () => ({ data: {
@@ -297,8 +306,17 @@ describe("InboxItemRow", () => {
     expect(screen.getByText("Last archive")).toBeVisible();
     expect(fetchMock).toHaveBeenCalledTimes(initialRequests + 2);
 
+    // At its deadline the server still lists the lagging notice; a delayed
+    // retry removes it instead of leaving it until the next user action.
+    await act(async () => { await vi.advanceTimersByTimeAsync(90_000); });
+    expect(screen.getByText("Lagging notice")).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledTimes(initialRequests + 4);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(screen.queryByText("Lagging notice")).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(initialRequests + 6);
+
     unmount();
     await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
-    expect(fetchMock).toHaveBeenCalledTimes(initialRequests + 2);
+    expect(fetchMock).toHaveBeenCalledTimes(initialRequests + 6);
   });
 });

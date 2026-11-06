@@ -41,6 +41,10 @@ function withItem(page: InboxPage, next: InboxItem, state: InboxState): InboxPag
   return { ...page, status_items: replace(page.status_items), items: replace(page.items) };
 }
 
+// A stated deadline is checked when it passes, then again after these delays
+// while the server still lists the item (its clock may run behind ours).
+const EXPIRY_REFRESH_DELAYS_MS = [0, 5_000, 30_000, 120_000];
+
 // Short within the current year; the year appears once an item is older.
 function formatItemTime(date: Date, locale: string) {
   const year = date.getFullYear() === new Date().getFullYear() ? undefined : "numeric";
@@ -216,13 +220,14 @@ export function InboxScreen() {
   const requestRef = useRef(0);
   const refreshRef = useRef(0);
   const loadedPagesRef = useRef(1);
-  const expiredThroughRef = useRef(-Infinity);
+  // Refreshes already made for each stated deadline (ms) in this view.
+  const expiryAttemptsRef = useRef(new Map<number, number>());
 
   const load = useCallback(async () => {
     const request = ++requestRef.current;
     ++refreshRef.current;
     loadedPagesRef.current = 1;
-    expiredThroughRef.current = -Infinity;
+    expiryAttemptsRef.current = new Map();
     setLoadingMore(false);
     setRefreshing(false);
     setBusyKey(null);
@@ -279,23 +284,33 @@ export function InboxScreen() {
 
   useEffect(() => {
     if (!page || refreshing) return;
-    const deadlines = [...page.status_items, ...page.items]
-      .map((item) => inboxVisibleUntil(item)?.getTime())
-      .filter((at): at is number => at !== undefined && at > expiredThroughRef.current);
-    const deadline = Math.min(...deadlines);
-    if (!Number.isFinite(deadline)) return;
+    const attempts = expiryAttemptsRef.current;
+    const pending = [...new Set(
+      [...page.status_items, ...page.items]
+        .map((item) => inboxVisibleUntil(item)?.getTime())
+        .filter((at): at is number => at !== undefined),
+    )]
+      .filter((at) => (attempts.get(at) ?? 0) < EXPIRY_REFRESH_DELAYS_MS.length)
+      .map((at) => ({ at, fireAt: at + EXPIRY_REFRESH_DELAYS_MS[attempts.get(at) ?? 0] }));
+    if (pending.length === 0) return;
+    const fireAt = Math.min(...pending.map((deadline) => deadline.fireAt));
     let timer: number;
     function schedule() {
       // setTimeout overflows beyond about 25 days. Recheck a distant deadline
       // locally, and only query the server once its stated time is reached.
-      const remaining = deadline - Date.now();
+      const remaining = fireAt - Date.now();
       timer = window.setTimeout(() => {
-        if (Date.now() < deadline) {
+        if (Date.now() < fireAt) {
           schedule();
           return;
         }
-        // A failed request or a clock difference must not create a retry loop.
-        expiredThroughRef.current = deadline;
+        // Count this refresh for every deadline it covers. A server clock
+        // behind the browser keeps the item a little longer, so the next
+        // attempt follows a delay; after the last one the deadline is left
+        // alone, and a failed request cannot loop either.
+        for (const deadline of pending) {
+          if (deadline.fireAt <= fireAt) attempts.set(deadline.at, (attempts.get(deadline.at) ?? 0) + 1);
+        }
         void refresh().then((applied) => { if (applied) notifyInboxChanged(); });
       }, Math.max(0, Math.min(remaining, 2_147_483_647)));
     }

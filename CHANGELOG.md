@@ -60,7 +60,12 @@
   instead of one query per item.
 - Refill capped Inbox lists after marks while retaining loaded message pages.
   Update removal countdowns while the screen is open and refresh loaded pages
-  when an item's stated visibility ends.
+  when an item's stated visibility ends. If the server still lists the item,
+  for example because its clock runs behind the browser's, refresh again after
+  5 seconds, 30 seconds and 2 minutes, then stop.
+- Migration `00ba02774c4a` adds partial indexes on archived entries of
+  `workspace_inbox_entry` and `account_inbox_entry` in Archived list order, so
+  an Archived page no longer reads and sorts the recipient's whole history.
 
 ## 0.2.1 — 2026-11-04
 

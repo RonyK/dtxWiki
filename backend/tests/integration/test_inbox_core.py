@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from backend.models.inbox import WorkspaceInboxEntry
 from backend.policy.auth import ActorContext
@@ -215,8 +215,27 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
     assert mark("q2", "r1", kind="test.status", read=False).applied
     newest_archive_first = ["q6", "q3", "q2", "q1", "note"]
     lookups.clear()
-    assert [i.item_key for i in page(state="archived").items] == newest_archive_first
+    plan = []
+
+    def explain(_conn, cursor, statement, parameters, _context, _many):
+        # The Archived page reads its partial index in order, not the
+        # recipient's whole history plus a sort.
+        if not plan and "ORDER BY workspace_inbox_entry.updated_at DESC" in statement:
+            explained = cursor.connection.execute(
+                f"EXPLAIN QUERY PLAN {statement}", parameters
+            )
+            plan.extend(row[-1] for row in explained)
+
+    engine = session_factory.kw["bind"]
+    event.listen(engine, "before_cursor_execute", explain)
+    try:
+        archived_items = page(state="archived").items
+    finally:
+        event.remove(engine, "before_cursor_execute", explain)
+    assert [i.item_key for i in archived_items] == newest_archive_first
     assert len(lookups) == 1
+    assert any("ix_workspace_inbox_entry_archived" in step for step in plan)
+    assert not any("TEMP B-TREE" in step for step in plan)
 
     def archived_keys(service):
         keys, cursor = [], None
