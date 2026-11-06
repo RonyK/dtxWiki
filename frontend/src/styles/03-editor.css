@@ -7166,7 +7166,7 @@ button.graph-seed-pill:focus-visible { outline: 2px solid var(--context); outlin
 /* One shrinkable column: a long unwrapped row must not widen the list past the stage. */
 /* --graph-list-head-size is the sticky head's measured height. Rows scroll
    below everything stuck at the top: hub and keyboard focus stop under it. */
-.graph-list-view { --graph-list-sticky-top: var(--graph-list-head-size, 0px); display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; min-width: 0; padding: 14px 16px 18px; }
+.graph-list-view { --graph-list-sticky-top: var(--graph-list-head-size, 0px); container: graph-list / inline-size; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; min-width: 0; padding: 14px 16px 18px; }
 .graph-list-view :is(button, a, input) { scroll-margin-top: calc(var(--graph-list-sticky-top) + 8px); }
 .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-view { padding-right: 328px; }
 /* The head (title, counts, search) stays at the top. Its background spans the
@@ -7205,6 +7205,10 @@ button.graph-seed-pill:focus-visible { outline: 2px solid var(--context); outlin
 .graph-list-bowtie-head { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 4px; }
 .graph-list-bowtie-head .relation-list-fold-title { font-size: 12px; font-weight: 700; }
 .graph-list-bowtie-hub { position: sticky; top: calc(var(--graph-list-sticky-top) + 8px); display: flex; justify-content: center; padding: 34px 6px 0; }
+/* The centre track is auto: cap the hub to a third of the list so a long seed
+   title cannot squeeze the incoming and outgoing columns. The pill shortens
+   the title instead; the full title stays in its tooltip. */
+.graph-list-bowtie > .graph-list-bowtie-hub { box-sizing: border-box; min-width: 0; max-width: 34cqi; }
 .graph-list-bowtie-none { margin: 4px; color: var(--ink-muted); font-size: 12px; }
 .graph-list-bowtie-hub.is-alone { position: static; justify-content: flex-start; padding: 8px 0; }
 .graph-list-bowtie-row { display: grid; grid-template-columns: minmax(0, 1fr) auto 30px; align-items: center; column-gap: 2px; padding: 3px 0; border-top: 1px solid var(--border); }
