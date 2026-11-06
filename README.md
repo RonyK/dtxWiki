@@ -2,7 +2,7 @@
 
 **Give your AI the knowledge you've already built.**
 
-[Website](https://www.dtxwiki.com/) · [Documentation](https://docs.dtxwiki.com/) · [PyPI](https://pypi.org/project/dtxwiki/) · [한국어](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/README.ko.md)
+[Website](https://www.dtxwiki.com/) · [Documentation](https://docs.dtxwiki.com/) · [PyPI](https://pypi.org/project/dtxwiki/) · [한국어](https://github.com/dtxSuite/dtxWiki/blob/v0.2.2/README.ko.md)
 
 dtxWiki connects your notes, source materials, and decisions in a knowledge base
 that you and your AI tools can use together. Keep your reasoning and references
@@ -13,7 +13,7 @@ in **Library**, and connect supported AI apps through MCP (Model Context Protoco
 They can find, read, and update the same knowledge you work with, within the
 access you grant.
 
-[![Actual dtxWiki Context screen showing an onboarding plan, interview notes, and product decisions.](https://raw.githubusercontent.com/dtxSuite/dtxWiki/main/.github/assets/readme/context-preview.en.png)](https://raw.githubusercontent.com/dtxSuite/dtxWiki/main/.github/assets/readme/context-preview.en.png)
+[![Actual dtxWiki Context screen showing an onboarding plan, interview notes, and product decisions.](https://raw.githubusercontent.com/dtxSuite/dtxWiki/dev/.github/assets/readme/context-preview.en.png)](https://raw.githubusercontent.com/dtxSuite/dtxWiki/dev/.github/assets/readme/context-preview.en.png)
 
 *Context preview: an actual dtxWiki screen with sample project content.*
 
@@ -50,7 +50,7 @@ review withdraws the request; request review again when the draft is ready.
 - **Find your place when you return.** Mark pages as personal favorites and
   spot recent content changes and review states in the explorer.
 
-[![Actual dtxWiki Chats screen showing recorded MCP tool activity for a sample project.](https://raw.githubusercontent.com/dtxSuite/dtxWiki/main/.github/assets/readme/chats-preview.en.png)](https://raw.githubusercontent.com/dtxSuite/dtxWiki/main/.github/assets/readme/chats-preview.en.png)
+[![Actual dtxWiki Chats screen showing recorded MCP tool activity for a sample project.](https://raw.githubusercontent.com/dtxSuite/dtxWiki/dev/.github/assets/readme/chats-preview.en.png)](https://raw.githubusercontent.com/dtxSuite/dtxWiki/dev/.github/assets/readme/chats-preview.en.png)
 
 *Chats preview: recorded tool activity from a sample MCP session.*
 
@@ -60,12 +60,12 @@ write, organize, and search without an AI account or API key.
 
 ## Get started
 
-This guide is for **dtxWiki 0.2.1 (Beta)**. Start on your own computer, then follow
+This guide is for **dtxWiki 0.2.2 (Beta)**. Start on your own computer, then follow
 [Access from other devices](#server-access) and
 [Run in the background](#4-run-in-the-background) to share it with others.
 To register Claude Code or Codex CLI, follow
 [Connect MCP clients](#mcp-clients).
-For an existing installation, read [Upgrading to 0.2.1](#upgrade-021) before
+For an existing installation, read [Upgrading to 0.2.2](#upgrade-022) before
 starting the new server.
 
 ### 1. Install and start the web server
@@ -82,7 +82,7 @@ Linux or macOS (`python3` must be Python 3.12 or newer):
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install "dtxwiki==0.2.1"
+python -m pip install "dtxwiki==0.2.2"
 dtxwiki
 ```
 
@@ -91,7 +91,7 @@ Windows PowerShell (with Python 3.12 installed):
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install "dtxwiki==0.2.1"
+python -m pip install "dtxwiki==0.2.2"
 dtxwiki
 ```
 
@@ -106,14 +106,14 @@ or [uv](https://docs.astral.sh/uv/getting-started/installation/).
 The npm package launches the matching Python release through one of these tools.
 
 ```bash
-npx @dtxsuite/dtxwiki@0.2.1
+npx @dtxsuite/dtxwiki@0.2.2
 ```
 
 With npm, replace `dtxwiki` in foreground CLI commands below with
-`npx @dtxsuite/dtxwiki@0.2.1`. For a global installation, use
-`npm install --global @dtxsuite/dtxwiki@0.2.1`, then run `dtxwiki`.
+`npx @dtxsuite/dtxwiki@0.2.2`. For a global installation, use
+`npm install --global @dtxsuite/dtxwiki@0.2.2`, then run `dtxwiki`.
 The manual background examples use a direct Python installation, such as the
-pip environment above. See the [npm guide](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/npm/dtxwiki/README.md)
+pip environment above. See the [npm guide](https://github.com/dtxSuite/dtxWiki/blob/v0.2.2/npm/dtxwiki/README.md)
 for launcher details.
 
 The browser opens **[http://127.0.0.1:21080/](http://127.0.0.1:21080/)**.
@@ -132,7 +132,7 @@ Node.js 22.18 or newer with npm, and GNU Make. Clone the release, install its
 dependencies, and build the web UI:
 
 ```bash
-git clone --branch v0.2.1 https://github.com/dtxSuite/dtxWiki.git
+git clone --branch v0.2.2 https://github.com/dtxSuite/dtxWiki.git
 cd dtxWiki
 uv sync --locked --extra dev --python 3.12
 npm ci
@@ -141,7 +141,7 @@ source .venv/bin/activate
 dtxwiki
 ```
 
-For development servers and contributing, see [DEVELOPMENT.md](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/DEVELOPMENT.md).
+For development servers and contributing, see [DEVELOPMENT.md](https://github.com/dtxSuite/dtxWiki/blob/v0.2.2/DEVELOPMENT.md).
 
 </details>
 
@@ -209,27 +209,29 @@ server-admin permission does not automatically share workspace content.
   router's external port to this server. Set `DTXWIKI_PUBLIC_BASE_URL` to the
   actual browser URL, including the external port, and allow its host in
   `DTXWIKI_ALLOWED_HOSTS`.
-- `0.0.0.0` is the listening address, not a browser URL. HTTP does not encrypt
+- `0.0.0.0` is the listening address, not a browser URL. This trial keeps the
+  default `solo_local` [app mode](#run-modes), so the server prints a network
+  exposure warning. HTTP does not encrypt
   passwords or content; use it for a temporary trial. For regular internet
   access, use the HTTPS setup below.
 
 #### An HTTPS server for shared use
 
 Use an Ubuntu 22.04+ server with `sudo`, point your domain's DNS to it, and
-allow incoming **TCP 80 and 443**. On the server, download the 0.2.1 installer
+allow incoming **TCP 80 and 443**. On the server, download the 0.2.2 installer
 and its release wheel, then replace the domain and administrator email:
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y curl ca-certificates
-curl -fL https://raw.githubusercontent.com/dtxSuite/dtxWiki/v0.2.1/infra/prod/install.sh -o install-dtxwiki.sh
-curl -fL https://github.com/dtxSuite/dtxWiki/releases/download/v0.2.1/dtxwiki-0.2.1-py3-none-any.whl -o /tmp/dtxwiki-0.2.1-py3-none-any.whl
-chmod 0644 /tmp/dtxwiki-0.2.1-py3-none-any.whl
+curl -fL https://raw.githubusercontent.com/dtxSuite/dtxWiki/v0.2.2/infra/prod/install.sh -o install-dtxwiki.sh
+curl -fL https://github.com/dtxSuite/dtxWiki/releases/download/v0.2.2/dtxwiki-0.2.2-py3-none-any.whl -o /tmp/dtxwiki-0.2.2-py3-none-any.whl
+chmod 0644 /tmp/dtxwiki-0.2.2-py3-none-any.whl
 sudo bash install-dtxwiki.sh \
   --domain wiki.example.com \
   --email admin@example.com \
   --tls acme \
-  --wheel /tmp/dtxwiki-0.2.1-py3-none-any.whl
+  --wheel /tmp/dtxwiki-0.2.2-py3-none-any.whl
 ```
 
 The installer prepares Python, HTTPS, an administrator account, and services
@@ -239,8 +241,9 @@ one-time temporary password printed by the installer, then change it in
 Create team accounts with `sudo dtxwiki users add teammate@example.com`, then
 add them to the workspace in **Settings > Members & access**.
 
-This installation manages the server and worker as separate systemd services;
-it configures that mode for you. Do not launch another worker manually.
+The installer sets the `team` app mode and runs the server and worker as
+separate systemd services in `external` worker mode; see [Run modes](#run-modes).
+Do not launch another worker manually.
 Use the [deployment guide](https://docs.dtxwiki.com/docs/0.2/administration/deployment/)
 for private certificates, an existing proxy, or a package mirror.
 
@@ -314,7 +317,7 @@ sudo systemctl start dtxwiki dtxwiki-worker
 
 ### 5. Connect MCP clients
 
-[한국어: 같은 MCP 연결 안내](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/README.ko.md#mcp-clients)
+[한국어: 같은 MCP 연결 안내](https://github.com/dtxSuite/dtxWiki/blob/v0.2.2/README.ko.md#mcp-clients)
 
 Keep dtxWiki running and install Claude Code or Codex CLI on the client computer.
 The examples below connect to its Streamable HTTP endpoint using an access key
@@ -406,27 +409,8 @@ in a new session before starting Codex.
 
 #### Verify workspace access
 
-Every workspace-scoped MCP tool and prompt requires an explicit `workspace_id`.
-Use `list_my_workspaces` to find an accessible ID; a key's allowed workspace,
-the account default, and the browser selection do not supply a missing ID.
-Resource reads include it in `dtxwiki://workspaces/<workspace_id>/...`.
-
-MCP Context page inputs accept a page UUID or the returned `stable_url`
-(`/p/<workspace_id>/<page_id>`). A short `/p/<page_id>` locator is accepted
-only with an explicit matching `workspace_id`; it is not a browser permalink.
-Use returned `link_markdown` for document links. Library lookup paths such
-as `/library/<id>.md` retain their existing read meaning.
-
-`get_index` entries use internal `dtxwiki://index/<kind>/<id>` refs as their
-first Markdown link destination. Pass that destination unchanged to
-`get_index.node` for folders or `read_concept.path` for Context/Library,
-with the same explicit `workspace_id`. Use returned `link_markdown` in answers.
-
-Browser links to workspace content use `/workspaces/<workspace_id>/...`.
-Context document links use `/p/<workspace_id>/<page_id>`. Target-free entry
-pages can redirect to your last workspace, but old links such as
-`/context?target=<id>` and `/p/<page_id>` cannot infer one. Open the explicit
-link from the source workspace. Public pages keep `/w/<workspace_slug>/pages/<slug>`.
+Name the workspace in your request. The AI client looks up its ID through
+dtxWiki; the workspace selected in your browser is not used.
 
 A client reporting a connected server does not prove workspace or write access.
 Ask the client:
@@ -438,21 +422,36 @@ Replace the placeholders with a workspace and page you can access, then confirm
 that the guide and page are returned. Editors and Owners can also inspect the
 calls in **Chats** in that workspace; Viewers do not have access to Chats.
 If edits are refused, check the key's Write scope, allowed workspaces, and
-account role. Context changes
-are prepared as drafts for review.
+account role. Context changes are prepared as drafts for review.
 
-You can change an existing key's
-allowed workspaces in **Settings > MCP access** without registering the client
-again. For the permission rules, see
-[MCP workspace access in the deployment guide (Korean)](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/DEPLOYMENT.md#mcp-workspace-access).
+You can change an existing key's allowed workspaces in **Settings > MCP access**
+without registering the client again. For the permission rules, see
+[MCP workspace access in the deployment guide (Korean)](https://github.com/dtxSuite/dtxWiki/blob/v0.2.2/DEPLOYMENT.md#mcp-workspace-access).
 Other clients and OAuth compatibility are covered in
 [Connect an AI app](https://docs.dtxwiki.com/docs/0.2/integrations/mcp-connections/).
+
+<a id="run-modes"></a>
+
+## Run modes
+
+Two settings decide how dtxWiki runs. The setup paths above choose both, so
+change them only for a deployment you configure yourself.
+
+| Setting | Value | Chosen by | Behavior |
+| --- | --- | --- | --- |
+| `DTXWIKI_APP_MODE` | `solo_local` (default) | `dtxwiki`, `dtxwiki serve` | For use on this computer. Public sign-up is on unless `DTXWIKI_SIGNUP_ENABLED=false`. Listening on a network address, as in step 3, prints a warning. |
+| | `team` | HTTPS installer | A shared server. Public sign-up stays off until you enable it, and a session secret must be configured. |
+| `DTXWIKI_WORKER_MODE` | `managed` (default) | `dtxwiki`, `dtxwiki serve` | The web server starts and stops its own worker. Do not start another worker. |
+| | `external` | HTTPS installer (systemd), Docker images | A separate service runs the worker. `/health/ready` reports `worker=n/a`. |
+
+`DTXWIKI_APP_MODE` also accepts `solo_remote`. Like `team`, it keeps public
+sign-up off by default and needs a configured session secret.
 
 ## If setup gets stuck
 
 | Symptom | Check |
 | --- | --- |
-| `dtxwiki` command not found | For pip, activate the virtual environment from step 1. For npm, use `npx @dtxsuite/dtxwiki@0.2.1`. |
+| `dtxwiki` command not found | For pip, activate the virtual environment from step 1. For npm, use `npx @dtxsuite/dtxwiki@0.2.2`. |
 | Local access works, another device cannot connect | Bind with `--host 0.0.0.0`; check TCP 21080, router forwarding, and WSL/VM forwarding. |
 | Host validation rejects an IP or domain | Set `DTXWIKI_PUBLIC_BASE_URL` to the browser-visible base URL and add other IPs/names to `DTXWIKI_ALLOWED_HOSTS`. Do not use `/mcp` or `0.0.0.0` as the base URL. Restart after changing environment variables. |
 | `admin grant` cannot find the account | Use the same OS user and data directory as the server, and make sure the account already exists. |
@@ -463,23 +462,24 @@ Other clients and OAuth compatibility are covered in
 
 <a id="upgrade-013"></a>
 <a id="upgrade-021"></a>
+<a id="upgrade-022"></a>
 
-## Upgrading to 0.2.1
+## Upgrading to 0.2.2
 
 For systemd or Docker installations, follow the
 [maintenance guide](https://docs.dtxwiki.com/docs/0.2/administration/backup-upgrades/)
 for the deployment-specific update steps. For local installations, read the
-[release notes](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/CHANGELOG.md), stop
+[release notes](https://github.com/dtxSuite/dtxWiki/blob/v0.2.2/CHANGELOG.md), stop
 the server and every separately managed worker, then back up the database,
 files, and configuration.
 
-Install 0.2.1 using your existing installation method without starting the new
+Install 0.2.2 using your existing installation method without starting the new
 server. For pip, activate the existing virtual
-environment and run `python -m pip install --upgrade "dtxwiki==0.2.1"`.
-For npm, follow the [npm update instructions](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/npm/dtxwiki/README.md#updating).
+environment and run `python -m pip install --upgrade "dtxwiki==0.2.2"`.
+For npm, follow the [npm update instructions](https://github.com/dtxSuite/dtxWiki/blob/v0.2.2/npm/dtxwiki/README.md#updating).
 
 For an existing uv installation, use
-`uv tool install --force "dtxwiki==0.2.1"`. dtxWiki requires Python 3.12 or newer;
+`uv tool install --force "dtxwiki==0.2.2"`. dtxWiki requires Python 3.12 or newer;
 this command does not pin the interpreter. If you need a specific interpreter,
 add `--python <version-or-path>` with a supported version. Preserve your existing
 package index and authentication settings.
@@ -514,10 +514,11 @@ dtxwiki graph reproject --all-workspaces
 ```
 
 If a process manager runs a separate worker, set `DTXWIKI_WORKER_MODE=external`
-before starting the upgraded web server. The systemd updater sets this
-automatically; Docker images already default to external mode. Restart MCP
-clients after upgrading so they reload the updated tool definitions. Rollback
-requires the matching application version and its pre-upgrade database backup.
+([Run modes](#run-modes)) before starting the upgraded web server. The systemd
+updater sets this automatically; Docker images already default to `external`
+mode. Restart MCP clients after upgrading so they reload the updated tool
+definitions. Rollback requires the matching application version and its
+pre-upgrade database backup.
 
 ## Further reading
 
@@ -535,10 +536,10 @@ See the [full documentation](https://docs.dtxwiki.com/) for more workflows.
 Share a use case, suggest an improvement, or report a problem on
 [GitHub](https://github.com/dtxSuite/dtxWiki/issues).
 For code and documentation contributions, see the
-[contribution guide](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/CONTRIBUTING.md).
+[contribution guide](https://github.com/dtxSuite/dtxWiki/blob/v0.2.2/CONTRIBUTING.md).
 
 ## License
 
 dtxWiki is available under your choice of **AGPL-3.0-only OR Elastic-2.0**.
-See [LICENSE](https://github.com/dtxSuite/dtxWiki/blob/v0.2.1/LICENSE) for the terms,
+See [LICENSE](https://github.com/dtxSuite/dtxWiki/blob/v0.2.2/LICENSE) for the terms,
 third-party notices, and commercial licensing options.
