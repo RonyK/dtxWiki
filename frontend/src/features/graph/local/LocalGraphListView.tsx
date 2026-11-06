@@ -73,6 +73,20 @@ function useListWidth(ref: { current: HTMLElement | null }) {
   return width;
 }
 
+/** The sticky head's height, so the bow-tie hub and keyboard scrolling stop below it. */
+function useStickyHeadSize(rootRef: { current: HTMLElement | null }, headRef: { current: HTMLElement | null }) {
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const head = headRef.current;
+    if (!root || !head || typeof ResizeObserver === "undefined") return undefined;
+    const update = () => root.style.setProperty("--graph-list-head-size", `${head.offsetHeight}px`);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(head);
+    return () => observer.disconnect();
+  }, [headRef, rootRef]);
+}
+
 /** A list with one Tab entry. Row keys are unique; `targetOf` names what a row selects and highlights. */
 function RovingRows<T>({ className, handlers, items, keyOf, label, renderRow, scopeKey, targetOf }: {
   className: string;
@@ -117,7 +131,24 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
   const rootRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const width = useListWidth(rootRef);
+  const headRef = useRef<HTMLDivElement>(null);
+  useStickyHeadSize(rootRef, headRef);
   const wide = width === null || width >= BOW_TIE_MIN_WIDTH;
+  // Opening Details beside the list narrows it and re-lays it out (bow-tie to
+  // flow, rows wrap): keep the chosen row in view rather than where it was.
+  const chosenRef = useRef<HTMLElement | null>(null);
+  const select = useCallback((id: string, origin: RovingSelectionOrigin) => {
+    chosenRef.current = origin.control;
+    onSelect(id, origin);
+  }, [onSelect]);
+  useLayoutEffect(() => {
+    if (!selectedId) return;
+    const chosen = chosenRef.current;
+    const row = chosen?.isConnected && chosen.dataset.localGraphId === selectedId ? chosen
+      : Array.from(rootRef.current?.querySelectorAll<HTMLElement>('[aria-pressed="true"][data-local-graph-id]') ?? [])
+        .find((candidate) => candidate.dataset.localGraphId === selectedId);
+    row?.scrollIntoView?.({ block: "nearest" });
+  }, [selectedId, width]);
   const [query, setQuery] = useState("");
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
   const [paging, setPaging] = useState<{ analysis: LocalSceneAnalysis | null; query: string; limits: Record<string, number> }>({
@@ -176,7 +207,7 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
     return () => input.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  const handlers: RowHandlers = { active, describedBy: `${baseId}-hint`, onBlur, onFocus, onSelect, selectedId };
+  const handlers: RowHandlers = { active, describedBy: `${baseId}-hint`, onBlur, onFocus, onSelect: select, selectedId };
   const strokeSummary = (edges: readonly GraphEdge[]) => <RelationListSummary
     items={relationListStrokeSummary(edges, localStroke, LOCAL_STROKE_ORDER, localStrokeLabel(t))} />;
   const nodeSummary = (nodes: readonly GraphNode[]) => {
@@ -269,7 +300,7 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
           nodeView={nodeView}
           onRowBlur={(_, otherId) => onBlur(otherId)}
           onRowFocus={(_, otherId) => onFocus(otherId)}
-          onSelect={onSelect}
+          onSelect={select}
           openLinkTabIndex={-1}
           page={RELATION_LIST_PAGE}
           query={query}
@@ -303,7 +334,7 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
   const matchedEdges = searching ? analysis.edges.filter(edgeMatches).length : 0;
   return <section aria-labelledby={`${baseId}-title`} className="graph-list-view" data-testid="graph-list-view"
     data-layout={wide ? "bow-tie" : "flow"} ref={rootRef}>
-    <div className="graph-list-head">
+    <div className="graph-list-head" ref={headRef}>
       <div className="graph-list-title">
         <h4 id={`${baseId}-title`}>{t("graph.list.title")}</h4>
         <span className="graph-list-counts">{t("graph.list.counts", {
@@ -394,7 +425,6 @@ function BowTie({ direction, edgeView, handlers, limit, nodeView, onMore, scopeK
               <span className="relation-list-row-meta">
                 <RelationListChip chip={view.chip} />
                 {other ? <RelationListChip chip={other.chip} /> : null}
-                {view.note ? <span className="relation-list-row-meta-text">{view.note}</span> : null}
               </span>
             </button>
             <OpenOrSpacer node={other} />

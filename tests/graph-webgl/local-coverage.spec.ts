@@ -1066,6 +1066,9 @@ test("Local disappearing pointer member recovers scoped Escape without a keyboar
   const geometry = await localStageGeometry(graph);
   const native = await graph.locator("canvas.sigma-nodes").elementHandle();
 
+  // Pinning from More expanded the phone sheet over all but the list's top
+  // band; a reader collapses it to return to the list.
+  await details.getByRole("button", { name: "Collapse details", exact: true }).click();
   await nodes.locator('button[data-local-graph-id="node:folder"]').click();
   await expect(details.locator("h5.graph-details-title")).toHaveText("Visible Source Folder");
   // A folder's members are its outgoing relations (folder → member).

@@ -74,7 +74,9 @@
   list starts from the seed document's incoming and outgoing relations, then
   folds what the relation scope adds (relations between neighbors, two-step
   items and relations, items not connected to the seed), ten rows at a time
-  with one search box.
+  with one search box. The title, counts and search stay at the top while the
+  list scrolls, names wrap to two lines before they are cut, and the chosen
+  row stays in view when Details opens beside the list.
 - Show a selected node's relations in Details as one searchable flow (incoming,
   this item, outgoing; five per direction) and how the item is reached from the
   seed, replacing the separate neighbor, member and folder lists. A relation
