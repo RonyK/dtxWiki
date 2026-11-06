@@ -7152,7 +7152,7 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 .graph-status-actions button { display: flex; align-items: center; gap: 4px; border: 0; padding: 0; min-height: 24px; background: transparent; font: inherit; color: var(--ink-muted); cursor: pointer; }
 .graph-status-omitted { color: var(--ink-muted); }
 .graph-view .graph-parity-grid[hidden], .graph-frame > [hidden] { display: none; }
-.graph-frame .graph-legend { margin: 0; border-width: 1px 0 0; border-radius: 0; }
+.graph-frame .graph-legend { margin: 0; padding-top: 10px; border-width: 1px 0 0; border-radius: 0; }
 .graph-frame:fullscreen { width: 100vw; height: 100dvh; display: flex; flex-direction: column; overflow: auto; border-radius: 0; }
 .graph-frame:fullscreen .graph-local-stage { flex: 1; min-height: 240px; }
 .graph-frame:fullscreen .graph-canvas-frame { height: 100%; min-height: 100%; }
