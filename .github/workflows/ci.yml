@@ -20,7 +20,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -39,7 +39,7 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v5
       # tests/static runs node (the i18n coverage gate always; the e2e helper
       # self-runners when node_modules is present, which it is not here), so
@@ -61,7 +61,7 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v5
       - uses: actions/setup-node@v7
         with:
@@ -121,7 +121,7 @@ jobs:
             browsers: firefox webkit
             projects: --project=firefox --project=webkit
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v5
       - uses: actions/setup-node@v7
         with:
@@ -180,7 +180,7 @@ jobs:
     # which ubuntu-latest became in November 2026.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v5
       - uses: actions/setup-node@v7
         with:

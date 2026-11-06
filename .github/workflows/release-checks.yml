@@ -37,7 +37,7 @@ jobs:
         postgresql+pg8000://postgres:postgres@127.0.0.1:5432/dtxwiki_concurrency
       DTXWIKI_REQUIRE_POSTGRES_CONCURRENCY: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v5
       - name: Install Python dependencies
         run: uv sync --locked --extra dev
@@ -78,7 +78,7 @@ jobs:
   packaging:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v5
       # The release-gate validator tests start node (the gate script's i18n
       # coverage check), so pin it rather than inherit the runner's.
@@ -122,7 +122,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build the frontend stage of the image
         run: docker build --target frontend -f Dockerfile .
 
@@ -132,7 +132,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v5
       - uses: actions/setup-node@v7
         with:

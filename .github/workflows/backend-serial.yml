@@ -39,7 +39,7 @@ jobs:
         postgresql+pg8000://postgres:postgres@127.0.0.1:5432/dtxwiki_concurrency
       DTXWIKI_REQUIRE_POSTGRES_CONCURRENCY: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v5
       - name: Install Python dependencies
         run: uv sync --locked --extra dev
