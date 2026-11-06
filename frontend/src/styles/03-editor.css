@@ -778,8 +778,12 @@ body[data-focus-mode="true"] .main-surface {
 :root[data-theme="dark"] .graph-canvas,
 .graph-canvas[data-graph-theme="dark"] { color: #e5e7eb; }
 
+/* Same specificity as the dark-theme rules above and later in the file, so
+   system colours also win when a dark theme is active. */
 @media (forced-colors: active) {
-  :root {
+  :root,
+  :root[data-theme="dark"],
+  .graph-canvas[data-graph-theme="dark"] {
     --graph-surface: Canvas;
     --graph-node-context: CanvasText;
     --graph-node-library: CanvasText;

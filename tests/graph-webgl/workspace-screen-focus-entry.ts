@@ -385,7 +385,11 @@ window.__workspaceScreenFocus = {
     return {
       points: highlight.highlightedPointIndices ? Array.from(highlight.highlightedPointIndices) : null,
       links: highlight.highlightedLinkIndices ? Array.from(highlight.highlightedLinkIndices) : null,
-      selectedPoint: highlight.focusedPointIndex ?? null,
+      // The Map draws no native focused point; its selection ring names the row.
+      selectedPoint: (() => {
+        const value = document.querySelector<SVGSVGElement>("[data-workspace-map-selection-ring]")?.dataset.selectedPoint;
+        return value === undefined ? null : Number(value);
+      })(),
       selectedLink: highlight.focusedLinkIndex ?? null,
       positions: Array.from(graph?.getPointPositions() ?? []),
       pinned: graph ? [...(pinsByGraph.get(graph) ?? [])] : [],

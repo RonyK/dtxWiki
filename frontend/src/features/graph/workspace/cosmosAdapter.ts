@@ -255,6 +255,9 @@ export function createWorkspaceCosmosAdapter(
   let draggedPoint: { index: number; nodeKey: string; identityKey: string; startX: number; startY: number; moved: boolean } | null = null;
   let initialFadeZoom: number | null = null;
   let appliedFadeZoom: number | null = null;
+  // The native shader multiplies every point by this zoom-dependent scale.
+  let appliedPointSizeScale = 1;
+  let pointSpriteLimit: { ratio: number; diameter: number } | null = null;
   let fitReferencePending = false;
   let pendingViewport = options.initialViewport;
   // Native restoration narrows centers to Float32. Its asynchronous zoom end
@@ -365,9 +368,7 @@ export function createWorkspaceCosmosAdapter(
         diametersCss: buffers.pointSizes, pointShapes: buffers.pointShapes,
         origin: [2048, 2048], width, height });
       const zoomFactor = Math.min(5, Math.max(1, initial.referenceZoom * .01));
-      const gl = graph.getGpuSimulationFrame()?.gl;
-      const hardwareRange = gl?.getParameter(gl.ALIASED_POINT_SIZE_RANGE) as Float32Array | undefined;
-      const maxDiameterCss = hardwareRange ? hardwareRange[1] / (window.devicePixelRatio || 2) : Infinity;
+      const maxDiameterCss = maxPointDiameterCss();
       forceAtlas2Units = buildWorkspaceForceAtlas2Units({ positions: collisionSeed,
         diametersCss: Float32Array.from(buffers.pointSizes, size => Math.min(size * zoomFactor, maxDiameterCss)),
         pointShapes: buffers.pointShapes, origin: [2048, 2048], width, height });
@@ -381,10 +382,7 @@ export function createWorkspaceCosmosAdapter(
       if (!("setPointCollisionRadii" in graph) || typeof graph.setPointCollisionRadii !== "function") {
         throw new Error("Native per-point collision input is unavailable");
       }
-      const gl = graph.getGpuSimulationFrame()?.gl;
-      const range = gl?.getParameter(gl.ALIASED_POINT_SIZE_RANGE) as Float32Array | undefined;
-      const maxDiameterCss = range ? range[1] / (window.devicePixelRatio || 2) : Infinity;
-      const radii = buildWorkspaceNativeCollisionRadii(buffers.pointSizes, buffers.pointShapes, collisionBasis, maxDiameterCss);
+      const radii = buildWorkspaceNativeCollisionRadii(buffers.pointSizes, buffers.pointShapes, collisionBasis, maxPointDiameterCss());
       graph.setPointCollisionRadii(Float32Array.from(radii, radius => radius * nativeSpace.scale));
     }
     const forceConfig = forceBasisApplied || usesCpuLayout() ? {}
@@ -429,9 +427,8 @@ export function createWorkspaceCosmosAdapter(
     pointGreyoutColor: keepOverviewContext() ? tokens.node.folder : undefined,
     pointGreyoutOpacity: keepOverviewContext() ? 0.3 : undefined,
     linkGreyoutOpacity: keepOverviewContext() ? 0.08 : 0.1,
-    // The selection ring is drawn by the shape-following overlay below, like
-    // the Context graph's; the native ring is always a circle, so hide it.
-    focusedPointRingColor: [0, 0, 0, 0],
+    // No native focused point: its ring is always a circle and its colour
+    // keeps a fixed alpha. The shape-following overlay draws the selection.
     hoveredPointRingColor: interactionInk,
     renderHoveredPointRing: false,
     hoveredPointCursor: "pointer",
@@ -1113,15 +1110,40 @@ export function createWorkspaceCosmosAdapter(
     if (!initialFadeZoom || !Number.isFinite(zoom) || zoom <= 0 || zoom === appliedFadeZoom) return;
     const scale = zoom / initialFadeZoom;
     const [near, far] = baseLinkDistanceRange();
+    // Native's fixed-size shader still grows at k>100. Preserve canonical
+    // CSS bodies when a smaller native space needs a larger SDK zoom.
+    appliedPointSizeScale = Math.min(4, Math.max(1, Math.sqrt(scale)))
+      * Math.min(5, Math.max(1, zoom * .01))
+      / Math.min(5, Math.max(1, nativeSpace.toNativeZoom(zoom) * .01));
     graph.setConfigPartial({
       linkVisibilityDistanceRange: [near * scale, far * scale],
-      // Native's fixed-size shader still grows at k>100. Preserve canonical
-      // CSS bodies when a smaller native space needs a larger SDK zoom.
-      pointSizeScale: Math.min(4, Math.max(1, Math.sqrt(scale)))
-        * Math.min(5, Math.max(1, zoom * .01))
-        / Math.min(5, Math.max(1, nativeSpace.toNativeZoom(zoom) * .01)),
+      pointSizeScale: appliedPointSizeScale,
     });
     appliedFadeZoom = zoom;
+  }
+
+  /**
+   * The GPU's largest point sprite in CSS pixels; the native shader clamps to
+   * it. Read once per device pixel ratio: overlays ask on every frame.
+   */
+  function maxPointDiameterCss(): number {
+    const ratio = window.devicePixelRatio || 2;
+    if (pointSpriteLimit?.ratio === ratio) return pointSpriteLimit.diameter;
+    const gl = graph.getGpuSimulationFrame()?.gl;
+    const range = gl?.getParameter(gl.ALIASED_POINT_SIZE_RANGE) as Float32Array | undefined;
+    if (!range) return Infinity;
+    pointSpriteLimit = { ratio, diameter: range[1] / ratio };
+    return pointSpriteLimit.diameter;
+  }
+
+  /**
+   * A point's drawn CSS diameter at the current camera: the native shader's
+   * expression (size × pointSizeScale × held 1–5× zoom, clamped to the GPU
+   * sprite), which the picker mirrors too. Overlays must not use the bare size.
+   */
+  function renderedPointDiameter(index: number): number {
+    const zoomFactor = Math.min(5, Math.max(1, graph.getZoomLevel() * .01));
+    return Math.min(buffers.drawPointSizes[index] * appliedPointSizeScale * zoomFactor, maxPointDiameterCss());
   }
 
   function captureFitZoom() {
@@ -1491,6 +1513,7 @@ export function createWorkspaceCosmosAdapter(
    * The active point's ring follows its glyph (a Library square or a disc),
    * 2px clear of it, in the selection ink. The active point is always a
    * priority label candidate, so its tracked position is already bounded.
+   * `data-selected-point` names the selected row (not a focused one).
    */
   function updateSelectionRing() {
     if (!selectionRing) return;
@@ -1503,7 +1526,7 @@ export function createWorkspaceCosmosAdapter(
     const [x, y] = projectPoint(position);
     const library = columns.nodeKinds[index] === WORKSPACE_MAP_NODE_KIND.library;
     // The native square fills 0.8 of the point radius; discs fill all of it.
-    const radius = buffers.drawPointSizes[index] / 2 * (library ? 0.8 : 1);
+    const radius = renderedPointDiameter(index) / 2 * (library ? 0.8 : 1);
     const shape = library ? "square" : "circle";
     selectionRing.gap.setAttribute("d", outlinePathData(shapeOutline(shape, x, y, radius, GRAPH_RING_GAP_PX / 2)));
     selectionRing.ring.setAttribute("d", outlinePathData(shapeOutline(shape, x, y, radius, GRAPH_RING_GAP_PX + GRAPH_RING_WIDTH_PX / 2)));
@@ -1518,7 +1541,7 @@ export function createWorkspaceCosmosAdapter(
       if (position) {
         const [x, y] = projectPoint(position);
         chip.show(columns.nodeLabels[hoveredIndex], { x, y }, { kind: "node", id: columns.nodeIds[hoveredIndex] },
-          buffers.drawPointSizes[hoveredIndex] / 2);
+          renderedPointDiameter(hoveredIndex) / 2);
         return;
       }
     } else if (hoveredEdge !== null && showEdges) {
@@ -1581,7 +1604,6 @@ export function createWorkspaceCosmosAdapter(
         .filter((edge) => searchPoints.has(columns.edgeSources[edge])
           && searchPoints.has(columns.edgeTargets[edge]));
     graph.setConfigPartial({
-      focusedPointIndex: selectedId === null ? undefined : nodeById.get(selectedId),
       focusedLinkIndex: selectedId === null ? undefined : edgeById.get(selectedId),
       highlightedPointIndices: searchPoints === null ? star?.points
         : [...new Set([...searchPoints, ...(star?.points ?? [])])],
@@ -1615,6 +1637,9 @@ export function createWorkspaceCosmosAdapter(
       const active = activeIndex();
       if (active === null || !cachedLabelPositions?.has(active)) updateLabels();
     }
+    const selected = selectedId === null ? undefined : nodeById.get(selectedId);
+    if (selectionRing && selected !== undefined) selectionRing.svg.dataset.selectedPoint = String(selected);
+    else if (selectionRing) delete selectionRing.svg.dataset.selectedPoint;
     updateSelectionRing();
   }
 
