@@ -126,6 +126,55 @@ jobs:
       - name: Build the frontend stage of the image
         run: docker build --target frontend -f Dockerfile .
 
+  # Graph browser gates run for release qualification, outside ordinary CI.
+  graph-2k:
+    name: Graph (2K)
+    # Playwright 1.59 cannot install browser dependencies on ubuntu-26.04,
+    # which ubuntu-latest became in November 2026.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.18.0"
+          cache: npm
+      - name: Install Python dependencies
+        run: uv sync --locked --extra dev
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Verify Local Graph WebGL shaders
+        run: npm run test:graph-webgl -- --project=chromium
+      - name: Run the real-API 2K graph e2e
+        id: playwright
+        # The isolated wrapper and the 2K specs share this switch. Without it
+        # the acceptance silently skips despite a green release-check job.
+        env:
+          DTXWIKI_E2E_GRAPH_2K: "1"
+        run: >-
+          npm run test:e2e -- tests/e2e/workspace_graph_2k_real.spec.ts
+          tests/e2e/workspace_graph_reading_real.spec.ts
+          tests/e2e/workspace_graph_first_view.spec.ts
+          --project=chromium
+      # The HTML report inlines step titles, traces and attachments; scrub it
+      # exactly as the `e2e` job does before it is published.
+      - name: Redact the Playwright report before publishing it
+        if: always()
+        run: |
+          if [ -d playwright-report ]; then
+            bash scripts/redact_evidence.sh --dir playwright-report
+          fi
+      - name: Upload Playwright report
+        if: always() && (steps.playwright.outcome == 'success' || hashFiles('playwright-report/index.html') != '')
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-graph-2k-${{ github.run_id }}
+          path: playwright-report
+          if-no-files-found: error
+          retention-days: 14
+
   graph-10k:
     # Playwright 1.59 cannot install browser dependencies on ubuntu-26.04,
     # which ubuntu-latest became in November 2026.
@@ -146,7 +195,7 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Verify exact-scale benchmark guards
         run: node --test scripts/bench/graph/render_contract.test.mjs
-      # The WebGL gate's @pc10k cases; PR CI runs the rest of the gate.
+      # The WebGL gate's @pc10k cases; graph-2k runs the rest of the gate.
       - name: Verify PC 10K native WebGL cases
         run: npm run test:graph-webgl -- --project=chromium-pc10k --forbid-only
       - name: Verify PC 10K and mobile 2K capacity

@@ -18,6 +18,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 RELEASE_CHECKS = ROOT / ".github" / "workflows" / "release-checks.yml"
 CI = ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE_CHECK_JOBS = {
+    "graph-2k",
     "graph-10k",
     "docker-frontend",
     "packaging",

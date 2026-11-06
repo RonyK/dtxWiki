@@ -103,9 +103,15 @@ jobs:
 
   e2e:
     name: E2E (${{ matrix.name }})
-    # Playwright 1.59 cannot install browser dependencies on ubuntu-26.04,
-    # which ubuntu-latest became in November 2026.
     runs-on: ubuntu-24.04
+    # Match package-lock.json. Browsers and OS dependencies are preinstalled,
+    # avoiding the per-job apt downloads that stalled on the Ubuntu mirror.
+    container:
+      image: mcr.microsoft.com/playwright:v1.59.1-noble@sha256:b0ab6f3cb99aa7803adbc14d9027ec1785fc6e433b97e134e0f8fe61683b6b53
+      options: --init --ipc=host
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       # Together the legs must name every project in playwright.config.ts.
@@ -115,10 +121,8 @@ jobs:
       matrix:
         include:
           - name: chromium
-            browsers: chromium
             projects: --project=chromium
           - name: firefox-webkit
-            browsers: firefox webkit
             projects: --project=firefox --project=webkit
     steps:
       - uses: actions/checkout@v7
@@ -128,16 +132,17 @@ jobs:
           node-version: "22.18.0"
           cache: npm
       - name: Install Python dependencies
-        run: uv sync --locked --extra dev
+        run: |
+          uv sync --locked --extra dev
+          # The browser image need not supply a system Python for redaction.
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Install frontend dependencies
         run: npm ci
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps ${{ matrix.browsers }}
       # Standard profile: every spec on Chromium, @cross-browser specs on all
       # three. Each matrix job owns its database, backend and background worker.
       # The whole suite meets all three engines weekly, in
       # .github/workflows/e2e-browsers.yml. The real-API 2K specs skip here
-      # without DTXWIKI_E2E_GRAPH_2K; the `graph-2k` job runs them.
+      # without DTXWIKI_E2E_GRAPH_2K; Release checks runs them.
       - name: Run Playwright e2e
         id: playwright
         run: npm run test:e2e -- ${{ matrix.projects }}
@@ -166,58 +171,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: e2e-standard-${{ github.run_id }}-${{ matrix.name }}
-          path: playwright-report
-          if-no-files-found: error
-          retention-days: 14
-
-  # Graph runtime at the PR budget, beside the E2E legs so the chromium leg
-  # does not carry it too: the WebGL gate without its @pc10k cases
-  # (release-checks.yml `graph-10k` runs those) and the real-API 2K specs on
-  # their seeded corpus.
-  graph-2k:
-    name: Graph (2K)
-    # Playwright 1.59 cannot install browser dependencies on ubuntu-26.04,
-    # which ubuntu-latest became in November 2026.
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v5
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22.18.0"
-          cache: npm
-      - name: Install Python dependencies
-        run: uv sync --locked --extra dev
-      - name: Install frontend dependencies
-        run: npm ci
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-      - name: Verify Local Graph WebGL shaders
-        run: npm run test:graph-webgl -- --project=chromium
-      - name: Run the real-API 2K graph e2e
-        id: playwright
-        # The isolated wrapper and the 2K specs share this switch. Without it
-        # the acceptance silently skips on every PR despite a green job.
-        env:
-          DTXWIKI_E2E_GRAPH_2K: "1"
-        run: >-
-          npm run test:e2e -- tests/e2e/workspace_graph_2k_real.spec.ts
-          tests/e2e/workspace_graph_reading_real.spec.ts
-          tests/e2e/workspace_graph_first_view.spec.ts
-          --project=chromium
-      # The HTML report inlines step titles, traces and attachments; scrub it
-      # exactly as the `e2e` job does before it is published.
-      - name: Redact the Playwright report before publishing it
-        if: always()
-        run: |
-          if [ -d playwright-report ]; then
-            bash scripts/redact_evidence.sh --dir playwright-report
-          fi
-      - name: Upload Playwright report
-        if: always() && (steps.playwright.outcome == 'success' || hashFiles('playwright-report/index.html') != '')
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-graph-2k-${{ github.run_id }}
           path: playwright-report
           if-no-files-found: error
           retention-days: 14

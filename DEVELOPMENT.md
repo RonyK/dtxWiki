@@ -264,25 +264,28 @@ npm run lint:md            # markdown lint (markdownlint-cli2)
 
 일반 `CI` 워크플로(`.github/workflows/ci.yml`)는 pull request와 `main` push에서
 leak scan, backend·static, frontend·desktop, 기본 E2E 검증을 실행합니다.
-Graph 검증은 별도 `graph-2k` job이 E2E와 병렬로 실행합니다. 이 job은 `@pc10k`를 제외한
-WebGL gate(`npm run test:graph-webgl -- --project=chromium`)와 `DTXWIKI_E2E_GRAPH_2K=1`
-실제 API 2K spec을 돌립니다. WebGL gate의 `@pc10k` 케이스(`--project=chromium-pc10k`)는
-`Release checks`의 `graph-10k`가 담당합니다. 대규모 입력으로 처리량·상한을 확인하는
-backend 용량 검사는 `release_scale` marker를 붙입니다. PR의 `make test-backend`는 이를
+기본 E2E는 Chromium과 Firefox/WebKit 두 job으로 나누고, 브라우저·OS 의존성이
+포함된 Playwright 공식 컨테이너에서 실행합니다. 컨테이너 버전은 `package-lock.json`의
+Playwright 버전과 맞춰 함께 갱신합니다. Node는 기존 `22.18.0`을 사용합니다.
+Graph (2K)는 일반 CI에서 제외하고 `Release checks`의 `graph-2k` job에서 실행합니다.
+이 job은 `@pc10k`를 제외한 WebGL gate(`npm run test:graph-webgl -- --project=chromium`)와
+`DTXWIKI_E2E_GRAPH_2K=1` 실제 API 2K spec을 돌립니다. WebGL gate의 `@pc10k`
+케이스(`--project=chromium-pc10k`)는 같은 워크플로의 `graph-10k`가 담당합니다.
+대규모 입력으로 처리량·상한을 확인하는 backend 용량 검사는 `release_scale` marker를 붙입니다. PR의 `make test-backend`는 이를
 제외하고, `Release checks`의 `postgres-migration` job이 실행합니다(로컬:
 `make test-backend-scale`).
 실제 schema upgrade·downgrade·호환성 회귀 검사는 `release_migration` marker로 분리합니다.
 일반 backend CI와 serial lane에서는 제외하고, `Release checks`에서
 `VENV=.venv make test-migrations`로 SQLite·PostgreSQL을 함께 실행합니다. 일반 startup,
 inventory 단위 테스트와 제품 테스트의 DB 준비 fixture는 PR 검증에 유지합니다.
-`graph-10k`, `docker-frontend`, `packaging`, `postgres-migration`은 별도의
+`graph-2k`, `graph-10k`, `docker-frontend`, `packaging`, `postgres-migration`은 별도의
 `Release checks` 워크플로(`.github/workflows/release-checks.yml`)에서 실행합니다.
 `packaging` job에는 acceptance·release-gate 검증과 정제된 로그 업로드도 포함됩니다.
 
 기본 branch에 워크플로가 반영되면 GitHub Actions의 `Release checks` → `Run workflow`에서
 대상 branch를 선택해 [수동 실행](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)합니다.
 `v*` tag push로 시작하는 `release`
-워크플로는 같은 commit의 `Release checks`를 호출하고, 네 job이 모두 성공한 뒤
+워크플로는 같은 commit의 `Release checks`를 호출하고, 다섯 job이 모두 성공한 뒤
 패키지 빌드와 PyPI·npm 게시, GitHub Release 생성을 진행합니다. 수동 `Release checks`
 실행은 검증과 증거 업로드만 수행합니다.
 
@@ -331,7 +334,7 @@ npm run test:e2e
 # PR CI와 같은 project 분할. 아래 두 명령은 순서대로 실행합니다.
 npm run test:e2e -- --project=chromium
 npm run test:e2e -- --project=firefox --project=webkit
-# PR CI graph-2k job과 같은 범위
+# Release checks의 graph-2k job과 같은 범위
 npm run test:graph-webgl -- --project=chromium
 DTXWIKI_E2E_GRAPH_2K=1 npm run test:e2e -- tests/e2e/workspace_graph_2k_real.spec.ts \
   tests/e2e/workspace_graph_reading_real.spec.ts tests/e2e/workspace_graph_first_view.spec.ts \

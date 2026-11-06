@@ -12,8 +12,8 @@ export default defineConfig({
   workers: 1,
   reporter: "list",
   use: { screenshot: "only-on-failure", trace: "off" },
-  // Titles tagged @pc10k drive 10K-node workloads. PR CI (ci.yml `graph-2k`)
-  // runs `--project=chromium`; release-checks.yml `graph-10k` runs
+  // Titles tagged @pc10k drive 10K-node workloads. Release checks runs
+  // `--project=chromium` in `graph-2k`; its `graph-10k` job runs
   // `--project=chromium-pc10k` beside the real-API 10K specs. A local run
   // without --project runs both.
   projects: [
