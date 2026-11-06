@@ -7,8 +7,9 @@ import {
   deriveGraphScene,
   graphFacets,
   graphPayloadToNeighbors,
-  graphSceneToMermaid,
 } from "../graphModel";
+import { graphSceneToMermaid } from "../local/staticDiagram";
+import { readGraphTokens } from "../shared/graphTokens";
 import type { GraphEdge, GraphNode, GraphTimelineEvent } from "../../../shared/api/graph";
 import { graphFixture } from "./graphFixture";
 
@@ -207,7 +208,7 @@ describe("graphModel", () => {
       .toBe("current relationship");
   });
 
-  it("derives inspector groups and escapes untrusted Mermaid control text", () => {
+  it("derives inspector groups and draws an escaped static diagram in the legend vocabulary", () => {
     const payload = graphFixture();
     const neighbors = graphPayloadToNeighbors(payload);
     expect(neighbors?.backlinks).toEqual([
@@ -226,9 +227,22 @@ describe("graphModel", () => {
 
     const scene = deriveGraphScene(payload, graphFacets(payload), null);
     scene.nodes[0] = { ...scene.nodes[0], label: `unsafe "|<tag>` };
-    const mermaid = graphSceneToMermaid(scene);
-    expect(mermaid).toContain("&quot;&#124;&lt;tag&gt;");
-    expect(mermaid).not.toContain(`"|<tag>`);
+    const visuals = { tokens: readGraphTokens(document.documentElement), ink: "#0f172a", forcedColors: false };
+    const diagram = graphSceneToMermaid(scene, visuals, { iconSlot: true });
+    expect(diagram.source).toContain("&quot;&#124;&lt;tag&gt;");
+    expect(diagram.source).not.toContain(`"|<tag>`);
+    // Seed first; Mermaid lays its title out bold, at the weight it is drawn.
+    expect(diagram.nodes).toEqual([
+      { kind: "context", seed: true }, { kind: "conversation", seed: false }, { kind: "context", seed: false },
+    ]);
+    expect(diagram.source).toContain('n0("Mm unsafe');
+    expect(diagram.source).toContain('"themeCSS":".contextSeed .text-inner-tspan { font-weight: bold; }"');
+    expect(diagram.source).toContain("classDef contextSeed fill:#7c3aed,stroke:#7c3aed,stroke-width:1.5px,color:#ffffff");
+    expect(diagram.source).toContain("classDef conversation fill:#e6f3f9,stroke:#0284c7,stroke-width:1.5px,color:#0f172a");
+    expect(diagram.source).toMatch(/^ {2}linkStyle \d+ stroke:#64748b,stroke-width:2px$/m);
+    expect(diagram.source).toMatch(/^ {2}linkStyle \d+ stroke:#0f9f8f,stroke-width:2px,stroke-dasharray:7 4$/m);
+    // An exported file has no slot words for a renderer that cannot draw glyphs.
+    expect(graphSceneToMermaid(scene, visuals, { iconSlot: false }).source).not.toMatch(/\bMm\b|wrappingWidth/);
   });
 
   it("does not project structural tree edges into the legacy neighbors panel", () => {

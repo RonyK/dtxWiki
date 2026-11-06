@@ -1855,18 +1855,31 @@ type MermaidDiagramState =
 
 let mermaidDiagramSequence = 0;
 
-function MermaidDiagram({
+/**
+ * A Mermaid diagram rendered through the sanitising pipeline, with the
+ * zoom viewer. `decorateSvg` may add to the sanitised SVG before it is shown
+ * (the graph's static view draws its legend glyphs this way).
+ */
+export function MermaidDiagram({
   source,
-  sourceAnchorAttributes,
+  sourceAnchorAttributes = {},
+  decorateSvg,
 }: {
   source: string;
-  sourceAnchorAttributes: SourceAnchorAttributes;
+  sourceAnchorAttributes?: SourceAnchorAttributes;
+  decorateSvg?: (svg: string) => string;
 }) {
   const { t } = useTranslation("pages");
   const figureRef = useRef<HTMLElement | null>(null);
   const [state, setState] = useState<MermaidDiagramState>({ status: "rendering" });
   const [zoomOpen, setZoomOpen] = useState(false);
   const titleId = useId();
+  // The latest decorator, without re-rendering the diagram when only its
+  // identity changes: a decorator's inputs are reflected in `source`.
+  const decorateSvgRef = useRef(decorateSvg);
+  useLayoutEffect(() => {
+    decorateSvgRef.current = decorateSvg;
+  }, [decorateSvg]);
 
   useEffect(() => {
     let canceled = false;
@@ -1876,7 +1889,8 @@ function MermaidDiagram({
     void renderMermaidDiagram(source, diagramId)
       .then((svg) => {
         if (!canceled) {
-          setState({ status: "rendered", svg });
+          const decorate = decorateSvgRef.current;
+          setState({ status: "rendered", svg: decorate ? decorate(svg) : svg });
         }
       })
       .catch((error: unknown) => {

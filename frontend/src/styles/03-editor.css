@@ -1148,8 +1148,6 @@ body[data-focus-mode="true"] .main-surface {
   color: var(--ink);
 }
 
-.graph-static-fallback .markdown-view { padding: 0 12px 12px; }
-
 .graph-print-fallback { display: none; }
 
 @container graph-view (max-width: 760px) {
@@ -7153,6 +7151,8 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 .graph-status-omitted { color: var(--ink-muted); }
 .graph-view .graph-parity-grid[hidden], .graph-frame > [hidden] { display: none; }
 .graph-frame .graph-legend { margin: 0; padding-top: 10px; border-width: 1px 0 0; border-radius: 0; }
+/* The static diagram spans the graph view, inset like the legend rows. */
+.graph-static-fallback > .mermaid-diagram { margin: 0 12px 12px; }
 .graph-frame:fullscreen { width: 100vw; height: 100dvh; display: flex; flex-direction: column; overflow: auto; border-radius: 0; }
 .graph-frame:fullscreen .graph-local-stage { flex: 1; min-height: 240px; }
 .graph-frame:fullscreen .graph-canvas-frame { height: 100%; min-height: 100%; }

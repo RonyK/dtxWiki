@@ -5,9 +5,10 @@ import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
-import { MarkdownView } from "../pages/MarkdownView";
+import { MermaidDiagram } from "../pages/MarkdownView";
 import { LOCAL_EDGE_VISUAL_KIND_ORDER, localEdgeKindsFor, localEdgeVisualKind } from "./local/edgeKinds";
 import { localNodeVisualKind } from "./local/nodeVisual";
+import { decorateStaticDiagramSvg, graphSceneToMermaid, type StaticDiagramVisuals } from "./local/staticDiagram";
 import { GraphCameraControls, GraphPreviewBadge, GraphScopeSelector, GraphTypeSelector, eventInvolves } from "./local/LocalGraphChrome";
 import { LocalGraphTimeline, LocalTimelineMark } from "./local/LocalGraphTimeline";
 import { timelinePresentation } from "./local/timelinePresentation";
@@ -43,7 +44,6 @@ import {
   coAccessSentence,
   deriveGraphScene,
   graphFacets,
-  graphSceneToMermaid,
   sortedTimeline,
   type GraphFilters,
   type GraphScene,
@@ -137,8 +137,9 @@ export function GraphView({
   const [retryAction, setRetryAction] = useState<{ key: string; action: () => Promise<void> } | null>(null);
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const forcedColors = useMediaQuery("(forced-colors: active)");
-  const tokens = useLocalGraphTokens(graphRegionRef, forcedColors);
+  const { tokens, ink } = useLocalGraphTokens(graphRegionRef, forcedColors);
   const nodeVisuals = useMemo(() => ({ tokens, forcedColors }), [tokens, forcedColors]);
+  const staticVisuals = useMemo<StaticDiagramVisuals>(() => ({ tokens, ink, forcedColors }), [tokens, ink, forcedColors]);
   const expansionAvailability = payload.capabilities?.expand === false
     ? "unsupported"
     : payload.query.seeds.length >= 8
@@ -208,11 +209,15 @@ export function GraphView({
   const staticScene = useMemo(() => localizedGraphScene(applyHistoryVisibility(
     deriveGraphScene(staticPayload, filters, timelineCursor)), t),
   [applyHistoryVisibility, filters, staticPayload, t, timelineCursor]);
-  const mermaidSource = useMemo(
+  const staticDiagram = useMemo(
     () => staticOpen && staticScene.edges.length <= STATIC_DIAGRAM_EDGE_LIMIT
-      ? graphSceneToMermaid(staticScene)
+      ? graphSceneToMermaid(staticScene, staticVisuals, { iconSlot: true })
       : null,
-    [staticScene, staticOpen],
+    [staticScene, staticOpen, staticVisuals],
+  );
+  const decorateStaticSvg = useCallback(
+    (svg: string) => staticDiagram ? decorateStaticDiagramSvg(svg, staticDiagram.nodes, staticVisuals) : svg,
+    [staticDiagram, staticVisuals],
   );
   const selectedNode = scene.nodes.find((node) => node.id === selectedId)
     ?? (historical ? historyCatalog.nodes.find((node) => node.id === selectedId) : null) ?? null;
@@ -628,7 +633,7 @@ export function GraphView({
   }
 
   function exportFilteredScene() {
-    const blob = new Blob([graphSceneToMermaid(scene)], {
+    const blob = new Blob([graphSceneToMermaid(scene, staticVisuals, { iconSlot: false }).source], {
       type: "text/plain;charset=utf-8",
     });
     const url = URL.createObjectURL(blob);
@@ -948,11 +953,8 @@ export function GraphView({
             ? t("graph.staticFallbackFailed", { defaultValue: "Static graph fallback" })
             : t("graph.staticFallback", { defaultValue: "Static graph view" })}
         </summary>
-        {staticOpen ? mermaidSource !== null ? (
-          <MarkdownView
-            body={`\`\`\`mermaid\n${mermaidSource}\n\`\`\``}
-            wikilinkMode="plain"
-          />
+        {staticOpen ? staticDiagram !== null ? (
+          <MermaidDiagram decorateSvg={decorateStaticSvg} source={staticDiagram.source} />
         ) : (
           <>
             <p>{t("graph.staticFallbackList", {
@@ -1780,15 +1782,24 @@ function graphWarningMessages(t: TFunction, codes: string[], currentMode: boolea
 function readLocalGraphTokens(element: Element, forcedColors: boolean) {
   const theme = element.closest("[data-graph-theme]")?.getAttribute("data-graph-theme")
     ?? element.closest("[data-theme]")?.getAttribute("data-theme");
-  return readGraphTokens(element, forcedColors ? "forced" : theme === "dark" ? "dark" : "light");
+  return {
+    tokens: readGraphTokens(element, forcedColors ? "forced" : theme === "dark" ? "dark" : "light"),
+    // Static diagram titles take the view's own text colour.
+    ink: getComputedStyle(element).color || "#0f172a",
+  };
 }
 
 function useLocalGraphTokens(regionRef: { current: HTMLElement | null }, forcedColors: boolean) {
-  const [tokens, setTokens] = useState(() => readLocalGraphTokens(document.documentElement, forcedColors));
+  const [visuals, setVisuals] = useState(() => readLocalGraphTokens(document.documentElement, forcedColors));
   useLayoutEffect(() => {
     const region = regionRef.current;
     if (!region) return undefined;
-    const update = () => setTokens(readLocalGraphTokens(region, forcedColors));
+    // Ancestor class/style changes (a dialog opening) re-read the tokens;
+    // unchanged values keep their identity, so nothing downstream redraws.
+    const update = () => {
+      const next = readLocalGraphTokens(region, forcedColors);
+      setVisuals((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+    };
     update();
     if (typeof MutationObserver === "undefined") return undefined;
     // One observer per GraphView, not per row. Ancestors supply inherited
@@ -1798,7 +1809,7 @@ function useLocalGraphTokens(regionRef: { current: HTMLElement | null }, forcedC
     for (let element: Element | null = region; element; element = element.parentElement) observer.observe(element, attributes);
     return () => observer.disconnect();
   }, [forcedColors, regionRef]);
-  return tokens;
+  return visuals;
 }
 
 function useMediaQuery(query: string) {
