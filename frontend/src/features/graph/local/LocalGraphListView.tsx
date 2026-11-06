@@ -168,8 +168,21 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
   }, [analysis, context]);
   const edgeView = useCallback((edge: GraphEdge) => localEdgeView(edge, context, labelOf), [context, labelOf]);
   const matches = useMemo(() => localListMatches(query), [query]);
-  const edgeMatches = useCallback((edge: GraphEdge) => matches(localEdgeSearchText(edge, edgeView(edge), labelOf)),
-    [edgeView, labelOf, matches]);
+  const nodeText = useCallback((id: string) => {
+    const node = analysis.nodesById.get(id);
+    return node ? localNodeSearchText(node, t) : "";
+  }, [analysis, t]);
+  const relationText = useCallback((edge: GraphEdge) => localEdgeSearchText(edge, edgeView(edge), labelOf),
+    [edgeView, labelOf]);
+  // A relation matches by its own names or by either end (a node matches by
+  // its name and kind names). In a seed's group every row has the seed at one
+  // end, so a row matches by the relation or its far end only.
+  const edgeMatches = useCallback((edge: GraphEdge) => matches(relationText(edge), nodeText(edge.source), nodeText(edge.target)),
+    [matches, nodeText, relationText]);
+  const seedRowText = useCallback((edge: GraphEdge, otherId: string) => `${relationText(edge)} ${nodeText(otherId)}`,
+    [nodeText, relationText]);
+  const seedRowMatches = useCallback((seedId: string) => (edge: GraphEdge) =>
+    matches(seedRowText(edge, edge.source === seedId ? edge.target : edge.source)), [matches, seedRowText]);
   const nodeMatches = useCallback((node: GraphNode) => matches(localNodeSearchText(node, t)), [matches, t]);
   const rings = useMemo(() => localSceneRings(analysis), [analysis]);
   const searching = Boolean(query.trim());
@@ -182,16 +195,17 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
   }), [edgeMatches, nodeMatches, rings]);
   const seedRelations = useMemo(() => analysis.seeds.map((seedId) => {
     const relations = localNodeRelations(analysis, seedId);
+    const rowMatches = seedRowMatches(seedId);
     return {
       all: [...relations.incoming, ...relations.outgoing, ...relations.undirected],
       relations: searching ? {
-        incoming: relations.incoming.filter(edgeMatches),
-        outgoing: relations.outgoing.filter(edgeMatches),
-        undirected: relations.undirected.filter(edgeMatches),
+        incoming: relations.incoming.filter(rowMatches),
+        outgoing: relations.outgoing.filter(rowMatches),
+        undirected: relations.undirected.filter(rowMatches),
       } : relations,
       seedId,
     };
-  }), [analysis, edgeMatches, searching]);
+  }), [analysis, searching, seedRowMatches]);
 
   // The graph region listens for Escape; a non-empty list search clears first.
   useEffect(() => {
@@ -307,7 +321,7 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
           relations={localNodeRelations(analysis, seedId)}
           rowAttributes={(otherId) => ({ "data-local-graph-id": otherId })}
           scopeKey={scopeKey}
-          searchText={(edge) => localEdgeSearchText(edge, edgeView(edge), labelOf)}
+          searchText={seedRowText}
           selectableHub
           selectedId={selectedId}
           strokeLabel={localStrokeLabel(t)}
@@ -331,7 +345,11 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
   };
 
   const matchedNodes = searching ? [...analysis.nodesById.values()].filter(nodeMatches).length : 0;
-  const matchedEdges = searching ? analysis.edges.filter(edgeMatches).length : 0;
+  // Counted by the rule of the row each relation is listed in.
+  const matchedEdges = searching ? analysis.edges.filter((edge) => {
+    const seedEnds = [edge.source, edge.target].filter((id) => analysis.seeds.includes(id));
+    return seedEnds.length ? seedEnds.some((seedId) => seedRowMatches(seedId)(edge)) : edgeMatches(edge);
+  }).length : 0;
   return <section aria-labelledby={`${baseId}-title`} className="graph-list-view" data-testid="graph-list-view"
     data-layout={wide ? "bow-tie" : "flow"} ref={rootRef}>
     <div className="graph-list-head" ref={headRef}>

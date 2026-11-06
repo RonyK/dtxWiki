@@ -1231,7 +1231,9 @@ function GraphDetails({
       {nodeActions?.reason ? <p className="graph-action-reason" id={actionReasonId}>{nodeActions.reason}</p> : null}
       {edge ? <LocalRelationEnds analysis={analysis} context={listContext} edge={edge} onSelect={onSelect} /> : null}
       {coAccess ? <p className="graph-edge-summary">{coAccess}</p> : null}
-      {node && !node.is_seed ? <LocalSeedPath analysis={analysis} context={listContext} node={node} onSelect={onSelect} /> : null}
+      {/* Expanded documents are seeds too; their path from the current document
+          is how a reader reaches the relations between them outside the canvas. */}
+      {node ? <LocalSeedPath analysis={analysis} context={listContext} node={node} onSelect={onSelect} /> : null}
       {historyEvents ? <div className="graph-item-history">
         <h5>{t("graph.historyUi.itemRecords")} <GraphPreviewBadge /></h5>
         <ul>{historyEvents.filter((event) => eventInvolves(event, node?.id ?? edge?.id ?? null, historyEdges)).map((event) => <li key={event.id}>

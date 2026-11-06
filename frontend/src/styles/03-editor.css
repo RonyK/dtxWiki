@@ -7245,11 +7245,13 @@ button.graph-seed-path-node:hover { background: var(--surface-hover); }
 .graph-seed-path-relation:hover .relation-list-chip { border-color: var(--context); }
 .graph-seed-path-more { margin: 0; color: var(--ink-muted); font-size: 11px; }
 /* Details is a bottom sheet (up to 45% of the stage) here: rows and keyboard
-   focus scroll clear of it instead of the right edge. */
+   focus scroll clear of it instead of the right edge. Fullscreen keeps Details
+   as a top-right panel at any width, so its list keeps the right gutter.
+   :where() adds no specificity: the phone rules below still win. */
 @container graph-view (max-width: 760px) {
-  .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-view { padding-right: 16px; padding-bottom: 270px; }
-  .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-layer { scroll-padding-bottom: 270px; }
-  .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-head { grid-template-columns: minmax(0, 1fr) minmax(180px, 280px); margin-right: -16px; padding-right: 136px; }
+  :where(.graph-frame:not(:fullscreen)) .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-view { padding-right: 16px; padding-bottom: 270px; }
+  :where(.graph-frame:not(:fullscreen)) .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-layer { scroll-padding-bottom: 270px; }
+  :where(.graph-frame:not(:fullscreen)) .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-head { grid-template-columns: minmax(0, 1fr) minmax(180px, 280px); margin-right: -16px; padding-right: 136px; }
 }
 @container graph-view (max-width: 620px) {
   .graph-list-view { --graph-list-sticky-top: 60px; padding: 64px 10px 12px; }

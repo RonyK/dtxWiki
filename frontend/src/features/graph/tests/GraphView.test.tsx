@@ -154,6 +154,13 @@ describe("GraphView", () => {
     expect(locate).toHaveTextContent("Seed Decision Log+1");
     await user.click(locate);
     expect(canvasHandle.locate).toHaveBeenCalledExactlyOnceWith("node:seed");
+    // The expanded document's path from the current document is the list's way
+    // to its relation with the current document, which seed rows never select.
+    await user.click(screen.getByRole("button", { name: "List" }));
+    await user.click(rowByLabel(screen.getByTestId("graph-list-view"), "Architecture Notes"));
+    const details = screen.getByRole("complementary", { name: "Details" });
+    await user.click(seedPathRelation(details, /^Architecture Notes to Decision Log/));
+    expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-selected", "edge:wikilink");
   });
 
   it("keeps unselected Details hidden from navigation and does not open it for canvas hover", () => {
@@ -1033,6 +1040,12 @@ describe("GraphView", () => {
     await user.keyboard("{Escape}");
     expect(search).toHaveValue("");
     expect(canvas).toHaveAttribute("data-selected", "node:hop2");
+
+    // A node kind name finds the seed's relations by their far end: the
+    // matched node is listed, not only counted.
+    await user.type(search, "Ask turn");
+    expect(within(list).getByRole("status")).toHaveTextContent("“Ask turn” matches 1 nodes · 1 relationships");
+    expect(rowByLabel(list, "Why was this chosen?")).toBeVisible();
   });
 
   it("uses one relation Tab entry and arrow emphasis without selecting, pinning, or moving the view", async () => {
