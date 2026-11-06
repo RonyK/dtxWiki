@@ -1,4 +1,4 @@
-import { useCallback, useId } from "react";
+import { useCallback, useId, type MouseEvent as ReactMouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { GraphEdge, GraphNode } from "../../../shared/api/graph";
@@ -37,7 +37,11 @@ export function LocalNodeMeta({ context, node }: { context: LocalViewContext; no
 /**
  * How the selected node is reached from the seed: one shortest path drawn
  * like the map (seed / stroke + kind / … / this node). Arrows follow the
- * stored direction, so a relation into the seed points up.
+ * stored direction, so a relation into the seed points up. Below it, every
+ * other relation between this node and a seed. List rows that touch a seed
+ * select the far document, so this card is where any seed relation opens
+ * outside the canvas: one between two expanded seeds, or one from an expanded
+ * seed to a document the path reaches another way.
  */
 export function LocalSeedPath({ analysis, context, node, onSelect }: {
   analysis: LocalSceneAnalysis;
@@ -48,8 +52,38 @@ export function LocalSeedPath({ analysis, context, node, onSelect }: {
   const { t } = useTranslation("graph");
   const titleId = useId();
   const path = localSeedPath(analysis, node.id);
-  if (!path) return null;
+  const onPath = new Set(path?.links.flat().map((edge) => edge.id));
+  const seeds = new Set(analysis.seeds);
+  const seedLinks = analysis.edges.filter((edge) => !onPath.has(edge.id)
+    && ((edge.source === node.id && seeds.has(edge.target)) || (edge.target === node.id && seeds.has(edge.source))));
+  if (!path && !seedLinks.length) return null;
   const labelOf = (id: string) => analysis.nodesById.get(id)?.label ?? "—";
+  const select = (id: string) => (event: ReactMouseEvent<HTMLButtonElement>) => onSelect(id, {
+    control: event.currentTarget,
+    modality: event.detail === 0 ? "keyboard" : "pointer",
+  });
+  const links = seedLinks.length ? <ul aria-label={t("graph.seedPath.otherSeeds")} className="graph-seed-links">
+    {seedLinks.map((edge) => {
+      const otherId = edge.source === node.id ? edge.target : edge.source;
+      const other = localNodeView(analysis.nodesById.get(otherId)!, context);
+      const edgeView = localEdgeView(edge, context, labelOf);
+      return <li key={edge.id}>
+        <button aria-label={edgeView.name} className="graph-seed-link" data-local-graph-id={edge.id}
+          onClick={select(edge.id)} title={edgeView.name} type="button">
+          <RelationListChip chip={edgeView.chip} />
+          {edge.direction === "directed"
+            ? <span aria-hidden="true" className="graph-seed-link-direction">{edge.source === node.id ? "→" : "←"}</span> : null}
+          {other.cue}<strong>{other.label}</strong>
+        </button>
+      </li>;
+    })}
+  </ul> : null;
+  if (!path) {
+    return <section aria-labelledby={titleId} className="graph-seed-path" data-tone={localNodeView(node, context).chip.tone}>
+      <h5 id={titleId}>{t("graph.seedPath.otherSeeds")}</h5>
+      {links}
+    </section>;
+  }
   const alternatives = path.alternatives.map(labelOf);
   return <section aria-labelledby={titleId} className="graph-seed-path" data-tone={localNodeView(node, context).chip.tone}>
     <h5 id={titleId}>
@@ -72,10 +106,7 @@ export function LocalSeedPath({ analysis, context, node, onSelect }: {
         return <li key={id}>
           {self ? <span className="graph-seed-path-node">{content}</span>
             : <button className="graph-seed-path-node" data-local-graph-id={id} type="button"
-              onClick={(event) => onSelect(id, {
-                control: event.currentTarget,
-                modality: event.detail === 0 ? "keyboard" : "pointer",
-              })}>{content}</button>}
+              onClick={select(id)}>{content}</button>}
           {links.length ? <div className="graph-seed-path-link">
             <span aria-hidden="true" className="relation-list-map-stroke" data-directed={links[0].direction === "directed"}
               data-upward={links[0].direction === "directed" && links[0].source === path.chain[index + 1]}
@@ -85,10 +116,7 @@ export function LocalSeedPath({ analysis, context, node, onSelect }: {
               // The chip selects the relation itself: the list's seed rows select
               // documents, so this is where a seed relation's Details open.
               return <button aria-label={edgeView.name} className="graph-seed-path-relation" data-local-graph-id={edge.id}
-                key={edge.id} onClick={(event) => onSelect(edge.id, {
-                  control: event.currentTarget,
-                  modality: event.detail === 0 ? "keyboard" : "pointer",
-                })} title={edgeView.name} type="button"><RelationListChip chip={edgeView.chip} /></button>;
+                key={edge.id} onClick={select(edge.id)} title={edgeView.name} type="button"><RelationListChip chip={edgeView.chip} /></button>;
             })}</span>
           </div> : null}
         </li>;
@@ -97,6 +125,8 @@ export function LocalSeedPath({ analysis, context, node, onSelect }: {
     {alternatives.length ? <p className="graph-seed-path-more">{t(alternatives.length > 2 ? "graph.seedPath.alternativesMore" : "graph.seedPath.alternatives", {
       count: alternatives.length, labels: alternatives.slice(0, 2).join(", "),
     })}</p> : null}
+    {links ? <p aria-hidden="true" className="graph-seed-links-title">{t("graph.seedPath.otherSeeds")}</p> : null}
+    {links}
   </section>;
 }
 

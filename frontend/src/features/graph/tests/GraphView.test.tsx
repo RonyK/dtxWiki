@@ -145,8 +145,11 @@ describe("GraphView", () => {
     const base = graphFixture();
     // "Architecture Notes" was expanded: a seed after the primary one, listed first by the payload.
     const expanded = { ...base.nodes[1], is_seed: true };
+    // The expanded seed also links to the primary seed's neighbour, a relation
+    // off the path from the primary seed and never on a list row.
+    const offPath = { ...base.edges[0], id: "edge:expanded-ask", target: "node:ask" };
     renderGraph({ openContents: false, payload: {
-      ...base, nodes: [expanded, base.nodes[0], ...base.nodes.slice(2)],
+      ...base, edges: [...base.edges, offPath], nodes: [expanded, base.nodes[0], ...base.nodes.slice(2)],
       query: { ...base.query, seeds: [...base.query.seeds, { kind: expanded.entity_kind!, id: expanded.entity_id! }] },
     } });
     expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-current", "node:seed");
@@ -161,6 +164,10 @@ describe("GraphView", () => {
     const details = screen.getByRole("complementary", { name: "Details" });
     await user.click(seedPathRelation(details, /^Architecture Notes to Decision Log/));
     expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-selected", "edge:wikilink");
+    await user.click(rowByLabel(screen.getByTestId("graph-list-view"), "Why was this chosen?"));
+    await user.click(within(within(details).getByRole("list", { name: "Direct relationships with other seeds" }))
+      .getByRole("button", { name: /^Architecture Notes to Why was this chosen\?/ }));
+    expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-selected", "edge:expanded-ask");
   });
 
   it("keeps unselected Details hidden from navigation and does not open it for canvas hover", () => {
@@ -262,6 +269,49 @@ describe("GraphView", () => {
     expect(canvas).toHaveAttribute("data-edges", "750");
     for (const mock of Object.values(canvasHandle)) expect(mock).not.toHaveBeenCalled();
     for (const action of [onCollapse, onDepthChange, onExpand, onHistoryModeChange]) expect(action).not.toHaveBeenCalled();
+  });
+
+  it("keeps a seed's pages and selected row when the list narrows from the bow-tie to the flow", async () => {
+    const user = userEvent.setup();
+    const payload = graphFixture();
+    const inbound = Array.from({ length: 12 }, (_, index) => ({
+      ...payload.nodes[1], id: `node:in:${index}`, entity_id: `in:${index}`, label: `Inbound ${index}`,
+    }));
+    payload.nodes = [...payload.nodes, ...inbound];
+    payload.edges = [...payload.edges, ...inbound.map((node) => ({ ...payload.edges[0], id: `edge:${node.id}`, source: node.id }))];
+    // Opening Details beside the list narrows it below the bow-tie width.
+    let listWidth = 900;
+    const resizes: (() => void)[] = [];
+    class TestResizeObserver {
+      callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+      observe(target: Element) {
+        if (target.matches("[data-testid='graph-list-view']")) resizes.push(() => this.callback([], this));
+      }
+      disconnect() {}
+      unobserve() {}
+    }
+    vi.stubGlobal("ResizeObserver", TestResizeObserver);
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.testid === "graph-list-view" ? listWidth : 0;
+    });
+    try {
+      renderGraph({ payload });
+      const list = screen.getByTestId("graph-list-view");
+      expect(list).toHaveAttribute("data-layout", "bow-tie");
+      await user.click(within(list).getByRole("button", { name: /^Show 3 more/ }));
+      await user.click(rowByLabel(list, "Inbound 11"));
+      listWidth = 500;
+      act(() => resizes.forEach((resize) => resize()));
+      expect(list).toHaveAttribute("data-layout", "flow");
+      expect(list.querySelector("[data-relation-direction='incoming']")).toHaveAttribute("data-shown-count", "13");
+      expect(rowByLabel(list, "Inbound 11")).toHaveAttribute("aria-pressed", "true");
+    } finally {
+      width.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("shows and hides Details without remounting the stage or canvas, changing pins, or invoking graph actions", async () => {

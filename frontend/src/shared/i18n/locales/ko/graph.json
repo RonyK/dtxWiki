@@ -506,7 +506,8 @@
       "steps": "{{steps}}단계 · 경유 {{via}}곳",
       "via": "경유",
       "alternatives": "다른 경유 {{count}}곳: {{labels}}",
-      "alternativesMore": "다른 경유 {{count}}곳: {{labels}} 외"
+      "alternativesMore": "다른 경유 {{count}}곳: {{labels}} 외",
+      "otherSeeds": "다른 기준 문서와의 직접 관계"
     },
     "listChips": {
       "node": {

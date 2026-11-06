@@ -7248,6 +7248,13 @@ button.graph-seed-path-node:hover { background: var(--surface-hover); }
 .graph-seed-path-relation { display: inline-flex; padding: 3px; border: 0; border-radius: 999px; background: transparent; cursor: pointer; }
 .graph-seed-path-relation:hover .relation-list-chip { border-color: var(--context); }
 .graph-seed-path-more { margin: 0; color: var(--ink-muted); font-size: 11px; }
+/* Seed relations the path does not show; each opens the relation itself. */
+.graph-details .graph-seed-links-title { margin: 4px 0 0; color: var(--ink-muted); font-size: 11px; font-weight: 650; }
+.graph-seed-links { display: grid; margin: 0; padding: 0; list-style: none; }
+.graph-seed-link { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 30px; padding: 0 4px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.graph-seed-link:hover { background: var(--surface-hover); }
+.graph-seed-link strong { min-width: 0; overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.graph-seed-link-direction { flex: none; color: var(--ink-muted); font-size: 12px; }
 /* Details is a bottom sheet (up to 45% of the stage) here: rows and keyboard
    focus scroll clear of it instead of the right edge. Fullscreen keeps Details
    as a top-right panel at any width, so its list keeps the right gutter.

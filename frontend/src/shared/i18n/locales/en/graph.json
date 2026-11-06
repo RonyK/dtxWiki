@@ -506,7 +506,8 @@
       "steps": "{{steps}} steps · {{via}} in between",
       "via": "via",
       "alternatives": "Also via {{count}}: {{labels}}",
-      "alternativesMore": "Also via {{count}}: {{labels}} and more"
+      "alternativesMore": "Also via {{count}}: {{labels}} and more",
+      "otherSeeds": "Direct relationships with other seeds"
     },
     "listChips": {
       "node": {

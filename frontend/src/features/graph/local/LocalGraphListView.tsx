@@ -307,6 +307,9 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
           edgeView={edgeView}
           headingLevel={5}
           hideSearch
+          // The bow-tie's pages: Details opening beside the list can switch
+          // the layout, and the chosen row must still be on the page.
+          limitOf={(side) => limit(`${scopeKey}:${key}:${side}`)}
           navigation="roving"
           node={seed}
           nodeChips
@@ -315,6 +318,7 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
           onRowBlur={(_, otherId) => onBlur(otherId)}
           onRowFocus={(_, otherId) => onFocus(otherId)}
           onSelect={select}
+          onShowMore={(side) => showMore(`${scopeKey}:${key}:${side}`)}
           openLinkTabIndex={-1}
           page={RELATION_LIST_PAGE}
           query={query}

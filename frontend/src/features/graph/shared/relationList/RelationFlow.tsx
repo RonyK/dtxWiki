@@ -43,6 +43,12 @@ type RelationFlowProps<E> = {
   edgeView: (edge: E) => RelationListEdgeView;
   headingLevel?: 3 | 4 | 5;
   hideSearch?: boolean;
+  /**
+   * Rows shown per direction, owned by an enclosing list so another layout of
+   * the same relations keeps its pages (with `onShowMore`). Without it the
+   * flow pages on its own and resets with its own search.
+   */
+  limitOf?: (direction: RelationListDirection) => number;
   navigation?: "tab" | "roving";
   node: RelationListNodeView;
   /** Second chip with the other end's kind. */
@@ -53,6 +59,7 @@ type RelationFlowProps<E> = {
   onRowBlur?: (edgeId: string, otherId: string) => void;
   onRowFocus?: (edgeId: string, otherId: string) => void;
   onSelect: (otherId: string, origin: RovingSelectionOrigin) => void;
+  onShowMore?: (direction: RelationListDirection) => void;
   openLinkTabIndex?: number;
   page?: number;
   /** A query owned by an enclosing list; it replaces the flow's own search box. */
@@ -111,6 +118,7 @@ export function RelationFlow<E>({
   edgeView,
   headingLevel = 3,
   hideSearch = false,
+  limitOf,
   navigation = "tab",
   node,
   nodeChips = false,
@@ -120,6 +128,7 @@ export function RelationFlow<E>({
   onRowBlur,
   onRowFocus,
   onSelect,
+  onShowMore,
   openLinkTabIndex,
   page = RELATION_FLOW_PAGE,
   query: externalQuery,
@@ -138,7 +147,12 @@ export function RelationFlow<E>({
   const [ownQuery, setOwnQuery] = useState("");
   const [open, setOpen] = useState<Record<RelationListDirection, boolean>>({ incoming: true, outgoing: true, undirected: true });
   const pageLimits = { incoming: page, outgoing: page, undirected: page };
-  const [limits, setLimits] = useState<Record<RelationListDirection, number>>(pageLimits);
+  const [ownLimits, setLimits] = useState<Record<RelationListDirection, number>>(pageLimits);
+  const limitFor = (direction: RelationListDirection) => limitOf?.(direction) ?? ownLimits[direction];
+  const showMore = (direction: RelationListDirection) => {
+    if (onShowMore) onShowMore(direction);
+    else setLimits((current) => ({ ...current, [direction]: current[direction] + page }));
+  };
   const query = externalQuery ?? ownQuery;
   const changeQuery = (value: string) => {
     setOwnQuery(value);
@@ -179,9 +193,9 @@ export function RelationFlow<E>({
   }, [page, searchable]);
 
   const shown = {
-    incoming: open.incoming ? filtered.incoming.slice(0, limits.incoming) : [],
-    outgoing: open.outgoing ? filtered.outgoing.slice(0, limits.outgoing) : [],
-    undirected: open.undirected ? filtered.undirected.slice(0, limits.undirected) : [],
+    incoming: open.incoming ? filtered.incoming.slice(0, limitFor("incoming")) : [],
+    outgoing: open.outgoing ? filtered.outgoing.slice(0, limitFor("outgoing")) : [],
+    undirected: open.undirected ? filtered.undirected.slice(0, limitFor("undirected")) : [],
   };
   const views = (direction: RelationListDirection) => shown[direction].map((edge) => ({ other: otherOf(edge, direction), view: edgeView(edge) }));
   const rows = { incoming: views("incoming"), outgoing: views("outgoing"), undirected: views("undirected") };
@@ -263,9 +277,7 @@ export function RelationFlow<E>({
         data-relation-direction={direction} data-shown-count={shown[direction].length} data-total-count={list.length} id={listId}>
         {shown[direction].map((_, index) => row(direction, index))}
       </ul> : null,
-      more: <RelationListMoreButton onClick={() => setLimits((current) => ({
-        ...current, [direction]: current[direction] + page,
-      }))} remaining={remaining} step={page} />,
+      more: <RelationListMoreButton onClick={() => showMore(direction)} remaining={remaining} step={page} />,
     };
   };
   const incoming = group("incoming");
