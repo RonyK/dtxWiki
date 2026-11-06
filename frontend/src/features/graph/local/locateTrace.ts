@@ -10,8 +10,9 @@ const SVG_NS = "http://www.w3.org/2000/svg";
  * A one-shot trace of the current document's ink ring after the reader asks
  * to locate it: the ring is drawn once, clockwise from the top, and the node's
  * own ring takes over where it ends. It is an SVG over the canvas because a
- * node program cannot draw part of a ring. `onEnd` runs once per play,
- * however it ends, so the node's ring is never left hidden.
+ * node program cannot draw part of a ring. `onEnd` runs once when a trace
+ * ends, however it ends, so the node's ring is never left hidden. Playing
+ * again restarts the trace; only the restarted trace's end reports.
  */
 export function createLocateTrace(container: HTMLElement, onEnd: () => void) {
   let svg: SVGSVGElement | null = null;
@@ -31,7 +32,9 @@ export function createLocateTrace(container: HTMLElement, onEnd: () => void) {
   return {
     get playing() { return svg !== null; },
     play() {
-      stop(true);
+      // A replay keeps the caller's tracing state: reporting this end would
+      // clear it and the next frame would stop the new trace.
+      stop(false);
       svg = document.createElementNS(SVG_NS, "svg");
       svg.setAttribute("class", "graph-locate-trace");
       svg.setAttribute("aria-hidden", "true");

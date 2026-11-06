@@ -2218,7 +2218,7 @@ function WorkspaceGraphList({
         data-shown-count={shown.length} id={`workspace-graph-relations-${section}`}>
         {shown.map(edgeRow)}
       </ul>
-      <WorkspaceGraphMoreButton onClick={() => showMore(section)} remaining={list.length - shown.length}
+      <WorkspaceGraphMoreButton controls={`workspace-graph-relations-${section}`} onClick={() => showMore(section)} remaining={list.length - shown.length}
         step={WORKSPACE_GRAPH_RESULT_PAGE} />
     </>;
   };
@@ -2275,7 +2275,7 @@ function WorkspaceGraphList({
           <ul aria-label={t("workspaceGraph.list.documents")} className="workspace-graph-result-list" id="workspace-graph-result-nodes">
             {shownNodes.map(nodeRow)}
           </ul>
-          <WorkspaceGraphMoreButton onClick={() => showMore("nodes")} remaining={nodes.length - shownNodes.length}
+          <WorkspaceGraphMoreButton controls="workspace-graph-result-nodes" onClick={() => showMore("nodes")} remaining={nodes.length - shownNodes.length}
             step={WORKSPACE_GRAPH_RESULT_PAGE} />
         </> : <p className="workspace-graph-list-none" id="workspace-graph-result-nodes">{t("workspaceGraph.list.noDocuments")}</p> : null}
       </div>

@@ -1308,9 +1308,9 @@ const CUE_COLORS = {
     conversation: "rgb(56, 189, 248)", folder: "rgb(148, 163, 184)" },
 } as const;
 const NAVIGATION_COPY = {
-  en: { incoming: "Incoming", outgoing: "Outgoing", ringRelations: "Two-step relationships", counts: "250 nodes · 750 relationships",
+  en: { incoming: "Incoming", outgoing: "Outgoing", ringRelations: "Relationships further out", counts: "250 nodes · 750 relationships",
     chips: { context: "Context", version: "Version", library: "Library", ask: "Ask turn", chat: "Conversation", folder: "Folder" } },
-  ko: { incoming: "들어오는 관계", outgoing: "나가는 관계", ringRelations: "2단계 관계", counts: "노드 250 · 관계 750",
+  ko: { incoming: "들어오는 관계", outgoing: "나가는 관계", ringRelations: "2단계 이상 관계", counts: "노드 250 · 관계 750",
     chips: { context: "컨텍스트", version: "버전", library: "라이브러리", ask: "질문 턴", chat: "대화", folder: "폴더" } },
 } as const;
 

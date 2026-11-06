@@ -28,24 +28,49 @@ import {
 import { LocalNodeCue } from "./LocalNodeCue";
 import {
   LOCAL_STROKE_ORDER,
-  localEdgeSearchText,
   localEdgeView,
   localNodeSearchText,
   localNodeView,
+  localRelationSearchText,
   localStroke,
   localStrokeLabel,
   type LocalViewContext,
 } from "./localRelationViews";
 import { localNodeVisualKind } from "./nodeVisual";
+import { useFocusRecovery } from "./useFocusRecovery";
 
 /** Below this list width the seed's relations read top to bottom, like Details. */
 const BOW_TIE_MIN_WIDTH = 640;
 const NODE_KIND_ORDER = ["context", "library", "agent", "conversation", "folder"] as const;
 
+/**
+ * What the reader set in the list: search, open groups and pages. It lives
+ * with the graph, so switching to the canvas and back, or between the
+ * bow-tie and the flow, or stepping through history keeps it.
+ */
+export type LocalListMemory = {
+  /** The list it belongs to (workspace and current document); another list starts fresh. */
+  key: string;
+  query: string;
+  /** Groups and flow directions the reader opened or closed. */
+  toggled: Record<string, boolean>;
+  /** Rows shown per paged list, valid for one scope and one search. */
+  limits: Record<string, number>;
+  limitsScope: string;
+};
+
+const emptyListMemory = (key: string): LocalListMemory => ({ key, limits: {}, limitsScope: "", query: "", toggled: {} });
+
 type ListViewProps = {
   active: boolean;
   analysis: LocalSceneAnalysis;
   context: LocalViewContext;
+  /** Shown when no relation is listed: why (none, or all filtered out) and the way back. */
+  empty?: ReactNode;
+  /** Stage status (loading, coverage) the canvas would float; the list head holds it instead. */
+  notice?: ReactNode;
+  memory: { current: LocalListMemory | null };
+  memoryKey: string;
   onBlur: (id: string) => void;
   onFocus: (id: string) => void;
   onSelect: (id: string, origin: RovingSelectionOrigin) => void;
@@ -62,6 +87,8 @@ function useListWidth(ref: { current: HTMLElement | null }) {
     if (!element || typeof ResizeObserver === "undefined") return undefined;
     // Content width: Details opening beside the list adds padding, not width.
     const update = () => {
+      // A hidden list (another tab) has no width: keep its layout for the return.
+      if (!element.clientWidth) return;
       const style = getComputedStyle(element);
       setWidth(element.clientWidth - parseFloat(style.paddingLeft || "0") - parseFloat(style.paddingRight || "0"));
     };
@@ -88,9 +115,10 @@ function useStickyHeadSize(rootRef: { current: HTMLElement | null }, headRef: { 
 }
 
 /** A list with one Tab entry. Row keys are unique; `targetOf` names what a row selects and highlights. */
-function RovingRows<T>({ className, handlers, items, keyOf, label, renderRow, scopeKey, targetOf }: {
+function RovingRows<T>({ className, handlers, id, items, keyOf, label, renderRow, scopeKey, targetOf }: {
   className: string;
   handlers: RowHandlers;
+  id: string;
   items: readonly T[];
   keyOf: (item: T) => string;
   label: string;
@@ -101,7 +129,7 @@ function RovingRows<T>({ className, handlers, items, keyOf, label, renderRow, sc
   const ids = useMemo(() => items.map(keyOf), [items, keyOf]);
   const { onBlur, onFocus, onSelect } = handlers;
   const rowProps = useRovingList({ enabled: handlers.active, ids, onBlur, onFocus, onSelect, scopeKey });
-  return <ul aria-describedby={handlers.describedBy} aria-label={label} className={className}>
+  return <ul aria-describedby={handlers.describedBy} aria-label={label} className={className} id={id}>
     {items.map((item, index) => renderRow(item, rowProps(keyOf(item), index, targetOf(item))))}
   </ul>;
 }
@@ -125,7 +153,9 @@ function OpenOrSpacer({ node }: { node: RelationListNodeView | undefined }) {
  * outgoing), then one folded group per ring the relation scope added. Every
  * displayed node and relation is reachable here, ten rows at a time.
  */
-export function LocalGraphListView({ active, analysis, context, onBlur, onFocus, onSelect, scopeKey, selectedId }: ListViewProps) {
+export function LocalGraphListView({
+  active, analysis, context, empty, memory, memoryKey, notice, onBlur, onFocus, onSelect, scopeKey, selectedId,
+}: ListViewProps) {
   const { t } = useTranslation("graph");
   const baseId = useId();
   const rootRef = useRef<HTMLElement>(null);
@@ -133,9 +163,13 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
   const width = useListWidth(rootRef);
   const headRef = useRef<HTMLDivElement>(null);
   useStickyHeadSize(rootRef, headRef);
+  // A layout switch, a timeline step or a refresh can drop the focused row:
+  // focus its copy in the new layout, else the graph region (Escape still works).
+  useFocusRecovery(rootRef, () => rootRef.current?.closest<HTMLElement>("[data-testid='graph-view']") ?? null, selectedId);
   const wide = width === null || width >= BOW_TIE_MIN_WIDTH;
-  // Opening Details beside the list narrows it and re-lays it out (bow-tie to
-  // flow, rows wrap): keep the chosen row in view rather than where it was.
+  // Selecting a row opens Details, which can switch the layout (bow-tie to
+  // flow): keep the chosen row in view rather than where it was. Only a new
+  // selection or a layout switch scrolls; resizing within a layout does not.
   const chosenRef = useRef<HTMLElement | null>(null);
   const select = useCallback((id: string, origin: RovingSelectionOrigin) => {
     chosenRef.current = origin.control;
@@ -148,18 +182,27 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
       : Array.from(rootRef.current?.querySelectorAll<HTMLElement>('[aria-pressed="true"][data-local-graph-id]') ?? [])
         .find((candidate) => candidate.dataset.localGraphId === selectedId);
     row?.scrollIntoView?.({ block: "nearest" });
-  }, [selectedId, width]);
-  const [query, setQuery] = useState("");
-  const [toggled, setToggled] = useState<Record<string, boolean>>({});
-  const [paging, setPaging] = useState<{ analysis: LocalSceneAnalysis | null; query: string; limits: Record<string, number> }>({
-    analysis: null, query: "", limits: {},
+  }, [selectedId, wide]);
+  const [memoryState, setMemoryState] = useState<LocalListMemory>(() =>
+    memory.current?.key === memoryKey ? memory.current : emptyListMemory(memoryKey));
+  const remembered = memoryState.key === memoryKey ? memoryState : emptyListMemory(memoryKey);
+  useEffect(() => {
+    memory.current = remembered;
   });
-  const limit = (key: string) => paging.analysis === analysis && paging.query === query
-    ? paging.limits[key] ?? RELATION_LIST_PAGE : RELATION_LIST_PAGE;
-  const showMore = (key: string) => setPaging((current) => {
-    const limits = current.analysis === analysis && current.query === query ? current.limits : {};
-    return { analysis, query, limits: { ...limits, [key]: (limits[key] ?? RELATION_LIST_PAGE) + RELATION_LIST_PAGE } };
+  const remember = useCallback((change: (current: LocalListMemory) => Partial<LocalListMemory>) => setMemoryState((previous) => {
+    const current = previous.key === memoryKey ? previous : emptyListMemory(memoryKey);
+    return { ...current, ...change(current) };
+  }), [memoryKey]);
+  const { query, toggled } = remembered;
+  // A new search starts every list at its first page.
+  const setQuery = useCallback((value: string) => remember(() => ({ limits: {}, query: value })), [remember]);
+  const toggle = (id: string, open: boolean) => remember((current) => ({ toggled: { ...current.toggled, [id]: !open } }));
+  const limit = (key: string) => remembered.limitsScope === scopeKey ? remembered.limits[key] ?? RELATION_LIST_PAGE : RELATION_LIST_PAGE;
+  const showMore = (key: string) => remember((current) => {
+    const limits = current.limitsScope === scopeKey ? current.limits : {};
+    return { limits: { ...limits, [key]: (limits[key] ?? RELATION_LIST_PAGE) + RELATION_LIST_PAGE }, limitsScope: scopeKey };
   });
+  const listId = (key: string) => `${baseId}-${key}`;
 
   const labelOf = useCallback((id: string) => analysis.nodesById.get(id)?.label ?? "—", [analysis]);
   const nodeView = useCallback((id: string) => {
@@ -172,8 +215,7 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
     const node = analysis.nodesById.get(id);
     return node ? localNodeSearchText(node, t) : "";
   }, [analysis, t]);
-  const relationText = useCallback((edge: GraphEdge) => localEdgeSearchText(edge, edgeView(edge), labelOf),
-    [edgeView, labelOf]);
+  const relationText = useCallback((edge: GraphEdge) => localRelationSearchText(edgeView(edge)), [edgeView]);
   // A relation matches by its own names or by either end (a node matches by
   // its name and kind names). In a seed's group every row has the seed at one
   // end, so a row matches by the relation or its far end only.
@@ -219,7 +261,7 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
     };
     input.addEventListener("keydown", onKeyDown);
     return () => input.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [setQuery]);
 
   const handlers: RowHandlers = { active, describedBy: `${baseId}-hint`, onBlur, onFocus, onSelect: select, selectedId };
   const strokeSummary = (edges: readonly GraphEdge[]) => <RelationListSummary
@@ -245,7 +287,7 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
     const open = toggled[id] ?? (defaultOpen || searching);
     return <section className="graph-list-group" data-list-group={id} key={id}>
       <RelationListFoldHeader controls={`${baseId}-${id}`} count={count} note={note}
-        onToggle={() => setToggled((current) => ({ ...current, [id]: !open }))} open={open} summary={summary} title={title} />
+        onToggle={() => toggle(id, open)} open={open} summary={summary} title={title} />
       {open ? <div className="graph-list-group-body" id={`${baseId}-${id}`}>{body()}</div> : null}
     </section>;
   };
@@ -253,11 +295,12 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
     const shown = items.slice(0, limit(key));
     return <>
       {render(shown)}
-      <RelationListMoreButton onClick={() => showMore(key)} remaining={items.length - shown.length} step={RELATION_LIST_PAGE} />
+      <RelationListMoreButton controls={listId(key)} onClick={() => showMore(key)} remaining={items.length - shown.length}
+        step={RELATION_LIST_PAGE} />
     </>;
   };
   const nodeRows = (key: string, label: string, nodes: readonly GraphNode[]) => pagedRows(key, nodes, (shown) => (
-    <RovingRows className="graph-list-rows" handlers={handlers} items={shown} keyOf={nodeKey} label={label}
+    <RovingRows className="graph-list-rows" handlers={handlers} id={listId(key)} items={shown} keyOf={nodeKey} label={label}
       renderRow={(node, rowProps) => {
         const view = nodeView(node.id)!;
         const hop = analysis.hop.get(node.id);
@@ -277,7 +320,8 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
       }} scopeKey={`${scopeKey}:${key}`} targetOf={nodeKey} />
   ));
   const relationRows = (key: string, label: string, edges: readonly GraphEdge[]) => pagedRows(key, edges, (shown) => (
-    <RovingRows className="graph-list-rows graph-list-relation-rows" handlers={handlers} items={shown} keyOf={edgeKey} label={label}
+    <RovingRows className="graph-list-rows graph-list-relation-rows" handlers={handlers} id={listId(key)} items={shown} keyOf={edgeKey}
+      label={label}
       renderRow={(edge, rowProps) => {
         const view = edgeView(edge);
         return <li className="graph-list-row graph-list-relation-row" key={edge.id}>
@@ -294,14 +338,18 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
     if (!seed) return null;
     const count = relations.incoming.length + relations.outgoing.length + relations.undirected.length;
     const key = `seed:${seedId}`;
-    // A seed without relations stays selectable beside the empty-state message.
-    if (!all.length && !searching) return <section className="graph-list-group" data-list-group={key} key={key}>
+    const seedNode = analysis.nodesById.get(seedId);
+    // The seed stays selectable on its own when no row is listed for it: when
+    // it has no relations, and when a search matches the seed but none of its
+    // rows (the search status counts it, so the list must show it).
+    if (!all.length && !searching || searching && !count && !!seedNode && nodeMatches(seedNode)) return <section
+      className="graph-list-group" data-list-group={key} key={key}>
       <div className="graph-list-bowtie-hub is-alone"><SeedHub handlers={handlers} seed={seed} seedId={seedId} /></div>
     </section>;
     return group({
       body: () => wide
-        ? <BowTie direction={relations} edgeView={edgeView} handlers={handlers} limit={limit} nodeView={nodeView}
-          onMore={showMore} scopeKey={`${scopeKey}:${key}`} seed={seed} seedId={seedId} t={t} tone={seed.chip.tone} />
+        ? <BowTie direction={relations} edgeView={edgeView} handlers={handlers} limit={limit} listIdOf={(side) => listId(`seed${index}-${side}`)}
+          nodeView={nodeView} onMore={showMore} scopeKey={`${scopeKey}:${key}`} seed={seed} seedId={seedId} t={t} tone={seed.chip.tone} />
         : <RelationFlow
           active={active}
           edgeView={edgeView}
@@ -319,7 +367,9 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
           onRowFocus={(_, otherId) => onFocus(otherId)}
           onSelect={select}
           onShowMore={(side) => showMore(`${scopeKey}:${key}:${side}`)}
+          onToggleOpen={(side) => toggle(`${key}:${side}`, toggled[`${key}:${side}`] ?? true)}
           openLinkTabIndex={-1}
+          openOf={(side) => toggled[`${key}:${side}`] ?? true}
           page={RELATION_LIST_PAGE}
           query={query}
           relations={localNodeRelations(analysis, seedId)}
@@ -348,7 +398,13 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
     });
   };
 
+  // Every node a search matches is listed: as a seed (alone when none of its
+  // rows match), a seed row's far end, a two-step item or an unlinked item.
   const matchedNodes = searching ? [...analysis.nodesById.values()].filter(nodeMatches).length : 0;
+  const counts = (nodes: number, edges: number) => ({
+    edges: t("graph.list.relationCount", { count: edges, value: formatRelationListCount(edges) }),
+    nodes: t("graph.list.nodeCount", { count: nodes, value: formatRelationListCount(nodes) }),
+  });
   // Counted by the rule of the row each relation is listed in.
   const matchedEdges = searching ? analysis.edges.filter((edge) => {
     const seedEnds = [edge.source, edge.target].filter((id) => analysis.seeds.includes(id));
@@ -359,9 +415,7 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
     <div className="graph-list-head" ref={headRef}>
       <div className="graph-list-title">
         <h4 id={`${baseId}-title`}>{t("graph.list.title")}</h4>
-        <span className="graph-list-counts">{t("graph.list.counts", {
-          edges: formatRelationListCount(analysis.edges.length), nodes: formatRelationListCount(analysis.nodesById.size),
-        })}</span>
+        <span className="graph-list-counts">{t("graph.list.counts", counts(analysis.nodesById.size, analysis.edges.length))}</span>
       </div>
       <div className="relation-list-search graph-list-search">
         <Search aria-hidden="true" size={15} />
@@ -370,14 +424,14 @@ export function LocalGraphListView({ active, analysis, context, onBlur, onFocus,
         {query ? <button aria-label={t("graph.list.clearSearch")} className="relation-list-search-clear"
           onClick={() => { setQuery(""); inputRef.current?.focus(); }} type="button"><X aria-hidden="true" size={14} /></button> : null}
       </div>
+      {notice ? <div className="graph-list-notice">{notice}</div> : null}
     </div>
     <p className="visually-hidden" id={`${baseId}-hint`}>{t("graph.relationshipListDescription")}</p>
     {searching ? <p className="graph-list-status" role="status">
-      {matchedNodes || matchedEdges ? t("graph.list.status", {
-        edges: formatRelationListCount(matchedEdges), nodes: formatRelationListCount(matchedNodes), query: query.trim(),
-      }) : t("graph.list.noMatch", { query: query.trim() })}
+      {matchedNodes || matchedEdges ? t("graph.list.status", { ...counts(matchedNodes, matchedEdges), query: query.trim() })
+        : t("graph.list.noMatch", { query: query.trim() })}
     </p> : null}
-    {!analysis.edges.length ? <p className="graph-list-empty">{t("graph.view.noRelations")}</p> : null}
+    {!analysis.edges.length ? <div className="graph-list-empty" role="status">{empty ?? <p>{t("graph.view.noRelations")}</p>}</div> : null}
     {seedRelations.map(seedGroup)}
     {group({
       body: () => relationRows("neighbors", t("graph.list.groups.neighbors"), filtered.neighbors),
@@ -409,11 +463,12 @@ const nodeKey = (node: GraphNode) => node.id;
 const edgeKey = (edge: GraphEdge) => edge.id;
 
 /** Incoming relations on the left point at the seed; outgoing ones leave it to the right. */
-function BowTie({ direction, edgeView, handlers, limit, nodeView, onMore, scopeKey, seed, seedId, t, tone }: {
+function BowTie({ direction, edgeView, handlers, limit, listIdOf, nodeView, onMore, scopeKey, seed, seedId, t, tone }: {
   direction: Record<RelationListDirection, readonly GraphEdge[]>;
   edgeView: (edge: GraphEdge) => RelationListEdgeView;
   handlers: RowHandlers;
   limit: (key: string) => number;
+  listIdOf: (side: RelationListDirection) => string;
   nodeView: (id: string) => RelationListNodeView | undefined;
   onMore: (key: string) => void;
   scopeKey: string;
@@ -435,7 +490,8 @@ function BowTie({ direction, edgeView, handlers, limit, nodeView, onMore, scopeK
         <span className="relation-list-fold-count">{formatRelationListCount(edges.length)}</span>
         <span className="relation-list-fold-note">{note}</span>
       </div>
-      {edges.length ? <RovingRows className="graph-list-bowtie-list" handlers={handlers} items={shown} keyOf={edgeKey} label={title}
+      {edges.length ? <RovingRows className="graph-list-bowtie-list" handlers={handlers} id={listIdOf(side)} items={shown} keyOf={edgeKey}
+        label={title}
         renderRow={(edge, rowProps) => {
           const view = edgeView(edge);
           const otherId = otherOf(edge);
@@ -453,7 +509,8 @@ function BowTie({ direction, edgeView, handlers, limit, nodeView, onMore, scopeK
             <span aria-hidden="true" className="graph-list-bowtie-stroke" data-directed={view.directed} data-visual={view.stroke} />
           </li>;
         }} scopeKey={key} targetOf={otherOf} /> : <p className="graph-list-bowtie-none">—</p>}
-      <RelationListMoreButton onClick={() => onMore(key)} remaining={edges.length - shown.length} step={RELATION_LIST_PAGE} />
+      <RelationListMoreButton controls={listIdOf(side)} onClick={() => onMore(key)} remaining={edges.length - shown.length}
+        step={RELATION_LIST_PAGE} />
     </div>;
   };
   return <div className="graph-list-bowtie" data-tone={tone}>

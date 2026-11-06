@@ -1,5 +1,6 @@
 import { ArrowUpRight, ChevronDown, ChevronRight, FileText } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
@@ -90,14 +91,24 @@ export function relationListStrokeSummary<E>(
   }));
 }
 
-export function RelationListMoreButton({ onClick, remaining, step }: {
+export function RelationListMoreButton({ controls, onClick, remaining, step }: {
+  /** The id of the list this button pages. */
+  controls: string;
   onClick: () => void;
   remaining: number;
   step: number;
 }) {
   const { t } = useTranslation("graph");
   if (remaining <= 0) return null;
-  return <button className="relation-list-more" onClick={onClick} type="button">
+  return <button aria-controls={controls} className="relation-list-more" onClick={(event) => {
+    const button = event.currentTarget;
+    const shown = document.getElementById(controls)?.children.length ?? 0;
+    // The last page removes this button. Commit now and hand focus to the
+    // first row it revealed, so focus never falls to the document body.
+    flushSync(onClick);
+    if (button.isConnected) return;
+    document.getElementById(controls)?.children[shown]?.querySelector<HTMLElement>("button, a[href]")?.focus();
+  }} type="button">
     {t("relationList.more", { count: Math.min(step, remaining), remaining: formatRelationListCount(remaining) })}
   </button>;
 }

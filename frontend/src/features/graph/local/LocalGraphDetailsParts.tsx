@@ -9,9 +9,10 @@ import { RelationFlow } from "../shared/relationList/RelationFlow";
 import type { RovingSelectionOrigin } from "../shared/relationList/useRovingList";
 import { localNodeRelations, localSeedPath, type LocalSceneAnalysis } from "./localGraphList";
 import {
-  localEdgeSearchText,
   localEdgeView,
+  localNodeSearchText,
   localNodeView,
+  localRelationSearchText,
   localSelfKind,
   localStroke,
   localStrokeLabel,
@@ -166,7 +167,10 @@ export function LocalRelationFlow({ active, analysis, context, node, onBlur, onF
     relations={localNodeRelations(analysis, node.id)}
     rowAttributes={(otherId) => ({ "data-local-graph-id": otherId })}
     scopeKey={scopeKey}
-    searchText={(edge) => localEdgeSearchText(edge, edgeView(edge), labelOf)}
+    searchText={(edge, otherId) => {
+      const other = analysis.nodesById.get(otherId);
+      return `${localRelationSearchText(edgeView(edge))} ${other ? localNodeSearchText(other, t) : ""}`;
+    }}
     strokeLabel={localStrokeLabel(t)}
     texts={{
       empty: t("graph.relations.none"),
@@ -182,20 +186,23 @@ export function LocalRelationFlow({ active, analysis, context, node, onBlur, onF
 }
 
 /** A selected relation: source on top, the map's stroke and kind, target below; each end selects and opens. */
-export function LocalRelationEnds({ analysis, context, edge, onSelect }: {
+export function LocalRelationEnds({ analysis, catalog, context, edge, onSelect }: {
   analysis: LocalSceneAnalysis;
+  /** History: every node of the interval. An end not drawn at this point in time is named from here. */
+  catalog?: readonly GraphNode[];
   context: LocalViewContext;
   edge: GraphEdge;
   onSelect: Select;
 }) {
   const { t } = useTranslation("graph");
-  const labelOf = (id: string) => analysis.nodesById.get(id)?.label ?? "—";
+  const nodeOf = (id: string) => analysis.nodesById.get(id) ?? catalog?.find((item) => item.id === id);
+  const labelOf = (id: string) => nodeOf(id)?.label ?? "—";
   const stroke = localStroke(edge);
   const roles = stroke === "link" ? "Link" : stroke === "citation" ? "Citation" : stroke === "membership" ? "Membership" : "";
   return <RelationEnds
     edge={localEdgeView(edge, context, labelOf)}
     nodeView={(id) => {
-      const item = analysis.nodesById.get(id);
+      const item = nodeOf(id);
       return item ? localNodeView(item, context) : undefined;
     }}
     onSelectEnd={onSelect}

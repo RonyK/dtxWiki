@@ -250,6 +250,10 @@ describe("Local Sigma interactions", () => {
       adapter.locate("seed");
       expect(state.container!.querySelectorAll(".graph-locate-trace circle")).toHaveLength(1);
       expect(reducer()("context_page:seed", attributes("seed"))).toMatchObject({ type: "circle", size: metric });
+      // Locating again mid-trace restarts it rather than cancelling it.
+      adapter.locate("seed");
+      expect(state.container!.querySelectorAll(".graph-locate-trace circle")).toHaveLength(1);
+      expect(reducer()("context_page:seed", attributes("seed"))).toMatchObject({ type: "circle", size: metric });
       vi.advanceTimersByTime(LOCATE_TRACE_MS + 200);
       expect(state.container!.querySelector(".graph-locate-trace")).toBeNull();
       expect(reducer()("context_page:seed", attributes("seed"))).toMatchObject({ type: "seed", size: metric });

@@ -2059,7 +2059,7 @@ describe("ContextScreen", () => {
     ).toHaveLength(1);
   });
 
-  it("navigates Local rows without querying and hands keyboard selections to Details", async () => {
+  it("focuses Local list rows without querying and hands keyboard selections to Details", async () => {
     const fetchMock = await renderDecisionLog();
     await userEvent.click(screen.getByRole("treeitem", { name: "Decision Log" }));
     await userEvent.click(within(await screen.findByRole("tablist", { name: "Context reader views" }))
@@ -2071,12 +2071,13 @@ describe("ContextScreen", () => {
     const outgoing = within(within(list).getByRole("list", { name: "Outgoing" })).getAllByRole("button");
     expect([...incoming, ...outgoing].map((row) => row.querySelector("strong")!.textContent))
       .toEqual(["Architecture Notes", "Deployment Runbook"]);
+    // Each list is one Tab stop; arrow keys are covered with the shared roving list.
     expect([...incoming, ...outgoing].every((row) => row.tabIndex === 0)).toBe(true);
     expect(list.querySelectorAll("a:not([tabindex='-1'])")).toHaveLength(0);
     const queries = () => fetchMock.mock.calls.filter(([input]) =>
       String(input).endsWith(`/workspaces/${WORKSPACE_ID}/graph/query`));
-    const rows = [incoming[0], incoming[0]];
-    await act(async () => rows[1].focus());
+    const row = incoming[0];
+    await act(async () => row.focus());
     expect(within(graph).queryByRole("complementary", { name: "Details" })).toBeNull();
     expect(queries()).toHaveLength(1);
     await userEvent.keyboard("{Enter}");
@@ -2087,7 +2088,7 @@ describe("ContextScreen", () => {
     expect(within(details).getByRole("button", { name: "Clear selection" })).toHaveFocus();
     // Re-selecting the same ID must hand off even when selection state does
     // not change and the original main-list button remains connected.
-    await act(async () => rows[1].focus());
+    await act(async () => row.focus());
     await userEvent.keyboard(" ");
     expect(details).toHaveFocus();
     expect(queries()).toHaveLength(1);

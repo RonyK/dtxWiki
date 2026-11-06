@@ -30,10 +30,11 @@ export function LocalGraphCoverageInfo({
     const positionPanel = () => {
       if (!details || !summary) return;
       const bounds = summary.getBoundingClientRect();
-      // The reader can be much narrower than the browser. GraphView clips
-      // overflow, so its visible intersection, not window size alone, owns
-      // both the popup's width and its above/below space.
-      const owner = details.closest(".graph-view")?.getBoundingClientRect();
+      // The reader can be much narrower than the browser. The box that clips
+      // the notice (the list in List mode, else the stage; both follow a
+      // fullscreen frame), intersected with the window, owns both the popup's
+      // width and its above/below space.
+      const owner = (details.closest(".graph-list-layer, .graph-local-stage") ?? details.closest(".graph-view"))?.getBoundingClientRect();
       const left = Math.max(12, (owner?.left ?? 0) + 12);
       const right = Math.min(window.innerWidth - 12, (owner?.right ?? window.innerWidth) - 12);
       const top = Math.max(12, (owner?.top ?? 0) + 12);

@@ -15,8 +15,9 @@ import { historySceneCatalog, renderHistoryScene } from "./local/historyScene";
 import { LocalGraphCoverageInfo } from "./local/LocalGraphCoverageInfo";
 import { CitationEvidenceSection, type CitationPair } from "./shared/CitationEvidenceSection";
 import { analyzeLocalScene, type LocalSceneAnalysis } from "./local/localGraphList";
-import { LocalGraphListView } from "./local/LocalGraphListView";
+import { LocalGraphListView, type LocalListMemory } from "./local/LocalGraphListView";
 import { LocalNodeMeta, LocalRelationEnds, LocalRelationFlow, LocalSeedPath } from "./local/LocalGraphDetailsParts";
+import { useFocusRecovery } from "./local/useFocusRecovery";
 import type { LocalNodeVisuals } from "./local/LocalNodeCue";
 import { localEdgeKindLabel, type LocalViewContext } from "./local/localRelationViews";
 import type { RovingSelectionOrigin as LocalGraphSelectionOrigin } from "./shared/relationList/useRovingList";
@@ -101,6 +102,9 @@ export function GraphView({
   const [dismissedCoverageKey, setDismissedCoverageKey] = useState<string | null>(null);
   const [historyVisibility, setHistoryVisibility] = useState({ recorded: true, background: true });
   const [listOpen, setListOpen] = useState(false);
+  // The list's search, open groups and pages, kept while the canvas shows.
+  const listMemoryRef = useRef<LocalListMemory | null>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const [legendOpen, setLegendOpen] = useState(false);
   useEffect(() => {
     const change = () => setFullscreen(document.fullscreenElement === frameRef.current);
@@ -659,6 +663,44 @@ export function GraphView({
     URL.revokeObjectURL(url);
   }
 
+  // Stage status is built once. Over the canvas it floats; in List mode the
+  // list replaces the canvas, so the same status joins the list instead and
+  // never sits under (or over) the list's own controls.
+  const loadingView = busyAction ? <div className="graph-canvas-loading" role="status"><RefreshCw size={20} aria-hidden="true" />
+    {t("graph.view.loading", { view: busyAction.startsWith("mode:") ? t(`graph.view.${busyAction.slice(5)}.name`) : t(`graph.view.${payload.history.mode}.name`) })}</div> : null;
+  // History views hide relations with their own two chips; those count as filters here.
+  const hiddenByChoice = activeFilters.length > 0 || historical && (!historyVisibility.recorded || !historyVisibility.background);
+  const emptyView = <>
+    <p>{t(hiddenByChoice ? "graph.view.allHidden" : "graph.view.noRelations")}</p>
+    {hiddenByChoice ? <button className="inline-action" type="button" onClick={() => {
+      setFilters(facets); setHistoryVisibility({ recorded: true, background: true });
+    }}>{t("graph.filters.clearAll")}</button> : historical ? null : <small>{t("graph.view.addRelations")}</small>}
+  </>;
+  const coverageShown = !!coverageNotice && dismissedCoverageKey !== coverageKey;
+  const coverageView = coverageShown ? <div className="graph-canvas-coverage">
+    <LocalGraphCoverageInfo active={active} descriptions={omissionDescriptions}
+      heading={coverageNotice.heading} messages={coverageNotice.messages} payload={payload} workspaceId={workspaceId}
+      folderOnly={coverageNotice.folderOnly} tone={coverageNotice.tone}
+      budgetNote={hasDisplayQuota ? t("graph.omissions.appliedBudget", { nodes: payload.budget.applied.nodes, edges: payload.budget.applied.edges }) : undefined} />
+    <button type="button" aria-label={t("graph.view.dismissNotice")} onClick={() => setDismissedCoverageKey(coverageKey)}><X size={14} aria-hidden="true" /></button>
+  </div> : null;
+  // The floating notice stays operable above Details, so Details (panel or
+  // expanded sheet) starts below it: the stage publishes the notice's bottom
+  // edge. The stage is observed too: its width moves the notice (history, phone).
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    const notice = stage?.querySelector<HTMLElement>(":scope > .graph-canvas-coverage");
+    if (!stage || !notice || typeof ResizeObserver === "undefined") return undefined;
+    const update = () => stage.style.setProperty("--graph-stage-notice-bottom", `${notice.offsetTop + notice.offsetHeight + 8}px`);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(notice);
+    observer.observe(stage);
+    return () => {
+      observer.disconnect();
+      stage.style.removeProperty("--graph-stage-notice-bottom");
+    };
+  }, [coverageShown, historical, listOpen]);
   return (
     <section
       aria-labelledby="graph-view-heading"
@@ -810,13 +852,9 @@ export function GraphView({
       </details>
 
         </div>
-      <div className={`graph-local-stage ${busyAction ? "is-loading" : ""} ${listOpen ? "is-list-view" : ""}`} aria-busy={!!busyAction}>
-        {busyAction ? <div className="graph-canvas-loading" role="status"><RefreshCw size={20} aria-hidden="true" />
-          {t("graph.view.loading", { view: busyAction.startsWith("mode:") ? t(`graph.view.${busyAction.slice(5)}.name`) : t(`graph.view.${payload.history.mode}.name`) })}</div> : null}
-        {!busyAction && !historical && scene.edges.length === 0 ? <div className="graph-canvas-empty" role="status">
-          <p>{t(activeFilters.length ? "graph.view.allHidden" : "graph.view.noRelations")}</p>
-          {activeFilters.length ? <button className="inline-action" type="button" onClick={() => setFilters(facets)}>{t("graph.filters.clearAll")}</button> : <small>{t("graph.view.addRelations")}</small>}
-        </div> : null}
+      <div className={`graph-local-stage ${busyAction ? "is-loading" : ""} ${listOpen ? "is-list-view" : ""}`} aria-busy={!!busyAction} ref={stageRef}>
+        {!listOpen ? loadingView : null}
+        {!listOpen && !busyAction && !historical && scene.edges.length === 0 ? <div className="graph-canvas-empty" role="status">{emptyView}</div> : null}
         <div className="graph-canvas-context">
           {currentNode ? <button aria-label={t("graph.view.locateCurrent", { label: currentNode.label })} className="graph-seed-pill"
             onClick={() => canvasRef.current?.locate(currentNode.id)} title={t("graph.view.locateCurrent", { label: currentNode.label })} type="button">
@@ -837,23 +875,20 @@ export function GraphView({
           <details className="graph-canvas-more"><summary aria-label={t("graph.view.more")} title={t("graph.view.more")}><MoreHorizontal size={17} aria-hidden="true" /></summary>
             <div>
               <button className="graph-mobile-fullscreen" type="button" onClick={() => void toggleFullscreen()}><Maximize2 size={16} aria-hidden="true" />{t(fullscreen ? "graph.view.exitFullscreen" : "graph.view.fullscreen")}</button>
-              <button type="button" onClick={resetView}><RotateCcw size={16} aria-hidden="true" />{t("graph.resetView")}</button>
+              {/* Camera, labels and future items only change the drawing: List mode leaves them out. */}
+              {!listOpen ? <button type="button" onClick={resetView}><RotateCcw size={16} aria-hidden="true" />{t("graph.resetView")}</button> : null}
               <button type="button" disabled={payload.capabilities?.export === false} onClick={exportFilteredScene}><Download size={16} aria-hidden="true" />{t("graph.export")}</button>
               {!fullscreen ? <button type="button" onClick={() => { setStaticOpen(true); requestAnimationFrame(() => graphRegionRef.current?.querySelector(".graph-static-fallback")?.scrollIntoView({ block: "nearest" })); }}>{t("graph.view.openStatic")}</button> : null}
-              <label><input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} />{t("graph.localToolbar.labels")}</label>
-              {historical ? <label><input type="checkbox" checked={showFuture} onChange={(e) => setShowFuture(e.target.checked)} />{t("graph.historyUi.showFuture")}</label> : null}
+              {!listOpen ? <label><input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} />{t("graph.localToolbar.labels")}</label> : null}
+              {historical && !listOpen ? <label><input type="checkbox" checked={showFuture} onChange={(e) => setShowFuture(e.target.checked)} />{t("graph.historyUi.showFuture")}</label> : null}
             </div>
           </details>
         </div>
-        {coverageNotice && dismissedCoverageKey !== coverageKey ? <div className="graph-canvas-coverage">
-          <LocalGraphCoverageInfo active={active} descriptions={omissionDescriptions}
-            heading={coverageNotice.heading} messages={coverageNotice.messages} payload={payload} workspaceId={workspaceId}
-            folderOnly={coverageNotice.folderOnly} tone={coverageNotice.tone}
-            budgetNote={hasDisplayQuota ? t("graph.omissions.appliedBudget", { nodes: payload.budget.applied.nodes, edges: payload.budget.applied.edges }) : undefined} />
-          <button type="button" aria-label={t("graph.view.dismissNotice")} onClick={() => setDismissedCoverageKey(coverageKey)}><X size={14} aria-hidden="true" /></button>
-        </div> : null}
+        {!listOpen ? coverageView : null}
         {listOpen ? <div className="graph-list-layer">
-          <LocalGraphListView active={active} analysis={sceneAnalysis} context={listContext} onBlur={clearItemFocus}
+          <LocalGraphListView active={active} analysis={sceneAnalysis} context={listContext} empty={emptyView}
+            memory={listMemoryRef} memoryKey={JSON.stringify([workspaceId, payload.query.seeds[0] ?? null])}
+            notice={loadingView || coverageView ? <>{loadingView}{coverageView}</> : null} onBlur={clearItemFocus}
             onFocus={setFocusedId} onSelect={selectItem} scopeKey={canvasScopeKey} selectedId={effectiveSelectedId} />
         </div> : null}
         <GraphCameraControls disabled={rendererStatus !== "ready"} onZoomIn={() => canvasRef.current?.zoomIn()} onZoomOut={() => canvasRef.current?.zoomOut()} onFit={() => canvasRef.current?.fit()} />
@@ -863,7 +898,8 @@ export function GraphView({
           viewportInsets={() => {
             const stage = graphRegionRef.current?.querySelector(".graph-local-stage")?.getBoundingClientRect();
             const detail = graphRegionRef.current?.querySelector(".graph-details:not([hidden])")?.getBoundingClientRect();
-            const sheet = !fullscreen && !!stage && !!detail && detail.width > stage.width * .75;
+            // Details is a bottom sheet in a narrow frame (fullscreen too), a side panel otherwise.
+            const sheet = !!stage && !!detail && detail.width > stage.width * .75;
             return { top: historical ? 90 : 60, left: 0,
               right: detail && !sheet ? detail.width + 24 : 0,
               bottom: detail && sheet ? detail.height + 12 : 0 };
@@ -903,6 +939,7 @@ export function GraphView({
           citationEvidenceRevision={payload.projection_revision}
           historyEvents={historical ? timeline : undefined}
           historyEdges={historyCatalog.edges}
+          historyNodes={historical ? historyCatalog.nodes : undefined}
           historicalOnly={historical && !!selectedId && !scene.nodes.some((node) => node.id === selectedId) && !scene.edges.some((edge) => edge.id === selectedId)}
           currentEventId={currentEvent?.id}
           onSeekEvent={(id) => seekEvent(timeline.findIndex((event) => event.id === id))}
@@ -1129,6 +1166,7 @@ function GraphDetails({
   active,
   historyEvents,
   historyEdges,
+  historyNodes,
   historicalOnly,
   currentEventId,
   onSeekEvent,
@@ -1157,6 +1195,7 @@ function GraphDetails({
   active: boolean;
   historyEvents?: GraphTimelineEvent[];
   historyEdges: GraphEdge[];
+  historyNodes?: GraphNode[];
   historicalOnly: boolean;
   currentEventId?: string;
   onSeekEvent: (id: string) => void;
@@ -1184,6 +1223,9 @@ function GraphDetails({
 }) {
   const { t } = useTranslation("graph");
   const detailsRef = useRef<HTMLElement>(null);
+  // A timeline step or refresh can drop the focused row from Details: focus
+  // the same item if it is still here, else the panel itself.
+  useFocusRecovery(detailsRef, () => detailsRef.current, node?.id ?? edge?.id ?? null);
   const [sheetExpanded, setSheetExpanded] = useState(false);
   const actionReasonId = useId();
   useLayoutEffect(() => {
@@ -1229,7 +1271,7 @@ function GraphDetails({
       {historicalOnly ? <p className="graph-history-inactive">{t("graph.historyUi.notPresent")}</p> : null}
       {node ? <LocalNodeMeta context={listContext} node={node} /> : null}
       {nodeActions?.reason ? <p className="graph-action-reason" id={actionReasonId}>{nodeActions.reason}</p> : null}
-      {edge ? <LocalRelationEnds analysis={analysis} context={listContext} edge={edge} onSelect={onSelect} /> : null}
+      {edge ? <LocalRelationEnds analysis={analysis} catalog={historyNodes} context={listContext} edge={edge} onSelect={onSelect} /> : null}
       {coAccess ? <p className="graph-edge-summary">{coAccess}</p> : null}
       {/* Expanded documents are seeds too; their path from the current document
           is how a reader reaches the relations between them outside the canvas. */}

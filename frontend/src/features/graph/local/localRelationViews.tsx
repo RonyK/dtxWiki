@@ -109,7 +109,12 @@ export function localEdgeView(edge: GraphEdge, context: LocalViewContext, labelO
   };
 }
 
-/** Everything a list search may match for a relation row: both ends and every kind name. */
-export function localEdgeSearchText(edge: GraphEdge, view: RelationListEdgeView, labelOf: (id: string) => string) {
-  return [labelOf(edge.source), labelOf(edge.target), view.chip.label, view.chip.title, view.note ?? ""].join(" ");
+/**
+ * A relation's own names (kind, full title, the action it carries). A search
+ * matches a relation row by these or by the row's node ends: both ends for a
+ * free-standing relation, only the far end for a row listed under a node,
+ * whose near end is the same on every row.
+ */
+export function localRelationSearchText(view: RelationListEdgeView) {
+  return [view.chip.label, view.chip.title, view.note ?? ""].join(" ");
 }

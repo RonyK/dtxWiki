@@ -2037,7 +2037,9 @@ p.workspace-graph-list-window-hint {
   background: color-mix(in srgb, var(--context) 6%, var(--surface));
 }
 
-.workspace-graph-list li > button {
+/* The open link (and the cluster expand button styled as one) keeps its own
+   size and colour: :where() leaves this rule at row-button specificity. */
+.workspace-graph-list li > button:where(:not(.relation-list-open-link)) {
   min-width: 0;
   min-height: 44px;
   border: 0;
@@ -2174,6 +2176,8 @@ p.workspace-graph-list-window-hint {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  /* A narrow column clips its chips rather than painting under the open link. */
+  overflow: hidden;
   color: var(--ink-muted);
   font-size: 11px;
   font-weight: 400;
@@ -3352,6 +3356,7 @@ button.relation-list-flow-hub-pill[aria-pressed="true"] { box-shadow: 0 0 0 2px 
   .relation-list-flow-stroke[data-visual] { stroke: CanvasText; }
   .relation-list-flow-arrow[data-visual] { fill: CanvasText; }
   .relation-list-row-select[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
+  button.relation-list-flow-hub-pill[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: 2px; }
 
   .workspace-graph-list-select[aria-pressed="true"] { outline: 3px solid Highlight; }
 
@@ -7071,7 +7076,7 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 .graph-frame .graph-local-stage { overflow: hidden; }
 .graph-view .graph-frame .graph-canvas-frame { height: 560px; min-height: 560px; border: 0; border-radius: 0; }
 .graph-view .graph-frame-history .graph-canvas-frame { height: 440px; min-height: 440px; }
-.graph-canvas-context { position: absolute; z-index: 6; left: 10px; top: 10px; display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: 7px; max-width: calc(100% - 140px); pointer-events: none; }
+.graph-canvas-context { position: absolute; z-index: 4; left: 10px; top: 10px; display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: 7px; max-width: calc(100% - 140px); pointer-events: none; }
 .graph-seed-pill, .graph-time-pill { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 5px 10px; border: 1px solid var(--border); border-radius: 20px; background: var(--surface); box-shadow: 0 1px 2px #0001; color: var(--ink-muted); font-size: 11px; }
 .graph-seed-pill strong { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .graph-seed-pill { white-space: nowrap; }
@@ -7091,6 +7096,10 @@ button.graph-seed-pill:focus-visible { outline: 2px solid var(--context); outlin
 .graph-canvas-more > div { position: absolute; z-index: 8; right: 0; top: calc(100% + 5px); width: 250px; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 24px #0002; }
 .graph-canvas-more button, .graph-canvas-more label { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
 .graph-canvas-more button:hover, .graph-canvas-more label:hover { background: var(--surface-hover); }
+/* Stage layers: canvas internals (≤3) < seed/time pills and the list (4) <
+   Details (5) < the coverage notice and frame chrome (6+). The notice stays
+   operable while Details is open; Details starts below it instead
+   (--graph-stage-notice-bottom, measured by GraphView). */
 .graph-canvas-coverage { position: absolute; z-index: 6; top: 52px; right: 10px; display: flex; align-items: flex-start; gap: 4px; max-width: calc(100% - 20px); padding: 3px 7px; border: 1px solid #e0b553; border-radius: 8px; background: var(--surface); font-size: 11px; color: var(--ink-muted); }
 .graph-frame-history .graph-canvas-coverage { top: 88px; }
 .graph-canvas-coverage summary { cursor: pointer; }
@@ -7108,7 +7117,10 @@ button.graph-seed-pill:focus-visible { outline: 2px solid var(--context); outlin
    the graph surface its cards and labels are coloured for. */
 .graph-static-fallback > .mermaid-diagram { margin: 0 12px 12px; }
 .graph-static-fallback > .mermaid-diagram .mermaid-diagram-viewport { background: var(--graph-surface); }
-.graph-frame:fullscreen { width: 100vw; height: 100dvh; display: flex; flex-direction: column; overflow: auto; border-radius: 0; }
+/* In fullscreen the frame, not the in-page .graph-view, has the width every
+   graph-view container rule inside it (Details sheet or panel, list gutters,
+   phone controls) must follow: the frame becomes that container. */
+.graph-frame:fullscreen { container: graph-view / inline-size; width: 100vw; height: 100dvh; display: flex; flex-direction: column; overflow: auto; border-radius: 0; }
 .graph-frame:fullscreen .graph-local-stage { flex: 1; min-height: 240px; }
 .graph-frame:fullscreen .graph-canvas-frame { height: 100%; min-height: 100%; }
 .graph-frame:fullscreen .graph-frame-header, .graph-frame:fullscreen .local-history, .graph-frame:fullscreen .graph-frame-status { flex-shrink: 0; }
@@ -7118,7 +7130,8 @@ button.graph-seed-pill:focus-visible { outline: 2px solid var(--context); outlin
 .graph-item-history time, .graph-details-location { color: var(--ink-muted); font-size: 11px; }
 .graph-item-history small { color: var(--context); }
 .graph-frame .graph-details { z-index: 5; border-radius: 10px; box-shadow: 0 12px 32px #0002; }
-.graph-frame .graph-local-stage .graph-details { top: 60px; max-height: calc(100% - 72px); }
+.graph-frame .graph-local-stage { --graph-details-top: max(60px, var(--graph-stage-notice-bottom, 0px)); }
+.graph-frame .graph-local-stage .graph-details { top: var(--graph-details-top); max-height: calc(100% - var(--graph-details-top) - 12px); }
 .graph-view :is(button, summary, select, input):focus-visible { outline: 2px solid var(--context); outline-offset: 2px; }
 @container graph-view (max-width: 620px) {
   .graph-type-row { flex-wrap: wrap; }
@@ -7160,9 +7173,9 @@ button.graph-seed-pill:focus-visible { outline: 2px solid var(--context); outlin
 .graph-status-actions .graph-view-switch button { gap: 5px; min-height: 26px; padding: 0 9px; border-radius: 6px; }
 .graph-status-actions .graph-view-switch button[aria-pressed="true"] { background: var(--context-soft); color: var(--context); }
 .graph-local-stage.is-list-view .graph-canvas-context,
-.graph-local-stage.is-list-view .graph-camera-controls,
-.graph-local-stage.is-list-view .graph-canvas-empty { display: none; }
-.graph-list-layer { position: absolute; inset: 0; z-index: 4; overflow: auto; overscroll-behavior: contain; background: var(--surface); }
+.graph-local-stage.is-list-view .graph-camera-controls { display: none; }
+/* A stable gutter: a scrollbar appearing never narrows the list across the bow-tie threshold. */
+.graph-list-layer { position: absolute; inset: 0; z-index: 4; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; background: var(--surface); }
 /* One shrinkable column: a long unwrapped row must not widen the list past the stage. */
 /* --graph-list-head-size is the sticky head's measured height. Rows scroll
    below everything stuck at the top: hub and keyboard focus stop under it. */
@@ -7175,13 +7188,20 @@ button.graph-seed-pill:focus-visible { outline: 2px solid var(--context); outlin
 .graph-list-head { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 280px); align-items: center; gap: 10px; margin: -14px -16px 0; padding: 14px 136px 10px 16px; background: var(--surface); }
 /* Details beside the list holds the corner: the head ends at the list column. */
 .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-head { grid-template-columns: minmax(0, 1fr); margin-right: 0; padding-right: 0; }
-.graph-list-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+/* Stage status (loading, coverage) joins the list head in List mode: a
+   full-width row under the search, in flow, so it covers nothing. */
+.graph-list-notice { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; min-width: 0; }
+.graph-list-notice > :is(.graph-canvas-coverage, .graph-canvas-loading) { position: static; width: fit-content; max-width: 100%; transform: none; }
+.graph-list-notice > .graph-canvas-loading { padding: 6px 10px; font-size: 12px; }
+/* Title and counts wrap rather than widen the head (long locales, large counts). */
+.graph-list-title { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; min-width: 0; }
 .graph-list-title h4 { margin: 0; font-size: 14px; white-space: nowrap; }
-.graph-list-counts { color: var(--ink-muted); font-size: 11.5px; white-space: nowrap; }
+.graph-list-counts { min-width: 0; max-width: 100%; overflow: hidden; color: var(--ink-muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
 .graph-list-search { margin-top: 0; }
 .graph-list-status, .graph-list-empty { margin: 0; font-size: 12px; }
 .graph-list-status { color: var(--ink); font-weight: 650; }
 .graph-list-empty { color: var(--ink-muted); }
+.graph-list-empty p { margin: 0 0 6px; }
 .graph-list-group { min-width: 0; padding-top: 2px; border-top: 1px solid var(--border); }
 .graph-list-rows, .graph-list-bowtie-list { display: grid; margin: 0 0 4px; padding: 0; list-style: none; }
 .graph-list-rows { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); column-gap: 14px; }
@@ -7255,14 +7275,16 @@ button.graph-seed-path-node:hover { background: var(--surface-hover); }
 .graph-seed-link:hover { background: var(--surface-hover); }
 .graph-seed-link strong { min-width: 0; overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 .graph-seed-link-direction { flex: none; color: var(--ink-muted); font-size: 12px; }
-/* Details is a bottom sheet (up to 45% of the stage) here: rows and keyboard
-   focus scroll clear of it instead of the right edge. Fullscreen keeps Details
-   as a top-right panel at any width, so its list keeps the right gutter.
-   :where() adds no specificity: the phone rules below still win. */
+/* Details is a bottom sheet (up to 45% of the stage) in a frame this narrow,
+   fullscreen or not: rows and keyboard focus scroll clear of it instead of
+   the right edge. */
 @container graph-view (max-width: 760px) {
-  :where(.graph-frame:not(:fullscreen)) .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-view { padding-right: 16px; padding-bottom: 270px; }
-  :where(.graph-frame:not(:fullscreen)) .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-layer { scroll-padding-bottom: 270px; }
-  :where(.graph-frame:not(:fullscreen)) .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-head { grid-template-columns: minmax(0, 1fr) minmax(180px, 280px); margin-right: -16px; padding-right: 136px; }
+  .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-view { padding-right: 16px; }
+  /* The sheet is 45% of the stage: so is the space the list can scroll into
+     below its last row (percentages of the layer, which fills the stage). */
+  .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-layer { scroll-padding-bottom: 45%; }
+  .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-layer::after { content: ""; display: block; height: 45%; }
+  .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-head { grid-template-columns: minmax(0, 1fr) minmax(180px, 280px); margin-right: -16px; padding-right: 136px; }
 }
 @container graph-view (max-width: 620px) {
   .graph-list-view { --graph-list-sticky-top: 60px; padding: 64px 10px 12px; }
@@ -7322,11 +7344,14 @@ button.graph-seed-path-node:hover { background: var(--surface-hover); }
 .graph-history-inactive { color: var(--ink-muted); font-size: 11px; }
 @container graph-view (max-width: 760px) {
   .graph-frame .graph-local-stage .graph-details { inset: auto 0 0; max-height: 45%; border-radius: 12px 12px 0 0; }
-  .graph-frame .graph-local-stage .graph-details.is-sheet-expanded { max-height: min(88%, calc(100% - 64px)); }
+  .graph-frame .graph-local-stage .graph-details.is-sheet-expanded { max-height: min(88%, calc(100% - max(64px, var(--graph-stage-notice-bottom, 0px)))); }
   .graph-details-sheet-toggle { position: sticky; top: 44px; z-index: 2; display: block; min-height: 44px; border: 0; padding: 0; text-align: left; background: var(--surface); color: var(--context); font: inherit; font-size: 12px; cursor: pointer; }
 }
-.graph-frame:fullscreen .graph-local-stage .graph-details { inset: 60px 12px auto auto; width: min(300px, calc(100% - 24px)); max-height: calc(100% - 72px); border-radius: 10px; }
-.graph-frame:fullscreen .graph-details-sheet-toggle { display: none; }
+/* A wide fullscreen frame keeps Details as a top-right panel; a narrow one
+   uses the sheet above, like the page. */
+@container graph-view (min-width: 761px) {
+  .graph-frame:fullscreen .graph-local-stage .graph-details { inset: var(--graph-details-top) 12px auto auto; width: min(300px, calc(100% - 24px)); max-height: calc(100% - var(--graph-details-top) - 12px); border-radius: 10px; }
+}
 
 /* The current document's ink ring, traced once after the seed pill locates it. */
 .graph-locate-trace { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }

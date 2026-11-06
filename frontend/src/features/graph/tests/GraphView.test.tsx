@@ -240,11 +240,11 @@ describe("GraphView", () => {
     expect(within(within(list).getByRole("list", { name: "Incoming" })).getAllByRole("button")).toHaveLength(3);
     expect(within(within(list).getByRole("list", { name: "Outgoing" })).getAllByRole("button")).toHaveLength(3);
     // What the scope added is folded with its count, then shown ten rows at a time.
-    const ringHead = within(list).getByRole("button", { name: /^Two steps away\s*247/ });
+    const ringHead = within(list).getByRole("button", { name: /^Two or more steps away\s*247/ });
     expect(ringHead).toHaveAttribute("aria-expanded", "false");
-    expect(within(list).queryByRole("list", { name: "Two steps away" })).not.toBeInTheDocument();
+    expect(within(list).queryByRole("list", { name: "Two or more steps away" })).not.toBeInTheDocument();
     await user.click(ringHead);
-    const ring = within(list).getByRole("list", { name: "Two steps away" });
+    const ring = within(list).getByRole("list", { name: "Two or more steps away" });
     const rows = within(ring).getAllByRole("button");
     expect(rows).toHaveLength(10);
     expect(ring.querySelector("a[tabindex='0'],a:not([tabindex])")).toBeNull();
@@ -271,7 +271,7 @@ describe("GraphView", () => {
     for (const action of [onCollapse, onDepthChange, onExpand, onHistoryModeChange]) expect(action).not.toHaveBeenCalled();
   });
 
-  it("keeps a seed's pages and selected row when the list narrows from the bow-tie to the flow", async () => {
+  it("keeps a seed's pages, selected row and focus across the bow-tie, the flow and the canvas", async () => {
     const user = userEvent.setup();
     const payload = graphFixture();
     const inbound = Array.from({ length: 12 }, (_, index) => ({
@@ -301,13 +301,27 @@ describe("GraphView", () => {
       renderGraph({ payload });
       const list = screen.getByTestId("graph-list-view");
       expect(list).toHaveAttribute("data-layout", "bow-tie");
+      const incoming = () => list.querySelectorAll<HTMLButtonElement>(
+        ".graph-list-bowtie-column[data-direction='incoming'] button[data-local-graph-id]");
+      // The last page removes its button: focus moves to the first row it revealed.
       await user.click(within(list).getByRole("button", { name: /^Show 3 more/ }));
-      await user.click(rowByLabel(list, "Inbound 11"));
+      expect(incoming()).toHaveLength(13);
+      expect(incoming()[10]).toHaveFocus();
+      const chosen = incoming()[12];
+      const id = chosen.dataset.localGraphId!;
+      await user.click(chosen);
+      // Details narrows the list to the flow: the page, the selected row and focus follow.
       listWidth = 500;
       act(() => resizes.forEach((resize) => resize()));
       expect(list).toHaveAttribute("data-layout", "flow");
       expect(list.querySelector("[data-relation-direction='incoming']")).toHaveAttribute("data-shown-count", "13");
-      expect(rowByLabel(list, "Inbound 11")).toHaveAttribute("aria-pressed", "true");
+      const pressed = list.querySelector<HTMLElement>(`[aria-pressed="true"][data-local-graph-id="${id}"]`);
+      expect(pressed).toHaveFocus();
+      // The canvas and back: the list keeps its pages.
+      await user.click(screen.getByRole("button", { name: "Graph" }));
+      await user.click(screen.getByRole("button", { name: "List" }));
+      expect(screen.getByTestId("graph-list-view").querySelector("[data-relation-direction='incoming']"))
+        .toHaveAttribute("data-shown-count", "13");
     } finally {
       width.mockRestore();
       vi.unstubAllGlobals();
@@ -537,13 +551,16 @@ describe("GraphView", () => {
 
   it("keeps filters, canvas, DOM parity, active chips, and clear-all on one physical scene", async () => {
     const user = userEvent.setup();
-    renderGraph();
+    renderGraph({ openContents: false });
 
     expect(screen.getByText("3 nodes · 2 edges")).toBeInTheDocument();
     expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-nodes", "3");
     expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-edges", "2");
+    // Camera commands belong to the canvas; List mode leaves them out of the menu.
     expect(screen.getByRole("button", { name: "Reset viewport, pins, and selection" }))
       .toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "List" }));
+    expect(screen.queryByRole("button", { name: "Reset viewport, pins, and selection" })).not.toBeInTheDocument();
     await user.click(screen.getByText("More filters"));
 
     await user.click(rowByLabel(screen.getByTestId("graph-list-view"), "Why was this chosen?"));
@@ -582,13 +599,21 @@ describe("GraphView", () => {
     await user.click(screen.getByLabelText("Wiki link"));
     expect(screen.getByText("3 nodes · 1 edges")).toBeInTheDocument();
     expect(screen.queryByText("linked from")).not.toBeInTheDocument();
+
+    // Filters hiding every relation: the list (not only the canvas) says so and offers the way back.
+    await user.click(screen.getByLabelText("Inbound"));
+    await user.click(screen.getByLabelText("Outbound"));
+    const empty = screen.getByTestId("graph-list-view").querySelector<HTMLElement>(".graph-list-empty")!;
+    expect(empty).toHaveTextContent("All relationships are hidden by the current filters.");
+    await user.click(within(empty).getByRole("button", { name: "Clear all" }));
+    expect(screen.getByText("3 nodes · 2 edges")).toBeInTheDocument();
   });
 
   it("opens the new Local renderer with relation chips and a live label toggle", async () => {
     const user = userEvent.setup();
     const payload = graphFixture();
     payload.history.mode = "current";
-    renderGraph({ payload });
+    renderGraph({ openContents: false, payload });
 
     const canvas = screen.getByTestId("mock-graph-canvas");
     expect(canvas).toHaveAttribute("data-show-labels", "true");
@@ -1070,12 +1095,12 @@ describe("GraphView", () => {
     const open = within(related).getByRole("link", { name: "Open document: Architecture Notes" });
     expect(open).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
     expect(open).toHaveAttribute("tabindex", "-1");
-    expect(within(list).getByRole("button", { name: /^Two steps away/ })).toHaveAttribute("aria-expanded", "false");
+    expect(within(list).getByRole("button", { name: /^Two or more steps away/ })).toHaveAttribute("aria-expanded", "false");
 
     const search = within(list).getByRole("searchbox", { name: "Find in the graph list" });
     await user.type(search, "Distance");
-    expect(within(list).getByRole("status")).toHaveTextContent("“Distance” matches 1 nodes · 1 relationships");
-    expect(within(list).getByRole("button", { name: /^Two steps away/ })).toHaveAttribute("aria-expanded", "true");
+    expect(within(list).getByRole("status")).toHaveTextContent("“Distance” matches 1 node · 1 relationship");
+    expect(within(list).getByRole("button", { name: /^Two or more steps away/ })).toHaveAttribute("aria-expanded", "true");
     const twoStep = rowByLabel(list, "Distance Two");
     expect(twoStep).toHaveTextContent("via Architecture Notes");
     await user.click(twoStep);
@@ -1094,8 +1119,15 @@ describe("GraphView", () => {
     // A node kind name finds the seed's relations by their far end: the
     // matched node is listed, not only counted.
     await user.type(search, "Ask turn");
-    expect(within(list).getByRole("status")).toHaveTextContent("“Ask turn” matches 1 nodes · 1 relationships");
+    expect(within(list).getByRole("status")).toHaveTextContent("“Ask turn” matches 1 node · 1 relationship");
     expect(rowByLabel(list, "Why was this chosen?")).toBeVisible();
+
+    // Every seed row has the seed at its near end, so the seed's own name
+    // matches none of them; the seed itself is listed, as it is counted.
+    await user.clear(search);
+    await user.type(search, "Decision Log");
+    expect(within(list).getByRole("status")).toHaveTextContent("“Decision Log” matches 1 node · 0 relationships");
+    expect(list.querySelector('[data-local-graph-id="node:seed"]')).toBeVisible();
   });
 
   it("uses one relation Tab entry and arrow emphasis without selecting, pinning, or moving the view", async () => {
@@ -1907,7 +1939,7 @@ describe("GraphView", () => {
     const user = userEvent.setup();
     const onExpand = vi.fn(async () => undefined);
     const onDepthChange = vi.fn(async () => undefined);
-    renderGraph({ payload: folderOnlyCoverageFixture(), onExpand, onDepthChange });
+    renderGraph({ openContents: false, payload: folderOnlyCoverageFixture(), onExpand, onDepthChange });
     const summary = screen.getByText("Some folders omitted");
     const disclosure = summary.closest("details")!;
     const canvas = screen.getByTestId("mock-graph-canvas");

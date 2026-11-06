@@ -60,6 +60,9 @@ type RelationFlowProps<E> = {
   onRowFocus?: (edgeId: string, otherId: string) => void;
   onSelect: (otherId: string, origin: RovingSelectionOrigin) => void;
   onShowMore?: (direction: RelationListDirection) => void;
+  /** Open direction groups, owned like `limitOf` (with `onToggleOpen`); otherwise the flow's own. */
+  openOf?: (direction: RelationListDirection) => boolean;
+  onToggleOpen?: (direction: RelationListDirection) => void;
   openLinkTabIndex?: number;
   page?: number;
   /** A query owned by an enclosing list; it replaces the flow's own search box. */
@@ -129,7 +132,9 @@ export function RelationFlow<E>({
   onRowFocus,
   onSelect,
   onShowMore,
+  onToggleOpen,
   openLinkTabIndex,
+  openOf,
   page = RELATION_FLOW_PAGE,
   query: externalQuery,
   relations,
@@ -145,7 +150,16 @@ export function RelationFlow<E>({
   const baseId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [ownQuery, setOwnQuery] = useState("");
-  const [open, setOpen] = useState<Record<RelationListDirection, boolean>>({ incoming: true, outgoing: true, undirected: true });
+  const [ownOpen, setOpen] = useState<Record<RelationListDirection, boolean>>({ incoming: true, outgoing: true, undirected: true });
+  const open = {
+    incoming: openOf?.("incoming") ?? ownOpen.incoming,
+    outgoing: openOf?.("outgoing") ?? ownOpen.outgoing,
+    undirected: openOf?.("undirected") ?? ownOpen.undirected,
+  };
+  const toggleOpen = (direction: RelationListDirection) => {
+    if (onToggleOpen) onToggleOpen(direction);
+    else setOpen((current) => ({ ...current, [direction]: !current[direction] }));
+  };
   const pageLimits = { incoming: page, outgoing: page, undirected: page };
   const [ownLimits, setLimits] = useState<Record<RelationListDirection, number>>(pageLimits);
   const limitFor = (direction: RelationListDirection) => limitOf?.(direction) ?? ownLimits[direction];
@@ -271,13 +285,13 @@ export function RelationFlow<E>({
     return {
       remaining,
       head: <RelationListFoldHeader controls={listId} count={list.length} level="group" note={note}
-        onToggle={() => setOpen((current) => ({ ...current, [direction]: !current[direction] }))}
+        onToggle={() => toggleOpen(direction)}
         open={open[direction]} title={title} />,
       list: open[direction] ? <ul aria-label={title} className="relation-list-flow-list"
         data-relation-direction={direction} data-shown-count={shown[direction].length} data-total-count={list.length} id={listId}>
         {shown[direction].map((_, index) => row(direction, index))}
       </ul> : null,
-      more: <RelationListMoreButton onClick={() => showMore(direction)} remaining={remaining} step={page} />,
+      more: <RelationListMoreButton controls={listId} onClick={() => showMore(direction)} remaining={remaining} step={page} />,
     };
   };
   const incoming = group("incoming");
