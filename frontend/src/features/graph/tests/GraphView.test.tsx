@@ -93,7 +93,7 @@ vi.mock("../GraphCanvas", async () => {
 });
 
 vi.mock("../../pages/MarkdownView", () => ({
-  MarkdownView: ({ body }: { body: string }) => <pre data-testid="mock-markdown-view">{body}</pre>,
+  MermaidDiagram: ({ source }: { source: string }) => <pre data-testid="mock-mermaid-diagram">{source}</pre>,
 }));
 
 describe("GraphView", () => {
@@ -1248,15 +1248,15 @@ describe("GraphView", () => {
   it("mounts Mermaid only while the static view is requested, never for hidden print content", async () => {
     const user = userEvent.setup();
     renderGraph();
-    expect(screen.queryByTestId("mock-markdown-view")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("mock-mermaid-diagram")).not.toBeInTheDocument();
 
     await user.click(screen.getByLabelText("Wiki link", { selector: "input" }));
-    expect(screen.queryByTestId("mock-markdown-view")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("mock-mermaid-diagram")).not.toBeInTheDocument();
     await user.click(screen.getByText("Static graph view"));
-    expect(screen.getAllByTestId("mock-markdown-view")).toHaveLength(1);
-    expect(screen.getByTestId("mock-markdown-view")).not.toHaveTextContent("Wiki link");
+    expect(screen.getAllByTestId("mock-mermaid-diagram")).toHaveLength(1);
+    expect(screen.getByTestId("mock-mermaid-diagram")).not.toHaveTextContent("Wiki link");
     await user.click(screen.getByText("Static graph view"));
-    await waitFor(() => expect(screen.queryByTestId("mock-markdown-view"))
+    await waitFor(() => expect(screen.queryByTestId("mock-mermaid-diagram"))
       .not.toBeInTheDocument());
   });
 
@@ -1272,15 +1272,15 @@ describe("GraphView", () => {
     };
     const { rerender } = render(graphElement(props));
     await user.click(screen.getByText("Static graph view"));
-    const directSource = screen.getByTestId("mock-markdown-view").textContent;
+    const directSource = screen.getByTestId("mock-mermaid-diagram").textContent;
     const neighborEdge = { ...direct.edges[0], id: "edge:neighbors", source: "node:related", target: "node:ask", label: "Neighbor-only relationship" };
     const neighbors = { ...direct, query: { ...direct.query, relation_scope: "neighbors" as const }, edges: [direct.edges[0], neighborEdge] };
     rerender(graphElement({ ...props, payload: neighbors }));
     expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-rendered-edge-ids", expect.stringContaining("edge:neighbors"));
     // The broader query omitted a direct edge under its own budget; the
     // static view must recover it from its dedicated payload, not trim canvas.
-    expect(screen.getByTestId("mock-markdown-view")).toHaveTextContent("Included");
-    expect(screen.getByTestId("mock-markdown-view").textContent).toBe(directSource);
+    expect(screen.getByTestId("mock-mermaid-diagram")).toHaveTextContent("Included");
+    expect(screen.getByTestId("mock-mermaid-diagram").textContent).toBe(directSource);
 
     const distantNode = { ...direct.nodes[1], id: "node:distant", label: "Second-hop document" };
     const extended = { ...neighbors, query: { ...neighbors.query, depth: 2 as const },
@@ -1289,20 +1289,20 @@ describe("GraphView", () => {
     };
     rerender(graphElement({ ...props, payload: extended }));
     expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-nodes", "4");
-    expect(screen.getByTestId("mock-markdown-view").textContent).toBe(directSource);
+    expect(screen.getByTestId("mock-mermaid-diagram").textContent).toBe(directSource);
     fireEvent.click(screen.getByLabelText("Ask turn"));
-    expect(screen.getByTestId("mock-markdown-view")).not.toHaveTextContent("Why was this chosen?");
-    expect(screen.getByTestId("mock-markdown-view")).toHaveTextContent("Architecture Notes");
+    expect(screen.getByTestId("mock-mermaid-diagram")).not.toHaveTextContent("Why was this chosen?");
+    expect(screen.getByTestId("mock-mermaid-diagram")).toHaveTextContent("Architecture Notes");
 
     fireEvent.click(screen.getByLabelText("Ask turn"));
     rerender(graphElement(props));
     fireEvent.click(screen.getByLabelText("Usage"));
-    expect(screen.getByTestId("mock-markdown-view")).not.toHaveTextContent("Included");
+    expect(screen.getByTestId("mock-mermaid-diagram")).not.toHaveTextContent("Included");
     rerender(graphElement({ ...props, payload: neighbors }));
-    expect(screen.getByTestId("mock-markdown-view")).not.toHaveTextContent("Included");
+    expect(screen.getByTestId("mock-mermaid-diagram")).not.toHaveTextContent("Included");
     expect(screen.getByLabelText("Usage")).not.toBeChecked();
     fireEvent.click(screen.getByLabelText("Usage"));
-    expect(screen.getByTestId("mock-markdown-view")).toHaveTextContent("Included");
+    expect(screen.getByTestId("mock-mermaid-diagram")).toHaveTextContent("Included");
   });
 
   it.each([501, 750])("uses a complete text fallback for %i relationships instead of invalid Mermaid", (count) => {
@@ -1318,7 +1318,7 @@ describe("GraphView", () => {
       .getByText("Simulate renderer error"));
     const fallback = container.querySelector<HTMLElement>(".graph-static-fallback")!;
     expect(fallback).toHaveAttribute("open");
-    expect(container.querySelector("[data-testid='mock-markdown-view']")).toBeNull();
+    expect(container.querySelector("[data-testid='mock-mermaid-diagram']")).toBeNull();
     expect(within(fallback).getByText(/exceeds the diagram limit of 500 relationships/))
       .toBeInTheDocument();
     const [nodeList, edgeList] = fallback.querySelectorAll(".graph-text-contents > ul");
@@ -1340,7 +1340,7 @@ describe("GraphView", () => {
 
     fireEvent.click(within(screen.getByTestId("mock-graph-canvas"))
       .getByText("Simulate renderer error"));
-    const diagram = screen.getByTestId("mock-markdown-view");
+    const diagram = screen.getByTestId("mock-mermaid-diagram");
     expect(diagram).toHaveTextContent("Decision Log");
     expect(diagram.textContent?.match(/-->/g)).toHaveLength(500);
     expect(screen.queryByText(/exceeds the diagram limit/)).not.toBeInTheDocument();
@@ -1354,7 +1354,7 @@ describe("GraphView", () => {
     expect(within(printable).getByText("Decision Log")).toBeInTheDocument();
     expect(within(printable).getByRole("list", { name: "Relationships", hidden: true }))
       .toBeInTheDocument();
-    expect(screen.queryByTestId("mock-markdown-view")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("mock-mermaid-diagram")).not.toBeInTheDocument();
     act(() => window.dispatchEvent(new Event("afterprint")));
     expect(within(printable).queryByText("Decision Log")).not.toBeInTheDocument();
   });

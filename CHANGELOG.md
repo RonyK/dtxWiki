@@ -36,6 +36,11 @@
   columns. Map legend lines match the map and use the Link and Citation names.
 - Define the graph colour tokens once for the light, dark and forced-colours
   themes, so legends, lists and chips outside the canvas follow dark mode.
+- Draw the Context graph's static view in the same vocabulary: cards tinted
+  in each node's colour with its legend glyph before the title, the current
+  document as a filled card, and lines in their legend colour, dash and weight.
+  The static view now spans the full graph width, and **Export filtered
+  graph** writes the same styles.
 
 ## 0.2.1 — 2026-11-04
 

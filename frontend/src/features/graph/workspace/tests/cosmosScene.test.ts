@@ -9,7 +9,7 @@ const tokens: GraphVisualTokens = {
   surface: "#101827",
   node: { context: "#8b5cf6", library: "#0d9488", agent: "#60a5fa", conversation: "#ea580c", folder: "#94a3b8" },
   edge: { link: "#64748b", citation: "#0d9488", coAccess: "#ea580c", membership: "#64748b", action: "#a78bfa" },
-  highlight: "#a78bfa", selection: "#f8fafc",
+  highlight: "#a78bfa", selection: "#f8fafc", ink: "#e5e7eb",
 };
 
 function columns(): WorkspaceMapColumns {

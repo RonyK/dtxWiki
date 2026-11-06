@@ -64,6 +64,8 @@ describe("Graph visual tokens", () => {
       // Cosmos snapshots this computed color for its document-label spans;
       // checking palette-token text alone would miss the dark foreground bug.
       expect(readGraphTokens(canvas, "dark").surface).toBe("#0f172a");
+      // The static diagram writes its titles in this ink, not the page's --ink.
+      expect(readGraphTokens(canvas, "dark").ink).toBe("#e5e7eb");
       expect(getComputedStyle(canvas).color).toBe("rgb(229, 231, 235)");
       expect(getComputedStyle(unrelated).color).toBe("rgb(15, 23, 42)");
       canvas.style.color = "rgb(255, 255, 255)";
