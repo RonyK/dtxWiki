@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -71,8 +71,10 @@ const OTHER_WORKSPACE_ID = "00000000-0000-4000-8000-000000000120";
 const saveButton = () => screen.getByRole("button", { name: /^(Save changes|Saving…)$/ });
 const discardButton = () => screen.getByRole("button", { name: /Discard/ });
 
+const checksToggle = () => screen.findByText(/^Show all checks/);
+
 async function openChecks() {
-  await userEvent.click(screen.getByText("Checks"));
+  await userEvent.click(await checksToggle());
   await screen.findByText("Code fence balance");
 }
 
@@ -95,11 +97,15 @@ describe("LintRulesSection", () => {
   it("groups rules and saves edited checks only when Save changes is clicked", async () => {
     const user = userEvent.setup();
     render(routed(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />));
-    expect(screen.getByText("Checks").closest("details")).not.toHaveAttribute("open");
+    expect((await checksToggle()).closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("0 of 2 optional checks on")).toBeInTheDocument();
     await openChecks();
-    expect(screen.getByText("Format")).toBeInTheDocument();
-    expect(screen.getByText("Knowledge")).toBeInTheDocument();
-    expect(screen.getByText("Maintenance")).toBeInTheDocument();
+    for (const group of ["Format", "Knowledge", "Maintenance"]) {
+      expect(screen.getByRole("heading", { level: 4, name: new RegExp(`^${group}`) })).toBeInTheDocument();
+    }
+    // Groups without a toggleable rule offer no bulk action.
+    expect(screen.getByRole("heading", { level: 4, name: /^Format/ })).toHaveTextContent("Read-only");
+    expect(screen.getAllByText("Off by default")).toHaveLength(2);
     expect(screen.getByText("External source")).toBeInTheDocument();
     expect(screen.getByText("Required safeguard")).toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: "Code fence balance" })).not.toBeInTheDocument();
@@ -113,11 +119,13 @@ describe("LintRulesSection", () => {
     expect(beforeUnloadIsBlocked()).toBe(false);
     await user.click(orphan);
     expect(orphan).toBeChecked();
+    expect(orphan.closest("li")).toHaveTextContent("Changed");
+    expect(screen.getByText(/^Unsaved changes: 1 · Save to apply/)).toBeInTheDocument();
     expect(updateSettingsPolicyBatch).not.toHaveBeenCalled();
     expect(beforeUnloadIsBlocked()).toBe(true);
     const leave = vi.spyOn(window, "confirm").mockReturnValue(false);
     try {
-      const queue = screen.getByRole("link", { name: "Open lint queue" });
+      const queue = screen.getByRole("link", { name: "See what these checks found" });
       await user.click(queue);
       expect(leave).toHaveBeenCalledWith("You have unsaved changes here. Leave without saving them?");
       leave.mockClear();
@@ -138,6 +146,7 @@ describe("LintRulesSection", () => {
     });
     await waitFor(() => expect(saveButton()).toBeDisabled());
     expect(orphan).toBeChecked();
+    expect(orphan.closest("li")).not.toHaveTextContent("Changed");
     expect(backlink).not.toBeChecked();
     expect(beforeUnloadIsBlocked()).toBe(false);
   });
@@ -151,11 +160,14 @@ describe("LintRulesSection", () => {
     await waitFor(() => expect(autofix).toBeEnabled());
     const mode = screen.getByRole("combobox", { name: /Fix internal links/ });
     const approval = screen.getByRole("checkbox", { name: /Automatically approve safe link fixes/ });
+    expect(screen.getAllByText("Now")).toHaveLength(3);
     await user.click(autofix);
     await user.selectOptions(mode, "suggest");
     await user.click(approval);
+    expect(screen.getAllByText("After saving")).toHaveLength(3);
     expect(beforeUnloadIsBlocked()).toBe(true);
     await user.click(discardButton());
+    expect(screen.queryByText("After saving")).not.toBeInTheDocument();
     expect(autofix).not.toBeChecked();
     expect(mode).toHaveValue("auto");
     expect(approval).toBeChecked();
@@ -223,8 +235,15 @@ describe("LintRulesSection", () => {
     const user = userEvent.setup();
     const view = render(routed(<LintRulesSection readOnly={true} workspaceId={WORKSPACE_ID} />));
     await openChecks();
-    for (const checkbox of screen.getAllByRole("checkbox")) expect(checkbox).toBeDisabled();
-    expect(screen.getByRole("combobox", { name: /Fix internal links/ })).toBeDisabled();
+    expect(screen.getByText(/^Only workspace owners can change these/)).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    const saveGroup = screen.getByRole("group", { name: "Clean up on save" });
+    expect(within(saveGroup).getByText("Off")).toBeInTheDocument();
+    expect(within(saveGroup).getByText("Automatically")).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Review and publication" })).getByText("On")).toBeInTheDocument();
+    expect(screen.getByText("Orphan page").closest("li")).toHaveTextContent(/^Off/);
+    expect(screen.queryByRole("button", { name: /Turn all/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Discard/ })).not.toBeInTheDocument();
     expect(updateSettingsPolicyBatch).not.toHaveBeenCalled();
@@ -234,9 +253,9 @@ describe("LintRulesSection", () => {
     await user.click(screen.getByRole("checkbox", { name: /auto-fix/i }));
     expect(beforeUnloadIsBlocked()).toBe(true);
     view.rerender(routed(<LintRulesSection readOnly={true} workspaceId={WORKSPACE_ID} />));
-    await waitFor(() => expect(screen.getByRole("checkbox", { name: /auto-fix/i })).not.toHaveProperty("indeterminate", true));
-    expect(screen.getByRole("checkbox", { name: /auto-fix/i })).not.toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /auto-fix/i })).toBeDisabled();
+    // The owner's unsaved auto-fix edit is dropped, not shown as the saved state.
+    expect(within(screen.getByRole("group", { name: "Clean up on save" })).getByText("Off")).toBeInTheDocument();
+    expect(screen.queryByText("Changed")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
     expect(beforeUnloadIsBlocked()).toBe(false);
     expect(updateSettingsPolicyBatch).not.toHaveBeenCalled();
@@ -262,7 +281,7 @@ describe("LintRulesSection", () => {
     await user.type(screen.getByRole("searchbox", { name: "Search checks" }), "orphan");
     expect(screen.queryByText("Code fence balance")).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: "Missing backlink" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("checkbox", { name: "Toggle shown Knowledge checks" }));
+    await user.click(screen.getByRole("button", { name: "Turn all shown on: Knowledge" }));
     expect(updateSettingsPolicyBatch).not.toHaveBeenCalled();
     await user.clear(screen.getByRole("searchbox", { name: "Search checks" }));
     expect(screen.getByRole("checkbox", { name: "Orphan page" })).toBeChecked();
@@ -283,7 +302,7 @@ describe("LintRulesSection", () => {
     vi.mocked(getLintRules).mockResolvedValue(RULES as never);
     await user.click(screen.getByRole("button", { name: "Retry checks" }));
     await waitFor(() => expect(screen.getByRole("combobox")).toBeEnabled());
-    expect(screen.getByText("Checks").closest("details")).not.toHaveAttribute("open");
+    expect((await checksToggle()).closest("details")).not.toHaveAttribute("open");
     expect(updateSettingsPolicyBatch).not.toHaveBeenCalled();
   });
 

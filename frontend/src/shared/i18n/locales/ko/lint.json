@@ -138,12 +138,12 @@
     "link_unresolved": {
       "label": "열 수 없는 내부 링크",
       "message": "이 내부 문서 링크를 열 수 없습니다.",
-      "description": "이 Workspace에서 없거나 보관되었거나 접근할 수 없는 대상을 표시합니다."
+      "description": "이 워크스페이스에서 없거나 보관되었거나 접근할 수 없는 대상을 표시합니다."
     },
     "link_unresolved_citation": {
       "label": "해석되지 않은 인용",
-      "message": "이 인용은 이 Workspace의 문서를 가리키지 않아 참고문헌에 등록되지 않습니다.",
-      "description": "이 Workspace의 문서를 가리키지 않는 @cite 표시를 보여 줍니다."
+      "message": "이 인용은 이 워크스페이스의 문서를 가리키지 않아 참고문헌에 등록되지 않습니다.",
+      "description": "이 워크스페이스의 문서를 가리키지 않는 @cite 표시를 보여 줍니다."
     },
     "link_broken-slug": {
       "label": "오래된 위키 링크 슬러그",
@@ -236,9 +236,9 @@
       "description": "외부 유지보수 실행이 제안한 검색 평가 질의를 기록합니다."
     },
     "link_foreign": {
-      "label": "다른 Workspace 참조",
-      "message": "다른 Workspace 문서는 전체 형식의 영구 링크로 연결하세요.",
-      "description": "이 Workspace에서 해석할 수 없는 조회 전용 리소스 주소를 표시합니다."
+      "label": "다른 워크스페이스 참조",
+      "message": "다른 워크스페이스 문서는 전체 형식의 영구 링크로 연결하세요.",
+      "description": "이 워크스페이스에서 해석할 수 없는 조회 전용 리소스 주소를 표시합니다."
     },
     "link_target-unpublished": {
       "label": "게시되지 않은 링크 대상",
@@ -301,7 +301,7 @@
     "decide": "린트 결과 업데이트에 실패했습니다",
     "workspaceNotFound": "작업 공간을 찾을 수 없습니다",
     "batchPartialFailure": "{{count}}개의 결과를 업데이트하는 데 실패했습니다.",
-    "findingNotFound": "이 Workspace에서 해당 Lint 항목을 찾을 수 없습니다."
+    "findingNotFound": "이 워크스페이스에서 해당 Lint 항목을 찾을 수 없습니다."
   },
   "runState": {
     "queued": "대기 중",

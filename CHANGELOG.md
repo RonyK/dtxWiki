@@ -45,6 +45,12 @@
 - Edit lint settings as a draft and apply them with **Save changes** in one
   revision-checked save; **Discard** reverts them. If the settings changed
   elsewhere, the latest values load and your edits are kept for another save.
+- Split the lint settings card into save-time options and checks. Each option
+  states its current effect, and what it will do once an edit is saved.
+  While edits are pending, the save bar stays at the bottom of the screen and
+  edited rows are marked. Checks show a summary while folded, mark checks
+  that are off by default, and fold the ones that are always on or external.
+  Members who cannot edit see each setting as On or Off.
 
 ## 0.2.1 — 2026-11-04
 

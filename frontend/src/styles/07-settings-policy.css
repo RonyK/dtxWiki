@@ -2667,14 +2667,6 @@ button.history-card {
   text-transform: none;
 }
 
-/* I15: the section-level Auto-fix mode toggle is separated from the per-rule
-   list below it so it does not read as an unlabeled rule. */
-.lint-autofix {
-  margin-bottom: 0.75rem;
-  padding-bottom: 0.75rem;
-  border-bottom: 1px solid var(--border-strong);
-}
-
 /* F-9: the High auto-approval "danger noted" acknowledgement, warning-toned. */
 .review-high-danger-ack {
   margin-top: 0.5rem;
@@ -2687,16 +2679,20 @@ button.history-card {
 
 /* F-7: lint rule groups styled within the policy-card (peer-consistent). */
 .lint-rules-card .lint-rule-group {
-  margin-top: 0.85rem;
+  margin-top: 18px;
 }
 
+/* The group name is the heading and its count sits beside it, so the bulk
+   action at the far edge never reads as a stray, unlabelled checkbox. */
 .lint-rules-card .lint-rule-group h4 {
-  margin: 0 0 0.45rem;
-  font-size: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-size: 13.5px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--ink-muted);
+  color: var(--ink);
 }
 
 .lint-rules-card .lint-rule-list {
@@ -2722,7 +2718,7 @@ button.history-card {
    size, so the UA default rendered ~9x13 and sat off-centre in its track.
    Match .checkbox-field's 16px so every settings check control is one size. */
 .lint-rules-card .lint-rule-row > input[type="checkbox"],
-.lint-rules-card .lint-rule-group-toggle input[type="checkbox"] {
+.lint-rules-card .lint-option > input[type="checkbox"] {
   width: var(--checkbox-size);
   height: var(--checkbox-size);
   min-height: var(--checkbox-size);
@@ -2771,35 +2767,35 @@ button.history-card {
   gap: 12px;
 }
 
+.lint-rules-card .lint-rule-group-header {
+  justify-content: space-between;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
 .lint-rules-card .lint-rules-header .metric-card-title,
 .lint-rules-card .lint-rule-group-header h4 {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-.lint-rules-card .lint-rule-group-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.lint-rules-card .lint-layer-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-inline-size: 24px;
-}
-
 .lint-rules-card .lint-rule-group-count {
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 500;
-  text-transform: none;
-  letter-spacing: 0;
   color: var(--ink-muted);
 }
 
+.lint-rules-card .lint-rule-group-action {
+  flex: none;
+  min-height: 32px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
 .lint-rules-card .lint-rule-group-note {
-  margin: 0 0 0.45rem;
+  margin: 2px 0 8px;
   font-size: 12.5px;
   color: var(--ink-soft);
 }
@@ -4322,66 +4318,301 @@ button.history-card {
   min-height: 24px;
 }
 
-/* Lint options describe save/review policy; checks remain a separate disclosure. */
-.lint-settings-group,
-.lint-current-effect {
-  padding: 1rem 0;
+/* The lint card has two blocks: save and approval options first, then the
+   checks. Each block is a real section with its own heading, and spacing
+   comes from the blocks' own margins rather than the card's row gap. */
+.lint-rules-card {
+  gap: 0;
+}
+
+.lint-rules-card .lint-rules-description {
+  margin: 4px 0 12px;
+}
+
+.lint-rules-card > .status-banner {
+  margin-bottom: 12px;
+}
+
+.lint-settings-block {
+  margin-top: 4px;
+  padding-top: 16px;
   border-top: 1px solid var(--border-strong);
 }
 
-.lint-settings-group h3,
-.lint-current-effect h3 {
-  margin: 0 0 0.75rem;
-  font-size: 14px;
+.lint-settings-block + .lint-settings-block {
+  margin-top: 20px;
 }
 
-.lint-settings-group .lint-autofix {
-  border: 0;
-  padding-bottom: 0;
+.lint-settings-block-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
 }
 
-.lint-link-fix-policy {
+.lint-settings-block-head {
   display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.lint-queue-link {
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 4px;
+  min-height: 24px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
 }
 
-.lint-link-fix-policy .lint-rule-copy {
-  flex: 1 1 240px;
+.lint-queue-link:hover {
+  text-decoration: underline;
 }
 
-.lint-link-fix-policy select {
-  max-width: 100%;
-  min-height: 44px;
+.lint-settings-group {
+  padding: 12px 0 4px;
 }
 
-.lint-current-effect p,
-.lint-fixed-guidance,
+.lint-settings-group h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+}
+
+.lint-rules-card .lint-option {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 10px;
+  margin: 0 -8px;
+  padding: 10px 8px;
+  border-radius: var(--radius-control);
+}
+
+.lint-rules-card .lint-option > input[type="checkbox"] {
+  margin-top: 4px;
+}
+
+.lint-rules-card .lint-option--select {
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 24px;
+}
+
+.lint-rules-card .lint-option--select select {
+  min-width: 140px;
+  min-height: 40px;
+}
+
+.lint-rules-card .lint-option .lint-rule-copy {
+  gap: 3px;
+}
+
+.lint-rules-card .lint-option .lint-rule-label {
+  font-weight: 600;
+}
+
+.lint-rules-card .lint-option .lint-rule-description {
+  line-height: 1.5;
+}
+
+/* Each option says what it does now; while edited, what it will do. */
+.lint-effect {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+.lint-effect-label {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-active);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-muted);
+}
+
+.lint-effect--next {
+  color: #78350f;
+}
+
+.lint-effect--next .lint-effect-label {
+  background: #fde68a;
+  color: #78350f;
+}
+
+.lint-option-note {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+/* Edited rows: the whole box is tinted and ringed on every side. */
+.lint-rules-card .lint-option--changed,
+.lint-rules-card .lint-rule-row--changed {
+  background: var(--warning-soft);
+  box-shadow: inset 0 0 0 1px #fde68a;
+}
+
+.lint-rules-card .lint-rule-row--changed {
+  margin: 0 -8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-control);
+}
+
+/* Read-only: states and values as words instead of greyed controls. */
+.lint-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 22px;
+  margin-top: 1px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.lint-state--on {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.lint-state--off {
+  border-color: var(--border-strong);
+  background: var(--surface-active);
+  color: var(--ink-muted);
+}
+
+.lint-rules-card--readonly .lint-rule-row,
+.lint-rules-card--readonly .lint-option:not(.lint-option--select) {
+  grid-template-columns: 44px minmax(0, 1fr);
+}
+
+.lint-option-value {
+  align-self: center;
+  padding: 6px 12px;
+  border-radius: var(--radius-control);
+  background: var(--surface-active);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.lint-checks-summary {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.lint-checks-summary strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.lint-checks-changed {
+  font-weight: 600;
+  color: #92400e;
+}
+
 .lint-checks > p {
+  margin: 4px 0 0;
   font-size: 12.5px;
   line-height: 1.6;
   color: var(--ink-soft);
   overflow-wrap: anywhere;
 }
 
-.lint-checks summary {
-  cursor: pointer;
+.lint-checks > summary {
+  margin-top: 8px;
   min-height: 44px;
   align-content: center;
+  cursor: pointer;
+  font-size: 13.5px;
   font-weight: 600;
+  color: var(--accent);
 }
 
 .lint-rule-search {
-  display: grid;
-  gap: 6px;
-  margin: 0.75rem 0;
+  position: relative;
+  display: block;
+  max-width: 360px;
+  margin: 12px 0 4px;
+}
+
+.lint-rule-search svg {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  transform: translateY(-50%);
+  color: var(--ink-muted);
+  pointer-events: none;
 }
 
 .lint-rule-search input {
-  min-width: 0;
   width: 100%;
-  min-height: 44px;
+  min-width: 0;
+  min-height: 40px;
+  padding-left: 36px;
+}
+
+.lint-locked-rules {
+  margin-top: 8px;
+}
+
+.lint-locked-rules > summary {
+  display: list-item;
+  min-height: 32px;
+  padding-top: 6px;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.lint-locked-rules > .lint-rule-list {
+  margin-top: 6px;
+}
+
+.lint-rules-card .policy-card-actions {
+  margin-top: 16px;
+}
+
+/* While edits are pending the actions stick to the bottom of the screen.
+   .feature-main pads its scrollport by 32px (04-knowledge.css) and sticky
+   stops at that padding edge, so the offset cancels it. The side margins
+   cancel the card's 12px padding. */
+.lint-rules-card--dirty .policy-card-actions {
+  position: sticky;
+  bottom: -32px;
+  z-index: 2;
+  margin: 16px -12px -12px;
+  padding: 12px;
+  border-top: 1px solid var(--border-strong);
+  border-radius: 0 0 var(--radius-card) var(--radius-card);
+  background: var(--surface);
+  box-shadow: 0 -8px 18px rgb(26 20 46 / 8%);
+}
+
+.lint-dirty-summary {
+  margin-inline-end: auto;
+  font-size: 13px;
+  font-weight: 600;
+  color: #92400e;
 }
 
 .lint-rules-card .lint-rules-header,
@@ -4408,23 +4639,44 @@ button.history-card {
   }
 
   .lint-rules-card .lint-rule-row > input[type="checkbox"],
-  .lint-rules-card .lint-rule-row > .lint-rule-lock {
+  .lint-rules-card .lint-rule-row > .lint-rule-lock,
+  .lint-rules-card .lint-rule-row > .lint-state {
     grid-column: 1;
     grid-row: 1;
     align-self: center;
     margin-top: 0;
   }
 
-  .lint-rules-card .lint-rule-label label,
-  .lint-rules-card .lint-layer-toggle {
+  .lint-rules-card .lint-rule-label label {
     min-height: 44px;
     display: inline-flex;
     align-items: center;
   }
+
+  /* Option labels are 44px tall here too; centre the checkbox on that line.
+     Read-only names are plain text, so their state word needs no offset. */
+  .lint-rules-card .lint-option > input[type="checkbox"] {
+    margin-top: 14px;
+  }
 }
 
-.lint-checks summary h3 {
-  display: inline;
-  margin: 0;
-  font-size: 14px;
+@media (max-width: 640px) {
+  .lint-rules-card .lint-option--select {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 8px;
+  }
+
+  .lint-rules-card .lint-option--select select,
+  .lint-rules-card .lint-option--select .lint-option-value {
+    justify-self: start;
+  }
+
+  /* Descriptions use the whole row instead of the indented column. */
+  .lint-rules-card .lint-rule-row .lint-rule-description {
+    grid-column: 1 / -1;
+  }
+
+  .lint-dirty-summary {
+    flex-basis: 100%;
+  }
 }
