@@ -1083,22 +1083,26 @@ describe("LintScreen", () => {
     expect(fetchSpy.mock.calls.some(([input]) => String(input).includes("/tree/nodes/"))).toBe(false);
     expect(within(nullRow).queryByRole("link")).toBeNull();
     expect(within(nullRow).getByText("Context page")).toBeInTheDocument();
-    // A pair finding names both pages, links the second one, and states the
-    // proposal as a step instead of its code.
+    // A link-pair finding names both pages, links the second one, and offers
+    // both directions; each opens the source page's editor with the link added.
     const pairRow = screen
       .getByText("Read together, not linked")
       .closest(".lint-finding-card") as HTMLElement;
+    const workspace = "/workspaces/00000000-0000-4000-8000-000000000001";
     expect(
       within(pairRow).getByText(
-        "AI conversations often read Ranking guide and Incident runbook together, but neither links to the other.",
+        "7 AI conversations read both pages, but neither links to the other · last 30 days",
       ),
     ).toBeInTheDocument();
     expect(
       within(pairRow).getByRole("link", { name: "Open related Incident runbook" }),
-    ).toHaveAttribute("href", `/workspaces/00000000-0000-4000-8000-000000000001/context/pages/${relatedId}`);
+    ).toHaveAttribute("href", `${workspace}/context/pages/${relatedId}`);
     expect(
-      within(pairRow).getByText(/^Add a link from either page's body to the other\./),
-    ).toBeInTheDocument();
+      within(pairRow).getByRole("link", { name: "Add a link to Incident runbook in Ranking guide" }),
+    ).toHaveAttribute("href", `${workspace}/context/pages/${contextId}/edit?add_link=${relatedId}`);
+    expect(
+      within(pairRow).getByRole("link", { name: "Add a link to Ranking guide in Incident runbook" }),
+    ).toHaveAttribute("href", `${workspace}/context/pages/${relatedId}/edit?add_link=${contextId}`);
     expect(within(pairRow).queryByText("add_cross_link")).toBeNull();
   });
 

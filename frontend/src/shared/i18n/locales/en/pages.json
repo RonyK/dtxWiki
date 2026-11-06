@@ -418,7 +418,12 @@
       "aiPlaceholder": "AI placeholder (selected text)"
     },
     "publishedReviewCompletedReloadFailed": "Review approved, but the published page could not be reloaded.",
-    "reloadLatestFailed": "Could not reload the latest server version."
+    "reloadLatestFailed": "Could not reload the latest server version.",
+    "relatedLinksHeading": "Related pages",
+    "relatedLinkAdded": "Added a link to {{title}} under “Related pages” at the end. Review it, then save.",
+    "relatedLinkPresent": "This page already links to {{title}}. Publish it to resolve the lint finding.",
+    "relatedLinkRemove": "Undo",
+    "relatedLinkRemoveAria": "Undo the added link to {{title}}"
   },
   "blocks": {
     "groups": {

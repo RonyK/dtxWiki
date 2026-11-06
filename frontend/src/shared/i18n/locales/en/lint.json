@@ -115,6 +115,13 @@
   },
   "findingFallback": "Review the quality issue for {{target}}.",
   "relatedTargetFallback": "another page",
+  "pairLink": {
+    "evidence_one": "{{count}} AI conversation read both pages, but neither links to the other · last 30 days",
+    "evidence_other": "{{count}} AI conversations read both pages, but neither links to the other · last 30 days",
+    "row": "Link to {{target}} in {{source}}",
+    "add": "Add",
+    "addAria": "Add a link to {{target}} in {{source}}"
+  },
   "rules": {
     "md_heading_hierarchy": {
       "label": "Heading hierarchy",
@@ -193,7 +200,7 @@
     },
     "kb_hot_path_unmaterialized": {
       "label": "Read together, not linked",
-      "message": "AI conversations often read {{target_title}} and {{related_title}} together, but neither links to the other.",
+      "message": "Add a link to the other page in either page's body.",
       "description": "Flags two pages that AI conversations often read together but that do not link to each other."
     },
     "kb_semantic_near_duplicate": {

@@ -5684,6 +5684,54 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
   font-size: 12px;
 }
 
+/* The lint queue opened this editor with a link already added; the notice says
+   where and offers to take it back until the author edits further. */
+.editor-related-link-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 6px 6px 6px 12px;
+  border: 1px solid color-mix(in srgb, var(--info) 35%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--info) 8%, var(--surface));
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.editor-related-link-notice > svg {
+  flex: none;
+  color: var(--info);
+}
+
+.editor-related-link-notice > p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.editor-related-link-notice > .icon-button {
+  flex: none;
+}
+
+@media (max-width: 640px) {
+  .editor-related-link-notice {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  /* Icon and sentence on the first line, the undo button under them. */
+  .editor-related-link-notice > p {
+    flex-basis: calc(100% - 26px);
+  }
+
+  .editor-related-link-notice > .icon-button {
+    margin-left: auto;
+  }
+}
+
 .editor-inline-toolbar {
   position: fixed;
   z-index: 45;

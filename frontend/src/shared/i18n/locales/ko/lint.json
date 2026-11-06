@@ -115,6 +115,13 @@
   },
   "findingFallback": "{{target}}의 품질 문제를 검토하세요.",
   "relatedTargetFallback": "다른",
+  "pairLink": {
+    "evidence_one": "AI 대화 {{count}}건이 함께 읽었지만 서로 링크하지 않습니다 · 최근 30일",
+    "evidence_other": "AI 대화 {{count}}건이 함께 읽었지만 서로 링크하지 않습니다 · 최근 30일",
+    "row": "{{source}}에 {{target}} 링크",
+    "add": "추가",
+    "addAria": "{{source}}에 {{target}} 링크 추가"
+  },
   "rules": {
     "md_heading_hierarchy": {
       "label": "제목 계층",
@@ -193,7 +200,7 @@
     },
     "kb_hot_path_unmaterialized": {
       "label": "함께 읽지만 링크 없음",
-      "message": "AI 대화가 {{target_title}} 문서와 {{related_title}} 문서를 자주 함께 읽지만, 두 문서 사이에 링크가 없습니다.",
+      "message": "두 문서 중 한쪽 본문에 다른 문서 링크를 넣으세요.",
       "description": "AI 대화가 자주 함께 읽지만 서로 링크하지 않는 두 문서를 표시합니다."
     },
     "kb_semantic_near_duplicate": {

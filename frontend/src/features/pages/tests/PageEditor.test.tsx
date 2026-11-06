@@ -4796,6 +4796,29 @@ describe("PageEditor", () => {
     expect(autosaveCalls(fetchMock)).toHaveLength(0);
   });
 
+  it("opens with the lint queue's link added as an ordinary edit that Undo takes back", async () => {
+    const relatedId = "55555555-5555-4555-8555-555555555555";
+    const fetchMock = mockEditorPage("# Hello");
+    const baseFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) =>
+      String(input).endsWith(`/context/pages/${relatedId}`)
+        ? jsonResponse({ data: { ...page, id: relatedId, slug: "incident-runbook", title: "Incident runbook", body_md: "# Runbook" } })
+        : baseFetch(input, init),
+    );
+    renderWithRouter(
+      `/pages/hello/edit?add_link=${relatedId}`,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
+    );
+    await screen.findByText("Added a link to Incident runbook under “Related pages” at the end. Review it, then save.");
+    const added = `# Hello\n\n## Related pages\n\n- [Incident runbook](/p/11111111-1111-4111-8111-111111111111/${relatedId})\n`;
+    await waitFor(() => expect(codeMirrorView().state.doc.toString()).toBe(added));
+    expect(syncStatus()).not.toHaveTextContent(/^Saved$/);
+
+    await typist().click(screen.getByRole("button", { name: "Undo the added link to Incident runbook" }));
+    await waitFor(() => expect(codeMirrorView().state.doc.toString()).toBe("# Hello"));
+    expect(screen.queryByText(/Added a link to Incident runbook/)).not.toBeInTheDocument();
+  });
+
   it("switches to split mode with a resizable separator", async () => {
     await renderEditorOnHello();
     expect(screen.getByRole("navigation", { name: "Page location" })).toBeInTheDocument();
