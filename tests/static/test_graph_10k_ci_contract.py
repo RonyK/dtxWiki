@@ -51,7 +51,7 @@ PC10K_WEBGL_COMMAND = (
 def assert_pc_10k_job(job):
     assert "if" not in job
     assert not job.get("continue-on-error", False)
-    # PR CI excludes the WebGL gate's @pc10k cases; this lane owns them.
+    # The graph-2k release lane excludes @pc10k cases; this lane owns them.
     webgl = [s for s in job["steps"] if s.get("run", "").strip() == PC10K_WEBGL_COMMAND]
     assert len(webgl) == 1 and "if" not in webgl[0]
     assert not webgl[0].get("continue-on-error", False)

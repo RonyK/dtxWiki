@@ -195,6 +195,7 @@
   color: var(--ink-muted);
   font-size: 13px;
   font-weight: 600;
+  min-width: 32px;
   min-height: 36px;
   padding: 8px 2px;
   cursor: pointer;
