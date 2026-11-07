@@ -15,20 +15,25 @@ type Suggestion =
 /**
  * The lint queue's "link these two pages" remedy, shown above the editor:
  * the link to paste, a copy button, and nothing else. The body is the
- * author's to change, so the suggestion never writes into it. Once the
- * server's own reading of the page (`linkTargets`) contains the link, the
- * notice says so instead.
+ * author's to change, so the suggestion never writes into it and does not
+ * follow later edits: whether the page already links there is read once,
+ * from the page as loaded (autosave responses carry no link projection).
+ * Once closed it stays closed, and the address drops the request so a
+ * reload or Back does not bring it back.
  */
 export function RelatedLinkSuggestion({
-  linkTargets,
+  initialLinkTargets,
   relatedPageId,
   workspaceId,
 }: {
-  linkTargets: ReadonlyArray<{ target_page_id?: string | null }> | undefined;
+  initialLinkTargets: ReadonlyArray<{ target_page_id?: string | null }> | undefined;
   relatedPageId: string;
   workspaceId: string;
 }) {
   const { t } = useTranslation("pages");
+  const [linked] = useState(() =>
+    (initialLinkTargets ?? []).some((target) => target.target_page_id === relatedPageId),
+  );
   const [suggestion, setSuggestion] = useState<Suggestion>({ kind: "loading" });
   const [dismissed, setDismissed] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<CopyTextResult | null>(null);
@@ -36,8 +41,6 @@ export function RelatedLinkSuggestion({
 
   useEffect(() => {
     let active = true;
-    setSuggestion({ kind: "loading" });
-    setDismissed(false);
     readPage(workspaceId, relatedPageId)
       .then((related) => {
         if (!active) return;
@@ -66,14 +69,14 @@ export function RelatedLinkSuggestion({
 
   if (dismissed || suggestion.kind === "loading") return null;
 
-  const linked =
-    suggestion.kind === "ready" &&
-    (linkTargets ?? []).some((target) => target.target_page_id === relatedPageId);
   const dismiss = (
     <button
       aria-label={t("editor.relatedLinkDismiss", { defaultValue: "Dismiss" })}
       className="editor-related-link-notice__close"
-      onClick={() => setDismissed(true)}
+      onClick={() => {
+        setDismissed(true);
+        dropSuggestionFromAddress();
+      }}
       type="button"
     >
       <X size={16} aria-hidden="true" />
@@ -149,4 +152,15 @@ export function RelatedLinkSuggestion({
       ) : null}
     </div>
   );
+}
+
+/**
+ * Rewrites the history entry directly: a router navigation would trip the
+ * editor's unsaved-changes prompt, and nothing else reads this parameter.
+ */
+function dropSuggestionFromAddress() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("suggest_link")) return;
+  url.searchParams.delete("suggest_link");
+  window.history.replaceState(window.history.state, "", url);
 }

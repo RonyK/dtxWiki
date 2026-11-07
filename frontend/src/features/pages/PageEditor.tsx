@@ -5623,7 +5623,7 @@ export function PageEditor({
         {suggestLinkPageId && workspaceId && page && pageLoadState === "ready" ? (
           <RelatedLinkSuggestion
             key={`${page.id}:${suggestLinkPageId}`}
-            linkTargets={page.link_targets}
+            initialLinkTargets={page.link_targets}
             relatedPageId={suggestLinkPageId}
             workspaceId={workspaceId}
           />
