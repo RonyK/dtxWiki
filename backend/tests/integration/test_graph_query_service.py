@@ -11,13 +11,18 @@ from backend.models.audit import AuditEvent
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import ContextPage, ContextPageVersion, EdgeProjection
 from backend.models.graph import GraphObservation
-from backend.models.mcp_chat import McpChatSession, McpChatToolCallArtifact
+from backend.models.mcp_chat import (
+    McpChatArtifactLink,
+    McpChatSession,
+    McpChatToolCallArtifact,
+)
 from backend.models.mcp_trace import MCPToolCall
 from backend.models.review import ReviewDecision, ReviewItem
 from backend.models.tree import WorkspaceTreeNode
-from backend.models.workspace import Workspace
+from backend.models.workspace import MCPClient, Workspace
 from backend.policy.auth import ActorContext
 from backend.schemas.graph import (
+    GRAPH_NODE_RECORD_LIMIT,
     GraphBudget,
     GraphQueryRequest,
     GraphSeed,
@@ -108,6 +113,48 @@ def _edge(session, workspace_id, source, target, kind="wikilink", weight=1.0):
     )
     session.add(edge)
     return edge
+
+
+def _mcp_touch(session, chat, tool_call, resource_id, verb, occurred_at):
+    """One chat call touching one document: the per-call row and its rollup."""
+
+    session.add(
+        McpChatToolCallArtifact(
+            workspace_id=chat.workspace_id,
+            chat_session_id=chat.id,
+            mcp_tool_call_id=tool_call.id,
+            resource_kind="context_page",
+            resource_id=resource_id,
+            verb=verb,
+            occurred_at=occurred_at,
+        )
+    )
+    link = session.scalar(
+        select(McpChatArtifactLink).where(
+            McpChatArtifactLink.chat_session_id == chat.id,
+            McpChatArtifactLink.resource_id == resource_id,
+            McpChatArtifactLink.verb == verb,
+        )
+    )
+    if link is None:
+        session.add(
+            McpChatArtifactLink(
+                workspace_id=chat.workspace_id,
+                chat_session_id=chat.id,
+                resource_kind="context_page",
+                resource_id=resource_id,
+                verb=verb,
+                first_occurred_at=occurred_at,
+                last_occurred_at=occurred_at,
+                occurrence_count=1,
+                last_mcp_tool_call_id=tool_call.id,
+            )
+        )
+    else:
+        link.occurrence_count += 1
+        link.last_occurred_at = max(link.last_occurred_at, occurred_at)
+        link.last_mcp_tool_call_id = tool_call.id
+    session.flush()
 
 
 def _current_request(seed_id, **updates):
@@ -792,17 +839,7 @@ def test_action_scene_uses_included_not_cited_and_never_returns_raw_inputs(
         )
         session.add(tool_call)
         session.flush()
-        session.add(
-            McpChatToolCallArtifact(
-                workspace_id=chat.workspace_id,
-                chat_session_id=chat.id,
-                mcp_tool_call_id=tool_call.id,
-                resource_kind="context_page",
-                resource_id=seed.id,
-                verb="referenced",
-                occurred_at=occurred_at,
-            )
-        )
+        _mcp_touch(session, chat, tool_call, seed.id, "referenced", occurred_at)
         seed_id = seed.id
 
     request = _current_request(
@@ -819,41 +856,24 @@ def test_action_scene_uses_included_not_cited_and_never_returns_raw_inputs(
             request=request,
             actor=_actor("editor"),
             usage_signals_enabled=True,
+            ask_sessions_visible=True,
         )
 
+    # Each conversation is one node joined straight to the document it used;
+    # no turn or tool-call node stands between them.
     seed_transport_id = next(node.id for node in payload.nodes if node.is_seed)
-    ask_edges = [
-        edge
-        for edge in payload.edges
-        if edge.evidence is not None
-        and edge.evidence.kind == "ask_turn_citation"
-        and edge.action_kind == "included"
-        and edge.target == seed_transport_id
-    ]
-    assert len(ask_edges) == 1
-    assert ask_edges[0].action_kind == "included"
-    assert "chat" in {node.family for node in payload.nodes}
-    assert {"ask_session", "mcp_chat_session"} <= {
-        node.entity_kind for node in payload.nodes
-    }
     nodes_by_id = {node.id: node for node in payload.nodes}
+    assert {
+        nodes_by_id[edge.source].entity_kind: edge.action_kind
+        for edge in payload.edges
+        if edge.target == seed_transport_id
+        and nodes_by_id[edge.source].family in {"ask", "chat"}
+    } == {"ask_session": "included", "mcp_chat_session": "referenced"}
     assert {
         node.entity_kind: node.family
         for node in payload.nodes
-        if node.entity_kind in {"ask_session", "mcp_chat_session"}
+        if node.family in {"ask", "chat"}
     } == {"ask_session": "ask", "mcp_chat_session": "chat"}
-    assert any(
-        nodes_by_id[edge.source].entity_kind == "ask_session"
-        and nodes_by_id[edge.target].entity_kind == "ask_turn"
-        and edge.action_kind == "included"
-        for edge in payload.edges
-    )
-    assert any(
-        nodes_by_id[edge.source].entity_kind == "mcp_chat_session"
-        and nodes_by_id[edge.target].entity_kind == "mcp_tool_call"
-        and edge.action_kind == "tool_produced"
-        for edge in payload.edges
-    )
     unavailable_evidence = [
         *(node.evidence for node in payload.nodes if node.evidence is not None),
         *(edge.evidence for edge in payload.edges if edge.evidence is not None),
@@ -874,6 +894,342 @@ def test_action_scene_uses_included_not_cited_and_never_returns_raw_inputs(
     assert "SECRET_PROMPT_DO_NOT_RETURN" not in serialized
     assert "SECRET_ANSWER_DO_NOT_RETURN" not in serialized
     assert "SECRET_TOOL_ARG_DO_NOT_RETURN" not in serialized
+
+
+def test_each_chat_is_one_node_with_one_relation_per_document(session_factory):
+    """Action history draws a chat as the Chats screen names it.
+
+    One node per chat, one relation per (chat, document) named by the
+    strongest verb with its count and window, the seed version the chat's
+    writes produced, and one timeline event per chat that carries the chat's
+    other documents and no other event's. The change and audit rows of that
+    version ride on the version node instead of being drawn again.
+    """
+
+    t0 = datetime(2026, 8, 4, 9, 0, tzinfo=UTC)
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        seed = _page(session, workspace_id, slug="chat-seed", title="Chat Seed")
+        other = _page(session, workspace_id, slug="chat-other", title="Chat Other")
+        change_set = ChangeSet(
+            workspace_id=workspace_id,
+            trigger_type="manual",
+            actor_type="agent",
+            status="draft_created",
+        )
+        session.add(change_set)
+        session.flush()
+        draft = ContextPageVersion(
+            workspace_id=workspace_id,
+            page_id=seed.id,
+            version_no=2,
+            body_md="# Chat Seed v2",
+            content_hash="chat-seed-v2",
+            actor_type="agent",
+            created_by_actor_kind="agent",
+            created_by_actor_id="chat-writer",
+            version_status="draft",
+            change_set_id=change_set.id,
+            created_at=t0 + timedelta(minutes=1),
+        )
+        session.add(draft)
+        session.flush()
+        seed.latest_draft_version_id = draft.id
+        # Codex's earlier draft was rejected: the review retired it
+        # (graph_status) and left its row status "draft".
+        rejected_change_set = ChangeSet(
+            workspace_id=workspace_id,
+            trigger_type="manual",
+            actor_type="agent",
+            status="rejected",
+        )
+        session.add(rejected_change_set)
+        session.flush()
+        rejected = ContextPageVersion(
+            workspace_id=workspace_id,
+            page_id=seed.id,
+            version_no=3,
+            body_md="# Chat Seed rejected",
+            content_hash="chat-seed-rejected",
+            actor_type="agent",
+            created_by_actor_kind="agent",
+            created_by_actor_id="chat-writer",
+            version_status="draft",
+            graph_status="discarded",
+            change_set_id=rejected_change_set.id,
+            created_at=t0 + timedelta(minutes=1, seconds=30),
+        )
+        session.add(rejected)
+        session.flush()
+        chats = {}
+        for name, client_type in (("Claude Code", "claude-code"), ("Codex", "codex")):
+            client = MCPClient(
+                workspace_id=workspace_id,
+                # A PAT client's stored name carries its token id.
+                name=f"{name} ({uuid4()})",
+                client_type=client_type,
+                scopes=["mcp:read"],
+            )
+            session.add(client)
+            session.flush()
+            chat = McpChatSession(
+                workspace_id=workspace_id,
+                client_id=client.id,
+                mcp_session_id=f"chat-{client_type}",
+                started_at=t0,
+                last_activity_at=t0 + timedelta(minutes=3),
+            )
+            session.add(chat)
+            session.flush()
+            chats[name] = (chat, client)
+
+        def call(name, tool, minutes, *, change_set_id=None, result_detail=None):
+            chat, client = chats[name]
+            row = MCPToolCall(
+                client_id=client.id,
+                workspace_id=workspace_id,
+                request_id=uuid4(),
+                tool_name=tool,
+                input_summary={},
+                result_status="succeeded",
+                started_at=t0 + timedelta(minutes=minutes),
+                change_set_id=change_set_id,
+                result_detail=result_detail,
+            )
+            session.add(row)
+            session.flush()
+            return chat, row
+
+        for name, tool, minutes, resource, verb, change in (
+            ("Claude Code", "read", 0, seed.id, "viewed", None),
+            ("Claude Code", "read", 0, other.id, "viewed", None),
+            ("Claude Code", "update_context_edit", 2, seed.id, "edited", change_set.id),
+            ("Claude Code", "update_context_edit", 3, seed.id, "edited", change_set.id),
+            ("Codex", "read", 1, seed.id, "viewed", None),
+            ("Codex", "read", 1, other.id, "viewed", None),
+            (
+                "Codex",
+                "update_context_edit",
+                2,
+                seed.id,
+                "edited",
+                rejected_change_set.id,
+            ),
+        ):
+            chat, row = call(name, tool, minutes, change_set_id=change)
+            _mcp_touch(session, chat, row, resource, verb, row.started_at)
+        # Write paths keep different provenance; each must still link the chat
+        # to the version it produced. Codex created the seed (its first
+        # version has no change set; only the call's receipt names it), and
+        # Claude's revision kept nothing on the call: the revised version's
+        # own change set carries the chat as its origin.
+        first_version_id = seed.current_published_version_id
+        chat, row = call(
+            "Codex",
+            "create_context_page",
+            -5,
+            result_detail={
+                "page_id": str(seed.id),
+                "version_id": str(first_version_id),
+            },
+        )
+        _mcp_touch(session, chat, row, seed.id, "created", row.started_at)
+        revision_change_set = ChangeSet(
+            workspace_id=workspace_id,
+            trigger_type="agent_authenticated_write",
+            actor_type="agent",
+            status="draft_created",
+            origin_chat_session_id=chats["Claude Code"][0].id,
+        )
+        session.add(revision_change_set)
+        session.flush()
+        revision = ContextPageVersion(
+            workspace_id=workspace_id,
+            page_id=seed.id,
+            version_no=4,
+            body_md="# Chat Seed revision",
+            content_hash="chat-seed-revision",
+            actor_type="agent",
+            created_by_actor_kind="agent",
+            created_by_actor_id="chat-writer",
+            version_status="draft",
+            graph_status="branched",
+            change_set_id=revision_change_set.id,
+            created_at=t0 + timedelta(minutes=5),
+        )
+        session.add(revision)
+        session.flush()
+        chat, row = call("Claude Code", "submit_revision_for_review", 5)
+        _mcp_touch(session, chat, row, seed.id, "edited", row.started_at)
+        session.add(
+            ChangeOperation(
+                workspace_id=workspace_id,
+                change_set_id=change_set.id,
+                target_type="context_page",
+                target_id=seed.id,
+                operation="update",
+                diff_ref=f"context_page_version:{draft.id}",
+                created_at=t0 + timedelta(minutes=3),
+            )
+        )
+        # Each draft's review, reached the way the version history reaches it:
+        # the operation naming the version, its change set, that set's review.
+        session.add(
+            ChangeOperation(
+                workspace_id=workspace_id,
+                change_set_id=rejected_change_set.id,
+                target_type="context_page",
+                target_id=seed.id,
+                operation="update",
+                diff_ref=f"context_page_version:{rejected.id}",
+                created_at=t0 + timedelta(minutes=2),
+            )
+        )
+        for reviewed_set, review_status in (
+            (change_set, "changes_requested"),
+            (rejected_change_set, "rejected"),
+        ):
+            session.add(
+                ReviewItem(
+                    workspace_id=workspace_id,
+                    change_set_id=reviewed_set.id,
+                    review_type="context_update",
+                    status=review_status,
+                    risk_level="low",
+                )
+            )
+        # The version also has more old audit rows than its record limit, all
+        # older than its change row: the newest records must survive the cap.
+        for minutes in (4, *range(-60, -20)):
+            session.add(
+                AuditEvent(
+                    workspace_id=workspace_id,
+                    actor_kind="agent",
+                    actor_id="chat-writer",
+                    actor_type="agent",
+                    action="page.submit_context_edit_for_review",
+                    target_kind="context_page",
+                    target_type="context_page",
+                    target_id=seed.id,
+                    payload={"version_id": str(draft.id)},
+                    created_at=t0 + timedelta(minutes=minutes),
+                )
+            )
+        seed_id, other_id, draft_id = seed.id, other.id, draft.id
+        rejected_id, revision_id = rejected.id, revision.id
+        chat_ids = {name: chat.id for name, (chat, _client) in chats.items()}
+
+    request = _current_request(
+        seed_id,
+        time=GraphTimeQuery(mode="action"),
+        layers=["action", "evidence", "activity", "knowledge"],
+        edge_kinds=[],
+        budget=GraphBudget(nodes=20, edges=40),
+    )
+    with session_factory() as session:
+        payload = GraphQueryService().query(
+            session,
+            workspace_id,
+            request=request,
+            actor=_actor("owner"),
+            usage_signals_enabled=True,
+        )
+
+    chat_nodes = {
+        node.entity_id: node
+        for node in payload.nodes
+        if node.entity_kind == "mcp_chat_session"
+    }
+    assert set(chat_nodes) == set(chat_ids.values())
+    assert {node.actor_label for node in chat_nodes.values()} == {
+        "Claude Code",
+        "Codex",
+    }
+    claude = chat_nodes[chat_ids["Claude Code"]]
+    assert claude.chat_presentation is not None
+    assert claude.chat_presentation.action == "edit"
+    assert claude.label == "Chat Seed"
+
+    by_id = {node.id: node for node in payload.nodes}
+    relations = {
+        (by_id[edge.source].entity_id, by_id[edge.target].entity_id): edge
+        for edge in payload.edges
+        if edge.source in by_id and by_id[edge.source].entity_kind == "mcp_chat_session"
+    }
+    claude_seed = relations[(claude.entity_id, seed_id)]
+    assert (claude_seed.action_kind, claude_seed.count, claude_seed.aggregate) == (
+        "edited",
+        4,
+        True,
+    )
+    assert (claude_seed.window_from, claude_seed.window_to) == (
+        t0,
+        t0 + timedelta(minutes=5),
+    )
+    # The whole tally rides on the relation, from the same rollup.
+    assert [(c.action_kind, c.count) for c in claude_seed.action_counts] == [
+        ("edited", 3),
+        ("viewed", 1),
+    ]
+    assert set(relations) == {
+        (claude.entity_id, seed_id),
+        (claude.entity_id, other_id),
+        (claude.entity_id, draft_id),
+        (chat_ids["Codex"], seed_id),
+        (chat_ids["Codex"], other_id),
+        (chat_ids["Codex"], rejected_id),
+        (chat_ids["Codex"], first_version_id),
+        (claude.entity_id, revision_id),
+    }
+    assert relations[(claude.entity_id, draft_id)].action_kind == "created"
+    # A version reads as its history does: the live draft is in review, the
+    # rejected one is not, whatever its row status says.
+    version_status = {
+        node.entity_id: node.status
+        for node in payload.nodes
+        if node.entity_kind == "context_page_version"
+    }
+    assert (version_status[draft_id], version_status[rejected_id]) == (
+        "current_draft",
+        "discarded_draft",
+    )
+    # Where each review stands rides beside the lifecycle state.
+    review_status = {
+        node.entity_id: node.review_status
+        for node in payload.nodes
+        if node.entity_kind == "context_page_version"
+    }
+    assert (review_status[draft_id], review_status[rejected_id]) == (
+        "changes_requested",
+        "rejected",
+    )
+
+    kinds = {node.entity_kind for node in payload.nodes}
+    assert kinds.isdisjoint({"mcp_tool_call", "change_operation", "audit_event"})
+    version = next(node for node in payload.nodes if node.entity_id == draft_id)
+    record_times = [record.occurred_at for record in version.records]
+    assert record_times == sorted(record_times)
+    assert len(record_times) == GRAPH_NODE_RECORD_LIMIT
+    assert [
+        (record.source_kind, record.occurred_at) for record in version.records[-2:]
+    ] == [
+        ("change_operation", t0 + timedelta(minutes=3)),
+        ("audit_event", t0 + timedelta(minutes=4)),
+    ]
+
+    chat_transport_ids = {node.id for node in chat_nodes.values()}
+    chat_edge_ids = {
+        edge.id for edge in payload.edges if edge.source in chat_transport_ids
+    }
+    for chat in chat_nodes.values():
+        own = [event for event in payload.timeline if event.node_ids[0] == chat.id]
+        assert len(own) == 1
+    claude_other = relations[(claude.entity_id, other_id)].id
+    claude_events = [e for e in payload.timeline if claude_other in e.edge_ids]
+    assert [event.node_ids[0] for event in claude_events] == [claude.id]
+    for entry in payload.timeline:
+        if entry.node_ids[0] not in chat_transport_ids:
+            assert chat_edge_ids.isdisjoint(entry.edge_ids)
 
 
 def test_domain_action_path_is_seed_relative_inbound_including_session_context(
@@ -936,6 +1292,7 @@ def test_domain_action_path_is_seed_relative_inbound_including_session_context(
             request=request("in"),
             actor=_actor("viewer"),
             usage_signals_enabled=True,
+            ask_sessions_visible=True,
         )
         outbound = service.query(
             session,
@@ -943,39 +1300,43 @@ def test_domain_action_path_is_seed_relative_inbound_including_session_context(
             request=request("out"),
             actor=_actor("viewer"),
             usage_signals_enabled=True,
+            ask_sessions_visible=True,
         )
 
-    inbound_kinds = {node.entity_kind for node in inbound.nodes}
-    assert {"ask_turn", "ask_session"} <= inbound_kinds
+    assert "ask_session" in {node.entity_kind for node in inbound.nodes}
     assert any(
         edge.evidence is not None
-        and edge.evidence.kind == "ask_turn_citation"
+        and edge.evidence.kind == "ask_session"
         and edge.action_kind == "included"
         for edge in inbound.edges
     )
     assert any(
-        event.evidence is not None and event.evidence.kind == "ask_turn_citation"
+        event.evidence is not None and event.evidence.kind == "ask_session"
         for event in inbound.timeline
     )
 
-    outbound_kinds = {node.entity_kind for node in outbound.nodes}
-    assert "ask_turn" not in outbound_kinds
-    assert "ask_session" not in outbound_kinds
+    assert "ask_session" not in {node.entity_kind for node in outbound.nodes}
     assert all(
-        edge.evidence is None or edge.evidence.kind != "ask_turn_citation"
+        edge.evidence is None or edge.evidence.kind != "ask_session"
         for edge in outbound.edges
     )
     assert all(
-        event.evidence is None or event.evidence.kind != "ask_turn_citation"
+        event.evidence is None or event.evidence.kind != "ask_session"
         for event in outbound.timeline
     )
 
 
-def test_old_session_context_is_excluded_from_narrow_action_window(
+def test_mcp_conversations_overlap_the_window_while_ask_keeps_citation_times(
     session_factory,
 ):
+    # MCP history selects whole recorded conversations, including activities
+    # outside the window. Ask retains its citation-time policy. One scene
+    # covers a spanning interval, both inclusive boundaries and both misses.
     occurred_at = datetime(2026, 8, 4, 3, 0, tzinfo=UTC)
-    old_session_at = occurred_at - timedelta(days=1)
+    old_at = occurred_at - timedelta(days=1)
+    future_at = occurred_at + timedelta(days=1)
+    window_from = occurred_at - timedelta(minutes=1)
+    window_to = occurred_at + timedelta(minutes=1)
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         seed = _page(
@@ -984,76 +1345,105 @@ def test_old_session_context_is_excluded_from_narrow_action_window(
             slug="domain-session-window-seed",
             title="Domain Session Window Seed",
         )
-        ask_session = AskSession(
-            workspace_id=workspace_id,
-            title="Old Ask Session",
-            started_at=old_session_at,
-            actor_kind="human",
-            placement_tree_node_id=uuid4(),
+        other = _page(
+            session,
+            workspace_id,
+            slug="domain-session-window-other",
+            title="Domain Session Window Other",
         )
-        session.add(ask_session)
-        session.flush()
-        turn = AskTurn(
-            workspace_id=ask_session.workspace_id,
-            ask_session_id=ask_session.id,
-            turn_no=1,
-            user_message="Window question",
-            assistant_message="Window answer",
-        )
-        session.add(turn)
-        session.flush()
-        session.add(
-            AskTurnCitation(
-                workspace_id=turn.workspace_id,
-                ask_turn_id=turn.id,
-                target_kind="context_page",
-                target_id=seed.id,
-                rank=1,
-                created_at=occurred_at,
+        ask_ids = {}
+        for name, cited_at in (("inside", occurred_at), ("outside", old_at)):
+            ask_session = AskSession(
+                workspace_id=workspace_id,
+                title=f"Ask {name}",
+                started_at=old_at,
+                actor_kind="human",
+                placement_tree_node_id=uuid4(),
             )
-        )
+            session.add(ask_session)
+            session.flush()
+            turn = AskTurn(
+                workspace_id=ask_session.workspace_id,
+                ask_session_id=ask_session.id,
+                turn_no=1,
+                user_message="Window question",
+                assistant_message="Window answer",
+            )
+            session.add(turn)
+            session.flush()
+            session.add(
+                AskTurnCitation(
+                    workspace_id=turn.workspace_id,
+                    ask_turn_id=turn.id,
+                    target_kind="context_page",
+                    target_id=seed.id,
+                    rank=1,
+                    created_at=cited_at,
+                )
+            )
+            ask_ids[name] = ask_session.id
 
+        chats = {}
         client_id = uuid4()
-        chat = McpChatSession(
-            workspace_id=workspace_id,
-            client_id=client_id,
-            mcp_session_id="old-window-session",
-            started_at=old_session_at,
-            last_activity_at=occurred_at,
+        chat_intervals = (
+            ("spanning", old_at, future_at),
+            ("ends_at_from", old_at, window_from),
+            ("starts_at_to", window_to, future_at),
+            ("before", old_at, window_from - timedelta(seconds=1)),
+            ("after", window_to + timedelta(seconds=1), future_at),
         )
-        session.add(chat)
-        session.flush()
-        tool_call = MCPToolCall(
-            client_id=client_id,
-            workspace_id=workspace_id,
-            request_id=uuid4(),
-            tool_name="read_concept",
-            input_summary={},
-            result_status="ok",
-            started_at=occurred_at,
-        )
-        session.add(tool_call)
-        session.flush()
-        session.add(
-            McpChatToolCallArtifact(
-                workspace_id=chat.workspace_id,
-                chat_session_id=chat.id,
-                mcp_tool_call_id=tool_call.id,
-                resource_kind="context_page",
-                resource_id=seed.id,
-                verb="referenced",
-                occurred_at=occurred_at,
+        for name, started_at, last_activity_at in chat_intervals:
+            chat = McpChatSession(
+                workspace_id=workspace_id,
+                client_id=client_id,
+                mcp_session_id=f"window-{name}",
+                started_at=started_at,
+                last_activity_at=last_activity_at,
             )
-        )
-        seed_id = seed.id
+            session.add(chat)
+            session.flush()
+            read_at = old_at if name == "spanning" else last_activity_at
+            tool_call = MCPToolCall(
+                client_id=client_id,
+                workspace_id=workspace_id,
+                request_id=uuid4(),
+                tool_name="read",
+                input_summary={},
+                result_status="ok",
+                started_at=read_at,
+            )
+            session.add(tool_call)
+            session.flush()
+            _mcp_touch(session, chat, tool_call, seed.id, "viewed", read_at)
+            chats[name] = chat
+        spanning = chats["spanning"]
+        for resource_id, verb, at in (
+            (seed.id, "viewed", future_at),
+            (seed.id, "edited", old_at + timedelta(minutes=1)),
+            (other.id, "viewed", future_at),
+        ):
+            tool_call = MCPToolCall(
+                client_id=client_id,
+                workspace_id=workspace_id,
+                request_id=uuid4(),
+                tool_name="read" if verb == "viewed" else "update_context_edit",
+                input_summary={},
+                result_status="ok",
+                started_at=at,
+            )
+            session.add(tool_call)
+            session.flush()
+            _mcp_touch(session, spanning, tool_call, resource_id, verb, at)
+        chat_ids = {name: chat.id for name, chat in chats.items()}
+        seed_id, other_id = seed.id, other.id
 
     request = _current_request(
         seed_id,
         direction="in",
         time=GraphTimeQuery(
             mode="action",
-            from_=occurred_at - timedelta(minutes=1),
-            to=occurred_at + timedelta(minutes=1),
+            from_=window_from,
+            to=window_to,
         ),
         layers=["action", "evidence"],
         edge_kinds=[],
@@ -1066,18 +1456,39 @@ def test_old_session_context_is_excluded_from_narrow_action_window(
             request=request,
             actor=_actor("editor"),
             usage_signals_enabled=True,
+            ask_sessions_visible=True,
         )
 
-    kinds = {node.entity_kind for node in payload.nodes}
-    assert {"ask_turn", "mcp_tool_call"} <= kinds
-    assert "ask_session" not in kinds
-    assert "mcp_chat_session" not in kinds
-    assert {
-        edge.evidence.kind for edge in payload.edges if edge.evidence is not None
-    } >= {"ask_turn_citation", "mcp_tool_call_artifact"}
-    assert {
-        event.evidence.kind for event in payload.timeline if event.evidence is not None
-    } >= {"ask_turn_citation", "mcp_tool_call_artifact"}
+    sessions = {
+        node.entity_id
+        for node in payload.nodes
+        if node.entity_kind in {"ask_session", "mcp_chat_session"}
+    }
+    assert sessions == {
+        ask_ids["inside"],
+        chat_ids["spanning"],
+        chat_ids["ends_at_from"],
+        chat_ids["starts_at_to"],
+    }
+    by_entity = {node.entity_id: node for node in payload.nodes}
+    spanning_id = by_entity[chat_ids["spanning"]].id
+    spanning_edges = {
+        edge.target: edge for edge in payload.edges if edge.source == spanning_id
+    }
+    assert set(spanning_edges) == {by_entity[seed_id].id, by_entity[other_id].id}
+    seed_edge = spanning_edges[by_entity[seed_id].id]
+    assert (seed_edge.action_kind, seed_edge.count) == ("edited", 3)
+    assert (seed_edge.window_from, seed_edge.window_to) == (old_at, future_at)
+    other_edge = spanning_edges[by_entity[other_id].id]
+    assert (other_edge.action_kind, other_edge.count) == ("viewed", 1)
+    assert (other_edge.window_from, other_edge.window_to) == (future_at, future_at)
+    events = {event.node_ids[0]: event for event in payload.timeline}
+    assert events[spanning_id].occurred_at == old_at
+    assert set(events[spanning_id].edge_ids) == {
+        seed_edge.id,
+        other_edge.id,
+    }
+    assert events[by_entity[ask_ids["inside"]].id].occurred_at == occurred_at
 
 
 def test_viewer_history_reauthorizes_versions_and_sensitive_event_sources(
@@ -1130,17 +1541,7 @@ def test_viewer_history_reauthorizes_versions_and_sensitive_event_sources(
         )
         session.add(tool_call)
         session.flush()
-        session.add(
-            McpChatToolCallArtifact(
-                workspace_id=chat.workspace_id,
-                chat_session_id=chat.id,
-                mcp_tool_call_id=tool_call.id,
-                resource_kind="context_page",
-                resource_id=seed.id,
-                verb="edited",
-                occurred_at=occurred_at,
-            )
-        )
+        _mcp_touch(session, chat, tool_call, seed.id, "edited", occurred_at)
 
         change_set = ChangeSet(
             workspace_id=workspace_id,
@@ -1196,7 +1597,7 @@ def test_viewer_history_reauthorizes_versions_and_sensitive_event_sources(
         seed_id = seed.id
         private_ids = {
             draft.id,
-            tool_call.id,
+            chat.id,
             operation.id,
             audit.id,
         }
@@ -1234,7 +1635,7 @@ def test_viewer_history_reauthorizes_versions_and_sensitive_event_sources(
         )
 
     assert private_ids.isdisjoint({node.entity_id for node in viewer.nodes})
-    audit_source_ids = {tool_call.id, operation.id, decision.id, audit.id}
+    audit_source_ids = {chat.id, operation.id, decision.id, audit.id}
     assert audit_source_ids.isdisjoint(
         {node.entity_id for node in context_only_pat.nodes}
     )

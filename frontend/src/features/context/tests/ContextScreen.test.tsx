@@ -2234,7 +2234,7 @@ describe("ContextScreen", () => {
     ).map(([, init]) => JSON.parse(String(init?.body)));
     const seeds = [{ kind: "context_page", id: PAGE_ID }, { kind: "context_page", id: SECOND_PAGE_ID }];
     expect(requests().at(-1)).toMatchObject({
-      seeds, depth: 1, time: { mode: "appearance" }, budget: { nodes: 50, edges: 150 }, cursor: null,
+      seeds, depth: 1, time: { mode: "appearance" }, budget: { nodes: 500, edges: 1500 }, cursor: null,
     });
     await userEvent.click(graphUi.getByRole("radio", { name: "Current relationships" }));
     await waitFor(() => expect(graphUi.getByRole("radio", { name: "Two-step expansion" })).toHaveAttribute("aria-disabled", "false"));
@@ -6323,7 +6323,7 @@ function contextGraphPayload(
       time: { mode },
       budget: mode === "current"
         ? { nodes: 250, edges: 750 }
-        : { nodes: 50, edges: 150 },
+        : { nodes: 500, edges: 1500 },
       cursor: null,
     },
     projection_revision: 3,
@@ -6351,10 +6351,10 @@ function contextGraphPayload(
     budget: {
       requested: mode === "current"
         ? { nodes: 250, edges: 750 }
-        : { nodes: 50, edges: 150 },
+        : { nodes: 500, edges: 1500 },
       applied: mode === "current"
         ? { nodes: 250, edges: 750 }
-        : { nodes: 50, edges: 150 },
+        : { nodes: 500, edges: 1500 },
     },
     completeness: "complete",
     truncated: false,

@@ -18,7 +18,7 @@ describe("contextGraphQuery", () => {
     expect(contextGraphQuery("page-id", "appearance")).toMatchObject({
       depth: 1,
       time: { mode: "appearance" },
-      budget: { nodes: 50, edges: 150 },
+      budget: { nodes: 500, edges: 1500 },
     });
   });
 
@@ -36,7 +36,7 @@ describe("contextGraphQuery", () => {
       expect(contextGraphQuery("page-id", mode, 2)).toMatchObject({
         depth: 1,
         time: { mode },
-        budget: { nodes: 50, edges: 150 },
+        budget: { nodes: 500, edges: 1500 },
       });
     },
   );

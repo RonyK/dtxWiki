@@ -17,6 +17,7 @@ from pydantic import (
 
 from backend.domain.document_reference import DocumentKind
 from backend.schemas.common import RESTResponseBase
+from backend.schemas.mcp_chat import McpChatPresentationDescriptor
 
 GraphNodeFamily = Literal[
     "document",
@@ -66,8 +67,10 @@ class GraphTimeQuery(BaseModel):
 
 
 class GraphBudget(BaseModel):
-    nodes: int = Field(default=50, ge=1, le=250)
-    edges: int = Field(default=150, ge=1, le=750)
+    # Activity history asks for the maximum: one document can gather a
+    # hundred chats and the documents they used. Current relations ask less.
+    nodes: int = Field(default=50, ge=1, le=500)
+    edges: int = Field(default=150, ge=1, le=1500)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -134,6 +137,24 @@ class GraphEvidenceRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+# A node carries at most this many folded records, newest kept.
+GRAPH_NODE_RECORD_LIMIT = 40
+
+
+class GraphNodeRecord(BaseModel):
+    """One lifecycle fact folded into the node it names.
+
+    Activity history draws one edit as one version node. The change and audit
+    rows that name that version ride on it here instead of becoming nodes.
+    """
+
+    action_kind: str = Field(min_length=1, max_length=64)
+    occurred_at: datetime
+    source_kind: Literal["change_operation", "audit_event"]
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class GraphNode(BaseModel):
     id: str = Field(min_length=1, max_length=220)
     entity_kind: str = Field(min_length=1, max_length=64)
@@ -144,8 +165,30 @@ class GraphNode(BaseModel):
     path: str | None = Field(default=None, max_length=512)
     is_seed: bool = False
     occurred_at: datetime | None = None
+    # A person, or the client of an MCP chat, in display form.
     actor_label: str | None = Field(default=None, max_length=120)
     evidence: GraphEvidenceRef | None = None
+    # MCP chats only: the facts the Chats screen composes its title from, so
+    # both screens name a chat the same way. ``label`` is the plain fallback.
+    chat_presentation: McpChatPresentationDescriptor | None = None
+    # A node standing for several sessions (the ones past a cap): how many.
+    aggregate_count: int | None = Field(default=None, ge=1)
+    # Context versions only: the status of the review that speaks for the
+    # version (pending, changes_requested, approved, rejected), as the version
+    # history resolves it. ``status`` stays the version's lifecycle state.
+    review_status: str | None = Field(default=None, max_length=64)
+    records: list[GraphNodeRecord] = Field(
+        default_factory=list, max_length=GRAPH_NODE_RECORD_LIMIT
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class GraphActionCount(BaseModel):
+    """How often one action happened within an aggregate relation."""
+
+    action_kind: str = Field(min_length=1, max_length=64)
+    count: int = Field(ge=1)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -173,6 +216,9 @@ class GraphEdge(BaseModel):
     sequence: int | None = Field(default=None, ge=0)
     aggregate: bool = False
     count: int | None = Field(default=None, ge=1)
+    # Session relations only: count by action, strongest first. The same
+    # rollup that names the relation and totals ``count``, never a sample.
+    action_counts: list[GraphActionCount] = Field(default_factory=list, max_length=8)
     window_from: datetime | None = None
     window_to: datetime | None = None
     evidence: GraphEvidenceRef | None = None

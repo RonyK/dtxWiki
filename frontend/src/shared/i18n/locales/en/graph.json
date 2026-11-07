@@ -51,7 +51,15 @@
       "active": "Active",
       "completed": "Completed",
       "failed": "Failed",
-      "deleted": "Deleted"
+      "deleted": "Deleted",
+      "state_inconsistent": "State review required",
+      "current_editing": "Currently editing",
+      "current_draft": "Current draft",
+      "published_snapshot": "Current published snapshot",
+      "alternative_draft": "Alternative draft",
+      "discarded_draft": "Discarded draft",
+      "superseded_snapshot": "Superseded snapshot",
+      "superseded_draft": "Superseded draft"
     },
     "graphEdgeKind": {
       "wikilink": "Wiki link",
@@ -83,9 +91,9 @@
       "restored": "Restored",
       "superseded": "Superseded",
       "promoted": "Promoted",
-      "tool_produced": "Produced by tool",
       "referenced": "Referenced",
-      "removed": "Removed"
+      "removed": "Removed",
+      "viewed": "Viewed"
     },
     "graphEntityKind": {
       "context_page": "Context page",
@@ -106,7 +114,9 @@
       "change_operation": "Change operation",
       "graph_observation": "Graph observation",
       "workspace_tree_node": "Workspace tree node",
-      "library_sync_run": "Library sync run"
+      "library_sync_run": "Library sync run",
+      "mcp_chat_session_group": "MCP chat group",
+      "ask_session_group": "Ask session group"
     },
     "graphEvidenceKind": {
       "observation": "Observation",
@@ -239,10 +249,16 @@
         "coAccess": "Often read together",
         "membership": "Folder membership",
         "action": "Action occurrence",
-        "removed": "Removed relationship"
+        "removed": "Removed relationship",
+        "actionWrite": "Wrote or edited",
+        "actionCite": "Cited",
+        "actionRead": "Read",
+        "actionReference": "Looked at structure",
+        "actionOther": "Other activity"
       },
       "edgeNote": {
-        "action": "Recorded activity such as creating, editing, reviewing, searching and citing"
+        "action": "Recorded activity such as creating, editing, reviewing, searching and citing",
+        "actionOther": "Review, publish, search and other records"
       },
       "history": "History marks",
       "eventTarget": "Current event target"
@@ -299,7 +315,9 @@
       "unavailable": "Unavailable",
       "seedRelationships": "Relationship to the seed",
       "expandSheet": "Expand details",
-      "collapseSheet": "Collapse details"
+      "collapseSheet": "Collapse details",
+      "records": "Records of this version",
+      "review": "Review"
     },
     "citationEvidence": {
       "title": "Retained citation evidence",
@@ -410,7 +428,7 @@
       "partial": "Recorded history only",
       "latest": "Latest",
       "authoring": "Edits & reviews",
-      "tools": "AI & tool usage",
+      "tools": "AI chats",
       "versions": "Document versions",
       "relations": "Relationship changes",
       "group": "Expand {{count}} records",
@@ -431,15 +449,20 @@
       "kind": {
         "version": "Version",
         "review": "Review",
-        "ask": "Ask",
-        "tool": "MCP",
+        "ask": "Ask session",
+        "tool": "MCP chat",
         "activity": "Activity",
         "added": "Relationship added",
         "removed": "Relationship removed"
       },
       "restoredLatest": "The record you were viewing is no longer in the results. Moved to the latest record.",
       "groupRecords": "{{count}} nearby records",
-      "closeGroup": "Close"
+      "closeGroup": "Close",
+      "referenced": "Structure-only looks",
+      "referencedHint": "Chats that only read this document's outline or structure. Hidden by default.",
+      "sessionDetail": "This document: {{verbs}}",
+      "sessionDetailWithOthers_one": "This document: {{verbs}} · {{count}} other document",
+      "sessionDetailWithOthers_other": "This document: {{verbs}} · {{count}} other documents"
     },
     "list": {
       "title": "Graph list",
@@ -542,6 +565,39 @@
       "group": "View",
       "graph": "Graph",
       "list": "List"
+    },
+    "session": {
+      "groupHeading": "More conversations",
+      "list": {
+        "chats": "Chats",
+        "ask": "Ask"
+      },
+      "thisDocument": "What it did here",
+      "produced": "Produced {{version}} · {{outcome}}",
+      "flow": "Flow",
+      "loading": "Loading the chat…",
+      "loadFailed": "Could not load the chat.",
+      "retry": "Retry",
+      "stepMore": "{{title}} and {{count}} more",
+      "fullFlow": "See all {{count}} steps in Chats",
+      "coUsed": "Also used",
+      "noCoUsed": "No other document this chat used is in the scene.",
+      "digest": {
+        "sessions": "AI chats {{count}}",
+        "edited": "edited this document {{count}}",
+        "inReview": "in review {{count}}"
+      },
+      "more_one": "{{count}} more conversation",
+      "more_other": "{{count}} more conversations",
+      "times_one": "{{count}} time",
+      "times_other": "{{count}} times",
+      "groupBody_one": "{{count}} more conversation used this document. Only the most recent are drawn.",
+      "groupBody_other": "{{count}} more conversations used this document. Only the most recent are drawn.",
+      "review": {
+        "pending": "In review",
+        "changes_requested": "Changes requested",
+        "rejected": "Rejected"
+      }
     }
   },
   "workspaceGraph": {

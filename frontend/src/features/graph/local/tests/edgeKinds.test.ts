@@ -14,10 +14,11 @@ describe("Local edge visual kinds", () => {
     ["searched", "action"],
     ["returned", "action"],
     ["retrieved", "action"],
-    ["included", "action"],
-    ["cited", "action"],
-    ["created", "action"],
-    ["edited", "action"],
+    ["included", "actionRead"],
+    ["viewed", "actionRead"],
+    ["cited", "actionCite"],
+    ["created", "actionWrite"],
+    ["edited", "actionWrite"],
     ["reviewed", "action"],
     ["approved", "action"],
     ["rejected", "action"],
@@ -27,8 +28,7 @@ describe("Local edge visual kinds", () => {
     ["superseded", "action"],
     ["merged", "action"],
     ["promoted", "action"],
-    ["tool_produced", "action"],
-    ["referenced", "action"],
+    ["referenced", "actionReference"],
   ] as const)("maps %s to %s", (kind, visualKind) => {
     expect(localEdgeVisualKind(kind)).toBe(visualKind);
   });
@@ -39,6 +39,10 @@ describe("Local edge visual kinds", () => {
       "citation",
       "coAccess",
       "membership",
+      "actionWrite",
+      "actionCite",
+      "actionRead",
+      "actionReference",
       "action",
     ]);
     expect(LOCAL_EDGE_VISUAL_KIND_ORDER).toEqual(Object.keys(GRAPH_EDGE_PATTERN));
@@ -54,6 +58,8 @@ describe("Local edge visual kinds", () => {
     "page_provenance",
     "unknown_future_citation",
     "unknown_future_action",
+    // The tool-call relation is gone: a chat now joins its documents directly.
+    "tool_produced",
   ])("omits unknown or non-Local kinds (%s), without layer inference", (kind) => {
     expect(localEdgeVisualKind(kind)).toBeNull();
   });

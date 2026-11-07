@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { i18n } from "../../../shared/i18n";
 import * as graphApi from "../../../shared/api/graph";
+import * as operations from "../../../shared/api/operations";
 import * as authContext from "../../../shared/auth/AuthContext";
 import type {
   GraphHistoryMode,
@@ -415,8 +416,13 @@ describe("GraphView", () => {
     // A fixed list per mode, not only what this scene happens to contain.
     expect(kinds("li[data-node-visual-kind]", "data-node-visual-kind"))
       .toEqual(["seed", "context", "version", "agent", "library", "conversation", "folder"]);
+    // History splits activity by verb: writes and citations point at what
+    // they changed or cited; reads and structure-only looks do not.
     expect(kinds("li[data-edge-visual-kind]", "data-edge-visual-kind"))
-      .toEqual(["link", "citation", "coAccess", "membership", "action", "removed"]);
+      .toEqual(["link", "citation", "coAccess", "membership", "actionWrite", "actionCite",
+        "actionRead", "actionReference", "action", "removed"]);
+    expect([...legend.querySelectorAll('svg[data-edge-arrow="target"]')]
+      .map((cue) => cue.getAttribute("data-edge-visual-kind"))).toEqual(["actionWrite", "actionCite"]);
     expect(legend.querySelector('[data-legend-mark="event-target"] svg path[fill="none"]')).toHaveAttribute("stroke", "#7c3aed");
     expect(legend.querySelector('svg[data-node-visual-kind="version"] path')).toHaveAttribute("fill", "#7c3aed");
     expect(legend.querySelector('svg[data-node-visual-kind="context"] path')).toHaveAttribute("fill", "#7c3aed");
@@ -659,6 +665,7 @@ describe("GraphView", () => {
     expect(actions).toHaveAttribute("aria-pressed", "true");
     expect(canvas).toHaveAttribute("data-rendered-edge-ids", "action:created|action:edited|action:published");
     expect(listRows()).toHaveLength(3);
+    expect(rowByLabel(screen.getByTestId("graph-list-view"), "Event 1").closest("li")?.querySelector('[data-visual="action"]')).toBeInTheDocument();
     await user.click(actions);
     expect(canvas).toHaveAttribute("data-rendered-edge-ids", "");
     expect(listRows()).toHaveLength(0);
@@ -670,9 +677,10 @@ describe("GraphView", () => {
     expect(listRows()).toHaveLength(2);
     expect(screen.getByText("4 nodes · 2 edges")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Legend" }));
-    // The action line names what it draws: recorded activity, not links or citations.
-    expect(screen.getByText("Recorded activity such as creating, editing, reviewing, searching and citing"))
-      .toBeVisible();
+    // Each activity line names the verbs it draws; the plain one the rest.
+    const legend = screen.getByTestId("graph-view").querySelector(".graph-legend")!;
+    expect(legend.querySelector('li[data-edge-visual-kind="actionWrite"]')).toHaveTextContent("Created · Edited");
+    expect(screen.getByText("Review, publish, search and other records")).toBeVisible();
   });
 
   it("requests depth changes from the main toolbar without optimistically relabeling the scene", async () => {
@@ -1788,6 +1796,174 @@ describe("GraphView", () => {
     }
   });
 
+  it("names a chat as Chats does and reads its details only while it is selected", async () => {
+    // What a chat did to the document comes whole with the graph relation;
+    // the chat's own detail, read only on selection, adds its flow and can
+    // never shorten that tally (its artifact list is capped). A late answer
+    // for a chat no longer selected never reaches the panel.
+    const user = userEvent.setup();
+    const pending: Array<{ id: string; signal?: AbortSignal; resolve: (value: operations.McpChatDetail) => void }> = [];
+    const read = vi.spyOn(operations, "readMcpChat").mockImplementation((_workspace, id, init) =>
+      new Promise((resolve) => { pending.push({ id, signal: init?.signal ?? undefined, resolve }); }));
+    try {
+      const payload = graphFixture();
+      payload.history.mode = "action";
+      payload.query.time = { mode: "action" };
+      const seed = payload.nodes[0];
+      const chat = (key: string, client: string, action: "edit" | "read"): GraphNode => ({
+        ...payload.nodes[1], id: `node:${key}`, entity_kind: "mcp_chat_session",
+        entity_id: `${key}-0000-4000-8000-000000000000`, family: "chat", status: "active",
+        label: "raw fallback", actor_label: client,
+        chat_presentation: { title_source: "artifact", action, subject: "Decision Log", subject_kind: "context_page", primary_tool_name: null },
+      });
+      const editing = chat("1111aaaa", "Claude Code", "edit");
+      const reading = chat("2222bbbb", "Codex", "read");
+      const version: GraphNode = { ...payload.nodes[1], id: "node:v2", entity_kind: "context_page_version", family: "document", label: "Version 2", status: "current_draft", review_status: "changes_requested" };
+      const relation = (source: GraphNode, target: GraphNode, action: string, count: number | null,
+        actionCounts: Array<[string, number]> = []) => ({
+        ...payload.edges[0], id: `edge:${source.id}:${target.id}`, source: source.id, target: target.id,
+        edge_kind: action, action_kind: action, label: action, layer: "action" as const, provenance: "domain" as const,
+        aggregate: true, count, window_from: "2026-08-03T01:00:00Z", window_to: "2026-08-03T01:05:00Z",
+        action_counts: actionCounts.map(([action_kind, occurrences]) => ({ action_kind, count: occurrences })),
+      });
+      const outlined: GraphNode = { ...payload.nodes[1], id: "node:outlined", entity_id: "outlined", label: "Outline only" };
+      payload.nodes = [seed, editing, reading, version, outlined];
+      payload.edges = [relation(editing, seed, "edited", 3, [["edited", 2], ["viewed", 1]]), relation(editing, version, "created", null),
+        relation(reading, seed, "viewed", 1), relation(reading, outlined, "referenced", 1)];
+      payload.timeline = [];
+      const props = { payload, onRefresh: vi.fn(async () => undefined),
+        onCollapse: (_node: GraphNode) => Promise.resolve(), onExpand: (_node: GraphNode) => Promise.resolve() };
+      const view = renderGraph(props);
+
+      // A document only a chat's structure-only look brought in starts hidden
+      // with that look, rather than floating unconnected.
+      const canvas = screen.getByTestId("mock-graph-canvas");
+      expect(canvas).toHaveAttribute("data-nodes", "4");
+      const lookChip = screen.getByRole("button", { name: /Structure-only looks/ });
+      await user.click(lookChip);
+      expect(canvas).toHaveAttribute("data-nodes", "5");
+      await user.click(lookChip);
+
+      expect(read).not.toHaveBeenCalled();
+      const nodeList = screen.getByTestId("graph-list-view");
+      await user.click(rowByLabel(nodeList, "Edited Decision Log"));
+      expect(read).toHaveBeenCalledTimes(1);
+      const details = screen.getByRole("complementary", { name: "Details" });
+      expect(details).toHaveTextContent("Edited ×2 · Viewed");
+      // The review says where the draft stands, not the lifecycle state alone.
+      expect(details).toHaveTextContent("Produced Version 2 · Changes requested");
+      expect(within(details).getByRole("link", { name: "Open" }))
+        .toHaveAttribute("href", `/workspaces/00000000-0000-4000-8000-000000000001/chats/${editing.entity_id}`);
+
+      const step = (id: string, action: operations.McpChatTimelineItem["action"]) => ({
+        id, tool_name: action === "search" ? "search" : "read", action, result_status: "succeeded",
+        title_source: "artifact", subject: "Decision Log", subject_kind: "context_page", primary_tool_name: null,
+      }) as unknown as operations.McpChatTimelineItem;
+      // A long, search-heavy chat: its capped artifact list kept only a view.
+      const detail = (actions: operations.McpChatTimelineItem["action"][]) => ({
+        linked_artifacts: [{ resource_kind: "context_page", resource_id: seed.entity_id, verb: "viewed", occurrence_count: 1 }],
+        timeline: actions.map((action, index) => step(`${action}-${index}`, action)),
+      }) as unknown as operations.McpChatDetail;
+      const flowSteps = () => within(screen.getByRole("complementary", { name: "Details" })).queryAllByRole("listitem")
+        .filter((item) => item.closest(".graph-session-flow")).length;
+      await act(async () => { pending[0].resolve(detail(["search", "read", "edit"])); });
+      expect(details).toHaveTextContent("Edited ×2 · Viewed");
+      expect(flowSteps()).toBe(3);
+
+      view.rerender(graphElement(props));
+      expect(read).toHaveBeenCalledTimes(1);
+      await user.click(screen.getByRole("button", { name: "Refresh graph" }));
+      expect(props.onRefresh).toHaveBeenCalledOnce();
+      // Session activity can change without advancing the edge projection;
+      // the tally follows the new relation at once.
+      const refreshed = { ...payload, generated_at: "2026-08-05T00:00:00Z",
+        edges: payload.edges.map((edge) => edge.source === editing.id && edge.target === seed.id
+          ? relation(editing, seed, "edited", 6, [["edited", 5], ["viewed", 1]]) : edge) };
+      view.rerender(graphElement({ ...props, payload: refreshed }));
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(details).toHaveTextContent("Edited ×5 · Viewed");
+      view.rerender(graphElement({ ...props, payload: { ...refreshed, generated_at: "2026-08-06T00:00:00Z" } }));
+      expect(read).toHaveBeenCalledTimes(3);
+      expect(pending[1].signal?.aborted).toBe(true);
+      await act(async () => { pending[1].resolve(detail(["search", "read", "edit", "read", "edit"])); });
+      expect(flowSteps()).toBe(0);
+      await act(async () => { pending[2].resolve(detail(["read", "edit"])); });
+      expect(flowSteps()).toBe(2);
+
+      await user.click(rowByLabel(nodeList, "Read Decision Log"));
+      expect(read).toHaveBeenCalledTimes(4);
+      await user.click(rowByLabel(nodeList, "Edited Decision Log"));
+      expect(pending[3].signal?.aborted).toBe(true);
+      await act(async () => { pending[3].resolve(detail(["search", "search", "read", "edit"])); });
+      expect(flowSteps()).toBe(0);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it("removes session-only documents consistently when filters hide their conversation", async () => {
+    // Membership comes from the unfiltered graph; reachability comes from
+    // the displayed edges. Ordinary documents and versions retain history's
+    // node visibility even when their independent relationships are hidden.
+    const user = userEvent.setup();
+    const payload = graphFixture();
+    payload.history.mode = "action";
+    payload.query.time = { mode: "action" };
+    const seed = payload.nodes[0];
+    const chat: GraphNode = { ...payload.nodes[1], id: "node:conversation", entity_id: "conversation",
+      entity_kind: "mcp_chat_session", family: "chat", label: "Shared conversation" };
+    const coUsed: GraphNode = { ...payload.nodes[1], id: "node:co-used", entity_id: "co-used", label: "Session-only document" };
+    const independent = { ...payload.nodes[1], label: "Independently related document" };
+    const version: GraphNode = { ...payload.nodes[1], id: "node:version", entity_id: "version",
+      entity_kind: "context_page_version", label: "Independent version" };
+    const relation = (id: string, source: GraphNode, target: GraphNode, action: string) => ({
+      ...payload.edges[0], id, source: source.id, target: target.id, edge_kind: action, action_kind: action,
+      layer: "action" as const, provenance: "domain" as const,
+    });
+    payload.nodes = [seed, chat, coUsed, independent, version];
+    payload.edges = [relation("edge:session-seed", chat, seed, "edited"),
+      relation("edge:session-only", chat, coUsed, "viewed"),
+      relation("edge:session-independent", chat, independent, "viewed"),
+      { ...payload.edges[0], source: independent.id, target: seed.id },
+      relation("edge:version", version, seed, "created")];
+    payload.timeline = [];
+    renderGraph({ payload });
+    const canvas = screen.getByTestId("mock-graph-canvas");
+    const contents = screen.getByTestId("graph-list-view");
+    expect(canvas).toHaveAttribute("data-nodes", "5");
+    await user.click(within(contents).getByRole("button", { name: /^Two or more steps away/ }));
+    expect(rowByLabel(contents, "Session-only document")).toBeVisible();
+    await user.click(screen.getByText("More filters"));
+    await user.click(screen.getByLabelText("Wiki link", { selector: "input" }));
+    expect(canvas).toHaveAttribute("data-nodes", "5");
+    await user.click(screen.getByLabelText("Conversation", { selector: "input" }));
+    expect(canvas).toHaveAttribute("data-nodes", "3");
+    expect(within(contents).queryByText("Session-only document")).not.toBeInTheDocument();
+    await user.click(within(contents).getByRole("button", { name: /^Not connected to the seed/ }));
+    expect(rowByLabel(contents, "Independently related document")).toBeVisible();
+    expect(rowByLabel(contents, "Independent version")).toBeVisible();
+
+    await user.click(screen.getByLabelText("Conversation", { selector: "input" }));
+    expect(canvas).toHaveAttribute("data-nodes", "5");
+    const actionFilter = screen.getByRole("group", { name: "Action" });
+    await user.click(within(actionFilter).getByLabelText("Edited"));
+    await user.click(within(actionFilter).getByLabelText("Viewed"));
+    expect(canvas).toHaveAttribute("data-nodes", "3");
+    expect(within(contents).queryByText("Session-only document")).not.toBeInTheDocument();
+    await user.click(within(actionFilter).getByLabelText("Created"));
+    expect(canvas).toHaveAttribute("data-nodes", "3");
+    expect(canvas).toHaveAttribute("data-edges", "0");
+    expect(rowByLabel(contents, "Independently related document")).toBeVisible();
+    expect(rowByLabel(contents, "Independent version")).toBeVisible();
+
+    const filters = screen.getByTestId("graph-view").querySelector<HTMLElement>(".graph-frame-filters")!;
+    await user.click(within(filters).getByRole("button", { name: "Clear all" }));
+    expect(canvas).toHaveAttribute("data-nodes", "5");
+    await user.click(screen.getByRole("button", { name: /Historical relationships/ }));
+    expect(canvas).toHaveAttribute("data-nodes", "3");
+    expect(within(contents).queryByText("Session-only document")).not.toBeInTheDocument();
+  });
+
   it("says what a read-together relationship rests on", async () => {
     const user = userEvent.setup();
     const payload = graphFixture();
@@ -1859,7 +2035,7 @@ describe("GraphView", () => {
     expect(screen.getByRole("radio", { name: /변화 이력/ })).toHaveAttribute("aria-checked", "true");
     expect(within(screen.getByTestId("graph-timeline")).getByRole("button", { name: /포함됨.*Why was this chosen/ }))
       .toBeInTheDocument();
-    expect(screen.getByTestId("graph-timeline")).toHaveTextContent("Ask · 포함됨");
+    expect(screen.getByTestId("graph-timeline")).toHaveTextContent("활동 · 포함됨");
     expect(screen.queryByText("Current projection")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("graph-view").querySelector(".graph-canvas-more > summary")!);

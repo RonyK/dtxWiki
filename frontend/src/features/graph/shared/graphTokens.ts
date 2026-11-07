@@ -5,7 +5,29 @@ export type GraphNodeColorKey = "context" | "library" | "agent" | "conversation"
 export type GraphNodeVisualKind =
   | "context" | "version" | "agent" | "agentVersion" | "library" | "conversation" | "folder";
 export type GraphNodeShape = "circle" | "triangle" | "square" | "diamond" | "ring";
-export type GraphEdgeVisualKind = "link" | "citation" | "coAccess" | "membership" | "action";
+export type GraphEdgeVisualKind =
+  | "link" | "citation" | "coAccess" | "membership"
+  | "actionWrite" | "actionCite" | "actionRead" | "actionReference" | "action";
+
+/**
+ * Activity lines: what a chat, a person or an event did to a document. They
+ * share one colour; the stroke says the verb (solid write, dashed cite, long
+ * dash read, dots structure-only look) and an arrowhead marks the verbs that
+ * change or cite their target. `action` is every other recorded event.
+ */
+export const GRAPH_ACTION_EDGE_KINDS = [
+  "actionWrite", "actionCite", "actionRead", "actionReference", "action",
+] as const satisfies readonly GraphEdgeVisualKind[];
+
+export function isActionEdgeVisualKind(kind: GraphEdgeVisualKind | null | undefined): boolean {
+  return (GRAPH_ACTION_EDGE_KINDS as readonly string[]).includes(kind ?? "");
+}
+
+/** Lines that end in an arrowhead at their target. */
+export const GRAPH_EDGE_ARROW = {
+  link: false, citation: false, coAccess: false, membership: false,
+  actionWrite: true, actionCite: true, actionRead: false, actionReference: false, action: false,
+} as const satisfies Record<GraphEdgeVisualKind, boolean>;
 
 /**
  * The one node vocabulary for both graph views, their legends and lists.
@@ -46,11 +68,16 @@ export const GRAPH_EDGE_PATTERN = {
   citation: [7, 4],
   coAccess: [2, 3.5],
   membership: [3, 3],
+  actionWrite: null,
+  actionCite: [6, 3],
+  actionRead: [10, 5],
+  actionReference: [1.5, 3.5],
   action: [10, 3],
 } as const satisfies Record<GraphEdgeVisualKind, readonly number[] | null>;
 
 export const GRAPH_EDGE_WIDTH = {
-  link: 2, citation: 2, coAccess: 2, membership: 1.1, action: 1.7,
+  link: 2, citation: 2, coAccess: 2, membership: 1.1,
+  actionWrite: 2, actionCite: 1.7, actionRead: 1.1, actionReference: 1, action: 1.7,
 } as const satisfies Record<GraphEdgeVisualKind, number>;
 
 /** A relationship that was removed in the replayed history. */
@@ -60,6 +87,19 @@ export const GRAPH_NODE_RADIUS_PX = {
   local: { min: 3, max: 13 },
   workspace: { min: 1.5, max: 8.5 },
 } as const;
+
+type BaseEdgeColors = Record<Exclude<GraphEdgeVisualKind, (typeof GRAPH_ACTION_EDGE_KINDS)[number]> | "action", string>;
+
+/** Every activity line takes the one action colour. */
+export function withActionEdgeColors(edge: BaseEdgeColors): Record<GraphEdgeVisualKind, string> {
+  return {
+    ...edge,
+    actionWrite: edge.action,
+    actionCite: edge.action,
+    actionRead: edge.action,
+    actionReference: edge.action,
+  };
+}
 
 // Fallbacks only: styles/03-editor.css defines the same --graph-* values for
 // the light, dark and forced-colours themes on :root.
@@ -73,13 +113,13 @@ const DEFAULT_COLORS = {
       conversation: "#0284c7",
       folder: "#64748b",
     },
-    edge: {
+    edge: withActionEdgeColors({
       link: "#64748b",
       citation: "#0f9f8f",
       coAccess: "#0284c7",
       membership: "#8391a7",
       action: "#475569",
-    },
+    }),
     highlight: "#7c3aed",
     selection: "#0f172a",
     ink: "#0f172a",
@@ -93,13 +133,13 @@ const DEFAULT_COLORS = {
       conversation: "#38bdf8",
       folder: "#94a3b8",
     },
-    edge: {
+    edge: withActionEdgeColors({
       link: "#64748b",
       citation: "#0d9488",
       coAccess: "#38bdf8",
       membership: "#64748b",
       action: "#94a3b8",
-    },
+    }),
     highlight: "#a78bfa",
     selection: "#f8fafc",
     ink: "#e5e7eb",
@@ -122,7 +162,7 @@ export function readGraphTokens(
     return {
       surface,
       node: { context: ink, library: ink, agent: ink, conversation: ink, folder: ink },
-      edge: { link: ink, citation: ink, coAccess: ink, membership: ink, action: ink },
+      edge: withActionEdgeColors({ link: ink, citation: ink, coAccess: ink, membership: ink, action: ink }),
       highlight: ink,
       // Selection uses the system highlight so it never reads as an Agent outline.
       selection: systemColor(element, "Highlight") ?? ink,
@@ -140,13 +180,13 @@ export function readGraphTokens(
       conversation: css("--graph-node-conversation", defaults.node.conversation),
       folder: css("--graph-node-folder", defaults.node.folder),
     },
-    edge: {
+    edge: withActionEdgeColors({
       link: css("--graph-edge-link", defaults.edge.link),
       citation: css("--graph-edge-citation", defaults.edge.citation),
       coAccess: css("--graph-edge-co-access", defaults.edge.coAccess),
       membership: css("--graph-edge-membership", defaults.edge.membership),
       action: css("--graph-edge-action", defaults.edge.action),
-    },
+    }),
     highlight: css("--graph-highlight", defaults.highlight),
     selection: css("--graph-selection", defaults.selection),
     ink: css("--graph-ink", defaults.ink),

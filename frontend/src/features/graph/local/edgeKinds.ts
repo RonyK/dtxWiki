@@ -6,6 +6,10 @@ export const LOCAL_EDGE_VISUAL_KIND_ORDER = [
   "citation",
   "coAccess",
   "membership",
+  "actionWrite",
+  "actionCite",
+  "actionRead",
+  "actionReference",
   "action",
 ] as const satisfies readonly GraphEdgeVisualKind[];
 
@@ -14,6 +18,8 @@ export const LOCAL_EDGE_VISUAL_KIND_ORDER = [
  * never by layer or action metadata on a different stored relationship.
  * Action cases mirror backend ACTION_SEMANTICS: an event occurrence is not a
  * document link, citation, or membership even if it belongs to that layer.
+ * The verb picks the activity stroke: writes, citations, reads (a body read or
+ * evidence included in an answer) and structure-only looks each have one.
  * A kind absent here has no designed line and is not drawn (nor listed in the
  * legend) until its visual meaning is explicitly added to this table.
  */
@@ -28,10 +34,10 @@ const LOCAL_EDGE_VISUAL_BY_KIND: Readonly<Record<string, GraphEdgeVisualKind>> =
   searched: "action",
   returned: "action",
   retrieved: "action",
-  included: "action",
-  cited: "action",
-  created: "action",
-  edited: "action",
+  included: "actionRead",
+  cited: "actionCite",
+  created: "actionWrite",
+  edited: "actionWrite",
   reviewed: "action",
   approved: "action",
   rejected: "action",
@@ -41,8 +47,8 @@ const LOCAL_EDGE_VISUAL_BY_KIND: Readonly<Record<string, GraphEdgeVisualKind>> =
   superseded: "action",
   merged: "action",
   promoted: "action",
-  tool_produced: "action",
-  referenced: "action",
+  viewed: "actionRead",
+  referenced: "actionReference",
 };
 
 export function localEdgeVisualKind(

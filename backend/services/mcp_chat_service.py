@@ -41,6 +41,7 @@ from backend.repositories.context_visibility import (
 )
 from backend.repositories.mcp_chat_projection import (
     ChatPageProjection,
+    ProjectionLink,
     ProjectionPolicy,
     artifact_visible_predicate,
     load_projection,
@@ -93,6 +94,7 @@ from backend.services.mcp_artifact_activity import (
 from backend.services.mcp_artifact_activity import (
     InsertedArtifactUsage,
 )
+from backend.services.mcp_client_service import mcp_client_display_name
 from backend.services.mcp_display_text import (
     sanitize_display_text as _sanitize_display_text,
 )
@@ -211,6 +213,10 @@ _EDIT_SUMMARY_TOOLS = frozenset(
 _SESSION_EDIT_TOOLS = frozenset(
     {"create_context_page", "update_context_edit", "patch_context_edit"}
 )
+# Calls whose receipt (result_detail.version_id) names the Context version they
+# wrote or submitted: Chats diffs that version, the graph links the chat to it.
+# begin only opens an edit and discard ends one; neither produced its version.
+VERSION_RECEIPT_TOOLS = _SESSION_EDIT_TOOLS | {"submit_context_edit_for_review"}
 # Commands whose input names the editing row they act on.
 _VERSION_NAMING_EDIT_TOOLS = frozenset(
     {"patch_context_edit", "submit_context_edit_for_review", "discard_context_edit"}
@@ -291,6 +297,18 @@ class _ChatLabels:
     semantic_summary: str
     intent_summary: str | None
     intent_source: str | None
+
+
+@dataclass(frozen=True)
+class McpChatCard:
+    """One chat named exactly as the Chats screen names it, for other screens."""
+
+    chat: McpChatSession
+    presentation: McpChatPresentationDescriptor
+    title: str
+    client_name: str
+    # Every rollup link of the chat except search matches, newest first.
+    links: tuple[ProjectionLink, ...]
 
 
 class McpChatService:
@@ -988,6 +1006,7 @@ class McpChatService:
         include_search_matches: bool = False,
         load_clients: bool = True,
         include_client_catalog: bool = False,
+        compact_labels: bool = False,
     ) -> ChatPageProjection:
         return load_projection(
             session,
@@ -999,7 +1018,36 @@ class McpChatService:
             include_search_matches=include_search_matches,
             load_clients=load_clients,
             include_client_catalog=include_client_catalog,
+            compact_labels=compact_labels,
         )
+
+    def chat_cards(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        chats: list[McpChatSession],
+        actor: ActorContext | None,
+    ) -> list[McpChatCard]:
+        """Name a batch of chats with one projection load (no per-chat SQL)."""
+
+        projection = self._load_projection(
+            session, workspace_id, chats, actor, compact_labels=True
+        )
+        cards = []
+        for chat in chats:
+            labels = self._build_chat_labels(chat, projection, actor)
+            cards.append(
+                McpChatCard(
+                    chat=chat,
+                    presentation=labels.presentation,
+                    title=_chat_title(chat, labels.presentation),
+                    client_name=_client_list_ref(
+                        projection.clients.get(chat.client_id)
+                    ).name,
+                    links=tuple(projection.links_by_chat.get(chat.id, ())),
+                )
+            )
+        return cards
 
     def _refresh_chat_labels(self, session: Session, chat: McpChatSession) -> None:
         # Capture-time labels share the reader's pure rules, but may never
@@ -1272,11 +1320,7 @@ class McpChatService:
             if include_full_client
             else _client_list_ref(client),
             mcp_session_id=chat.mcp_session_id,
-            title=(
-                chat.title
-                if chat.title_user_edited and chat.title
-                else _presentation_anchor(labels.presentation)
-            ),
+            title=_chat_title(chat, labels.presentation),
             summary=(
                 labels.semantic_summary
                 if actor is not None
@@ -3005,7 +3049,7 @@ def _client_ref(client: MCPClient | None) -> McpChatClientRef:
     return McpChatClientRef(
         id=client.id,
         name=_sanitize_client_name(
-            client.name,
+            mcp_client_display_name(client.name),
             max_graphemes=CLIENT_DETAIL_NAME_MAX_GRAPHEMES,
         ),
         client_type=client.client_type,
@@ -3061,6 +3105,8 @@ def _projection_policy() -> ProjectionPolicy:
         excluded_library_lifecycle_statuses=frozenset(
             EXCLUDED_LIBRARY_LIFECYCLE_STATUSES
         ),
+        focused_read_tools=FOCUSED_READ_TOOLS,
+        normalize_presentation_text=_normalize_presentation_text,
     )
 
 
@@ -3320,6 +3366,15 @@ def _normalize_presentation_text(value: object) -> str | None:
 def _sanitize_client_name(value: object, *, max_graphemes: int) -> str:
     safe = _sanitize_display_text(value) or "Unknown MCP client"
     return _truncate_graphemes(safe, max_graphemes)
+
+
+def _chat_title(
+    chat: McpChatSession,
+    presentation: McpChatPresentationDescriptor,
+) -> str:
+    if chat.title_user_edited and chat.title:
+        return chat.title
+    return _presentation_anchor(presentation)
 
 
 def _presentation_anchor(

@@ -6,7 +6,12 @@ import type {
 } from "../../shared/api/operations";
 import { mcpToolTitle } from "../../shared/lib/mcpCallVocabulary";
 
-type ChatPresentation = McpChatSessionRef | McpChatTimelineItem;
+// Only the presentation facts: a chat card, a timeline call and a Graph node
+// (GraphNode.chat_presentation) all carry them and are named by one rule.
+type ChatPresentation = Pick<
+  McpChatSessionRef | McpChatTimelineItem,
+  "title_source" | "action" | "subject" | "subject_kind" | "primary_tool_name"
+>;
 
 export function chatPresentationLine(
   presentation: ChatPresentation,

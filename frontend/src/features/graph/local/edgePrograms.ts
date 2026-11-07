@@ -1,8 +1,14 @@
-import { EdgeProgram, type ProgramDefinition, type ProgramInfo } from "sigma/rendering";
+import {
+  createEdgeArrowHeadProgram,
+  createEdgeCompoundProgram,
+  EdgeProgram,
+  type ProgramDefinition,
+  type ProgramInfo,
+} from "sigma/rendering";
 import type { EdgeDisplayData, NodeDisplayData, RenderParams } from "sigma/types";
 import { floatColor } from "sigma/utils";
 
-import { GRAPH_EDGE_PATTERN, type GraphEdgeVisualKind } from "../shared/graphTokens";
+import { GRAPH_EDGE_ARROW, GRAPH_EDGE_PATTERN, type GraphEdgeVisualKind } from "../shared/graphTokens";
 
 // Local strokes deliberately use CSS-pixel widths. The Workspace Map has a
 // separate renderer and should not inherit these values or this edge buffer.
@@ -11,8 +17,39 @@ export const LOCAL_EDGE_HALF_WIDTH_PX = {
   citation: 0.75,
   coAccess: 0.8,
   membership: 0.65,
+  actionWrite: 1,
+  actionCite: 0.85,
+  actionRead: 0.55,
+  actionReference: 0.5,
   action: 0.85,
 } as const satisfies Record<GraphEdgeVisualKind, number>;
+
+// Sigma sizes an arrowhead from the edge's `size`, which hover and history
+// emphasis change. The head keeps one size; only its line is emphasised.
+const ARROW_HEAD_THICKNESS = 1.6;
+const LocalArrowHeadProgram = createEdgeArrowHeadProgram({
+  extremity: "target",
+  lengthToThicknessRatio: 3,
+  widenessToThicknessRatio: 2.2,
+});
+type ProcessVisibleItem = (
+  this: unknown,
+  edgeIndex: number,
+  startIndex: number,
+  sourceData: NodeDisplayData,
+  targetData: NodeDisplayData,
+  data: EdgeDisplayData,
+) => void;
+// This class is created above for Local lines only; Sigma's default arrow
+// program is a different class and keeps its own behaviour.
+const arrowHead = LocalArrowHeadProgram.prototype as unknown as { processVisibleItem: ProcessVisibleItem };
+const processArrowHead = arrowHead.processVisibleItem;
+arrowHead.processVisibleItem = function (edgeIndex, startIndex, sourceData, targetData, data) {
+  processArrowHead.call(this, edgeIndex, startIndex, sourceData, targetData, {
+    ...data,
+    size: ARROW_HEAD_THICKNESS,
+  });
+};
 
 // WebGL1 enum values. Keeping these as literals also avoids reading a browser
 // global while this module is imported by build-time tooling.
@@ -175,10 +212,19 @@ function createLocalEdgeProgram(kind: GraphEdgeVisualKind) {
   };
 }
 
+function localEdgeProgram(kind: GraphEdgeVisualKind) {
+  const line = createLocalEdgeProgram(kind);
+  return GRAPH_EDGE_ARROW[kind] ? createEdgeCompoundProgram([line, LocalArrowHeadProgram]) : line;
+}
+
 export const LOCAL_EDGE_PROGRAMS = {
-  link: createLocalEdgeProgram("link"),
-  citation: createLocalEdgeProgram("citation"),
-  coAccess: createLocalEdgeProgram("coAccess"),
-  membership: createLocalEdgeProgram("membership"),
-  action: createLocalEdgeProgram("action"),
-} as const satisfies Record<GraphEdgeVisualKind, ReturnType<typeof createLocalEdgeProgram>>;
+  link: localEdgeProgram("link"),
+  citation: localEdgeProgram("citation"),
+  coAccess: localEdgeProgram("coAccess"),
+  membership: localEdgeProgram("membership"),
+  actionWrite: localEdgeProgram("actionWrite"),
+  actionCite: localEdgeProgram("actionCite"),
+  actionRead: localEdgeProgram("actionRead"),
+  actionReference: localEdgeProgram("actionReference"),
+  action: localEdgeProgram("action"),
+} as const satisfies Record<GraphEdgeVisualKind, ReturnType<typeof localEdgeProgram>>;

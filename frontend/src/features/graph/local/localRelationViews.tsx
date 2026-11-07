@@ -2,7 +2,7 @@ import type { TFunction } from "i18next";
 
 import type { GraphEdge, GraphNode } from "../../../shared/api/graph";
 import { domainLabel } from "../../../shared/lib/domainLabel";
-import { GRAPH_NODE_VISUALS } from "../shared/graphTokens";
+import { GRAPH_NODE_VISUALS, isActionEdgeVisualKind } from "../shared/graphTokens";
 import { GraphSeedCue } from "../shared/GraphCues";
 import { RelationListStrokeCue } from "../shared/relationList/parts";
 import type { RelationListEdgeView, RelationListNodeView, RelationListStroke } from "../shared/relationList/types";
@@ -29,7 +29,9 @@ export function localSelfKind(node: GraphNode): LocalSelfKind {
 }
 
 export function localStroke(edge: GraphEdge): RelationListStroke {
-  return localEdgeVisualKind(edge.edge_kind) ?? "other";
+  const visual = localEdgeVisualKind(edge.edge_kind);
+  // The shared list groups activity strokes; the canvas distinguishes verbs.
+  return isActionEdgeVisualKind(visual) ? "action" : visual ?? "other";
 }
 
 export const LOCAL_STROKE_ORDER: readonly RelationListStroke[] = ["link", "citation", "coAccess", "membership", "action", "other"];

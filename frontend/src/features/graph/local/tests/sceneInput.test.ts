@@ -84,11 +84,16 @@ describe("visible Local scene input", () => {
     const result = buildLocalScene(input);
     expect(result.edges.map(({ graphId }) => graphId).sort())
       .toEqual(input.edges.map(({ id }) => id).sort());
-    expect(result.edges.every(({ kind }) => kind === "action")).toBe(true);
-    expect(result.layout.edges).toHaveLength(4);
+    // The verb picks the stroke; each occurrence still enters the topology.
+    expect(Object.fromEntries(result.edges.map(({ graphId, kind }) => [graphId, kind]))).toEqual({
+      "action:created": "actionWrite",
+      "action:edited": "actionWrite",
+      "action:published": "action",
+      "action:included": "actionRead",
+      "action:cited": "actionCite",
+    });
+    expect(result.layout.edges).toHaveLength(5);
     expect(result.layout.edges.reduce((count, edge) => count + edge.count, 0)).toBe(5);
-    expect(result.layout.edges.find(({ sourceKey }) => sourceKey === "ask_turn:ask-1"))
-      .toEqual({ kind: "action", sourceKey: "ask_turn:ask-1", targetKey: "context_page:seed", count: 2 });
   });
 
   it("does not disguise stored citations as actions or infer unknown kinds from layer/action metadata", () => {

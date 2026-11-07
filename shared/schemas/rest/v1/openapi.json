@@ -8617,19 +8617,42 @@
         "title": "FeedbackListResponse",
         "type": "object"
       },
+      "GraphActionCount": {
+        "additionalProperties": false,
+        "description": "How often one action happened within an aggregate relation.",
+        "properties": {
+          "action_kind": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Action Kind",
+            "type": "string"
+          },
+          "count": {
+            "minimum": 1.0,
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "action_kind",
+          "count"
+        ],
+        "title": "GraphActionCount",
+        "type": "object"
+      },
       "GraphBudget": {
         "additionalProperties": false,
         "properties": {
           "edges": {
             "default": 150,
-            "maximum": 750.0,
+            "maximum": 1500.0,
             "minimum": 1.0,
             "title": "Edges",
             "type": "integer"
           },
           "nodes": {
             "default": 50,
-            "maximum": 250.0,
+            "maximum": 500.0,
             "minimum": 1.0,
             "title": "Nodes",
             "type": "integer"
@@ -8917,6 +8940,14 @@
       "GraphEdge": {
         "additionalProperties": false,
         "properties": {
+          "action_counts": {
+            "items": {
+              "$ref": "#/components/schemas/GraphActionCount"
+            },
+            "maxItems": 8,
+            "title": "Action Counts",
+            "type": "array"
+          },
           "action_kind": {
             "anyOf": [
               {
@@ -9456,6 +9487,28 @@
             ],
             "title": "Actor Label"
           },
+          "aggregate_count": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aggregate Count"
+          },
+          "chat_presentation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/McpChatPresentationDescriptor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "entity_id": {
             "format": "uuid",
             "title": "Entity Id",
@@ -9531,6 +9584,26 @@
             ],
             "title": "Path"
           },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNodeRecord"
+            },
+            "maxItems": 40,
+            "title": "Records",
+            "type": "array"
+          },
+          "review_status": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Status"
+          },
           "status": {
             "anyOf": [
               {
@@ -9552,6 +9625,38 @@
           "label"
         ],
         "title": "GraphNode",
+        "type": "object"
+      },
+      "GraphNodeRecord": {
+        "additionalProperties": false,
+        "description": "One lifecycle fact folded into the node it names.\n\nActivity history draws one edit as one version node. The change and audit\nrows that name that version ride on it here instead of becoming nodes.",
+        "properties": {
+          "action_kind": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Action Kind",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "source_kind": {
+            "enum": [
+              "change_operation",
+              "audit_event"
+            ],
+            "title": "Source Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action_kind",
+          "occurred_at",
+          "source_kind"
+        ],
+        "title": "GraphNodeRecord",
         "type": "object"
       },
       "GraphOmission": {
@@ -15136,6 +15241,80 @@
           "right_op_index"
         ],
         "title": "McpChatOperationConflict",
+        "type": "object"
+      },
+      "McpChatPresentationDescriptor": {
+        "additionalProperties": false,
+        "description": "Read-time facts from which a localized chat label can be composed.\n\nThe backend ranks locale-neutral evidence only. ``subject`` is never built\nby parsing result-summary prose or by inferring an external user's prompt.",
+        "properties": {
+          "action": {
+            "enum": [
+              "search",
+              "read",
+              "create",
+              "edit",
+              "cite",
+              "guide",
+              "other"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "primary_tool_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Tool Name"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "subject_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Kind"
+          },
+          "title_source": {
+            "enum": [
+              "user",
+              "artifact",
+              "query",
+              "input_text",
+              "target_kind",
+              "tool",
+              "generic"
+            ],
+            "title": "Title Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title_source",
+          "action",
+          "subject",
+          "subject_kind",
+          "primary_tool_name"
+        ],
+        "title": "McpChatPresentationDescriptor",
         "type": "object"
       },
       "McpChatPreviewPurgeResponse": {

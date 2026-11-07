@@ -7,9 +7,12 @@ test_graph_query_service.py and test_local_graph_mixed_scene.py.
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from uuid import UUID, uuid5
 
+from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.graph import GraphHistoryCoverage
 from backend.schemas.graph import (
     GraphBudget,
     GraphEdge,
@@ -22,9 +25,19 @@ from backend.services.graph_query_service import (
     GraphQueryService,
     _anchor_and_role,
     _EdgeCandidate,
+    _session_candidate,
+    _session_edge,
+    _TimelineDraft,
     graph_node_id,
 )
 from backend.services.graph_semantics import NODE_FAMILY_BY_KIND
+from backend.services.graph_service import _Hydrated
+from backend.services.graph_session_activity import (
+    SessionActivity,
+    SessionActivityBatch,
+    SessionResourceActivity,
+    _split,
+)
 
 NAMESPACE = UUID("2c7f55c4-94d6-4b8d-a5a0-6b7b1a1f0c11")
 
@@ -308,84 +321,105 @@ def test_session_relations_cannot_take_an_anchored_share_or_float_free():
     assert sum(edge.edge_kind == "included" for edge in edges) == 2
 
 
-def test_direct_activity_keeps_its_admitted_session_on_the_same_timeline_event():
-    # One activity input covers direct-scope assembly, admission and Timeline
-    # ownership; existing DB tests retain domain retrieval/authorization proof.
-    workspace_id = uuid5(NAMESPACE, "direct-action-workspace")
-    session_id = uuid5(NAMESPACE, "direct-action-session")
-    turn_id = uuid5(NAMESPACE, "direct-action-turn")
-    evidence_id = uuid5(NAMESPACE, "direct-action-citation")
-    occurred_at = datetime(2026, 8, 4, 2, 15, tzinfo=UTC)
-    seed = _node("direct-action-seed", seed=True)
+def test_a_session_spends_its_own_share_and_owns_its_context_on_the_timeline():
+    # A chat's relation to each seed competes in that seed's share and is one
+    # event. Its relation to another document it used spends the chat's own
+    # share, only once the chat is in, and replays with the chat's events,
+    # never with another event that happens to touch that document, and a
+    # chat's relation to one seed never rides on its event for another.
+    workspace_id = uuid5(NAMESPACE, "session-share-workspace")
+    at = datetime(2026, 8, 4, 2, 15, tzinfo=UTC)
+    seed = _node("session-seed", seed=True)
+    second_seed = _node("session-second-seed", seed=True)
+    other = _node("session-other")
+    chat = _node("session-chat", kind="mcp_chat_session")
     request = GraphQueryRequest(
-        seeds=[GraphSeed(kind="context_page", id=seed.entity_id)],
-        relation_scope="direct",
+        seeds=[
+            GraphSeed(kind="context_page", id=seed.entity_id),
+            GraphSeed(kind="context_page", id=second_seed.entity_id),
+        ],
         direction="in",
-        layers=["action"],
+        layers=["action", "evidence", "knowledge"],
         time=GraphTimeQuery(mode="action"),
-        budget=GraphBudget(nodes=3, edges=2),
+        budget=GraphBudget(nodes=3, edges=3),
     )
-    candidates = []
-    assembled_nodes = {seed.id: seed}
-    drafts = []
-    GraphQueryService._append_domain_action(
-        workspace_id,
-        request=request,
-        active_layers={"action"},
-        seed=seed,
-        source_kind="ask_turn",
-        source_id=turn_id,
-        source_label="Direct activity",
-        source_status=None,
-        occurred_at=occurred_at,
-        action_kind="included",
-        evidence_kind="ask_turn_citation",
-        evidence_id=evidence_id,
-        candidates=candidates,
-        nodes=assembled_nodes,
-        timeline=drafts,
+    layers = {"action", "evidence", "knowledge"}
+
+    def session_edge(target, action_kind):
+        return _session_edge(
+            workspace_id,
+            request=request,
+            active_layers=layers,
+            source=chat,
+            target=target,
+            action_kind=action_kind,
+            count=2,
+            first_at=at,
+            last_at=at,
+        )
+
+    to_seed = session_edge(seed, "edited")
+    to_second_seed = session_edge(second_seed, "viewed")
+    to_other = session_edge(other, "viewed")
+    used = _session_candidate(to_other, chat, other, 3, chat.id)
+    link = _candidate(seed, other, "wikilink", anchor=seed, role="out")
+
+    _nodes, edges, _ = _apply([seed], [used], nodes=10, edges=10)
+    assert edges == []
+
+    nodes, edges, capped = _apply(
+        [seed, second_seed],
+        [
+            used,
+            link,
+            _session_candidate(to_seed, chat, seed, 2, seed.id, "in"),
+            _session_candidate(
+                to_second_seed, chat, second_seed, 2, second_seed.id, "in"
+            ),
+        ],
+        nodes=4,
+        edges=4,
     )
-    turn_node_id = graph_node_id("ask_turn", turn_id)
-    GraphQueryService._append_session_relation(
-        workspace_id,
-        request=request,
-        active_layers={"action"},
-        session_kind="ask_session",
-        session_id=session_id,
-        session_label="Direct activity session",
-        session_status="active",
-        occurred_at=occurred_at,
-        event_node=assembled_nodes[turn_node_id],
-        action_kind="included",
-        evidence_kind="ask_turn_citation",
-        evidence_id=evidence_id,
-        candidates=candidates,
-        nodes=assembled_nodes,
-    )
-    nodes, edges, capped = GraphQueryService._apply_budget(
-        request=request,
-        seed_nodes={seed.id: seed},
-        candidates=candidates,
-        extra_nodes={},
-    )
-    session_node_id = graph_node_id("ask_session", session_id)
-    assert {node.id for node in nodes} == {seed.id, turn_node_id, session_node_id}
-    assert {(edge.source, edge.target) for edge in edges} == {
-        (turn_node_id, seed.id),
-        (session_node_id, turn_node_id),
+    assert {edge.id for edge in edges} == {
+        to_seed.id,
+        to_second_seed.id,
+        to_other.id,
+        link.edge.id,
     }
     assert not capped
 
+    def draft(identity, node_ids, edge_ids):
+        return _TimelineDraft(
+            identity=identity,
+            operation="action_occurred",
+            action_kind="edited",
+            label="edited",
+            occurred_at=at,
+            node_ids=node_ids,
+            edge_ids=edge_ids,
+            evidence=None,
+        )
+
     timeline, timeline_capped = GraphQueryService._finalize_timeline(
-        drafts, nodes, edges, node_limit=3, edge_limit=2
+        [
+            draft("chat", (chat.id, seed.id), (to_seed.id,)),
+            draft("chat-second", (chat.id, second_seed.id), (to_second_seed.id,)),
+            draft("link", (seed.id, other.id), (link.edge.id,)),
+        ],
+        nodes,
+        edges,
+        node_limit=4,
+        edge_limit=4,
     )
     assert not timeline_capped
-    assert len(timeline) == 1
-    assert set(timeline[0].node_ids) == {node.id for node in nodes}
-    assert set(timeline[0].edge_ids) == {edge.id for edge in edges}
-    assert timeline[0].occurred_at == occurred_at
-    assert timeline[0].evidence is not None
-    assert timeline[0].evidence.kind == "ask_turn_citation"
+    assert sorted((set(event.edge_ids) for event in timeline), key=sorted) == sorted(
+        [
+            {link.edge.id},
+            {to_seed.id, to_other.id},
+            {to_second_seed.id, to_other.id},
+        ],
+        key=sorted,
+    )
 
 
 def test_fair_share_uses_every_slot_it_hands_out():
@@ -412,6 +446,126 @@ def test_fair_share_uses_every_slot_it_hands_out():
             sum(edge.source == seed.id for edge in edges) for seed in seeds
         )
         assert per_seed[-1] - per_seed[0] <= 1
+
+
+def test_co_used_document_cap_counts_only_actor_visible_documents(monkeypatch):
+    seed = _node("co-used-seed", seed=True)
+    at = datetime(2026, 8, 4, 2, 15, tzinfo=UTC)
+    documents = [_node(f"co-used-{index}") for index in range(41)]
+    resources = {
+        ("context_page", document.entity_id): SessionResourceActivity(
+            resource_kind="context_page",
+            resource_id=document.entity_id,
+            counts=(("viewed", 1),),
+            first_at=at - timedelta(seconds=index),
+            last_at=at - timedelta(seconds=index),
+        )
+        for index, document in enumerate([seed, *documents])
+    }
+    seeds, co_used = _split(
+        resources, kept_seed_ids={seed.entity_id}, all_seed_ids={seed.entity_id}
+    )
+    activity = SessionActivity(
+        entity_kind="mcp_chat_session",
+        entity_id=uuid5(NAMESPACE, "co-used-chat"),
+        label="Chat",
+        status="active",
+        actor_label=None,
+        presentation=None,
+        seeds=seeds,
+        co_used=co_used,
+    )
+    monkeypatch.setattr(
+        "backend.services.graph_query_service.SESSION_ACTIVITY_SOURCES",
+        (
+            SimpleNamespace(
+                collect=lambda *args, **kwargs: SessionActivityBatch(
+                    sessions=(activity,)
+                )
+            ),
+        ),
+    )
+    # The newest 20 documents are unavailable (for example, archived).
+    # Visibility must leave room for the next 20, while preserving the cap
+    # and strongest/newest ordering when one further document is visible.
+    visible = {
+        ("context_page", document.entity_id): _Hydrated(document.label, None)
+        for document in documents[20:]
+    }
+    visible[("context_page", seed.entity_id)] = _Hydrated(seed.label, None)
+    service = GraphQueryService()
+    monkeypatch.setattr(
+        service.graph_service, "hydrate_entities", lambda *args, **kwargs: visible
+    )
+    monkeypatch.setattr(
+        service.graph_service, "hydration_context", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        service, "_observations_for_seeds", lambda *args, **kwargs: ([], False)
+    )
+    # Stub repository reads only: retain the real domain collector and query
+    # response assembly so a lost overflow signal cannot claim completeness.
+    rows = {
+        ContextPage: [
+            SimpleNamespace(
+                id=seed.entity_id,
+                title=seed.label,
+                lifecycle_status="published",
+                created_at=at,
+            )
+        ],
+        ContextPageVersion: [],
+        GraphHistoryCoverage: [
+            SimpleNamespace(
+                stream_id=seed.entity_id,
+                status="complete",
+                coverage_from=at,
+                watermark=at,
+            )
+        ],
+    }
+    session = SimpleNamespace(
+        get=lambda *args: SimpleNamespace(edge_projection_version=0),
+        scalars=lambda statement: SimpleNamespace(
+            all=lambda: rows[statement.column_descriptions[0]["entity"]]
+        ),
+    )
+    request = GraphQueryRequest(
+        seeds=[GraphSeed(kind="context_page", id=seed.entity_id)],
+        time=GraphTimeQuery(mode="action"),
+        layers=["action", "evidence"],
+        edge_kinds=["wikilink"],
+    )
+    payload = service.query(
+        session,
+        uuid5(NAMESPACE, "co-used-workspace"),
+        request=request,
+        actor=None,
+        usage_signals_enabled=True,
+    )
+
+    assert {edge.target for edge in payload.edges} == {
+        seed.id,
+        *(document.id for document in documents[20:40]),
+    }
+    assert payload.completeness == "bounded_sample"
+    assert payload.truncated
+    assert payload.warnings == ["graph_history_source_bounded"]
+
+    # Exactly 20 eligible documents and an unavailable tail are complete;
+    # merely filling the share must not report an omitted visible relation.
+    del visible[("context_page", documents[40].entity_id)]
+    complete = service.query(
+        session,
+        uuid5(NAMESPACE, "co-used-workspace"),
+        request=request,
+        actor=None,
+        usage_signals_enabled=True,
+    )
+    assert {edge.id for edge in complete.edges} == {edge.id for edge in payload.edges}
+    assert complete.completeness == "complete"
+    assert not complete.truncated
+    assert complete.warnings == []
 
 
 def test_every_tier_keeps_strict_priority():
