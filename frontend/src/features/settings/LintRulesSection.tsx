@@ -50,12 +50,16 @@ function validCard(card: PolicyCard | undefined): PolicyCard | null {
     typeof policy.auto_approve_link_fixes === "boolean" ? card : null;
 }
 
-/** Read-only viewers get the state as a word; a greyed checkbox hides it. */
-function StateWord({ on }: { on: boolean }) {
+/** Read-only viewers get the state as a word; a greyed checkbox hides it.
+
+`null` means this browser has not confirmed the value yet. The server always
+applies a concrete value, so an unconfirmed one must never read as Off. */
+function StateWord({ on }: { on: boolean | null }) {
   const { t } = useTranslation("settings");
+  const state = on === null ? "unknown" : on ? "on" : "off";
   return (
-    <span className={`lint-state lint-state--${on ? "on" : "off"}`}>
-      {t(on ? "lint.stateOn" : "lint.stateOff")}
+    <span className={`lint-state lint-state--${state}`}>
+      {t(on === null ? "lint.unknownValue" : on ? "lint.stateOn" : "lint.stateOff")}
     </span>
   );
 }
@@ -66,11 +70,13 @@ function ChangedPill({ show }: { show: boolean }) {
 }
 
 /** One option's effect, labelled "Now" or, while that option is edited, "After saving". */
-function OptionEffect({ next, text }: { next: boolean; text: string }) {
+function OptionEffect({ id, next, text }: { id: string; next: boolean; text: string }) {
   const { t } = useTranslation("settings");
   return (
-    <p className={`lint-effect${next ? " lint-effect--next" : ""}`}>
+    <p className={`lint-effect${next ? " lint-effect--next" : ""}`} id={id}>
       <span className="lint-effect-label">{t(next ? "lint.effectNext" : "lint.effectNow")}</span>
+      {/* Keeps "Now" and the sentence apart when read as one description. */}
+      {" "}
       <span>{text}</span>
     </p>
   );
@@ -242,12 +248,19 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
     ? t("lint.linkFixAuto")
     : linkFixMode === "suggest" ? t("lint.linkFixSuggest") : t("lint.unknownValue");
 
+  // A control announces what it does and, once its value is confirmed, its
+  // current (or after-saving) effect.
+  function describedBy(id: string) {
+    return policyReady ? `${id}-hint ${id}-effect` : `${id}-hint`;
+  }
+
   function optionControl(id: string, value: unknown, onChange: () => void) {
-    return readOnly ? <StateWord on={value === true} /> : (
+    return readOnly ? <StateWord on={typeof value === "boolean" ? value : null} /> : (
       <input
         id={id}
         type="checkbox"
         checked={value === true}
+        aria-describedby={describedBy(id)}
         title={value === null ? t("lint.unknownValue") : undefined}
         ref={(input) => { if (input) input.indeterminate = value === null; }}
         disabled={disabled}
@@ -309,9 +322,13 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
                   {optionLabel("lint-auto-fix", t("lint.autoFix", { defaultValue: "Auto-fix safe formatting on save" }))}
                   <ChangedPill show={isChanged("auto_fix")} />
                 </span>
-                <span className="lint-rule-description">{t("lint.autoFixHint")}</span>
+                <span className="lint-rule-description" id="lint-auto-fix-hint">{t("lint.autoFixHint")}</span>
                 {policyReady ? (
-                  <OptionEffect next={isChanged("auto_fix")} text={t(autoFix ? "lint.effectFormatOn" : "lint.effectFormatOff")} />
+                  <OptionEffect
+                    id="lint-auto-fix-effect"
+                    next={isChanged("auto_fix")}
+                    text={t(autoFix ? "lint.effectFormatOn" : "lint.effectFormatOff")}
+                  />
                 ) : null}
               </div>
             </div>
@@ -321,9 +338,10 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
                   {optionLabel("lint-link-fix-mode", t("lint.linkFixMode"))}
                   <ChangedPill show={isChanged("link_fix_mode")} />
                 </span>
-                <span className="lint-rule-description">{t("lint.linkFixModeHint")}</span>
+                <span className="lint-rule-description" id="lint-link-fix-mode-hint">{t("lint.linkFixModeHint")}</span>
                 {policyReady ? (
                   <OptionEffect
+                    id="lint-link-fix-mode-effect"
                     next={isChanged("link_fix_mode")}
                     text={t(linkFixMode === "auto" ? "lint.effectLinksAuto" : "lint.effectLinksSuggest")}
                   />
@@ -333,6 +351,7 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
               {readOnly ? <span className="lint-option-value">{linkModeLabel}</span> : (
                 <select
                   id="lint-link-fix-mode"
+                  aria-describedby={describedBy("lint-link-fix-mode")}
                   value={typeof linkFixMode === "string" ? linkFixMode : ""}
                   disabled={disabled}
                   onChange={(event) => updateDraft("link_fix_mode", event.target.value)}
@@ -356,9 +375,12 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
                   {optionLabel("lint-auto-approve-link-fixes", t("lint.autoApproveLinkFixes"))}
                   <ChangedPill show={isChanged("auto_approve_link_fixes")} />
                 </span>
-                <span className="lint-rule-description">{t("lint.autoApproveLinkFixesHint")}</span>
+                <span className="lint-rule-description" id="lint-auto-approve-link-fixes-hint">
+                  {t("lint.autoApproveLinkFixesHint")}
+                </span>
                 {policyReady ? (
                   <OptionEffect
+                    id="lint-auto-approve-link-fixes-effect"
                     next={isChanged("auto_approve_link_fixes")}
                     text={t(autoApproveLinkFixes ? "lint.effectApprovalOn" : "lint.effectApprovalOff")}
                   />

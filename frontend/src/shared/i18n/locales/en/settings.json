@@ -623,7 +623,7 @@
     "linkFixSuggest": "Suggest only",
     "autoApproveLinkFixes": "Automatically approve safe link fixes",
     "autoApproveLinkFixesHint": "Immediately approve safe fix-only changes on authored saves and published maintenance when existing review safeguards pass. Other changes follow the normal Review policy.",
-    "policyLoadError": "Lint options could not be loaded. Editing is disabled until their values are confirmed.",
+    "policyLoadError": "Lint options could not be loaded. Saved settings still apply; editing is disabled until their values are confirmed.",
     "policyLoading": "Loading lint options…",
     "retryPolicies": "Retry options",
     "retryRules": "Retry checks",

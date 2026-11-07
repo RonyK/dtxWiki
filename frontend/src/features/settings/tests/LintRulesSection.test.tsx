@@ -160,6 +160,10 @@ describe("LintRulesSection", () => {
     await waitFor(() => expect(autofix).toBeEnabled());
     const mode = screen.getByRole("combobox", { name: /Fix internal links/ });
     const approval = screen.getByRole("checkbox", { name: /Automatically approve safe link fixes/ });
+    // Focusing a control announces what it does and what it does now.
+    expect(autofix).toHaveAccessibleDescription(/^Clean up heading.+Now Optional formatting cleanup is off/);
+    expect(mode).toHaveAccessibleDescription(/^Preserve destinations.+Now Automatic link fixing/);
+    expect(approval).toHaveAccessibleDescription(/^Immediately approve safe fix-only changes.+Now Safe fix-only changes/);
     expect(screen.getAllByText("Now")).toHaveLength(3);
     await user.click(autofix);
     await user.selectOptions(mode, "suggest");
@@ -233,7 +237,14 @@ describe("LintRulesSection", () => {
 
   it("allows non-owners to inspect settings but disables every edit and omits save actions", async () => {
     const user = userEvent.setup();
+    vi.mocked(getSettingsPolicies).mockRejectedValueOnce(new Error("offline"));
     const view = render(routed(<LintRulesSection readOnly={true} workspaceId={WORKSPACE_ID} />));
+    // Unconfirmed options never read as Off: the server keeps applying saved values.
+    expect(await screen.findByRole("alert")).toHaveTextContent("Saved settings still apply");
+    expect(within(screen.getByRole("group", { name: "Clean up on save" })).getAllByText("Not loaded")).toHaveLength(2);
+    expect(within(screen.getByRole("group", { name: "Review and publication" })).getByText("Not loaded")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry options" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
     await openChecks();
     expect(screen.getByText(/^Only workspace owners can change these/)).toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
@@ -260,7 +271,7 @@ describe("LintRulesSection", () => {
     expect(beforeUnloadIsBlocked()).toBe(false);
     expect(updateSettingsPolicyBatch).not.toHaveBeenCalled();
     expect(getLintRules).toHaveBeenCalledTimes(1);
-    expect(getSettingsPolicies).toHaveBeenCalledTimes(1);
+    expect(getSettingsPolicies).toHaveBeenCalledTimes(2);
   });
 
   it("waits for both reads before editing and applies group toggles only to filtered checks", async () => {

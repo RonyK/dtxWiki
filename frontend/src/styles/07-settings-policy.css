@@ -4498,9 +4498,20 @@ button.history-card {
   color: var(--ink-muted);
 }
 
-.lint-rules-card--readonly .lint-rule-row,
-.lint-rules-card--readonly .lint-option:not(.lint-option--select) {
+/* Not confirmed by this browser yet: neither On nor Off. */
+.lint-state--unknown {
+  border: 1px dashed var(--border-strong);
+  background: var(--surface);
+  color: var(--ink-muted);
+}
+
+.lint-rules-card--readonly .lint-rule-row {
   grid-template-columns: 44px minmax(0, 1fr);
+}
+
+/* Options can be unconfirmed, and "Not loaded" is wider than On or Off. */
+.lint-rules-card--readonly .lint-option:not(.lint-option--select) {
+  grid-template-columns: minmax(44px, max-content) minmax(0, 1fr);
 }
 
 .lint-option-value {

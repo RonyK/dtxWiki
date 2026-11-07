@@ -623,7 +623,7 @@
     "linkFixSuggest": "제안만",
     "autoApproveLinkFixes": "안전한 링크 수정 자동 승인",
     "autoApproveLinkFixesHint": "작성 저장과 게시 문서 유지보수에서 기존 검토 안전 조건을 통과한 안전한 수정 전용 변경을 즉시 승인합니다. 다른 변경은 일반 검토 정책으로 처리합니다.",
-    "policyLoadError": "Lint 옵션을 불러오지 못했습니다. 실제 설정을 확인할 때까지 편집할 수 없습니다.",
+    "policyLoadError": "린트 옵션을 불러오지 못했습니다. 저장된 설정은 그대로 적용되며, 값을 확인할 때까지 편집할 수 없습니다.",
     "policyLoading": "Lint 옵션 불러오는 중…",
     "retryPolicies": "옵션 다시 불러오기",
     "retryRules": "검사 다시 불러오기",
