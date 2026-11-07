@@ -7,7 +7,7 @@ export type SearchResultLinkInput = {
   source_ref?: Record<string, string> | null;
 };
 
-export type SearchResultDestination = "context" | "library" | "agent" | "review";
+export type SearchResultDestination = "context" | "library" | "agent" | "review" | "chats" | "ask";
 export type SearchResultLink = {
   href: string;
   destination: SearchResultDestination;
@@ -45,6 +45,14 @@ export function searchResultLink<T extends SearchResultLinkInput>(
   }
   if (result.type === "agent_page" && targetId) {
     return { href: workspaceTargetHref(workspaceId, "agent", targetId), destination: "agent" };
+  }
+  // A conversation opens on its own screen: an MCP chat in Chats, an Ask
+  // session in Ask. Those routes enforce their own access.
+  if (result.type === "mcp_chat_session" && targetId) {
+    return { href: workspacePath(workspaceId, "chats/" + encodeURIComponent(targetId)), destination: "chats" };
+  }
+  if (result.type === "ask_session" && targetId) {
+    return { href: workspacePath(workspaceId, "ask/" + encodeURIComponent(targetId)), destination: "ask" };
   }
   if (result.type === "workspace_tree_node" && targetId) {
     const ref = result.source_ref ?? {};

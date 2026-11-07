@@ -1,3 +1,4 @@
+import re
 from uuid import UUID
 
 from sqlalchemy import select
@@ -433,6 +434,25 @@ def _trace_name_lookup_statement(
         MCPClient.name == name,
     )
     return statement.where(MCPClient.runtime_binding_key.is_(None))
+
+
+# _trace_client_identity appends these so two credentials never share a row
+# by name. They identify a credential; they do not describe the client.
+_PAT_NAME_SUFFIX = re.compile(
+    r" \([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\)$"
+)
+_OAUTH_NAME_SUFFIX = re.compile(r" \(user [^()]+\)(?: \(grant [^()]+\))?$")
+
+
+def mcp_client_display_name(name: str) -> str:
+    """The client name people read, without its credential suffix.
+
+    Every screen that names the client of a chat (Chats, Graph) uses this, so
+    a chat reads "Claude Code" everywhere rather than "Claude Code (<token>)".
+    """
+
+    stripped = _OAUTH_NAME_SUFFIX.sub("", _PAT_NAME_SUFFIX.sub("", name))
+    return stripped or name
 
 
 def _trace_client_identity(

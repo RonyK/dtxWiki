@@ -156,17 +156,33 @@ ACTION_SEMANTICS: dict[str, GraphSemantic] = {
     "promoted": GraphSemantic(
         "promoted", "promoted", "was promoted by", "action", "promoted"
     ),
-    "tool_produced": GraphSemantic(
-        "tool_produced",
-        "tool produced",
-        "was produced by tool",
-        "action",
-        "tool_produced",
-    ),
+    # A body read (read, fetch, cite lookups) as opposed to a structure-only
+    # look (outline, structure map), which stays ``referenced``.
+    "viewed": GraphSemantic("viewed", "viewed", "was viewed by", "evidence", "viewed"),
     "referenced": GraphSemantic(
         "referenced", "referenced", "was referenced by", "evidence", "referenced"
     ),
 }
+
+
+# What a session (an MCP chat, an Ask session) did to one document, strongest
+# first. A session draws one relation per document, named by the first of
+# these it did; the rest are counted on that relation.
+SESSION_ACTION_ORDER: tuple[str, ...] = (
+    "created",
+    "edited",
+    "cited",
+    "included",
+    "viewed",
+    "referenced",
+)
+_SESSION_ACTION_RANK = {kind: index for index, kind in enumerate(SESSION_ACTION_ORDER)}
+
+
+def session_action_rank(action_kind: str) -> int:
+    """Position in ``SESSION_ACTION_ORDER``; 0 is strongest, unknown is last."""
+
+    return _SESSION_ACTION_RANK.get(action_kind, len(SESSION_ACTION_ORDER))
 
 
 NODE_FAMILY_BY_KIND: dict[str, str] = {
@@ -176,7 +192,10 @@ NODE_FAMILY_BY_KIND: dict[str, str] = {
     "library_item_version": "document",
     "library_artifact": "document",
     "mcp_chat_session": "chat",
+    # The sessions beyond the per-document cap, folded into one node.
+    "mcp_chat_session_group": "chat",
     "ask_session": "ask",
+    "ask_session_group": "ask",
     "ask_turn": "ask",
     "review_item": "review",
     "review_decision": "review",

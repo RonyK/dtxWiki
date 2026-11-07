@@ -5,6 +5,7 @@ import type { GraphQueryPayload, GraphTimelineEvent } from "../../../shared/api/
 import { formatVersionTimestamp } from "../../../shared/lib/datetime";
 import { eventInvolves, GraphPreviewBadge, type LocalTimelineEvent } from "./LocalGraphChrome";
 import type { TimelineMarkKind } from "./timelinePresentation";
+import { sessionActivityDigest } from "../sessionActivity";
 import "./LocalGraphTimeline.css";
 
 // A version mark is the canvas version glyph (a filled triangle); every
@@ -70,6 +71,7 @@ export function LocalGraphTimeline({ cursor, onCursorChange, onPause, onPlay, on
     const closest = timeline.reduce((best, item, index) => Math.abs(Date.parse(item.occurred_at) - at) < Math.abs(Date.parse(timeline[best].occurred_at) - at) ? index : best, 0);
     onCursorChange(closest);
   };
+  const digest = payload.history.mode === "action" ? sessionActivityDigest(payload, t) : null;
   const shortDate = (at: number) => new Intl.DateTimeFormat(undefined, { month: "2-digit", day: "2-digit" }).format(at);
   return <section className="local-history" aria-labelledby="graph-timeline-heading" data-testid="graph-timeline">
     <header className="local-history-header">
@@ -78,6 +80,7 @@ export function LocalGraphTimeline({ cursor, onCursorChange, onPause, onPlay, on
         <p>{payload.history.coverage_from ? formatVersionTimestamp(payload.history.coverage_from).split(" ")[0] : t("graph.timeline.unknown")}
           {" – "}{payload.history.watermark ? formatVersionTimestamp(payload.history.watermark).split(" ")[0] : t("graph.timeline.now")}
           <span aria-hidden="true"> · </span>{t("graph.historyUi.records", { count: timeline.length })}</p>
+        {digest ? <p className="local-history-digest" data-testid="graph-session-digest">{digest}</p> : null}
       </div>
       <div className="local-history-controls" role="group" aria-label={t("graph.timeline.heading")}>
         <div className="local-history-transport">

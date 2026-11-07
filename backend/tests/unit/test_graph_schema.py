@@ -65,7 +65,7 @@ def test_graph_query_normalizes_aware_time_values_to_utc(field):
 
 def test_graph_query_rejects_unbounded_or_duplicated_filters():
     with pytest.raises(ValidationError):
-        _request(budget={"nodes": 251, "edges": 150})
+        _request(budget={"nodes": 501, "edges": 150})
     with pytest.raises(ValidationError):
         _request(layers=["knowledge", "knowledge"])
     with pytest.raises(ValidationError):

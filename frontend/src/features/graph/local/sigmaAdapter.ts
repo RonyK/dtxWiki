@@ -134,6 +134,28 @@ function createTriangleNodeProgram(scale = 1, colorAttribute: "color" | "surface
     }
   };
 }
+// At or below this canvas width only the selected or focused conversation is titled.
+const COMPACT_LABEL_WIDTH_PX = 440;
+// The smallest share of its legend size a node shrinks to, so a far zoom-out
+// still shows a dot.
+export const LOCAL_MIN_NODE_SCALE = 0.2;
+
+/**
+ * How much of its legend size a node is drawn at.
+ *
+ * Glyphs keep their legend size wherever the scene fits at one screen pixel
+ * or more per layout unit, and grow on zoom-in by Sigma's √ rule. A scene that
+ * must be drawn smaller to fit (a large activity history) shrinks its glyphs
+ * by the same factor, and so does zooming out past the fit. The layout keeps
+ * nodes apart by their radius in layout units, so glyphs shrink with the
+ * distances and never overlap.
+ */
+export function localNodeSizeScale(pixelsPerUnit: number, cameraRatio: number): number {
+  const fitted = Math.min(1, pixelsPerUnit * cameraRatio);
+  const zoom = cameraRatio <= 1 ? Math.sqrt(cameraRatio) : cameraRatio;
+  return Math.max(LOCAL_MIN_NODE_SCALE, fitted / zoom);
+}
+
 const TriangleNodeProgram = createTriangleNodeProgram();
 // Forced colours: an Agent version keeps its triangle and gains the same thin
 // inner outline as an Agent disc (outer band, surface gap, inner fill).
@@ -311,6 +333,8 @@ export function createSigmaGraphAdapter(
       // Drawn last, above the dense centre where it is pinned.
       zIndex: node.isCurrent ? 1 : 0,
       label: node.label,
+      badge: node.badge,
+      session: node.session,
       // The current document is the legend's "This document" glyph: its disc in
       // a solid ink ring. Seeds added by expanding keep their own glyph.
       shape: node.seedGlyph ? "circle" : visual.shape,
@@ -429,6 +453,13 @@ export function createSigmaGraphAdapter(
     // Local points are intentionally tiny (3–13 CSS px). Sigma's default
     // size gate would suppress every label in a small real Context scene.
     labelRenderedSizeThreshold: 0,
+    // Sigma sizes every node through this one function: glyphs, picking,
+    // rings, labels and arrowheads.
+    zoomToSizeRatioFunction: (ratio) => {
+      const pixelsPerUnit = renderer?.getGraphToViewportRatio();
+      return pixelsPerUnit && Number.isFinite(pixelsPerUnit)
+        ? 1 / localNodeSizeScale(pixelsPerUnit, ratio) : 1;
+    },
     defaultDrawNodeLabel: function drawNodeLabel(context, data, settings) {
       // The constructor renders synchronously before its public handle exists.
       // A render-only refresh below owns that first visible label pass instead.
@@ -461,6 +492,8 @@ export function createSigmaGraphAdapter(
       const current = Boolean((data as { isCurrent?: boolean }).isCurrent);
       const label = Array.from(data.label).slice(0, current ? 40 : 24).join("");
       const shortened = label.length < Array.from(data.label).length ? `${label}…` : label;
+      // A conversation's client badge is extra, outside its title's cut.
+      const badge = typeof data.badge === "string" && data.badge ? data.badge : null;
       const offset = data.size + (current ? 6 : 5);
       const margin = Math.min(8, viewportWidth / 4);
       const roomRight = viewportWidth - data.x - offset - 8;
@@ -471,16 +504,24 @@ export function createSigmaGraphAdapter(
       if (room < 18 && !forced) return;
       const fontSize = forced ? Math.min(settings.labelSize, Math.max(1, viewportHeight - 4)) : settings.labelSize;
       context.save();
+      const badgeFont = `600 ${Math.max(8, fontSize - 2)}px ${settings.labelFont}`;
+      context.font = badgeFont;
+      // Pill padding plus the gap to the title; dropped when the title would
+      // otherwise have no room left.
+      const badgeWidth = badge && room - context.measureText(badge).width - 12 >= 24
+        ? context.measureText(badge).width + 12 : 0;
       context.font = `${current ? 700 : settings.labelWeight} ${fontSize}px ${settings.labelFont}`;
       context.textAlign = right ? "left" : "right";
       context.textBaseline = "middle";
+      const textRoom = room - badgeWidth;
       const graphemes = Array.from(shortened);
       let visible = shortened;
-      while (graphemes.length > 1 && context.measureText(visible).width > room) {
+      while (graphemes.length > 1 && context.measureText(visible).width > textRoom) {
         graphemes.pop();
         visible = `${graphemes.join("")}…`;
       }
-      const width = Math.min(room, context.measureText(visible).width);
+      const textWidth = Math.min(textRoom, context.measureText(visible).width);
+      const width = textWidth + badgeWidth;
       const anchorX = data.x + (right ? offset : -offset);
       const x = forced ? Math.max(right ? margin : margin + width,
         Math.min(right ? viewportWidth - margin - width : viewportWidth - margin, anchorX)) : anchorX;
@@ -532,11 +573,30 @@ export function createSigmaGraphAdapter(
         return;
       }
       labelBounds.push(chosen);
+      // Right of the node: [badge][title]; left of it: [badge][title] ending at x.
+      const textX = right ? x + badgeWidth : x;
+      if (badgeWidth > 0 && badge) {
+        const pillX = right ? x : x - textWidth - badgeWidth;
+        const pillHeight = Math.max(10, fontSize + 1);
+        context.save();
+        context.font = badgeFont;
+        context.fillStyle = tokens.surface;
+        context.beginPath();
+        context.roundRect(pillX, y - pillHeight / 2, badgeWidth - 4, pillHeight, pillHeight / 2);
+        context.fill();
+        context.globalAlpha = 0.14;
+        context.fillStyle = ink;
+        context.fill();
+        context.globalAlpha = 1;
+        context.textAlign = "center";
+        context.fillText(badge, pillX + (badgeWidth - 4) / 2, y + 0.5);
+        context.restore();
+      }
       context.lineWidth = 3;
       context.strokeStyle = tokens.surface;
-      context.strokeText(visible, x, y, room);
+      context.strokeText(visible, textX, y, textRoom);
       context.fillStyle = ink;
-      context.fillText(visible, x, y, room);
+      context.fillText(visible, textX, y, textRoom);
       context.restore();
       if (forced && data.key) paintedPriorityLabels.add(data.key);
     },
@@ -551,6 +611,9 @@ export function createSigmaGraphAdapter(
       const current = Boolean(data.isCurrent);
       const quiet = !current && (presentation?.muted || highlightedStar !== null && !highlightedStar.nodes.has(key));
       const importantLabel = Boolean(data.isSeed || (id && [selectedId, focusedId].includes(id)));
+      // On a narrow canvas conversation titles would bury the documents; they
+      // show only for the selected or focused conversation.
+      const yieldsLabel = Boolean(data.session) && container.clientWidth <= COMPACT_LABEL_WIDTH_PX;
       return {
         ...data,
         hidden: presentation?.hidden ?? false,
@@ -560,7 +623,7 @@ export function createSigmaGraphAdapter(
         ...(key === tracingKey ? { type: "circle" } : {}),
         color: quiet ? data.quietColor : data.color,
         borderColor: quiet ? data.quietBorderColor : data.borderColor,
-        label: importantLabel || (showOrdinaryLabels && !quiet) ? data.label : null,
+        label: importantLabel || (showOrdinaryLabels && !quiet && !yieldsLabel) ? data.label : null,
         forceLabel: importantLabel,
       };
     },

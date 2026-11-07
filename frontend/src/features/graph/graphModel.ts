@@ -30,7 +30,6 @@ export type GraphActionFamily =
   | "authoring"
   | "governance"
   | "retrieval"
-  | "tool"
   | "other";
 
 export type GraphScene = {
@@ -156,9 +155,9 @@ export function graphActionFamily(actionKind?: string | null): GraphActionFamily
     "retrieved",
     "included",
     "cited",
+    "viewed",
     "referenced",
   ].includes(actionKind ?? "")) return "retrieval";
-  if (actionKind === "tool_produced") return "tool";
   return "other";
 }
 

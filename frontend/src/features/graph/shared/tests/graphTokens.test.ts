@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
-  GRAPH_EDGE_PATTERN,
+  GRAPH_EDGE_ARROW, GRAPH_EDGE_PATTERN,
   GRAPH_NODE_RADIUS_PX,
   readGraphTokens,
 } from "../graphTokens";
@@ -104,8 +104,15 @@ describe("Graph visual tokens", () => {
       citation: [7, 4],
       coAccess: [2, 3.5],
       membership: [3, 3],
+      actionWrite: null,
+      actionCite: [6, 3],
+      actionRead: [10, 5],
+      actionReference: [1.5, 3.5],
       action: [10, 3],
     });
+    // Without colour, a write still differs from a link by its arrowhead.
+    expect(Object.entries(GRAPH_EDGE_ARROW).filter(([, arrow]) => arrow).map(([kind]) => kind))
+      .toEqual(["actionWrite", "actionCite"]);
   });
 
   it("keeps separate Local and Workspace dot-size limits", () => {

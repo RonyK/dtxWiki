@@ -24,20 +24,18 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Session, aliased
 
-from backend.models.ask import AskSession, AskTurn, AskTurnCitation
 from backend.models.audit import AuditEvent
 from backend.models.base import utc_now
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.graph import GraphHistoryCoverage, GraphObservation
-from backend.models.mcp_chat import McpChatSession, McpChatToolCallArtifact
-from backend.models.mcp_trace import MCPToolCall
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.policy.trust_boundaries import _role_allows, actor_can_read_drafts
 from backend.repositories.workspace_scoped import select_in_workspace
 from backend.schemas.graph import (
+    GRAPH_NODE_RECORD_LIMIT,
     GraphBudgetResult,
     GraphCapabilities,
     GraphEdge,
@@ -45,6 +43,7 @@ from backend.schemas.graph import (
     GraphFacets,
     GraphHistoryMetadata,
     GraphNode,
+    GraphNodeRecord,
     GraphOmission,
     GraphQueryPayload,
     GraphQueryRequest,
@@ -85,7 +84,13 @@ from backend.services.graph_service import (
     VisibleProjectionEdge,
     graph_neighbor_visibility_predicate,
 )
+from backend.services.graph_session_activity import (
+    SESSION_ACTIVITY_SOURCES,
+    SESSION_ENTITY_KINDS,
+    SessionAccess,
+)
 from backend.services.read_errors import ReadNotFoundError, ReadValidationError
+from backend.utils.actor_display import DeferredIdentityLabels
 
 GRAPH_TRANSPORT_NAMESPACE = UUID("9fa0a65c-22fc-5e2f-bc73-0bcd967fd57a")
 GRAPH_OBSERVATION_RAW_SCAN_LIMIT = 1_024
@@ -109,14 +114,6 @@ _CHANGE_ACTIONS = {
     "restore": "restored",
     "supersede": "superseded",
     "promote": "promoted",
-}
-
-_MCP_ACTIONS = {
-    "created": "created",
-    "edited": "edited",
-    "cited": "cited",
-    "referenced": "referenced",
-    "viewed": "referenced",
 }
 
 
@@ -183,6 +180,8 @@ class GraphQueryService:
         request: GraphQueryRequest,
         actor: ActorContext | None,
         usage_signals_enabled: bool,
+        ask_sessions_visible: bool = False,
+        deferred_identity: DeferredIdentityLabels | None = None,
     ) -> GraphQueryPayload:
         """Build one actor-visible scene around the request's seeds.
 
@@ -190,6 +189,11 @@ class GraphQueryService:
         Off, no co_access edge enters the scene even while projection rows
         remain from before the switch, and a request that would have shown
         them says so with ``usage_relation_signals_disabled``.
+
+        ``ask_sessions_visible`` says whether the actor can open Ask sessions
+        (a Labs screen); action history names Ask sessions only then.
+        ``deferred_identity`` collects the people whose names live on the
+        identity plane; the caller applies it after this workspace read.
         """
 
         generated_at = utc_now()
@@ -369,6 +373,9 @@ class GraphQueryService:
                 actor=actor,
                 seed_nodes=seed_nodes,
                 active_layers=active_layers,
+                hydration_context=hydration_context,
+                session_access=SessionAccess(ask_sessions=ask_sessions_visible),
+                deferred_identity=deferred_identity,
             )
             candidates.extend(domain_candidates)
             extra_nodes.update(domain_nodes)
@@ -1606,6 +1613,9 @@ class GraphQueryService:
         actor: ActorContext | None,
         seed_nodes: dict[str, GraphNode],
         active_layers: set[str],
+        hydration_context: GraphHydrationContext,
+        session_access: SessionAccess,
+        deferred_identity: DeferredIdentityLabels | None = None,
     ) -> tuple[
         list[_EdgeCandidate],
         dict[str, GraphNode],
@@ -1613,9 +1623,9 @@ class GraphQueryService:
         bool,
     ]:
         # Every domain action is modeled event/source -> seed, so it is
-        # seed-relative inbound. Session -> event edges only contextualize that
-        # same inbound path; they are not an independent both-direction path.
-        # Gate before querying any domain table or constructing timeline rows.
+        # seed-relative inbound. A session's relations to other documents only
+        # contextualize its inbound path; they are not an independent
+        # both-direction path. Gate before querying any domain table.
         if request.direction == "out":
             return [], {}, [], False
 
@@ -1674,148 +1684,9 @@ class GraphQueryService:
             )
 
         if request.time.mode == "action":
-            ask_statement = (
-                select(AskTurnCitation, AskTurn, AskSession)
-                .join(AskTurn, AskTurnCitation.ask_turn_id == AskTurn.id)
-                .join(AskSession, AskTurn.ask_session_id == AskSession.id)
-                .where(
-                    AskSession.workspace_id == workspace_id,
-                    AskTurnCitation.target_kind == "context_page",
-                    AskTurnCitation.target_id.in_(seed_ids),
-                )
-                .order_by(AskTurnCitation.created_at, AskTurnCitation.id)
-            )
-            ask_statement = _apply_time_window(
-                ask_statement,
-                AskTurnCitation.created_at,
-                request,
-            )
-            ask_page = session.execute(ask_statement.limit(source_limit + 1)).all()
-            capped = capped or len(ask_page) > source_limit
-            ask_rows = ask_page[:source_limit]
-            for citation, turn, ask_session in ask_rows:
-                self._append_domain_action(
-                    workspace_id,
-                    request=request,
-                    active_layers=active_layers,
-                    seed=seed_by_id[citation.target_id],
-                    source_kind="ask_turn",
-                    source_id=turn.id,
-                    source_label=f"Ask turn {turn.turn_no}",
-                    source_status="evidence_included",
-                    occurred_at=citation.created_at,
-                    action_kind="included",
-                    evidence_kind="ask_turn_citation",
-                    evidence_id=citation.id,
-                    candidates=candidates,
-                    nodes=nodes,
-                    timeline=timeline,
-                )
-                event_node = nodes.get(graph_node_id("ask_turn", turn.id))
-                if event_node is not None:
-                    self._append_session_relation(
-                        workspace_id,
-                        request=request,
-                        active_layers=active_layers,
-                        session_kind="ask_session",
-                        session_id=ask_session.id,
-                        session_label="Ask session",
-                        session_status=(
-                            "ended" if ask_session.ended_at is not None else "active"
-                        ),
-                        occurred_at=ask_session.started_at,
-                        event_node=event_node,
-                        action_kind="included",
-                        evidence_kind="ask_turn_citation",
-                        evidence_id=citation.id,
-                        candidates=candidates,
-                        nodes=nodes,
-                    )
-
             audit_sources_allowed = actor_can_read_audit_records(
                 actor
             ) and _actor_role_allows(actor, "editor")
-            mcp_rows = []
-            if audit_sources_allowed:
-                mcp_statement = (
-                    select(
-                        McpChatToolCallArtifact,
-                        MCPToolCall,
-                        McpChatSession,
-                    )
-                    .join(
-                        MCPToolCall,
-                        McpChatToolCallArtifact.mcp_tool_call_id == MCPToolCall.id,
-                    )
-                    .join(
-                        McpChatSession,
-                        McpChatToolCallArtifact.chat_session_id == McpChatSession.id,
-                    )
-                    .where(
-                        MCPToolCall.workspace_id == workspace_id,
-                        McpChatSession.workspace_id == workspace_id,
-                        McpChatToolCallArtifact.workspace_id == workspace_id,
-                        McpChatToolCallArtifact.resource_kind == "context_page",
-                        McpChatToolCallArtifact.resource_id.in_(seed_ids),
-                        McpChatToolCallArtifact.verb.in_(tuple(_MCP_ACTIONS)),
-                    )
-                    .order_by(
-                        McpChatToolCallArtifact.occurred_at,
-                        McpChatToolCallArtifact.id,
-                    )
-                )
-                mcp_statement = _apply_time_window(
-                    mcp_statement,
-                    McpChatToolCallArtifact.occurred_at,
-                    request,
-                )
-                mcp_page = session.execute(mcp_statement.limit(source_limit + 1)).all()
-                capped = capped or len(mcp_page) > source_limit
-                mcp_rows = mcp_page[:source_limit]
-            for artifact, tool_call, chat_session in mcp_rows:
-                action_kind = _MCP_ACTIONS.get(artifact.verb)
-                if action_kind is None:
-                    continue
-                self._append_domain_action(
-                    workspace_id,
-                    request=request,
-                    active_layers=active_layers,
-                    seed=seed_by_id[artifact.resource_id],
-                    source_kind="mcp_tool_call",
-                    source_id=tool_call.id,
-                    source_label=f"MCP {tool_call.tool_name}"[:200],
-                    source_status=tool_call.result_status,
-                    occurred_at=artifact.occurred_at,
-                    action_kind=action_kind,
-                    evidence_kind="mcp_tool_call_artifact",
-                    evidence_id=artifact.id,
-                    candidates=candidates,
-                    nodes=nodes,
-                    timeline=timeline,
-                )
-                event_node = nodes.get(graph_node_id("mcp_tool_call", tool_call.id))
-                if event_node is not None:
-                    self._append_session_relation(
-                        workspace_id,
-                        request=request,
-                        active_layers=active_layers,
-                        session_kind="mcp_chat_session",
-                        session_id=chat_session.id,
-                        session_label="MCP chat",
-                        session_status=(
-                            "archived"
-                            if chat_session.archived_at is not None
-                            else "active"
-                        ),
-                        occurred_at=chat_session.started_at,
-                        event_node=event_node,
-                        action_kind="tool_produced",
-                        evidence_kind="mcp_tool_call_artifact",
-                        evidence_id=artifact.id,
-                        candidates=candidates,
-                        nodes=nodes,
-                    )
-
             change_rows = []
             if audit_sources_allowed:
                 allowed_change_operations = tuple(
@@ -1846,7 +1717,15 @@ class GraphQueryService:
                 change_rows = change_page[:source_limit]
             for operation, _change_set in change_rows:
                 action_kind = _CHANGE_ACTIONS.get(operation.operation)
-                if action_kind is None:
+                if action_kind is None or not _action_requested(action_kind, request):
+                    continue
+                if _fold_into_version(
+                    nodes,
+                    _change_version_id(operation),
+                    action_kind=action_kind,
+                    occurred_at=operation.created_at,
+                    source_kind="change_operation",
+                ):
                     continue
                 self._append_domain_action(
                     workspace_id,
@@ -1893,7 +1772,17 @@ class GraphQueryService:
                 audit_events = audit_page[:source_limit]
                 for audit_event in audit_events:
                     action_kind = _audit_action(audit_event.action)
-                    if action_kind is None:
+                    if action_kind is None or not _action_requested(
+                        action_kind, request
+                    ):
+                        continue
+                    if _fold_into_version(
+                        nodes,
+                        _audit_version_id(audit_event),
+                        action_kind=action_kind,
+                        occurred_at=audit_event.created_at,
+                        source_kind="audit_event",
+                    ):
                         continue
                     self._append_domain_action(
                         workspace_id,
@@ -1913,100 +1802,233 @@ class GraphQueryService:
                         timeline=timeline,
                     )
 
+            for node in nodes.values():
+                if len(node.records) > GRAPH_NODE_RECORD_LIMIT:
+                    node.records = node.records[-GRAPH_NODE_RECORD_LIMIT:]
+
+            self._append_session_activity(
+                session,
+                workspace_id,
+                request=request,
+                actor=actor,
+                active_layers=active_layers,
+                seed_by_id=seed_by_id,
+                hydration_context=hydration_context,
+                access=session_access,
+                deferred_identity=deferred_identity,
+                candidates=candidates,
+                nodes=nodes,
+                timeline=timeline,
+            )
+
         return candidates, nodes, timeline, capped
 
-    @staticmethod
-    def _append_session_relation(
+    def _append_session_activity(
+        self,
+        session: Session,
         workspace_id: UUID,
         *,
         request: GraphQueryRequest,
+        actor: ActorContext | None,
         active_layers: set[str],
-        session_kind: str,
-        session_id: UUID,
-        session_label: str,
-        session_status: str,
-        occurred_at: datetime,
-        event_node: GraphNode,
-        action_kind: str,
-        evidence_kind: str,
-        evidence_id: UUID,
+        seed_by_id: dict[UUID, GraphNode],
+        hydration_context: GraphHydrationContext,
+        access: SessionAccess,
+        deferred_identity: DeferredIdentityLabels | None,
         candidates: list[_EdgeCandidate],
         nodes: dict[str, GraphNode],
+        timeline: list[_TimelineDraft],
     ) -> None:
-        # Activity history keeps the session that gives an event its context.
-        # This does not expand document-to-document neighbors in direct scope.
-        if request.relation_scope == "direct" and request.time.mode != "action":
-            return
-        # This non-seed edge is subordinate to an inbound event -> seed path.
-        if request.direction == "out":
-            return
-        if not _time_allowed(occurred_at, request):
-            return
-        semantic = action_semantic(action_kind)
-        if action_kind not in ACTION_SEMANTICS or not semantic.default_visible:
-            return
-        if semantic.layer not in active_layers:
-            return
-        if request.action_kinds and action_kind not in request.action_kinds:
-            return
-        family = NODE_FAMILY_BY_KIND.get(session_kind)
-        if family not in {"chat", "ask"}:
-            return
-        session_node = GraphNode(
-            id=graph_node_id(session_kind, session_id),
-            entity_kind=session_kind,
-            entity_id=session_id,
-            family=family,
-            label=session_label,
-            status=session_status,
-            occurred_at=occurred_at,
-            evidence=GraphEvidenceRef(
-                kind=evidence_kind,
-                available=False,
-            ),
-        )
-        if not _node_filter_allows(session_node, request):
-            return
-        evidence = GraphEvidenceRef(
-            kind=evidence_kind,
-            available=False,
-        )
-        edge = GraphEdge(
-            id=graph_edge_id(
+        """Draw every session source with one rule.
+
+        A session is one node. Its relation to a seed competes in that seed's
+        share like any other activity, and is the session's one timeline
+        event. Its relations to the other documents it used, and to the seed
+        versions its writes produced, are spent from the session's own share
+        and only once the session itself is in the scene.
+        """
+
+        batches = [
+            source.collect(
+                session,
                 workspace_id,
-                session_node.id,
-                event_node.id,
-                action_kind,
-                f"domain:{evidence_kind}:{evidence_id}",
-            ),
-            source=session_node.id,
-            target=event_node.id,
-            edge_kind=action_kind,
-            action_kind=action_kind,
-            label=semantic.label,
-            layer=semantic.layer,
-            provenance="domain",
-            direction="directed",
-            weight=1.0,
-            occurred_at=occurred_at,
-            evidence=evidence,
-        )
-        candidates.append(
-            _EdgeCandidate(
-                edge=edge,
-                nodes=(session_node, event_node),
-                priority=2,
-                semantic_identity=(
-                    edge.source,
-                    edge.target,
-                    edge.edge_kind,
-                    action_kind,
-                ),
-                anchor=None,
-                role="context",
+                seed_ids=list(seed_by_id),
+                request=request,
+                actor=actor,
+                access=access,
             )
+            for source in SESSION_ACTIVITY_SOURCES
+        ]
+        co_used_refs = sorted(
+            {
+                (resource.resource_kind, resource.resource_id)
+                for batch in batches
+                for activity in batch.sessions
+                for resource in activity.co_used
+            },
+            key=lambda ref: (ref[0], str(ref[1])),
         )
-        nodes[session_node.id] = session_node
+        hydrated = (
+            self.graph_service.hydrate_entities(
+                session,
+                workspace_id,
+                entities=co_used_refs,
+                actor=actor,
+                hydration_context=hydration_context,
+            )
+            if co_used_refs
+            else {}
+        )
+        for batch in batches:
+            for activity in batch.sessions:
+                family = NODE_FAMILY_BY_KIND[activity.entity_kind]
+                session_node = GraphNode(
+                    id=graph_node_id(activity.entity_kind, activity.entity_id),
+                    entity_kind=activity.entity_kind,
+                    entity_id=activity.entity_id,
+                    family=family,
+                    label=activity.label[:200] or activity.entity_kind,
+                    status=activity.status,
+                    occurred_at=max(seed.last_at for seed in activity.seeds),
+                    actor_label=(activity.actor_label or None)
+                    and activity.actor_label[:120],
+                    chat_presentation=activity.presentation,
+                )
+                if not _node_filter_allows(session_node, request):
+                    continue
+                anchored = False
+                for resource in activity.seeds:
+                    seed = seed_by_id[resource.resource_id]
+                    edge = _session_edge(
+                        workspace_id,
+                        request=request,
+                        active_layers=active_layers,
+                        source=session_node,
+                        target=seed,
+                        action_kind=resource.action_kind,
+                        count=resource.count,
+                        first_at=resource.first_at,
+                        last_at=resource.last_at,
+                    )
+                    if edge is None:
+                        continue
+                    anchored = True
+                    candidates.append(
+                        _session_candidate(edge, session_node, seed, 2, seed.id, "in")
+                    )
+                    timeline.append(
+                        _TimelineDraft(
+                            identity=(
+                                f"session:{activity.entity_kind}:"
+                                f"{activity.entity_id}:{seed.entity_id}"
+                            ),
+                            operation="action_occurred",
+                            action_kind=edge.action_kind or resource.action_kind,
+                            label=edge.label,
+                            occurred_at=resource.first_at,
+                            node_ids=(session_node.id, seed.id),
+                            edge_ids=(edge.id,),
+                            evidence=edge.evidence,
+                            node_snapshots=(session_node, seed),
+                        )
+                    )
+                if not anchored:
+                    continue
+                nodes[session_node.id] = session_node
+                if (
+                    deferred_identity is not None
+                    and activity.actor_ref is not None
+                    and activity.actor_ref[0] == "human"
+                    and activity.actor_ref[1] is not None
+                ):
+                    deferred_identity.request(
+                        activity.actor_ref[1], session_node, "actor_label"
+                    )
+                for resource in activity.co_used:
+                    info = hydrated.get((resource.resource_kind, resource.resource_id))
+                    if info is None:
+                        continue
+                    document = nodes.get(
+                        graph_node_id(resource.resource_kind, resource.resource_id)
+                    ) or _node_from_hydrated(
+                        resource.resource_kind, resource.resource_id, info
+                    )
+                    if not _node_filter_allows(document, request):
+                        continue
+                    edge = _session_edge(
+                        workspace_id,
+                        request=request,
+                        active_layers=active_layers,
+                        source=session_node,
+                        target=document,
+                        action_kind=resource.action_kind,
+                        count=resource.count,
+                        first_at=resource.first_at,
+                        last_at=resource.last_at,
+                    )
+                    if edge is not None:
+                        candidates.append(
+                            _session_candidate(
+                                edge, session_node, document, 3, session_node.id
+                            )
+                        )
+                for version_id in activity.authored_versions:
+                    version = nodes.get(
+                        graph_node_id("context_page_version", version_id)
+                    )
+                    if version is None or version.occurred_at is None:
+                        continue
+                    edge = _session_edge(
+                        workspace_id,
+                        request=request,
+                        active_layers=active_layers,
+                        source=session_node,
+                        target=version,
+                        action_kind="created",
+                        count=None,
+                        first_at=version.occurred_at,
+                        last_at=version.occurred_at,
+                    )
+                    if edge is not None:
+                        candidates.append(
+                            _session_candidate(
+                                edge, session_node, version, 3, session_node.id
+                            )
+                        )
+            for group in batch.groups:
+                seed = seed_by_id[group.seed_id]
+                group_id = uuid5(
+                    GRAPH_TRANSPORT_NAMESPACE,
+                    f"{group.entity_kind}:{group.seed_id}",
+                )
+                group_node = GraphNode(
+                    id=graph_node_id(group.entity_kind, group_id),
+                    entity_kind=group.entity_kind,
+                    entity_id=group_id,
+                    family=NODE_FAMILY_BY_KIND[group.entity_kind],
+                    label=f"+{group.count}",
+                    occurred_at=group.last_at,
+                    aggregate_count=group.count,
+                )
+                if not _node_filter_allows(group_node, request):
+                    continue
+                edge = _session_edge(
+                    workspace_id,
+                    request=request,
+                    active_layers=active_layers,
+                    source=group_node,
+                    target=seed,
+                    action_kind=group.action_kind,
+                    count=None,
+                    first_at=group.first_at,
+                    last_at=group.last_at,
+                )
+                if edge is None:
+                    continue
+                nodes[group_node.id] = group_node
+                candidates.append(
+                    _session_candidate(edge, group_node, seed, 2, seed.id, "in")
+                )
 
     @staticmethod
     def _append_domain_action(
@@ -2750,11 +2772,13 @@ class GraphQueryService:
         A candidate that does not fit is consumed; a repeat of a shown
         relation costs nothing.
 
-        Relations no seed anchors (a session and one of its events) hang off
-        an event already shown: they are offered after every seed's
-        candidates, and one whose event is not in the scene is passed over.
-        So they never spend the nodes an anchored share was sized for, and
-        never leave a piece of the scene with no path to a seed.
+        Relations no seed anchors hang off a node already shown. One anchored
+        by a non-seed node (a session and the other documents it used) spends
+        that node's share, in a later tier than the session's own relation to
+        a seed; one with no anchor hangs off its target and is offered after
+        every anchored share. Either is passed over while the node it hangs
+        off is not in the scene, so it never leaves a piece of the scene with
+        no path to a seed.
         """
 
         selected_nodes = dict(seed_nodes)
@@ -2766,7 +2790,14 @@ class GraphQueryService:
             nonlocal truncated
             if candidate.semantic_identity in seen_semantics:
                 return "skipped"
-            if candidate.anchor is None and candidate.nodes[1].id not in selected_nodes:
+            hook = (
+                candidate.nodes[1].id
+                if candidate.anchor is None
+                else None
+                if candidate.anchor in seed_nodes
+                else candidate.anchor
+            )
+            if hook is not None and hook not in selected_nodes:
                 return "skipped"
             unseen_nodes = {
                 node.id: node
@@ -2784,6 +2815,21 @@ class GraphQueryService:
             return "admitted"
 
         seed_position = {seed_id: index for index, seed_id in enumerate(seed_nodes)}
+        # Non-seed anchors (sessions) are offered newest first, so when slots
+        # run short the leftover shares go to the most recent sessions.
+        anchor_recency: dict[str | None, float] = {}
+        for candidate in candidates:
+            anchor_node = candidate.nodes[0]
+            if (
+                candidate.anchor is not None
+                and candidate.anchor not in seed_position
+                and anchor_node.id == candidate.anchor
+                and anchor_node.occurred_at is not None
+            ):
+                anchor_recency[candidate.anchor] = min(
+                    anchor_recency.get(candidate.anchor, 0.0),
+                    -anchor_node.occurred_at.timestamp(),
+                )
 
         def group_position(anchor: str | None) -> int:
             if anchor is None:
@@ -2805,6 +2851,8 @@ class GraphQueryService:
                 queues,
                 key=lambda key: (
                     group_position(key[0]),
+                    anchor_recency.get(key[0], 0.0),
+                    key[0] or "",
                     kind_order_key(key[1]),
                     ROLE_ORDER.index(key[2]),
                 ),
@@ -2879,11 +2927,16 @@ class GraphQueryService:
         current_node_ids = {node.id for node in nodes}
         current_edge_ids = {edge.id for edge in edges}
         session_ids = {
-            node.id
-            for node in nodes
-            if node.entity_kind in {"ask_session", "mcp_chat_session"}
+            node.id for node in nodes if node.entity_kind in SESSION_ENTITY_KINDS
         }
-        session_edges = [edge for edge in edges if edge.source in session_ids]
+        # A session's relation to a seed is an event of its own; only its
+        # other relations (documents it used, versions it produced) ride on it.
+        own_edge_ids = {edge_id for draft in drafts for edge_id in draft.edge_ids}
+        session_edges = [
+            edge
+            for edge in edges
+            if edge.source in session_ids and edge.id not in own_edge_ids
+        ]
         ordered_drafts = sorted(
             drafts,
             key=lambda draft: (
@@ -2897,18 +2950,19 @@ class GraphQueryService:
         events: list[GraphTimelineEvent] = []
         capped = False
         for draft in ordered_drafts:
-            # A session is context for the activity, not a pre-history fact.
-            # Only attach admitted context edges so an omitted session cannot
-            # cause its otherwise visible primary event to disappear.
+            # A session's relations to the other documents it used appear with
+            # that session's own event, and with no other: a document the
+            # session used may sit in many unrelated events. Only admitted
+            # relations attach, so an omitted one cannot drop the event.
             context_edges = [
-                edge for edge in session_edges if edge.target in draft.node_ids
+                edge for edge in session_edges if edge.source in draft.node_ids
             ]
             if context_edges:
                 draft = replace(
                     draft,
                     node_ids=tuple(
                         dict.fromkeys(
-                            (*draft.node_ids, *(edge.source for edge in context_edges))
+                            (*draft.node_ids, *(edge.target for edge in context_edges))
                         )
                     ),
                     edge_ids=tuple(
@@ -3263,6 +3317,134 @@ def _select_induced_edges(
     ]
     omitted = [name for name in classes if cursors[name] < len(class_queues[name])]
     return selected, omitted
+
+
+def _session_edge(
+    workspace_id: UUID,
+    *,
+    request: GraphQueryRequest,
+    active_layers: set[str],
+    source: GraphNode,
+    target: GraphNode,
+    action_kind: str,
+    count: int | None,
+    first_at: datetime,
+    last_at: datetime,
+) -> GraphEdge | None:
+    """One session's relation to one node, or None where filters drop it.
+
+    It stands for every time the session did something to that node, so it
+    is an aggregate: ``count`` occurrences between ``window_from`` and
+    ``window_to``, named by the strongest action.
+    """
+
+    semantic = action_semantic(action_kind)
+    if action_kind not in ACTION_SEMANTICS or not semantic.default_visible:
+        return None
+    if semantic.layer not in active_layers:
+        return None
+    if request.action_kinds and action_kind not in request.action_kinds:
+        return None
+    # Like every other unavailable evidence ref, it names a kind, never a row.
+    evidence = GraphEvidenceRef(kind=source.entity_kind, available=False)
+    return GraphEdge(
+        id=graph_edge_id(
+            workspace_id,
+            source.id,
+            target.id,
+            action_kind,
+            f"session:{source.entity_kind}:{source.entity_id}",
+        ),
+        source=source.id,
+        target=target.id,
+        edge_kind=action_kind,
+        action_kind=action_kind,
+        label=semantic.label,
+        layer=semantic.layer,
+        provenance="domain",
+        direction="directed",
+        weight=1.0,
+        occurred_at=last_at,
+        aggregate=True,
+        count=count,
+        window_from=first_at,
+        window_to=last_at,
+        evidence=evidence,
+    )
+
+
+def _session_candidate(
+    edge: GraphEdge,
+    session_node: GraphNode,
+    other: GraphNode,
+    priority: int,
+    anchor: str,
+    role: str = "context",
+) -> _EdgeCandidate:
+    return _EdgeCandidate(
+        edge=edge,
+        nodes=(session_node, other),
+        priority=priority,
+        semantic_identity=(edge.source, edge.target, edge.edge_kind, None),
+        anchor=anchor,
+        role=role,
+    )
+
+
+def _action_requested(action_kind: str, request: GraphQueryRequest) -> bool:
+    """An action filter applies whether the action is drawn or folded."""
+
+    return not request.action_kinds or action_kind in request.action_kinds
+
+
+def _fold_into_version(
+    nodes: dict[str, GraphNode],
+    version_id: UUID | None,
+    *,
+    action_kind: str,
+    occurred_at: datetime,
+    source_kind: str,
+) -> bool:
+    """Record a change/audit row on the version node it names, if drawn.
+
+    One edit is one version node, whatever wrote it. The rows that describe
+    that edit (save, submit, publish, review) become its records, so the same
+    edit is not drawn again as a Change node and an Audit node. A row naming
+    no drawn version keeps its own node.
+    """
+
+    if version_id is None:
+        return False
+    version = nodes.get(graph_node_id("context_page_version", version_id))
+    if version is None:
+        return False
+    version.records.append(
+        GraphNodeRecord(
+            action_kind=action_kind,
+            occurred_at=occurred_at,
+            source_kind=source_kind,
+        )
+    )
+    return True
+
+
+def _change_version_id(operation: ChangeOperation) -> UUID | None:
+    kind, _, raw_id = (operation.diff_ref or "").partition(":")
+    return _uuid_or_none(raw_id) if kind == "context_page_version" else None
+
+
+def _audit_version_id(event: AuditEvent) -> UUID | None:
+    payload = event.payload if isinstance(event.payload, dict) else {}
+    return _uuid_or_none(payload.get("version_id"))
+
+
+def _uuid_or_none(value: object) -> UUID | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return UUID(value)
+    except ValueError:
+        return None
 
 
 def _time_allowed(occurred_at: datetime | None, request: GraphQueryRequest) -> bool:

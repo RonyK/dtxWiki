@@ -749,9 +749,14 @@ export async function listMcpChats(
   return response.data;
 }
 
-export async function readMcpChat(workspaceId: string, chatSessionId: string) {
+export async function readMcpChat(
+  workspaceId: string,
+  chatSessionId: string,
+  init: Pick<RequestInit, "signal"> = {},
+) {
   const response = await apiRequest<{ data: McpChatDetail }>(
     `/api/v1/workspaces/${workspaceId}/mcp-chats/${chatSessionId}`,
+    { signal: init.signal },
   );
   return response.data;
 }

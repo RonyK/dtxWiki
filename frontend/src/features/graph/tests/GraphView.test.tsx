@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { i18n } from "../../../shared/i18n";
 import * as graphApi from "../../../shared/api/graph";
+import * as operations from "../../../shared/api/operations";
 import * as authContext from "../../../shared/auth/AuthContext";
 import type {
   GraphHistoryMode,
@@ -415,8 +416,13 @@ describe("GraphView", () => {
     // A fixed list per mode, not only what this scene happens to contain.
     expect(kinds("li[data-node-visual-kind]", "data-node-visual-kind"))
       .toEqual(["seed", "context", "version", "agent", "library", "conversation", "folder"]);
+    // History splits activity by verb: writes and citations point at what
+    // they changed or cited; reads and structure-only looks do not.
     expect(kinds("li[data-edge-visual-kind]", "data-edge-visual-kind"))
-      .toEqual(["link", "citation", "coAccess", "membership", "action", "removed"]);
+      .toEqual(["link", "citation", "coAccess", "membership", "actionWrite", "actionCite",
+        "actionRead", "actionReference", "action", "removed"]);
+    expect([...legend.querySelectorAll('svg[data-edge-arrow="target"]')]
+      .map((cue) => cue.getAttribute("data-edge-visual-kind"))).toEqual(["actionWrite", "actionCite"]);
     expect(legend.querySelector('[data-legend-mark="event-target"] svg path[fill="none"]')).toHaveAttribute("stroke", "#7c3aed");
     expect(legend.querySelector('svg[data-node-visual-kind="version"] path')).toHaveAttribute("fill", "#7c3aed");
     expect(legend.querySelector('svg[data-node-visual-kind="context"] path')).toHaveAttribute("fill", "#7c3aed");
@@ -670,9 +676,10 @@ describe("GraphView", () => {
     expect(listRows()).toHaveLength(2);
     expect(screen.getByText("4 nodes · 2 edges")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Legend" }));
-    // The action line names what it draws: recorded activity, not links or citations.
-    expect(screen.getByText("Recorded activity such as creating, editing, reviewing, searching and citing"))
-      .toBeVisible();
+    // Each activity line names the verbs it draws; the plain one the rest.
+    const legend = screen.getByTestId("graph-view").querySelector(".graph-legend")!;
+    expect(legend.querySelector('li[data-edge-visual-kind="actionWrite"]')).toHaveTextContent("Created · Edited");
+    expect(screen.getByText("Review, publish, search and other records")).toBeVisible();
   });
 
   it("requests depth changes from the main toolbar without optimistically relabeling the scene", async () => {
@@ -1788,6 +1795,83 @@ describe("GraphView", () => {
     }
   });
 
+  it("names a chat as Chats does and reads its details only while it is selected", async () => {
+    // A chat's own detail fills in its verbs and flow on selection. The
+    // graph's facts show at once; a late answer for a chat no longer
+    // selected never reaches the panel.
+    const user = userEvent.setup();
+    const pending: Array<{ id: string; signal?: AbortSignal; resolve: (value: operations.McpChatDetail) => void }> = [];
+    const read = vi.spyOn(operations, "readMcpChat").mockImplementation((_workspace, id, init) =>
+      new Promise((resolve) => { pending.push({ id, signal: init?.signal ?? undefined, resolve }); }));
+    try {
+      const payload = graphFixture();
+      payload.history.mode = "action";
+      payload.query.time = { mode: "action" };
+      const seed = payload.nodes[0];
+      const chat = (key: string, client: string, action: "edit" | "read"): GraphNode => ({
+        ...payload.nodes[1], id: `node:${key}`, entity_kind: "mcp_chat_session",
+        entity_id: `${key}-0000-4000-8000-000000000000`, family: "chat", status: "active",
+        label: "raw fallback", actor_label: client,
+        chat_presentation: { title_source: "artifact", action, subject: "Decision Log", subject_kind: "context_page", primary_tool_name: null },
+      });
+      const editing = chat("1111aaaa", "Claude Code", "edit");
+      const reading = chat("2222bbbb", "Codex", "read");
+      const version: GraphNode = { ...payload.nodes[1], id: "node:v2", entity_kind: "context_page_version", family: "document", label: "Version 2", status: "draft" };
+      const relation = (source: GraphNode, target: GraphNode, action: string, count: number | null) => ({
+        ...payload.edges[0], id: `edge:${source.id}:${target.id}`, source: source.id, target: target.id,
+        edge_kind: action, action_kind: action, label: action, layer: "action" as const, provenance: "domain" as const,
+        aggregate: true, count, window_from: "2026-08-03T01:00:00Z", window_to: "2026-08-03T01:05:00Z",
+      });
+      const outlined: GraphNode = { ...payload.nodes[1], id: "node:outlined", entity_id: "outlined", label: "Outline only" };
+      payload.nodes = [seed, editing, reading, version, outlined];
+      payload.edges = [relation(editing, seed, "edited", 3), relation(editing, version, "created", null),
+        relation(reading, seed, "viewed", 1), relation(reading, outlined, "referenced", 1)];
+      payload.timeline = [];
+      renderGraph({ payload });
+
+      // A document only a chat's structure-only look brought in starts hidden
+      // with that look, rather than floating unconnected.
+      const canvas = screen.getByTestId("mock-graph-canvas");
+      expect(canvas).toHaveAttribute("data-nodes", "4");
+      const lookChip = screen.getByRole("button", { name: /Structure-only looks/ });
+      await user.click(lookChip);
+      expect(canvas).toHaveAttribute("data-nodes", "5");
+      await user.click(lookChip);
+
+      expect(read).not.toHaveBeenCalled();
+      // The first accessible list is the nodes; the second names relationships.
+      const nodeList = screen.getByTestId("graph-view").querySelector(".graph-relationship-list > details")!;
+      await user.click(within(nodeList as HTMLElement).getByRole("button", { name: /Edited Decision Log/ }));
+      expect(read).toHaveBeenCalledTimes(1);
+      const details = screen.getByRole("complementary", { name: "Details" });
+      expect(details).toHaveTextContent("Edited · 3 times");
+      expect(details).toHaveTextContent("Produced Version 2 · In review");
+      expect(within(details).getByRole("link", { name: "Open" }))
+        .toHaveAttribute("href", `/workspaces/00000000-0000-4000-8000-000000000001/chats/${editing.entity_id}`);
+
+      const step = (id: string, action: operations.McpChatTimelineItem["action"]) => ({
+        id, tool_name: action === "search" ? "search" : "read", action, result_status: "succeeded",
+        title_source: "artifact", subject: "Decision Log", subject_kind: "context_page", primary_tool_name: null,
+      }) as unknown as operations.McpChatTimelineItem;
+      const detail = (links: Array<[string, number]>) => ({
+        linked_artifacts: links.map(([verb, count]) => ({ resource_kind: "context_page", resource_id: seed.entity_id, verb, occurrence_count: count })),
+        timeline: [step("a", "search"), step("b", "read"), step("c", "edit")],
+      }) as unknown as operations.McpChatDetail;
+      await act(async () => { pending[0].resolve(detail([["edited", 2], ["viewed", 1]])); });
+      expect(details).toHaveTextContent("Edited ×2 · Viewed");
+      expect(within(details).getAllByRole("listitem").filter((item) => item.closest(".graph-session-flow"))).toHaveLength(3);
+
+      await user.click(within(nodeList as HTMLElement).getByRole("button", { name: /Read Decision Log/ }));
+      expect(read).toHaveBeenCalledTimes(2);
+      await user.click(within(nodeList as HTMLElement).getByRole("button", { name: /Edited Decision Log/ }));
+      expect(pending[1].signal?.aborted).toBe(true);
+      await act(async () => { pending[1].resolve(detail([["referenced", 9]])); });
+      expect(screen.getByRole("complementary", { name: "Details" })).not.toHaveTextContent("Referenced ×9");
+    } finally {
+      read.mockRestore();
+    }
+  });
+
   it("says what a read-together relationship rests on", async () => {
     const user = userEvent.setup();
     const payload = graphFixture();
@@ -1859,7 +1943,7 @@ describe("GraphView", () => {
     expect(screen.getByRole("radio", { name: /변화 이력/ })).toHaveAttribute("aria-checked", "true");
     expect(within(screen.getByTestId("graph-timeline")).getByRole("button", { name: /포함됨.*Why was this chosen/ }))
       .toBeInTheDocument();
-    expect(screen.getByTestId("graph-timeline")).toHaveTextContent("Ask · 포함됨");
+    expect(screen.getByTestId("graph-timeline")).toHaveTextContent("활동 · 포함됨");
     expect(screen.queryByText("Current projection")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("graph-view").querySelector(".graph-canvas-more > summary")!);

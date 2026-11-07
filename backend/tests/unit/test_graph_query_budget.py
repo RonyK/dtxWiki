@@ -22,6 +22,9 @@ from backend.services.graph_query_service import (
     GraphQueryService,
     _anchor_and_role,
     _EdgeCandidate,
+    _session_candidate,
+    _session_edge,
+    _TimelineDraft,
     graph_node_id,
 )
 from backend.services.graph_semantics import NODE_FAMILY_BY_KIND
@@ -308,84 +311,105 @@ def test_session_relations_cannot_take_an_anchored_share_or_float_free():
     assert sum(edge.edge_kind == "included" for edge in edges) == 2
 
 
-def test_direct_activity_keeps_its_admitted_session_on_the_same_timeline_event():
-    # One activity input covers direct-scope assembly, admission and Timeline
-    # ownership; existing DB tests retain domain retrieval/authorization proof.
-    workspace_id = uuid5(NAMESPACE, "direct-action-workspace")
-    session_id = uuid5(NAMESPACE, "direct-action-session")
-    turn_id = uuid5(NAMESPACE, "direct-action-turn")
-    evidence_id = uuid5(NAMESPACE, "direct-action-citation")
-    occurred_at = datetime(2026, 8, 4, 2, 15, tzinfo=UTC)
-    seed = _node("direct-action-seed", seed=True)
+def test_a_session_spends_its_own_share_and_owns_its_context_on_the_timeline():
+    # A chat's relation to each seed competes in that seed's share and is one
+    # event. Its relation to another document it used spends the chat's own
+    # share, only once the chat is in, and replays with the chat's events,
+    # never with another event that happens to touch that document, and a
+    # chat's relation to one seed never rides on its event for another.
+    workspace_id = uuid5(NAMESPACE, "session-share-workspace")
+    at = datetime(2026, 8, 4, 2, 15, tzinfo=UTC)
+    seed = _node("session-seed", seed=True)
+    second_seed = _node("session-second-seed", seed=True)
+    other = _node("session-other")
+    chat = _node("session-chat", kind="mcp_chat_session")
     request = GraphQueryRequest(
-        seeds=[GraphSeed(kind="context_page", id=seed.entity_id)],
-        relation_scope="direct",
+        seeds=[
+            GraphSeed(kind="context_page", id=seed.entity_id),
+            GraphSeed(kind="context_page", id=second_seed.entity_id),
+        ],
         direction="in",
-        layers=["action"],
+        layers=["action", "evidence", "knowledge"],
         time=GraphTimeQuery(mode="action"),
-        budget=GraphBudget(nodes=3, edges=2),
+        budget=GraphBudget(nodes=3, edges=3),
     )
-    candidates = []
-    assembled_nodes = {seed.id: seed}
-    drafts = []
-    GraphQueryService._append_domain_action(
-        workspace_id,
-        request=request,
-        active_layers={"action"},
-        seed=seed,
-        source_kind="ask_turn",
-        source_id=turn_id,
-        source_label="Direct activity",
-        source_status=None,
-        occurred_at=occurred_at,
-        action_kind="included",
-        evidence_kind="ask_turn_citation",
-        evidence_id=evidence_id,
-        candidates=candidates,
-        nodes=assembled_nodes,
-        timeline=drafts,
+    layers = {"action", "evidence", "knowledge"}
+
+    def session_edge(target, action_kind):
+        return _session_edge(
+            workspace_id,
+            request=request,
+            active_layers=layers,
+            source=chat,
+            target=target,
+            action_kind=action_kind,
+            count=2,
+            first_at=at,
+            last_at=at,
+        )
+
+    to_seed = session_edge(seed, "edited")
+    to_second_seed = session_edge(second_seed, "viewed")
+    to_other = session_edge(other, "viewed")
+    used = _session_candidate(to_other, chat, other, 3, chat.id)
+    link = _candidate(seed, other, "wikilink", anchor=seed, role="out")
+
+    _nodes, edges, _ = _apply([seed], [used], nodes=10, edges=10)
+    assert edges == []
+
+    nodes, edges, capped = _apply(
+        [seed, second_seed],
+        [
+            used,
+            link,
+            _session_candidate(to_seed, chat, seed, 2, seed.id, "in"),
+            _session_candidate(
+                to_second_seed, chat, second_seed, 2, second_seed.id, "in"
+            ),
+        ],
+        nodes=4,
+        edges=4,
     )
-    turn_node_id = graph_node_id("ask_turn", turn_id)
-    GraphQueryService._append_session_relation(
-        workspace_id,
-        request=request,
-        active_layers={"action"},
-        session_kind="ask_session",
-        session_id=session_id,
-        session_label="Direct activity session",
-        session_status="active",
-        occurred_at=occurred_at,
-        event_node=assembled_nodes[turn_node_id],
-        action_kind="included",
-        evidence_kind="ask_turn_citation",
-        evidence_id=evidence_id,
-        candidates=candidates,
-        nodes=assembled_nodes,
-    )
-    nodes, edges, capped = GraphQueryService._apply_budget(
-        request=request,
-        seed_nodes={seed.id: seed},
-        candidates=candidates,
-        extra_nodes={},
-    )
-    session_node_id = graph_node_id("ask_session", session_id)
-    assert {node.id for node in nodes} == {seed.id, turn_node_id, session_node_id}
-    assert {(edge.source, edge.target) for edge in edges} == {
-        (turn_node_id, seed.id),
-        (session_node_id, turn_node_id),
+    assert {edge.id for edge in edges} == {
+        to_seed.id,
+        to_second_seed.id,
+        to_other.id,
+        link.edge.id,
     }
     assert not capped
 
+    def draft(identity, node_ids, edge_ids):
+        return _TimelineDraft(
+            identity=identity,
+            operation="action_occurred",
+            action_kind="edited",
+            label="edited",
+            occurred_at=at,
+            node_ids=node_ids,
+            edge_ids=edge_ids,
+            evidence=None,
+        )
+
     timeline, timeline_capped = GraphQueryService._finalize_timeline(
-        drafts, nodes, edges, node_limit=3, edge_limit=2
+        [
+            draft("chat", (chat.id, seed.id), (to_seed.id,)),
+            draft("chat-second", (chat.id, second_seed.id), (to_second_seed.id,)),
+            draft("link", (seed.id, other.id), (link.edge.id,)),
+        ],
+        nodes,
+        edges,
+        node_limit=4,
+        edge_limit=4,
     )
     assert not timeline_capped
-    assert len(timeline) == 1
-    assert set(timeline[0].node_ids) == {node.id for node in nodes}
-    assert set(timeline[0].edge_ids) == {edge.id for edge in edges}
-    assert timeline[0].occurred_at == occurred_at
-    assert timeline[0].evidence is not None
-    assert timeline[0].evidence.kind == "ask_turn_citation"
+    assert sorted((set(event.edge_ids) for event in timeline), key=sorted) == sorted(
+        [
+            {link.edge.id},
+            {to_seed.id, to_other.id},
+            {to_second_seed.id, to_other.id},
+        ],
+        key=sorted,
+    )
 
 
 def test_fair_share_uses_every_slot_it_hands_out():
