@@ -7226,6 +7226,11 @@ button.graph-seed-pill:focus-visible { outline: 2px solid var(--context); outlin
 /* The static diagram spans the graph view, inset like the legend rows, on
    the graph surface its cards and labels are coloured for. */
 .graph-static-fallback > .mermaid-diagram { margin: 0 12px 12px; }
+.graph-static-description { margin: 0 12px 12px; color: var(--ink-muted); font-size: 12px; line-height: 1.5; }
+.graph-static-coverage { margin: 0 12px 12px; font-size: 12px; }
+.graph-static-coverage .status-banner { margin: 0; align-items: start; }
+.graph-static-coverage p { margin: 6px 0 0; }
+.graph-static-coverage ul { margin: 6px 0 0; padding-left: 18px; }
 .graph-static-fallback > .mermaid-diagram .mermaid-diagram-viewport { background: var(--graph-surface); }
 /* In fullscreen the frame, not the in-page .graph-view, has the width every
    graph-view container rule inside it (Details sheet or panel, list gutters,

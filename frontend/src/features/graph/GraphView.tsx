@@ -50,6 +50,7 @@ import {
 import {
   coAccessSentence,
   deriveGraphScene,
+  filterGraphScene,
   graphFacets,
   sortedTimeline,
   type GraphFilters,
@@ -64,7 +65,7 @@ type GraphViewProps = {
   onExpand: (node: GraphNode) => Promise<void>;
   onHistoryModeChange: (mode: GraphHistoryMode) => Promise<void>;
   payload: GraphQueryPayload;
-  staticPayload?: GraphQueryPayload;
+  staticPayload: GraphQueryPayload;
   workspaceGraphHref?: (node: GraphNode) => string | null;
   // Canonical Context permalinks are workspace-in-path; without the id the
   // list falls back to the query-param form (see searchResultHref).
@@ -83,7 +84,7 @@ export function GraphView({
   onExpand,
   onHistoryModeChange,
   payload: wirePayload,
-  staticPayload: wireStaticPayload = wirePayload,
+  staticPayload: wireStaticPayload,
   workspaceGraphHref,
   workspaceId = null,
 }: GraphViewProps) {
@@ -166,15 +167,13 @@ export function GraphView({
     : payload.query.depth === 2 ? "extended" : "neighbors";
   const depthBusy = Boolean(busyAction?.startsWith("depth:") || busyAction?.startsWith("mode:"));
   const historyTopology = useMemo(() => buildHistoryTopology(payload), [payload]);
-  const staticHistoryTopology = useMemo(() => staticPayload === payload ? historyTopology : buildHistoryTopology(staticPayload),
-    [historyTopology, payload, staticPayload]);
   const { recordedEdgeIds } = historyTopology;
   const referencedCount = useMemo(() => payload.edges.filter((edge) => edge.action_kind === "referenced").length, [payload]);
-  const applyHistoryVisibility = useCallback((value: GraphScene, topology = historyTopology): GraphScene => {
+  const applyHistoryVisibility = useCallback((value: GraphScene): GraphScene => {
     if (!historical) return value;
     const edges = value.edges.filter((edge) => (edge.action_kind !== "referenced" || historyVisibility.referenced)
-      && (topology.recordedEdgeIds.has(edge.id) ? historyVisibility.recorded : historyVisibility.background));
-    return withoutDetachedSessions(value.nodes, edges, topology);
+      && (historyTopology.recordedEdgeIds.has(edge.id) ? historyVisibility.recorded : historyVisibility.background));
+    return withoutDetachedSessions(value.nodes, edges, historyTopology);
   }, [historical, historyTopology, historyVisibility]);
   const timeline = useMemo(
     () => localizedGraphTimeline(payload, filters, t, applyHistoryVisibility),
@@ -237,9 +236,9 @@ export function GraphView({
       currentId: currentNode?.id ?? null,
     };
   }, [applyHistoryVisibility, canvasScopeKey, currentNode, filters, historical, historyCatalog, hoveredEventId, payload, scene, showFuture, t, timeline, visibleCursor]);
-  const staticScene = useMemo(() => localizedGraphScene(applyHistoryVisibility(
-    deriveGraphScene(staticPayload, filters, timelineCursor), staticHistoryTopology), t),
-  [applyHistoryVisibility, filters, staticHistoryTopology, staticPayload, t, timelineCursor]);
+  // Static relationships stay current even while the canvas replays history.
+  const staticScene = useMemo(() => localizedGraphScene(
+    filterGraphScene(staticPayload, filters), t), [filters, staticPayload, t]);
   const staticDiagram = useMemo(
     () => staticOpen && staticScene.edges.length <= STATIC_DIAGRAM_EDGE_LIMIT
       ? graphSceneToMermaid(staticScene, staticVisuals, { iconSlot: true })
@@ -439,6 +438,20 @@ export function GraphView({
     (payload.omissions ?? []).map((omission) => graphOmissionDescription(omission, t)),
   )];
   const hasDisplayQuota = payload.omissions?.some(
+    (omission) => omission.reason === "node_quota" || omission.reason === "relation_quota",
+  );
+  // The static surface describes current relationships, without timeline coverage.
+  const staticCoverageNotice = graphCoverageNotice({
+    truncated: staticPayload.truncated,
+    completeness: staticPayload.completeness,
+    omissions: staticPayload.omissions,
+    warnings: (staticPayload.warnings ?? []).filter((code) => code !== "history_coverage_partial"
+      && code !== "graph_timeline_catalog_bounded"),
+  }, t);
+  const staticOmissionDescriptions = [...new Set(
+    (staticPayload.omissions ?? []).map((omission) => graphOmissionDescription(omission, t)),
+  )];
+  const staticHasDisplayQuota = staticPayload.omissions?.some(
     (omission) => omission.reason === "node_quota" || omission.reason === "relation_quota",
   );
   const activeFilters = [
@@ -1022,6 +1035,28 @@ export function GraphView({
             ? t("graph.staticFallbackFailed", { defaultValue: "Static graph fallback" })
             : t("graph.staticFallback", { defaultValue: "Static graph view" })}
         </summary>
+        <p className="graph-static-description">
+          {t("graph.staticFixedScope", {
+            defaultValue: "The static graph always shows this document's current direct connections (one step), regardless of the graph view.",
+          })}
+        </p>
+        {staticOpen && staticCoverageNotice ? (
+          <div className="graph-static-coverage">
+            <StatusBanner tone={staticCoverageNotice.tone}>
+              <strong>{staticCoverageNotice.tone === "warning"
+                ? t("graph.staticCoverageWarning", { defaultValue: "Some current direct relationships are not shown." })
+                : staticCoverageNotice.heading}</strong>
+              {staticCoverageNotice.messages.length ? <p>{staticCoverageNotice.messages.join(" ")}</p> : null}
+              {staticOmissionDescriptions.length ? <ul>
+                {staticOmissionDescriptions.map((description) => <li key={description}>{description}</li>)}
+              </ul> : null}
+              {staticHasDisplayQuota ? <p>{t("graph.omissions.appliedBudget", {
+                nodes: staticPayload.budget.applied.nodes, edges: staticPayload.budget.applied.edges,
+              })}</p> : null}
+              {staticOmissionDescriptions.length ? <p>{t("graph.omissions.noCounts")}</p> : null}
+            </StatusBanner>
+          </div>
+        ) : null}
         {staticOpen ? staticDiagram !== null ? (
           <MermaidDiagram decorateSvg={decorateStaticSvg} source={staticDiagram.source} />
         ) : (
@@ -1673,17 +1708,21 @@ function graphLabelGroupForFilter(key: keyof GraphFilters): GraphLabelGroup {
   return groups[key];
 }
 
-function graphCoverageNotice(payload: GraphQueryPayload, t: TFunction) {
+function graphCoverageNotice(
+  payload: Pick<GraphQueryPayload, "truncated" | "completeness" | "omissions" | "warnings">
+    & Partial<Pick<GraphQueryPayload, "history">>,
+  t: TFunction,
+) {
   const omissions = payload.omissions ?? [];
-  const codes = [...new Set([...(payload.warnings ?? []), ...(payload.history.warnings ?? [])])];
+  const codes = [...new Set([...(payload.warnings ?? []), ...(payload.history?.warnings ?? [])])];
   // Partial temporal coverage belongs to the Timeline, not to a missing-item
   // warning on an otherwise complete graph. Real budgets/privacy limits stay.
-  if (payload.history.mode !== "current" && !payload.truncated && omissions.length === 0
+  if (payload.history && payload.history.mode !== "current" && !payload.truncated && omissions.length === 0
     && payload.completeness === "complete"
     && codes.every((code) => code === "history_coverage_partial")) return null;
   const hasCoverageRestriction = payload.truncated
     || payload.completeness !== "complete"
-    || payload.history.status !== "complete"
+    || Boolean(payload.history && payload.history.status !== "complete")
     || omissions.length > 0;
   if (!hasCoverageRestriction && !codes.length) return null;
 
@@ -1695,7 +1734,7 @@ function graphCoverageNotice(payload: GraphQueryPayload, t: TFunction) {
     && omissions.every((omission) => omission.reason === "folder_node")
     && payload.completeness !== "bounded_sample"
     && payload.completeness !== "privacy_suppressed"
-    && payload.history.status === "complete"
+    && (!payload.history || payload.history.status === "complete")
     && codes.every((code) => code === "graph_budget_applied" || code === "usage_relation_signals_disabled");
   const settingsOnly = !hasCoverageRestriction
     && codes.every((code) => code === "usage_relation_signals_disabled");
@@ -1705,7 +1744,7 @@ function graphCoverageNotice(payload: GraphQueryPayload, t: TFunction) {
   // Observation history also supplies current relationships. Its source cap
   // is not merely a timeline restriction, even when history.status is complete.
   // Only explicit complete/untruncated scene metadata permits this distinction.
-  const currentHistoryOnly = payload.history.mode === "current"
+  const currentHistoryOnly = payload.history?.mode === "current"
     && payload.completeness === "complete"
     && !payload.truncated
     && omissions.length === 0
@@ -1726,7 +1765,7 @@ function graphCoverageNotice(payload: GraphQueryPayload, t: TFunction) {
         : currentHistoryOnly
           ? t("graph.omissions.timelineNotice", { defaultValue: "Timeline coverage is limited." })
           : t("graph.coverageWarning", { defaultValue: "This graph has bounded or partial coverage." }),
-    messages: graphWarningMessages(t, messageCodes, payload.history.mode === "current"),
+    messages: graphWarningMessages(t, messageCodes, !payload.history || payload.history.mode === "current"),
   };
 }
 

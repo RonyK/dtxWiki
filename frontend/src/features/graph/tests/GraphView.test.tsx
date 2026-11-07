@@ -1373,7 +1373,7 @@ describe("GraphView", () => {
       .not.toBeInTheDocument());
   });
 
-  it("keeps the independent direct static scene across neighbor and two-hop canvas queries", async () => {
+  it("keeps the current direct static scene across canvas scopes, history modes, and playback", async () => {
     const user = userEvent.setup();
     const direct = graphFixture();
     direct.history.mode = "current";
@@ -1416,6 +1416,68 @@ describe("GraphView", () => {
     expect(screen.getByLabelText("Usage")).not.toBeChecked();
     fireEvent.click(screen.getByLabelText("Usage"));
     expect(screen.getByTestId("mock-mermaid-diagram")).toHaveTextContent("Included");
+
+    const appearance = graphFixture();
+    rerender(graphElement({ ...props, payload: appearance }));
+    expect(screen.getByTestId("mock-mermaid-diagram").textContent).toBe(directSource);
+    fireEvent.change(screen.getByLabelText("Timeline position"), { target: { value: "0" } });
+    expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-edges", "0");
+    expect(screen.getByTestId("mock-mermaid-diagram").textContent).toBe(directSource);
+
+    const action = { ...appearance, history: { ...appearance.history, mode: "action" as const },
+      query: { ...appearance.query, time: { mode: "action" as const } },
+    };
+    rerender(graphElement({ ...props, payload: action }));
+    expect(screen.getByTestId("mock-mermaid-diagram").textContent).toBe(directSource);
+    fireEvent.click(screen.getByLabelText("Current relationships", { selector: "input" }));
+    expect(screen.getByTestId("mock-mermaid-diagram").textContent).toBe(directSource);
+    fireEvent.change(screen.getByLabelText("Timeline position"), { target: { value: "0" } });
+    expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-edges", "0");
+    expect(screen.getByTestId("mock-mermaid-diagram").textContent).toBe(directSource);
+  });
+
+  it("keeps static coverage independent of history and canvas notice dismissal in both static views", async () => {
+    const current = graphFixture();
+    const budget = { nodes: 250, edges: 750 };
+    current.history = { ...current.history, mode: "current", status: "complete", warnings: [] };
+    current.query = { ...current.query, depth: 1, relation_scope: "direct", time: { mode: "current" }, budget };
+    current.budget = { requested: budget, applied: budget };
+    current.truncated = true;
+    current.completeness = "capped";
+    current.warnings = ["graph_budget_applied"];
+    current.omissions = [{ scope: "node", reason: "node_quota", hop: 1 }];
+    const history = graphFixture();
+    const props = { onCollapse: () => Promise.resolve(), onExpand: () => Promise.resolve(),
+      payload: history, staticPayload: current };
+    const { container, rerender } = render(graphElement(props));
+    await userEvent.click(screen.getByText("Static graph view", { selector: "summary" }));
+    const fallback = within(container.querySelector<HTMLElement>(".graph-static-fallback")!);
+    expect(fallback.getByTestId("mock-mermaid-diagram")).toBeInTheDocument();
+    expect(fallback.getByRole("alert")).toHaveTextContent("Some current direct relationships are not shown.");
+    expect(fallback.getByRole("alert")).toHaveTextContent("Node display limit · Distance 1");
+    expect(fallback.getByRole("alert")).toHaveTextContent("Applied display limit: 250 nodes · 750 relationships.");
+
+    rerender(graphElement({ ...props, payload: current }));
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss coverage notice" }));
+    expect(fallback.getByRole("alert")).toBeVisible();
+    rerender(graphElement(props));
+    expect(fallback.getByRole("alert")).toBeVisible();
+
+    // The list fallback has a separate render branch above Mermaid's edge limit.
+    const textPayload = { ...current, edges: Array.from({ length: 501 }, (_, index) => ({
+      ...current.edges[0], id: `edge:static:${index}`,
+    })) };
+    rerender(graphElement({ ...props, staticPayload: textPayload }));
+    expect(fallback.queryByTestId("mock-mermaid-diagram")).not.toBeInTheDocument();
+    expect(fallback.getByRole("list", { name: "Relationships" }).children).toHaveLength(501);
+    expect(fallback.getByRole("alert")).toBeVisible();
+
+    rerender(graphElement({ ...props, staticPayload: { ...current, truncated: false,
+      completeness: "complete", omissions: [], warnings: ["history_coverage_partial"],
+      history: { ...current.history, status: "partial", warnings: ["history_coverage_partial"] },
+    } }));
+    expect(fallback.queryByRole("alert")).not.toBeInTheDocument();
+    expect(fallback.queryByText("Timeline coverage is limited.")).not.toBeInTheDocument();
   });
 
   it.each([501, 750])("uses a complete text fallback for %i relationships instead of invalid Mermaid", (count) => {
@@ -2699,7 +2761,12 @@ function graphElement({
         onExpand={onExpand}
         onHistoryModeChange={onHistoryModeChange ?? (() => Promise.resolve())}
         payload={payload}
-        staticPayload={staticPayload}
+        staticPayload={staticPayload ?? {
+          ...payload,
+          query: { ...payload.query, depth: 1, relation_scope: "direct", time: { mode: "current" } },
+          history: { ...payload.history, mode: "current" },
+          timeline: [],
+        }}
         workspaceGraphHref={workspaceGraphHref}
         workspaceId={workspaceId}
       />

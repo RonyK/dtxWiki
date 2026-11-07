@@ -186,6 +186,8 @@
     "noRelationships": "No graph relationships to show.",
     "staticFallback": "Static graph view",
     "staticFallbackFailed": "Static graph fallback",
+    "staticFixedScope": "The static graph always shows this document's current direct connections (one step), regardless of the graph view.",
+    "staticCoverageWarning": "Some current direct relationships are not shown.",
     "staticFallbackList": "This scene exceeds the diagram limit of {{limit}} relationships. All nodes and relationships are listed here.",
     "printFallback": "Graph relationships",
     "relationshipListDescription": "Tab into each list once. Use arrow keys to highlight items, then Enter or Space to select and access their actions in Details.",

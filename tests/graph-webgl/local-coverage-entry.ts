@@ -1,4 +1,4 @@
-import { createElement, useState } from "react";
+import { createElement, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import Sigma from "sigma";
@@ -289,6 +289,12 @@ declare global {
 function Fixture() {
   const [active, setActive] = useState(true);
   const [currentPayload, setPayload] = useState(payload);
+  const staticPayload = useMemo<GraphQueryPayload>(() => ({
+    ...currentPayload,
+    query: { ...currentPayload.query, time: { mode: "current" }, relation_scope: "direct", depth: 1 },
+    history: { ...currentPayload.history, mode: "current" },
+    timeline: [],
+  }), [currentPayload]);
   // Open actions require the same explicit UUID scope as the real reader.
   const [workspaceId, setWorkspaceId] = useState<string | null>(fixtureWorkspaceId);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -363,7 +369,7 @@ function Fixture() {
     },
   } });
   const graph = createElement(GraphView, {
-    active, payload: currentPayload, onCollapse: graphAction, onDepthChange: graphAction,
+    active, payload: currentPayload, staticPayload, onCollapse: graphAction, onDepthChange: graphAction,
     onExpand: expandNode, onHistoryModeChange: graphAction, workspaceId,
     workspaceGraphHref: scenario === "details-actions-long"
       ? (node: GraphNode) => workspaceId

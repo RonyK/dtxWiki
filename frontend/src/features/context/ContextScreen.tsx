@@ -2645,18 +2645,19 @@ function ContextReader({
         const incomingRequest = queryGraph(workspaceId, query, {
           signal: controller.signal,
         });
-        // Direct scope spends its display budget before neighbor expansion.
-        // A broader payload cannot recover direct relationships it omitted.
+        // The static view always shows this document's current one-hop scene.
+        // Broader scopes, expanded seeds, and history have different budgets
+        // and cannot recover the direct relationships they omitted.
         const [incoming, incomingStatic] = await Promise.all([
           incomingRequest,
-          query.relation_scope === "direct" && query.depth === 1
+          query.time?.mode === "current"
+            && query.relation_scope === "direct" && query.depth === 1
+            && query.seeds.length === 1
+            && query.seeds[0].kind === "context_page" && query.seeds[0].id === pageId
             ? incomingRequest
-            : queryGraph(workspaceId, {
-                ...query,
-                depth: 1,
-                relation_scope: "direct",
-                cursor: null,
-              }, { signal: controller.signal }),
+            : queryGraph(workspaceId, contextGraphQuery(pageId), {
+                signal: controller.signal,
+              }),
         ]);
         const current = graphRequestRef.current;
         if (
@@ -3261,7 +3262,7 @@ function ContextReader({
                 defaultValue: "Graph could not be loaded.",
               })}
             </StatusBanner>
-          ) : graph ? (
+          ) : graph && staticGraph ? (
             <GraphView
               key={detail.id}
               active={tab === "graph"}
@@ -3271,7 +3272,7 @@ function ContextReader({
               onExpand={expandGraphNode}
               onHistoryModeChange={changeGraphHistoryMode}
               payload={graph}
-              staticPayload={staticGraph ?? graph}
+              staticPayload={staticGraph}
               workspaceId={workspaceId}
               workspaceGraphHref={
                 labsPreferences.knowledgeMap && workspaceGraph.enabled
