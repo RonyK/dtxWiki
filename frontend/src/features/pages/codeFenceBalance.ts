@@ -47,38 +47,27 @@ function isFenceCloser(line: string, open: OpenFence): boolean {
   return end - start >= open.length && /^[ \t]*$/.test(line.slice(end));
 }
 
-/** Walk the lines once, reporting for each whether it belongs to a fence. */
-function scanCodeFences(
-  lines: string[],
-  visit: (index: number, fenced: boolean) => void = () => undefined,
-): OpenFence | null {
+/** Walk the lines once and return the fence still open at the end, if any. */
+function scanCodeFences(lines: string[]): OpenFence | null {
   let open: OpenFence | null = null;
 
   for (let index = 0; index < lines.length; index += 1) {
     if (open) {
-      visit(index, true);
       if (isFenceCloser(lines[index], open)) {
         open = null;
       }
       continue;
     }
     const opener = fenceOpener(lines[index]);
-    if (!opener) {
-      visit(index, false);
-      continue;
+    if (opener) {
+      open = { ...opener, openingLine: index + 1 };
     }
-    open = { ...opener, openingLine: index + 1 };
-    visit(index, true);
   }
   return open;
 }
 
-function bodyLines(body: string) {
-  return body.replace(/\r\n?/g, "\n").split("\n");
-}
-
 export function findUnclosedCodeFence(body: string): UnclosedCodeFence | null {
-  const open = scanCodeFences(bodyLines(body));
+  const open = scanCodeFences(body.replace(/\r\n?/g, "\n").split("\n"));
   if (!open) {
     return null;
   }
@@ -86,16 +75,6 @@ export function findUnclosedCodeFence(body: string): UnclosedCodeFence | null {
     closingFence: open.marker.repeat(open.length),
     line: open.openingLine,
   };
-}
-
-/** For each line of the body, whether it is a fence line or fenced content. */
-export function codeFenceLineMask(body: string): boolean[] {
-  const lines = bodyLines(body);
-  const mask = new Array<boolean>(lines.length).fill(false);
-  scanCodeFences(lines, (index, fenced) => {
-    mask[index] = fenced;
-  });
-  return mask;
 }
 
 export function appendClosingCodeFence(body: string, closingFence: string) {
