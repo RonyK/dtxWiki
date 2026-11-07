@@ -65,7 +65,7 @@ This guide is for **dtxWiki 0.2.3 (Beta)**. Start on your own computer, then fol
 [Run in the background](#4-run-in-the-background) to share it with others.
 To register Claude Code or Codex CLI, follow
 [Connect MCP clients](#mcp-clients).
-For an existing installation, read [Upgrading to 0.2.3](#upgrade-023) before
+For an existing installation, read [Upgrading to 0.2.3](#upgrading) before
 starting the new server.
 
 ### 1. Install and start the web server
@@ -460,6 +460,7 @@ sign-up off by default and needs a configured session secret.
 | MCP can read but cannot write, or returns 403 | Check Write scope, allowed workspaces, workspace role, and whether the connection is blocked in MCP access settings. |
 | A worker error stops the server | Read `server.log` or the systemd journal and fix the reported error. Starting another worker alongside the managed runtime will not repair it. |
 
+<a id="upgrading"></a>
 <a id="upgrade-013"></a>
 <a id="upgrade-021"></a>
 <a id="upgrade-022"></a>

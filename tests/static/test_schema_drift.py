@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from backend.app import main as app_main
+from backend.app import version as app_version
 from backend.scripts.export_mcp_schemas import build_mcp_schemas
 from backend.scripts.export_openapi import build_openapi_schema
 
@@ -15,11 +17,17 @@ GENERATED_SCHEMA_PATHS = (
 )
 
 
-def test_openapi_schema_artifact_is_current():
+def test_openapi_schema_artifact_is_current(monkeypatch):
     expected = json.loads(
         (ROOT / "shared/schemas/rest/v1/openapi.json").read_text(encoding="utf-8")
     )
 
+    # Source exports must not inherit the version of a stale installation or an
+    # operator's runtime override. Neither changes the release being exported.
+    monkeypatch.setattr(app_version, "metadata_version", lambda _: "99.88.77")
+    monkeypatch.setenv("DTXWIKI_APP_VERSION", "88.77.66")
+    # Avoid a settings cache populated by an earlier schema test masking drift.
+    monkeypatch.setattr(app_main, "get_settings", lambda: app_main.Settings())
     assert build_openapi_schema() == expected
 
 

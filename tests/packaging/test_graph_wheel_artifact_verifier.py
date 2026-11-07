@@ -524,19 +524,59 @@ def test_release_cli_rejects_current_graph_without_a_new_schema_boundary(tmp_pat
 def test_release_cli_checks_metadata_in_both_uploaded_artifacts(
     tmp_path, artifact_kind
 ):
+    version = "0.2.4"
+    migration = Path("backend/migrations/versions/unreleased/0003_stray.py")
+    helper = Path("backend/migrations/revision_modules/unreleased/new_schema.py")
+    helper_init = helper.with_name("__init__.py")
+
     def corrupt_one(stage, kind):
+        _append_schema_boundary(stage, "0.2.1", head="5b7e5c149279")
+        _append_schema_boundary(stage, "0.2.3", head="00ba02774c4a")
         if kind == artifact_kind:
-            metadata = _release_metadata_path(stage, kind, "0.2.1")
+            metadata = _release_metadata_path(stage, kind, version)
             metadata.write_text(
                 "Metadata-Version: 2.4\nName: dtxwiki\nVersion: 0.1.2\n\n",
                 encoding="utf-8",
             )
+            _backend._write_stray_revision(stage)
+            (stage / migration).parent.mkdir(exist_ok=True)
+            (stage / migration.parent.parent / "0003_stray.py").rename(
+                stage / migration
+            )
+            (stage / helper).parent.mkdir(parents=True)
+            (stage / helper).write_text("def upgrade():\n    pass\n", encoding="utf-8")
+            (stage / helper_init).touch()
 
-    result = _run_verifier(
-        _release_dist(tmp_path, mutate=corrupt_one), "--release-version", "0.2.1"
-    )
+    dist = _release_dist(tmp_path, version, boundary=version, mutate=corrupt_one)
+    result = _run_verifier(dist, "--release-version", version)
 
     assert result.returncode == 1, result.stdout + result.stderr
     suffix = "-py3-none-any.whl" if artifact_kind == "wheel" else ".tar.gz"
-    assert f"dtxwiki-0.2.1{suffix}:" in result.stderr
+    assert f"dtxwiki-{version}{suffix}:" in result.stderr
     assert "metadata" in result.stderr.lower()
+    assert f"unreleased migration file: {migration.as_posix()}" in result.stderr
+    assert f"unreleased migration file: {helper.as_posix()}" in result.stderr
+
+    # Keep the existing wheel/sdist cases: removing the source must not hide
+    # helper-only leftovers, including the helper scaffold's empty initializer.
+    stage = tmp_path / f"release-{artifact_kind}"
+    _write_release_metadata(stage, artifact_kind, version)
+    (stage / migration).unlink()
+    (stage / helper).unlink()
+    write_archive = _write_wheel if artifact_kind == "wheel" else _write_sdist
+    artifact = dist / f"dtxwiki-{version}{suffix}"
+    write_archive(artifact, stage)
+
+    result = _run_verifier(dist, "--release-version", version)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"unreleased migration file: {helper_init.as_posix()}" in result.stderr
+    assert migration.as_posix() not in result.stderr
+    assert "metadata" not in result.stderr.lower()
+
+    (stage / helper_init).unlink()
+    write_archive(artifact, stage)
+
+    result = _run_verifier(dist, "--release-version", version)
+
+    assert result.returncode == 0, result.stdout + result.stderr

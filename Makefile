@@ -171,4 +171,24 @@ check-i18n:
 sync-csp:
 	$(VENV_PYTHON) -m backend.scripts.sync_csp_templates
 
+.PHONY: version set-version sync-version check-version verify-release-artifacts
+version:
+	@$(VENV_PYTHON) scripts/release_version.py show
+
+# VERSION is a Make input only. pyproject.toml remains the stored source.
+set-version:
+	@test -n "$(VERSION)" || { echo 'Usage: make set-version VERSION=X.Y.Z' >&2; exit 2; }
+	$(VENV_PYTHON) scripts/release_version.py set "$(VERSION)"
+	uv sync --locked --extra dev
+
+sync-version:
+	$(VENV_PYTHON) scripts/release_version.py sync
+	uv sync --locked --extra dev
+
+check-version:
+	$(VENV_PYTHON) scripts/release_version.py check
+
+verify-release-artifacts:
+	$(VENV_PYTHON) scripts/verify_wheel_artifact.py dist --release-version "$$($(VENV_PYTHON) scripts/release_version.py show)"
+
 -include Makefile.local

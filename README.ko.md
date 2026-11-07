@@ -64,7 +64,7 @@ Editor·Owner에게 공유합니다. 참고문헌 추가·삭제도 같은 공�
 Claude Code나 Codex CLI를 등록하려면
 [MCP 클라이언트 연결하기](#mcp-clients)를 참고하세요.
 기존 설치를 사용 중이라면 새 서버를 시작하기 전에
-[0.2.3으로 업데이트하기](#upgrade-023)를 읽으세요.
+[0.2.3으로 업데이트하기](#upgrading)를 읽으세요.
 
 ### 1. 설치하고 웹 서버 실행하기
 
@@ -454,6 +454,7 @@ dtxWiki의 실행 방식은 두 설정으로 정해집니다. 위 설치 방법�
 | MCP 읽기는 되지만 쓰기가 안 되거나 403 반환 | 쓰기 권한, 허용 워크스페이스, 계정 역할, MCP 접근 설정의 사용 차단 여부를 확인하세요. |
 | worker 오류로 서버가 종료됨 | `server.log` 또는 systemd journal의 오류를 먼저 해결하세요. 통합 runtime 옆에 worker를 추가로 실행해서 해결할 수는 없습니다. |
 
+<a id="upgrading"></a>
 <a id="upgrade-013"></a>
 <a id="upgrade-021"></a>
 <a id="upgrade-022"></a>

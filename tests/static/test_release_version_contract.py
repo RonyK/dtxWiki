@@ -213,6 +213,14 @@ def _release() -> dict:
 
 def test_every_shipped_manifest_carries_the_pyproject_version():
     assert version_mismatches() == {}
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/release_version.py"), "check"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_project_urls_point_at_the_public_project():

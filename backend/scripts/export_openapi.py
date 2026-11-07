@@ -4,6 +4,8 @@ import sys
 from backend.api.auth_sso import BINDING_COOKIE, EMAIL_CONFLICT_COOKIE
 from backend.api.auth_verification import email_binding_name
 from backend.app.main import create_app
+from backend.app.settings import Settings
+from backend.app.version import source_version
 from backend.policy.rest_scopes import (
     REST_REQUIRED_SCOPES,
     REST_SESSION_ONLY_ROUTES,
@@ -233,7 +235,9 @@ def reviewed_openapi_security() -> dict[RouteKey, list[dict[str, list]]]:
 
 
 def build_openapi_schema() -> dict:
-    app = create_app()
+    # This checked-in artifact describes the source tree, even when the active
+    # environment still has an older package installed or overrides its version.
+    app = create_app(settings=Settings(app_version=source_version()))
     schema = app.openapi()
     security_schemes = schema.setdefault("components", {}).setdefault(
         "securitySchemes", {}

@@ -128,7 +128,7 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
         for revision in appended
     )
     assert all(
-        Path(script.get_revision(revision).path).parent.name == "v0_2"
+        Path(script.get_revision(revision).path).parent.name in {"v0_2", "unreleased"}
         for revision in appended
     )
     assert Path(script.get_revision(RELEASE_021_REVISION).path).parent.name == "v0_2"
@@ -157,7 +157,7 @@ def test_versions_directory_holds_only_graph_revisions():
     assert migration_files == graph
     for path in MIGRATIONS_DIR.rglob("*.py"):
         assert path.parent.parent == MIGRATIONS_DIR
-        assert path.parent.name.startswith("v")
+        assert path.parent.name.startswith("v") or path.parent.name == "unreleased"
         assert path.stem.split("_", 1)[0] in graph
 
 
@@ -400,7 +400,7 @@ def test_consolidated_revision_has_no_generic_fragments_package():
     assert not FRAGMENTS_DIR.exists()
 
 
-def test_generated_revisions_group_patch_versions_and_link_in_order(tmp_path):
+def test_generated_revisions_wait_for_release_and_link_in_order(tmp_path):
     """The developer helper creates linked scripts without opening a database."""
 
     target = tmp_path / "backend"
@@ -411,17 +411,36 @@ def test_generated_revisions_group_patch_versions_and_link_in_order(tmp_path):
         target / "migrations",
         ignore=shutil.ignore_patterns("__pycache__"),
     )
-    first = create_revision("0.2.0", "add workspace settings", root=tmp_path)
-    second = create_revision("0.2.1", "add search index", root=tmp_path)
+    first = create_revision("add workspace settings", root=tmp_path)
+    second = create_revision("add search index", root=tmp_path)
     assert first.down_revision == CURRENT_HEAD
     assert second.down_revision == first.revision
     assert first.revision != second.revision
     assert (
         Path(first.path).parent
         == Path(second.path).parent
-        == target / "migrations/versions/v0_2"
+        == target / "migrations/versions/unreleased"
     )
+    assert (target / "migrations/revision_modules/unreleased/__init__.py").is_file()
     assert Path(first.path).name.endswith("_add_workspace_settings.py")
-    assert ScriptDirectory(
+    pending = ScriptDirectory(
         str(target / "migrations"), recursive_version_locations=True
-    ).get_heads() == [second.revision]
+    )
+    assert pending.get_heads() == [second.revision]
+    graph = _revision_graph(pending)
+
+    # Assigning a release later changes the folders, never revision identities
+    # or ancestry. Helper scaffolding follows the same eventual release group.
+    release_dir = target / "migrations/versions/v0_3"
+    release_dir.mkdir()
+    for revision in (first, second):
+        shutil.move(revision.path, release_dir / Path(revision.path).name)
+    (target / "migrations/revision_modules/unreleased").rename(
+        target / "migrations/revision_modules/v0_3"
+    )
+    released = ScriptDirectory(
+        str(target / "migrations"), recursive_version_locations=True
+    )
+    assert released.get_heads() == [second.revision]
+    assert _revision_graph(released) == graph
+    assert Path(released.get_revision(first.revision).path).parent == release_dir
