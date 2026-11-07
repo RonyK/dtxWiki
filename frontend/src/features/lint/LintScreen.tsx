@@ -13,7 +13,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -42,6 +42,7 @@ import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
 import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
+import { strongText } from "../../shared/i18n/strongText";
 import { searchResultHref } from "../../shared/lib/searchResultHref";
 import { contextEditHref, treeNodeHref, useRouteWorkspaceId, useWorkspaceRoute, withWorkspaceQuery, workspacePath } from "../../shared/lib/workspaceRoutes";
 import { isEditorRole } from "../../shared/workspace/permissions";
@@ -1604,7 +1605,7 @@ const PAIR_REMEDIES: Record<string, PairRemedy> = {
   },
 };
 
-/** "Link B in A", both ways; each opens A's editor with that link added. */
+/** "Link B in A", both ways; each opens A's editor with the link to paste. */
 function LinkPairActions({ canEdit, pages, workspaceId }: PairActionsProps) {
   const { t } = useTranslation("lint");
   const [first, second] = pages;
@@ -1616,7 +1617,10 @@ function LinkPairActions({ canEdit, pages, workspaceId }: PairActionsProps) {
       ].map(([source, target]) => (
         <li className="lint-pair-action" key={source.id}>
           <span className="lint-pair-action__text">
-            <PairSentence source={source.title} target={target.title} />
+            {strongText((values) => t("pairLink.row", values), {
+              source: source.title,
+              target: target.title,
+            })}
           </span>
           {canEdit ? (
             <Link
@@ -1625,7 +1629,7 @@ function LinkPairActions({ canEdit, pages, workspaceId }: PairActionsProps) {
                 target: target.title,
               })}
               className="icon-button"
-              to={`${contextEditHref(workspaceId, source.id)}?add_link=${encodeURIComponent(target.id)}`}
+              to={`${contextEditHref(workspaceId, source.id)}?suggest_link=${encodeURIComponent(target.id)}`}
             >
               <Edit size={15} aria-hidden="true" />
               <span>{t("pairLink.add")}</span>
@@ -1634,30 +1638,6 @@ function LinkPairActions({ canEdit, pages, workspaceId }: PairActionsProps) {
         </li>
       ))}
     </ul>
-  );
-}
-
-const SOURCE_MARK = "\u0001";
-const TARGET_MARK = "\u0002";
-
-/** The translated sentence with both page titles in bold, in locale order. */
-function PairSentence({ source, target }: { source: string; target: string }) {
-  const { t } = useTranslation("lint");
-  const sentence = t("pairLink.row", { source: SOURCE_MARK, target: TARGET_MARK });
-  return (
-    <>
-      {sentence.split(/(\u0001|\u0002)/).map((part, index) => (
-        <Fragment key={index}>
-          {part === SOURCE_MARK ? (
-            <strong>{source}</strong>
-          ) : part === TARGET_MARK ? (
-            <strong>{target}</strong>
-          ) : (
-            part
-          )}
-        </Fragment>
-      ))}
-    </>
   );
 }
 

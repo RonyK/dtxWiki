@@ -43,7 +43,6 @@ import {
   CheckCircle2,
   Code,
   Images,
-  Info,
   Italic,
   Keyboard,
   Link2,
@@ -52,7 +51,6 @@ import {
   Minimize2,
   Settings2,
   Strikethrough,
-  Undo2,
   Wand2,
   X,
 } from "lucide-react";
@@ -143,8 +141,7 @@ import {
   workspacePath,
 } from "../../shared/lib/workspaceRoutes";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
-import { formatContextPageMarkdown } from "../../shared/lib/contextLinks";
-import { previewLinkTargets as previewBodyLinkTargets } from "../../shared/api/linkTargets";
+import { isContextId } from "../../shared/lib/contextLinks";
 import {
   formatUploadByteLimit,
   uploadAcceptValue,
@@ -219,7 +216,7 @@ import {
   summarizeMediaUploadBatches,
 } from "./mediaUploadCoordinator";
 import { clearEditorUploadSlots } from "./editorUploadSlots";
-import { relatedLinkPlacements } from "./relatedLinkInsertion";
+import { RelatedLinkSuggestion } from "./RelatedLinkSuggestion";
 import {
   DEFAULT_PAGE_METADATA,
   PAGE_TYPE_OPTIONS,
@@ -347,15 +344,6 @@ const UPLOAD_PLACEHOLDER_PATTERN = /!\[[^\]]*\]\(\u200b/;
 
 export const AUTOSAVE_CHECKPOINT_MS = 60_000;
 const SAVED_JUST_NOW_MS = 60_000;
-
-type RelatedLinkNotice = {
-  kind: "added" | "present" | "manual";
-  title: string;
-  before: string;
-  after: string;
-  /** Where the added link ends, for the cursor; null when nothing was added. */
-  cursor: number | null;
-};
 
 function sourceLineBoundaryOffset(
   view: EditorViewType,
@@ -508,7 +496,6 @@ export function PageEditor({
   const [tagQuery, setTagQuery] = useState("");
   const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
   const [status, setStatus] = useState<string | null>(null);
-  const [relatedLinkNotice, setRelatedLinkNotice] = useState<RelatedLinkNotice | null>(null);
   const [publicationState, setPublicationState] = useState<PublicationState>(
     mode === "create" ? "never-published" : "published",
   );
@@ -733,8 +720,11 @@ export function PageEditor({
       ? searchParams.get("reviewItemId") ?? searchParams.get("review_item_id")
       : null;
   const createParentNodeId = mode === "create" ? searchParams.get("parent") : null;
-  // Lint's "link these two pages" remedy: open with a link to this page added.
-  const addLinkPageId = mode === "edit" ? searchParams.get("add_link") : null;
+  // Lint's "link these two pages" remedy: suggest a link to this page. Only a
+  // page id is accepted; it becomes part of an API path.
+  const suggestLinkParam = mode === "edit" ? searchParams.get("suggest_link") : null;
+  const suggestLinkPageId =
+    suggestLinkParam && isContextId(suggestLinkParam) ? suggestLinkParam : null;
   const createInitialTitle = mode === "create" ? normalizeInitialTitle(searchParams.get("title")) : "";
   const isLinkDialogOpen = Boolean(linkDialog);
   const isCommentPreviewOpen = Boolean(commentPreview);
@@ -1423,91 +1413,6 @@ export function PageEditor({
     bodyRef.current = nextBody;
     setBody(nextBody);
     markDraftMutation();
-  }
-  const updateAuthoredBodyRef = useRef(updateAuthoredBody);
-  useEffect(() => {
-    updateAuthoredBodyRef.current = updateAuthoredBody;
-  });
-
-  // ?add_link=<page id> (the lint queue's "add" action): once the body has
-  // loaded, write a link to that page under the related-pages heading. It goes
-  // through updateAuthoredBody exactly like typing, so drafts and autosave
-  // treat it as the author's edit and nothing is published until they publish.
-  // Applied once per page and target.
-  const relatedLinkAppliedRef = useRef<string | null>(null);
-  const loadedPageId = page?.id ?? null;
-  const loadedVersionId = page?.version_id ?? null;
-  // The server's own reading of the loaded body: the same parser that decides
-  // whether publishing creates a page link, so code, comments and stray ids in
-  // prose never count as an existing link.
-  const loadedLinkTargets = page?.link_targets;
-  useEffect(() => {
-    if (!addLinkPageId || pageLoadState !== "ready" || !loadedPageId || !workspaceId) {
-      return;
-    }
-    const key = `${loadedPageId}:${addLinkPageId}`;
-    if (relatedLinkAppliedRef.current === key) return;
-    relatedLinkAppliedRef.current = key;
-    const current = () =>
-      isEditorMountedRef.current && pageIdRef.current === loadedPageId;
-    async function addRelatedLink(workspace: string, pageId: string, relatedId: string) {
-      const related = await readPage(workspace, relatedId);
-      if (!current()) return;
-      const before = bodyRef.current;
-      const notice = { title: related.title, before, after: before, cursor: null };
-      if ((loadedLinkTargets ?? []).some((target) => target.target_page_id === related.id)) {
-        setRelatedLinkNotice({ ...notice, kind: "present" });
-        return;
-      }
-      const link = formatContextPageMarkdown(related.title, workspace, related.id);
-      const candidates = relatedLinkPlacements(
-        before,
-        link,
-        translationRef.current("editor.relatedLinksHeading", { defaultValue: "Related pages" }),
-      );
-      // Keep the first placement the server parses as a link to the page:
-      // the editor must not report an addition that publishing would ignore.
-      for (const after of candidates) {
-        const preview = await previewBodyLinkTargets(workspace, {
-          body_md: after,
-          request_id: newIdempotencyKey(),
-          source_page_id: pageId,
-          source_version_id: loadedVersionId,
-        });
-        if (!current() || bodyRef.current !== before) return;
-        if ((preview.link_targets ?? []).some((target) => target.target_page_id === related.id)) {
-          updateAuthoredBodyRef.current(after);
-          setRelatedLinkNotice({
-            ...notice,
-            kind: "added",
-            after,
-            cursor: after.lastIndexOf(link) + link.length,
-          });
-          return;
-        }
-      }
-      setRelatedLinkNotice({ ...notice, kind: "manual" });
-    }
-    addRelatedLink(workspaceId, loadedPageId, addLinkPageId).catch(() => {
-      // Gone or hidden from this author, or the check failed: change nothing.
-    });
-  }, [addLinkPageId, loadedLinkTargets, loadedPageId, loadedVersionId, pageLoadState, workspaceId]);
-
-  // Put the cursor on the added line so it scrolls into view and carries the
-  // active-line highlight. A selection change is not an edit.
-  useEffect(() => {
-    const view = editorViewRef.current;
-    const cursor = relatedLinkNotice?.cursor;
-    if (!view || cursor == null || view.state.doc.toString() !== relatedLinkNotice?.after) {
-      return;
-    }
-    view.dispatch({ selection: { anchor: cursor }, scrollIntoView: true });
-  }, [relatedLinkNotice]);
-
-  function removeAddedRelatedLink() {
-    if (relatedLinkNotice?.kind !== "added") return;
-    updateAuthoredBody(relatedLinkNotice.before);
-    setRelatedLinkNotice(null);
   }
 
   // F2d: on-demand "Format now" — normalize the body via the server formatter
@@ -5715,47 +5620,13 @@ export function PageEditor({
             </section>
           </Dialog>
         ) : null}
-        {/* Shown until the author changes the body; from then on the change
-            is simply theirs. */}
-        {relatedLinkNotice && body === relatedLinkNotice.after ? (
-          <div className="editor-related-link-notice" role="status">
-            <Info size={16} aria-hidden="true" />
-            <p>
-              {relatedLinkNotice.kind === "added"
-                ? t("editor.relatedLinkAdded", {
-                    defaultValue:
-                      "Added a link to {{title}} under “Related pages”. Review it, then save.",
-                    title: relatedLinkNotice.title,
-                  })
-                : relatedLinkNotice.kind === "present"
-                  ? t("editor.relatedLinkPresent", {
-                      defaultValue:
-                        "This page already links to {{title}}. Publish it to resolve the lint finding.",
-                      title: relatedLinkNotice.title,
-                    })
-                  : t("editor.relatedLinkManual", {
-                      defaultValue:
-                        "Couldn't add the link to {{title}} automatically. Insert it with the editor's link tool.",
-                      title: relatedLinkNotice.title,
-                    })}
-            </p>
-            {relatedLinkNotice.kind === "added" ? (
-              <button
-                aria-label={t("editor.relatedLinkRemoveAria", {
-                  defaultValue: "Undo the added link to {{title}}",
-                  title: relatedLinkNotice.title,
-                })}
-                className="icon-button"
-                onClick={removeAddedRelatedLink}
-                type="button"
-              >
-                <Undo2 size={15} aria-hidden="true" />
-                <span>
-                  {t("editor.relatedLinkRemove", { defaultValue: "Undo" })}
-                </span>
-              </button>
-            ) : null}
-          </div>
+        {suggestLinkPageId && workspaceId && page && pageLoadState === "ready" ? (
+          <RelatedLinkSuggestion
+            key={`${page.id}:${suggestLinkPageId}`}
+            linkTargets={page.link_targets}
+            relatedPageId={suggestLinkPageId}
+            workspaceId={workspaceId}
+          />
         ) : null}
         <div
           className="editor-grid"

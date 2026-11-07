@@ -4796,45 +4796,43 @@ describe("PageEditor", () => {
     expect(autosaveCalls(fetchMock)).toHaveLength(0);
   });
 
-  it("adds the lint queue's link only where the server parses it, as an edit Undo takes back", async () => {
+  it("suggests the lint queue's link to paste and never edits the body", async () => {
     const relatedId = "55555555-5555-4555-8555-555555555555";
-    // The id in inline code is not a link (the server's link_targets for this
-    // body are empty), so it must not suppress the insertion.
-    const loaded = `# Hello\n\nSee \`${relatedId}\`.`;
-    let serverParsesLink = false;
-    const fetchMock = mockEditorPage(loaded);
+    const fetchMock = mockEditorPage("# Hello");
     const baseFetch = fetchMock.getMockImplementation()!;
-    fetchMock.mockImplementation(async (input, init) => {
-      const url = String(input);
-      if (url.endsWith(`/context/pages/${relatedId}`)) {
-        return jsonResponse({ data: { ...page, id: relatedId, slug: "incident-runbook", title: "Incident runbook", body_md: "# Runbook" } });
-      }
-      if (url.endsWith("/link-targets/preview")) {
-        const linkTargets = serverParsesLink
-          ? [{ href: `/p/w/${relatedId}`, locator: `/p/w/${relatedId}`, state: "available", target_page_id: relatedId }]
-          : [];
-        return jsonResponse({ data: { link_targets: linkTargets, references: [] } });
-      }
-      return baseFetch(input, init);
+    fetchMock.mockImplementation(async (input, init) =>
+      String(input).endsWith(`/context/pages/${relatedId}`)
+        ? jsonResponse({ data: { ...page, id: relatedId, slug: "incident-runbook", title: "Incident runbook", body_md: "# Runbook" } })
+        : baseFetch(input, init),
+    );
+    // user-event installs its own clipboard; the page only needs a secure context.
+    const secure = Object.getOwnPropertyDescriptor(window, "isSecureContext");
+    onTestFinished(() => {
+      if (secure) Object.defineProperty(window, "isSecureContext", secure);
+      else Reflect.deleteProperty(window, "isSecureContext");
     });
+    Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
     const route = <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />;
 
-    // No placement the server would read as a link: nothing is written.
-    renderWithRouter(`/pages/hello/edit?add_link=${relatedId}`, route);
-    await screen.findByText("Couldn't add the link to Incident runbook automatically. Insert it with the editor's link tool.");
-    expect(codeMirrorView().state.doc.toString()).toBe(loaded);
+    renderWithRouter(`/pages/hello/edit?suggest_link=${relatedId}`, route);
+    const notice = (await screen.findByText("Incident runbook")).closest(".editor-related-link-notice") as HTMLElement;
+    expect(notice).toHaveTextContent("Add a link to Incident runbook to this page. Copy the text below and paste it where it fits.");
+    const snippet = `[Incident runbook](/p/11111111-1111-4111-8111-111111111111/${relatedId})`;
+    expect(within(notice).getByText(snippet)).toBeInTheDocument();
+    await typist().click(within(notice).getByRole("button", { name: "Copy the link text" }));
+    await waitFor(() => expect(within(notice).getByRole("button", { name: "Copy the link text" })).toHaveTextContent("Copied"));
+    expect(await navigator.clipboard.readText()).toBe(snippet);
+    expect(codeMirrorView().state.doc.toString()).toBe("# Hello");
+    await typist().click(within(notice).getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText(snippet)).not.toBeInTheDocument();
     cleanup();
 
-    serverParsesLink = true;
-    renderWithRouter(`/pages/hello/edit?add_link=${relatedId}`, route);
-    await screen.findByText("Added a link to Incident runbook under “Related pages”. Review it, then save.");
-    const added = `${loaded}\n\n## Related pages\n\n- [Incident runbook](/p/11111111-1111-4111-8111-111111111111/${relatedId})\n`;
-    await waitFor(() => expect(codeMirrorView().state.doc.toString()).toBe(added));
-    expect(syncStatus()).not.toHaveTextContent(/^Saved$/);
-
-    await typist().click(screen.getByRole("button", { name: "Undo the added link to Incident runbook" }));
-    await waitFor(() => expect(codeMirrorView().state.doc.toString()).toBe(loaded));
-    expect(screen.queryByText(/Added a link to Incident runbook/)).not.toBeInTheDocument();
+    // Only a page id is accepted: anything else never reaches an API path.
+    fetchMock.mockClear();
+    renderWithRouter("/pages/hello/edit?suggest_link=..%2F..%2Fzz-probe", route);
+    await screen.findByLabelText("Markdown body");
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("zz-probe"))).toBe(false);
+    expect(document.querySelector(".editor-related-link-notice")).toBeNull();
   });
 
   it("switches to split mode with a resizable separator", async () => {

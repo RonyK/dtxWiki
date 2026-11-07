@@ -13,6 +13,7 @@ from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.policy.trust_boundaries import actor_can_read_drafts
 from backend.repositories.context_visibility import (
+    visible_context_page_expression,
     visible_context_version_expression,
     visible_context_version_id,
 )
@@ -360,9 +361,9 @@ class LintService:
         A pair finding ("these two pages ...") says nothing without its second
         page and would leak that page's identifier, so it follows its target's
         rule: excluded BEFORE count/pagination, failing CLOSED when the related
-        page is missing. Only rows of rules that declare a related page are
-        read, and the stored action is parsed here rather than in SQL so both
-        dialects share one path without a column of its own.
+        page is missing or deleted (archived). Only rows of rules that declare
+        a related page are read, and the stored action is parsed here rather
+        than in SQL so both dialects share one path without a column of its own.
         """
         related_page_keys = self.lint_registry.related_page_keys()
         if not related_page_keys:
@@ -413,7 +414,9 @@ class LintService:
                         workspace_id=workspace_id,
                         conditions=(
                             ContextPage.id.in_(wanted[offset : offset + 400]),
-                            visible_context_version_expression(actor).is_not(None),
+                            # Ordinary page visibility: a deleted (archived)
+                            # page is gone even though its version remains.
+                            visible_context_page_expression(actor),
                         ),
                     ).with_only_columns(ContextPage.id)
                 ).all()

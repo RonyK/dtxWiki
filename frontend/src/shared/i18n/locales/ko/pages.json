@@ -419,12 +419,15 @@
     },
     "publishedReviewCompletedReloadFailed": "검토를 승인했지만 게시된 페이지를 다시 불러오지 못했습니다.",
     "reloadLatestFailed": "최신 서버 버전을 다시 불러오지 못했습니다.",
-    "relatedLinksHeading": "관련 문서",
-    "relatedLinkAdded": "{{title}} 링크를 ‘관련 문서’ 아래에 넣었습니다. 확인한 뒤 저장하세요.",
     "relatedLinkPresent": "이 문서 본문에 이미 {{title}} 링크가 있습니다. 게시하면 린트 항목이 해결됩니다.",
-    "relatedLinkRemove": "되돌리기",
-    "relatedLinkRemoveAria": "넣은 {{title}} 링크 되돌리기",
-    "relatedLinkManual": "{{title}} 링크를 자동으로 넣지 못했습니다. 편집기의 링크 삽입으로 직접 넣어 주세요."
+    "relatedLinkSuggest": "이 문서 본문에 {{title}} 링크를 넣어 주세요. 아래 문구를 복사해 원하는 위치에 붙여 넣으면 됩니다.",
+    "relatedLinkUnavailable": "링크할 문서를 불러오지 못했습니다.",
+    "relatedLinkCopy": "복사",
+    "relatedLinkCopied": "복사됨",
+    "relatedLinkCopyAria": "링크 문구 복사",
+    "relatedLinkSelected": "문구를 선택했습니다. Ctrl+C를 눌러 복사하세요.",
+    "relatedLinkCopyUnavailable": "여기서는 복사할 수 없습니다. 문구를 직접 선택해 복사하세요.",
+    "relatedLinkDismiss": "안내 닫기"
   },
   "blocks": {
     "groups": {

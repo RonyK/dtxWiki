@@ -589,12 +589,12 @@ def test_pair_finding_names_its_related_page_only_to_actors_who_can_read_it(
     session_factory,
 ):
     # One finding, one related page: a never-published draft the owner can read
-    # and the viewer cannot. Database case because draft visibility is the SQL
+    # and the viewer cannot. Database case because page visibility is the SQL
     # expression list_findings filters on. The owner is the control: the same
     # row comes back to them with the page titled at read time, so the
     # viewer's exclusion (from the total too, and on a direct-id decide) is the
-    # related-page gate, not a broken query. A deleted related page takes the
-    # same path (no visible row), so it needs no case of its own.
+    # related-page gate, not a broken query. Deleting the page archives it and
+    # keeps its version, so the same row must then disappear for the owner too.
     import json
 
     from backend.models.context import ContextPageVersion
@@ -691,6 +691,9 @@ def test_pair_finding_names_its_related_page_only_to_actors_who_can_read_it(
                 actor_id="viewer-user",
                 actor=viewer,
             )
+        draft.lifecycle_status = "archived"
+        session.flush()
+        after_delete = svc.list_findings(session, wsid, actor=owner)
 
     assert (viewer_list.total, viewer_list.findings) == (0, [])
     assert owner_list.total == 1
@@ -706,6 +709,7 @@ def test_pair_finding_names_its_related_page_only_to_actors_who_can_read_it(
             ],
         )
     ]
+    assert (after_delete.total, after_delete.findings) == (0, [])
 
 
 def test_get_run_hides_draft_only_finding_count_from_viewer(session_factory):

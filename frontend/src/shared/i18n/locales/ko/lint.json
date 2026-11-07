@@ -119,8 +119,8 @@
     "evidence_one": "AI 대화 {{count}}건이 함께 읽었지만 서로 링크하지 않습니다 · 최근 30일",
     "evidence_other": "AI 대화 {{count}}건이 함께 읽었지만 서로 링크하지 않습니다 · 최근 30일",
     "row": "{{source}}에 {{target}} 링크",
-    "add": "추가",
-    "addAria": "{{source}}에 {{target}} 링크 추가"
+    "add": "편집",
+    "addAria": "{{source}}에 {{target}} 링크 넣으러 편집"
   },
   "rules": {
     "md_heading_hierarchy": {

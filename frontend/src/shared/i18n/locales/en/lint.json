@@ -119,8 +119,8 @@
     "evidence_one": "{{count}} AI conversation read both pages, but neither links to the other · last 30 days",
     "evidence_other": "{{count}} AI conversations read both pages, but neither links to the other · last 30 days",
     "row": "Link to {{target}} in {{source}}",
-    "add": "Add",
-    "addAria": "Add a link to {{target}} in {{source}}"
+    "add": "Edit",
+    "addAria": "Edit {{source}} to add a link to {{target}}"
   },
   "rules": {
     "md_heading_hierarchy": {

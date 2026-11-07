@@ -1084,7 +1084,7 @@ describe("LintScreen", () => {
     expect(within(nullRow).queryByRole("link")).toBeNull();
     expect(within(nullRow).getByText("Context page")).toBeInTheDocument();
     // A link-pair finding names both pages, links the second one, and offers
-    // both directions; each opens the source page's editor with the link added.
+    // both directions; each opens the source page's editor with the link to paste.
     const pairRow = screen
       .getByText("Read together, not linked")
       .closest(".lint-finding-card") as HTMLElement;
@@ -1098,11 +1098,11 @@ describe("LintScreen", () => {
       within(pairRow).getByRole("link", { name: "Open related Incident runbook" }),
     ).toHaveAttribute("href", `${workspace}/context/pages/${relatedId}`);
     expect(
-      within(pairRow).getByRole("link", { name: "Add a link to Incident runbook in Ranking guide" }),
-    ).toHaveAttribute("href", `${workspace}/context/pages/${contextId}/edit?add_link=${relatedId}`);
+      within(pairRow).getByRole("link", { name: "Edit Ranking guide to add a link to Incident runbook" }),
+    ).toHaveAttribute("href", `${workspace}/context/pages/${contextId}/edit?suggest_link=${relatedId}`);
     expect(
-      within(pairRow).getByRole("link", { name: "Add a link to Ranking guide in Incident runbook" }),
-    ).toHaveAttribute("href", `${workspace}/context/pages/${relatedId}/edit?add_link=${contextId}`);
+      within(pairRow).getByRole("link", { name: "Edit Incident runbook to add a link to Ranking guide" }),
+    ).toHaveAttribute("href", `${workspace}/context/pages/${relatedId}/edit?suggest_link=${contextId}`);
     expect(within(pairRow).queryByText("add_cross_link")).toBeNull();
   });
 

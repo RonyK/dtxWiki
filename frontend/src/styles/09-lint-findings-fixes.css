@@ -602,8 +602,22 @@ a.lint-target-chip:focus-visible {
     display: contents;
   }
 
+  /* No column gap: an empty checkbox or menu track (resolved findings,
+     viewers, coverage gaps) would otherwise push the message 8px past the
+     full-width rows below it. The controls keep their spacing as margins, and
+     the body's lost block padding returns at the bottom. */
   .lint-finding-card__main {
+    column-gap: 0;
     row-gap: 6px;
+    padding-bottom: 16px;
+  }
+
+  .lint-finding-card__main > .lint-row-selector {
+    margin-right: 8px;
+  }
+
+  .lint-finding-card__main > .action-menu {
+    margin-left: 8px;
   }
 
   .lint-finding-card .lint-finding-message {

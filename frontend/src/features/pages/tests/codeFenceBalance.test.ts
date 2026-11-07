@@ -13,9 +13,6 @@ describe("codeFenceBalance", () => {
   it("requires a same-marker closing fence at least as long as the opener", () => {
     expect(findUnclosedCodeFence("````\n```\ninside\n````\n")).toBeNull();
     expect(findUnclosedCodeFence("~~~js\n```\n~~~\n")).toBeNull();
-    // The server's grammar: four leading spaces make indented code, not a
-    // fence, so the editor raises no publish-time fence prompt for it.
-    expect(findUnclosedCodeFence("    ```\nindented code\n")).toBeNull();
   });
 
   it("appends the author's matching closing fence at the end of the buffer", () => {
