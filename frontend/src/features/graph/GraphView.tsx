@@ -23,7 +23,10 @@ import { localEdgeKindLabel, type LocalViewContext } from "./local/localRelation
 import type { RovingSelectionOrigin as LocalGraphSelectionOrigin } from "./shared/relationList/useRovingList";
 import { localSceneScopeKey } from "./local/sceneScope";
 import { GraphEdgeCue, GraphNodeCue, GraphSeedCue } from "./shared/GraphCues";
-import { GRAPH_NODE_VISUALS, readGraphTokens, type GraphEdgeVisualKind, type GraphNodeVisualKind } from "./shared/graphTokens";
+import { GRAPH_NODE_VISUALS, isActionEdgeVisualKind, readGraphTokens, type GraphEdgeVisualKind, type GraphNodeVisualKind } from "./shared/graphTokens";
+import { hasSessionDetails, SessionActivityDetails } from "./shared/SessionActivityDetails";
+import { isSessionGroupNode, isSessionNode } from "./shared/sessionNodes";
+import { sessionRelationSummary, withSessionLabels } from "./sessionActivity";
 import type { GraphRenderScene } from "./shared/rendererTypes";
 import type {
   GraphEdge,
@@ -79,12 +82,17 @@ export function GraphView({
   onRefresh,
   onExpand,
   onHistoryModeChange,
-  payload,
-  staticPayload = payload,
+  payload: wirePayload,
+  staticPayload: wireStaticPayload = wirePayload,
   workspaceGraphHref,
   workspaceId = null,
 }: GraphViewProps) {
   const { t } = useTranslation("graph");
+  const { t: tChats } = useTranslation("chats");
+  // Conversations are named once here, as their own screens name them.
+  const payload = useMemo(() => withSessionLabels(wirePayload, t, tChats), [t, tChats, wirePayload]);
+  const staticPayload = useMemo(() => wireStaticPayload === wirePayload ? payload
+    : withSessionLabels(wireStaticPayload, t, tChats), [payload, t, tChats, wirePayload, wireStaticPayload]);
   const canvasRef = useRef<GraphCanvasHandle | null>(null);
   const graphRegionRef = useRef<HTMLElement | null>(null);
   const selectionOriginRef = useRef<{
@@ -100,7 +108,8 @@ export function GraphView({
   const [showFuture, setShowFuture] = useState(false);
   const [hoveredEventId, setHoveredEventId] = useState<string | null>(null);
   const [dismissedCoverageKey, setDismissedCoverageKey] = useState<string | null>(null);
-  const [historyVisibility, setHistoryVisibility] = useState({ recorded: true, background: true });
+  // Structure-only looks (outline, structure map) are counted but start hidden.
+  const [historyVisibility, setHistoryVisibility] = useState({ recorded: true, background: true, referenced: false });
   const [listOpen, setListOpen] = useState(false);
   // The list's search, open groups and pages, kept while the canvas shows.
   const listMemoryRef = useRef<LocalListMemory | null>(null);
@@ -158,12 +167,15 @@ export function GraphView({
   const depthBusy = Boolean(busyAction?.startsWith("depth:") || busyAction?.startsWith("mode:"));
   const recordedEdgeIds = useMemo(() => new Set([
     ...sortedTimeline(payload).flatMap((event) => [...(event.edge_ids ?? []), ...(event.edge_snapshots ?? []).map((edge) => edge.id)]),
-    ...payload.edges.filter((edge) => localEdgeVisualKind(edge.edge_kind) === "action").map((edge) => edge.id),
+    ...payload.edges.filter((edge) => isActionEdgeVisualKind(localEdgeVisualKind(edge.edge_kind))).map((edge) => edge.id),
   ]), [payload]);
-  const applyHistoryVisibility = useCallback((value: GraphScene): GraphScene => !historical ? value : ({
-    ...value,
-    edges: value.edges.filter((edge) => recordedEdgeIds.has(edge.id) ? historyVisibility.recorded : historyVisibility.background),
-  }), [historical, historyVisibility, recordedEdgeIds]);
+  const referencedCount = useMemo(() => payload.edges.filter((edge) => edge.action_kind === "referenced").length, [payload]);
+  const applyHistoryVisibility = useCallback((value: GraphScene): GraphScene => {
+    if (!historical) return value;
+    const edges = value.edges.filter((edge) => (edge.action_kind !== "referenced" || historyVisibility.referenced)
+      && (recordedEdgeIds.has(edge.id) ? historyVisibility.recorded : historyVisibility.background));
+    return withoutDetachedSessions(value.nodes, edges, value.edges);
+  }, [historical, historyVisibility, recordedEdgeIds]);
   const timeline = useMemo(
     () => localizedGraphTimeline(payload, filters, t, applyHistoryVisibility),
     [applyHistoryVisibility, filters, payload, t],
@@ -673,7 +685,7 @@ export function GraphView({
   const emptyView = <>
     <p>{t(hiddenByChoice ? "graph.view.allHidden" : "graph.view.noRelations")}</p>
     {hiddenByChoice ? <button className="inline-action" type="button" onClick={() => {
-      setFilters(facets); setHistoryVisibility({ recorded: true, background: true });
+      setFilters(facets); setHistoryVisibility((state) => ({ ...state, recorded: true, background: true }));
     }}>{t("graph.filters.clearAll")}</button> : historical ? null : <small>{t("graph.view.addRelations")}</small>}
   </>;
   const coverageShown = !!coverageNotice && dismissedCoverageKey !== coverageKey;
@@ -735,6 +747,15 @@ export function GraphView({
               {kind === "recorded" ? <GraphPreviewBadge /> : null}
               <span>{kind === "recorded" ? recordedEdgeIds.size : payload.edges.filter((edge) => !recordedEdgeIds.has(edge.id)).length}</span>
             </button>)}
+            {historical && referencedCount > 0 ? <button type="button" aria-pressed={historyVisibility.referenced}
+              className="graph-local-relation-chip graph-local-relation-chip-actionReference"
+              title={t("graph.historyUi.referencedHint")}
+              onClick={() => setHistoryVisibility((state) => ({ ...state, referenced: !state.referenced }))}>
+              <GraphEdgeCue className="graph-local-relation-line" kind="actionReference" width={18}
+                color={nodeVisuals.tokens.edge.actionReference} />
+              {t("graph.historyUi.referenced")}
+              <span>{referencedCount}</span>
+            </button> : null}
           </div>
       <details
         aria-label={t("graph.filters.heading", { defaultValue: "Graph filters" })}
@@ -754,6 +775,7 @@ export function GraphView({
           {historical ? <fieldset className="graph-filter-group"><legend>{t("graph.localToolbar.relationships")}</legend><div>
             <label><input type="checkbox" checked={historyVisibility.background} onChange={(e) => setHistoryVisibility((state) => ({ ...state, background: e.target.checked }))} />{t("graph.historyUi.currentRelations")}</label>
             <label><input type="checkbox" checked={historyVisibility.recorded} onChange={(e) => setHistoryVisibility((state) => ({ ...state, recorded: e.target.checked }))} />{t("graph.historyUi.historyRelations")} <GraphPreviewBadge /></label>
+            {referencedCount > 0 ? <label><input type="checkbox" checked={historyVisibility.referenced} onChange={(e) => setHistoryVisibility((state) => ({ ...state, referenced: e.target.checked }))} />{t("graph.historyUi.referenced")} ({referencedCount})</label> : null}
           </div></fieldset> : null}
           <div className="graph-filter-summary">
           <button
@@ -1091,6 +1113,11 @@ const LEGEND_NODE_KINDS = {
   history: ["context", "version", "agent", "library", "conversation", "folder"],
 } as const satisfies Record<string, readonly GraphNodeVisualKind[]>;
 const LEGEND_TIMELINE_MARKS = ["version", "ask", "tool", "review", "activity", "added", "removed"] as const;
+// Current relations draw no activity verb; history draws each verb's stroke.
+const LEGEND_EDGE_KINDS = {
+  current: ["link", "citation", "coAccess", "membership", "action"],
+  history: LOCAL_EDGE_VISUAL_KIND_ORDER,
+} as const satisfies Record<string, readonly GraphEdgeVisualKind[]>;
 
 /**
  * A fixed legend per mode: every glyph and line this mode can draw, in one
@@ -1101,7 +1128,10 @@ function GraphLegend({ historical, nodeVisuals }: { historical: boolean; nodeVis
   const { t } = useTranslation("graph");
   const { tokens, forcedColors } = nodeVisuals;
   const relationNames = (kind: GraphEdgeVisualKind) => {
-    if (kind === "action") return t("graph.legend.edgeNote.action");
+    if (kind === "action") return t(historical ? "graph.legend.edgeNote.actionOther" : "graph.legend.edgeNote.action");
+    if (isActionEdgeVisualKind(kind)) {
+      return localEdgeKindsFor(kind).map((actionKind) => graphLabel(t, "graphActionKind", actionKind)).join(" · ");
+    }
     const names = [...new Set(localEdgeKindsFor(kind).map((edgeKind) => graphLabel(t, "graphEdgeKind", edgeKind)))]
       .filter((name) => name !== t(`graph.legend.edge.${kind}`));
     return names.join(" · ");
@@ -1124,12 +1154,13 @@ function GraphLegend({ historical, nodeVisuals }: { historical: boolean; nodeVis
           ))}
         </ul>
         <ul aria-label={t("graph.legend.edges", { defaultValue: "Relationship line styles" })} className="graph-legend-stack">
-          {LOCAL_EDGE_VISUAL_KIND_ORDER.map((kind) => {
+          {LEGEND_EDGE_KINDS[historical ? "history" : "current"].map((kind) => {
             const names = relationNames(kind);
+            const label = historical && kind === "action" ? "actionOther" : kind;
             return (
               <li data-edge-visual-kind={kind} key={kind}>
                 <GraphEdgeCue color={tokens.edge[kind]} kind={kind} />
-                <span>{t(`graph.legend.edge.${kind}`)}{names ? <small>{names}</small> : null}</span>
+                <span>{t(`graph.legend.edge.${label}`)}{names ? <small>{names}</small> : null}</span>
               </li>
             );
           })}
@@ -1251,6 +1282,9 @@ function GraphDetails({
   const evidence = node?.evidence ?? edge?.evidence;
   const href = node ? nodeHref(node, workspaceId) : null;
   const coAccess = edge ? coAccessSentence(edge, t) : null;
+  const sessionEdge = edge && isSessionNode(nodes.find((item) => item.id === edge.source))
+    ? sessionRelationSummary(edge, t, (value) => formatVersionTimestamp(value)) : null;
+  const detailEdges = [...new Map([...analysis.edges, ...historyEdges].map((entry) => [entry.id, entry])).values()];
   const citationSource = edge && ["citation_page", "citation_source", "citation_agent"].includes(edge.edge_kind)
     ? nodes.find((item) => item.id === edge.source && item.entity_kind === "context_page") : undefined;
   const citationTarget = citationSource && edge ? nodes.find((item) => item.id === edge.target) : undefined;
@@ -1273,6 +1307,10 @@ function GraphDetails({
       {nodeActions?.reason ? <p className="graph-action-reason" id={actionReasonId}>{nodeActions.reason}</p> : null}
       {edge ? <LocalRelationEnds analysis={analysis} catalog={historyNodes} context={listContext} edge={edge} onSelect={onSelect} /> : null}
       {coAccess ? <p className="graph-edge-summary">{coAccess}</p> : null}
+      {sessionEdge ? <p className="graph-edge-summary">{sessionEdge}</p> : null}
+      {node && hasSessionDetails(node) ? <SessionActivityDetails active={active} edges={detailEdges} href={href}
+        node={node} nodes={nodes} workspaceId={workspaceId} /> : null}
+      {node?.records?.length ? <GraphNodeRecords records={node.records} /> : null}
       {/* Expanded documents are seeds too; their path from the current document
           is how a reader reaches the relations between them outside the canvas. */}
       {node ? <LocalSeedPath analysis={analysis} context={listContext} node={node} onSelect={onSelect} /> : null}
@@ -1377,6 +1415,28 @@ function GraphSelectedNodeActions({ actions, node, onCollapse, onExpand, reasonI
   );
 }
 
+/** The change and audit rows folded into a version: one line per action. */
+function GraphNodeRecords({ records }: { records: NonNullable<GraphNode["records"]> }) {
+  const { t } = useTranslation("graph");
+  const byAction = new Map<string, { count: number; last: string }>();
+  for (const record of records) {
+    const entry = byAction.get(record.action_kind);
+    byAction.set(record.action_kind, {
+      count: (entry?.count ?? 0) + 1,
+      last: entry && entry.last > record.occurred_at ? entry.last : record.occurred_at,
+    });
+  }
+  return (
+    <div className="graph-node-records">
+      <h5>{t("graph.details.records")}</h5>
+      <ul>{[...byAction.entries()].map(([action, { count, last }]) => <li key={action}>
+        {graphLabel(t, "graphActionKind", action)} {count > 1 ? `×${count}` : ""}
+        <time dateTime={last}>{formatVersionTimestamp(last)}</time>
+      </li>)}</ul>
+    </div>
+  );
+}
+
 function GraphDetail({ label, value }: { label: string; value: string }) {
   return <><dt>{label}</dt><dd>{value}</dd></>;
 }
@@ -1424,6 +1484,37 @@ function uniqueSceneValues(values: string[]) {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
+/**
+ * A conversation hangs off the seed it used. When filters hide every path
+ * from a seed to a conversation, the conversation goes, and so do the
+ * documents that are in the scene only because it used them. Other nodes
+ * keep the history view's rule: a node stays while its relations are hidden
+ * or not yet recorded.
+ */
+function withoutDetachedSessions(nodes: GraphNode[], edges: GraphEdge[], allEdges: GraphEdge[]): GraphScene {
+  const sessions = new Set(nodes.filter((node) => isSessionNode(node) || isSessionGroupNode(node)).map((node) => node.id));
+  if (!sessions.size) return { nodes, edges };
+  const nonSessionRelation = new Set(allEdges.filter((edge) => !sessions.has(edge.source))
+    .flatMap((edge) => [edge.source, edge.target]));
+  const sessionOnly = new Set(allEdges.filter((edge) => sessions.has(edge.source))
+    .map((edge) => edge.target).filter((id) => !nonSessionRelation.has(id)));
+  const reached = new Set(nodes.filter((node) => node.is_seed).map((node) => node.id));
+  const neighbours = new Map<string, string[]>();
+  for (const edge of edges) {
+    neighbours.set(edge.source, [...(neighbours.get(edge.source) ?? []), edge.target]);
+    neighbours.set(edge.target, [...(neighbours.get(edge.target) ?? []), edge.source]);
+  }
+  const pending = [...reached];
+  while (pending.length) {
+    for (const next of neighbours.get(pending.pop()!) ?? []) {
+      if (!reached.has(next)) { reached.add(next); pending.push(next); }
+    }
+  }
+  const kept = nodes.filter((node) => reached.has(node.id) || !(sessions.has(node.id) || sessionOnly.has(node.id)));
+  const keptIds = new Set(kept.map((node) => node.id));
+  return { nodes: kept, edges: edges.filter((edge) => keptIds.has(edge.source) && keptIds.has(edge.target)) };
+}
+
 function localizedGraphScene(scene: GraphScene, t: TFunction): GraphScene {
   return {
     nodes: scene.nodes,
@@ -1460,10 +1551,10 @@ function localizedGraphTimeline(
     for (const node of timelineNodeSnapshots(event)) nodes.set(node.id, node);
     for (const edge of timelineEdgeSnapshots(event)) edges.set(edge.id, edge);
   }
+  // Each frame once: event i changes the view when frame i differs from i-1.
+  const frames = [-1, ...events.keys()].map((cursor) => applyVisibility(deriveGraphScene(payload, filters, cursor)));
   return events.map((event, index) => {
-    const before = applyVisibility(deriveGraphScene(payload, filters, index - 1));
-    const after = applyVisibility(deriveGraphScene(payload, filters, index));
-    const visibleChange = graphSceneSignature(before) !== graphSceneSignature(after);
+    const visibleChange = !sameGraphScene(frames[index], frames[index + 1]);
     const action = graphLabel(t, "graphActionKind", event.action_kind);
     const edge = [
       ...timelineEdgeSnapshots(event),
@@ -1502,11 +1593,14 @@ function localizedGraphTimeline(
   });
 }
 
-function graphSceneSignature(scene: GraphScene) {
-  return JSON.stringify({
-    edges: scene.edges.map((edge) => edge),
-    nodes: scene.nodes.map((node) => node),
-  });
+/**
+ * Same order and same content. Frames share their unchanged node and edge
+ * objects, so identity settles almost every pair and JSON only the rest.
+ */
+function sameGraphScene(left: GraphScene, right: GraphScene) {
+  const same = <T,>(a: readonly T[], b: readonly T[]) => a.length === b.length
+    && a.every((item, index) => item === b[index] || JSON.stringify(item) === JSON.stringify(b[index]));
+  return same(left.nodes, right.nodes) && same(left.edges, right.edges);
 }
 
 function timelineNodeSnapshots(event: GraphTimelineEvent) {
@@ -1540,6 +1634,10 @@ function localRelationLabel(t: TFunction, kind: GraphEdgeVisualKind) {
     citation: t("graph.localToolbar.citation", { defaultValue: "Citations" }),
     coAccess: t("graph.localToolbar.coAccess", { defaultValue: "Read together" }),
     membership: t("graph.localToolbar.membership", { defaultValue: "Membership" }),
+    actionWrite: t("graph.legend.edge.actionWrite"),
+    actionCite: t("graph.legend.edge.actionCite"),
+    actionRead: t("graph.legend.edge.actionRead"),
+    actionReference: t("graph.legend.edge.actionReference"),
     action: t("graph.localToolbar.action", { defaultValue: "Actions" }),
   };
   return labels[kind];

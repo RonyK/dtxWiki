@@ -4,11 +4,12 @@ import type { WorkspaceMapColumns } from "../../map/sceneColumns";
 import type { GraphVisualTokens } from "../../shared/graphTokens";
 import { WORKSPACE_MAP_PC_10K_BUDGET } from "../../shared/workspaceMapBudget";
 import { WORKSPACE_CLUSTER_RING_IMAGE, buildCosmosRelationColors, buildCosmosSceneBuffers, incidentStar, isDenseWorkspaceMapOverview, isReadableWorkspaceMapScene } from "../cosmosScene";
+import { withActionEdgeColors } from "../../shared/graphTokens";
 
 const tokens: GraphVisualTokens = {
   surface: "#101827",
   node: { context: "#8b5cf6", library: "#0d9488", agent: "#60a5fa", conversation: "#ea580c", folder: "#94a3b8" },
-  edge: { link: "#64748b", citation: "#0d9488", coAccess: "#ea580c", membership: "#64748b", action: "#a78bfa" },
+  edge: withActionEdgeColors({ link: "#64748b", citation: "#0d9488", coAccess: "#ea580c", membership: "#64748b", action: "#a78bfa" }),
   highlight: "#a78bfa", selection: "#f8fafc", ink: "#e5e7eb",
 };
 

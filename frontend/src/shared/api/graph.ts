@@ -74,9 +74,12 @@ export function contextGraphQuery(
     depth: mode === "current" ? depth : 1,
     relation_scope: mode === "current" ? relationScope : "direct",
     time: { mode },
+    // Activity history draws every conversation the server collects for a
+    // document (up to 100) with the documents each used, so it takes the
+    // server's maximum; current relations keep the Local graph's own size.
     budget: mode === "current"
       ? { nodes: 250, edges: 750 }
-      : { nodes: 50, edges: 150 },
+      : { nodes: 500, edges: 1500 },
     cursor: null,
   };
 }

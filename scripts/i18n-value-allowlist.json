@@ -11,8 +11,6 @@
   "context.json:folder.pageFolderCount",
   "graph.json:graph.timeline.entityEvent",
   "graph.json:graph.timeline.edgeEvent",
-  "graph.json:graph.historyUi.kind.ask",
-  "graph.json:graph.historyUi.kind.tool",
   "graph.json:graph.list.counts",
   "graph.json:workspaceGraph.list.documentSummary",
   "graph.json:workspaceGraph.expandedGroups.count",

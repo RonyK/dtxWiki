@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 
 import {
-  GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH, GRAPH_NODE_VISUALS, GRAPH_REMOVED_EDGE_COLOR,
+  GRAPH_EDGE_ARROW, GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH, GRAPH_NODE_VISUALS, GRAPH_REMOVED_EDGE_COLOR,
   type GraphEdgeVisualKind, type GraphNodeColorKey, type GraphNodeVisualKind,
 } from "./graphTokens";
 import {
@@ -21,6 +21,10 @@ const EDGE_COLOR_VARIABLE: Record<GraphEdgeVisualKind, string> = {
   citation: "var(--graph-edge-citation, #0f9f8f)",
   coAccess: "var(--graph-edge-co-access, #0284c7)",
   membership: "var(--graph-edge-membership, #8391a7)",
+  actionWrite: "var(--graph-edge-action, #475569)",
+  actionCite: "var(--graph-edge-action, #475569)",
+  actionRead: "var(--graph-edge-action, #475569)",
+  actionReference: "var(--graph-edge-action, #475569)",
   action: "var(--graph-edge-action, #475569)",
 };
 const SURFACE_VARIABLE = "var(--graph-surface, #ffffff)";
@@ -136,11 +140,16 @@ export function GraphEdgeCue({ kind, color, width = 34, className }: {
     : kind === "other" ? 1.5 : Math.max(1.5, GRAPH_EDGE_WIDTH[kind]);
   const stroke = color ?? (kind === "removed" ? GRAPH_REMOVED_EDGE_COLOR
     : kind === "other" ? "var(--ink-muted, #475569)" : EDGE_COLOR_VARIABLE[kind]);
+  const arrow = kind !== "removed" && kind !== "other" && GRAPH_EDGE_ARROW[kind];
+  // The arrowhead ends the sample where the canvas line meets its target.
+  const lineEnd = arrow ? width - 6 : width - 1;
   return (
     <svg aria-hidden="true" className={["graph-edge-cue", className].filter(Boolean).join(" ")}
+      data-edge-arrow={arrow ? "target" : undefined}
       data-edge-visual-kind={kind} height="10" viewBox={`0 0 ${width} 10`} width={width}>
-      <line strokeDasharray={pattern?.join(" ")} strokeWidth={strokeWidth} x1="1" x2={width - 1} y1="5" y2="5"
+      <line strokeDasharray={pattern?.join(" ")} strokeWidth={strokeWidth} x1="1" x2={lineEnd} y1="5" y2="5"
         {...paint("stroke", stroke)} />
+      {arrow ? <path d={`M${width - 7} 1.5 L${width - 0.5} 5 L${width - 7} 8.5 Z`} {...paint("fill", stroke)} /> : null}
     </svg>
   );
 }

@@ -11,6 +11,7 @@ from backend.api.deps import (
     WorkspaceSessionFactoryDep,
     WorkspaceViewerAccessDep,
     read_service_error_response,
+    workspace_labs_feature_enabled,
 )
 from backend.api.read import REST_ERROR_RESPONSES
 from backend.schemas.graph import (
@@ -31,6 +32,7 @@ from backend.services.workspace_graph_capability import (
     usage_relation_signals_enabled,
     workspace_graph_capability,
 )
+from backend.utils.actor_display import DeferredIdentityLabels
 
 router = APIRouter(prefix="/workspaces", tags=["graph"])
 
@@ -74,7 +76,7 @@ def query_graph(
     workspace_id: UUID,
     request_body: GraphQueryRequest,
     actor: RestActorDep,
-    _access: WorkspaceViewerAccessDep,
+    access: WorkspaceViewerAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
     control_session_factory: SessionFactoryDep,
 ):
@@ -86,19 +88,31 @@ def query_graph(
             usage_signals = usage_relation_signals_enabled(
                 control_session, workspace_id
             )
+        # Activity history names an Ask session only for a reader who can
+        # open it, and the Ask screen is a Labs experiment.
+        ask_sessions_visible = workspace_labs_feature_enabled(
+            workspace_id, access, control_session_factory, "ask"
+        )
+        deferred_identity = DeferredIdentityLabels()
         with session_factory() as session:
             # Candidates, rank denominators, hydration and history are separate
             # statements; one snapshot keeps them describing one state.
             acquire_consistent_read_snapshot(session)
-            return {
-                "data": svc.graph_query.query(
-                    session,
-                    workspace_id,
-                    request=request_body,
-                    actor=actor,
-                    usage_signals_enabled=usage_signals,
-                )
-            }
+            payload = svc.graph_query.query(
+                session,
+                workspace_id,
+                request=request_body,
+                actor=actor,
+                usage_signals_enabled=usage_signals,
+                ask_sessions_visible=ask_sessions_visible,
+                deferred_identity=deferred_identity,
+            )
+        # People's names are identity-plane rows: one read, after the
+        # workspace session has closed.
+        if deferred_identity.pending_user_ids:
+            with control_session_factory() as identity_session:
+                deferred_identity.apply(identity_session)
+        return {"data": payload}
     except ReadServiceError as exc:
         return read_service_error_response(exc)
 

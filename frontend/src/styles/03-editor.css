@@ -7427,6 +7427,16 @@ button.graph-seed-path-node:hover { background: var(--surface-hover); }
 .graph-details-more > summary { display: grid; place-items: center; min-width: 36px; min-height: 36px; border: 1px solid var(--border); border-radius: 7px; color: var(--ink-muted); cursor: pointer; }
 .graph-details-more > div { position: absolute; right: 0; bottom: calc(100% + 5px); z-index: 2; width: 180px; padding: 6px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); box-shadow: 0 5px 20px #0002; }
 .graph-details-more :is(button, a) { display: block; width: 100%; min-height: 36px; padding: 8px; border: 0; background: transparent; font: inherit; font-size: 12px; color: var(--ink); text-align: left; text-decoration: none; cursor: pointer; }
+/* A conversation: what it did here and with what result, then its flow. */
+.graph-session-details, .graph-node-records { padding: 8px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
+.graph-session-details h5, .graph-node-records h5 { margin: 0; font-size: 12px; }
+.graph-session-details * + h5 { margin-top: 10px; }
+.graph-session-details p { margin: 6px 0 0; color: var(--ink-muted); }
+.graph-session-facts, .graph-node-records ul { display: grid; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; }
+.graph-session-flow { display: grid; gap: 4px; margin: 6px 0 0; padding-left: 1.25rem; }
+.graph-session-flow strong { font-weight: 650; }
+.graph-session-list-link { display: inline-block; margin-top: 8px; }
+.graph-node-records time { margin-left: 6px; color: var(--ink-muted); font-size: 11px; }
 .graph-canvas-coverage .graph-local-coverage-info > summary { min-height: 22px; padding: 0; background: transparent; border: 0; }
 .graph-canvas-coverage .graph-local-coverage-panel { z-index: 10; }
 @container graph-view (max-width: 760px) {

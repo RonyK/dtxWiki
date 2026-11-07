@@ -4,7 +4,7 @@ import type { GraphRenderScene } from "../../shared/rendererTypes";
 import { createLocalLayout } from "../layout";
 import { LOCATE_TRACE_MS } from "../locateTrace";
 import { buildLocalScene } from "../sceneInput";
-import { createSigmaGraphAdapter, type SigmaGraphAdapter } from "../sigmaAdapter";
+import { createSigmaGraphAdapter, LOCAL_MIN_NODE_SCALE, localNodeSizeScale, type SigmaGraphAdapter } from "../sigmaAdapter";
 
 const state = vi.hoisted(() => ({
   sigma: null as unknown as {
@@ -116,6 +116,27 @@ afterEach(() => {
   adapter.destroy();
   state.labelPass = null;
   vi.unstubAllGlobals();
+});
+
+describe("Local node size", () => {
+  it("never draws two laid-out nodes over each other, and keeps legend size where the scene fits", () => {
+    // The layout separates two nodes by at least the sum of their radii in
+    // layout units. Drawn, they are that far apart times pixels-per-unit and
+    // as wide as their radii times the size scale: no overlap at any zoom
+    // while scale <= pixels-per-unit (above the far zoom-out floor).
+    for (const fit of [0.3, 0.44, 1, 1.7, 3]) {
+      for (const cameraRatio of [0.15, 1 / 6, 0.5, 1, 1.5, 3]) {
+        const pixelsPerUnit = fit / cameraRatio;
+        expect(localNodeSizeScale(pixelsPerUnit, cameraRatio))
+          .toBeLessThanOrEqual(Math.max(pixelsPerUnit, LOCAL_MIN_NODE_SCALE) + 1e-9);
+      }
+    }
+    // A scene that fits keeps the legend's sizes, and zooming in still grows them.
+    expect(localNodeSizeScale(1.7, 1)).toBe(1);
+    expect(localNodeSizeScale(1.7 * 6, 1 / 6)).toBeCloseTo(Math.sqrt(6));
+    // A large scene fitted at 0.44 px per unit draws its glyphs at 0.44.
+    expect(localNodeSizeScale(0.44, 1)).toBeCloseTo(0.44);
+  });
 });
 
 describe("Local Sigma interactions", () => {

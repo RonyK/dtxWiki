@@ -7,6 +7,7 @@ import { createWorkspaceCosmosAdapter, type WorkspaceCosmosAdapter } from "../co
 import { buildCosmosSceneBuffers } from "../cosmosScene";
 import type { GraphConfig } from "../cosmosNative";
 import { createWorkspaceNativePointPicker } from "../nativePointPicker";
+import { withActionEdgeColors } from "../../shared/graphTokens";
 
 const { graph, createNativeGraph, cpu } = vi.hoisted(() => {
   let positions = new Float32Array();
@@ -73,7 +74,7 @@ vi.mock("../nativePointPicker", async (importOriginal) => {
 const tokens: GraphVisualTokens = {
   surface: "#ffffff",
   node: { context: "#7c3aed", library: "#0f9f8f", agent: "#2563eb", conversation: "#ea580c", folder: "#64748b" },
-  edge: { link: "#64748b", citation: "#0f9f8f", coAccess: "#ea580c", membership: "#94a3b8", action: "#7c3aed" },
+  edge: withActionEdgeColors({ link: "#64748b", citation: "#0f9f8f", coAccess: "#ea580c", membership: "#94a3b8", action: "#7c3aed" }),
   highlight: "#7c3aed", selection: "#0f172a", ink: "#0f172a",
 };
 // The 20K corpus shape: one dominant link component, the unlinked residue, and two-document pairs.

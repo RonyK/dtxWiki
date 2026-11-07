@@ -23,6 +23,8 @@ export type GraphRenderNode = {
   entity_kind?: string;
   entity_id?: string;
   entityKind?: string;
+  /** Who acted, for a conversation: its client ("Claude Code") or person. */
+  actor_label?: string | null;
   grain?: string;
   referenceCount?: number;
   metricSized?: boolean;

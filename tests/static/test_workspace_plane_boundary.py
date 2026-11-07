@@ -1151,6 +1151,18 @@ ACTOR_DISPLAY_IDENTITY_READERS: dict[str, str] = {
         "method and measured by "
         "test_single_session_identity_label_read_dies_on_a_real_shard."
     ),
+    "backend/api/graph.py": (
+        "FIXED. query_graph runs the scene on WorkspaceSessionFactoryDep, closes "
+        "it, then applies DeferredIdentityLabels on SessionFactoryDep (control)."
+    ),
+    "backend/services/graph_query_service.py": (
+        "FIXED. Holds a DeferredIdentityLabels sink and records a request per "
+        "Ask session node; it never reads `users` itself."
+    ),
+    "backend/services/graph_session_activity.py": (
+        "FIXED. Uses only workspace_plane_actor_display_names (no read) for the "
+        "Ask session placeholder label; the person's name is deferred."
+    ),
     "backend/repositories/context_page_repo.py": (
         "UNFIXED. insert_version(:328) labels the version author with "
         "resolve_actor_display_name on the writing (workspace) session."

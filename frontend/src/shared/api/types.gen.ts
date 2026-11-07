@@ -7012,6 +7012,9 @@ export interface components {
         GraphNode: {
             /** Actor Label */
             actor_label?: string | null;
+            /** Aggregate Count */
+            aggregate_count?: number | null;
+            chat_presentation?: components["schemas"]["McpChatPresentationDescriptor"] | null;
             /**
              * Entity Id
              * Format: uuid
@@ -7038,8 +7041,31 @@ export interface components {
             occurred_at?: string | null;
             /** Path */
             path?: string | null;
+            /** Records */
+            records?: components["schemas"]["GraphNodeRecord"][];
             /** Status */
             status?: string | null;
+        };
+        /**
+         * GraphNodeRecord
+         * @description One lifecycle fact folded into the node it names.
+         *
+         *     Activity history draws one edit as one version node. The change and audit
+         *     rows that name that version ride on it here instead of becoming nodes.
+         */
+        GraphNodeRecord: {
+            /** Action Kind */
+            action_kind: string;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /**
+             * Source Kind
+             * @enum {string}
+             */
+            source_kind: "change_operation" | "audit_event";
         };
         /** GraphOmission */
         GraphOmission: {
@@ -8943,6 +8969,31 @@ export interface components {
             right_lines?: number[] | null;
             /** Right Op Index */
             right_op_index: number;
+        };
+        /**
+         * McpChatPresentationDescriptor
+         * @description Read-time facts from which a localized chat label can be composed.
+         *
+         *     The backend ranks locale-neutral evidence only. ``subject`` is never built
+         *     by parsing result-summary prose or by inferring an external user's prompt.
+         */
+        McpChatPresentationDescriptor: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "search" | "read" | "create" | "edit" | "cite" | "guide" | "other";
+            /** Primary Tool Name */
+            primary_tool_name: string | null;
+            /** Subject */
+            subject: string | null;
+            /** Subject Kind */
+            subject_kind: string | null;
+            /**
+             * Title Source
+             * @enum {string}
+             */
+            title_source: "user" | "artifact" | "query" | "input_text" | "target_kind" | "tool" | "generic";
         };
         /** McpChatPreviewPurgeResponse */
         McpChatPreviewPurgeResponse: {
