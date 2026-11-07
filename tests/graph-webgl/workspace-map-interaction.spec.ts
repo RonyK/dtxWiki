@@ -598,7 +598,8 @@ test("native 2k active full titles do not overprint adjacent selection and focus
       return { id: (element as HTMLElement).dataset.nodeId, title: element.textContent,
         full: (element as HTMLElement).dataset.fullTitle, x: rectangle.x, y: rectangle.y,
         right: rectangle.right, bottom: rectangle.bottom, width: rectangle.width, height: rectangle.height,
-        background: css.backgroundColor, pointerEvents: css.pointerEvents };
+        textStrokeWidth: Number.parseFloat(css.getPropertyValue("-webkit-text-stroke-width")),
+        paintOrder: css.getPropertyValue("paint-order"), pointerEvents: css.pointerEvents };
     }));
   expect(measured).toHaveLength(2);
   for (let left = 0; left < measured.length; left++) {
@@ -606,7 +607,8 @@ test("native 2k active full titles do not overprint adjacent selection and focus
     expect(label.full).toBe("true");
     expect(label.width).toBeGreaterThan(0);
     expect(label.height).toBeGreaterThan(0);
-    expect(label.background).not.toBe("rgba(0, 0, 0, 0)");
+    expect(label.textStrokeWidth).toBeGreaterThan(0);
+    expect(label.paintOrder.trim().split(/\s+/)[0]).toBe("stroke");
     expect(label.pointerEvents).toBe("none");
     expect(label.x).toBeGreaterThanOrEqual(0);
     expect(label.y).toBeGreaterThanOrEqual(0);
