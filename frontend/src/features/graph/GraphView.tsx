@@ -233,7 +233,6 @@ export function GraphView({
         withCoAccessLabels(eventFrame, t), event, showFuture, payload.history.mode === "action", hoveredIndex >= 0, event?.summary)
         : withCoAccessLabels(scene, t)),
       scopeKey: canvasScopeKey,
-      freezeLayout: historical,
       currentId: currentNode?.id ?? null,
     };
   }, [applyHistoryVisibility, canvasScopeKey, currentNode, filters, historical, historyCatalog, hoveredEventId, payload, scene, showFuture, t, timeline, visibleCursor]);

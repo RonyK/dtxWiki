@@ -174,7 +174,6 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
               positions: positionsRef.current,
               reducedMotion,
               ...(callbacksRef.current.viewportInsets ? { viewportInsets: () => callbacksRef.current.viewportInsets!() } : {}),
-              ...(sceneRef.current.freezeLayout ? { freezeLayout: true } : {}),
               showLabels: showLabelsRef.current,
               callbacks: {
                 onHover: (id) => callbacksRef.current.onHover(id),
@@ -277,10 +276,10 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       const update = adapter.replaceScene(scene);
       lastAppliedSceneRef.current = scene;
       pendingSceneRef.current = null;
-      // Metadata updates retain live interaction state. Replaying saved pins
+      // Incremental updates retain live interaction state. Replaying saved pins
       // would rewind an ongoing drag; replaying focus would discard pointer
       // hover. Independent prop effects still apply actual state changes.
-      if (update === "metadata") return;
+      if (update === "metadata" || update === "topology") return;
       // A rebuilt scene resets elements, so unchanged external state must be
       // reconciled after a filter/timeline round-trip.
       adapter.select(selectedIdRef.current);
@@ -305,7 +304,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       const update = adapter.replaceScene(pendingScene);
       lastAppliedSceneRef.current = pendingScene;
       pendingSceneRef.current = null;
-      if (update !== "metadata") {
+      if (update !== "metadata" && update !== "topology") {
         adapter.select(selectedIdRef.current);
         adapter.focus(focusedIdRef.current);
         for (const id of pinnedIdsRef.current) {

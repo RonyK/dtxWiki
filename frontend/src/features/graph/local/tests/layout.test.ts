@@ -195,4 +195,85 @@ describe("Local d3-force layout", () => {
     expect(layout.getPositions()["page:b"]).toEqual(before["page:b"]);
     expect(layout.getPositions()["page:a"]).toEqual({ x: 200, y: 300 });
   });
+
+  it("lets arriving nodes converge from their neighbor while retaining live pins and releasing departed nodes", async () => {
+    const onTick = vi.fn();
+    const layout = create(seedAndNeighbors, { autoStart: false, onTick });
+    layout.pin("page:a", { x: 80, y: 40 });
+    layout.beginDrag("page:b", { x: -70, y: 30 });
+    const before = layout.getPositions();
+    const arrived: LocalLayoutInput = {
+      nodes: [...seedAndNeighbors.nodes, { key: "page:new", radiusPx: 7, isSeed: false }],
+      edges: [...seedAndNeighbors.edges, { sourceKey: "page:b", targetKey: "page:new", kind: "link", count: 1 }],
+    };
+    layout.update(arrived);
+    const joined = layout.getPositions();
+    expect(joined["page:a"]).toEqual(before["page:a"]);
+    expect(joined["page:b"]).toEqual(before["page:b"]);
+    const arrivalDistance = Math.hypot(joined["page:new"].x - before["page:b"].x,
+      joined["page:new"].y - before["page:b"].y);
+    expect(arrivalDistance).toBeGreaterThan(0);
+    expect(arrivalDistance).toBeLessThan(30);
+
+    const departed: LocalLayoutInput = {
+      nodes: arrived.nodes.filter((node) => node.key !== "page:b"),
+      edges: [seedAndNeighbors.edges[0], { sourceKey: "page:a", targetKey: "page:new", kind: "link", count: 1 }],
+    };
+    layout.update(departed);
+    expect(layout.getPositions()["page:b"]).toBeUndefined();
+    expect(layout.pin("page:b")).toBeNull();
+    expect(() => layout.endDrag("page:b")).not.toThrow();
+    expect(layout.getPositions()["page:new"]).toEqual(joined["page:new"]);
+    layout.resume();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(layout.getPositions()["page:new"]).not.toEqual(joined["page:new"]);
+    expect(layout.getPositions()["page:a"]).toEqual({ x: 80, y: 40 });
+    expect(layout.getPositions()["page:seed"]).toEqual({ x: 0, y: 0 });
+
+    layout.pause();
+    const settled = layout.getPositions();
+    onTick.mockClear();
+    layout.update({ nodes: [...departed.nodes].reverse(), edges: [...departed.edges].reverse() });
+    expect(onTick).not.toHaveBeenCalled();
+    expect(layout.getPositions()).toEqual(settled);
+  });
+
+  it("settles topology changes without animation in reduced motion and does not advance paused updates", async () => {
+    const onTick = vi.fn();
+    const layout = create(seedAndNeighbors, { reducedMotion: true, onTick });
+    const next: LocalLayoutInput = {
+      nodes: [seedAndNeighbors.nodes[0], { key: "page:new", radiusPx: 7, isSeed: false }],
+      edges: [{ sourceKey: "page:seed", targetKey: "page:new", kind: "link", count: 1 }],
+    };
+    onTick.mockClear();
+    layout.update(next, { "page:new": { x: 90, y: 20 } });
+    expect(layout.getPositions()).toEqual({ "page:seed": { x: 0, y: 0 }, "page:new": { x: 90, y: 20 } });
+    expect(onTick).toHaveBeenCalledOnce();
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(onTick).toHaveBeenCalledOnce();
+
+    layout.pause();
+    layout.update({
+      nodes: [...next.nodes, { key: "page:later", radiusPx: 7, isSeed: false }],
+      edges: [...next.edges, { sourceKey: "page:new", targetKey: "page:later", kind: "link", count: 1 }],
+    });
+    const paused = layout.getPositions();
+    expect(Math.hypot(paused["page:later"].x - 90, paused["page:later"].y - 20)).toBeLessThan(30);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(layout.getPositions()).toEqual(paused);
+    layout.resume();
+    expect(layout.getPositions()["page:later"]).not.toEqual(paused["page:later"]);
+    const resumed = layout.getPositions();
+    const atResume = onTick.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(layout.getPositions()).toEqual(resumed);
+    expect(onTick).toHaveBeenCalledTimes(atResume);
+    layout.pause();
+    layout.resume();
+    expect(onTick).toHaveBeenCalledTimes(atResume);
+    layout.setReducedMotion(false);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(layout.getPositions()["page:later"]).not.toEqual(resumed["page:later"]);
+    expect(layout.getPositions()["page:new"]).toEqual({ x: 90, y: 20 });
+  });
 });

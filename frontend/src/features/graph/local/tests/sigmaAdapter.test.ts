@@ -17,7 +17,7 @@ const state = vi.hoisted(() => ({
   layout: {
     destroy: vi.fn(), beginDrag: vi.fn(), moveDrag: vi.fn(), endDrag: vi.fn(),
     pin: vi.fn(() => ({ x: 4, y: 8 })), unpin: vi.fn(), clearPins: vi.fn(),
-    pause: vi.fn(), resume: vi.fn(), getPositions: vi.fn(() => ({})),
+    pause: vi.fn(), resume: vi.fn(), update: vi.fn(), getPositions: vi.fn(() => ({})),
   },
   setCameraState: vi.fn(), animateCamera: vi.fn(),
   setCustomBBox: vi.fn(),
@@ -779,6 +779,53 @@ describe("Local scene refresh boundary", () => {
     const reducer = state.sigma.settings.nodeReducer as (key: string, data: Record<string, unknown>) => Record<string, unknown>;
     return state.sigma.graph.nodes().map((key) => reducer(key, state.sigma.graph.getNodeAttributes(key)).color);
   };
+
+  it("joins and removes timeline members without resetting live pins, drag, selection or camera", () => {
+    adapter.destroy();
+    const initial = { ...cloneScene(), scopeKey: "workspace:appearance", nodes: scene.nodes.map((node) => ({
+      ...node, hidden: node.id === "other",
+    })) };
+    adapter = createSigmaGraphAdapter(state.container!, initial, {
+      callbacks, forcedColors: false, positions: {}, reducedMotion: false,
+    });
+    adapter.pin("neighbor", true, { x: 4, y: 8 });
+    adapter.select("neighbor");
+    state.sigma.emit("downNode", { node: "context_page:neighbor", event: event() });
+    state.sigma.emit("moveBody", { event: event(20, 30) });
+    vi.clearAllMocks();
+
+    const arrived = { ...initial, nodes: scene.nodes, edges: [...scene.edges, {
+      ...scene.edges[0], id: "new-link", source: "neighbor", target: "other",
+    }] };
+    state.layout.getPositions.mockReturnValueOnce({
+      "context_page:seed": { x: 0, y: 0 }, "context_page:neighbor": { x: 20, y: 30 },
+      "context_page:other": { x: 40, y: 35 },
+    });
+    expect(adapter.replaceScene(arrived)).toBe("topology");
+    expect(state.sigma.graph.nodes()).toContain("context_page:other");
+    expect(state.sigma.graph.getEdgeAttributes("new-link")).toHaveProperty("label", "link");
+    expect(state.sigma.graph.getNodeAttributes("context_page:neighbor")).toMatchObject({ x: 20, y: 30 });
+    expect(state.layout.update).toHaveBeenCalledWith(buildLocalScene(arrived).layout,
+      { "context_page:neighbor": { x: 4, y: 8 } });
+    expect(createLocalLayout).not.toHaveBeenCalled();
+    expect(state.layout.destroy).not.toHaveBeenCalled();
+    expect(state.layout.endDrag).not.toHaveBeenCalled();
+    expect(state.setCustomBBox).not.toHaveBeenCalled();
+    expect(state.setCameraState).not.toHaveBeenCalled();
+    expect(callbacks.onSelect).not.toHaveBeenCalled();
+    state.sigma.emit("moveBody", { event: event(30, 45) });
+    expect(state.layout.moveDrag).toHaveBeenLastCalledWith("context_page:neighbor", { x: 30, y: 45 });
+
+    expect(adapter.replaceScene(initial)).toBe("topology");
+    expect(state.sigma.graph.nodes()).not.toContain("context_page:other");
+    // Rewinding past the dragged node must end its transient drag too.
+    const seedOnly = { ...initial, nodes: initial.nodes.map((node) => ({ ...node, hidden: !node.is_seed })), edges: [] };
+    expect(adapter.replaceScene(seedOnly)).toBe("topology");
+    expect(state.sigma.graph.nodes()).toEqual(["context_page:seed"]);
+    expect(state.layout.endDrag).toHaveBeenCalledExactlyOnceWith("context_page:neighbor");
+    expect(callbacks.onPin).not.toHaveBeenCalled();
+    expect(state.setCameraState).not.toHaveBeenCalled();
+  });
 
   it.each([
     { reducedMotion: true, paused: false }, { reducedMotion: true, paused: true },

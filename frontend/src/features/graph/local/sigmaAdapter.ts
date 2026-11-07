@@ -29,12 +29,11 @@ export type SigmaGraphAdapterOptions = {
   initialViewport?: GraphViewport | null;
   positions: Record<string, GraphPoint>;
   reducedMotion: boolean;
-  freezeLayout?: boolean;
   viewportInsets?: () => { top: number; right: number; bottom: number; left: number };
   showLabels?: boolean;
 };
 
-export type LocalSceneUpdate = "metadata" | "rebuild";
+export type LocalSceneUpdate = "metadata" | "topology" | "rebuild";
 
 /** The Local canvas contract; Workspace Map deliberately retains its own adapter. */
 export interface SigmaGraphAdapter {
@@ -243,7 +242,6 @@ export function createSigmaGraphAdapter(
   let nodePresentation = new Map(initialScene.nodes.map((node) => [node.id, node]));
   let edgePresentation = new Map(initialScene.edges.map((edge) => [edge.id, edge]));
   let localScopeKey = initialScene.scopeKey ?? null;
-  let freezeLayout = options.freezeLayout ?? false;
   // Construction coordinates are a restore snapshot, not ongoing pin authority.
   // Keep our own live pins so unpin/reset and later drags survive scene changes
   // without mutating (or rereading) the caller's original snapshot.
@@ -350,7 +348,6 @@ export function createSigmaGraphAdapter(
   });
 
   const loadScene = (scene: GraphRenderScene): LocalSceneUpdate => {
-    freezeLayout = scene.freezeLayout ?? options.freezeLayout ?? false;
     nodePresentation = new Map(scene.nodes.map((node) => [node.id, node]));
     edgePresentation = new Map(scene.edges.map((edge) => [edge.id, edge]));
     const nextLocalScene = buildLocalScene(scene);
@@ -368,6 +365,42 @@ export function createSigmaGraphAdapter(
       refreshHighlight();
       return "metadata";
     }
+    if (layout && nextScopeKey !== null && nextScopeKey === localScopeKey
+      && localScene.geometryKey !== null && nextLocalScene.geometryKey !== null) {
+      // Timeline births/removals change the live force input within the same
+      // query. Keep the simulation, existing coordinates, pins and camera.
+      if (draggingKey && !nextLocalScene.graphIdByKey.has(draggingKey)) {
+        layout.endDrag(draggingKey);
+        draggingKey = null;
+        dragStart = null;
+        dragged = false;
+        suppressClick = true;
+        renderer?.setCustomBBox(null);
+      }
+      const nextIds = new Set([...nextLocalScene.keyByGraphId.keys(), ...nextLocalScene.edges.map((edge) => edge.graphId)]);
+      if (hoveredId && !nextIds.has(hoveredId)) clearHover();
+      localScene = nextLocalScene;
+      // Remove links before endpoints, including links whose wire ID is reused
+      // with different endpoints at a later event.
+      for (const id of graph.edges()) graph.dropEdge(id);
+      for (const key of graph.nodes()) {
+        if (!localScene.graphIdByKey.has(key)) graph.dropNode(key);
+      }
+      layout.update(localScene.layout, visiblePositions(localScene, pinnedPositions));
+      const positions = layout.getPositions();
+      for (const node of localScene.nodes) {
+        const position = positions[node.key] ?? { x: 0, y: 0 };
+        const attributes = { ...position, ...nodeAttributes(node) };
+        if (graph.hasNode(node.key)) graph.mergeNodeAttributes(node.key, attributes);
+        else graph.addNode(node.key, attributes);
+      }
+      for (const edge of localScene.edges) {
+        graph.addEdgeWithKey(edge.graphId, edge.sourceKey, edge.targetKey,
+          edgeAttributes(edge, edgeLabels.get(edge.graphId) ?? ""));
+      }
+      refreshHighlight();
+      return "topology";
+    }
     draggingKey = null;
     dragStart = null;
     dragged = false;
@@ -380,11 +413,11 @@ export function createSigmaGraphAdapter(
     if (renderer) clearHover();
     graph.clear();
     // Recompute from the exact current visible scene. In particular, a filter,
-    // actor, or timeline change must not inherit hidden nodes' old positions.
+    // actor, or query change must not inherit another scope's old positions.
     layout = createLocalLayout(localScene.layout, {
       fixedPositions: visiblePositions(localScene, pinnedPositions),
       onTick: applyPositions,
-      reducedMotion: options.reducedMotion || freezeLayout,
+      reducedMotion: options.reducedMotion,
     });
     const positions = layout.getPositions();
     for (const node of localScene.nodes) {

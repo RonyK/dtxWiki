@@ -106,7 +106,7 @@ describe("GraphCanvas reconciliation", () => {
 
   it.each([
     { path: "active", replayCount: 0 }, { path: "pending", replayCount: 1 },
-  ])("performs no extra reconciliation after an $path metadata refresh", async ({ path, replayCount }) => {
+  ])("performs no extra reconciliation after $path metadata and topology updates", async ({ path, replayCount }) => {
     const payload = graphFixture();
     const scene = deriveGraphScene(payload, graphFacets(payload), null);
     const nextScene = {
@@ -138,11 +138,31 @@ describe("GraphCanvas reconciliation", () => {
     expect(createAdapter).toHaveBeenCalledOnce();
     expect(adapter.destroy).not.toHaveBeenCalled();
 
+    // Timeline arrivals also preserve live drag/pin state in the adapter.
+    // Replaying the saved pin here would move a dragged node back on every birth.
+    const timelineScene = { ...nextScene, nodes: nextScene.nodes.slice(0, 1), edges: [] };
+    if (path === "pending") {
+      view.rerender(<GraphCanvas {...common} active={false} scene={nextScene} />);
+      view.rerender(<GraphCanvas {...common} active={false} scene={timelineScene} />);
+    }
     adapter.replaceScene.mockClear();
     adapter.select.mockClear();
     adapter.focus.mockClear();
     adapter.pin.mockClear();
-    view.rerender(<GraphCanvas {...common} scene={nextScene} focusedId="node:related"
+    adapter.replaceScene.mockReturnValueOnce("topology");
+    view.rerender(<GraphCanvas {...common} scene={timelineScene} />);
+    await waitFor(() => expect(adapter.replaceScene).toHaveBeenCalledWith(timelineScene));
+    expect(adapter.select).toHaveBeenCalledTimes(replayCount);
+    expect(adapter.focus).toHaveBeenCalledTimes(replayCount);
+    expect(adapter.pin).toHaveBeenCalledTimes(replayCount);
+    expect(createAdapter).toHaveBeenCalledOnce();
+    expect(adapter.destroy).not.toHaveBeenCalled();
+
+    adapter.replaceScene.mockClear();
+    adapter.select.mockClear();
+    adapter.focus.mockClear();
+    adapter.pin.mockClear();
+    view.rerender(<GraphCanvas {...common} scene={timelineScene} focusedId="node:related"
       selectedId="node:related" pinnedPositions={{ "node:related": { x: 130, y: -45 } }} />);
     expect(adapter.replaceScene).not.toHaveBeenCalled();
     expect(adapter.select).toHaveBeenCalledExactlyOnceWith("node:related");

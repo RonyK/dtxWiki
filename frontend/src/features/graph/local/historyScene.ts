@@ -2,7 +2,7 @@ import type { GraphQueryPayload, GraphTimelineEvent } from "../../../shared/api/
 import { deriveGraphScene, sortedTimeline, type GraphFilters, type GraphScene } from "../graphModel";
 import type { GraphRenderScene } from "../shared/rendererTypes";
 
-/** Only the actor-authorized, filtered interval is allowed into the layout. */
+/** Collect actor-authorized, filtered records for timeline frames and previews. */
 export function historySceneCatalog(payload: GraphQueryPayload, filters: GraphFilters): GraphScene {
   const nodes = new Map<string, GraphScene["nodes"][number]>();
   const edges = new Map<string, GraphScene["edges"][number]>();
@@ -14,7 +14,7 @@ export function historySceneCatalog(payload: GraphQueryPayload, filters: GraphFi
   return { nodes: [...nodes.values()], edges: [...edges.values()] };
 }
 
-/** Playback changes presentation, never the interval's layout topology. */
+/** Resolve the visible frame and event preview against the interval catalog. */
 export function renderHistoryScene(catalog: GraphScene, frame: GraphScene, eventFrame: GraphScene, event: GraphTimelineEvent | undefined,
   showFuture: boolean, actionMode: boolean, preview = false, caption?: string): GraphRenderScene {
   const nodes = new Map(frame.nodes.map((node) => [node.id, node]));
@@ -51,7 +51,6 @@ export function renderHistoryScene(catalog: GraphScene, frame: GraphScene, event
         highlighted: eventEdges.has(edge.id),
         eventCaption: eventEdge && (seedIds.has(displayed.source) || seedIds.has(displayed.target)) ? caption : undefined,
         removed,
-        layoutCount: edge.count ?? 1,
         label: eventEdges.has(edge.id) && event ? caption ?? displayed.label : displayed.label,
       };
     }),

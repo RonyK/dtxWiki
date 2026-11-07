@@ -37,6 +37,8 @@ export type LocalLayoutOptions = {
 
 export type LocalLayout = {
   getPositions(): LocalLayoutPositions;
+  /** Update the current scope without resetting existing positions or velocities. */
+  update(input: LocalLayoutInput, fixedPositions?: LocalLayoutPositions): void;
   pause(): void;
   resume(): void;
   destroy(): void;
@@ -110,6 +112,21 @@ function normalizeInput(input: LocalLayoutInput): {
   return { nodes, links, seedKey };
 }
 
+function topologyKey(input: ReturnType<typeof normalizeInput>): string {
+  return JSON.stringify([
+    input.seedKey,
+    input.nodes.map((node) => [node.key, node.radiusPx]),
+    input.links.map((link) => [link.source, link.target, link.kind]),
+  ]);
+}
+
+function spawnOffset(key: string): GraphPoint {
+  let hash = 0;
+  for (const character of key) hash = (Math.imul(hash, 31) + character.charCodeAt(0)) >>> 0;
+  const angle = hash / 0x100000000 * Math.PI * 2;
+  return { x: Math.cos(angle) * 16, y: Math.sin(angle) * 16 };
+}
+
 /**
  * A browser-only Local Graph force layout. Initial 300 ticks are synchronous
  * so the first renderer frame receives settled, deterministic coordinates;
@@ -119,12 +136,15 @@ export function createLocalLayout(
   input: LocalLayoutInput,
   options: LocalLayoutOptions = {},
 ): LocalLayout {
-  const { nodes, links, seedKey } = normalizeInput(input);
+  const normalized = normalizeInput(input);
+  let { nodes, seedKey } = normalized;
+  let currentTopologyKey = topologyKey(normalized);
   const byKey = new Map(nodes.map((node) => [node.key, node]));
   const persistentPins = new Set<string>();
   let draggingKey: string | null = null;
   let reducedMotion = Boolean(options.reducedMotion);
   let paused = options.autoStart === false;
+  let pendingTopologySettle = false;
   let destroyed = false;
 
   for (const node of nodes) {
@@ -148,12 +168,13 @@ export function createLocalLayout(
     persistentPins.add(seedKey);
   }
 
+  const linkForce = forceLink<LayoutNode, LayoutLink>(normalized.links)
+    .id((node) => node.key)
+    .distance((link) => link.kind === "membership"
+      ? LOCAL_LAYOUT_PARAMS.membershipDistance
+      : LOCAL_LAYOUT_PARAMS.relationDistance);
   const simulation = forceSimulation<LayoutNode>(nodes).stop()
-    .force("link", forceLink<LayoutNode, LayoutLink>(links)
-      .id((node) => node.key)
-      .distance((link) => link.kind === "membership"
-        ? LOCAL_LAYOUT_PARAMS.membershipDistance
-        : LOCAL_LAYOUT_PARAMS.relationDistance))
+    .force("link", linkForce)
     .force("charge", forceManyBody<LayoutNode>()
       .strength(LOCAL_LAYOUT_PARAMS.chargeStrength)
       .distanceMax(LOCAL_LAYOUT_PARAMS.chargeDistanceMax))
@@ -195,6 +216,70 @@ export function createLocalLayout(
 
   return {
     getPositions,
+    update(nextInput, fixedPositions) {
+      if (destroyed) return;
+      const next = normalizeInput(nextInput);
+      const nextTopologyKey = topologyKey(next);
+      if (nextTopologyKey === currentTopologyKey) return;
+
+      const retained = new Map(byKey);
+      const nextKeys = new Set(next.nodes.map((node) => node.key));
+      for (const key of persistentPins) {
+        if (!nextKeys.has(key)) persistentPins.delete(key);
+      }
+      if (draggingKey !== null && !nextKeys.has(draggingKey)) {
+        draggingKey = null;
+        simulation.alphaTarget(0);
+      }
+      if (seedKey !== null && seedKey !== next.seedKey && retained.has(seedKey)) {
+        const previousSeed = retained.get(seedKey)!;
+        persistentPins.delete(seedKey);
+        previousSeed.fx = previousSeed.fy = null;
+      }
+
+      nodes = next.nodes.map((node) => {
+        const existing = retained.get(node.key);
+        if (existing) {
+          existing.radiusPx = node.radiusPx;
+          return existing;
+        }
+        const fixed = fixedPositions?.[node.key];
+        if (finitePoint(fixed)) {
+          setPosition(node, fixed);
+          persistentPins.add(node.key);
+          return node;
+        }
+        const relation = next.links.find((link) =>
+          link.source === node.key && retained.has(String(link.target))
+          || link.target === node.key && retained.has(String(link.source)));
+        const neighbor = relation && retained.get(String(relation.source === node.key ? relation.target : relation.source));
+        if (neighbor) {
+          const offset = spawnOffset(node.key);
+          node.x = neighbor.x + offset.x;
+          node.y = neighbor.y + offset.y;
+        }
+        return node;
+      });
+      byKey.clear();
+      nodes.forEach((node) => byKey.set(node.key, node));
+      seedKey = next.seedKey;
+      if (seedKey !== null) {
+        setPosition(byKey.get(seedKey)!, { x: 0, y: 0 });
+        persistentPins.add(seedKey);
+      }
+      // Remove old endpoint references before d3 initializes forces on the
+      // new membership; a departed endpoint must never remain in a force.
+      linkForce.links([]);
+      simulation.nodes(nodes);
+      linkForce.links(next.links);
+      currentTopologyKey = nextTopologyKey;
+      pendingTopologySettle = paused;
+      if (reducedMotion && !paused) {
+        simulation.alpha(0.3).tick(LOCAL_LAYOUT_PARAMS.preTicks);
+      }
+      notify();
+      startLive(0.3);
+    },
     pause() {
       if (destroyed || paused) return;
       paused = true;
@@ -203,6 +288,11 @@ export function createLocalLayout(
     resume() {
       if (destroyed || !paused) return;
       paused = false;
+      if (pendingTopologySettle && reducedMotion) {
+        simulation.alpha(0.3).tick(LOCAL_LAYOUT_PARAMS.preTicks);
+        notify();
+      }
+      pendingTopologySettle = false;
       startLive();
     },
     destroy() {
