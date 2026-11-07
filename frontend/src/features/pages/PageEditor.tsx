@@ -144,6 +144,7 @@ import {
 } from "../../shared/lib/workspaceRoutes";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { formatContextPageMarkdown } from "../../shared/lib/contextLinks";
+import { previewLinkTargets as previewBodyLinkTargets } from "../../shared/api/linkTargets";
 import {
   formatUploadByteLimit,
   uploadAcceptValue,
@@ -218,7 +219,7 @@ import {
   summarizeMediaUploadBatches,
 } from "./mediaUploadCoordinator";
 import { clearEditorUploadSlots } from "./editorUploadSlots";
-import { appendRelatedLink } from "./relatedLinkInsertion";
+import { relatedLinkPlacements } from "./relatedLinkInsertion";
 import {
   DEFAULT_PAGE_METADATA,
   PAGE_TYPE_OPTIONS,
@@ -348,7 +349,7 @@ export const AUTOSAVE_CHECKPOINT_MS = 60_000;
 const SAVED_JUST_NOW_MS = 60_000;
 
 type RelatedLinkNotice = {
-  kind: "added" | "present";
+  kind: "added" | "present" | "manual";
   title: string;
   before: string;
   after: string;
@@ -1435,6 +1436,7 @@ export function PageEditor({
   // Applied once per page and target.
   const relatedLinkAppliedRef = useRef<string | null>(null);
   const loadedPageId = page?.id ?? null;
+  const loadedVersionId = page?.version_id ?? null;
   // The server's own reading of the loaded body: the same parser that decides
   // whether publishing creates a page link, so code, comments and stray ids in
   // prose never count as an existing link.
@@ -1446,33 +1448,50 @@ export function PageEditor({
     const key = `${loadedPageId}:${addLinkPageId}`;
     if (relatedLinkAppliedRef.current === key) return;
     relatedLinkAppliedRef.current = key;
-    readPage(workspaceId, addLinkPageId)
-      .then((related) => {
-        if (!isEditorMountedRef.current || pageIdRef.current !== loadedPageId) return;
-        const before = bodyRef.current;
-        if ((loadedLinkTargets ?? []).some((target) => target.target_page_id === related.id)) {
-          setRelatedLinkNotice({ kind: "present", title: related.title, before, after: before, cursor: null });
+    const current = () =>
+      isEditorMountedRef.current && pageIdRef.current === loadedPageId;
+    async function addRelatedLink(workspace: string, pageId: string, relatedId: string) {
+      const related = await readPage(workspace, relatedId);
+      if (!current()) return;
+      const before = bodyRef.current;
+      const notice = { title: related.title, before, after: before, cursor: null };
+      if ((loadedLinkTargets ?? []).some((target) => target.target_page_id === related.id)) {
+        setRelatedLinkNotice({ ...notice, kind: "present" });
+        return;
+      }
+      const link = formatContextPageMarkdown(related.title, workspace, related.id);
+      const candidates = relatedLinkPlacements(
+        before,
+        link,
+        translationRef.current("editor.relatedLinksHeading", { defaultValue: "Related pages" }),
+      );
+      // Keep the first placement the server parses as a link to the page:
+      // the editor must not report an addition that publishing would ignore.
+      for (const after of candidates) {
+        const preview = await previewBodyLinkTargets(workspace, {
+          body_md: after,
+          request_id: newIdempotencyKey(),
+          source_page_id: pageId,
+          source_version_id: loadedVersionId,
+        });
+        if (!current() || bodyRef.current !== before) return;
+        if ((preview.link_targets ?? []).some((target) => target.target_page_id === related.id)) {
+          updateAuthoredBodyRef.current(after);
+          setRelatedLinkNotice({
+            ...notice,
+            kind: "added",
+            after,
+            cursor: after.lastIndexOf(link) + link.length,
+          });
           return;
         }
-        const link = formatContextPageMarkdown(related.title, workspaceId, related.id);
-        const after = appendRelatedLink(
-          before,
-          link,
-          translationRef.current("editor.relatedLinksHeading", { defaultValue: "Related pages" }),
-        );
-        updateAuthoredBodyRef.current(after);
-        setRelatedLinkNotice({
-          kind: "added",
-          title: related.title,
-          before,
-          after,
-          cursor: after.lastIndexOf(link) + link.length,
-        });
-      })
-      .catch(() => {
-        // Gone or hidden from this author: there is nothing to link to.
-      });
-  }, [addLinkPageId, loadedLinkTargets, loadedPageId, pageLoadState, workspaceId]);
+      }
+      setRelatedLinkNotice({ ...notice, kind: "manual" });
+    }
+    addRelatedLink(workspaceId, loadedPageId, addLinkPageId).catch(() => {
+      // Gone or hidden from this author, or the check failed: change nothing.
+    });
+  }, [addLinkPageId, loadedLinkTargets, loadedPageId, loadedVersionId, pageLoadState, workspaceId]);
 
   // Put the cursor on the added line so it scrolls into view and carries the
   // active-line highlight. A selection change is not an edit.
@@ -5705,14 +5724,20 @@ export function PageEditor({
               {relatedLinkNotice.kind === "added"
                 ? t("editor.relatedLinkAdded", {
                     defaultValue:
-                      "Added a link to {{title}} under “Related pages” at the end. Review it, then save.",
+                      "Added a link to {{title}} under “Related pages”. Review it, then save.",
                     title: relatedLinkNotice.title,
                   })
-                : t("editor.relatedLinkPresent", {
-                    defaultValue:
-                      "This page already links to {{title}}. Publish it to resolve the lint finding.",
-                    title: relatedLinkNotice.title,
-                  })}
+                : relatedLinkNotice.kind === "present"
+                  ? t("editor.relatedLinkPresent", {
+                      defaultValue:
+                        "This page already links to {{title}}. Publish it to resolve the lint finding.",
+                      title: relatedLinkNotice.title,
+                    })
+                  : t("editor.relatedLinkManual", {
+                      defaultValue:
+                        "Couldn't add the link to {{title}} automatically. Insert it with the editor's link tool.",
+                      title: relatedLinkNotice.title,
+                    })}
             </p>
             {relatedLinkNotice.kind === "added" ? (
               <button

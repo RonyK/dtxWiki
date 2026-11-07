@@ -1,5 +1,5 @@
 import { EditorView } from "@codemirror/view";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode, type ReactNode } from "react";
 import {
@@ -4796,23 +4796,38 @@ describe("PageEditor", () => {
     expect(autosaveCalls(fetchMock)).toHaveLength(0);
   });
 
-  it("opens with the lint queue's link added as an ordinary edit that Undo takes back", async () => {
+  it("adds the lint queue's link only where the server parses it, as an edit Undo takes back", async () => {
     const relatedId = "55555555-5555-4555-8555-555555555555";
     // The id in inline code is not a link (the server's link_targets for this
     // body are empty), so it must not suppress the insertion.
     const loaded = `# Hello\n\nSee \`${relatedId}\`.`;
+    let serverParsesLink = false;
     const fetchMock = mockEditorPage(loaded);
     const baseFetch = fetchMock.getMockImplementation()!;
-    fetchMock.mockImplementation(async (input, init) =>
-      String(input).endsWith(`/context/pages/${relatedId}`)
-        ? jsonResponse({ data: { ...page, id: relatedId, slug: "incident-runbook", title: "Incident runbook", body_md: "# Runbook" } })
-        : baseFetch(input, init),
-    );
-    renderWithRouter(
-      `/pages/hello/edit?add_link=${relatedId}`,
-      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
-    );
-    await screen.findByText("Added a link to Incident runbook under “Related pages” at the end. Review it, then save.");
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith(`/context/pages/${relatedId}`)) {
+        return jsonResponse({ data: { ...page, id: relatedId, slug: "incident-runbook", title: "Incident runbook", body_md: "# Runbook" } });
+      }
+      if (url.endsWith("/link-targets/preview")) {
+        const linkTargets = serverParsesLink
+          ? [{ href: `/p/w/${relatedId}`, locator: `/p/w/${relatedId}`, state: "available", target_page_id: relatedId }]
+          : [];
+        return jsonResponse({ data: { link_targets: linkTargets, references: [] } });
+      }
+      return baseFetch(input, init);
+    });
+    const route = <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />;
+
+    // No placement the server would read as a link: nothing is written.
+    renderWithRouter(`/pages/hello/edit?add_link=${relatedId}`, route);
+    await screen.findByText("Couldn't add the link to Incident runbook automatically. Insert it with the editor's link tool.");
+    expect(codeMirrorView().state.doc.toString()).toBe(loaded);
+    cleanup();
+
+    serverParsesLink = true;
+    renderWithRouter(`/pages/hello/edit?add_link=${relatedId}`, route);
+    await screen.findByText("Added a link to Incident runbook under “Related pages”. Review it, then save.");
     const added = `${loaded}\n\n## Related pages\n\n- [Incident runbook](/p/11111111-1111-4111-8111-111111111111/${relatedId})\n`;
     await waitFor(() => expect(codeMirrorView().state.doc.toString()).toBe(added));
     expect(syncStatus()).not.toHaveTextContent(/^Saved$/);

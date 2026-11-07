@@ -420,10 +420,11 @@
     "publishedReviewCompletedReloadFailed": "Review approved, but the published page could not be reloaded.",
     "reloadLatestFailed": "Could not reload the latest server version.",
     "relatedLinksHeading": "Related pages",
-    "relatedLinkAdded": "Added a link to {{title}} under “Related pages” at the end. Review it, then save.",
+    "relatedLinkAdded": "Added a link to {{title}} under “Related pages”. Review it, then save.",
     "relatedLinkPresent": "This page already links to {{title}}. Publish it to resolve the lint finding.",
     "relatedLinkRemove": "Undo",
-    "relatedLinkRemoveAria": "Undo the added link to {{title}}"
+    "relatedLinkRemoveAria": "Undo the added link to {{title}}",
+    "relatedLinkManual": "Couldn't add the link to {{title}} automatically. Insert it with the editor's link tool."
   },
   "blocks": {
     "groups": {
