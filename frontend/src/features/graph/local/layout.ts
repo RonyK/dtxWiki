@@ -10,6 +10,7 @@ import type { SimulationLinkDatum, SimulationNodeDatum } from "d3-force";
 
 import type { GraphPoint } from "../shared/rendererTypes";
 import {
+  LOCAL_ARRIVAL_PIN,
   LOCAL_LAYOUT_PARAMS,
   type LocalLayoutInput,
   type LocalLayoutPositions,
@@ -31,6 +32,10 @@ export type LocalLayoutOptions = {
   cachedPositions?: LocalLayoutPositions | null;
   fixedPositions?: LocalLayoutPositions | null;
   onTick?: (positions: LocalLayoutPositions) => void;
+  /** A node waiting through pinWhenSettled() has been fixed where it came to rest. */
+  onSettledPin?: (key: string, position: GraphPoint) => void;
+  /** Millisecond clock for arrival settling; defaults to performance.now(). */
+  now?: () => number;
   reducedMotion?: boolean;
   autoStart?: boolean;
 };
@@ -43,6 +48,12 @@ export type LocalLayout = {
   resume(): void;
   destroy(): void;
   pin(key: string, position?: GraphPoint): GraphPoint | null;
+  /**
+   * Fix an arriving node once its motion calms down (LOCAL_ARRIVAL_PIN), or
+   * at once when nothing moves. Repeating it never restarts a running wait;
+   * pin, unpin, clearPins, a departure or destroy ends the wait.
+   */
+  pinWhenSettled(key: string): void;
   unpin(key: string): void;
   clearPins(): void;
   beginDrag(key: string, position?: GraphPoint): GraphPoint | null;
@@ -120,6 +131,37 @@ function topologyKey(input: ReturnType<typeof normalizeInput>): string {
   ]);
 }
 
+export type ArrivalWatch = {
+  activeMs: number;
+  recent: Array<{ ms: number; distance: number }>;
+};
+
+/**
+ * Advance one arriving node by one live frame and say whether to fix it now.
+ * Time, not tick count: d3 ticks once per display frame (60 or 120 Hz). The
+ * still window sums the path travelled, so an oscillating node is not still.
+ */
+export function advanceArrival(watch: ArrivalWatch, elapsedMs: number | null, distance: number): boolean {
+  if (elapsedMs === null || !(elapsedMs >= 0)) {
+    watch.recent.length = 0;
+    return false;
+  }
+  watch.activeMs += Math.min(elapsedMs, LOCAL_ARRIVAL_PIN.maxFrameGapMs);
+  if (elapsedMs > LOCAL_ARRIVAL_PIN.maxFrameGapMs) {
+    watch.recent.length = 0;
+    return watch.activeMs >= LOCAL_ARRIVAL_PIN.maxMs;
+  }
+  watch.recent.push({ ms: elapsedMs, distance });
+  let span = watch.recent.reduce((sum, sample) => sum + sample.ms, 0);
+  while (watch.recent.length > 1 && span - watch.recent[0].ms >= LOCAL_ARRIVAL_PIN.stillWindowMs) {
+    span -= watch.recent.shift()!.ms;
+  }
+  if (watch.activeMs >= LOCAL_ARRIVAL_PIN.maxMs) return true;
+  const path = watch.recent.reduce((sum, sample) => sum + sample.distance, 0);
+  return watch.activeMs >= LOCAL_ARRIVAL_PIN.minMs
+    && span >= LOCAL_ARRIVAL_PIN.stillWindowMs && path <= LOCAL_ARRIVAL_PIN.stillDistance;
+}
+
 function spawnOffset(key: string): GraphPoint {
   let hash = 0;
   for (const character of key) hash = (Math.imul(hash, 31) + character.charCodeAt(0)) >>> 0;
@@ -146,6 +188,10 @@ export function createLocalLayout(
   let paused = options.autoStart === false;
   let pendingTopologySettle = false;
   let destroyed = false;
+  const now = options.now ?? (() => performance.now());
+  // Arriving nodes waiting to be pinned, with the point seen on the last frame.
+  const arrivals = new Map<string, ArrivalWatch & GraphPoint>();
+  let lastFrameAt: number | null = null;
 
   for (const node of nodes) {
     const cached = options.cachedPositions?.[node.key];
@@ -208,8 +254,55 @@ export function createLocalLayout(
     notify();
     startLive();
   };
+  const settleArrival = (key: string): void => {
+    // Only a wait still in place settles, and it ends first: a callback may
+    // pin, unpin or reset re-entrantly, even in the middle of a batch.
+    if (!arrivals.delete(key)) return;
+    const node = byKey.get(key);
+    if (destroyed || !node) return;
+    // Fix the point where it stands. Unlike pin(), this neither moves it nor
+    // reheats the simulation, so every other node keeps settling smoothly.
+    node.fx = node.x;
+    node.fy = node.y;
+    node.vx = node.vy = 0;
+    persistentPins.add(key);
+    options.onSettledPin?.(key, { x: node.x, y: node.y });
+  };
+  const settleArrivals = (): void => {
+    for (const key of [...arrivals.keys()]) {
+      if (key !== draggingKey) settleArrival(key);
+    }
+  };
+  const observeArrivals = (): void => {
+    if (arrivals.size === 0) {
+      lastFrameAt = null;
+      return;
+    }
+    const at = now();
+    const elapsed = lastFrameAt === null ? null : at - lastFrameAt;
+    lastFrameAt = at;
+    for (const key of [...arrivals.keys()]) {
+      const watch = arrivals.get(key);
+      const node = byKey.get(key);
+      if (!watch || !node) continue;
+      const distance = Math.hypot(node.x - watch.x, node.y - watch.y);
+      watch.x = node.x;
+      watch.y = node.y;
+      // A drag is the user's motion, not arrival time.
+      if (key === draggingKey) watch.recent.length = 0;
+      else if (advanceArrival(watch, elapsed, distance)) settleArrival(key);
+    }
+  };
 
-  simulation.on("tick.local-layout", notify);
+  simulation.on("tick.local-layout", () => {
+    notify();
+    observeArrivals();
+  });
+  // A cooled simulation moves nothing further: arrivals are at rest.
+  simulation.on("end.local-layout", () => {
+    lastFrameAt = null;
+    settleArrivals();
+  });
   simulation.tick(LOCAL_LAYOUT_PARAMS.preTicks);
   notify();
   startLive();
@@ -226,6 +319,9 @@ export function createLocalLayout(
       const nextKeys = new Set(next.nodes.map((node) => node.key));
       for (const key of persistentPins) {
         if (!nextKeys.has(key)) persistentPins.delete(key);
+      }
+      for (const key of [...arrivals.keys()]) {
+        if (!nextKeys.has(key)) arrivals.delete(key);
       }
       if (draggingKey !== null && !nextKeys.has(draggingKey)) {
         draggingKey = null;
@@ -283,23 +379,40 @@ export function createLocalLayout(
     pause() {
       if (destroyed || paused) return;
       paused = true;
+      lastFrameAt = null;
       simulation.stop().alphaTarget(0);
     },
     resume() {
       if (destroyed || !paused) return;
       paused = false;
+      lastFrameAt = null;
       if (pendingTopologySettle && reducedMotion) {
         simulation.alpha(0.3).tick(LOCAL_LAYOUT_PARAMS.preTicks);
         notify();
       }
       pendingTopologySettle = false;
+      // Manual ticks dispatch no events; settle reduced-motion arrivals here.
+      if (reducedMotion) settleArrivals();
       startLive();
     },
     destroy() {
       if (destroyed) return;
       destroyed = true;
-      simulation.stop().on("tick.local-layout", null);
+      simulation.stop().on("tick.local-layout", null).on("end.local-layout", null);
+      arrivals.clear();
       draggingKey = null;
+    },
+    pinWhenSettled(key) {
+      if (destroyed || arrivals.has(key)) return;
+      const node = byKey.get(key);
+      if (!node) return;
+      arrivals.set(key, { activeMs: 0, recent: [], x: node.x, y: node.y });
+      // Nothing will move it: already fixed, reduced motion, or a cooled
+      // simulation. A paused layout decides on resume instead.
+      if (persistentPins.has(key)
+        || !paused && (reducedMotion || simulation.alpha() < simulation.alphaMin())) {
+        settleArrival(key);
+      }
     },
     pin(key, position) {
       if (destroyed) return null;
@@ -307,6 +420,14 @@ export function createLocalLayout(
       if (!node) return null;
       if (key === seedKey) return { x: 0, y: 0 };
       if (position !== undefined && !finitePoint(position)) return null;
+      // An explicit pin ends any arrival wait.
+      arrivals.delete(key);
+      if (key === draggingKey) {
+        // The drag owns its point until release (as for unpin and clearPins):
+        // record the pin, never pull the dragged node back to another point.
+        persistentPins.add(key);
+        return { x: node.x, y: node.y };
+      }
       const point = position ?? { x: node.x, y: node.y };
       if (persistentPins.has(key) && node.fx === point.x && node.fy === point.y) return { ...point };
       setPosition(node, point);
@@ -316,6 +437,7 @@ export function createLocalLayout(
     },
     unpin(key) {
       if (destroyed || key === seedKey) return;
+      arrivals.delete(key);
       const node = byKey.get(key);
       if (!node || !persistentPins.delete(key)) return;
       if (draggingKey !== key) {
@@ -325,6 +447,7 @@ export function createLocalLayout(
     },
     clearPins() {
       if (destroyed) return;
+      arrivals.clear();
       let changed = false;
       for (const key of persistentPins) {
         if (key === seedKey) continue;
@@ -369,9 +492,11 @@ export function createLocalLayout(
     setReducedMotion(enabled) {
       if (destroyed || reducedMotion === enabled) return;
       reducedMotion = enabled;
+      lastFrameAt = null;
       if (enabled) {
         simulation.stop().alphaTarget(0);
         notify();
+        if (!paused) settleArrivals();
       } else {
         startLive();
       }

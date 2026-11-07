@@ -48,6 +48,11 @@ function semanticKey(node: GraphRenderNode): string | null {
   return `${node.entity_kind}:${node.entity_id}`;
 }
 
+/** Whether the Local canvas draws this node, i.e. buildLocalScene() admits it. */
+export function localSceneAdmits(node: GraphRenderNode): boolean {
+  return !node.hidden && semanticKey(node) !== null;
+}
+
 function edgeCount(edge: GraphRenderEdge): number {
   const count = edge.count ?? 1;
   return Number.isFinite(count) && count > 0 ? Math.floor(count) || 1 : 1;

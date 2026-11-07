@@ -31,6 +31,7 @@ vi.mock("../GraphCanvas", async () => {
     active,
     focusedId,
     onHover,
+    onPin,
     onRendererStatusChange,
     onSelect,
     pinnedIds,
@@ -42,6 +43,7 @@ vi.mock("../GraphCanvas", async () => {
     active: boolean;
     focusedId: string | null;
     onHover: (id: string | null) => void;
+    onPin: (id: string, position: { x: number; y: number }) => void;
     onRendererStatusChange: (status: "loading" | "ready" | "error") => void;
     onSelect: (id: string | null) => void;
     pinnedIds: string[];
@@ -84,6 +86,9 @@ vi.mock("../GraphCanvas", async () => {
       </button>
       <button onClick={() => onRendererStatusChange("error")} type="button">
         Simulate renderer error
+      </button>
+      <button onClick={() => onPin("node:ask", { x: 1, y: 2 })} type="button">
+        Report Ask pin from canvas
       </button>
       <button onClick={() => onRendererStatusChange("ready")} type="button">
         Simulate renderer ready
@@ -927,8 +932,22 @@ describe("GraphView", () => {
     const canvas = screen.getByTestId("mock-graph-canvas");
 
     await pinAskFromDetails(user);
-    await user.click(screen.getByRole("button", { name: "Select Ask from canvas" }));
     const details = screen.getByRole("heading", { name: "Details" }).closest("aside")!;
+    // A pin is "Pinning" until the canvas reports the coordinate it keeps;
+    // the muted button stays a live cancel action and keeps its menu open.
+    const pending = within(details).getByRole("button", { name: "Pinning: press to cancel" });
+    expect(pending).toHaveTextContent("Pinning…");
+    expect(pending.querySelector(".spinner[aria-hidden='true']")).not.toBeNull();
+    await user.click(pending);
+    expect(canvasHandle.pin).toHaveBeenLastCalledWith("node:ask", false);
+    expect(canvas).toHaveAttribute("data-pinned", "");
+    await user.click(within(details).getByRole("button", { name: "Pin" }));
+    await user.click(screen.getByRole("button", { name: "Report Ask pin from canvas" }));
+    const pinned = within(details).getByRole("button", { name: "Unpin" });
+    expect(pinned).not.toHaveClass("graph-details-pin-pending");
+    expect(pinned.querySelector(".spinner")).toBeNull();
+    expect(screen.getByText("Pinned: Why was this chosen?")).toHaveAttribute("aria-live", "polite");
+    await user.click(screen.getByRole("button", { name: "Select Ask from canvas" }));
     expect(within(details).queryByText(/Other nodes stay visible but dimmed/)).not.toBeInTheDocument();
     expect(canvas).toHaveAttribute("data-pinned", "node:ask");
 

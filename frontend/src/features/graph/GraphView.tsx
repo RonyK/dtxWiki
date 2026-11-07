@@ -22,6 +22,7 @@ import type { LocalNodeVisuals } from "./local/LocalNodeCue";
 import { localEdgeKindLabel, type LocalViewContext } from "./local/localRelationViews";
 import type { RovingSelectionOrigin as LocalGraphSelectionOrigin } from "./shared/relationList/useRovingList";
 import { localSceneScopeKey } from "./local/sceneScope";
+import { localSceneAdmits } from "./local/sceneInput";
 import { GraphEdgeCue, GraphNodeCue, GraphSeedCue } from "./shared/GraphCues";
 import { GRAPH_NODE_VISUALS, isActionEdgeVisualKind, readGraphTokens, type GraphEdgeVisualKind, type GraphNodeVisualKind } from "./shared/graphTokens";
 import { hasSessionDetails, SessionActivityDetails } from "./shared/SessionActivityDetails";
@@ -39,6 +40,7 @@ import type {
   GraphTimelineEvent,
 } from "../../shared/api/graph";
 import { StatusBanner } from "../../shared/components/StatusBanner";
+import { Spinner } from "../../shared/components/Spinner";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { domainLabel } from "../../shared/lib/domainLabel";
 import { searchResultHref } from "../../shared/lib/searchResultHref";
@@ -55,6 +57,8 @@ import {
   type GraphFilters,
   type GraphScene,
 } from "./graphModel";
+
+type LocalPinState = "unpinned" | "waiting" | "pinning" | "pinned";
 
 type GraphViewProps = {
   active: boolean;
@@ -253,6 +257,21 @@ export function GraphView({
     ?? (historical ? historyCatalog.nodes.find((node) => node.id === selectedId) : null) ?? null;
   const selectedEdge = scene.edges.find((edge) => edge.id === selectedId)
     ?? (historical ? historyCatalog.edges.find((edge) => edge.id === selectedId) : null) ?? null;
+  // A pin without a coordinate is not fixed yet: the canvas reports one once
+  // the point has entered the timeline frame and settled there.
+  const canvasMemberIds = useMemo(() => new Set(canvasScene.nodes.filter(localSceneAdmits).map((node) => node.id)),
+    [canvasScene]);
+  const pinStateOf = (id: string): LocalPinState => !pinnedIds.includes(id) ? "unpinned"
+    : pinnedPositions[id] ? "pinned"
+      : canvasMemberIds.has(id) && rendererStatus !== "error" ? "pinning" : "waiting";
+  const unresolvedPinsRef = useRef<string[]>([]);
+  useEffect(() => {
+    const resolved = unresolvedPinsRef.current.filter((id) => pinnedIds.includes(id) && pinnedPositions[id]);
+    unresolvedPinsRef.current = pinnedIds.filter((id) => !pinnedPositions[id]);
+    const labels = resolved.flatMap((id) => canvasScene.nodes.find((node) => node.id === id)?.label ?? []);
+    // One message for every pin fixed in the same frame.
+    if (labels.length) setAnnouncement(t("graph.details.pinnedAnnouncement", { labels: labels.join(", ") }));
+  }, [canvasScene, pinnedIds, pinnedPositions, t]);
   const effectiveSelectedId = selectedNode || selectedEdge ? selectedId : null;
   const effectiveFocusedId = focusedId && (
     scene.nodes.some((node) => node.id === focusedId)
@@ -645,13 +664,10 @@ export function GraphView({
       canvasRef.current?.pin(node.id, false);
       return;
     }
-    // A keyboard pin asks the adapter to retain the current position; a
-    // pointer drag reports and stores its exact position.
+    // The canvas reports the coordinate it keeps through onPin, as for a
+    // drag: at once for a drawn point, after arrival for one outside the frame.
     setPinnedIds((current) => [...current, node.id]);
-    const position = canvasRef.current?.pin(node.id, true);
-    if (position) {
-      setPinnedPositions((current) => ({ ...current, [node.id]: position }));
-    }
+    canvasRef.current?.pin(node.id, true);
   }
 
   function resetView() {
@@ -979,7 +995,7 @@ export function GraphView({
           onFocus={setFocusedId}
           onSelect={selectItem}
           onTogglePin={togglePin}
-          pinnedIds={pinnedIds}
+          pinState={selectedNode ? pinStateOf(selectedNode.id) : "unpinned"}
           querySeeds={payload.query.seeds}
           supportsExpand={payload.capabilities?.expand !== false}
           workspaceGraphHref={workspaceGraphHref}
@@ -1193,6 +1209,22 @@ function GraphLegend({ historical, nodeVisuals }: { historical: boolean; nodeVis
 
 
 
+/** The pin toggle. A requested pin that is not fixed yet stays cancellable. */
+function GraphDetailsPinButton({ onToggle, state }: { onToggle: () => void; state: LocalPinState }) {
+  const { t } = useTranslation("graph");
+  const pending = state === "waiting" || state === "pinning";
+  const label = state === "unpinned" ? t("graph.details.pin") : state === "pinned" ? t("graph.details.unpin")
+    : state === "pinning" ? t("graph.details.pinning") : t("graph.details.pinWaiting");
+  const cancel = state === "pinning" ? t("graph.details.pinningCancel") : t("graph.details.pinWaitingCancel");
+  return (
+    <button type="button" className={pending ? "graph-details-pin-pending" : undefined} onClick={onToggle}
+      aria-label={pending ? cancel : undefined}>
+      {label}
+      {state === "pinning" ? <Spinner decorative size={12} /> : null}
+    </button>
+  );
+}
+
 function GraphDetails({
   active,
   historyEvents,
@@ -1218,7 +1250,7 @@ function GraphDetails({
   onFocus,
   onSelect,
   onTogglePin,
-  pinnedIds,
+  pinState,
   querySeeds,
   supportsExpand,
   workspaceGraphHref,
@@ -1248,7 +1280,7 @@ function GraphDetails({
   onFocus: (id: string) => void;
   onSelect: (id: string, origin: LocalGraphSelectionOrigin) => void;
   onTogglePin: (node: GraphNode) => void;
-  pinnedIds: string[];
+  pinState: LocalPinState;
   querySeeds: GraphQueryPayload["query"]["seeds"];
   supportsExpand: boolean;
   workspaceGraphHref?: (node: GraphNode) => string | null;
@@ -1344,7 +1376,7 @@ function GraphDetails({
             const id = (node ?? edge)!.id;
             requestAnimationFrame(() => onCenter(id));
           }}>{t("graph.details.center")}</button>
-          {node ? <button type="button" onClick={() => onTogglePin(node)}>{t(pinnedIds.includes(node.id) ? "graph.details.unpin" : "graph.details.pin")}</button> : null}
+          {node ? <GraphDetailsPinButton onToggle={() => onTogglePin(node)} state={pinState} /> : null}
           {nodeActions?.href ? <Link to={nodeActions.href}>{t("graph.showInKnowledgeMap")}</Link> : null}
         </div></details>
       </div>

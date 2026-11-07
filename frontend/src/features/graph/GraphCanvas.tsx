@@ -49,6 +49,12 @@ type GraphCanvasProps = {
   viewport?: GraphViewport | null;
 };
 
+type PinPoint = { x: number; y: number } | undefined;
+
+function samePinPoint(left: PinPoint, right: PinPoint): boolean {
+  return left === right || (left !== undefined && right !== undefined && left.x === right.x && left.y === right.y);
+}
+
 function graphPaletteKey(container: Element, forcedColors: boolean): string {
   const mode = forcedColors ? "forced"
     : document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
@@ -109,6 +115,21 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     const [rendererRevision, setRendererRevision] = useState(0);
     const [themeRevision, setThemeRevision] = useState(0);
     const generationRef = useRef(0);
+    // Pins as last delivered to the CURRENT adapter. Prop changes send only
+    // the pins that changed: one pin's reported coordinate must never re-pin
+    // another point (a dragged one would jump back to its saved coordinate).
+    const deliveredPinsRef = useRef<{ adapter: SigmaGraphAdapter | null; pins: Map<string, PinPoint> }>({
+      adapter: null, pins: new Map(),
+    });
+    const replayPins = (adapter: SigmaGraphAdapter) => {
+      const pins = new Map<string, PinPoint>();
+      for (const id of pinnedIdsRef.current) {
+        const position = positionsRef.current[id];
+        pins.set(id, position);
+        adapter.pin(id, true, position);
+      }
+      deliveredPinsRef.current = { adapter, pins };
+    };
     sceneRef.current = scene;
     callbacksRef.current = {
       viewportInsets,
@@ -177,7 +198,10 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
               showLabels: showLabelsRef.current,
               callbacks: {
                 onHover: (id) => callbacksRef.current.onHover(id),
-                onPin: (id, position) => callbacksRef.current.onPin(id, position),
+                onPin: (id, position) => {
+                  if (cancelled || rendererFailed || generation !== generationRef.current) return;
+                  callbacksRef.current.onPin(id, position);
+                },
                 onSelect: (id) => callbacksRef.current.onSelect(id),
                 onViewport: (nextViewport) => {
                   if (cancelled || rendererFailed || generation !== generationRef.current) return;
@@ -213,9 +237,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           lastAppliedSceneRef.current = sceneRef.current;
           pendingSceneRef.current = null;
           if (activeRef.current) {
-            for (const id of pinnedIdsRef.current) {
-              adapter.pin(id, true, positionsRef.current[id]);
-            }
+            replayPins(adapter);
             adapter.select(selectedIdRef.current);
             adapter.focus(focusedIdRef.current);
           } else {
@@ -284,9 +306,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       // reconciled after a filter/timeline round-trip.
       adapter.select(selectedIdRef.current);
       adapter.focus(focusedIdRef.current);
-      for (const id of pinnedIdsRef.current) {
-        adapter.pin(id, true, positionsRef.current[id]);
-      }
+      replayPins(adapter);
     }, [scene]);
 
     useEffect(() => {
@@ -307,9 +327,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       if (update !== "metadata" && update !== "topology") {
         adapter.select(selectedIdRef.current);
         adapter.focus(focusedIdRef.current);
-        for (const id of pinnedIdsRef.current) {
-          adapter.pin(id, true, positionsRef.current[id]);
-        }
+        replayPins(adapter);
       }
       adapter.resumeLayout();
     }, [active]);
@@ -329,10 +347,19 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     }, [showLabels]);
 
     useEffect(() => {
-      if (!active) return;
+      const adapter = adapterRef.current;
+      if (!active || !adapter) return;
+      // A recreated adapter (even one built while inactive) has received
+      // nothing yet; compare against what this adapter was actually sent.
+      const delivered = deliveredPinsRef.current.adapter === adapter
+        ? deliveredPinsRef.current.pins : new Map<string, PinPoint>();
+      const pins = new Map<string, PinPoint>();
       for (const id of pinnedIds) {
-        adapterRef.current?.pin(id, true, pinnedPositions[id]);
+        const position = pinnedPositions[id];
+        pins.set(id, position);
+        if (!delivered.has(id) || !samePinPoint(delivered.get(id), position)) adapter.pin(id, true, position);
       }
+      deliveredPinsRef.current = { adapter, pins };
     }, [active, pinnedIds, pinnedPositions]);
 
     useEffect(() => {

@@ -249,6 +249,14 @@ export function createSigmaGraphAdapter(
   for (const [id, point] of Object.entries(options.positions)) {
     if (finitePoint(point)) pinnedPositions[id] = { ...point };
   }
+  // Pins requested without a coordinate for points outside the timeline
+  // frame. Each is fixed after it enters and settles, then reported.
+  const pendingPins = new Set<string>();
+  const resolvePendingPin = (id: string, point: GraphPoint) => {
+    if (!pendingPins.delete(id)) return;
+    pinnedPositions[id] = { ...point };
+    options.callbacks.onPin(id, { ...point });
+  };
   let layout: LocalLayout | null = null;
   let renderer: Sigma | null = null;
   let destroyed = false;
@@ -398,6 +406,12 @@ export function createSigmaGraphAdapter(
         graph.addEdgeWithKey(edge.graphId, edge.sourceKey, edge.targetKey,
           edgeAttributes(edge, edgeLabels.get(edge.graphId) ?? ""));
       }
+      // A waiting pin lets its point arrive from the spawn offset first;
+      // pinning on entry would freeze it beside its neighbor.
+      for (const id of [...pendingPins]) {
+        const key = localScene.keyByGraphId.get(id);
+        if (key) layout.pinWhenSettled(key);
+      }
       refreshHighlight();
       return "topology";
     }
@@ -417,6 +431,10 @@ export function createSigmaGraphAdapter(
     layout = createLocalLayout(localScene.layout, {
       fixedPositions: visiblePositions(localScene, pinnedPositions),
       onTick: applyPositions,
+      onSettledPin: (key, point) => {
+        const id = localScene.graphIdByKey.get(key);
+        if (id) resolvePendingPin(id, point);
+      },
       reducedMotion: options.reducedMotion,
     });
     const positions = layout.getPositions();
@@ -432,6 +450,15 @@ export function createSigmaGraphAdapter(
       if (!graph.hasNode(edge.sourceKey) || !graph.hasNode(edge.targetKey)) continue;
       graph.addEdgeWithKey(edge.graphId, edge.sourceKey, edge.targetKey,
         edgeAttributes(edge, edgeLabels.get(edge.graphId) ?? ""));
+    }
+    // A rebuilt layout computed its points before the first frame; adopt
+    // them for waiting pins now instead of watching a motion nobody saw.
+    for (const id of [...pendingPins]) {
+      // An earlier report in this loop may have released this pin.
+      if (!pendingPins.has(id)) continue;
+      const key = localScene.keyByGraphId.get(id);
+      const point = key ? layout.pin(key) : null;
+      if (point) resolvePendingPin(id, point);
     }
     refreshHighlight();
     return "rebuild";
@@ -804,6 +831,8 @@ export function createSigmaGraphAdapter(
       layout?.endDrag(key);
       const graphId = localScene.graphIdByKey.get(key);
       if (position && graphId) {
+        // Dropping a waiting point is an explicit pin; it ends the wait.
+        pendingPins.delete(graphId);
         pinnedPositions[graphId] = { ...position };
         options.callbacks.onPin(graphId, position);
       }
@@ -1077,15 +1106,31 @@ export function createSigmaGraphAdapter(
       if (destroyed || contextLost) return null;
       // A filter can temporarily remove the point, but an explicit release
       // still revokes its pin before the point is made visible again.
-      if (!pinned) delete pinnedPositions[id];
+      if (!pinned) {
+        delete pinnedPositions[id];
+        pendingPins.delete(id);
+      }
       const key = localScene.keyByGraphId.get(id);
-      if (!key) return null;
+      if (!key) {
+        // Outside the timeline frame there is no point to keep yet. Keep the
+        // request; the point is fixed after it enters and settles.
+        if (pinned && !finitePoint(position) && !pinnedPositions[id]) pendingPins.add(id);
+        return null;
+      }
       if (!pinned) {
         layout?.unpin(key);
         return layout?.getPositions()[key] ?? null;
       }
+      // A repeated request must neither restart nor cut short an arrival.
+      if (pendingPins.has(id)) return null;
+      // Report every coordinate the adapter chooses itself, so the caller's
+      // "pinned without a coordinate" always means "not fixed yet".
+      const chosen = position === undefined && !pinnedPositions[id];
       const point = layout?.pin(key, position) ?? null;
-      if (point) pinnedPositions[id] = { ...point };
+      if (point) {
+        pinnedPositions[id] = { ...point };
+        if (chosen) options.callbacks.onPin(id, { ...point });
+      }
       return point;
     },
     replaceScene(scene) {
@@ -1098,6 +1143,7 @@ export function createSigmaGraphAdapter(
       if (destroyed || contextLost) return;
       cancelDrag();
       for (const id of Object.keys(pinnedPositions)) delete pinnedPositions[id];
+      pendingPins.clear();
       layout?.clearPins();
       this.fit();
     },

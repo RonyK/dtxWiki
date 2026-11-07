@@ -7427,6 +7427,8 @@ button.graph-seed-path-node:hover { background: var(--surface-hover); }
 .graph-details-more > summary { display: grid; place-items: center; min-width: 36px; min-height: 36px; border: 1px solid var(--border); border-radius: 7px; color: var(--ink-muted); cursor: pointer; }
 .graph-details-more > div { position: absolute; right: 0; bottom: calc(100% + 5px); z-index: 2; width: 180px; padding: 6px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); box-shadow: 0 5px 20px #0002; }
 .graph-details-more :is(button, a) { display: block; width: 100%; min-height: 36px; padding: 8px; border: 0; background: transparent; font: inherit; font-size: 12px; color: var(--ink); text-align: left; text-decoration: none; cursor: pointer; }
+/* A requested pin that is not fixed yet: muted but still a live (cancel) action. */
+.graph-details-more .graph-details-pin-pending { display: flex; align-items: center; gap: 6px; color: var(--ink-muted); }
 /* A conversation: what it did here and with what result, then its flow. */
 .graph-session-details, .graph-node-records { padding: 8px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
 .graph-session-details h5, .graph-node-records h5 { margin: 0; font-size: 12px; }
