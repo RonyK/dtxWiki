@@ -3262,7 +3262,7 @@ function ContextReader({
                 defaultValue: "Graph could not be loaded.",
               })}
             </StatusBanner>
-          ) : graph ? (
+          ) : graph && staticGraph ? (
             <GraphView
               key={detail.id}
               active={tab === "graph"}
@@ -3272,7 +3272,7 @@ function ContextReader({
               onExpand={expandGraphNode}
               onHistoryModeChange={changeGraphHistoryMode}
               payload={graph}
-              staticPayload={staticGraph ?? graph}
+              staticPayload={staticGraph}
               workspaceId={workspaceId}
               workspaceGraphHref={
                 labsPreferences.knowledgeMap && workspaceGraph.enabled

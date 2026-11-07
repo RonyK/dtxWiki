@@ -88,7 +88,14 @@ export function deriveGraphScene(
   filters: GraphFilters,
   timelineCursor: number | null,
 ): GraphScene {
-  const timelineScene = deriveTimelineScene(payload, timelineCursor);
+  return filterGraphScene(deriveTimelineScene(payload, timelineCursor), filters, payload.nodes);
+}
+
+export function filterGraphScene(
+  scene: GraphScene,
+  filters: GraphFilters,
+  referenceNodes: GraphNode[] = scene.nodes,
+): GraphScene {
   const familyFilter = new Set(filters.nodeFamilies);
   const layerFilter = new Set(filters.layers);
   const actionFilter = new Set(filters.actionKinds);
@@ -96,21 +103,21 @@ export function deriveGraphScene(
   const directionFilter = new Set(filters.directions);
   const statusFilter = new Set(filters.statuses);
   const provenanceFilter = new Set(filters.provenances);
-  const seedIds = new Set(payload.nodes.filter((node) => node.is_seed).map((node) => node.id));
+  const seedIds = new Set(referenceNodes.filter((node) => node.is_seed).map((node) => node.id));
 
-  const nodes = timelineScene.nodes.filter(
+  const nodes = scene.nodes.filter(
     (node) =>
       familyFilter.has(node.family)
       && statusFilter.has(node.status ?? "unspecified"),
   );
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const edges = timelineScene.edges.filter((edge) =>
+  const edges = scene.edges.filter((edge) =>
     nodeIds.has(edge.source)
       && nodeIds.has(edge.target)
       && layerFilter.has(edge.layer)
       && (!edge.action_kind || actionFilter.has(edge.action_kind))
       && edgeKindFilter.has(edge.edge_kind)
-      && relativeDirections(edge, payload.nodes, seedIds)
+      && relativeDirections(edge, referenceNodes, seedIds)
         .some((direction) => directionFilter.has(direction))
       && provenanceFilter.has(edge.provenance),
   );
