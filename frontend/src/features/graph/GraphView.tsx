@@ -165,17 +165,17 @@ export function GraphView({
   const range: GraphRange = historical || payload.query.relation_scope === "direct" ? "direct"
     : payload.query.depth === 2 ? "extended" : "neighbors";
   const depthBusy = Boolean(busyAction?.startsWith("depth:") || busyAction?.startsWith("mode:"));
-  const recordedEdgeIds = useMemo(() => new Set([
-    ...sortedTimeline(payload).flatMap((event) => [...(event.edge_ids ?? []), ...(event.edge_snapshots ?? []).map((edge) => edge.id)]),
-    ...payload.edges.filter((edge) => isActionEdgeVisualKind(localEdgeVisualKind(edge.edge_kind))).map((edge) => edge.id),
-  ]), [payload]);
+  const historyTopology = useMemo(() => buildHistoryTopology(payload), [payload]);
+  const staticHistoryTopology = useMemo(() => staticPayload === payload ? historyTopology : buildHistoryTopology(staticPayload),
+    [historyTopology, payload, staticPayload]);
+  const { recordedEdgeIds } = historyTopology;
   const referencedCount = useMemo(() => payload.edges.filter((edge) => edge.action_kind === "referenced").length, [payload]);
-  const applyHistoryVisibility = useCallback((value: GraphScene): GraphScene => {
+  const applyHistoryVisibility = useCallback((value: GraphScene, topology = historyTopology): GraphScene => {
     if (!historical) return value;
     const edges = value.edges.filter((edge) => (edge.action_kind !== "referenced" || historyVisibility.referenced)
-      && (recordedEdgeIds.has(edge.id) ? historyVisibility.recorded : historyVisibility.background));
-    return withoutDetachedSessions(value.nodes, edges, value.edges);
-  }, [historical, historyVisibility, recordedEdgeIds]);
+      && (topology.recordedEdgeIds.has(edge.id) ? historyVisibility.recorded : historyVisibility.background));
+    return withoutDetachedSessions(value.nodes, edges, topology);
+  }, [historical, historyTopology, historyVisibility]);
   const timeline = useMemo(
     () => localizedGraphTimeline(payload, filters, t, applyHistoryVisibility),
     [applyHistoryVisibility, filters, payload, t],
@@ -238,8 +238,8 @@ export function GraphView({
     };
   }, [applyHistoryVisibility, canvasScopeKey, currentNode, filters, historical, historyCatalog, hoveredEventId, payload, scene, showFuture, t, timeline, visibleCursor]);
   const staticScene = useMemo(() => localizedGraphScene(applyHistoryVisibility(
-    deriveGraphScene(staticPayload, filters, timelineCursor)), t),
-  [applyHistoryVisibility, filters, staticPayload, t, timelineCursor]);
+    deriveGraphScene(staticPayload, filters, timelineCursor), staticHistoryTopology), t),
+  [applyHistoryVisibility, filters, staticHistoryTopology, staticPayload, t, timelineCursor]);
   const staticDiagram = useMemo(
     () => staticOpen && staticScene.edges.length <= STATIC_DIAGRAM_EDGE_LIMIT
       ? graphSceneToMermaid(staticScene, staticVisuals, { iconSlot: true })
@@ -959,6 +959,7 @@ export function GraphView({
           active={active}
           citationEvidenceActive={active && !historical && timelineCursor === null}
           citationEvidenceRevision={payload.projection_revision}
+          sessionActivityRevision={`${payload.projection_revision}:${payload.generated_at}`}
           historyEvents={historical ? timeline : undefined}
           historyEdges={historyCatalog.edges}
           historyNodes={historical ? historyCatalog.nodes : undefined}
@@ -1203,6 +1204,7 @@ function GraphDetails({
   onSeekEvent,
   citationEvidenceActive,
   citationEvidenceRevision,
+  sessionActivityRevision,
   busyAction,
   edge,
   node,
@@ -1232,6 +1234,7 @@ function GraphDetails({
   onSeekEvent: (id: string) => void;
   citationEvidenceActive: boolean;
   citationEvidenceRevision: number;
+  sessionActivityRevision: string;
   busyAction: string | null;
   edge: GraphEdge | null;
   node: GraphNode | null;
@@ -1309,7 +1312,7 @@ function GraphDetails({
       {coAccess ? <p className="graph-edge-summary">{coAccess}</p> : null}
       {sessionEdge ? <p className="graph-edge-summary">{sessionEdge}</p> : null}
       {node && hasSessionDetails(node) ? <SessionActivityDetails active={active} edges={detailEdges} href={href}
-        node={node} nodes={nodes} workspaceId={workspaceId} /> : null}
+        node={node} nodes={nodes} revision={sessionActivityRevision} workspaceId={workspaceId} /> : null}
       {node?.records?.length ? <GraphNodeRecords records={node.records} /> : null}
       {/* Expanded documents are seeds too; their path from the current document
           is how a reader reaches the relations between them outside the canvas. */}
@@ -1484,6 +1487,25 @@ function uniqueSceneValues(values: string[]) {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
+type HistoryTopology = { sessions: Set<string>; sessionOnly: Set<string>; recordedEdgeIds: Set<string> };
+
+/** Classify dependencies before filters can remove their session or relation. */
+function buildHistoryTopology(payload: GraphQueryPayload): HistoryTopology {
+  const events = payload.timeline ?? [];
+  const allNodes = [...payload.nodes, ...events.flatMap(timelineNodeSnapshots)];
+  const allEdges = [...payload.edges, ...events.flatMap(timelineEdgeSnapshots)];
+  const sessions = new Set(allNodes.filter((node) => isSessionNode(node) || isSessionGroupNode(node)).map((node) => node.id));
+  const nonSessionRelation = new Set(allEdges.filter((edge) => !sessions.has(edge.source))
+    .flatMap((edge) => [edge.source, edge.target]));
+  const sessionOnly = new Set(allEdges.filter((edge) => sessions.has(edge.source))
+    .map((edge) => edge.target).filter((id) => !nonSessionRelation.has(id)));
+  const recordedEdgeIds = new Set([
+    ...events.flatMap((event) => [...(event.edge_ids ?? []), ...timelineEdgeSnapshots(event).map((edge) => edge.id)]),
+    ...payload.edges.filter((edge) => isActionEdgeVisualKind(localEdgeVisualKind(edge.edge_kind))).map((edge) => edge.id),
+  ]);
+  return { sessions, sessionOnly, recordedEdgeIds };
+}
+
 /**
  * A conversation hangs off the seed it used. When filters hide every path
  * from a seed to a conversation, the conversation goes, and so do the
@@ -1491,13 +1513,8 @@ function uniqueSceneValues(values: string[]) {
  * keep the history view's rule: a node stays while its relations are hidden
  * or not yet recorded.
  */
-function withoutDetachedSessions(nodes: GraphNode[], edges: GraphEdge[], allEdges: GraphEdge[]): GraphScene {
-  const sessions = new Set(nodes.filter((node) => isSessionNode(node) || isSessionGroupNode(node)).map((node) => node.id));
+function withoutDetachedSessions(nodes: GraphNode[], edges: GraphEdge[], { sessions, sessionOnly }: HistoryTopology): GraphScene {
   if (!sessions.size) return { nodes, edges };
-  const nonSessionRelation = new Set(allEdges.filter((edge) => !sessions.has(edge.source))
-    .flatMap((edge) => [edge.source, edge.target]));
-  const sessionOnly = new Set(allEdges.filter((edge) => sessions.has(edge.source))
-    .map((edge) => edge.target).filter((id) => !nonSessionRelation.has(id)));
   const reached = new Set(nodes.filter((node) => node.is_seed).map((node) => node.id));
   const neighbours = new Map<string, string[]>();
   for (const edge of edges) {

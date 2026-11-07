@@ -85,6 +85,7 @@ from backend.services.graph_service import (
     graph_neighbor_visibility_predicate,
 )
 from backend.services.graph_session_activity import (
+    CO_USED_PER_SESSION,
     SESSION_ACTIVITY_SOURCES,
     SESSION_ENTITY_KINDS,
     SessionAccess,
@@ -1803,8 +1804,8 @@ class GraphQueryService:
                     )
 
             for node in nodes.values():
-                if len(node.records) > GRAPH_NODE_RECORD_LIMIT:
-                    node.records = node.records[-GRAPH_NODE_RECORD_LIMIT:]
+                if node.records:
+                    node.records = _newest_records(node.records)
 
             self._append_session_activity(
                 session,
@@ -1944,6 +1945,7 @@ class GraphQueryService:
                     deferred_identity.request(
                         activity.actor_ref[1], session_node, "actor_label"
                     )
+                visible_co_used = 0
                 for resource in activity.co_used:
                     info = hydrated.get((resource.resource_kind, resource.resource_id))
                     if info is None:
@@ -1972,6 +1974,9 @@ class GraphQueryService:
                                 edge, session_node, document, 3, session_node.id
                             )
                         )
+                        visible_co_used += 1
+                        if visible_co_used >= CO_USED_PER_SESSION:
+                            break
                 for version_id in activity.authored_versions:
                     version = nodes.get(
                         graph_node_id("context_page_version", version_id)
@@ -3426,6 +3431,24 @@ def _fold_into_version(
         )
     )
     return True
+
+
+def _newest_records(records: list[GraphNodeRecord]) -> list[GraphNodeRecord]:
+    """A version's records in time order, the newest ``GRAPH_NODE_RECORD_LIMIT``.
+
+    Change and audit rows arrive from separate time-ordered reads; their
+    concatenation is not, so sort before keeping the newest.
+    """
+
+    ordered = sorted(
+        records,
+        key=lambda record: (
+            record.occurred_at,
+            record.source_kind,
+            record.action_kind,
+        ),
+    )
+    return ordered[-GRAPH_NODE_RECORD_LIMIT:]
 
 
 def _change_version_id(operation: ChangeOperation) -> UUID | None:
