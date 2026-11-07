@@ -132,10 +132,7 @@ export class WorkspaceMapWebGLError extends Error {
 const MIN_UNCOVERED_PIXELS = 96;
 /** Fit leaves this fraction of the frame empty on each side. */
 const FIT_PADDING = 0.08;
-/**
- * Titles republish at least this often, without a GPU read, and a settled
- * GPU-tracked scene reads at this cadence. Moving sources publish every frame.
- */
+/** Titles republish at least this often, without a GPU read; moving sources publish every frame. */
 const LABEL_HEARTBEAT_MS = 200;
 /** Title anchors that moved less than this keep their last publication. */
 const LABEL_MOTION_EPSILON_PX = 0.5;
@@ -302,7 +299,6 @@ export function createWorkspaceCosmosAdapter(
   let rankedLabelIndices: number[] = [];
   let labelIndices: number[] = [];
   let labelTimer: number | null = null;
-  let lastLabelRead = -Infinity;
   let trackedPositions: ReturnType<typeof createWorkspaceTrackedPositions> | null = null;
   let nativePointPickerAttached = false;
   let cachedLabelPositions: ReadonlyMap<number, [number, number]> | null = null;
@@ -327,14 +323,11 @@ export function createWorkspaceCosmosAdapter(
   // At most one opacity fade per title. Every fade starts at the opacity on
   // screen, so reversing or interrupting one never jumps (linear: exact).
   const labelFades = new WeakMap<HTMLSpanElement, { animation: Animation; from: number; to: number }>();
-  // Asynchronous GPU-tracked rows: one read per simulation frame while titles
-  // visibly move, at the heartbeat cadence once two reads moved < epsilon.
+  // Asynchronous GPU-tracked rows: one read per simulation frame, one in flight.
   let trackedReadQueued = false;
   let trackedReadExplicit = false;
   // A wanted read was refused behind an unsignaled one: read once it lands.
   let trackedReadRetry = false;
-  let trackedMotionReference: ReadonlyMap<number, [number, number]> | null = null;
-  let stillTrackedReads = 0;
   // A GPU read delivers the rows of the step it was issued at, one or more
   // steps after that step was drawn. Titles advance each delivered row along
   // its per-step velocity to the step on screen, so they stay on their points.
@@ -349,7 +342,6 @@ export function createWorkspaceCosmosAdapter(
   // GPU rows equal the last upload until a read lands after it: titles follow
   // an upload in its own frame instead of waiting for that read.
   let uploadedRows: Float32Array | null = null;
-  let lastTrackedRead = -Infinity;
   let initialCamera: InitialWorkspaceCamera | null = null;
   let cpuLayout: WorkspaceForceAtlas2WorkerLayout | null = null;
   let cpuLayoutEpoch = 0;
@@ -683,6 +675,7 @@ export function createWorkspaceCosmosAdapter(
       const released = Number.isFinite(event.x) && Number.isFinite(event.y)
         ? graph.screenToSpacePosition([event.x, event.y]) : null;
       cacheLabelPoint(last.index, released?.every(Number.isFinite) ? nativeSpace.fromNativePoint(released) : last.point);
+      forgetTrackedMotion(last.index);
       if (trackedPositions) requestAnimationFrame(() => queueTrackedRead(true));
     }
     labelPublicationStale = true;
@@ -933,8 +926,7 @@ export function createWorkspaceCosmosAdapter(
     const permitted = shouldRunRelationPhysics();
     graph.setConfigPartial({ enableSimulation: permitted && !usesCpuLayout() });
     if (!usesCpuLayout()) {
-      // A (re)started simulation reads tracked titles every frame again.
-      if (permitted) { graph.start(alpha); stillTrackedReads = 0; trackedMotionReference = null; }
+      if (permitted) graph.start(alpha);
       else graph.pause();
       publishLayoutStatus();
       return;
@@ -1295,8 +1287,6 @@ export function createWorkspaceCosmosAdapter(
     // Indices of a replaced scene name other nodes: no placement or motion history.
     placedLabelNodes = new Set();
     shownLabelNodes = new Set();
-    trackedMotionReference = null;
-    stillTrackedReads = 0;
     deliveredTrackedRows = null;
     trackedVelocity = new Map();
     detachNativePointPicker();
@@ -1323,8 +1313,8 @@ export function createWorkspaceCosmosAdapter(
     }
     // Titles track their GPU rows in every GPU-laid-out scene, whatever its
     // size: at most 42 rows are read, and never synchronously. CPU rows are
-    // already in JS. Only a graph without the frame seam (the rest-log
-    // diagnostic) keeps the bounded synchronous read.
+    // already in JS. A graph without the frame seam (the legacy rest-log
+    // diagnostic) places titles from uploaded rows only.
     if (!usesCpuLayout() && "getTrackedPointPositionsFrame" in graph
       && typeof graph.getTrackedPointPositionsFrame === "function") {
       const getFrame = graph.getTrackedPointPositionsFrame.bind(graph);
@@ -1337,7 +1327,6 @@ export function createWorkspaceCosmosAdapter(
         onPositions(positions) {
           if (destroyed || contextLost || simulationFailed || owner !== workspaceMapCommunityIdentityKey(columns)) return;
           const next = new Map([...positions].map(([index, point]) => [index, nativeSpace.fromNativePoint(point)]));
-          noteTrackedMotion(next);
           noteTrackedVelocity(next, trackedReadStep);
           cachedLabelPositions = next;
           uploadedRows = null;
@@ -1381,11 +1370,10 @@ export function createWorkspaceCosmosAdapter(
 
   /**
    * Asynchronous GPU-tracked rows (every GPU-laid-out scene). One read is in
-   * flight at most. A simulation frame asks for one and republishes titles at
-   * its step; after two consecutive reads moved every title < epsilon, frames
-   * read only at the heartbeat. Explicit reads (new rows, new indices, shown
-   * titles) always ask. Requests wait for the current task: Cosmos uploads
-   * written rows at render(), and a frame's step is drawn by then.
+   * flight at most. Each simulation frame asks for one and republishes titles
+   * at its step; new rows, new indices and shown titles ask once. Requests wait
+   * for the current task: Cosmos uploads written rows at render(), and a
+   * frame's step is drawn by then.
    */
   function queueTrackedRead(explicit = false) {
     if (!trackedPositions) return;
@@ -1394,15 +1382,11 @@ export function createWorkspaceCosmosAdapter(
     else trackedReadQueued = true;
     if (!first) return;
     queueMicrotask(() => {
-      const explicitRead = trackedReadExplicit;
       trackedReadQueued = trackedReadExplicit = false;
       if (!ready || destroyed || contextLost || !trackedPositions) return;
-      const now = performance.now();
-      if (explicitRead || stillTrackedReads < 2 || now - lastTrackedRead >= LABEL_HEARTBEAT_MS) {
-        // A signaled earlier read may publish inside request(), with its own step.
-        if (trackedPositions.request()) { lastTrackedRead = now; trackedReadStep = simulationStep; }
-        else trackedReadRetry = true;
-      }
+      // A signaled earlier read may publish inside request(), with its own step.
+      if (trackedPositions.request()) trackedReadStep = simulationStep;
+      else trackedReadRetry = true;
       // A frame advanced the drawn rows, or an upload replaced them: publish.
       updateLabels(undefined, true);
     });
@@ -1435,26 +1419,27 @@ export function createWorkspaceCosmosAdapter(
     return x !== undefined && y !== undefined && Number.isFinite(x) && Number.isFinite(y) ? [x, y] : undefined;
   }
 
-  /** A GPU-tracked row advanced to the simulation step on screen. */
+  /**
+   * A hand-moved row (a released drag, pinned or cancelled) is not physics:
+   * the next read must not measure the drag as velocity.
+   */
+  function forgetTrackedMotion(index: number) {
+    trackedVelocity.delete(index);
+    if (!deliveredTrackedRows?.has(index)) return;
+    const rows = new Map(deliveredTrackedRows);
+    rows.delete(index);
+    deliveredTrackedRows = rows;
+  }
+
+  /**
+   * A GPU-tracked row advanced to the simulation step on screen. Only a free
+   * node moved by the layout is extrapolated: a pinned row is exact.
+   */
   function predictTrackedPoint(index: number, point: [number, number]): [number, number] {
+    if (pinned.has(index)) return point;
     const velocity = trackedVelocity.get(index);
     const steps = Math.min(LABEL_PREDICTION_STEPS, simulationStep - cachedRowsStep);
     return velocity && steps > 0 ? [point[0] + velocity[0] * steps, point[1] + velocity[1] * steps] : point;
-  }
-
-  function noteTrackedMotion(next: ReadonlyMap<number, [number, number]>) {
-    // Drift is measured from the rows that began the still run, under the
-    // current camera, so slow motion cannot pass as still read by read.
-    const reference = trackedMotionReference;
-    let still = reference !== null && next.size > 0;
-    for (const [index, point] of next) {
-      const before = reference?.get(index);
-      if (!still || !before) { still = false; break; }
-      const [fromX, fromY] = projectPoint(before), [toX, toY] = projectPoint(point);
-      if (Math.hypot(toX - fromX, toY - fromY) >= LABEL_MOTION_EPSILON_PX) still = false;
-    }
-    if (still) stillTrackedReads += 1;
-    else { stillTrackedReads = 0; trackedMotionReference = next; }
   }
 
   function syncLabelCandidates(force = false, star = interactionStar()): boolean {
@@ -1536,35 +1521,19 @@ export function createWorkspaceCosmosAdapter(
     // Rows already in JS cost no read: the CPU layout's published frame, or
     // the scene an initial camera Fit has just read. Every call publishes them.
     const knownPositions = positions ?? (usesCpuLayout() ? buffers.positions : undefined);
-    if (!reprojectOnly && !knownPositions) {
-      if (trackedPositions) {
-        // Asynchronous GPU rows: one bounded read after this task. Meanwhile
-        // the last rows reproject under the current camera.
-        queueTrackedRead(true);
-        if (cachedLabelPositions?.size) updateLabels(undefined, true);
-        return;
-      }
-      // A synchronous tracked read waits for the GPU. Hover/focus may change
-      // faster than the heartbeat; they share one six-per-second read budget.
-      const now = performance.now();
-      if (now - lastLabelRead < 1000 / 6) return;
-      lastLabelRead = now;
-    }
-    const tracked = knownPositions ? new Map(trackingIndices().map((index) =>
-      [index, [knownPositions[index * 2], knownPositions[index * 2 + 1]] as [number, number]]))
-      : reprojectOnly ? cachedLabelPositions
-        : new Map([...graph.getTrackedPointPositionsMap()].map(([index, point]) =>
-          [index, nativeSpace.fromNativePoint(point)] as const));
+    // GPU rows are never read synchronously: a caller asking for fresh rows
+    // gets one asynchronous read after this task; the last rows publish now.
+    if (!reprojectOnly && !knownPositions) queueTrackedRead(true);
+    const known = knownPositions ? new Map(trackingIndices().map((index) =>
+      [index, [knownPositions[index * 2], knownPositions[index * 2 + 1]] as [number, number]])) : null;
+    const tracked = known ?? cachedLabelPositions;
     if (!tracked && !uploadedRows) return;
-    if (tracked && tracked !== cachedLabelPositions && !usesCpuLayout()) {
-      // Camera motion reprojects this bounded snapshot immediately, without
-      // another GPU read or consuming the next scheduled position refresh.
-      cachedLabelPositions = new Map(trackingIndices().flatMap((index) => {
-        const point = tracked.get(index);
-        return point ? [[index, [point[0], point[1]] as [number, number]] as const] : [];
-      }));
+    if (known && !usesCpuLayout()) {
+      // An initial camera Fit read these rows at the step on screen; camera
+      // motion reprojects them without another GPU read.
+      cachedLabelPositions = known;
       uploadedRows = null; // a read newer than the last upload
-      cachedRowsStep = simulationStep; // rows of the step on screen
+      cachedRowsStep = simulationStep;
     }
     updateHoverChip();
     if (!showLabels) return;
@@ -1572,7 +1541,7 @@ export function createWorkspaceCosmosAdapter(
     const anchors = labelElements.map((_, slot): [number, number] | null => {
       const node = labelIndices[slot];
       const point = node === undefined ? undefined : drag !== null && drag.index === node ? drag.point
-        : knownPositions ? tracked?.get(node) : gpuLabelRow(node, tracked);
+        : known ? known.get(node) : gpuLabelRow(node, tracked);
       return point ? projectPoint(point) : null;
     });
     // Sub-epsilon motion (a cooling layout) keeps the last publication; it
@@ -1790,12 +1759,10 @@ export function createWorkspaceCosmosAdapter(
     labelLayer.style.display = showLabels ? "block" : "none";
     resetLabelCandidates();
     // Heartbeat: republish every title without a GPU read; moving sources
-    // already publish per frame. Synchronous rows read here, within their
-    // six-per-second budget (5/s).
+    // already publish per frame.
     labelTimer = window.setInterval(() => {
       labelPublicationStale = true;
-      if (usesCpuLayout() || trackedPositions) updateLabels(undefined, true);
-      else updateLabels();
+      updateLabels(undefined, true);
     }, LABEL_HEARTBEAT_MS);
   }
 

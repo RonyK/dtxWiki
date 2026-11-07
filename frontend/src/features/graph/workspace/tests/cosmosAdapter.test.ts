@@ -1745,32 +1745,24 @@ describe("Cosmos Map presentation-only search", () => {
         [start + slot, [100 + start + slot, 200 + start + slot]]));
     }
 
-    it("reads tracked rows per moving simulation frame, at the heartbeat once still, and never on the heartbeat", async () => {
-      let now = 1_000;
-      vi.spyOn(performance, "now").mockImplementation(() => now);
+    it("reads tracked rows once per simulation frame, advances them to the step on screen, and never reads on the heartbeat", async () => {
       const tracking = observeTrackedLabels(), { request } = tracking.controller;
       graph.spaceToScreenPosition.mockImplementation(point => point);
       vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
       try {
-      await mount(sizedColumns(2_001));
+      const adapter = await mount(sizedColumns(2_001));
       const config = createGraph.mock.calls[0][1];
-      const frame = async (ms = 16) => { now += ms; config.onSimulationTick?.(.3); await Promise.resolve(); };
+      const frame = async () => { config.onSimulationTick?.(.3); await Promise.resolve(); };
       tracking.publish(pointRows()); await Promise.resolve(); request.mockClear();
       // The read waits for the end of the native frame's task, then once per frame.
       config.onSimulationTick?.(.3);
       expect(request).not.toHaveBeenCalled();
       await Promise.resolve(); await frame();
       expect(request).toHaveBeenCalledTimes(2);
-      // Two consecutive reads moved every title < 0.5 px: frames read at the heartbeat.
+      // Still rows read every frame too: a running simulation has no read back-off.
       tracking.publish(pointRows()); tracking.publish(pointRows()); request.mockClear();
       await frame(); await frame(); await frame();
-      expect(request).not.toHaveBeenCalled();
-      await frame(200);
-      expect(request).toHaveBeenCalledOnce();
-      // A visible move returns to one read per frame.
-      tracking.publish(new Map([...pointRows()].map(([index, [x, y]]) => [index, [x + 3, y]])));
-      request.mockClear(); await frame();
-      expect(request).toHaveBeenCalledOnce();
+      expect(request).toHaveBeenCalledTimes(3);
       // Rows reach titles after the step that drew them: each title advances
       // its row along the per-step velocity to the step on screen, at most 4.
       const title = () => createGraph.mock.calls[0][0].querySelector<HTMLElement>('[data-node-id="node:0"]')!.dataset.pointX;
@@ -1781,6 +1773,23 @@ describe("Cosmos Map presentation-only search", () => {
       await frame(); expect(title()).toBe("220");
       for (let step = 0; step < 6; step += 1) await frame();
       expect(title()).toBe("250");
+      // Only a free node moved by the layout is extrapolated: a pinned row is exact.
+      const titleOf = (index: number) => createGraph.mock.calls[0][0]
+        .querySelector<HTMLElement>(`[data-node-id="node:${index}"]`)!.dataset.pointX;
+      adapter.pin("node:1", true); await frame();
+      expect(titleOf(1)).toBe("211"); expect(title()).toBe("250");
+      // A hand-moved row is no velocity: a drag cancelled without a pin keeps
+      // its released point after a later read that still measured the drag.
+      graph.screenToSpacePosition.mockImplementation(point => point);
+      const withNode0 = (rows: Map<number, [number, number]>, point: [number, number]) =>
+        new Map([...rows].map(([index, row]): [number, [number, number]] => [index, index === 0 ? point : row]));
+      config.onPointMouseOver?.(0, [250, 200], undefined, false, false);
+      const drag = installedSdkDrag(config, 0); drag.start(); drag.move(300, 200);
+      await frame(); tracking.publish(withNode0(rowsAt(220), [300, 200]));
+      drag.move(320, 200); drag.end("pointercancel");
+      await frame(); tracking.publish(withNode0(rowsAt(230), [320, 200]));
+      await frame(); await frame();
+      expect(title()).toBe("320");
       // A stopped simulation has no frames; the heartbeat republishes without reading.
       request.mockClear();
       vi.advanceTimersByTime(1_000); await Promise.resolve();
@@ -1788,7 +1797,7 @@ describe("Cosmos Map presentation-only search", () => {
       } finally { vi.useRealTimers(); }
     });
 
-    it("clears old slot coordinates before publishing disjoint node IDs inside the read throttle, then publishes the new readback", async () => {
+    it("clears old slot coordinates before publishing disjoint node IDs, then publishes the new readback", async () => {
       let now = 1_000;
       vi.spyOn(performance, "now").mockImplementation(() => now);
       const tracking = observeTrackedLabels();
@@ -3709,22 +3718,6 @@ describe("Cosmos Map interaction contracts", () => {
     }));
   });
 
-  it("does not add per-hover GPU position reads beyond the six-per-second label cap", async () => {
-    // Only a graph without the tracked-frame seam (the rest-log diagnostic) reads synchronously.
-    const frameSeam = graph.getTrackedPointPositionsFrame;
-    delete (graph as { getTrackedPointPositionsFrame?: unknown }).getTrackedPointPositionsFrame;
-    try {
-      await mount(columns(), true, vi.fn(), false, vi.fn(), WORKSPACE_MAP_PC_10K_BUDGET, "rest-log");
-      const clock = vi.spyOn(performance, "now").mockReturnValue(1000);
-      graph.getTrackedPointPositionsMap.mockClear();
-      for (let index = 0; index < 20; index += 1) {
-        createGraph.mock.calls[0][1].onPointMouseOver?.(index % 3, [0, 0], undefined, false, false);
-        createGraph.mock.calls[0][1].onSimulationTick?.(.3);
-      }
-      clock.mockRestore();
-      expect(graph.getTrackedPointPositionsMap.mock.calls.length).toBeLessThanOrEqual(1);
-    } finally { graph.getTrackedPointPositionsFrame = frameSeam; }
-  });
 });
 
 describe("bounded initial Map camera ownership", () => {
