@@ -22,17 +22,23 @@ interface TrackedPositionsOptions {
  */
 export const WORKSPACE_TRACKED_POSITION_LIMIT = 42;
 
-/** Request at the label cadence; poll only the fence, never GPU positions, on RAF. */
+/**
+ * At most one read in flight: the owner asks per simulation frame while titles
+ * move, and once per explicit change. Poll only the fence, never GPU positions, on RAF.
+ */
 export function createWorkspaceTrackedPositions(options: TrackedPositionsOptions) {
   let context: WebGL2RenderingContext | null = null;
   let readback: ReturnType<typeof createWorkspaceGpuReadback> | null = null;
   let animationFrame: number | null = null;
+  // The in-flight read's poll, so a later request can complete it first.
+  let pendingPoll: (() => void) | null = null;
   let generation = 0;
   let failed = false;
   let destroyed = false;
 
   function invalidate() {
     generation += 1;
+    pendingPoll = null;
     if (animationFrame !== null) cancelAnimationFrame(animationFrame);
     animationFrame = null;
     readback?.discard();
@@ -48,6 +54,14 @@ export function createWorkspaceTrackedPositions(options: TrackedPositionsOptions
   }
 
   function request(): boolean {
+    if (destroyed || failed) return false;
+    // A signaled read publishes now instead of at its next-frame poll, so an
+    // owner asking once per frame reads every frame with one read in flight.
+    if (animationFrame !== null && pendingPoll) {
+      cancelAnimationFrame(animationFrame);
+      animationFrame = null;
+      pendingPoll();
+    }
     if (destroyed || failed || animationFrame !== null || readback?.pending()) return false;
     try {
       const frame = options.getFrame();
@@ -86,6 +100,7 @@ export function createWorkspaceTrackedPositions(options: TrackedPositionsOptions
           if (!destroyed && issuedGeneration === generation) options.onPositions(positions);
         } catch (error) { fail(error); }
       };
+      pendingPoll = poll;
       animationFrame = requestAnimationFrame(poll);
       return true;
     } catch (error) {

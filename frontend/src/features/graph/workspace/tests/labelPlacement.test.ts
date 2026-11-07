@@ -45,6 +45,24 @@ describe("bounded Workspace Map label placement", () => {
     expect(result[0]).toMatchObject({ visible: false, reason: "collision" });
   });
 
+  it("keeps shown ordinary titles against newcomers and holds the shown set during a gesture", () => {
+    const crowd = [label(), label({ screenX: 120 })];
+    expect(placeWorkspaceMapLabels(crowd, viewport).map((placement) => placement.visible)).toEqual([true, false]);
+    expect(placeWorkspaceMapLabels([{ ...crowd[0], wasVisible: false }, { ...crowd[1], wasVisible: true }], viewport)
+      .map((placement) => placement.visible)).toEqual([false, true]);
+    // 7 px apart: a shown title may stay at the 5 px gap; a hidden one needs 9 px to appear.
+    const below = (wasVisible?: boolean) => placeWorkspaceMapLabels(
+      [label({ wasVisible: true }), label({ screenY: 100 + 36 + 7, wasVisible })], viewport)[1].visible;
+    expect([below(true), below(undefined), below(false)]).toEqual([true, true, false]);
+    // A gesture: shown titles stay even overlapping each other, none appears, and
+    // a mandatory title still displaces an overlapping ordinary one.
+    expect(placeWorkspaceMapLabels([
+      label({ wasVisible: true }), label({ screenX: 110, wasVisible: true }), label({ screenY: 250 }),
+      label({ priority: "active", screenY: 400 }), label({ screenX: 110, screenY: 400, wasVisible: true }),
+    ], viewport, { freeze: true }).map((placement) => placement.reason))
+      .toEqual(["placed", "placed", "deferred", "placed", "collision"]);
+  });
+
   it("retains oversized active intent with an explicit constrained reason", () => {
     expect(placeWorkspaceMapLabels([label({ priority: "active", width: 350, height: 200 })], { width: 300, height: 100 }))
       .toEqual([{ x: 0, y: 0, visible: true, reason: "viewport-constrained" }]);

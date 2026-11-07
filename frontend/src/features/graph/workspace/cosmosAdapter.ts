@@ -1,4 +1,4 @@
-import { NativeGraph } from "./cosmosNative";
+import { NativeGraph, type GraphConfig } from "./cosmosNative";
 import { RestLogGraph } from "./cosmosRestLog";
 
 import {
@@ -132,6 +132,16 @@ export class WorkspaceMapWebGLError extends Error {
 const MIN_UNCOVERED_PIXELS = 96;
 /** Fit leaves this fraction of the frame empty on each side. */
 const FIT_PADDING = 0.08;
+/** Titles republish at least this often, without a GPU read; moving sources publish every frame. */
+const LABEL_HEARTBEAT_MS = 200;
+/** Title anchors that moved less than this keep their last publication. */
+const LABEL_MOTION_EPSILON_PX = 0.5;
+/** Titles fade in and out instead of popping, unless motion is reduced. */
+const LABEL_FADE_MS = 120;
+/** A camera gesture without zoom events this long no longer holds titles. */
+const LABEL_GESTURE_LAPSE_MS = 1_000;
+/** GPU rows reach titles a few simulation steps late; titles look this far ahead at most. */
+const LABEL_PREDICTION_STEPS = 4;
 
 function validViewport(viewport: GraphViewport | null | undefined): viewport is GraphViewport {
   return Boolean(viewport && Number.isFinite(viewport.zoom) && viewport.zoom > 0
@@ -289,13 +299,49 @@ export function createWorkspaceCosmosAdapter(
   let rankedLabelIndices: number[] = [];
   let labelIndices: number[] = [];
   let labelTimer: number | null = null;
-  let lastLabelRead = -Infinity;
   let trackedPositions: ReturnType<typeof createWorkspaceTrackedPositions> | null = null;
   let nativePointPickerAttached = false;
   let cachedLabelPositions: ReadonlyMap<number, [number, number]> | null = null;
   const labelMeasurements = new WeakMap<HTMLSpanElement, {
     text: string; full: boolean; maxWidth: number; width: number; height: number;
   }>();
+  // The dragged point follows the pointer; its other sources lag the gesture.
+  let dragLabelPoint: { index: number; point: [number, number] } | null = null;
+  // A user camera gesture or point drag keeps the ordinary shown titles. The
+  // camera hold lapses without zoom events, should its end never arrive.
+  let zoomGesture = false;
+  let lastGestureZoom = -Infinity;
+  let dragGesture = false;
+  // Set whenever the next publication must rewrite every title, even if no
+  // anchor moved: candidates, text, size, gesture state or the heartbeat.
+  let labelPublicationStale = true;
+  let publishedAnchors: Array<[number, number] | null> = [];
+  // Placement history by node, not by DOM slot: a candidate change rebinds slots.
+  let placedLabelNodes = new Set<number>();
+  let shownLabelNodes = new Set<number>();
+  let labelViewport: { width: number; height: number } | null = null;
+  // At most one opacity fade per title. Every fade starts at the opacity on
+  // screen, so reversing or interrupting one never jumps (linear: exact).
+  const labelFades = new WeakMap<HTMLSpanElement, { animation: Animation; from: number; to: number }>();
+  // Asynchronous GPU-tracked rows: one read per simulation frame, one in flight.
+  let trackedReadQueued = false;
+  let trackedReadExplicit = false;
+  // A wanted read was refused behind an unsignaled one: read once it lands.
+  let trackedReadRetry = false;
+  // A GPU read delivers the rows of the step it was issued at, one or more
+  // steps after that step was drawn. Titles advance each delivered row along
+  // its per-step velocity to the step on screen, so they stay on their points.
+  let simulationStep = 0;
+  let trackedReadStep = 0;
+  // Velocity spans asynchronous deliveries only; the prediction horizon
+  // starts at whichever read last filled the title rows.
+  let deliveredRowsStep = 0;
+  let cachedRowsStep = 0;
+  let deliveredTrackedRows: ReadonlyMap<number, [number, number]> | null = null;
+  let trackedVelocity = new Map<number, [number, number]>();
+  // GPU rows equal the last upload until a read lands after it: titles follow
+  // an upload in its own frame instead of waiting for that read.
+  let uploadedRows: Float32Array | null = null;
   let initialCamera: InitialWorkspaceCamera | null = null;
   let cpuLayout: WorkspaceForceAtlas2WorkerLayout | null = null;
   let cpuLayoutEpoch = 0;
@@ -435,8 +481,12 @@ export function createWorkspaceCosmosAdapter(
     hoveredLinkCursor: "pointer",
     renderLinks: showEdges,
     enableDrag: true,
+    // A paused or cooled simulation has no further frames: read its last rows once.
+    onSimulationPause() { if (ready && !destroyed && !contextLost) queueTrackedRead(true); },
+    onSimulationEnd() { if (ready && !destroyed && !contextLost) queueTrackedRead(true); },
     onSimulationTick(alpha) {
-      if (ready && !destroyed && !contextLost) updateHoverChip();
+      simulationStep += 1;
+      if (ready && !destroyed && !contextLost) { updateHoverChip(); queueTrackedRead(); }
       // Keep the current 2K relation graph live after natural cooling without
       // an interval or stale generation callback. Initial camera framing has
       // its own bounded readback/ownership window, independent of physics.
@@ -453,7 +503,7 @@ export function createWorkspaceCosmosAdapter(
         && Number.isFinite(event.x) && Number.isFinite(event.y)
         ? { index: nativeHoveredIndex, nodeKey: columns.nodeKeys[nativeHoveredIndex], identityKey: workspaceMapCommunityIdentityKey(columns),
           startX: event.x, startY: event.y, moved: false } : null;
-      if (draggedPoint) stopCpuLayout();
+      if (draggedPoint) { dragGesture = true; stopCpuLayout(); }
     },
     onDrag(event) {
       const drag = draggedPoint;
@@ -462,6 +512,13 @@ export function createWorkspaceCosmosAdapter(
       if (!drag.moved && Math.hypot(event.x - drag.startX, event.y - drag.startY) >= 1) {
         drag.moved = true;
         reheatRelationPhysics(0.15);
+      }
+      // Native Drag writes the pointer position into the GPU row this frame;
+      // CPU rows and GPU reads only catch up after the gesture.
+      const point = graph.screenToSpacePosition([event.x, event.y]);
+      if (point.every(Number.isFinite)) {
+        dragLabelPoint = { index: drag.index, point: nativeSpace.fromNativePoint(point) };
+        updateLabels(undefined, true);
       }
     },
     onPointMouseOver(index, position, event) {
@@ -511,61 +568,21 @@ export function createWorkspaceCosmosAdapter(
     onDragEnd(event) {
       const drag = draggedPoint;
       draggedPoint = null;
-      if (!drag || destroyed || contextLost || drag.identityKey !== workspaceMapCommunityIdentityKey(columns)
-        || columns.nodeKeys[drag.index] !== drag.nodeKey) return;
-      if (typeof event.sourceEvent?.type === "string" && event.sourceEvent.type.endsWith("cancel")) {
-        if (usesCpuLayout()) { reseedCpuLayoutFromNative(); syncRelationPhysics(.15); }
-        return;
-      }
-      const moved = drag.moved || (Number.isFinite(event.x) && Number.isFinite(event.y)
-        && Math.hypot(event.x - drag.startX, event.y - drag.startY) >= 1);
-      if (!moved) {
-        if (usesCpuLayout()) syncRelationPhysics(.15);
-        return; // A stationary tap is selection, never a saved pin or native reheat.
-      }
-      // Native Drag clears its owner before the callback; its last texture
-      // update happens in a later RAF. Commit the final event position rather
-      // than allowing a stale CPU frame or earlier GPU drag position to win.
-      if (usesCpuLayout()) {
-        const positions = readPositions();
-        if (Number.isFinite(event.x) && Number.isFinite(event.y)) {
-          const nativePoint = graph.screenToSpacePosition([event.x, event.y]);
-          if (!nativePoint.every(Number.isFinite)) {
-            cpuLayout?.setPositions(positions, [...pinned]);
-            syncRelationPhysics(.15);
-            return;
-          }
-          const point = nativeSpace.fromNativePoint(nativePoint);
-          positions[drag.index * 2] = point[0]; positions[drag.index * 2 + 1] = point[1];
-        }
-        buffers.positions = positions;
-        writePositions(positions);
-        graph.render(undefined, 0);
-      }
-      if (!options.callbacks.onPin) {
-        if (usesCpuLayout()) cpuLayout?.setPositions(buffers.positions, [...pinned]);
-        reheatRelationPhysics(.15);
-        return;
-      }
-      // SDK Drag.subject contains only {x,y}, and clears its index before this
-      // callback. Use the public pick captured at start, fenced to this scene.
-      const index = drag.index;
-      // One explicit readback per completed drag; never per frame or hover.
-      const positions = usesCpuLayout() ? buffers.positions : readPositions();
-      const position = { x: positions[index * 2], y: positions[index * 2 + 1] };
-      if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) return;
-      pinned.add(index);
-      pinOwners.set(index, columns.nodeIds[index]);
-      for (const [id, owner] of retiredPinIds) if (owner === index) retiredPinIds.delete(id);
-      graph.setPinnedPoints([...pinned]);
-      if (usesCpuLayout()) { cpuLayout?.setPositions(buffers.positions, [...pinned]); syncRelationPhysics(.15); }
-      else reheatRelationPhysics(0.15);
-      options.callbacks.onPin(columns.nodeIds[index], position);
+      const draggedLabel = dragLabelPoint;
+      dragLabelPoint = null;
+      dragGesture = false;
+      try { endPointDrag(drag, event); } finally { if (drag) finishLabelDrag(draggedLabel, event); }
     },
     onZoomStart(_event, userDriven) {
+      if (userDriven) { zoomGesture = true; lastGestureZoom = performance.now(); }
       if (userDriven && !initialCamera?.isInterrupting()) markCameraInteraction();
     },
     onZoomEnd(_event, userDriven) {
+      if (zoomGesture) {
+        zoomGesture = false;
+        labelPublicationStale = true;
+        updateLabels(undefined, true);
+      }
       if (initialCamera?.isInterrupting()) return;
       initialCamera?.nativeEnd();
       if (destroyed || contextLost || !ready) return;
@@ -588,11 +605,82 @@ export function createWorkspaceCosmosAdapter(
         fitReferencePending = false;
       }
       syncLinkFade(zoom);
+      if (zoomGesture) lastGestureZoom = performance.now();
       const positions = initialCamera?.positionsForLabels();
       if (positions) updateLabels(positions);
       else updateLabels(undefined, true);
     },
   });
+
+  function endPointDrag(drag: typeof draggedPoint, event: Parameters<NonNullable<GraphConfig["onDragEnd"]>>[0]) {
+    if (!drag || destroyed || contextLost || drag.identityKey !== workspaceMapCommunityIdentityKey(columns)
+      || columns.nodeKeys[drag.index] !== drag.nodeKey) return;
+    if (typeof event.sourceEvent?.type === "string" && event.sourceEvent.type.endsWith("cancel")) {
+      if (usesCpuLayout()) { reseedCpuLayoutFromNative(); syncRelationPhysics(.15); }
+      return;
+    }
+    const moved = drag.moved || (Number.isFinite(event.x) && Number.isFinite(event.y)
+      && Math.hypot(event.x - drag.startX, event.y - drag.startY) >= 1);
+    if (!moved) {
+      if (usesCpuLayout()) syncRelationPhysics(.15);
+      return; // A stationary tap is selection, never a saved pin or native reheat.
+    }
+    // Native Drag clears its owner before the callback; its last texture
+    // update happens in a later RAF. Commit the final event position rather
+    // than allowing a stale CPU frame or earlier GPU drag position to win.
+    if (usesCpuLayout()) {
+      const positions = readPositions();
+      if (Number.isFinite(event.x) && Number.isFinite(event.y)) {
+        const nativePoint = graph.screenToSpacePosition([event.x, event.y]);
+        if (!nativePoint.every(Number.isFinite)) {
+          cpuLayout?.setPositions(positions, [...pinned]);
+          syncRelationPhysics(.15);
+          return;
+        }
+        const point = nativeSpace.fromNativePoint(nativePoint);
+        positions[drag.index * 2] = point[0]; positions[drag.index * 2 + 1] = point[1];
+      }
+      buffers.positions = positions;
+      writePositions(positions);
+      graph.render(undefined, 0);
+    }
+    if (!options.callbacks.onPin) {
+      if (usesCpuLayout()) cpuLayout?.setPositions(buffers.positions, [...pinned]);
+      reheatRelationPhysics(.15);
+      return;
+    }
+    // SDK Drag.subject contains only {x,y}, and clears its index before this
+    // callback. Use the public pick captured at start, fenced to this scene.
+    const index = drag.index;
+    // One explicit readback per completed drag; never per frame or hover.
+    const positions = usesCpuLayout() ? buffers.positions : readPositions();
+    const position = { x: positions[index * 2], y: positions[index * 2 + 1] };
+    if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) return;
+    pinned.add(index);
+    pinOwners.set(index, columns.nodeIds[index]);
+    for (const [id, owner] of retiredPinIds) if (owner === index) retiredPinIds.delete(id);
+    graph.setPinnedPoints([...pinned]);
+    if (usesCpuLayout()) { cpuLayout?.setPositions(buffers.positions, [...pinned]); syncRelationPhysics(.15); }
+    else reheatRelationPhysics(0.15);
+    options.callbacks.onPin(columns.nodeIds[index], position);
+  }
+
+  function finishLabelDrag(last: typeof dragLabelPoint, event: Parameters<NonNullable<GraphConfig["onDragEnd"]>>[0]) {
+    if (!ready || destroyed || contextLost) return;
+    if (last && !usesCpuLayout()) {
+      // Reads issued during the drag predate the release, and Native Drag
+      // writes its last row in the next frame. Keep the released pointer
+      // position, then read after that write; CPU rows are committed above.
+      trackedPositions?.invalidate();
+      const released = Number.isFinite(event.x) && Number.isFinite(event.y)
+        ? graph.screenToSpacePosition([event.x, event.y]) : null;
+      cacheLabelPoint(last.index, released?.every(Number.isFinite) ? nativeSpace.fromNativePoint(released) : last.point);
+      forgetTrackedMotion(last.index);
+      if (trackedPositions) requestAnimationFrame(() => queueTrackedRead(true));
+    }
+    labelPublicationStale = true;
+    updateLabels(undefined, true);
+  }
 
   const pointImages = buildWorkspacePointImages(tokens);
   if (pointImages) graph.setImageData(pointImages);
@@ -603,9 +691,15 @@ export function createWorkspaceCosmosAdapter(
 
   function writePositions(positions: Float32Array) {
     // A tracked readback issued before this upload holds pre-upload rows. Drop
-    // it; the next bounded request reads the new texture.
+    // it and read the new texture once uploaded: a settled scene runs no
+    // simulation frame that would request it.
     trackedPositions?.invalidate();
+    deliveredTrackedRows = null;
+    trackedVelocity = new Map();
+    cachedLabelPositions = null;
+    uploadedRows = usesCpuLayout() ? null : positions.slice();
     graph.setPointPositions(nativeSpace.toNativePositions(positions));
+    queueTrackedRead(true);
   }
 
   function projectPoint(point: [number, number]): [number, number] {
@@ -791,10 +885,10 @@ export function createWorkspaceCosmosAdapter(
             || !ready || !shouldRunRelationPhysics() || draggedPoint || !usesCpuLayout()) return;
           buffers.positions = positions;
           container.dataset.mapLayoutTicks = String(++cpuLayoutTicks);
-          cachedLabelPositions = null;
           writePositions(positions);
           graph.render(undefined, 0);
-          updateHoverChip();
+          // Titles, ring and chip publish in the frame that draws these rows.
+          updateLabels(undefined, true);
           // Official FA2 has no cooling alpha. Camera ownership remains the
           // existing bounded wall-time gate, independent of the solver.
           initialCamera?.tick(1);
@@ -962,6 +1056,9 @@ export function createWorkspaceCosmosAdapter(
       trackedPositions?.invalidate();
       retireInitialFitIntent();
       if (usesCpuLayout()) stopCpuLayout();
+    } else if (trackedPositions) {
+      // A read the hidden page invalidated is never re-requested otherwise.
+      queueTrackedRead(true);
     } else if (usesCpuLayout()) {
       // Start from the last published coordinates and fixed pins. Visibility
       // restores permission only; it never re-arms automatic camera framing.
@@ -1187,6 +1284,11 @@ export function createWorkspaceCosmosAdapter(
   function applyData(next: CosmosSceneBuffers) {
     appliedLinkColorSource = null;
     cachedLabelPositions = null;
+    // Indices of a replaced scene name other nodes: no placement or motion history.
+    placedLabelNodes = new Set();
+    shownLabelNodes = new Set();
+    deliveredTrackedRows = null;
+    trackedVelocity = new Map();
     detachNativePointPicker();
     trackedPositions?.destroy(); trackedPositions = null;
     if ("setPointCollisionRadii" in graph && typeof graph.setPointCollisionRadii === "function") graph.setPointCollisionRadii(null);
@@ -1208,22 +1310,31 @@ export function createWorkspaceCosmosAdapter(
       && "attachPointPicker" in graph && typeof graph.attachPointPicker === "function") {
       graph.attachPointPicker(createWorkspaceNativePointPicker(next.drawPointSizes, next.pointShapes, failRelationSimulation));
       nativePointPickerAttached = true;
-      if ("getTrackedPointPositionsFrame" in graph && typeof graph.getTrackedPointPositionsFrame === "function") {
-        const getFrame = graph.getTrackedPointPositionsFrame.bind(graph);
-        const owner = workspaceMapCommunityIdentityKey(columns);
-        trackedPositions = createWorkspaceTrackedPositions({
-          getFrame: () => destroyed || contextLost || simulationFailed
-            || (!showLabels && hoveredIndex === null && hoveredEdge === null && activeIndex() === null)
-            || document.visibilityState === "hidden"
-            ? null : getFrame(),
-          onPositions(positions) {
-            if (destroyed || contextLost || simulationFailed || owner !== workspaceMapCommunityIdentityKey(columns)) return;
-            cachedLabelPositions = new Map([...positions].map(([index, point]) => [index, nativeSpace.fromNativePoint(point)]));
-            updateLabels(undefined, true);
-          },
-          onError: failRelationSimulation,
-        });
-      }
+    }
+    // Titles track their GPU rows in every GPU-laid-out scene, whatever its
+    // size: at most 42 rows are read, and never synchronously. CPU rows are
+    // already in JS. A graph without the frame seam (the legacy rest-log
+    // diagnostic) places titles from uploaded rows only.
+    if (!usesCpuLayout() && "getTrackedPointPositionsFrame" in graph
+      && typeof graph.getTrackedPointPositionsFrame === "function") {
+      const getFrame = graph.getTrackedPointPositionsFrame.bind(graph);
+      const owner = workspaceMapCommunityIdentityKey(columns);
+      trackedPositions = createWorkspaceTrackedPositions({
+        getFrame: () => destroyed || contextLost || simulationFailed
+          || (!showLabels && hoveredIndex === null && hoveredEdge === null && activeIndex() === null)
+          || document.visibilityState === "hidden"
+          ? null : getFrame(),
+        onPositions(positions) {
+          if (destroyed || contextLost || simulationFailed || owner !== workspaceMapCommunityIdentityKey(columns)) return;
+          const next = new Map([...positions].map(([index, point]) => [index, nativeSpace.fromNativePoint(point)]));
+          noteTrackedVelocity(next, trackedReadStep);
+          cachedLabelPositions = next;
+          uploadedRows = null;
+          updateLabels(undefined, true);
+          if (trackedReadRetry) { trackedReadRetry = false; queueTrackedRead(true); }
+        },
+        onError: failRelationSimulation,
+      });
     }
   }
 
@@ -1242,12 +1353,93 @@ export function createWorkspaceCosmosAdapter(
   }
 
   function cachePickedLabelPosition(index: number, position: [number, number]) {
-    if (!Number.isInteger(index) || !columns.nodeIds[index] || position?.length !== 2 || !position.every(Number.isFinite)) return;
+    if (position?.length !== 2 || !position.every(Number.isFinite)) return;
     // The native pick already returned this point. Publish its title without
     // waiting for (or adding to) the bounded GPU tracking cadence.
+    cacheLabelPoint(index, nativeSpace.fromNativePoint(position));
+  }
+
+  function cacheLabelPoint(index: number, point: [number, number]) {
+    if (!Number.isInteger(index) || !columns.nodeIds[index] || !point.every(Number.isFinite)) return;
     const positions = new Map(cachedLabelPositions);
-    positions.set(index, nativeSpace.fromNativePoint(position));
+    positions.set(index, point);
     cachedLabelPositions = positions;
+    // An exact (picked or released) point is current: never extrapolate it.
+    trackedVelocity.delete(index);
+  }
+
+  /**
+   * Asynchronous GPU-tracked rows (every GPU-laid-out scene). One read is in
+   * flight at most. Each simulation frame asks for one and republishes titles
+   * at its step; new rows, new indices and shown titles ask once. Requests wait
+   * for the current task: Cosmos uploads written rows at render(), and a
+   * frame's step is drawn by then.
+   */
+  function queueTrackedRead(explicit = false) {
+    if (!trackedPositions) return;
+    const first = !trackedReadQueued && !trackedReadExplicit;
+    if (explicit) trackedReadExplicit = true;
+    else trackedReadQueued = true;
+    if (!first) return;
+    queueMicrotask(() => {
+      trackedReadQueued = trackedReadExplicit = false;
+      if (!ready || destroyed || contextLost || !trackedPositions) return;
+      // A signaled earlier read may publish inside request(), with its own step.
+      if (trackedPositions.request()) trackedReadStep = simulationStep;
+      else trackedReadRetry = true;
+      // A frame advanced the drawn rows, or an upload replaced them: publish.
+      updateLabels(undefined, true);
+    });
+  }
+
+  function noteTrackedVelocity(next: ReadonlyMap<number, [number, number]>, step: number) {
+    const previous = deliveredTrackedRows, steps = step - deliveredRowsStep;
+    const velocity = new Map<number, [number, number]>();
+    if (previous && steps > 0) {
+      for (const [index, [x, y]] of next) {
+        const before = previous.get(index);
+        if (before) velocity.set(index, [(x - before[0]) / steps, (y - before[1]) / steps]);
+      }
+    }
+    deliveredTrackedRows = next;
+    deliveredRowsStep = step;
+    cachedRowsStep = step;
+    trackedVelocity = velocity;
+  }
+
+  /**
+   * The GPU row behind a title: the last read (advanced to the step on
+   * screen) or an exact pick/release, else the last upload while no read has
+   * landed since it.
+   */
+  function gpuLabelRow(index: number, rows: ReadonlyMap<number, [number, number]> | null): [number, number] | undefined {
+    const row = rows?.get(index);
+    if (row) return predictTrackedPoint(index, row);
+    const x = uploadedRows?.[index * 2], y = uploadedRows?.[index * 2 + 1];
+    return x !== undefined && y !== undefined && Number.isFinite(x) && Number.isFinite(y) ? [x, y] : undefined;
+  }
+
+  /**
+   * A hand-moved row (a released drag, pinned or cancelled) is not physics:
+   * the next read must not measure the drag as velocity.
+   */
+  function forgetTrackedMotion(index: number) {
+    trackedVelocity.delete(index);
+    if (!deliveredTrackedRows?.has(index)) return;
+    const rows = new Map(deliveredTrackedRows);
+    rows.delete(index);
+    deliveredTrackedRows = rows;
+  }
+
+  /**
+   * A GPU-tracked row advanced to the simulation step on screen. Only a free
+   * node moved by the layout is extrapolated: a pinned row is exact.
+   */
+  function predictTrackedPoint(index: number, point: [number, number]): [number, number] {
+    if (pinned.has(index)) return point;
+    const velocity = trackedVelocity.get(index);
+    const steps = Math.min(LABEL_PREDICTION_STEPS, simulationStep - cachedRowsStep);
+    return velocity && steps > 0 ? [point[0] + velocity[0] * steps, point[1] + velocity[1] * steps] : point;
   }
 
   function syncLabelCandidates(force = false, star = interactionStar()): boolean {
@@ -1283,6 +1475,7 @@ export function createWorkspaceCosmosAdapter(
     if (changed) {
       trackedPositions?.invalidate();
       graph.trackPointPositionsByIndices(trackingIndices());
+      queueTrackedRead(true);
     }
     let textChanged = false;
     for (let index = 0; index < labelElements.length; index += 1) {
@@ -1305,78 +1498,96 @@ export function createWorkspaceCosmosAdapter(
       label.dataset.labelPriority = priorityKind;
       const nodeId = node === undefined ? "" : columns.nodeIds[node];
       // A reused slot must not publish the previous node's GPU coordinates
-      // while its new identity waits for the bounded tracking refresh.
+      // while its new identity waits for the bounded tracking refresh. A slot
+      // that keeps its node keeps its title on screen.
       if (label.dataset.nodeId !== nodeId) {
         delete label.dataset.pointX;
         delete label.dataset.pointY;
+        stopLabelFade(label);
+        label.style.display = "none";
       }
       label.dataset.nodeId = nodeId;
       label.title = title;
       label.style.whiteSpace = full ? "normal" : "nowrap";
       label.style.overflowWrap = full ? "anywhere" : "normal";
-      if (changed) label.style.display = "none";
     }
+    if (changed || textChanged) labelPublicationStale = true;
     return changed || textChanged;
   }
 
   function updateLabels(positions?: Float32Array, reprojectOnly = false) {
     if (!ready || destroyed || contextLost || !labelLayer
       || (!showLabels && hoveredIndex === null && hoveredEdge === null && activeIndex() === null)) return;
-    const now = performance.now();
-    // Hover/focus may change faster than the 5Hz timer. They still share one
-    // bounded GPU label readback budget, rather than adding per-pointer reads.
-    if (!reprojectOnly && !positions && now - lastLabelRead < 1000 / 6) return;
-    if (!reprojectOnly) lastLabelRead = now;
-    // An initial camera Fit already read the entire visible scene. Reuse it
-    // at actual native Zoom instead of performing a second label readback.
+    // Rows already in JS cost no read: the CPU layout's published frame, or
+    // the scene an initial camera Fit has just read. Every call publishes them.
     const knownPositions = positions ?? (usesCpuLayout() ? buffers.positions : undefined);
-    if (!reprojectOnly && !knownPositions && trackedPositions) {
-      trackedPositions.request();
-      if (cachedLabelPositions?.size) updateLabels(undefined, true);
-      return;
-    }
-    const tracked = reprojectOnly ? cachedLabelPositions : knownPositions ? new Map(trackingIndices().map((index) =>
-      [index, [knownPositions[index * 2], knownPositions[index * 2 + 1]] as [number, number]]))
-      : new Map([...graph.getTrackedPointPositionsMap()].map(([index, point]) =>
-        [index, nativeSpace.fromNativePoint(point)] as const));
-    if (!tracked) return;
-    if (!reprojectOnly) {
-      // Camera motion reprojects this bounded snapshot immediately, without
-      // another GPU read or consuming the next scheduled position refresh.
-      cachedLabelPositions = new Map(trackingIndices().flatMap((index) => {
-        const point = tracked.get(index);
-        return point ? [[index, [point[0], point[1]] as [number, number]] as const] : [];
-      }));
+    // GPU rows are never read synchronously: a caller asking for fresh rows
+    // gets one asynchronous read after this task; the last rows publish now.
+    if (!reprojectOnly && !knownPositions) queueTrackedRead(true);
+    const known = knownPositions ? new Map(trackingIndices().map((index) =>
+      [index, [knownPositions[index * 2], knownPositions[index * 2 + 1]] as [number, number]])) : null;
+    const tracked = known ?? cachedLabelPositions;
+    if (!tracked && !uploadedRows) return;
+    if (known && !usesCpuLayout()) {
+      // An initial camera Fit read these rows at the step on screen; camera
+      // motion reprojects them without another GPU read.
+      cachedLabelPositions = known;
+      uploadedRows = null; // a read newer than the last upload
+      cachedRowsStep = simulationStep;
     }
     updateHoverChip();
     if (!showLabels) return;
-    const bounds = container.getBoundingClientRect();
+    const drag = dragLabelPoint;
+    const anchors = labelElements.map((_, slot): [number, number] | null => {
+      const node = labelIndices[slot];
+      const point = node === undefined ? undefined : drag !== null && drag.index === node ? drag.point
+        : known ? known.get(node) : gpuLabelRow(node, tracked);
+      return point ? projectPoint(point) : null;
+    });
+    // Sub-epsilon motion (a cooling layout) keeps the last publication; it
+    // accumulates against the published anchors, never frame to frame.
+    if (!labelPublicationStale && anchors.length === publishedAnchors.length && anchors.every((anchor, slot) => {
+      const published = publishedAnchors[slot];
+      return anchor === null ? published === null : published !== null
+        && Math.hypot(anchor[0] - published[0], anchor[1] - published[1]) < LABEL_MOTION_EPSILON_PX;
+    })) return;
+    labelPublicationStale = false;
+    publishedAnchors = anchors;
+    // Resize() refreshes this; one read per publication would force layout.
+    const bounds = labelViewport ?? container.getBoundingClientRect();
+    if (!labelViewport && bounds.width > 0 && bounds.height > 0) labelViewport = { width: bounds.width, height: bounds.height };
     const candidates: Array<{
       label: HTMLSpanElement; screenX: number; screenY: number;
       text: string; full: boolean; maxWidth: number;
-      width: number; height: number; measure: boolean;
+      width: number; height: number; measure: boolean; node: number; wasVisible: boolean | undefined; onScreen: boolean;
     }> = [];
     for (let index = 0; index < labelElements.length; index += 1) {
       const label = labelElements[index];
-      delete label.dataset.placementReason;
-      delete label.dataset.viewportConstrained;
-      label.style.maxHeight = "";
+      // The last placement of this node, whichever slot showed it. A node
+      // without a placement (new, or without an anchor) has no history.
       const node = labelIndices[index];
-      const position = tracked.get(node);
-      if (!position) {
-        label.style.display = "none";
+      const wasVisible = node === undefined || !placedLabelNodes.has(node) ? undefined : shownLabelNodes.has(node);
+      // What this element painted last frame, before measuring hides it.
+      const onScreen = label.style.display !== "none" && label.style.visibility !== "hidden";
+      setLabelStyle(label, "maxHeight", "");
+      const anchor = anchors[index];
+      if (!anchor) {
+        delete label.dataset.placementReason;
+        delete label.dataset.viewportConstrained;
+        stopLabelFade(label);
+        setLabelStyle(label, "display", "none");
         delete label.dataset.pointX;
         delete label.dataset.pointY;
         continue;
       }
-      const [screenX, screenY] = projectPoint(position);
+      const [screenX, screenY] = anchor;
       // The title may be clamped into view; keep its actual bounded tracked
       // point separate for position-aware consumers and browser acceptance.
       label.dataset.pointX = String(screenX);
       label.dataset.pointY = String(screenY);
       const full = label.dataset.fullTitle === "true";
       const maxWidth = full ? Math.max(0, Math.min(420, bounds.width - 16)) : 144;
-      label.style.maxWidth = `${maxWidth}px`;
+      setLabelStyle(label, "maxWidth", `${maxWidth}px`);
       const text = label.textContent;
       const cached = labelMeasurements.get(label);
       const measure = !cached || cached.text !== text || cached.full !== full || cached.maxWidth !== maxWidth;
@@ -1384,11 +1595,12 @@ export function createWorkspaceCosmosAdapter(
         // display:none has no measurable rectangle. Prepare every changed
         // title before reading any dimensions, so one bounded layout pass
         // measures first-paint wrapping and non-Latin glyph widths correctly.
+        // A running fade continues: opacity does not affect the rectangle.
         label.style.visibility = "hidden";
         label.style.display = "block";
       }
       candidates.push({ label, screenX, screenY, text, full, maxWidth,
-        width: cached?.width ?? 0, height: cached?.height ?? 0, measure });
+        width: cached?.width ?? 0, height: cached?.height ?? 0, measure, node: node!, wasVisible, onScreen });
     }
     for (const candidate of candidates) {
       if (!candidate.measure) continue;
@@ -1403,28 +1615,99 @@ export function createWorkspaceCosmosAdapter(
       candidate.height = height > 0 ? height : 18;
       if (width > 0 && height > 0) labelMeasurements.set(label, { text, full, maxWidth, width, height });
     }
-    const placements = placeWorkspaceMapLabels(candidates.map(({ label, screenX, screenY, width, height }) => ({
-      screenX, screenY, width, height,
+    const placements = placeWorkspaceMapLabels(candidates.map(({ label, screenX, screenY, width, height, wasVisible }) => ({
+      screenX, screenY, width, height, wasVisible,
       priority: label.dataset.labelPriority === "active" ? "active"
         : label.dataset.labelPriority === "explicit" ? "explicit" : "ordinary",
-    })), bounds);
+    })), bounds, { freeze: dragGesture
+      || zoomGesture && performance.now() - lastGestureZoom < LABEL_GESTURE_LAPSE_MS });
+    const fades = !reducedMotion;
+    placedLabelNodes = new Set();
+    shownLabelNodes = new Set();
     for (let index = 0; index < candidates.length; index += 1) {
-      const { label } = candidates[index];
+      const { label, node, wasVisible, onScreen } = candidates[index];
       const { x, y, visible, reason } = placements[index];
+      placedLabelNodes.add(node);
+      if (visible) shownLabelNodes.add(node);
       label.dataset.placementReason = reason;
-      if (!visible) {
-        label.style.display = "none";
-        label.style.visibility = "visible";
-        continue;
-      }
       if (reason === "viewport-constrained") {
         label.dataset.viewportConstrained = "true";
-        label.style.maxHeight = `${bounds.height}px`;
-      }
-      label.style.display = "block";
-      label.style.transform = `translate(${x}px, ${y}px)`;
-      label.style.visibility = "visible";
+        setLabelStyle(label, "maxHeight", `${bounds.height}px`);
+      } else delete label.dataset.viewportConstrained;
+      if (!visible) hideLabel(label, fades && onScreen);
+      // A rebound slot showing a node already on screen elsewhere does not fade in.
+      else showLabel(label, x, y, fades, fades && !onScreen && wasVisible !== true);
     }
+  }
+
+  function setLabelStyle(label: HTMLSpanElement,
+    property: "display" | "visibility" | "transform" | "maxWidth" | "maxHeight", value: string) {
+    if (label.style[property] !== value) label.style[property] = value;
+  }
+
+  function showLabel(label: HTMLSpanElement, x: number, y: number, fades: boolean, fadeIn: boolean) {
+    setLabelStyle(label, "display", "block");
+    setLabelStyle(label, "visibility", "visible");
+    // Each title is its own compositor layer. Whole device pixels keep its
+    // text sharp while it moves; the anchor itself stays exact in data-point-*.
+    const ratio = window.devicePixelRatio || 1;
+    setLabelStyle(label, "transform", `translate(${Math.round(x * ratio) / ratio}px, ${Math.round(y * ratio) / ratio}px)`);
+    const fade = labelFades.get(label);
+    if (!fades) stopLabelFade(label);
+    // A leaving title turns back from its current opacity; an entering one
+    // continues; a hidden one (display may already be set above) starts at 0.
+    else if (fade?.to === 0) fadeLabel(label, 1);
+    else if (!fade && fadeIn) fadeLabel(label, 1, 0);
+  }
+
+  function hideLabel(label: HTMLSpanElement, fade: boolean) {
+    // Only a title that was on screen fades out, from its current opacity;
+    // a leaving one keeps its last place until it has faded.
+    if (fade && typeof label.animate === "function") {
+      setLabelStyle(label, "display", "block");
+      setLabelStyle(label, "visibility", "visible");
+      if (labelFades.get(label)?.to !== 0) fadeLabel(label, 0);
+      return;
+    }
+    stopLabelFade(label);
+    setLabelStyle(label, "display", "none");
+    setLabelStyle(label, "visibility", "visible");
+  }
+
+  function labelOpacity(label: HTMLSpanElement): number {
+    const fade = labelFades.get(label);
+    if (!fade) return label.style.display === "none" ? 0 : 1;
+    const progress = fade.animation.effect?.getComputedTiming().progress;
+    return progress === null || progress === undefined ? fade.to : fade.from + (fade.to - fade.from) * progress;
+  }
+
+  // `from` defaults to the shown opacity, read before the previous fade is cancelled.
+  function fadeLabel(label: HTMLSpanElement, to: 0 | 1, from = labelOpacity(label)) {
+    stopLabelFade(label);
+    if (typeof label.animate !== "function" || from === to) {
+      if (to === 0) { setLabelStyle(label, "display", "none"); setLabelStyle(label, "visibility", "visible"); }
+      return;
+    }
+    const animation = label.animate([{ opacity: from }, { opacity: to }],
+      { duration: LABEL_FADE_MS * Math.abs(to - from), easing: "linear", fill: "forwards" });
+    labelFades.set(label, { animation, from, to });
+    animation.onfinish = () => {
+      if (labelFades.get(label)?.animation !== animation) return;
+      labelFades.delete(label);
+      if (to === 0) {
+        label.style.display = "none";
+        label.style.visibility = "visible";
+      }
+      // The inline state now holds the end opacity; drop the filled effect.
+      animation.cancel();
+    };
+  }
+
+  function stopLabelFade(label: HTMLSpanElement) {
+    const fade = labelFades.get(label);
+    if (!fade) return;
+    labelFades.delete(label);
+    fade.animation.cancel();
   }
 
   function attachSelectionRing() {
@@ -1466,6 +1749,8 @@ export function createWorkspaceCosmosAdapter(
         // A system colour keeps forced-colour browsers from remapping it to ink.
         webkitTextStroke: `3px ${options.forcedColors ? "Canvas" : tokens.surface}`,
         paintOrder: "stroke fill", pointerEvents: "none",
+        // Own compositor layer: per-frame moves composite without repainting text.
+        willChange: "transform",
       });
       labelLayer?.appendChild(label);
       return label;
@@ -1473,7 +1758,12 @@ export function createWorkspaceCosmosAdapter(
     container.appendChild(labelLayer);
     labelLayer.style.display = showLabels ? "block" : "none";
     resetLabelCandidates();
-    labelTimer = window.setInterval(updateLabels, 200); // 5 reads/s, below the 6/s cap.
+    // Heartbeat: republish every title without a GPU read; moving sources
+    // already publish per frame.
+    labelTimer = window.setInterval(() => {
+      labelPublicationStale = true;
+      updateLabels(undefined, true);
+    }, LABEL_HEARTBEAT_MS);
   }
 
   function allowsHover(input: unknown) {
@@ -1494,6 +1784,7 @@ export function createWorkspaceCosmosAdapter(
     if (!ready || destroyed || contextLost) return;
     trackedPositions?.invalidate();
     graph.trackPointPositionsByIndices(trackingIndices());
+    queueTrackedRead(true);
   }
 
   function clearHover() {
@@ -1507,8 +1798,10 @@ export function createWorkspaceCosmosAdapter(
   // row or meet a not-yet-placed one. Name nothing rather than throw from a
   // pointer callback inside the native frame.
   function trackedPoint(index: number): [number, number] | undefined {
-    const position: [number, number] | undefined = usesCpuLayout()
-      ? [buffers.positions[index * 2], buffers.positions[index * 2 + 1]] : cachedLabelPositions?.get(index);
+    const drag = dragLabelPoint;
+    const position: [number, number] | undefined = drag !== null && drag.index === index ? drag.point
+      : usesCpuLayout() ? [buffers.positions[index * 2], buffers.positions[index * 2 + 1]]
+        : gpuLabelRow(index, cachedLabelPositions);
     return position && Number.isFinite(position[0]) && Number.isFinite(position[1]) ? position : undefined;
   }
 
@@ -1682,7 +1975,7 @@ export function createWorkspaceCosmosAdapter(
     cachedLabelPositions = null;
     initialCamera?.cancel(false);
     cancelReveal();
-    draggedPoint = null;
+    draggedPoint = null; dragLabelPoint = null; dragGesture = false;
     nativeHoveredIndex = null;
     graph.pause();
     options.callbacks.onContextStatus?.("lost");
@@ -1829,7 +2122,7 @@ export function createWorkspaceCosmosAdapter(
       initialCamera?.cancel(false);
       cancelReveal();
       communityJob.destroy();
-      draggedPoint = null;
+      draggedPoint = null; dragLabelPoint = null; dragGesture = false;
       nativeHoveredIndex = null;
       container.removeEventListener("pointerdown", markCameraInteraction, true);
       container.removeEventListener("wheel", markCameraInteraction, true);
@@ -1947,7 +2240,7 @@ export function createWorkspaceCosmosAdapter(
           next.positions[index * 2 + 1] = current[previous * 2 + 1];
         });
       }
-      draggedPoint = null;
+      draggedPoint = null; dragLabelPoint = null; dragGesture = false;
       nativeHoveredIndex = null;
       preservesSessionCoordinates = false;
       appliedCommunity = null;
@@ -1999,7 +2292,7 @@ export function createWorkspaceCosmosAdapter(
     },
     reset() {
       if (destroyed) return;
-      draggedPoint = null;
+      draggedPoint = null; dragLabelPoint = null; dragGesture = false;
       // Reset does not replace indexed geometry or SDK native hover. A later
       // same-index pick emits no MouseOver, so retain that public pick owner.
       selectedId = null;
@@ -2020,11 +2313,14 @@ export function createWorkspaceCosmosAdapter(
       captureFitZoom();
     },
     resize() {
+      labelViewport = null;
+      labelPublicationStale = true;
       if (ready && !destroyed && !contextLost) {
         graph.create();
         if (initializeRelationCollision()) {
           syncRelationPhysics(.35);
         }
+        updateLabels(undefined, true);
       }
     },
     resumeLayout() {
@@ -2053,6 +2349,7 @@ export function createWorkspaceCosmosAdapter(
     },
     setLabelsVisible(enabled) {
       showLabels = enabled;
+      labelPublicationStale = true;
       if (!enabled) trackedPositions?.invalidate();
       if (labelLayer) labelLayer.style.display = enabled ? "block" : "none";
       if (enabled) updateLabels();
