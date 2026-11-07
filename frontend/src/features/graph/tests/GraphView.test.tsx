@@ -1373,7 +1373,7 @@ describe("GraphView", () => {
       .not.toBeInTheDocument());
   });
 
-  it("keeps the independent direct static scene across neighbor and two-hop canvas queries", async () => {
+  it("keeps the current direct static scene across canvas scopes, history modes, and playback", async () => {
     const user = userEvent.setup();
     const direct = graphFixture();
     direct.history.mode = "current";
@@ -1416,6 +1416,24 @@ describe("GraphView", () => {
     expect(screen.getByLabelText("Usage")).not.toBeChecked();
     fireEvent.click(screen.getByLabelText("Usage"));
     expect(screen.getByTestId("mock-mermaid-diagram")).toHaveTextContent("Included");
+
+    const appearance = graphFixture();
+    rerender(graphElement({ ...props, payload: appearance }));
+    expect(screen.getByTestId("mock-mermaid-diagram").textContent).toBe(directSource);
+    fireEvent.change(screen.getByLabelText("Timeline position"), { target: { value: "0" } });
+    expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-edges", "0");
+    expect(screen.getByTestId("mock-mermaid-diagram").textContent).toBe(directSource);
+
+    const action = { ...appearance, history: { ...appearance.history, mode: "action" as const },
+      query: { ...appearance.query, time: { mode: "action" as const } },
+    };
+    rerender(graphElement({ ...props, payload: action }));
+    expect(screen.getByTestId("mock-mermaid-diagram").textContent).toBe(directSource);
+    fireEvent.click(screen.getByLabelText("Current relationships", { selector: "input" }));
+    expect(screen.getByTestId("mock-mermaid-diagram").textContent).toBe(directSource);
+    fireEvent.change(screen.getByLabelText("Timeline position"), { target: { value: "0" } });
+    expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-edges", "0");
+    expect(screen.getByTestId("mock-mermaid-diagram").textContent).toBe(directSource);
   });
 
   it.each([501, 750])("uses a complete text fallback for %i relationships instead of invalid Mermaid", (count) => {

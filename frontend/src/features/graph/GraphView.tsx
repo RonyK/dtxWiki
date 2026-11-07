@@ -166,8 +166,6 @@ export function GraphView({
     : payload.query.depth === 2 ? "extended" : "neighbors";
   const depthBusy = Boolean(busyAction?.startsWith("depth:") || busyAction?.startsWith("mode:"));
   const historyTopology = useMemo(() => buildHistoryTopology(payload), [payload]);
-  const staticHistoryTopology = useMemo(() => staticPayload === payload ? historyTopology : buildHistoryTopology(staticPayload),
-    [historyTopology, payload, staticPayload]);
   const { recordedEdgeIds } = historyTopology;
   const referencedCount = useMemo(() => payload.edges.filter((edge) => edge.action_kind === "referenced").length, [payload]);
   const applyHistoryVisibility = useCallback((value: GraphScene, topology = historyTopology): GraphScene => {
@@ -237,9 +235,9 @@ export function GraphView({
       currentId: currentNode?.id ?? null,
     };
   }, [applyHistoryVisibility, canvasScopeKey, currentNode, filters, historical, historyCatalog, hoveredEventId, payload, scene, showFuture, t, timeline, visibleCursor]);
-  const staticScene = useMemo(() => localizedGraphScene(applyHistoryVisibility(
-    deriveGraphScene(staticPayload, filters, timelineCursor), staticHistoryTopology), t),
-  [applyHistoryVisibility, filters, staticHistoryTopology, staticPayload, t, timelineCursor]);
+  // Static relationships stay current even while the canvas replays history.
+  const staticScene = useMemo(() => localizedGraphScene(
+    deriveGraphScene(staticPayload, filters, null), t), [filters, staticPayload, t]);
   const staticDiagram = useMemo(
     () => staticOpen && staticScene.edges.length <= STATIC_DIAGRAM_EDGE_LIMIT
       ? graphSceneToMermaid(staticScene, staticVisuals, { iconSlot: true })
