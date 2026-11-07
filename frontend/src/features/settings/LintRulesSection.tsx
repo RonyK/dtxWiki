@@ -1,5 +1,5 @@
 import { ArrowRight, Lock, Search, Settings2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
@@ -117,6 +117,14 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
     }
   }
 
+  // Counts losses of edit permission. A save that was pending across one must
+  // not hand back the edits that loss discarded. Updated during commit, so a
+  // response that arrives right after the change already sees it.
+  const permissionLosses = useRef(0);
+  useLayoutEffect(() => {
+    if (readOnly) permissionLosses.current += 1;
+  }, [readOnly]);
+
   useEffect(() => {
     active.current = true;
     return () => { active.current = false; };
@@ -198,6 +206,7 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
 
   async function saveDrafts() {
     if (disabled || !card || !dirtyCount) return;
+    const losses = permissionLosses.current;
     setBusy(true);
     clearNotices();
     try {
@@ -216,7 +225,16 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
       setSavedNotice(t("lint.saved"));
     } catch (caught) {
       if (!active.current) return;
-      if (caught instanceof ApiError && caught.body.error_code === "settings_revision_conflict") {
+      const isConflict = caught instanceof ApiError && caught.body.error_code === "settings_revision_conflict";
+      if (permissionLosses.current !== losses) {
+        // Edit permission was lost while this save was pending and its edits
+        // were discarded then. Neither restore nor report them; a conflict
+        // still means the shown baseline is stale.
+        if (isConflict) {
+          setCard(null);
+          setPolicyAttempt((value) => value + 1);
+        }
+      } else if (isConflict) {
         // Keep the attempted edits and reload only the policy baseline: the
         // catalog's defaults and capabilities do not depend on its revision.
         // Unedited values come from the latest card.

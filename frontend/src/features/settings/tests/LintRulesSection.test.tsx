@@ -263,15 +263,26 @@ describe("LintRulesSection", () => {
     await waitFor(() => expect(screen.getByRole("checkbox", { name: /auto-fix/i })).toBeEnabled());
     await user.click(screen.getByRole("checkbox", { name: /auto-fix/i }));
     expect(beforeUnloadIsBlocked()).toBe(true);
+    // Permission is lost while that edit is being saved, and the save then conflicts.
+    let rejectSave!: (reason: unknown) => void;
+    vi.mocked(updateSettingsPolicyBatch).mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject; }));
+    await user.click(saveButton());
     view.rerender(routed(<LintRulesSection readOnly={true} workspaceId={WORKSPACE_ID} />));
+    const cleanupGroup = () => screen.getByRole("group", { name: "Clean up on save" });
     // The owner's unsaved auto-fix edit is dropped, not shown as the saved state.
-    expect(within(screen.getByRole("group", { name: "Clean up on save" })).getByText("Off")).toBeInTheDocument();
+    expect(within(cleanupGroup()).getByText("Off")).toBeInTheDocument();
+    await act(async () => rejectSave(new ApiError(409, {
+      error_code: "settings_revision_conflict", message: "Changed elsewhere", request_id: "test", warnings: [],
+    })));
+    await waitFor(() => expect(getSettingsPolicies).toHaveBeenCalledTimes(3));
+    // The late conflict refreshes the baseline but never hands the edit back.
+    await waitFor(() => expect(within(cleanupGroup()).getByText("Off")).toBeInTheDocument());
     expect(screen.queryByText("Changed")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
     expect(beforeUnloadIsBlocked()).toBe(false);
-    expect(updateSettingsPolicyBatch).not.toHaveBeenCalled();
+    expect(updateSettingsPolicyBatch).toHaveBeenCalledTimes(1);
     expect(getLintRules).toHaveBeenCalledTimes(1);
-    expect(getSettingsPolicies).toHaveBeenCalledTimes(2);
   });
 
   it("waits for both reads before editing and applies group toggles only to filtered checks", async () => {
