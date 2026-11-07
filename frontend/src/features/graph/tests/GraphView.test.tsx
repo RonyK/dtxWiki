@@ -665,6 +665,7 @@ describe("GraphView", () => {
     expect(actions).toHaveAttribute("aria-pressed", "true");
     expect(canvas).toHaveAttribute("data-rendered-edge-ids", "action:created|action:edited|action:published");
     expect(listRows()).toHaveLength(3);
+    expect(rowByLabel(screen.getByTestId("graph-list-view"), "Event 1").closest("li")?.querySelector('[data-visual="action"]')).toBeInTheDocument();
     await user.click(actions);
     expect(canvas).toHaveAttribute("data-rendered-edge-ids", "");
     expect(listRows()).toHaveLength(0);
@@ -1827,7 +1828,9 @@ describe("GraphView", () => {
       payload.edges = [relation(editing, seed, "edited", 3), relation(editing, version, "created", null),
         relation(reading, seed, "viewed", 1), relation(reading, outlined, "referenced", 1)];
       payload.timeline = [];
-      renderGraph({ payload });
+      const props = { payload, onRefresh: vi.fn(async () => undefined),
+        onCollapse: (_node: GraphNode) => Promise.resolve(), onExpand: (_node: GraphNode) => Promise.resolve() };
+      const view = renderGraph(props);
 
       // A document only a chat's structure-only look brought in starts hidden
       // with that look, rather than floating unconnected.
@@ -1839,9 +1842,8 @@ describe("GraphView", () => {
       await user.click(lookChip);
 
       expect(read).not.toHaveBeenCalled();
-      // The first accessible list is the nodes; the second names relationships.
-      const nodeList = screen.getByTestId("graph-view").querySelector(".graph-relationship-list > details")!;
-      await user.click(within(nodeList as HTMLElement).getByRole("button", { name: /Edited Decision Log/ }));
+      const nodeList = screen.getByTestId("graph-list-view");
+      await user.click(rowByLabel(nodeList, "Edited Decision Log"));
       expect(read).toHaveBeenCalledTimes(1);
       const details = screen.getByRole("complementary", { name: "Details" });
       expect(details).toHaveTextContent("Edited · 3 times");
@@ -1861,15 +1863,95 @@ describe("GraphView", () => {
       expect(details).toHaveTextContent("Edited ×2 · Viewed");
       expect(within(details).getAllByRole("listitem").filter((item) => item.closest(".graph-session-flow"))).toHaveLength(3);
 
-      await user.click(within(nodeList as HTMLElement).getByRole("button", { name: /Read Decision Log/ }));
+      view.rerender(graphElement(props));
+      expect(read).toHaveBeenCalledTimes(1);
+      await user.click(screen.getByRole("button", { name: "Refresh graph" }));
+      expect(props.onRefresh).toHaveBeenCalledOnce();
+      // Session activity can change without advancing the edge projection.
+      const refreshed = { ...payload, generated_at: "2026-08-05T00:00:00Z" };
+      view.rerender(graphElement({ ...props, payload: refreshed }));
       expect(read).toHaveBeenCalledTimes(2);
-      await user.click(within(nodeList as HTMLElement).getByRole("button", { name: /Edited Decision Log/ }));
+      expect(details).not.toHaveTextContent("Edited ×2 · Viewed");
+      view.rerender(graphElement({ ...props, payload: { ...refreshed, generated_at: "2026-08-06T00:00:00Z" } }));
+      expect(read).toHaveBeenCalledTimes(3);
       expect(pending[1].signal?.aborted).toBe(true);
-      await act(async () => { pending[1].resolve(detail([["referenced", 9]])); });
+      await act(async () => { pending[1].resolve(detail([["edited", 9]])); });
+      expect(details).not.toHaveTextContent("Edited ×9");
+      await act(async () => { pending[2].resolve(detail([["edited", 5], ["viewed", 1]])); });
+      expect(details).toHaveTextContent("Edited ×5 · Viewed");
+
+      await user.click(rowByLabel(nodeList, "Read Decision Log"));
+      expect(read).toHaveBeenCalledTimes(4);
+      await user.click(rowByLabel(nodeList, "Edited Decision Log"));
+      expect(pending[3].signal?.aborted).toBe(true);
+      await act(async () => { pending[3].resolve(detail([["referenced", 9]])); });
       expect(screen.getByRole("complementary", { name: "Details" })).not.toHaveTextContent("Referenced ×9");
     } finally {
       read.mockRestore();
     }
+  });
+
+  it("removes session-only documents consistently when filters hide their conversation", async () => {
+    // Membership comes from the unfiltered graph; reachability comes from
+    // the displayed edges. Ordinary documents and versions retain history's
+    // node visibility even when their independent relationships are hidden.
+    const user = userEvent.setup();
+    const payload = graphFixture();
+    payload.history.mode = "action";
+    payload.query.time = { mode: "action" };
+    const seed = payload.nodes[0];
+    const chat: GraphNode = { ...payload.nodes[1], id: "node:conversation", entity_id: "conversation",
+      entity_kind: "mcp_chat_session", family: "chat", label: "Shared conversation" };
+    const coUsed: GraphNode = { ...payload.nodes[1], id: "node:co-used", entity_id: "co-used", label: "Session-only document" };
+    const independent = { ...payload.nodes[1], label: "Independently related document" };
+    const version: GraphNode = { ...payload.nodes[1], id: "node:version", entity_id: "version",
+      entity_kind: "context_page_version", label: "Independent version" };
+    const relation = (id: string, source: GraphNode, target: GraphNode, action: string) => ({
+      ...payload.edges[0], id, source: source.id, target: target.id, edge_kind: action, action_kind: action,
+      layer: "action" as const, provenance: "domain" as const,
+    });
+    payload.nodes = [seed, chat, coUsed, independent, version];
+    payload.edges = [relation("edge:session-seed", chat, seed, "edited"),
+      relation("edge:session-only", chat, coUsed, "viewed"),
+      relation("edge:session-independent", chat, independent, "viewed"),
+      { ...payload.edges[0], source: independent.id, target: seed.id },
+      relation("edge:version", version, seed, "created")];
+    payload.timeline = [];
+    renderGraph({ payload });
+    const canvas = screen.getByTestId("mock-graph-canvas");
+    const contents = screen.getByTestId("graph-list-view");
+    expect(canvas).toHaveAttribute("data-nodes", "5");
+    await user.click(within(contents).getByRole("button", { name: /^Two or more steps away/ }));
+    expect(rowByLabel(contents, "Session-only document")).toBeVisible();
+    await user.click(screen.getByText("More filters"));
+    await user.click(screen.getByLabelText("Wiki link", { selector: "input" }));
+    expect(canvas).toHaveAttribute("data-nodes", "5");
+    await user.click(screen.getByLabelText("Conversation", { selector: "input" }));
+    expect(canvas).toHaveAttribute("data-nodes", "3");
+    expect(within(contents).queryByText("Session-only document")).not.toBeInTheDocument();
+    await user.click(within(contents).getByRole("button", { name: /^Not connected to the seed/ }));
+    expect(rowByLabel(contents, "Independently related document")).toBeVisible();
+    expect(rowByLabel(contents, "Independent version")).toBeVisible();
+
+    await user.click(screen.getByLabelText("Conversation", { selector: "input" }));
+    expect(canvas).toHaveAttribute("data-nodes", "5");
+    const actionFilter = screen.getByRole("group", { name: "Action" });
+    await user.click(within(actionFilter).getByLabelText("Edited"));
+    await user.click(within(actionFilter).getByLabelText("Viewed"));
+    expect(canvas).toHaveAttribute("data-nodes", "3");
+    expect(within(contents).queryByText("Session-only document")).not.toBeInTheDocument();
+    await user.click(within(actionFilter).getByLabelText("Created"));
+    expect(canvas).toHaveAttribute("data-nodes", "3");
+    expect(canvas).toHaveAttribute("data-edges", "0");
+    expect(rowByLabel(contents, "Independently related document")).toBeVisible();
+    expect(rowByLabel(contents, "Independent version")).toBeVisible();
+
+    const filters = screen.getByTestId("graph-view").querySelector<HTMLElement>(".graph-frame-filters")!;
+    await user.click(within(filters).getByRole("button", { name: "Clear all" }));
+    expect(canvas).toHaveAttribute("data-nodes", "5");
+    await user.click(screen.getByRole("button", { name: /Historical relationships/ }));
+    expect(canvas).toHaveAttribute("data-nodes", "3");
+    expect(within(contents).queryByText("Session-only document")).not.toBeInTheDocument();
   });
 
   it("says what a read-together relationship rests on", async () => {

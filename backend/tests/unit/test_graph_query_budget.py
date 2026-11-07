@@ -7,7 +7,8 @@ test_graph_query_service.py and test_local_graph_mixed_scene.py.
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from uuid import UUID, uuid5
 
 from backend.schemas.graph import (
@@ -28,6 +29,14 @@ from backend.services.graph_query_service import (
     graph_node_id,
 )
 from backend.services.graph_semantics import NODE_FAMILY_BY_KIND
+from backend.services.graph_service import _Hydrated
+from backend.services.graph_session_activity import (
+    SessionAccess,
+    SessionActivity,
+    SessionActivityBatch,
+    SessionResourceActivity,
+    _split,
+)
 
 NAMESPACE = UUID("2c7f55c4-94d6-4b8d-a5a0-6b7b1a1f0c11")
 
@@ -436,6 +445,81 @@ def test_fair_share_uses_every_slot_it_hands_out():
             sum(edge.source == seed.id for edge in edges) for seed in seeds
         )
         assert per_seed[-1] - per_seed[0] <= 1
+
+
+def test_co_used_document_cap_counts_only_actor_visible_documents(monkeypatch):
+    seed = _node("co-used-seed", seed=True)
+    at = datetime(2026, 8, 4, 2, 15, tzinfo=UTC)
+    documents = [_node(f"co-used-{index}") for index in range(41)]
+    resources = {
+        ("context_page", document.entity_id): SessionResourceActivity(
+            resource_kind="context_page",
+            resource_id=document.entity_id,
+            counts=(("viewed", 1),),
+            first_at=at - timedelta(seconds=index),
+            last_at=at - timedelta(seconds=index),
+        )
+        for index, document in enumerate([seed, *documents])
+    }
+    seeds, co_used = _split(
+        resources, kept_seed_ids={seed.entity_id}, all_seed_ids={seed.entity_id}
+    )
+    activity = SessionActivity(
+        entity_kind="mcp_chat_session",
+        entity_id=uuid5(NAMESPACE, "co-used-chat"),
+        label="Chat",
+        status="active",
+        actor_label=None,
+        presentation=None,
+        seeds=seeds,
+        co_used=co_used,
+    )
+    monkeypatch.setattr(
+        "backend.services.graph_query_service.SESSION_ACTIVITY_SOURCES",
+        (
+            SimpleNamespace(
+                collect=lambda *args, **kwargs: SessionActivityBatch(
+                    sessions=(activity,)
+                )
+            ),
+        ),
+    )
+    # The newest 20 documents are unavailable (for example, archived).
+    # Visibility must leave room for the next 20, while preserving the cap
+    # and strongest/newest ordering when one further document is visible.
+    visible = {
+        ("context_page", document.entity_id): _Hydrated(document.label, None)
+        for document in documents[20:]
+    }
+    service = GraphQueryService()
+    monkeypatch.setattr(
+        service.graph_service, "hydrate_entities", lambda *args, **kwargs: visible
+    )
+    request = GraphQueryRequest(
+        seeds=[GraphSeed(kind="context_page", id=seed.entity_id)],
+        time=GraphTimeQuery(mode="action"),
+        layers=["action", "evidence"],
+    )
+    candidates = []
+    service._append_session_activity(
+        None,
+        uuid5(NAMESPACE, "co-used-workspace"),
+        request=request,
+        actor=None,
+        active_layers=set(request.layers),
+        seed_by_id={seed.entity_id: seed},
+        hydration_context=None,
+        access=SessionAccess(),
+        deferred_identity=None,
+        candidates=candidates,
+        nodes={seed.id: seed},
+        timeline=[],
+    )
+
+    assert {candidate.edge.target for candidate in candidates} == {
+        seed.id,
+        *(document.id for document in documents[20:40]),
+    }
 
 
 def test_every_tier_keeps_strict_priority():

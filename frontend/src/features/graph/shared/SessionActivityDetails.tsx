@@ -65,12 +65,13 @@ export function hasSessionDetails(node: GraphNode | null | undefined): boolean {
  * result, and the order it worked in. The graph answers the first part at
  * once; the chat's own detail fills in per-verb counts and the flow.
  */
-export function SessionActivityDetails({ active, edges, node, nodes, href, workspaceId }: {
+export function SessionActivityDetails({ active, edges, node, nodes, href, revision, workspaceId }: {
   active: boolean;
   edges: GraphEdge[];
   node: GraphNode;
   nodes: GraphNode[];
   href: string | null;
+  revision: string;
   workspaceId: string | null;
 }) {
   const { t } = useTranslation("graph");
@@ -78,7 +79,7 @@ export function SessionActivityDetails({ active, edges, node, nodes, href, works
   const headingId = useId();
   const source = SESSION_DETAIL_SOURCES[node.entity_kind];
   const actorId = useOptionalAuth()?.user?.user_id ?? null;
-  const scope = JSON.stringify([active, actorId, workspaceId, node.entity_kind, node.entity_id]);
+  const scope = JSON.stringify([active, actorId, workspaceId, node.entity_kind, node.entity_id, revision]);
   const liveScope = useRef(scope);
   useLayoutEffect(() => { liveScope.current = scope; }, [scope]);
   const [state, setState] = useState<LoadState>({ scope: "", data: null, loading: false, error: false });

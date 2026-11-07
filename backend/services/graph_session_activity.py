@@ -59,10 +59,10 @@ from backend.utils.actor_display import workspace_plane_actor_display_names
 # into one group node per seed. This bounds the work of one request, not the
 # drawing: the scene budget decides how much of what is collected is shown.
 SESSIONS_PER_SEED = 100
-# Per session, the other documents it used, strongest first, then newest.
+# Per session, the other visible documents it used, strongest first, then newest.
+# Applied by the scene builder after hydration checks actor visibility.
 CO_USED_PER_SESSION = 20
-# Only documents the graph can draw take a place under that cap; an uploaded
-# image, for one, has no graph node and must not crowd a document out.
+# An uploaded image, for one, has no graph node and cannot be a candidate.
 _DRAWABLE_KINDS = frozenset(HYDRATORS) & frozenset(NODE_FAMILY_BY_KIND) - {
     "workspace_tree_node"
 }
@@ -225,10 +225,15 @@ def _window(column, request: GraphQueryRequest) -> tuple:
     return tuple(predicates)
 
 
-def _in_window(instant: datetime, request: GraphQueryRequest) -> bool:
-    if request.time.from_ is not None and instant < request.time.from_:
-        return False
-    return request.time.to is None or instant <= request.time.to
+def _overlapping_window(start_column, end_column, request: GraphQueryRequest) -> tuple:
+    """Predicates for intervals that overlap the requested time window."""
+
+    predicates = []
+    if request.time.from_ is not None:
+        predicates.append(end_column >= request.time.from_)
+    if request.time.to is not None:
+        predicates.append(start_column <= request.time.to)
+    return tuple(predicates)
 
 
 @dataclass
@@ -301,7 +306,7 @@ def _split(
             str(activity.resource_id),
         ),
     )
-    return seeds, tuple(others[:CO_USED_PER_SESSION])
+    return seeds, tuple(others)
 
 
 def _kept_by_session(kept: list[_Kept]) -> dict[UUID, set[UUID]]:
@@ -316,6 +321,8 @@ class McpChatActivitySource:
 
     Chats are an editor surface whose rows come from the audit trail, so the
     source follows the Chats screen: editors with audit read only.
+    The time window selects whole conversations by their recorded activity
+    interval; their document relations retain every occurrence in the chat.
     """
 
     entity_kind = "mcp_chat_session"
@@ -337,6 +344,14 @@ class McpChatActivitySource:
             return SessionActivityBatch()
         from backend.services.mcp_chat_service import McpChatService
 
+        overlapping_chats = select_projection_in_workspace(
+            McpChatSession,
+            workspace_id=workspace_id,
+            columns=(McpChatSession.id,),
+            predicates=_overlapping_window(
+                McpChatSession.started_at, McpChatSession.last_activity_at, request
+            ),
+        )
         link = McpChatArtifactLink
         seed_links = select_projection_in_workspace(
             link,
@@ -352,7 +367,7 @@ class McpChatActivitySource:
                 link.resource_kind == "context_page",
                 link.resource_id.in_(seed_ids),
                 link.verb.in_(self._VERBS),
-                *_window(link.last_occurred_at, request),
+                link.chat_session_id.in_(overlapping_chats),
             ),
         ).cte("seed_chat_links")
         # Typed, so every dialect compares ranks as integers, not as text.
@@ -400,7 +415,7 @@ class McpChatActivitySource:
                     row.last_occurred_at,
                 )
                 for row in card.links
-                if row.verb in verbs and _in_window(row.last_occurred_at, request)
+                if row.verb in verbs
             )
             seeds, co_used = _split(
                 resources,
