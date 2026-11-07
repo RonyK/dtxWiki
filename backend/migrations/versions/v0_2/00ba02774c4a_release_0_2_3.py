@@ -1,11 +1,11 @@
-"""Index archived Inbox entries in Archived list order.
+"""Upgrade the published v0.2.1/v0.2.2 schema to v0.2.3.
 
-The Archived list pages archived entries newest archive first. Without an
-index in that order each page read and sorted the recipient's whole history.
-Both indexes are partial, so read marks and unarchived entries stay out.
+Persist workspace Labs switches with an all-off default and index Archived
+Inbox entries in list order. This consolidates the unpublished Labs and Inbox
+steps while retaining their terminal revision and complete schema.
 
 Revision ID: 00ba02774c4a
-Revises: fec23ff328e6
+Revises: 5b7e5c149279
 Create Date: 2026-11-06 23:37:45.796314
 """
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "00ba02774c4a"
-down_revision = "fec23ff328e6"
+down_revision = "5b7e5c149279"
 branch_labels = None
 depends_on = None
 
@@ -29,6 +29,10 @@ _INDEXES = (
 
 
 def upgrade() -> None:
+    op.add_column(
+        "workspace",
+        sa.Column("labs_policy", sa.JSON(), nullable=False, server_default="{}"),
+    )
     for name, table, owner in _INDEXES:
         op.create_index(
             name,
@@ -42,3 +46,4 @@ def upgrade() -> None:
 def downgrade() -> None:
     for name, table, _owner in reversed(_INDEXES):
         op.drop_index(name, table_name=table)
+    op.drop_column("workspace", "labs_policy")

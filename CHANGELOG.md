@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.3 — 2026-11-07
+
+Beta update with shared browser drafts, clearer graph navigation and legends,
+Inbox improvements, and workspace-saved Labs and Lint settings. Installation
+and package metadata now target 0.2.3.
+
 ### Shared browser drafts
 
 - Keep browser Context saves and reference additions or removals in shared,
@@ -92,6 +98,19 @@
   tab; the map sidebar looks the same.
 - Keep the retained citation evidence table readable in the Details panel
   instead of squeezing its second column to a letter's width.
+- Keep long Knowledge Map details inside their panel and the filter panel's
+  Cancel/Apply footer flush with its bottom edge, including on phones.
+
+### Labs settings
+
+- Save Ask, Agent, and Knowledge Map settings on the server for each workspace
+  with **Save changes** and **Discard**, replacing browser-local preferences.
+  Reload saved settings on window focus.
+- Limit configuring and using these browser experiments to workspace Owners.
+  Enforce the saved policy in navigation, browser routes, and REST endpoints;
+  MCP tools keep their separate policy. Experiments start off by default.
+- Mark Preview features with a flask chip and an explanatory tooltip in
+  navigation, tabs, settings, and graph controls.
 
 ### Lint settings
 
@@ -107,6 +126,68 @@
   edited rows are marked. Checks show a summary while folded, mark checks
   that are off by default, and fold the ones that are always on or external.
   Members who cannot edit see each setting as On or Off.
+
+### Chats
+
+- Keep flow-node hover and selected backgrounds translucent so they retain
+  their visual state without obscuring the underlying flow.
+
+### Database upgrade
+
+- Consolidate the unpublished workspace Labs policy and archived Inbox indexes
+  into one release migration, `00ba02774c4a_release_0_2_3.py`, directly after the
+  released `5b7e5c149279` boundary. Existing 0.2.1 and 0.2.2 databases apply this
+  migration; fresh installs initialize at the frozen 0.2.1 schema first.
+  Preserve the published migration implementations.
+- Keep the terminal revision `00ba02774c4a` and its final schema, so development
+  databases already there do not rerun the migration. Retire the unpublished
+  intermediate `fec23ff328e6`; databases at that revision must reach
+  `00ba02774c4a` with the original checkout, then be backed up and verified
+  before switching. Do not bypass this with `alembic stamp`.
+- Stop the server and worker and take a verified backup before upgrading.
+  Run `dtxwiki inputs audit` and `dtxwiki bootstrap` against the same database.
+  Rollback requires the matching code and its pre-upgrade backup.
+
+### Release validation
+
+- Run the 2K graph browser and WebGL checks in Release checks alongside the
+  existing 10K graph gates, outside ordinary PR CI.
+- Run standard browser E2E checks in a pinned Playwright container with its
+  browser dependencies preinstalled. Upgrade GitHub Actions checkout to its
+  Node.js 24 runtime while keeping the project toolchain on Node.js 22.18.0.
+
+## 0.2.2 — 2026-11-06
+
+Patch release fixing upgrades from published databases and initialization of
+empty databases. Installation and package metadata now target 0.2.2.
+
+### Database upgrade
+
+- Restore the published 0.1.4 migration `eb86fdacb1bb`, byte-identical to the
+  v0.1.4 tag, as the parent of `5b7e5c149279`. The 0.2 migration applies only
+  the changes after 0.1.4: existing 0.1.4 databases keep their login and
+  account-retention data, and 0.1.2 and 0.1.3 databases pass through the
+  published 0.1.4 boundary. Downgrade returns exactly to the 0.1.4 schema.
+- Remove the development-only index revision `ef53a0a7061c`, which no release
+  recorded as its head; the 0.2.1 package passed through it only inside one
+  upgrade transaction. Databases already at `5b7e5c149279` keep that head and
+  schema. A database stamped `ef53a0a7061c` is refused as an unsupported
+  revision.
+- Initialize a proven-empty database directly at the complete v0.2.1 schema
+  in one revision, using frozen SQLite/PostgreSQL DDL captured from the real
+  release schema. Fresh installs do not replay historical migrations or use
+  mutable ORM metadata to create their schema.
+- Run dedicated migration regressions in Release checks for SQLite and
+  PostgreSQL; exclude them from ordinary PR backend and serial test lanes.
+- Support direct upgrades from published v0.1.2 (`efcbcf724889`), v0.1.3
+  (`19db79d3e622`), and v0.1.4 (`eb86fdacb1bb`) without installing intervening
+  application versions. Preserve these release boundaries when consolidating
+  later migrations.
+
+### Release validation
+
+- Pin Playwright jobs to Ubuntu 24.04 so browser dependencies remain
+  installable after `ubuntu-latest` moved to Ubuntu 26.04.
 
 ## 0.2.1 — 2026-11-04
 
@@ -596,26 +677,9 @@ MCP workflows. Installation and package metadata now target 0.2.1.
 
 ### Database upgrade
 
-- Restore the published 0.1.4 migration `eb86fdacb1bb`, byte-identical to the
-  v0.1.4 tag, as the parent of `5b7e5c149279`. The 0.2 migration applies only
-  the changes after 0.1.4: existing 0.1.4 databases keep their login and
-  account-retention data, and 0.1.2 and 0.1.3 databases pass through the
-  published 0.1.4 boundary. Downgrade returns exactly to the 0.1.4 schema.
-- Remove the development-only index revision `ef53a0a7061c`, which no release
-  recorded as its head; the 0.2.1 package passed through it only inside one
-  upgrade transaction. Databases already at `5b7e5c149279` keep that head and
-  schema. A database stamped `ef53a0a7061c` is refused as an unsupported
-  revision.
-- Initialize a proven-empty database directly at the complete v0.2.1 schema
-  in one revision, using frozen SQLite/PostgreSQL DDL captured from the real
-  release schema. Fresh installs do not replay historical migrations or use
-  mutable ORM metadata to create their schema.
-- Run dedicated migration regressions in Release checks for SQLite and
-  PostgreSQL; exclude them from ordinary PR backend and serial test lanes.
-- Support direct upgrades from published v0.1.2 (`efcbcf724889`), v0.1.3
-  (`19db79d3e622`), and v0.1.4 (`eb86fdacb1bb`) without installing intervening
-  application versions. Preserve these release boundaries when consolidating
-  later migrations.
+- Consolidate the release additions at schema head `5b7e5c149279`.
+  The original upgrade chain and fresh-database initialization were corrected
+  in [0.2.2](#022--2026-11-06).
 - The 0.2 upgrade adds Inbox, Context link locators, Graph observation and
   relationship evidence, lifetime read-together pairs, document references,
   and the Chats tool-call lookup index. External login, account retention,
@@ -624,8 +688,8 @@ MCP workflows. Installation and package metadata now target 0.2.1.
 - Databases already at `5b7e5c149279` retain that head. An unpublished
   intermediate revision must first reach that head using its original checkout;
   back up and verify it before installing 0.2.1. Do not use `alembic stamp` to
-  bypass a missing revision or a schema mismatch. Released 0.1.4 and earlier
-  revisions remain unchanged.
+  bypass a missing revision or a schema mismatch. The published 0.1.4
+  migration was restored in 0.2.2.
 - Stop the server and worker and take a verified backup before upgrading.
   Run `dtxwiki inputs audit`, apply the schema with `dtxwiki bootstrap`, then
   run `dtxwiki reindex` and `dtxwiki graph reproject --all-workspaces` against

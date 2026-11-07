@@ -185,6 +185,9 @@ FROZEN_MIGRATIONS = {
     "versions/v0_2/5b7e5c149279_release_0_2.py": (
         "37470ffd638a140a787c26b805711d0af4589bb58ed0001e4f342d739b094b56"
     ),
+    "versions/v0_2/00ba02774c4a_release_0_2_3.py": (
+        "c4248b0d84bfc05e0d060c8eba7d136953b462d1882f931dc8c3514f223d90fc"
+    ),
 }
 FROZEN_MANIFEST = Path("backend") / "migrations" / "frozen_revisions.json"
 # A local env file can hold SMTP passwords and session secrets. Only the
@@ -444,6 +447,7 @@ def _check_alembic_payload(root: Path) -> list[str]:
             "0.1.3": {"group": "v0_1", "head": "19db79d3e622"},
             "0.1.4": {"group": "v0_1", "head": "eb86fdacb1bb"},
             "0.2.1": {"group": "v0_2", "head": "5b7e5c149279"},
+            "0.2.3": {"group": "v0_2", "head": "00ba02774c4a"},
         }
         aliases = {
             "0001_initial_release": "bd62193d5cf6",

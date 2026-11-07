@@ -40,8 +40,7 @@ CONSTRAINED_REVISIONS = frozenset(
         REVISION,
         "eb86fdacb1bb",
         "5b7e5c149279",
-        "fec23ff328e6",
-        # Adds Inbox indexes only; the input CHECK contract is unchanged.
+        # v0.2.3 adds Labs policy and Inbox indexes; input CHECKs are unchanged.
         "00ba02774c4a",
     }
 )
@@ -52,7 +51,7 @@ SUPPORTED = CONSTRAINED_REVISIONS | frozenset(
     }
 )
 _OPTIONAL_NATIVE_EMAIL_REVISIONS = frozenset(
-    {"eb86fdacb1bb", "5b7e5c149279", "fec23ff328e6", "00ba02774c4a"}
+    {"eb86fdacb1bb", "5b7e5c149279", "00ba02774c4a"}
 )
 FIELDS = {
     "api-token": ("api_tokens", {"name": 128}),

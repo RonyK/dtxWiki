@@ -35,7 +35,8 @@ CORE_REVISION = "efcbcf724889"
 RELEASE_013_REVISION = "19db79d3e622"
 RELEASE_014_REVISION = "eb86fdacb1bb"
 RELEASE_021_REVISION = "5b7e5c149279"
-CURRENT_HEAD = "00ba02774c4a"
+RELEASE_023_REVISION = "00ba02774c4a"
+CURRENT_HEAD = RELEASE_023_REVISION
 ALEMBIC_REVISION_METADATA = {
     "revision",
     "down_revision",
@@ -93,7 +94,7 @@ def _revision_ancestors(graph: dict[str, object], revision: str) -> set[str]:
 
 
 def test_graph_preserves_released_boundaries_and_appends_current_head():
-    """Unreleased changes append after immutable published schema boundaries."""
+    """Schema changes append after immutable published release boundaries."""
 
     script = _script_directory()
     graph = _revision_graph(script)
@@ -114,6 +115,7 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
     assert {
         revision: graph[revision] for revision in expected_prefix
     } == expected_prefix
+    assert graph[RELEASE_023_REVISION] == RELEASE_021_REVISION
     # Future changes append after the single frozen 0.2 release migration.
     appended = set(graph) - expected_prefix.keys()
     assert initialization_graph == {
@@ -137,6 +139,7 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
     assert manifest["schema_releases"]["0.1.3"]["head"] == RELEASE_013_REVISION
     assert manifest["schema_releases"]["0.1.4"]["head"] == RELEASE_014_REVISION
     assert manifest["schema_releases"]["0.2.1"]["head"] == RELEASE_021_REVISION
+    assert manifest["schema_releases"]["0.2.3"]["head"] == RELEASE_023_REVISION
     for release, entry in manifest["schema_releases"].items():
         major, minor = release.split(".")[:2]
         assert entry["group"] == f"v{major}_{minor}"
@@ -200,6 +203,7 @@ def test_the_freeze_covers_every_released_migration_file():
             for path in CORE_REVISION_DIR.glob("*.py")
         ),
         "versions/v0_2/5b7e5c149279_release_0_2.py",
+        "versions/v0_2/00ba02774c4a_release_0_2_3.py",
         "revision_modules/v0_2/__init__.py",
         "revision_modules/v0_2/co_read_v1.py",
         "revision_modules/v0_2/legacy_usage_v1.py",

@@ -3,7 +3,7 @@
 Fresh Ubuntu 22.04+ VM에 dtxWiki를 self-host 설치하는 절차입니다. 아래 **Quick install**은 서버에서 한
 명령으로 설치하는 권장 경로이고, Step 1~8은 같은 일을 손으로 하는 수동/디버그 경로입니다. Docker
 경로는 릴리스 태그의 checkout에서 이미지를 로컬 빌드합니다(게시된 컨테이너 이미지는 없습니다).
-Desktop 설치 파일은 0.1.1에 포함되지 않습니다.
+Desktop 설치 파일은 v0.2.3에 포함되지 않습니다.
 
 이 릴리스의 storage topology는 `single_database` 하나뿐이며, workspace별 DB 물리 분리는
 지원하지 않습니다(자세한 내용은 [데이터베이스](#데이터베이스) 절).
@@ -735,10 +735,12 @@ docker compose up -d app worker
 과거의 누락된 인용을 추가하지 않습니다. 이전 schema로 downgrade하면 wikilink 외 링크
 색인과 pin이 삭제되므로 다시 업그레이드한 뒤에도 재색인이 필요합니다.
 
-미배포 중간 revision을 사용한 DB는 해당 revision의 원래 checkout으로 먼저
-`5b7e5c149279`까지 업그레이드하고 백업·schema 검증을 마친 뒤 0.2.1을 설치하세요.
-이미 이 head인 DB는 schema를 유지합니다. 제거된 revision을 `alembic stamp`로
-우회하지 마세요. 배포된 0.1.4 이하 DB는 0.2.1 chain으로 직접 업그레이드합니다.
+0.2.1 준비 중의 미배포 중간 revision을 사용한 DB는 해당 revision의 원래 checkout으로
+먼저 `5b7e5c149279`까지 업그레이드하고 백업·schema 검증을 마친 뒤 0.2.3을 설치하세요.
+이미 이 head인 DB에도 v0.2.3의 단일 후속 migration을 적용합니다. v0.2.3 준비 중의
+`fec23ff328e6` DB는 원래 checkout으로 `00ba02774c4a`까지 올리고 백업·검증한 뒤
+전환해야 합니다. 제거된 revision을 `alembic stamp`로 우회하지 마세요. 배포된
+0.1.4 이하 DB는 v0.2 chain으로 직접 업그레이드합니다.
 
 ### 관리자 화면에서 버전 확인
 
@@ -791,7 +793,7 @@ readiness를 수행하며, 실패 시 자동 rollback하지 않고 복구 명령
 ```bash
 # systemd + private wheel index
 sudo dtxwiki update --check               # 새 버전 유무만 (가능하면 exit 10)
-sudo dtxwiki update --version 0.2.1       # 특정 버전 핀
+sudo dtxwiki update --version 0.2.3       # 특정 버전 핀
 sudo dtxwiki update --index-url https://pypi.internal/simple   # 사설 wheel index
 ```
 
@@ -1271,7 +1273,10 @@ endpoint를 사용한다.
 
 0.1.2부터 DB migration은 **릴리스 그룹**, **revision ID**, **변경 내용 이름**을 구분해
 관리합니다. 당시 ID·파일 배치 정리는 schema·데이터 작업을 바꾸지 않았습니다.
-새 설치와 기존 배포본 업그레이드는 같은 head `5b7e5c149279`에 도달합니다.
+새 설치와 기존 배포본 업그레이드는 v0.2.3 head `00ba02774c4a`에 도달합니다.
+v0.2.1·v0.2.2의 head `5b7e5c149279` 뒤에 단일 릴리스 migration
+`00ba02774c4a`가 연결되어 workspace Labs 정책 컬럼과 보관된 Inbox 목록의 부분
+인덱스를 추가합니다. 이미 배포된 `5b7e5c149279`와 그 이전 구현은 유지합니다.
 
 v0.1.2부터의 배포본은 중간 버전을 따로 설치하지 않고 현재 버전으로 직접
 업그레이드할 수 있습니다. 각 버전의 migration 구현과 연결은 이후 통합 시에도
@@ -1279,27 +1284,37 @@ v0.1.2부터의 배포본은 중간 버전을 따로 설치하지 않고 현재 
 
 | 기존 배포 버전 | 기존 DB revision | 현재 버전으로의 경로 |
 | --- | --- | --- |
-| 새 설치 | 없음, DB가 비어 있음 | 전체 v0.2.1 schema를 단일 revision으로 직접 초기화 |
+| 새 설치 | 없음, DB가 비어 있음 | v0.2.1 schema를 직접 초기화한 뒤 v0.2.3의 단일 후속 migration 적용 |
 | v0.1.2 | `efcbcf724889` | 정식 0.1.3 → 0.1.4 → v0.2 경로 적용 |
 | v0.1.3 | `19db79d3e622` | 정식 0.1.4 → v0.2 경로 적용 |
-| v0.1.4 | `eb86fdacb1bb` | 남은 v0.2 변경만 적용, 0.1.4 로그인·계정 보존 데이터 유지 |
-| v0.2.1 | `5b7e5c149279` | 이미 최신 schema이면 migration 생략 |
+| v0.1.4 | `eb86fdacb1bb` | 남은 v0.2 변경과 v0.2.3 후속 migration 적용, 0.1.4 로그인·계정 보존 데이터 유지 |
+| v0.2.1·v0.2.2 | `5b7e5c149279` | v0.2.3의 Labs 정책·Inbox 인덱스 migration 적용 |
+| v0.2.3 | `00ba02774c4a` | 이미 최신 schema이면 migration 생략 |
 
 ```text
 기존 배포본: efcbcf724889 (0.1.2) → 19db79d3e622 (0.1.3)
-           → eb86fdacb1bb (0.1.4) → 5b7e5c149279 (0.2, head)
+           → eb86fdacb1bb (0.1.4) → 5b7e5c149279 (0.2.1)
+           → 00ba02774c4a (Labs 정책·Inbox 인덱스, 0.2.3 head)
 
-새 설치: base → 5b7e5c149279 (전체 v0.2.1 schema 직접 생성)
+새 설치: base → 5b7e5c149279 (v0.2.1 schema 직접 생성)
+        → 00ba02774c4a
 ```
 
-새 DB는 과거 migration을 재실행하지 않고 최종 schema를 직접 생성합니다.
+새 DB는 과거 migration을 재실행하지 않고 고정된 v0.2.1 schema를 직접 생성한 뒤
+v0.2.3의 단일 후속 migration을 적용합니다.
 0.1.2·0.1.3 DB는 배포된 0.1.4 migration을 거쳐 업그레이드합니다.
 0.1.4 DB는 이미 적용된 SSO·계정 보존·Review 변경은 재실행하지 않고 Inbox·링크
 locator·Graph·문서 참고문헌·Chats 변경을 적용합니다. 시작 시 bootstrap과 직접
 Alembic 명령이 같은 경로를 사용하며, stamp를 수동 변경할 필요가 없습니다.
 
-0.2.1 패키지로 이미 `5b7e5c149279`에 도달한 DB는 schema가 같으므로 그대로
-인식합니다. 0.2.1 패키지가 중간에 거친 개발 전용 revision `ef53a0a7061c`는 배포에서
+0.2.1·0.2.2 패키지로 이미 `5b7e5c149279`에 도달한 DB는 이 revision에서
+후속 migration을 적용합니다. v0.2.3의 미배포 Labs·Inbox migration은 최종 revision
+`00ba02774c4a`를 유지한 하나의 파일로 통합했습니다. 기존 개발 DB가 이미 이 head라면
+최종 schema가 같으므로 migration을 다시 실행하지 않습니다. 제거된 중간 revision
+`fec23ff328e6`은 지원하지 않으며, 이 DB는 원래 checkout으로 `00ba02774c4a`까지
+업그레이드하고 백업·schema 검증을 마친 뒤 전환해야 합니다.
+
+0.2.1 패키지가 중간에 거친 개발 전용 revision `ef53a0a7061c`는 배포에서
 제거했습니다. 이 revision은 한 upgrade transaction 안에서만 거쳤으므로 Alembic
 명령으로 직접 지정하지 않았다면 DB에 남지 않습니다. 이 stamp나 제거된 다른 미배포
 중간 revision이 남은 DB는 원래 checkout(예: 0.2.1)에서 최종 head까지 업그레이드하고
@@ -1373,10 +1388,11 @@ backend/migrations/
 │   │   ├── 19db79d3e622_release_0_1_3.py
 │   │   └── eb86fdacb1bb_release_0_1_4.py
 │   └── v0_2/
-│       └── 5b7e5c149279_release_0_2.py
-├── initialization/                        # 새 설치용 단일 초기화
+│       ├── 5b7e5c149279_release_0_2.py
+│       └── 00ba02774c4a_release_0_2_3.py
+├── initialization/                        # 새 설치용 v0.2.1 초기화
 │   ├── versions/v0_2/5b7e5c149279_initial_schema.py
-│   └── schema/                            # SQLite·PostgreSQL의 고정된 최종 DDL
+│   └── schema/                            # SQLite·PostgreSQL의 고정된 v0.2.1 DDL
 ├── revision_modules/                      # 릴리스 그룹별 고정 helper 구현
 │   ├── v0_1/
 │   └── v0_2/
@@ -1397,12 +1413,12 @@ backend/migrations/
 
 ### 새 DB 변경 추가
 
-개발 checkout의 저장소 루트에서 다음 helper로 실행 파일을 생성합니다. 아래 `0.2.2`는
-0.2.1 이후 schema 변경을 추가하는 예시입니다. 버전만 바뀌고 DB 변경이 없으면
+개발 checkout의 저장소 루트에서 다음 helper로 실행 파일을 생성합니다. 아래 `0.2.4`는
+0.2.3 이후 schema 변경을 추가하는 예시입니다. 버전만 바뀌고 DB 변경이 없으면
 새 migration이 필요하지 않습니다.
 
 ```bash
-.venv/bin/python scripts/new_migration.py --release 0.2.2 -m "add workspace settings"
+.venv/bin/python scripts/new_migration.py --release 0.2.4 -m "add workspace settings"
 ```
 
 이 명령은 `versions/v0_2/<생성된 ID>_add_workspace_settings.py`를 만들고 직전 head와
@@ -1430,8 +1446,8 @@ sudo dtxwiki db revision-inventory --configured prod
 
 ```text
 Database revision inventory (evidence only; not migration approval)
-code heads: 5b7e5c149279
-prod: status=ok revisions=5b7e5c149279 consistency=consistent
+code heads: 00ba02774c4a
+prod: status=ok revisions=00ba02774c4a consistency=consistent
 ```
 
 `revisions`는 DB에 기록된 revision이고, `code heads`는 설치된 코드의 최신 revision입니다.

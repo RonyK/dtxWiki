@@ -1,12 +1,13 @@
 {
-  "description": "Frozen migration implementations through 0.2.1 and the direct v0.2 initialization. Released upgrades follow the published boundaries 0.0.1, 0.1.1, 0.1.3, 0.1.4 and 0.2.1; an empty database is initialized at the same 0.2 schema in one revision. Frozen files must not be edited; new database changes extend the chain.",
-  "released_in": "0.2.1",
+  "description": "Frozen migration implementations through 0.2.3 and the direct v0.2 initialization. Released upgrades follow the published boundaries 0.0.1, 0.1.1, 0.1.3, 0.1.4, 0.2.1 and 0.2.3; an empty database starts at the frozen 0.2.1 schema and applies the later revisions. Frozen files must not be edited; new database changes extend the chain.",
+  "released_in": "0.2.3",
   "schema_origins": [
     "0.0.1",
     "0.1.1",
     "0.1.3",
     "0.1.4",
-    "0.2.1"
+    "0.2.1",
+    "0.2.3"
   ],
   "sha256": {
     "revision_modules/__init__.py": "4a10c05f30c23333471d4ce1a16d2d768361fb82aac88f3862dbedff753bf7b6",
@@ -37,6 +38,7 @@
     "versions/v0_1/19db79d3e622_release_0_1_3.py": "f6eade587f72c760ff86a37d2769355e22cbb647b9815c12c3e3ec084dcf5a0c",
     "versions/v0_1/efcbcf724889_core_schema.py": "1e4edcea3733bc4ea0f7407a9cd331a5f2f5e6913eebb289856cf87a45b9cd6b",
     "versions/v0_2/5b7e5c149279_release_0_2.py": "37470ffd638a140a787c26b805711d0af4589bb58ed0001e4f342d739b094b56",
+    "versions/v0_2/00ba02774c4a_release_0_2_3.py": "c4248b0d84bfc05e0d060c8eba7d136953b462d1882f931dc8c3514f223d90fc",
     "initialization/schema/postgresql.json": "d8678842142290152f348ce50206a5fd12d6ff426f94178d6c912d7ad567d8da",
     "initialization/schema/sqlite.json": "01195f58398685838f7029007fe8b49f4f839da2e9d4860ce21085b86b0458cf",
     "initialization/versions/v0_2/5b7e5c149279_initial_schema.py": "91d97a286c94e9d9ae1c278d0227e42b38ab67f20239d945da665400136e3f69",

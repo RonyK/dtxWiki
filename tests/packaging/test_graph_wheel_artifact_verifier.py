@@ -480,6 +480,10 @@ def test_release_cli_uses_the_extracted_mapping_not_the_checkout(tmp_path):
             "group": "v0_2",
             "head": "5b7e5c149279",
         }
+        payload["schema_releases"]["0.2.3"] = {
+            "group": "v0_2",
+            "head": "00ba02774c4a",
+        }
         path.write_text(json.dumps(payload), encoding="utf-8")
 
     result = subprocess.run(

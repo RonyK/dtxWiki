@@ -144,7 +144,8 @@ def test_browser_script_keeps_real_rest_and_corrected_worker_runtime_oracles(
     assert "page.request.fetch" in script
     assert "/submit-for-review" in script
     assert "expected_content_hash: submitted.content_hash" in script
-    assert "key: 'workspace_map_enabled', value: true" in script
+    assert "`${workspacePath}/settings/policies/batch`" in script
+    assert "response.request().postDataJSON()?.group === group" in script
     assert "edge.relation_count === 1" in script
     assert "data-renderer-status', 'ready'" in script
     assert "data-map-physics', 'force-atlas2-worker'" in script

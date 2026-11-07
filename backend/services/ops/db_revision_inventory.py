@@ -41,6 +41,10 @@ RETIRED_REVISION_IDS = frozenset(
         # already contains. The 0.2.1 package passed through it only inside
         # the same upgrade transaction; it is no longer distributed.
         "ef53a0a7061c",
+        # Unpublished Labs-only step folded into the terminal v0.2.3
+        # release revision 00ba02774c4a. Use the original checkout to finish
+        # that upgrade before switching to the consolidated release.
+        "fec23ff328e6",
         # Unpublished steps replaced by the consolidated 0.2 release. The
         # terminal 5b7e5c149279 ID still describes the same complete schema;
         # intermediate databases must reach it with the old checkout first.

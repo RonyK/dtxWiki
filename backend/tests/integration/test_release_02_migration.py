@@ -10,10 +10,11 @@
   0.1.3 input constraints and publication-time backfill, and only this one
   compares the frozen initialization DDL with the real release upgrades.
 
-The first traversal also upgrades, downgrades and re-upgrades the appended
-Labs policy once, checking defaults, values and its NULL constraint without
-adding a collected case. Fresh startup applies that revision after the frozen
-release initializer; the frozen snapshots remain unchanged.
+The first traversal also upgrades, downgrades and re-upgrades the consolidated
+0.2.3 revision once, checking the Labs policy's defaults, values and NULL
+constraint and both archived Inbox indexes without adding a collected case.
+Fresh startup applies that revision after the frozen release initializer;
+the frozen snapshots remain unchanged.
 
 Scalar validation matrices belong to existing policy tests rather than this
 release migration.
@@ -55,6 +56,7 @@ from backend.tests.integration.test_release_schema_migration import (
 # Published 0.1.4. The 0.2.1 package used a development-only parent instead.
 PARENT = "eb86fdacb1bb"
 REVISION = "5b7e5c149279"
+RELEASE_023_REVISION = "00ba02774c4a"
 
 
 def _migration_engine(tmp_path, dialect, filename):
@@ -269,14 +271,14 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
             _assert_each_table_rebuilt_at_most_once(statements)
         _assert_release_upgrade(engine, release_data, now, first=True)
         _assert_labs_policy_upgrade(engine, config, workspace_id)
-        _assert_archived_inbox_indexes(engine, config)
+        _assert_archived_inbox_indexes(engine)
         _assert_model_parity(engine)
         _seed_runtime_links(engine, release_data)
         command.downgrade(config, REVISION)
         assert "labs_policy" not in {
             column["name"] for column in inspect(engine).get_columns("workspace")
         }
-        _assert_archived_inbox_indexes(engine, config, present=False)
+        _assert_archived_inbox_indexes(engine, present=False)
         with engine.connect() as connection:
             workspaces = _table(connection, "workspace")
             assert connection.execute(
@@ -310,7 +312,7 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
         _assert_labs_policy_upgrade(
             engine, config, workspace_id, upgrade=False, raw_default=True
         )
-        _assert_archived_inbox_indexes(engine, config, upgrade=False)
+        _assert_archived_inbox_indexes(engine)
         assert retained_account_state() == retained
         assert audit_inputs(database_url) == []
     finally:
@@ -337,9 +339,9 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
 def _assert_labs_policy_upgrade(
     engine, config, workspace_id, *, upgrade=True, raw_default=False
 ):
-    """Reuse this traversal's real workspace for the appended JSON setting."""
+    """Apply 0.2.3 once and inspect its Labs policy on the retained workspace."""
 
-    revision = "fec23ff328e6"
+    revision = RELEASE_023_REVISION
     with engine.begin() as connection:
         workspaces = _table(connection, "workspace")
         connection.execute(
@@ -391,12 +393,20 @@ def _assert_labs_policy_upgrade(
         assert connection.scalar(
             sa.select(workspaces.c.labs_policy).where(workspaces.c.id == workspace_id)
         ) == {"ask_enabled": True, "agent_enabled": True}
-        with pytest.raises(sa.exc.IntegrityError), connection.begin_nested():
+        # pg8000 maps NOT NULL violations to ProgrammingError; verify the
+        # database constraint code instead of the driver's exception subclass.
+        with pytest.raises(DBAPIError) as rejected, connection.begin_nested():
             connection.execute(
                 workspaces.update()
                 .where(workspaces.c.id == workspace_id)
                 .values(labs_policy=sa.null())
             )
+        if engine.dialect.name == "postgresql":
+            error = rejected.value.orig.args[0]
+            assert error["C"] == "23502"
+            assert error["c"] == "labs_policy"
+        else:
+            assert rejected.value.orig.sqlite_errorname == "SQLITE_CONSTRAINT_NOTNULL"
 
     # A new raw SQL insert must also default off without consulting ORM defaults.
     if not raw_default:
@@ -420,14 +430,11 @@ def _assert_labs_policy_upgrade(
         connection.execute(workspaces.delete().where(workspaces.c.id == inserted_id))
 
 
-def _assert_archived_inbox_indexes(engine, config, *, upgrade=True, present=True):
-    """The appended partial indexes that keep Archived pages bounded."""
+def _assert_archived_inbox_indexes(engine, *, present=True):
+    """Inspect the indexes applied with Labs by the same 0.2.3 revision."""
 
-    revision = "00ba02774c4a"
-    if present and upgrade:
-        command.upgrade(config, revision)
     if present:
-        assert _stamp(engine) == revision
+        assert _stamp(engine) == RELEASE_023_REVISION
     inspector = inspect(engine)
     for table, owner in (
         ("workspace_inbox_entry", ["workspace_id", "user_id"]),
@@ -851,13 +858,20 @@ def _assert_atomic_release_failures(config, engine, tmp_path, *, direction):
 
     A successful migration cannot prove transaction rollback. This adds exactly
     one upgrade and one downgrade failure input per dialect, not extra database
-    scenarios; the retry executes the real migration after each rollback.
+    scenarios; the retry executes the real migration after each rollback. The
+    upgrade fails after all 0.2.3 DDL, covering both release steps in the same
+    transaction; the downgrade still checks the published 0.2.1 boundary.
     """
     scripts = tmp_path / f"failed-{direction}"
     shutil.copytree(
         resolve_migrations_dir(), scripts, ignore=shutil.ignore_patterns("__pycache__")
     )
-    revision = scripts / "versions/v0_2/5b7e5c149279_release_0_2.py"
+    filename = (
+        "00ba02774c4a_release_0_2_3.py"
+        if direction == "upgrade"
+        else "5b7e5c149279_release_0_2.py"
+    )
+    revision = scripts / "versions/v0_2" / filename
     revision.write_text(
         revision.read_text()
         + (
@@ -879,7 +893,7 @@ def _assert_atomic_release_failures(config, engine, tmp_path, *, direction):
         }
     with pytest.raises(RuntimeError, match="late release DDL failure"):
         if direction == "upgrade":
-            command.upgrade(broken, REVISION)
+            command.upgrade(broken, RELEASE_023_REVISION)
         else:
             command.downgrade(broken, PARENT)
     assert _schema_snapshot(engine) == before

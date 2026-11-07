@@ -25,6 +25,10 @@
     "0.2.1": {
       "group": "v0_2",
       "head": "5b7e5c149279"
+    },
+    "0.2.3": {
+      "group": "v0_2",
+      "head": "00ba02774c4a"
     }
   },
   "legacy_revision_aliases": {

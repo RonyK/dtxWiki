@@ -247,21 +247,31 @@ await page
   .getByRole('heading', { name: 'Workspace Operations', exact: true })
   .waitFor({ timeout: 10000 });
 await page.getByText('Workspace now', { exact: true }).waitFor({ timeout: 10000 });
-// Account-scoped Labs opt-in is required as well as the workspace policy.
-// Use the shipped Settings UI, matching the real-API graph acceptance fixtures.
-await page.goto(`${baseUrl}/settings?section=labs`);
-await page.getByRole('checkbox', {
-  name: /^(Show Knowledge Map menu|지식 지도 메뉴 표시)$/,
-}).check();
 // A small REST-authored chain checks installed assets/Workers/CSP, not 2K
 // capacity, convergence, graph readability or target-device performance.
 const workspace = await requestData('POST', '/api/v1/workspaces', {
   title: 'Packaged Graph Worker smoke',
 });
 const workspacePath = `/api/v1/workspaces/${workspace.id}`;
-await requestData('PATCH', `${workspacePath}/settings/policies`, {
-  group: 'graph', key: 'workspace_map_enabled', value: true,
-});
+// Labs are saved per workspace. Enable Agent for the independent inventory
+// below and Knowledge Map for the canvas through the shipped Settings form.
+await page.goto(`${baseUrl}/workspaces/${workspace.id}/settings?section=labs`);
+for (const { name, group } of [
+  { name: /^Agent$/, group: 'labs' },
+  { name: /^(Workspace Knowledge Map|워크스페이스 지식 지도)$/, group: 'graph' },
+]) {
+  const checkbox = page.getByRole('checkbox', { name });
+  await checkbox.check();
+  const card = page.locator('.policy-card').filter({ has: checkbox });
+  const save = card.getByRole('button', { name: /^(Save changes|변경사항 저장)$/ });
+  const saved = page.waitForResponse(response =>
+    new URL(response.url()).pathname === `${workspacePath}/settings/policies/batch`
+    && response.request().method() === 'PATCH'
+    && response.request().postDataJSON()?.group === group);
+  await save.click();
+  expect((await saved).ok()).toBeTruthy();
+  await expect(save).toBeDisabled();
+}
 // New workspaces include a real active Agent page. Read its identity through
 // the independent inventory instead of assuming the graph starts empty.
 const seededAgents = await requestData('GET',
@@ -353,6 +363,7 @@ await expect.poll(async () => {
     && state.contactZoom > 0 && Number.isFinite(state.contactZoom);
 }, { timeout: 45000 }).toBe(true);
 await expect(page.getByTestId('workspace-map-layout-status')).toHaveCount(0);
+// The default canvas hides the unlinked Agent; every Context is in the chain.
 expect(Number(await canvas.getAttribute('data-map-node-count'))).toBe(documents.length);
 expect(Number(await canvas.getAttribute('data-map-edge-count')))
   .toBe(documents.length - 1);

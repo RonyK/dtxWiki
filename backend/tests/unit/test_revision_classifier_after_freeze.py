@@ -81,12 +81,12 @@ def test_a_revision_this_code_does_not_ship_is_unknown():
 
 
 def test_a_retired_identifier_is_unknown_even_in_the_script_directory():
-    snapshot = _snapshot("0003_oauth_consent_lifetimes", final_epic1_0002="complete")
+    snapshot = _snapshot("fec23ff328e6", final_epic1_0002="complete")
 
     assert (
         inventory.classify_revision_consistency(
             snapshot,
-            known_revisions={*_LATER_SCRIPT_DIRECTORY, "0003_oauth_consent_lifetimes"},
+            known_revisions={*_LATER_SCRIPT_DIRECTORY, "fec23ff328e6"},
         )
         == "unknown_revision"
     )

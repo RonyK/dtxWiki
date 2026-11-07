@@ -450,7 +450,7 @@ Cursor 이전 시각의 지연 열람이나 미처리 backlog는 요청 안에�
 
 현재 schema head는 release manifest에서 읽습니다. 이미 배포된 revision은 수정하지
 않습니다. 여러 브랜치의 후속 migration은 merge revision으로 연결하고 schema·model
-일치를 검사합니다. 0.2.1의 미배포 migration 통합과 개발 DB 전환은 아래 릴리스
+일치를 검사합니다. 0.2.1·0.2.3의 미배포 migration 통합과 개발 DB 전환은 아래 릴리스
 migration 안내를 따릅니다.
 
 ## 설치 방식별 업데이트 방법
@@ -521,6 +521,14 @@ the database. A disposable test database may instead be recreated at a separate
 explicit path. Do not delete the normal data directory or use `alembic stamp`
 to bypass compatibility checks. Alembic tracks revision identity and does not
 rerun a changed implementation for a database already at its head.
+
+For 0.2.3, the unpublished Labs and Inbox changes are consolidated into
+`00ba02774c4a_release_0_2_3.py`, directly after the published `5b7e5c149279`
+boundary. A development database already at `00ba02774c4a` has the same final
+schema and does not rerun the migration. The removed intermediate revision
+`fec23ff328e6` is unsupported: use the original checkout to upgrade it to
+`00ba02774c4a`, then back up and verify the database before switching code.
+Do not use `alembic stamp` to bypass this requirement.
 
 For read-only revision evidence, use explicit targets instead of `bootstrap` or
 `alembic upgrade`:
@@ -652,7 +660,7 @@ make test-packaged                        # frontend + wheel build, packaged UI/
 
 # 검증은 wheel 파일이 아니라 dist 디렉터리를 받으며, 이전 빌드 잔여물이 섞이지 않도록 깨끗한 dist 에서 합니다.
 rm -rf dist && make build-wheel
-.venv/bin/python scripts/verify_wheel_artifact.py dist --release-version 0.2.1
+.venv/bin/python scripts/verify_wheel_artifact.py dist --release-version 0.2.3
 WHEEL="$(find dist -maxdepth 1 -name 'dtxwiki-*.whl' -print -quit)"
 sha256sum "$WHEEL" infra/prod/install.sh
 ```
@@ -660,7 +668,7 @@ sha256sum "$WHEEL" infra/prod/install.sh
 `verify_wheel_artifact.py` 는 릴리스 워크플로가 태그 시점에 돌리는 것과 같은 검사입니다 —
 SPA 번들과 그 index HTML이 참조하는 asset, alembic.ini, 배포된 migration·직접 초기화·
 helper의 고정 해시를 확인합니다. 추출본 안에서 Alembic graph를 실제로 걸어
-0.2.1 schema head `5b7e5c149279`와 release manifest를 대조합니다. 인자는 dist 디렉터리이며 wheel 경로를
+0.2.3 schema head `00ba02774c4a`와 release manifest를 대조합니다. 인자는 dist 디렉터리이며 wheel 경로를
 넘기면 사용법 오류(exit 2)입니다. 이미 만든 `dist/` 에 이전 빌드가 있으면(`make build-wheel` 은 그것을
 `dist/prev/` 로 옮깁니다) 검사 대상이 모호해지므로 위처럼 `rm -rf dist` 로 시작하세요.
 
@@ -670,7 +678,7 @@ Migration은 `backend/migrations/versions/v<major>_<minor>/<id>_<description>.py
 새 migration이 필요하지 않습니다. 새 파일은 다음 명령으로 생성합니다.
 
 ```bash
-.venv/bin/python scripts/new_migration.py --release 0.2.2 -m "add workspace settings"
+.venv/bin/python scripts/new_migration.py --release 0.2.4 -m "add workspace settings"
 ```
 
 보조 모듈이 필요하면 `revision_modules/v0_2/<id>_add_workspace_settings/`에
@@ -688,16 +696,17 @@ head가 하나여야 합니다. 기존 DB 업그레이드는 고정된 core revi
 패키지 검증기는 각 그래프와 고정 파일의 해시를 함께 확인합니다.
 
 새 DB의 `upgrade head`는 `initialization/versions/v0_2/5b7e5c149279_initial_schema.py`
-하나로 전체 v0.2.1 schema를 생성합니다. SQLite·PostgreSQL의 최종 DDL은
+하나로 v0.2.1 기준 schema를 생성한 뒤 후속 migration을 적용해 현재 head에 도달합니다. SQLite·PostgreSQL의 기준 DDL은
 `initialization/schema/`에 고정되어 있으며, 과거 table rebuild·backfill이나 현재 ORM
 metadata를 실행하지 않습니다. 비어 있음이 증명된 DB에서만 이 경로를 선택합니다.
-후속 schema 변경은 같은 `5b7e5c149279` 뒤에 추가합니다.
+후속 schema 변경은 현재 head 뒤에 추가해 이 초기화 경로에서도 이어서 적용합니다.
 
 기존 DB의 upgrade graph는 배포된 릴리스 경계 하나로만 이어집니다.
 
 ```text
 bd62193d5cf6 (0.0.1) → efcbcf724889 (0.1.1·0.1.2) → 19db79d3e622 (0.1.3)
-  → eb86fdacb1bb (0.1.4) → 5b7e5c149279 (0.2.1)
+  → eb86fdacb1bb (0.1.4) → 5b7e5c149279 (0.2.1·0.2.2)
+  → 00ba02774c4a (0.2.3)
 ```
 
 `versions/v0_1/eb86fdacb1bb_release_0_1_4.py`는 v0.1.4 태그의 파일과 같습니다.
@@ -713,7 +722,14 @@ schema로 정확히 돌아가며 0.1.4의 외부 로그인·계정 보존 데이
 직접 지정하지 않았다면 이 stamp는 남지 않습니다. 그 경로로 `5b7e5c149279`에 도달한
 DB는 schema가 같아 그대로 인식합니다.
 
-DB가 이미 `5b7e5c149279`이면 통합 migration을 다시 실행하지 않습니다.
+0.2.3은 미배포 Labs·Inbox 변경을 `00ba02774c4a_release_0_2_3.py` 하나로 통합해
+Workspace의 Labs 정책 컬럼과 Archived Inbox 조회용 partial index를 추가합니다.
+DB가 이미 `5b7e5c149279`이면 0.2.1 migration을 다시 실행하지 않고 이 단일 후속
+migration만 적용합니다. 배포된 0.2.2 경계와 그 이전 고정 파일은 바꾸지 않습니다.
+0.2.2는 DB 변경이 없어 0.2.1의 schema 경계를 사용합니다.
+최종 schema와 ID를 유지하므로 개발 DB가 이미 `00ba02774c4a`이면 그대로 인식합니다.
+제거된 `fec23ff328e6`은 `RETIRED_REVISION_IDS`에 등록하여 거부하며, 해당 DB는
+원래 checkout으로 `00ba02774c4a`에 도달하고 백업·검증한 뒤 전환합니다.
 제거된 미배포·개발 revision의 DB는 원래 checkout으로 먼저 최종 head에 도달하고,
 백업과 schema 검증을 마친 뒤 전환합니다. 임의로 stamp를 바꾸지 않습니다.
 
