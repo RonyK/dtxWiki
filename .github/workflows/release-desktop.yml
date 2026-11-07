@@ -64,7 +64,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
       - uses: actions/setup-node@v7
@@ -136,7 +136,7 @@ jobs:
           DTXWIKI_UPDATE_CHANNEL: ${{ matrix.update_channel }}
         run: npx electron-builder --config electron-builder.config.cjs ${{ matrix.builder_args }} --publish never
       - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact_glob }}
