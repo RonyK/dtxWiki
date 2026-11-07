@@ -11,6 +11,8 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import UUID, uuid5
 
+from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.graph import GraphHistoryCoverage
 from backend.schemas.graph import (
     GraphBudget,
     GraphEdge,
@@ -31,7 +33,6 @@ from backend.services.graph_query_service import (
 from backend.services.graph_semantics import NODE_FAMILY_BY_KIND
 from backend.services.graph_service import _Hydrated
 from backend.services.graph_session_activity import (
-    SessionAccess,
     SessionActivity,
     SessionActivityBatch,
     SessionResourceActivity,
@@ -491,35 +492,80 @@ def test_co_used_document_cap_counts_only_actor_visible_documents(monkeypatch):
         ("context_page", document.entity_id): _Hydrated(document.label, None)
         for document in documents[20:]
     }
+    visible[("context_page", seed.entity_id)] = _Hydrated(seed.label, None)
     service = GraphQueryService()
     monkeypatch.setattr(
         service.graph_service, "hydrate_entities", lambda *args, **kwargs: visible
+    )
+    monkeypatch.setattr(
+        service.graph_service, "hydration_context", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        service, "_observations_for_seeds", lambda *args, **kwargs: ([], False)
+    )
+    # Stub repository reads only: retain the real domain collector and query
+    # response assembly so a lost overflow signal cannot claim completeness.
+    rows = {
+        ContextPage: [
+            SimpleNamespace(
+                id=seed.entity_id,
+                title=seed.label,
+                lifecycle_status="published",
+                created_at=at,
+            )
+        ],
+        ContextPageVersion: [],
+        GraphHistoryCoverage: [
+            SimpleNamespace(
+                stream_id=seed.entity_id,
+                status="complete",
+                coverage_from=at,
+                watermark=at,
+            )
+        ],
+    }
+    session = SimpleNamespace(
+        get=lambda *args: SimpleNamespace(edge_projection_version=0),
+        scalars=lambda statement: SimpleNamespace(
+            all=lambda: rows[statement.column_descriptions[0]["entity"]]
+        ),
     )
     request = GraphQueryRequest(
         seeds=[GraphSeed(kind="context_page", id=seed.entity_id)],
         time=GraphTimeQuery(mode="action"),
         layers=["action", "evidence"],
+        edge_kinds=["wikilink"],
     )
-    candidates = []
-    service._append_session_activity(
-        None,
+    payload = service.query(
+        session,
         uuid5(NAMESPACE, "co-used-workspace"),
         request=request,
         actor=None,
-        active_layers=set(request.layers),
-        seed_by_id={seed.entity_id: seed},
-        hydration_context=None,
-        access=SessionAccess(),
-        deferred_identity=None,
-        candidates=candidates,
-        nodes={seed.id: seed},
-        timeline=[],
+        usage_signals_enabled=True,
     )
 
-    assert {candidate.edge.target for candidate in candidates} == {
+    assert {edge.target for edge in payload.edges} == {
         seed.id,
         *(document.id for document in documents[20:40]),
     }
+    assert payload.completeness == "bounded_sample"
+    assert payload.truncated
+    assert payload.warnings == ["graph_history_source_bounded"]
+
+    # Exactly 20 eligible documents and an unavailable tail are complete;
+    # merely filling the share must not report an omitted visible relation.
+    del visible[("context_page", documents[40].entity_id)]
+    complete = service.query(
+        session,
+        uuid5(NAMESPACE, "co-used-workspace"),
+        request=request,
+        actor=None,
+        usage_signals_enabled=True,
+    )
+    assert {edge.id for edge in complete.edges} == {edge.id for edge in payload.edges}
+    assert complete.completeness == "complete"
+    assert not complete.truncated
+    assert complete.warnings == []
 
 
 def test_every_tier_keeps_strict_priority():

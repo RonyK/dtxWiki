@@ -1807,7 +1807,7 @@ class GraphQueryService:
                 if node.records:
                     node.records = _newest_records(node.records)
 
-            self._append_session_activity(
+            session_capped = self._append_session_activity(
                 session,
                 workspace_id,
                 request=request,
@@ -1821,6 +1821,7 @@ class GraphQueryService:
                 nodes=nodes,
                 timeline=timeline,
             )
+            capped = capped or session_capped
 
         return candidates, nodes, timeline, capped
 
@@ -1839,7 +1840,7 @@ class GraphQueryService:
         candidates: list[_EdgeCandidate],
         nodes: dict[str, GraphNode],
         timeline: list[_TimelineDraft],
-    ) -> None:
+    ) -> bool:
         """Draw every session source with one rule.
 
         A session is one node. Its relation to a seed competes in that seed's
@@ -1847,8 +1848,11 @@ class GraphQueryService:
         event. Its relations to the other documents it used, and to the seed
         versions its writes produced, are spent from the session's own share
         and only once the session itself is in the scene.
+
+        Return whether the co-used document limit omitted an eligible relation.
         """
 
+        capped = False
         batches = [
             source.collect(
                 session,
@@ -1969,14 +1973,15 @@ class GraphQueryService:
                         last_at=resource.last_at,
                     )
                     if edge is not None:
+                        if visible_co_used >= CO_USED_PER_SESSION:
+                            capped = True
+                            break
                         candidates.append(
                             _session_candidate(
                                 edge, session_node, document, 3, session_node.id
                             )
                         )
                         visible_co_used += 1
-                        if visible_co_used >= CO_USED_PER_SESSION:
-                            break
                 for version_id in activity.authored_versions:
                     version = nodes.get(
                         graph_node_id("context_page_version", version_id)
@@ -2034,6 +2039,7 @@ class GraphQueryService:
                 candidates.append(
                     _session_candidate(edge, group_node, seed, 2, seed.id, "in")
                 )
+        return capped
 
     @staticmethod
     def _append_domain_action(

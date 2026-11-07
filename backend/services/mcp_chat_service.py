@@ -1002,6 +1002,7 @@ class McpChatService:
         include_search_matches: bool = False,
         load_clients: bool = True,
         include_client_catalog: bool = False,
+        compact_labels: bool = False,
     ) -> ChatPageProjection:
         return load_projection(
             session,
@@ -1013,6 +1014,7 @@ class McpChatService:
             include_search_matches=include_search_matches,
             load_clients=load_clients,
             include_client_catalog=include_client_catalog,
+            compact_labels=compact_labels,
         )
 
     def chat_cards(
@@ -1024,7 +1026,9 @@ class McpChatService:
     ) -> list[McpChatCard]:
         """Name a batch of chats with one projection load (no per-chat SQL)."""
 
-        projection = self._load_projection(session, workspace_id, chats, actor)
+        projection = self._load_projection(
+            session, workspace_id, chats, actor, compact_labels=True
+        )
         cards = []
         for chat in chats:
             labels = self._build_chat_labels(chat, projection, actor)
@@ -3097,6 +3101,8 @@ def _projection_policy() -> ProjectionPolicy:
         excluded_library_lifecycle_statuses=frozenset(
             EXCLUDED_LIBRARY_LIFECYCLE_STATUSES
         ),
+        focused_read_tools=FOCUSED_READ_TOOLS,
+        normalize_presentation_text=_normalize_presentation_text,
     )
 
 

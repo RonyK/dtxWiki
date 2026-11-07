@@ -3644,7 +3644,9 @@ def test_the_list_card_does_not_name_a_page_the_reader_cannot_see(session_factor
     assert detail.subject is None
 
 
-def test_the_summary_lookup_does_not_load_every_call_in_the_chat(session_factory):
+def test_the_summary_lookup_does_not_load_every_call_in_the_chat(
+    session_factory, monkeypatch
+):
     """Many chats and repeated reads must use bounded, scalar list queries.
 
     Captured arguments and receipts can contain document-sized text; checking
@@ -3694,12 +3696,12 @@ def test_the_summary_lookup_does_not_load_every_call_in_the_chat(session_factory
                     mcp_session_id=str(mcp_session_id),
                     started_at=base,
                     last_activity_at=base + timedelta(seconds=chat_index),
-                    tool_call_count=5,
+                    tool_call_count=64,
                     write_count=0,
                     error_count=0,
                 )
             )
-            for call_index in range(5):
+            for call_index in range(64):
                 call_id = uuid4()
                 occurred_at = base + timedelta(seconds=call_index)
                 calls.append(
@@ -3738,10 +3740,34 @@ def test_the_summary_lookup_does_not_load_every_call_in_the_chat(session_factory
                     resource_kind="context_page",
                     resource_id=page.id,
                     verb="referenced",
-                    occurrence_count=5,
+                    first_occurred_at=base,
+                    last_occurred_at=occurred_at,
+                    occurrence_count=64,
                     last_mcp_tool_call_id=call_id,
                 )
             )
+        # Compact graph titles must skip malformed/empty historical searches
+        # with the exact Chats normalizer, then stop retaining later searches.
+        search_queries = (
+            [None, [], 123, " \t\u202e\u200b", "token=hidden"] * 4
+            + ["  first\tvalid query  "]
+            + [f"later query {index}" for index in range(64)]
+        )
+        for index, query in enumerate(search_queries):
+            calls.append(
+                dict(
+                    id=uuid4(),
+                    client_id=client_id,
+                    workspace_id=workspace_id,
+                    mcp_session_id=UUID(chats[0]["mcp_session_id"]),
+                    request_id=uuid4(),
+                    tool_name="search",
+                    input_summary={"query": query},
+                    result_status="succeeded",
+                    started_at=base + timedelta(minutes=10, seconds=index),
+                )
+            )
+        chats[0]["tool_call_count"] += len(search_queries)
         session.flush()
         session.execute(insert(McpChatSession), chats)
         session.execute(insert(MCPToolCall), calls)
@@ -3802,10 +3828,61 @@ def test_the_summary_lookup_does_not_load_every_call_in_the_chat(session_factory
             event.remove(engine, "before_cursor_execute", observe_query)
 
     assert len(listed.items) == 6
-    assert {item.subject for item in listed.items} == {page.title, "Call 0"}
+    assert {item.subject for item in listed.items} == {
+        page.title,
+        "Call 0",
+        "first valid query",
+    }
     assert len(statements) <= 8
     assert not selected_columns.intersection(
         {"input_summary", "result_detail", "body_md", "body_markdown"}
+    )
+
+    compact_projections = []
+    original_load = service._load_projection
+
+    def observe_projection(*args, **kwargs):
+        projection = original_load(*args, **kwargs)
+        if kwargs.get("compact_labels"):
+            compact_projections.append(projection)
+        return projection
+
+    monkeypatch.setattr(service, "_load_projection", observe_projection)
+    stream_buffers = []
+
+    def observe_stream(_conn, _cursor, _statement, _parameters, context, _many):
+        if context.execution_options.get("stream_results"):
+            stream_buffers.append(context.execution_options.get("yield_per"))
+
+    with session_factory() as session:
+        rows = session.scalars(
+            select(McpChatSession).where(McpChatSession.workspace_id == workspace_id)
+        ).all()
+        engine = session.get_bind()
+        event.listen(engine, "before_cursor_execute", observe_stream)
+        try:
+            cards = service.chat_cards(session, workspace_id, rows, viewer)
+        finally:
+            event.remove(engine, "before_cursor_execute", observe_stream)
+    fields = ("title_source", "action", "subject", "subject_kind", "primary_tool_name")
+    assert {card.chat.id: card.presentation.model_dump() for card in cards} == {
+        item.id: {name: getattr(item, name) for name in fields} for item in listed.items
+    }
+    assert len(compact_projections) == 1
+    compact = compact_projections[0]
+    # 320 per-call read edges collapse to five facts; all rollup occurrences
+    # and time windows remain complete. Only first/action/search inputs stay.
+    assert compact.row_counts["edges"] == 5
+    assert all(len(edges) <= 3 for edges in compact.edges_by_chat.values())
+    assert all(len(calls) <= 3 for calls in compact.calls_by_chat.values())
+    assert stream_buffers == [16]
+    read_links = [link for card in cards for link in card.links]
+    assert len(read_links) == 5
+    assert all(link.occurrence_count == 64 for link in read_links)
+    assert all(
+        (link.first_occurred_at, link.last_occurred_at)
+        == (base, base + timedelta(seconds=63))
+        for link in read_links
     )
 
 
@@ -4802,6 +4879,10 @@ def test_chat_presentation_hierarchy_prefers_authoring_then_user_override(
             authored.subject,
             authored.subject_kind,
         ) == ("artifact", "create", "MCP 설정", "context_page")
+        authored_card = service.chat_cards(session, workspace.id, [chat], None)[0]
+        assert authored_card.presentation.model_dump() == authored.model_dump(
+            include=set(authored_card.presentation.model_dump())
+        )
 
         actor = ActorContext(actor_kind="human", actor_id=str(uuid4()))
         service.update_title(
@@ -4833,6 +4914,10 @@ def test_chat_presentation_hierarchy_prefers_authoring_then_user_override(
             session=session,
             workspace_id=workspace.id,
             chat_session_id=chat.id,
+        )
+        renamed_card = service.chat_cards(session, workspace.id, [chat], None)[0]
+        assert renamed_card.presentation.model_dump() == renamed.model_dump(
+            include=set(renamed_card.presentation.model_dump())
         )
 
     assert renamed.title == "내가 정한 제목"
@@ -5062,6 +5147,13 @@ def test_focused_read_requires_one_distinct_visible_artifact_across_the_chat(
             workspace_id=workspace.id,
             chat_session_id=ambiguous_chat.id,
         )
+        cards = service.chat_cards(
+            session, workspace.id, [focused_chat, ambiguous_chat], None
+        )
+        assert [card.presentation.model_dump() for card in cards] == [
+            reference.model_dump(include=set(cards[0].presentation.model_dump()))
+            for reference in (focused, ambiguous)
+        ]
 
     assert (
         focused.title_source,
@@ -5302,6 +5394,11 @@ def test_hidden_authoring_event_does_not_change_visible_search_presentation(
             chat_session_id=chat.id,
             actor=viewer,
         )
+        card = service.chat_cards(session, workspace.id, [chat], viewer)[0]
+        assert card.presentation.model_dump() == after.model_dump(
+            include=set(card.presentation.model_dump())
+        )
+        assert hidden_title not in card.title
 
     fields = (
         "title_source",

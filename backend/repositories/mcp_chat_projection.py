@@ -14,7 +14,21 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Uuid, and_, case, column, func, not_, or_, select, union, values
+from sqlalchemy import (
+    JSON,
+    Uuid,
+    and_,
+    bindparam,
+    case,
+    cast,
+    column,
+    func,
+    not_,
+    or_,
+    select,
+    union,
+    values,
+)
 from sqlalchemy.orm import Session, load_only
 
 from backend.domain.input_policy import fit_generated_title
@@ -23,6 +37,7 @@ from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.context_media import ContextMediaAsset
 from backend.models.library import LibraryItem
 from backend.models.mcp_chat import (
+    AUTHORING_VERBS,
     McpChatArtifactLink,
     McpChatArtifactVerb,
     McpChatSession,
@@ -58,6 +73,8 @@ class ProjectionPolicy:
     artifact_urls: Mapping[str, Callable[[UUID, UUID], str]]
     visible_agent_sensitivities: frozenset[str]
     excluded_library_lifecycle_statuses: frozenset[str]
+    focused_read_tools: frozenset[str]
+    normalize_presentation_text: Callable[[object], str | None]
 
 
 @dataclass(frozen=True)
@@ -358,6 +375,137 @@ def _load_artifacts(
             result.artifacts[(kind, resource_id)] = raw_title, path
 
 
+def _compact_label_edges(
+    session: Session,
+    edge_metadata,
+    edge_calls,
+    policy: ProjectionPolicy,
+    result: ChatPageProjection,
+):
+    """At most one authoring and two distinct focused-read facts per chat.
+
+    Artifact metadata is already actor-visible. Check its text with the same
+    normalizer as the card builder before ranking, so hidden or empty titles
+    cannot displace a usable one. Repeated calls never enlarge this result;
+    complete counts and time windows remain on the separate artifact rollups.
+    """
+
+    usable_keys = sorted(
+        (
+            key
+            for key, (title, _path) in result.artifacts.items()
+            if policy.normalize_presentation_text(title) is not None
+        ),
+        key=lambda key: (key[0], str(key[1])),
+    )
+    # Bind the key table as one JSON value, rather than one pair of SQL
+    # parameters per document in a long conversation. SQLite stores Uuids as
+    # hex; PostgreSQL casts the JSON string back to its native UUID type.
+    postgres = session.get_bind().dialect.name == "postgresql"
+    key_data = bindparam(
+        "projection_label_resource_keys",
+        [(kind, str(key) if postgres else key.hex) for kind, key in usable_keys],
+        type_=JSON,
+    )
+    key_function = func.json_array_elements if postgres else func.json_each
+    key_rows = key_function(key_data).table_valued(column("value", JSON))
+    key_rows = (
+        key_rows.render_derived(name="projection_label_resource_values")
+        if postgres
+        else key_rows.alias("projection_label_resource_values")
+    )
+    keys = select(
+        key_rows.c.value[0].as_string().label("resource_kind"),
+        cast(key_rows.c.value[1].as_string(), Uuid).label("resource_id"),
+    ).cte("projection_label_resource_keys")
+    usable = (
+        select(
+            edge_metadata,
+            edge_calls.c.tool_name,
+            edge_calls.c.result_status,
+            edge_calls.c.started_at,
+        )
+        .join(edge_calls, edge_calls.c.id == edge_metadata.c.mcp_tool_call_id)
+        .join(
+            keys,
+            and_(
+                keys.c.resource_kind == edge_metadata.c.resource_kind,
+                keys.c.resource_id == edge_metadata.c.resource_id,
+            ),
+        )
+        .where(
+            edge_calls.c.result_status.in_(policy.eligible_statuses),
+        )
+        .cte("projection_usable_label_edges")
+    )
+    authored = (
+        select(
+            usable,
+            func.row_number()
+            .over(
+                partition_by=usable.c.chat_session_id,
+                order_by=(
+                    usable.c.occurred_at.desc(),
+                    usable.c.started_at.desc(),
+                    usable.c.mcp_tool_call_id,
+                    usable.c.resource_kind,
+                    usable.c.resource_id,
+                    usable.c.verb,
+                ),
+            )
+            .label("position"),
+        )
+        .where(usable.c.verb.in_(tuple(str(verb) for verb in AUTHORING_VERBS)))
+        .cte("projection_latest_authoring")
+    )
+    focused = (
+        select(
+            usable,
+            func.row_number()
+            .over(
+                partition_by=(
+                    usable.c.chat_session_id,
+                    usable.c.resource_kind,
+                    usable.c.resource_id,
+                ),
+                order_by=(usable.c.started_at, usable.c.mcp_tool_call_id),
+            )
+            .label("resource_position"),
+        )
+        .where(
+            usable.c.verb.in_(("viewed", "referenced")),
+            usable.c.tool_name.in_(policy.focused_read_tools),
+        )
+        .cte("projection_first_focused_resource")
+    )
+    distinct_focused = (
+        select(focused)
+        .where(focused.c.resource_position == 1)
+        .cte("projection_distinct_focused_resources")
+    )
+    ranked_focused = select(
+        distinct_focused,
+        func.row_number()
+        .over(
+            partition_by=distinct_focused.c.chat_session_id,
+            order_by=(
+                distinct_focused.c.started_at,
+                distinct_focused.c.mcp_tool_call_id,
+                distinct_focused.c.resource_kind,
+                distinct_focused.c.resource_id,
+            ),
+        )
+        .label("position"),
+    ).cte("projection_focused_label_candidates")
+    names = tuple(ProjectionEdge.__dataclass_fields__)
+    return union(
+        select(*(authored.c[name] for name in names)).where(authored.c.position == 1),
+        select(*(ranked_focused.c[name] for name in names)).where(
+            ranked_focused.c.position <= 2
+        ),
+    )
+
+
 def _load_calls(
     session: Session,
     workspace_id: UUID,
@@ -365,6 +513,8 @@ def _load_calls(
     actor: ActorContext | None,
     policy: ProjectionPolicy,
     result: ChatPageProjection,
+    *,
+    compact_labels: bool = False,
 ) -> None:
     chat_map = (
         values(column("chat_id", Uuid()), column("trace_uuid", Uuid()))
@@ -463,7 +613,10 @@ def _load_calls(
                     metadata.c.action_rank == 1,
                     metadata.c.tool_name.notin_(policy.bootstrap_tools),
                 ),
-                metadata.c.tool_name.in_(tuple(policy.search_fields)),
+                and_(
+                    not compact_labels,
+                    metadata.c.tool_name.in_(tuple(policy.search_fields)),
+                ),
             )
         )
         .cte("projection_label_candidates")
@@ -499,30 +652,30 @@ def _load_calls(
         ),
         else_=None,
     ).label("result_version_id")
-    payload = (
-        select_projection_in_workspace(
-            MCPToolCall,
-            workspace_id=workspace_id,
-            columns=(MCPToolCall.id,),
-            predicates=(MCPToolCall.id.in_(select(candidates.c.id)),),
+
+    def projected_rows(candidate_rows):
+        payload = (
+            select_projection_in_workspace(
+                MCPToolCall,
+                workspace_id=workspace_id,
+                columns=(MCPToolCall.id,),
+                predicates=(MCPToolCall.id.in_(select(candidate_rows.c.id)),),
+            )
+            .with_only_columns(MCPToolCall.id, *leaves, result_version)
+            .cte("projection_candidate_payload")
         )
-        .with_only_columns(MCPToolCall.id, *leaves, result_version)
-        .cte("projection_candidate_payload")
-    )
-    rows = session.execute(
-        select(
-            candidates,
+        return select(
+            candidate_rows,
             *(payload.c[f"input_{name}"] for name in field_names),
             payload.c.result_version_id,
-        )
-        .join(
-            payload,
-            payload.c.id == candidates.c.id,
-        )
-        .order_by(candidates.c.chat_id, candidates.c.started_at, candidates.c.id)
-    ).mappings()
-    for row in rows:
+        ).join(payload, payload.c.id == candidate_rows.c.id)
+
+    def append_call(row):
         chat_id = row["chat_id"]
+        if compact_labels and any(
+            call.id == row["id"] for call in result.calls_by_chat[chat_id]
+        ):
+            return
         name = row["tool_name"]
         inputs = {key: row[f"input_{key}"] for key in fields_by_tool.get(name, ())}
         call = ProjectionCall(
@@ -540,6 +693,79 @@ def _load_calls(
             result.bootstrap_by_chat[chat_id] = row["non_bootstrap_count"] == 0
         if row["action_rank"] == 1 and name not in policy.bootstrap_tools:
             result.first_action_call_ids_by_chat[chat_id] = call.id
+
+    rows = session.execute(
+        projected_rows(candidates).order_by(
+            candidates.c.chat_id, candidates.c.started_at, candidates.c.id
+        )
+    ).mappings()
+    for row in rows:
+        append_call(row)
+    if not compact_labels:
+        return
+
+    pending = {
+        chat.id
+        for chat in chats
+        if not chat.title_user_edited
+        and not any(
+            edge.verb in AUTHORING_VERBS
+            for edge in result.edges_by_chat.get(chat.id, ())
+        )
+        and not any(
+            policy.normalize_presentation_text(
+                call.input_summary.get(policy.search_fields[call.tool_name])
+            )
+            is not None
+            for call in result.calls_by_chat[chat.id]
+            if call.tool_name in policy.search_fields
+        )
+    }
+    if not pending:
+        return
+    search_candidates = (
+        select(
+            metadata,
+            func.row_number()
+            .over(
+                partition_by=metadata.c.chat_id,
+                order_by=(metadata.c.started_at, metadata.c.id),
+            )
+            .label("search_position"),
+        )
+        .where(
+            metadata.c.chat_id.in_(pending),
+            metadata.c.tool_name.in_(tuple(policy.search_fields)),
+        )
+        .cte("projection_search_candidates")
+    )
+    # Exact display normalization also rejects historical control-only or
+    # OAuth-parameter-only strings. Stream those candidates rather than keep
+    # a conversation-sized list or approximate the Python policy in SQL.
+    # Invalid histories can still require a full scan; retained evidence is
+    # at most the first/action calls and one valid search per chat. Interleave
+    # chats so one long history cannot precede another chat's first candidate.
+    streamed = session.execute(
+        projected_rows(search_candidates)
+        .order_by(search_candidates.c.search_position, search_candidates.c.chat_id)
+        .execution_options(yield_per=16, stream_results=True)
+    ).mappings()
+    try:
+        for row in streamed:
+            chat_id = row["chat_id"]
+            if chat_id not in pending:
+                continue
+            query = row[f"input_{policy.search_fields[row['tool_name']]}"]
+            if policy.normalize_presentation_text(query) is None:
+                continue
+            append_call(row)
+            pending.remove(chat_id)
+            if not pending:
+                break
+    finally:
+        streamed.close()
+    for calls in result.calls_by_chat.values():
+        calls.sort(key=lambda call: (call.started_at, call.id))
 
 
 def _load_edit_versions(
@@ -609,8 +835,15 @@ def load_projection(
     include_search_matches: bool = False,
     load_clients: bool = True,
     include_client_catalog: bool = False,
+    compact_labels: bool = False,
 ) -> ChatPageProjection:
-    """Load one request's evidence; constructing cards afterwards needs no SQL."""
+    """Load evidence once; constructing cards afterwards needs no SQL.
+
+    Graph cards keep all document rollups, but at most three event facts and
+    three input candidates per chat. Search normalization uses a bounded
+    cursor buffer; malformed historical values may still require a full scan.
+    Distinct document metadata and database work are not capped by this mode.
+    """
 
     result = ChatPageProjection(
         row_counts={
@@ -725,23 +958,37 @@ def load_projection(
         ),
         predicates=(MCPToolCall.id.in_(select(edge_metadata.c.mcp_tool_call_id)),),
     ).cte("projection_edge_calls")
-    edges = session.execute(
-        select(
+    if compact_labels:
+        _load_artifacts(
+            session,
+            workspace_id,
+            chat_ids,
+            set(policy.artifact_urls),
+            actor,
+            shared_only,
+            include_search_matches,
+            policy,
+            result,
+        )
+        edge_statement = _compact_label_edges(
+            session, edge_metadata, edge_calls, policy, result
+        )
+    else:
+        edge_statement = select(
             edge_metadata,
             edge_calls.c.tool_name,
             edge_calls.c.result_status,
             edge_calls.c.started_at,
-        )
-        .join(
+        ).join(
             edge_calls,
             edge_calls.c.id == edge_metadata.c.mcp_tool_call_id,
         )
-        .order_by(
+        edge_statement = edge_statement.order_by(
             edge_metadata.c.chat_session_id,
             edge_metadata.c.occurred_at,
             edge_metadata.c.resource_id,
         )
-    ).mappings()
+    edges = session.execute(edge_statement).mappings()
     for row in edges:
         edge = ProjectionEdge(**row)
         result.edges_by_chat[edge.chat_session_id].append(edge)
@@ -751,17 +998,26 @@ def load_projection(
             or edge.verb != McpChatArtifactVerb.SEARCH_MATCH.value
         ):
             kinds.add(edge.resource_kind)
-    _load_artifacts(
+    if not compact_labels:
+        _load_artifacts(
+            session,
+            workspace_id,
+            chat_ids,
+            kinds,
+            actor,
+            shared_only,
+            include_search_matches,
+            policy,
+            result,
+        )
+    _load_calls(
         session,
         workspace_id,
-        chat_ids,
-        kinds,
+        chats,
         actor,
-        shared_only,
-        include_search_matches,
         policy,
         result,
+        compact_labels=compact_labels,
     )
-    _load_calls(session, workspace_id, chats, actor, policy, result)
     _load_edit_versions(session, workspace_id, actor, policy, result)
     return result
