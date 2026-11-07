@@ -418,7 +418,16 @@
       "aiPlaceholder": "AI placeholder (selected text)"
     },
     "publishedReviewCompletedReloadFailed": "Review approved, but the published page could not be reloaded.",
-    "reloadLatestFailed": "Could not reload the latest server version."
+    "reloadLatestFailed": "Could not reload the latest server version.",
+    "relatedLinkPresent": "This page already links to {{title}}. Publish it to resolve the lint finding.",
+    "relatedLinkSuggest": "Add a link to {{title}} to this page. Copy the text below and paste it where it fits.",
+    "relatedLinkUnavailable": "Couldn't load the page to link.",
+    "relatedLinkCopy": "Copy",
+    "relatedLinkCopied": "Copied",
+    "relatedLinkCopyAria": "Copy the link text",
+    "relatedLinkSelected": "The text is selected. Press Ctrl+C to copy it.",
+    "relatedLinkCopyUnavailable": "Copying isn't available here. Select the text and copy it.",
+    "relatedLinkDismiss": "Dismiss"
   },
   "blocks": {
     "groups": {

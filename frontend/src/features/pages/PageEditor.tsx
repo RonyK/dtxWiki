@@ -141,6 +141,7 @@ import {
   workspacePath,
 } from "../../shared/lib/workspaceRoutes";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
+import { isContextId } from "../../shared/lib/contextLinks";
 import {
   formatUploadByteLimit,
   uploadAcceptValue,
@@ -215,6 +216,7 @@ import {
   summarizeMediaUploadBatches,
 } from "./mediaUploadCoordinator";
 import { clearEditorUploadSlots } from "./editorUploadSlots";
+import { RelatedLinkSuggestion } from "./RelatedLinkSuggestion";
 import {
   DEFAULT_PAGE_METADATA,
   PAGE_TYPE_OPTIONS,
@@ -718,6 +720,11 @@ export function PageEditor({
       ? searchParams.get("reviewItemId") ?? searchParams.get("review_item_id")
       : null;
   const createParentNodeId = mode === "create" ? searchParams.get("parent") : null;
+  // Lint's "link these two pages" remedy: suggest a link to this page. Only a
+  // page id is accepted; it becomes part of an API path.
+  const suggestLinkParam = mode === "edit" ? searchParams.get("suggest_link") : null;
+  const suggestLinkPageId =
+    suggestLinkParam && isContextId(suggestLinkParam) ? suggestLinkParam : null;
   const createInitialTitle = mode === "create" ? normalizeInitialTitle(searchParams.get("title")) : "";
   const isLinkDialogOpen = Boolean(linkDialog);
   const isCommentPreviewOpen = Boolean(commentPreview);
@@ -5612,6 +5619,14 @@ export function PageEditor({
               </div>
             </section>
           </Dialog>
+        ) : null}
+        {suggestLinkPageId && workspaceId && page && pageLoadState === "ready" ? (
+          <RelatedLinkSuggestion
+            key={`${page.id}:${suggestLinkPageId}`}
+            initialLinkTargets={page.link_targets}
+            relatedPageId={suggestLinkPageId}
+            workspaceId={workspaceId}
+          />
         ) : null}
         <div
           className="editor-grid"

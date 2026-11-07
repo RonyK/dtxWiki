@@ -294,71 +294,88 @@ def _authority_stat_rows(
 
 
 def _stage_hot_paths(session: Session, workspace_id: UUID, *, now: datetime) -> int:
+    """Stage a link suggestion per repeated, distant, unlinked page pair.
+
+    Reconciled like ``run_lint``: an OPEN finding this pass does not reproduce
+    is fixed, most often because one page now links to the other. Nothing
+    else closes these findings, since no lint run produces them. Acknowledged
+    and dismissed findings are human decisions and stay as they are.
+    """
+    from backend.repositories.workspace_scoped import select_in_workspace
+
     pair_counts = _context_pair_session_counts(session, workspace_id, now=now)
     candidates = [
         pair for pair, count in pair_counts.items() if count >= HOT_PATH_MIN_SESSIONS
     ]
-    if not candidates:
-        return 0
-    linked = {
-        frozenset((source_id, target_id))
-        for source_id, target_id in session.execute(
-            select(EdgeProjection.source_id, EdgeProjection.target_id).where(
-                EdgeProjection.workspace_id == workspace_id,
-                EdgeProjection.edge_kind == "wikilink",
-                EdgeProjection.source_kind == EntityKind.CONTEXT_PAGE.value,
-                EdgeProjection.target_kind == EntityKind.CONTEXT_PAGE.value,
-            )
-        ).all()
-    }
-    distances = _tree_distance_lookup(session, workspace_id)
-    existing = {
-        fingerprint
-        for fingerprint in session.scalars(
-            select(LintFinding.fingerprint).where(
-                LintFinding.workspace_id == workspace_id,
+    prior = session.scalars(
+        select_in_workspace(
+            LintFinding,
+            workspace_id=workspace_id,
+            conditions=(
                 LintFinding.rule_id == "kb.hot_path_unmaterialized",
                 LintFinding.status.in_(("open", "acknowledged", "dismissed")),
-            )
-        ).all()
-    }
+            ),
+        )
+    ).all()
+    if not candidates and not prior:
+        return 0
+    existing = {finding.fingerprint for finding in prior}
+    reproduced: set[str] = set()
     run = None
     created = 0
-    for left, right in candidates:
-        if frozenset((left, right)) in linked:
-            continue
-        distance = distances(left, right)
-        if distance is None or distance < HOT_PATH_MIN_TREE_DISTANCE:
-            continue
-        ordered = sorted((left, right), key=str)
-        fingerprint = f"hot-path:{ordered[0]}:{ordered[1]}"
-        if fingerprint in existing:
-            continue
-        if run is None:
-            run = _maintenance_run(session, workspace_id, now, "trail_tick")
-        session.add(
-            LintFinding(
-                lint_run_id=run.id,
-                workspace_id=workspace_id,
-                target_type="context_page",
-                target_id=left,
-                rule_id="kb.hot_path_unmaterialized",
-                severity="info",
-                status="open",
-                suggested_action=json.dumps(
-                    {
-                        "proposal": "add_cross_link",
-                        "related_page_id": str(right),
-                        "session_count": pair_counts[(left, right)],
-                        "tree_distance": distance,
-                    },
-                    sort_keys=True,
-                ),
-                fingerprint=fingerprint,
+    if candidates:
+        linked = {
+            frozenset((source_id, target_id))
+            for source_id, target_id in session.execute(
+                select(EdgeProjection.source_id, EdgeProjection.target_id).where(
+                    EdgeProjection.workspace_id == workspace_id,
+                    EdgeProjection.edge_kind == "wikilink",
+                    EdgeProjection.source_kind == EntityKind.CONTEXT_PAGE.value,
+                    EdgeProjection.target_kind == EntityKind.CONTEXT_PAGE.value,
+                )
+            ).all()
+        }
+        distances = _tree_distance_lookup(session, workspace_id)
+        for left, right in candidates:
+            if frozenset((left, right)) in linked:
+                continue
+            distance = distances(left, right)
+            if distance is None or distance < HOT_PATH_MIN_TREE_DISTANCE:
+                continue
+            ordered = sorted((left, right), key=str)
+            fingerprint = f"hot-path:{ordered[0]}:{ordered[1]}"
+            reproduced.add(fingerprint)
+            if fingerprint in existing:
+                continue
+            if run is None:
+                run = _maintenance_run(session, workspace_id, now, "trail_tick")
+            session.add(
+                LintFinding(
+                    lint_run_id=run.id,
+                    workspace_id=workspace_id,
+                    target_type="context_page",
+                    target_id=left,
+                    rule_id="kb.hot_path_unmaterialized",
+                    severity="info",
+                    status="open",
+                    suggested_action=json.dumps(
+                        {
+                            "proposal": "add_cross_link",
+                            "related_page_id": str(right),
+                            "session_count": pair_counts[(left, right)],
+                            "tree_distance": distance,
+                        },
+                        sort_keys=True,
+                    ),
+                    fingerprint=fingerprint,
+                )
             )
-        )
-        existing.add(fingerprint)
-        created += 1
+            existing.add(fingerprint)
+            created += 1
+    for finding in prior:
+        if finding.status == "open" and finding.fingerprint not in reproduced:
+            finding.status = "fixed"
+            finding.resolved_at = now
     if run is not None:
         run.finding_count_by_severity = {"info": created}
     session.flush()

@@ -497,6 +497,149 @@ a.lint-target-chip:focus-visible {
   }
 }
 
+/* Korean messages wrap between words, never inside one. */
+.lint-finding-message,
+.lint-finding-detail {
+  word-break: keep-all;
+}
+
+/* A pair whose remedy works in either direction: a small two-way arrow sits on
+   the hairline between the two page segments instead of taking a segment of
+   its own. The pages give it room on both sides. */
+.lint-pair-swap {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 0;
+}
+
+.lint-pair-swap__badge {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  transform: translate(-50%, -50%);
+}
+
+.lint-target-chip:has(+ .lint-pair-swap) {
+  padding-right: 22px;
+}
+
+.lint-pair-swap + .lint-target-chip {
+  padding-left: 22px;
+}
+
+/* The pair remedy: one row per direction, each "where + what + action". */
+.lint-pair-actions {
+  margin: 4px 0 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  list-style: none;
+}
+
+.lint-pair-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 4px 6px 4px 12px;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.lint-pair-action + .lint-pair-action {
+  border-top: 1px solid var(--border);
+}
+
+.lint-pair-action__text {
+  flex: 1;
+  min-width: 0;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.lint-pair-action__text strong {
+  font-weight: 600;
+}
+
+.lint-pair-action > .icon-button {
+  flex: none;
+}
+
+@media (max-width: 640px) {
+  /* The stacked box turns the arrow vertical, on the horizontal hairline,
+     lined up with the page icons. */
+  .lint-pair-swap {
+    width: auto;
+    height: 0;
+  }
+
+  .lint-pair-swap__badge {
+    top: 0;
+    left: 21px;
+    transform: translate(-50%, -50%) rotate(90deg);
+  }
+
+  .lint-target-chip:has(+ .lint-pair-swap),
+  .lint-pair-swap + .lint-target-chip {
+    padding-inline: 14px;
+  }
+
+  /* On a phone the checkbox and menu columns would leave the chips and pair
+     rows a third of the card. Only the message and its detail stay beside
+     them; everything below spans the card. */
+  .lint-finding-card .lint-finding-body {
+    display: contents;
+  }
+
+  /* No column gap: an empty checkbox or menu track (resolved findings,
+     viewers, coverage gaps) would otherwise push the message 8px past the
+     full-width rows below it. The controls keep their spacing as margins, and
+     the body's lost block padding returns at the bottom. */
+  .lint-finding-card__main {
+    column-gap: 0;
+    row-gap: 6px;
+    padding-bottom: 16px;
+  }
+
+  .lint-finding-card__main > .lint-row-selector {
+    margin-right: 8px;
+  }
+
+  .lint-finding-card__main > .action-menu {
+    margin-left: 8px;
+  }
+
+  .lint-finding-card .lint-finding-message {
+    grid-column: 2;
+    padding-top: 6px;
+  }
+
+  .lint-finding-card .lint-finding-detail {
+    grid-column: 2;
+  }
+
+  .lint-finding-card .lint-finding-chips,
+  .lint-finding-card .lint-pair-actions {
+    grid-column: 1 / -1;
+  }
+
+  .lint-pair-action {
+    gap: 8px;
+    padding-left: 10px;
+  }
+}
+
 /* The card grid needs no narrow-screen override: the three tracks are
    checkbox / body / menu, and the body simply narrows while the chips wrap.
    The old six-track grid had to reflow into a chrome strip above the finding,

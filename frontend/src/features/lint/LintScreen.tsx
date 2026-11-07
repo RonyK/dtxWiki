@@ -1,9 +1,11 @@
 import {
   AlertTriangle,
+  ArrowLeftRight,
   Check,
   CheckCircle2,
   ChevronDown,
   ClipboardCheck,
+  Edit,
   ExternalLink,
   Info,
   Play,
@@ -12,6 +14,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
@@ -39,8 +42,9 @@ import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
 import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
+import { strongText } from "../../shared/i18n/strongText";
 import { searchResultHref } from "../../shared/lib/searchResultHref";
-import { treeNodeHref, useRouteWorkspaceId, useWorkspaceRoute, withWorkspaceQuery, workspacePath } from "../../shared/lib/workspaceRoutes";
+import { contextEditHref, treeNodeHref, useRouteWorkspaceId, useWorkspaceRoute, withWorkspaceQuery, workspacePath } from "../../shared/lib/workspaceRoutes";
 import { isEditorRole } from "../../shared/workspace/permissions";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import { NotFoundScreen } from "../errors/NotFoundScreen";
@@ -1374,6 +1378,18 @@ function FindingList({
               finding.suggested_action?.trim()
                 ? finding.suggested_action.trim()
                 : null;
+            // A pair finding whose proposal the card can act on directly
+            // replaces the generic suggestion panel with that remedy.
+            const related = finding.related_targets?.[0];
+            const remedy =
+              structuredAction &&
+              related &&
+              finding.target_type === "context_page" &&
+              finding.target_id
+                ? PAIR_REMEDIES[String(structuredAction.proposal)]
+                : undefined;
+            const remedyEvidence =
+              remedy && structuredAction ? remedy.evidence(t, structuredAction) : null;
 
             return (
               <article
@@ -1413,6 +1429,9 @@ function FindingList({
                     {plainAction ? (
                       <p className="lint-finding-detail">{plainAction}</p>
                     ) : null}
+                    {remedyEvidence ? (
+                      <p className="lint-finding-detail">{remedyEvidence}</p>
+                    ) : null}
                     <div className="row-badges lint-finding-chips">
                       {/* Rule and target share one bordered box split by a
                           hairline, so "this rule, on this page" reads as a
@@ -1437,6 +1456,49 @@ function FindingList({
                             {targetLabel}
                           </span>
                         )}
+                        {remedy?.interchangeable ? (
+                          // The remedy works in either direction: a two-way
+                          // arrow on the hairline between the two pages.
+                          <span className="lint-pair-swap" aria-hidden="true">
+                            <span className="lint-pair-swap__badge">
+                              <ArrowLeftRight size={12} />
+                            </span>
+                          </span>
+                        ) : null}
+                        {/* A pair finding is about a second page too; the
+                            reader has to open either one to act on it. */}
+                        {(finding.related_targets ?? []).map((related) => {
+                          const relatedLabel =
+                            related.title ||
+                            t(`targetType.${related.target_type}`, {
+                              defaultValue: labelFor(related.target_type),
+                            });
+                          const relatedHref = searchResultHref(
+                            { id: related.target_id, type: related.target_type },
+                            routeWorkspaceId,
+                          );
+                          return relatedHref ? (
+                            <Link
+                              className="lint-target-chip"
+                              key={related.target_id}
+                              to={relatedHref}
+                              aria-label={t("actions.openRelated", {
+                                title: relatedLabel,
+                                defaultValue: `Open related ${relatedLabel}`,
+                              })}
+                            >
+                              <ExternalLink size={13} aria-hidden="true" />
+                              <span>{relatedLabel}</span>
+                            </Link>
+                          ) : (
+                            <span
+                              className="lint-target-chip is-static"
+                              key={related.target_id}
+                            >
+                              {relatedLabel}
+                            </span>
+                          );
+                        })}
                       </span>
                       {/* Every row in the open queue is "Open", so the pill
                           only earns its place once the status is something
@@ -1445,6 +1507,23 @@ function FindingList({
                         <StatusPill status={finding.status} compact />
                       )}
                     </div>
+                    {remedy && related && finding.target_id && actionable ? (
+                      <remedy.Actions
+                        canEdit={canEdit && mutationContextReady}
+                        pages={[
+                          { id: finding.target_id, title: targetLabel },
+                          {
+                            id: related.target_id,
+                            title:
+                              related.title ||
+                              t(`targetType.${related.target_type}`, {
+                                defaultValue: labelFor(related.target_type),
+                              }),
+                          },
+                        ]}
+                        workspaceId={routeWorkspaceId}
+                      />
+                    ) : null}
                   </div>
                   {canEdit && actionable ? (
                     <ActionMenu
@@ -1482,7 +1561,7 @@ function FindingList({
                     />
                   ) : null}
                 </div>
-                {structuredAction ? (
+                {structuredAction && !remedy ? (
                   <div className="lint-finding-details-panel">
                     <strong>{t("details.suggestedAction")}</strong>
                     <SuggestedAction value={structuredAction} />
@@ -1494,6 +1573,71 @@ function FindingList({
         </div>
       )}
     </section>
+  );
+}
+
+type PairPage = { id: string; title: string };
+type PairActionsProps = {
+  canEdit: boolean;
+  pages: [PairPage, PairPage];
+  workspaceId: string;
+};
+type PairRemedy = {
+  /** The remedy works in either direction (the chip shows a two-way arrow). */
+  interchangeable: boolean;
+  evidence: (t: TFunction, action: Record<string, unknown>) => string | null;
+  Actions: (props: PairActionsProps) => ReactNode;
+};
+
+/**
+ * Remedies a pair finding's card can carry out itself, keyed by the producer's
+ * `proposal` code. A proposal without an entry keeps the generic suggestion
+ * panel, so a new pair rule needs only an entry here to get its own actions.
+ */
+const PAIR_REMEDIES: Record<string, PairRemedy> = {
+  add_cross_link: {
+    interchangeable: true,
+    evidence: (t, action) =>
+      typeof action.session_count === "number"
+        ? t("pairLink.evidence", { count: action.session_count })
+        : null,
+    Actions: LinkPairActions,
+  },
+};
+
+/** "Link B in A", both ways; each opens A's editor with the link to paste. */
+function LinkPairActions({ canEdit, pages, workspaceId }: PairActionsProps) {
+  const { t } = useTranslation("lint");
+  const [first, second] = pages;
+  return (
+    <ul className="lint-pair-actions">
+      {[
+        [first, second],
+        [second, first],
+      ].map(([source, target]) => (
+        <li className="lint-pair-action" key={source.id}>
+          <span className="lint-pair-action__text">
+            {strongText((values) => t("pairLink.row", values), {
+              source: source.title,
+              target: target.title,
+            })}
+          </span>
+          {canEdit ? (
+            <Link
+              aria-label={t("pairLink.addAria", {
+                source: source.title,
+                target: target.title,
+              })}
+              className="icon-button"
+              to={`${contextEditHref(workspaceId, source.id)}?suggest_link=${encodeURIComponent(target.id)}`}
+            >
+              <Edit size={15} aria-hidden="true" />
+              <span>{t("pairLink.add")}</span>
+            </Link>
+          ) : null}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -1616,7 +1760,14 @@ function SuggestedAction({ value }: { value: Record<string, unknown> }) {
             })}
             :
           </strong>
-          <SuggestedValue value={entry} />
+          {key === "proposal" && typeof entry === "string" ? (
+            // A producer's proposal is a code; the reader needs the step.
+            <span>
+              {t(`suggestedAction.proposals.${entry}`, { defaultValue: entry })}
+            </span>
+          ) : (
+            <SuggestedValue value={entry} />
+          )}
         </div>
       ))}
     </div>

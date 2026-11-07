@@ -585,6 +585,133 @@ def test_decide_finding_404s_for_draft_only_finding_even_by_direct_id(
         assert decided.status == "acknowledged"
 
 
+def test_pair_finding_names_its_related_page_only_to_actors_who_can_read_it(
+    session_factory,
+):
+    # One finding, one related page: a never-published draft the owner can read
+    # and the viewer cannot. Database case because page visibility is the SQL
+    # expression list_findings filters on. The owner is the control: the same
+    # row comes back to them with the page titled at read time, so the
+    # viewer's exclusion (from the total too, and on a direct-id decide) is the
+    # related-page gate, not a broken query. Deleting the page archives it and
+    # keeps its version, so the same row must then disappear for the owner too.
+    import json
+
+    from backend.models.context import ContextPageVersion
+    from backend.schemas.lint import LintRelatedTarget
+    from backend.services.read_errors import ReadNotFoundError
+
+    svc = LintService()
+    with session_factory.begin() as session:
+        wsid = _ws(session)
+        run = LintRun(
+            workspace_id=wsid,
+            lint_scope={"kind": "maintenance"},
+            trigger_type="trail_tick",
+            status="completed",
+            finding_count_by_severity={"info": 1},
+        )
+        target = ContextPage(
+            workspace_id=wsid,
+            slug="pair-target",
+            title="Ranking guide",
+            page_type="concept",
+            lifecycle_status="published",
+        )
+        draft = ContextPage(
+            workspace_id=wsid,
+            slug="pair-draft",
+            title="Unreleased plan",
+            page_type="concept",
+            lifecycle_status="draft",
+        )
+        session.add_all([run, target, draft])
+        session.flush()
+        versions = {}
+        for row, status in ((target, "published_snapshot"), (draft, "draft")):
+            versions[row.id] = ContextPageVersion(
+                workspace_id=wsid,
+                page_id=row.id,
+                version_no=1,
+                body_md=f"# {row.title}\n",
+                content_hash=f"{row.slug}-v1",
+                actor_type="human",
+                created_by_actor_kind="human",
+                created_by_actor_id="tester",
+                version_status=status,
+            )
+        session.add_all(versions.values())
+        session.flush()
+        target.current_version_id = versions[target.id].id
+        target.current_published_version_id = versions[target.id].id
+        draft.current_version_id = versions[draft.id].id
+        draft.latest_draft_version_id = versions[draft.id].id
+        finding = LintFinding(
+            lint_run_id=run.id,
+            workspace_id=wsid,
+            target_type="context_page",
+            target_id=target.id,
+            rule_id="kb.hot_path_unmaterialized",
+            severity="info",
+            status="open",
+            suggested_action=json.dumps(
+                {"proposal": "add_cross_link", "related_page_id": str(draft.id)}
+            ),
+            fingerprint="hot-path:pair",
+        )
+        session.add(finding)
+        session.flush()
+
+        viewer = ActorContext(
+            actor_kind="human",
+            actor_id="viewer-user",
+            token_kind="session",
+            scopes=("read",),
+            workspace_id=wsid,
+            workspace_role="viewer",
+            role="viewer",
+        )
+        owner = ActorContext(
+            actor_kind="system",
+            actor_id="owner",
+            scopes=("*",),
+            workspace_id=wsid,
+            workspace_role="owner",
+            role="owner",
+        )
+        viewer_list = svc.list_findings(session, wsid, actor=viewer)
+        owner_list = svc.list_findings(session, wsid, actor=owner)
+        with pytest.raises(ReadNotFoundError):
+            svc.decide_finding(
+                session,
+                wsid,
+                finding.id,
+                LintFindingDecisionRequest(decision="acknowledge"),
+                actor_kind="human",
+                actor_id="viewer-user",
+                actor=viewer,
+            )
+        draft.lifecycle_status = "archived"
+        session.flush()
+        after_delete = svc.list_findings(session, wsid, actor=owner)
+
+    assert (viewer_list.total, viewer_list.findings) == (0, [])
+    assert owner_list.total == 1
+    assert [(item.id, item.related_targets) for item in owner_list.findings] == [
+        (
+            finding.id,
+            [
+                LintRelatedTarget(
+                    target_type="context_page",
+                    target_id=draft.id,
+                    title="Unreleased plan",
+                )
+            ],
+        )
+    ]
+    assert (after_delete.total, after_delete.findings) == (0, [])
+
+
 def test_get_run_hides_draft_only_finding_count_from_viewer(session_factory):
     # LEAK-01 (third surface): finding_count_by_severity is a raw tally
     # persisted at run-completion time over EVERY finding the run reproduced,

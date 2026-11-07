@@ -1,5 +1,5 @@
 import { EditorView } from "@codemirror/view";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode, type ReactNode } from "react";
 import {
@@ -4794,6 +4794,79 @@ describe("PageEditor", () => {
     const source = document.querySelector<HTMLElement>(".cm-editor")!;
     expect(EditorView.findFromDOM(source)?.state.doc.toString()).toBe(raw);
     expect(autosaveCalls(fetchMock)).toHaveLength(0);
+  });
+
+  it("suggests the lint queue's link, keeps its state through autosave, and stays closed", async () => {
+    const relatedId = "55555555-5555-4555-8555-555555555555";
+    let loadedLinkTargets: unknown[] = [
+      { href: `/p/w/${relatedId}`, locator: `/p/w/${relatedId}`, state: "available", target_page_id: relatedId },
+    ];
+    const fetchMock = mockEditorPage("# Hello");
+    const baseFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith(`/context/pages/${relatedId}`)) {
+        return jsonResponse({ data: { ...page, id: relatedId, slug: "incident-runbook", title: "Incident runbook", body_md: "# Runbook" } });
+      }
+      // Only the page read is enriched; write responses such as autosave
+      // carry no link projection (the server's _to_detail).
+      if (url.endsWith(`/context/pages/${page.id}`) && (init?.method ?? "GET") === "GET") {
+        return jsonResponse({ data: { ...page, body_md: "# Hello", link_targets: loadedLinkTargets } });
+      }
+      return baseFetch(input, init);
+    });
+    // user-event installs its own clipboard; the page only needs a secure context.
+    const secure = Object.getOwnPropertyDescriptor(window, "isSecureContext");
+    const address = `${window.location.pathname}${window.location.search}`;
+    onTestFinished(() => {
+      if (secure) Object.defineProperty(window, "isSecureContext", secure);
+      else Reflect.deleteProperty(window, "isSecureContext");
+      window.history.replaceState(null, "", address);
+    });
+    Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
+    const route = <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />;
+    const noticeText = () => document.querySelector(".editor-related-link-notice")?.textContent ?? null;
+    const saveDraft = async (body: string, saves: number) => {
+      replaceEditorSelection(codeMirrorView(), body);
+      const button = publicationActions().getByRole("button", { name: "Save draft" });
+      await waitFor(() => expect(button).toBeEnabled());
+      await typist().click(button);
+      await waitFor(() => expect(autosaveCalls(fetchMock)).toHaveLength(saves));
+    };
+
+    // Linked as loaded: an edit and its autosave must not turn the notice
+    // into a request to paste the link again. Once closed it stays closed,
+    // and the address loses the parameter so a reload shows nothing either.
+    window.history.replaceState(null, "", `/edit?suggest_link=${relatedId}`);
+    renderWithRouter(`/pages/hello/edit?suggest_link=${relatedId}`, route);
+    await screen.findByText("Incident runbook");
+    expect(noticeText()).toBe("This page already links to Incident runbook. Publish it to resolve the lint finding.");
+    await saveDraft("# Hello\n\nEdited.", 1);
+    expect(noticeText()).toBe("This page already links to Incident runbook. Publish it to resolve the lint finding.");
+    await typist().click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(window.location.search).toBe("");
+    await saveDraft("# Hello\n\nEdited again.", 2);
+    expect(noticeText()).toBeNull();
+    cleanup();
+
+    // Not linked yet: the link to paste, copied as is; the body is untouched.
+    loadedLinkTargets = [];
+    renderWithRouter(`/pages/hello/edit?suggest_link=${relatedId}`, route);
+    const notice = (await screen.findByText("Incident runbook")).closest(".editor-related-link-notice") as HTMLElement;
+    expect(notice).toHaveTextContent("Add a link to Incident runbook to this page. Copy the text below and paste it where it fits.");
+    const snippet = `[Incident runbook](/p/11111111-1111-4111-8111-111111111111/${relatedId})`;
+    await typist().click(within(notice).getByRole("button", { name: "Copy the link text" }));
+    await waitFor(() => expect(within(notice).getByRole("button", { name: "Copy the link text" })).toHaveTextContent("Copied"));
+    expect(await navigator.clipboard.readText()).toBe(snippet);
+    expect(codeMirrorView().state.doc.toString()).toBe("# Hello");
+    cleanup();
+
+    // Only a page id is accepted: anything else never reaches an API path.
+    fetchMock.mockClear();
+    renderWithRouter("/pages/hello/edit?suggest_link=..%2F..%2Fzz-probe", route);
+    await screen.findByLabelText("Markdown body");
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("zz-probe"))).toBe(false);
+    expect(noticeText()).toBeNull();
   });
 
   it("switches to split mode with a resizable separator", async () => {
