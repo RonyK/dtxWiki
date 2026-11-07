@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       # tests/static runs node (the i18n coverage gate always; the e2e helper
       # self-runners when node_modules is present, which it is not here), so
       # the job pins the same node as every other job instead of taking
@@ -62,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - uses: actions/setup-node@v7
         with:
           # Pinned, not the floating major. The "Run e2e helper self-runners"
@@ -128,7 +128,7 @@ jobs:
             projects: --project=firefox --project=webkit
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - uses: actions/setup-node@v7
         with:
           node-version: "22.18.0"
@@ -170,7 +170,7 @@ jobs:
           fi
       - name: Upload Playwright report
         if: always() && (steps.playwright.outcome == 'success' || hashFiles('playwright-report/index.html') != '')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: e2e-standard-${{ github.run_id }}-${{ matrix.name }}
           path: playwright-report

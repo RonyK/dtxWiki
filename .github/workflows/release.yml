@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - name: Install Python dependencies
         run: uv sync --locked --extra dev
       # PyPI never accepts the same version twice, so a tag that disagrees
@@ -95,11 +95,11 @@ jobs:
       # as well: an isolated install must supply both backend and graph assets.
       - name: Verify the installed-wheel Graph runtime
         run: .venv/bin/python tests/packaging/packaged_browser_smoke.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: dist
           path: dist/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: npm-package
           path: dist-npm/

@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   postgres-migration:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16
@@ -38,7 +38,7 @@ jobs:
       DTXWIKI_REQUIRE_POSTGRES_CONCURRENCY: "1"
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - name: Install Python dependencies
         run: uv sync --locked --extra dev
       - name: Create isolated PostgreSQL test databases
@@ -76,10 +76,10 @@ jobs:
           -m "release_scale and not xdist_group and not release_migration" --tb=short
 
   packaging:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       # The release-gate validator tests start node (the gate script's i18n
       # coverage check), so pin it rather than inherit the runner's.
       - uses: actions/setup-node@v7
@@ -101,14 +101,14 @@ jobs:
       - name: Run release-gate validator tests
         run: VENV=.venv make test-release-gate
       - name: Redact captured logs
-        if: always()
+        if: always() && hashFiles('.ci-evidence/*.log') != ''
         run: |
           for f in .ci-evidence/*.log; do
             bash scripts/redact_evidence.sh < "$f" > "${f%.log}.redacted.log" || true
           done
       - name: Upload evidence artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
+        if: always() && hashFiles('.ci-evidence/*.redacted.log') != ''
+        uses: actions/upload-artifact@v6
         with:
           name: evidence-${{ github.run_id }}
           path: .ci-evidence/*.redacted.log
@@ -119,7 +119,7 @@ jobs:
   # from the context, a changed base image or a failing install. The packaging
   # test of the COPY list cannot see those.
   docker-frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -134,7 +134,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - uses: actions/setup-node@v7
         with:
           node-version: "22.18.0"
@@ -168,7 +168,7 @@ jobs:
           fi
       - name: Upload Playwright report
         if: always() && (steps.playwright.outcome == 'success' || hashFiles('playwright-report/index.html') != '')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: e2e-graph-2k-${{ github.run_id }}
           path: playwright-report
@@ -182,7 +182,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - uses: actions/setup-node@v7
         with:
           node-version: "22.18.0"
@@ -220,7 +220,7 @@ jobs:
           fi
       - name: Upload PC 10K functional evidence
         if: always() && (steps.playwright.outcome == 'success' || hashFiles('playwright-report/index.html') != '')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: graph-10k-functional-${{ github.run_id }}
           path: playwright-report
