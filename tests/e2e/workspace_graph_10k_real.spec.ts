@@ -999,7 +999,7 @@ async function expectRealLocalQuery(response: Response, workspaceId: string, ent
   expect(response.ok()).toBe(true);
   const body = response.request().postDataJSON() as GraphQueryRequest;
   const depth = 1;
-  const budget = mode === "current" ? { nodes: 250, edges: 750 } : { nodes: 50, edges: 150 };
+  const budget = mode === "current" ? { nodes: 250, edges: 750 } : { nodes: 500, edges: 1500 };
   const expected = { schema_version: "dtxwiki.graph-query.v1", scope: "local", preset: "all", direction: "both", depth, relation_scope: "direct",
     seeds: [{ kind: "context_page", id: entityId }], layers: ["knowledge", "evidence", "activity", "action"],
     time: { mode }, budget, cursor: null };

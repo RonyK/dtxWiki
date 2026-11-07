@@ -1442,7 +1442,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           const appearanceResponse = await appearanceResponsePromise;
           expect(appearanceResponse.ok()).toBeTruthy();
           expect((await appearanceResponse.json()).data.query).toMatchObject({
-            depth: 1, time: { mode: "appearance" }, budget: { nodes: 50, edges: 150 },
+            depth: 1, time: { mode: "appearance" }, budget: { nodes: 500, edges: 1500 },
           });
           await expect(depthTwo).toHaveAttribute("aria-disabled", "true");
           const timeline = graphPanel.getByRole("slider", {
