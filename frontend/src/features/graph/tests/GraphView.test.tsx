@@ -19,7 +19,7 @@ import type { Ref } from "react";
 import type { GraphCanvasHandle } from "../GraphCanvas";
 
 const { canvasHandle } = vi.hoisted(() => ({ canvasHandle: {
-  centerOn: vi.fn(), fit: vi.fn(), pauseLayout: vi.fn(), resumeLayout: vi.fn(),
+  centerOn: vi.fn(), fit: vi.fn(), locate: vi.fn(), pauseLayout: vi.fn(), resumeLayout: vi.fn(),
   pin: vi.fn(() => null), reset: vi.fn(), setViewport: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn(),
 } }));
 
@@ -58,6 +58,7 @@ vi.mock("../GraphCanvas", async () => {
       data-edges={scene.edges.filter((edge) => !edge.hidden && !edge.removed).length}
       data-removed-edges={scene.edges.filter((edge) => !edge.hidden && edge.removed).length}
       data-active={String(active)}
+      data-current={scene.currentId ?? ""}
       data-focused={focusedId ?? ""}
       data-nodes={scene.nodes.filter((node) => !node.hidden).length}
       data-pinned={pinnedIds.join("|")}
@@ -128,12 +129,45 @@ describe("GraphView", () => {
     expect(stage).toContainElement(screen.getByRole("button", { name: "Fit graph" }));
     expect(stage).toContainElement(screen.getByRole("button", { name: "Refresh graph" }));
     expect(screen.queryByLabelText("History mode")).not.toBeInTheDocument();
-    expect(graph.querySelector(".graph-parity-grid")).not.toBeVisible();
+    expect(graph.querySelector(".graph-list-layer")).toBeNull();
     expect(graph.querySelector(".graph-frame-filters")).not.toHaveAttribute("open");
     await user.click(screen.getByText("More filters"));
     expect(screen.getByLabelText("Ask turn")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "View as list" }));
-    expect(graph.querySelector(".graph-parity-grid")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "List" }));
+    expect(screen.getByRole("button", { name: "List" })).toHaveAttribute("aria-pressed", "true");
+    // The list replaces the canvas area inside the frame; the canvas stays mounted underneath.
+    expect(stage.querySelector(".graph-list-layer")).toContainElement(screen.getByTestId("graph-list-view"));
+    expect(stage).toContainElement(screen.getByTestId("mock-graph-canvas"));
+  });
+
+  it("names and locates the current document, not an expanded seed the payload lists first", async () => {
+    const user = userEvent.setup();
+    const base = graphFixture();
+    // "Architecture Notes" was expanded: a seed after the primary one, listed first by the payload.
+    const expanded = { ...base.nodes[1], is_seed: true };
+    // The expanded seed also links to the primary seed's neighbour, a relation
+    // off the path from the primary seed and never on a list row.
+    const offPath = { ...base.edges[0], id: "edge:expanded-ask", target: "node:ask" };
+    renderGraph({ openContents: false, payload: {
+      ...base, edges: [...base.edges, offPath], nodes: [expanded, base.nodes[0], ...base.nodes.slice(2)],
+      query: { ...base.query, seeds: [...base.query.seeds, { kind: expanded.entity_kind!, id: expanded.entity_id! }] },
+    } });
+    expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-current", "node:seed");
+    const locate = screen.getByRole("button", { name: "Show Decision Log on the graph" });
+    expect(locate).toHaveTextContent("Seed Decision Log+1");
+    await user.click(locate);
+    expect(canvasHandle.locate).toHaveBeenCalledExactlyOnceWith("node:seed");
+    // The expanded document's path from the current document is the list's way
+    // to its relation with the current document, which seed rows never select.
+    await user.click(screen.getByRole("button", { name: "List" }));
+    await user.click(rowByLabel(screen.getByTestId("graph-list-view"), "Architecture Notes"));
+    const details = screen.getByRole("complementary", { name: "Details" });
+    await user.click(seedPathRelation(details, /^Architecture Notes to Decision Log/));
+    expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-selected", "edge:wikilink");
+    await user.click(rowByLabel(screen.getByTestId("graph-list-view"), "Why was this chosen?"));
+    await user.click(within(within(details).getByRole("list", { name: "Direct relationships with other seeds" }))
+      .getByRole("button", { name: /^Architecture Notes to Why was this chosen\?/ }));
+    expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-selected", "edge:expanded-ask");
   });
 
   it("keeps unselected Details hidden from navigation and does not open it for canvas hover", () => {
@@ -164,26 +198,27 @@ describe("GraphView", () => {
     const graph = screen.getByTestId("graph-view");
     const frame = graph.querySelector<HTMLElement>(".graph-frame")!;
     fireEvent.click(frame.querySelector(".graph-canvas-more > summary")!);
-    expect(within(frame).getByRole("button", { name: "View as list" })).toBeVisible();
+    expect(within(frame).getByRole("button", { name: "List" })).toBeVisible();
     expect(within(frame).getByRole("button", { name: "Open static graph view" })).toBeVisible();
     const descriptor = Object.getOwnPropertyDescriptor(document, "fullscreenElement");
     let fullscreenElement: Element | null = frame;
     Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => fullscreenElement });
     try {
       act(() => document.dispatchEvent(new Event("fullscreenchange")));
-      expect(within(frame).queryByRole("button", { name: "View as list" })).not.toBeInTheDocument();
+      // The list is a view of the frame, so it stays available in fullscreen.
+      expect(within(frame).getByRole("button", { name: "List" })).toBeInTheDocument();
       expect(within(frame).queryByRole("button", { name: "Open static graph view" })).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Select Ask from canvas" }));
       const details = within(frame).getByRole("complementary", { name: "Details" });
       expect(within(details).getByRole("heading", { name: "Why was this chosen?" })).toBeVisible();
       fireEvent.click(screen.getByRole("button", { name: "Select relationship from canvas" }));
-      expect(details.querySelector(".graph-edge-summary")).toHaveTextContent("Architecture Notes —Wiki link→ Decision Log");
+      expect(within(details).getByRole("heading", { level: 5, name: "Wiki link" })).toBeVisible();
+      expect(details.querySelector(".relation-list-ends")).toHaveTextContent(/Architecture Notes.*Link.*Decision Log/);
       expect(details).toBeVisible();
-      expect(graph.querySelector(".graph-parity-grid")!.parentElement).toBe(graph);
       expect(graph.querySelector(".graph-static-fallback")!.parentElement).toBe(graph);
       fullscreenElement = null;
       act(() => document.dispatchEvent(new Event("fullscreenchange")));
-      expect(within(frame).getByRole("button", { name: "View as list" })).toBeVisible();
+      expect(within(frame).getByRole("button", { name: "List" })).toBeVisible();
       expect(within(frame).getByRole("button", { name: "Open static graph view" })).toBeVisible();
     } finally {
       if (descriptor) Object.defineProperty(document, "fullscreenElement", descriptor);
@@ -191,7 +226,7 @@ describe("GraphView", () => {
     }
   });
 
-  it("keeps 250 nodes and 750 relationships at two row Tab entries with highlight-only navigation and keyboard Details handoff", async () => {
+  it("pages a 250-node, 750-relationship list by group with one Tab entry per list, highlight-only arrows, and keyboard Details handoff", async () => {
     const user = userEvent.setup();
     const payload = localListBudgetFixture();
     const onCollapse = vi.fn((_node: GraphNode) => Promise.resolve());
@@ -199,54 +234,98 @@ describe("GraphView", () => {
     const onDepthChange = vi.fn((_depth: 1 | 2) => Promise.resolve());
     const onHistoryModeChange = vi.fn((_mode: GraphHistoryMode) => Promise.resolve());
     renderGraph({ payload, onCollapse, onDepthChange, onExpand, onHistoryModeChange });
-    const main = screen.getByRole("heading", { name: "Accessible graph contents" }).closest("section")!;
-    const nodeList = within(main).getByRole("list", { name: "Nodes" });
-    // Row identity and Tab behavior are the subject here; avoid recomputing
-    // accessible names for all 1,000 rows before exercising the keyboard.
-    const nodes = Array.from(nodeList.querySelectorAll<HTMLButtonElement>("button"));
-    expect(nodes).toHaveLength(250);
-    expect(nodeList.querySelector("a,.graph-list-actions,details")).toBeNull();
-    expect(nodes.map((node) => node.getAttribute("data-local-graph-id")).sort())
-      .toEqual(payload.nodes.map((node) => node.id).sort());
-    fireEvent.click(nodes[0]);
-    const details = screen.getByRole("complementary", { name: "Details" });
-    fireEvent.click(details.querySelector(".graph-details-more > summary")!);
-    fireEvent.click(within(details).getByRole("button", { name: "Pin" }));
-    await user.click(within(main).getByText("Relationships (750)"));
-    const edgeList = within(main).getByRole("list", { name: "Relationships" });
-    const edges = Array.from(edgeList.querySelectorAll<HTMLButtonElement>("button"));
-    expect(edges).toHaveLength(750);
-    expect(edges.map((edge) => edge.getAttribute("data-local-graph-id")).sort())
-      .toEqual(payload.edges.map((edge) => edge.id).sort());
-    const lastEdgeId = edges[749].getAttribute("data-local-graph-id")!;
-    expect(nodes.filter((node) => node.tabIndex === 0)).toHaveLength(1);
-    expect(edges.filter((edge) => edge.tabIndex === 0)).toHaveLength(1);
+    const list = screen.getByTestId("graph-list-view");
     const canvas = screen.getByTestId("mock-graph-canvas");
+    // The seed's own relations are open: three parallel relations each way around the ring.
+    expect(within(within(list).getByRole("list", { name: "Incoming" })).getAllByRole("button")).toHaveLength(3);
+    expect(within(within(list).getByRole("list", { name: "Outgoing" })).getAllByRole("button")).toHaveLength(3);
+    // What the scope added is folded with its count, then shown ten rows at a time.
+    const ringHead = within(list).getByRole("button", { name: /^Two or more steps away\s*247/ });
+    expect(ringHead).toHaveAttribute("aria-expanded", "false");
+    expect(within(list).queryByRole("list", { name: "Two or more steps away" })).not.toBeInTheDocument();
+    await user.click(ringHead);
+    const ring = within(list).getByRole("list", { name: "Two or more steps away" });
+    const rows = within(ring).getAllByRole("button");
+    expect(rows).toHaveLength(10);
+    expect(ring.querySelector("a[tabindex='0'],a:not([tabindex])")).toBeNull();
+    expect(within(list).getByRole("button", { name: "Show 10 more (237 left)" })).toBeInTheDocument();
+    for (const entries of list.querySelectorAll("ul")) {
+      const buttons = [...entries.querySelectorAll<HTMLButtonElement>(":scope > li > button")];
+      expect(buttons.filter((button) => button.tabIndex === 0)).toHaveLength(1);
+    }
     for (const mock of Object.values(canvasHandle)) mock.mockClear();
-    act(() => nodes[0].focus());
-    await user.keyboard("{ArrowDown}{End}{Home}");
-    expect(nodes[0]).toHaveFocus();
-    expect(canvas).toHaveAttribute("data-focused", payload.nodes[0].id);
-    expect(canvas).toHaveAttribute("data-selected", payload.nodes[0].id);
-    // JSDOM's Tab model skips native summary; the browser gate covers that
-    // disclosure stop. The rows still contribute one entry, not 250 stops.
-    await user.tab();
-    expect(edges[0]).toHaveFocus();
-    await user.keyboard("{End}{ArrowUp}{ArrowDown}");
-    expect(edges[749]).toHaveFocus();
-    expect(canvas).toHaveAttribute("data-focused", lastEdgeId);
-    expect(canvas).toHaveAttribute("data-selected", payload.nodes[0].id);
-    expect(canvas).toHaveAttribute("data-pinned", payload.nodes[0].id);
+    act(() => rows[0].focus());
+    await user.keyboard("{ArrowDown}{End}{Home}{End}");
+    expect(rows[9]).toHaveFocus();
+    const lastId = rows[9].getAttribute("data-local-graph-id")!;
+    expect(canvas).toHaveAttribute("data-focused", lastId);
+    expect(canvas).toHaveAttribute("data-selected", "");
     for (const mock of Object.values(canvasHandle)) expect(mock).not.toHaveBeenCalled();
     for (const action of [onCollapse, onDepthChange, onExpand, onHistoryModeChange]) expect(action).not.toHaveBeenCalled();
     await user.keyboard("{Enter}");
-    expect(details).toHaveFocus();
-    expect(canvas).toHaveAttribute("data-selected", lastEdgeId);
+    expect(screen.getByRole("complementary", { name: "Details" })).toHaveFocus();
+    expect(canvas).toHaveAttribute("data-selected", lastId);
     expect(canvas).toHaveAttribute("data-nodes", "250");
     expect(canvas).toHaveAttribute("data-edges", "750");
-    expect(canvas).toHaveAttribute("data-pinned", payload.nodes[0].id);
     for (const mock of Object.values(canvasHandle)) expect(mock).not.toHaveBeenCalled();
     for (const action of [onCollapse, onDepthChange, onExpand, onHistoryModeChange]) expect(action).not.toHaveBeenCalled();
+  });
+
+  it("keeps a seed's pages, selected row and focus across the bow-tie, the flow and the canvas", async () => {
+    const user = userEvent.setup();
+    const payload = graphFixture();
+    const inbound = Array.from({ length: 12 }, (_, index) => ({
+      ...payload.nodes[1], id: `node:in:${index}`, entity_id: `in:${index}`, label: `Inbound ${index}`,
+    }));
+    payload.nodes = [...payload.nodes, ...inbound];
+    payload.edges = [...payload.edges, ...inbound.map((node) => ({ ...payload.edges[0], id: `edge:${node.id}`, source: node.id }))];
+    // Opening Details beside the list narrows it below the bow-tie width.
+    let listWidth = 900;
+    const resizes: (() => void)[] = [];
+    class TestResizeObserver {
+      callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+      observe(target: Element) {
+        if (target.matches("[data-testid='graph-list-view']")) resizes.push(() => this.callback([], this));
+      }
+      disconnect() {}
+      unobserve() {}
+    }
+    vi.stubGlobal("ResizeObserver", TestResizeObserver);
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.testid === "graph-list-view" ? listWidth : 0;
+    });
+    try {
+      renderGraph({ payload });
+      const list = screen.getByTestId("graph-list-view");
+      expect(list).toHaveAttribute("data-layout", "bow-tie");
+      const incoming = () => list.querySelectorAll<HTMLButtonElement>(
+        ".graph-list-bowtie-column[data-direction='incoming'] button[data-local-graph-id]");
+      // The last page removes its button: focus moves to the first row it revealed.
+      await user.click(within(list).getByRole("button", { name: /^Show 3 more/ }));
+      expect(incoming()).toHaveLength(13);
+      expect(incoming()[10]).toHaveFocus();
+      const chosen = incoming()[12];
+      const id = chosen.dataset.localGraphId!;
+      await user.click(chosen);
+      // Details narrows the list to the flow: the page, the selected row and focus follow.
+      listWidth = 500;
+      act(() => resizes.forEach((resize) => resize()));
+      expect(list).toHaveAttribute("data-layout", "flow");
+      expect(list.querySelector("[data-relation-direction='incoming']")).toHaveAttribute("data-shown-count", "13");
+      const pressed = list.querySelector<HTMLElement>(`[aria-pressed="true"][data-local-graph-id="${id}"]`);
+      expect(pressed).toHaveFocus();
+      // The canvas and back: the list keeps its pages.
+      await user.click(screen.getByRole("button", { name: "Graph" }));
+      await user.click(screen.getByRole("button", { name: "List" }));
+      expect(screen.getByTestId("graph-list-view").querySelector("[data-relation-direction='incoming']"))
+        .toHaveAttribute("data-shown-count", "13");
+    } finally {
+      width.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("shows and hides Details without remounting the stage or canvas, changing pins, or invoking graph actions", async () => {
@@ -364,18 +443,15 @@ describe("GraphView", () => {
     try {
       const payload = graphRowCueFixture();
       view = renderGraph({ payload });
-      const contents = screen.getByRole("heading", { name: "Accessible graph contents" }).closest("section")!;
-      const rows = contents.querySelectorAll(":scope > details:first-of-type > ul > li");
-      expect(rows).toHaveLength(8);
+      const list = screen.getByTestId("graph-list-view");
       expect(screen.getByText("8 nodes · 11 edges")).toBeInTheDocument();
+      // The seed is the hub; every other node is the far end of one of its relations.
       for (const node of payload.nodes) {
-        const row = [...rows].find((candidate) =>
-          candidate.querySelector(":scope > button strong")?.textContent === node.label)!;
-        const button = row.querySelector<HTMLButtonElement>(":scope > button.graph-list-select")!;
+        const button = rowByLabel(list, node.label);
         expect(button).toHaveTextContent(node.label);
         expect(button).toHaveAccessibleName(new RegExp(node.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
         expect(button).toHaveAttribute("aria-pressed", "false");
-        expectCanonicalRowCue(button, rowCueKind(node.entity_kind, node.family), forcedColors);
+        expectRowCue(payload, button, node, forcedColors);
       }
       const canvas = screen.getByTestId("mock-graph-canvas");
       expect(canvas).toHaveAttribute("data-nodes", "8");
@@ -394,30 +470,24 @@ describe("GraphView", () => {
       const user = userEvent.setup();
       const payload = graphRowCueFixture();
       view = renderGraph({ payload });
-      const contents = screen.getByRole("heading", { name: "Accessible graph contents" }).closest("section")!;
-      const rows = [...contents.querySelectorAll<HTMLLIElement>(":scope > details:first-of-type > ul > li")];
-      const rowFor = (label: string) => rows.find((candidate) =>
-        candidate.querySelector(":scope > button strong")?.textContent === label)!;
-      const folderRow = rowFor("Visible Source Folder");
-      expect(folderRow.querySelector("details,.graph-list-actions")).toBeNull();
-      const checkRows = (list: HTMLElement, expectedLabels: string[]) => {
-        const buttons = within(list).getAllByRole("button");
+      const list = screen.getByTestId("graph-list-view");
+      const checkRows = (details: HTMLElement, expectedLabels: string[]) => {
+        const buttons = detailsRelationRows(details);
         expect(buttons).toHaveLength(expectedLabels.length);
         expect(buttons.map((button) => button.querySelector("strong")!.textContent).sort())
           .toEqual([...expectedLabels].sort());
         for (const button of buttons) {
           const node = payload.nodes.find((candidate) => candidate.label === button.querySelector("strong")!.textContent)!;
-          expectCanonicalRowCue(button, rowCueKind(node.entity_kind, node.family), forcedColors);
+          expectRowCue(payload, button, node, forcedColors);
         }
       };
       const memberLabels = ["Decision Log", "Source Version", "Source Artifact", "Published Snapshot", "Chat Session"];
-      await user.click(folderRow.querySelector<HTMLButtonElement>(":scope > button.graph-list-select")!);
+      await user.click(rowByLabel(list, "Visible Source Folder"));
       const details = screen.getByRole("heading", { name: "Details" }).closest("aside")!;
-      checkRows(within(details).getByRole("list", { name: "Members in this scene" }), memberLabels);
+      checkRows(details, memberLabels);
 
-      await user.click(rowFor("Decision Log").querySelector<HTMLButtonElement>(":scope > button.graph-list-select")!);
-      const neighbors = within(details).getByRole("list", { name: "Direct neighbors in this scene" });
-      checkRows(neighbors, payload.nodes.filter((node) => node.id !== "node:seed").map((node) => node.label));
+      await user.click(rowByLabel(list, "Decision Log"));
+      checkRows(details, payload.nodes.filter((node) => node.id !== "node:seed").map((node) => node.label));
       expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-nodes", "8");
       expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-edges", "11");
       expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-selected", "node:seed");
@@ -442,10 +512,8 @@ describe("GraphView", () => {
       view = renderGraph({ payload: graphRowCueFixture() });
       expect(observerFactory).toHaveBeenCalledTimes(1);
       const graph = screen.getByTestId("graph-view");
-      const contents = screen.getByRole("heading", { name: "Accessible graph contents" }).closest("section")!;
-      const rows = [...contents.querySelectorAll(":scope > details:first-of-type > ul > li")];
-      const rowFor = (label: string) => rows.find((candidate) =>
-        candidate.querySelector(":scope > button strong")?.textContent === label)!;
+      const list = screen.getByTestId("graph-list-view");
+      const rowFor = (label: string) => rowByLabel(list, label);
       await act(async () => {
         graph.style.setProperty("--graph-node-library", "#123456");
         graph.style.setProperty("--graph-surface", "#abcdef");
@@ -457,13 +525,13 @@ describe("GraphView", () => {
       expect(legend.querySelector('svg[data-node-visual-kind="library"] path'))
         .toHaveAttribute("fill", "#123456");
       const user = userEvent.setup();
-      await user.click(rowFor("Decision Log").querySelector<HTMLButtonElement>(":scope > button.graph-list-select")!);
+      await user.click(rowFor("Decision Log"));
       const details = screen.getByRole("heading", { name: "Details" }).closest("aside")!;
-      const neighbors = within(details).getByRole("list", { name: "Direct neighbors in this scene" });
-      expect(within(neighbors).getByRole("button", { name: /Source Version/ })
+      expect(detailsRelationRows(details).find((row) => row.textContent?.includes("Source Version"))!
         .querySelector('[data-node-visual-kind="library"] path')).toHaveAttribute("fill", "#123456");
       await act(async () => { document.documentElement.setAttribute("data-theme", "dark"); });
-      expect(rowFor("Decision Log").querySelector('[data-node-visual-kind="context"] path'))
+      // The current document's row shows the "This document" glyph in the Context colour.
+      expect(rowFor("Decision Log").querySelector('[data-node-visual-kind="seed"] circle'))
         .toHaveAttribute("fill", "#8b5cf6");
       expect(legend.querySelector('svg[data-node-visual-kind="context"] path'))
         .toHaveAttribute("fill", "#8b5cf6");
@@ -483,18 +551,21 @@ describe("GraphView", () => {
 
   it("keeps filters, canvas, DOM parity, active chips, and clear-all on one physical scene", async () => {
     const user = userEvent.setup();
-    renderGraph();
+    renderGraph({ openContents: false });
 
     expect(screen.getByText("3 nodes · 2 edges")).toBeInTheDocument();
     expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-nodes", "3");
     expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-edges", "2");
+    // Camera commands belong to the canvas; List mode leaves them out of the menu.
     expect(screen.getByRole("button", { name: "Reset viewport, pins, and selection" }))
       .toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "List" }));
+    expect(screen.queryByRole("button", { name: "Reset viewport, pins, and selection" })).not.toBeInTheDocument();
     await user.click(screen.getByText("More filters"));
 
-    await user.click(screen.getByRole("button", { name: /Why was this chosen.*Ask turn/ }));
+    await user.click(rowByLabel(screen.getByTestId("graph-list-view"), "Why was this chosen?"));
     const details = screen.getByRole("heading", { name: "Details" }).closest("aside");
-    expect(within(details!).getByText("Why was this chosen?")).toBeInTheDocument();
+    expect(within(details!).getByRole("heading", { level: 5, name: "Why was this chosen?" })).toBeInTheDocument();
     expect(within(details!).queryByRole("link", { name: "Open" })).not.toBeInTheDocument();
     fireEvent.click(details!.querySelector(".graph-details-more > summary")!);
     expect(within(details!).getByRole("button", { name: "Center" })).toBeInTheDocument();
@@ -502,7 +573,7 @@ describe("GraphView", () => {
     await user.click(screen.getByLabelText("Ask turn"));
     expect(screen.getByText("2 nodes · 1 edges")).toBeInTheDocument();
     expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-nodes", "2");
-    expect(within(screen.getByTestId("graph-view").querySelector<HTMLElement>(".graph-relationship-list")!).queryByText("Why was this chosen?")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("graph-list-view")).queryByText("Why was this chosen?")).not.toBeInTheDocument();
     expect(screen.queryByText("included as evidence")).not.toBeInTheDocument();
     expect(screen.getByText("No visible change under the current filters."))
       .toBeInTheDocument();
@@ -528,13 +599,21 @@ describe("GraphView", () => {
     await user.click(screen.getByLabelText("Wiki link"));
     expect(screen.getByText("3 nodes · 1 edges")).toBeInTheDocument();
     expect(screen.queryByText("linked from")).not.toBeInTheDocument();
+
+    // Filters hiding every relation: the list (not only the canvas) says so and offers the way back.
+    await user.click(screen.getByLabelText("Inbound"));
+    await user.click(screen.getByLabelText("Outbound"));
+    const empty = screen.getByTestId("graph-list-view").querySelector<HTMLElement>(".graph-list-empty")!;
+    expect(empty).toHaveTextContent("All relationships are hidden by the current filters.");
+    await user.click(within(empty).getByRole("button", { name: "Clear all" }));
+    expect(screen.getByText("3 nodes · 2 edges")).toBeInTheDocument();
   });
 
   it("opens the new Local renderer with relation chips and a live label toggle", async () => {
     const user = userEvent.setup();
     const payload = graphFixture();
     payload.history.mode = "current";
-    renderGraph({ payload });
+    renderGraph({ openContents: false, payload });
 
     const canvas = screen.getByTestId("mock-graph-canvas");
     expect(canvas).toHaveAttribute("data-show-labels", "true");
@@ -576,20 +655,19 @@ describe("GraphView", () => {
 
     const canvas = screen.getByTestId("mock-graph-canvas");
     const actions = screen.getByRole("button", { name: /Historical relationships.*3/ });
-    const relationshipList = screen.getByTestId("graph-view")
-      .querySelector<HTMLUListElement>(".graph-relationship-list > details:nth-of-type(2) > ul")!;
+    const listRows = () => screen.getByTestId("graph-list-view").querySelectorAll(".graph-list-bowtie-row");
     expect(actions).toHaveAttribute("aria-pressed", "true");
     expect(canvas).toHaveAttribute("data-rendered-edge-ids", "action:created|action:edited|action:published");
-    expect(relationshipList.children).toHaveLength(3);
+    expect(listRows()).toHaveLength(3);
     await user.click(actions);
     expect(canvas).toHaveAttribute("data-rendered-edge-ids", "");
-    expect(relationshipList.children).toHaveLength(0);
+    expect(listRows()).toHaveLength(0);
     await user.click(actions);
     await user.click(screen.getByText("More filters"));
     const actionFilter = screen.getByRole("group", { name: "Action" });
     await user.click(within(actionFilter).getByLabelText("Edited"));
     expect(canvas).toHaveAttribute("data-rendered-edge-ids", "action:created|action:published");
-    expect(relationshipList.children).toHaveLength(2);
+    expect(listRows()).toHaveLength(2);
     expect(screen.getByText("4 nodes · 2 edges")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Legend" }));
     // The action line names what it draws: recorded activity, not links or citations.
@@ -657,11 +735,9 @@ describe("GraphView", () => {
     const onCollapse = vi.fn((_node: GraphNode) => Promise.resolve());
     const onExpand = vi.fn((_node: GraphNode) => Promise.resolve());
     const { rerender } = renderGraph({ onCollapse, onExpand });
-    const contents = screen.getByRole("heading", { name: "Accessible graph contents" }).closest("section")!;
+    const contents = screen.getByTestId("graph-list-view");
 
-    const askRow = within(contents).getByText("Why was this chosen?").closest("li");
-    expect(askRow).not.toBeNull();
-    await user.click(within(askRow!).getByRole("button"));
+    await user.click(rowByLabel(contents, "Why was this chosen?"));
     let selectedDetails = screen.getByRole("complementary", { name: "Details" });
     const askExpand = within(selectedDetails).getByRole("button", { name: "Expand" });
     expect(askExpand).toBeDisabled();
@@ -671,8 +747,7 @@ describe("GraphView", () => {
       .toHaveAttribute("id", askExpand.getAttribute("aria-describedby"));
     expect(askExpand).not.toHaveAttribute("title");
 
-    const primaryRow = within(contents).getByText("Decision Log").closest("li");
-    await user.click(within(primaryRow!).getByRole("button"));
+    await user.click(rowByLabel(contents, "Decision Log"));
     selectedDetails = screen.getByRole("complementary", { name: "Details" });
     const primaryExpand = within(selectedDetails).getByRole("button", { name: "Expand" });
     expect(primaryExpand).toBeDisabled();
@@ -681,9 +756,7 @@ describe("GraphView", () => {
     expect(within(selectedDetails).getByText("The primary seed stays in the graph."))
       .toHaveAttribute("id", primaryExpand.getAttribute("aria-describedby"));
 
-    const relatedRow = within(contents).getByText("Architecture Notes").closest("li");
-    expect(relatedRow).not.toBeNull();
-    await user.click(within(relatedRow!).getByRole("button"));
+    await user.click(rowByLabel(contents, "Architecture Notes"));
     const expand = within(screen.getByRole("complementary", { name: "Details" })).getByRole("button", { name: "Expand" });
     expect(expand).toBeEnabled();
     await user.click(expand);
@@ -699,12 +772,12 @@ describe("GraphView", () => {
       expect.objectContaining({ entity_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }),
     );
 
-    await user.click(within(contents).getByRole("button", { name: /Decision Log.*Document/ }));
+    await user.click(rowByLabel(contents, "Decision Log"));
     const details = screen.getByRole("heading", { name: "Details" }).closest("aside");
     expect(details).not.toBeNull();
-    expect(within(details!).getByText("Context page")).toBeInTheDocument();
+    expect(within(details!.querySelector<HTMLElement>(".graph-details-meta")!).getByTitle("Context page")).toHaveTextContent("Context");
     expect(within(details!).getByText("Published")).toBeInTheDocument();
-    await user.click(within(contents).getByRole("button", { name: /Architecture Notes.*Document/ }));
+    await user.click(rowByLabel(contents, "Architecture Notes"));
     expect(within(details!).getByRole("link", { name: "Open" }))
       .toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
   });
@@ -714,12 +787,12 @@ describe("GraphView", () => {
     renderGraph();
     canvasHandle.pauseLayout.mockClear();
     const graph = screen.getByTestId("graph-view");
-    const askSelect = screen.getByRole("button", { name: /Why was this chosen.*Ask turn/ });
+    const askSelect = rowByLabel(screen.getByTestId("graph-list-view"), "Why was this chosen?");
 
     await user.click(askSelect);
     expect(askSelect).toHaveAttribute("aria-pressed", "true");
     expect(within(screen.getByRole("heading", { name: "Details" }).closest("aside")!)
-      .getByText("Why was this chosen?")).toBeInTheDocument();
+      .getByRole("heading", { level: 5, name: "Why was this chosen?" })).toBeInTheDocument();
 
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(askSelect).toHaveAttribute("aria-pressed", "true");
@@ -758,8 +831,7 @@ describe("GraphView", () => {
     const payload = graphFixture();
     const workspaceGraphHref = (node: GraphNode) => `/graph?focus=${node.entity_id}`;
     const { rerender } = renderGraph({ payload, onCollapse, onExpand, workspaceGraphHref });
-    await user.click(within(screen.getByRole("list", { name: "Nodes" }))
-      .getByRole("button", { name: /Architecture Notes.*Document/ }));
+    await user.click(rowByLabel(screen.getByTestId("graph-list-view"), "Architecture Notes"));
     const details = screen.getByRole("complementary", { name: "Details" });
     const updated = { ...payload, nodes: payload.nodes.map((node) => node.id === "node:related"
       ? { ...node, label: "Latest document title" } : { ...node }) };
@@ -882,7 +954,7 @@ describe("GraphView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Hover node from canvas" }));
     expect(canvas).toHaveAttribute("data-focused", "");
 
-    const relatedSelect = screen.getByRole("button", { name: /Architecture Notes.*Document/ });
+    const relatedSelect = rowByLabel(screen.getByTestId("graph-list-view"), "Architecture Notes");
     fireEvent.focus(relatedSelect);
     expect(canvas).toHaveAttribute("data-focused", "node:related");
     fireEvent.click(screen.getByRole("button", { name: "Hover relationship from canvas" }));
@@ -894,9 +966,9 @@ describe("GraphView", () => {
     renderGraph();
     const graph = screen.getByTestId("graph-view");
     const details = screen.getByRole("heading", { name: "Details", hidden: true }).closest("aside")!;
-    const contents = screen.getByRole("heading", { name: "Accessible graph contents" }).closest("section")!;
-    const selectAsk = within(contents).getByRole("button", { name: /Why was this chosen.*Ask turn/ });
-    const selectRelated = within(contents).getByRole("button", { name: /Architecture Notes.*Document/ });
+    const contents = screen.getByTestId("graph-list-view");
+    const selectAsk = rowByLabel(contents, "Why was this chosen?");
+    const selectRelated = rowByLabel(contents, "Architecture Notes");
     graph.scrollTop = 35;
     details.scrollTop = 160;
     for (const mock of Object.values(canvasHandle)) mock.mockClear();
@@ -913,10 +985,9 @@ describe("GraphView", () => {
     expect(within(details).getByRole("button", { name: "Center" })).toBeInTheDocument();
     expect(within(details).getByRole("button", { name: "Pin" })).toBeInTheDocument();
 
-    const relationships = contents.querySelectorAll("details")[1];
-    await user.click(within(relationships).getByText("Relationships (2)"));
+    // A seed relation opens from the relation chip on the path card.
     details.scrollTop = 320;
-    await user.click(within(relationships).getAllByRole("button")[0]);
+    await user.click(seedPathRelation(details, /^Architecture Notes to Decision Log/));
     expect.soft(details.scrollTop).toBe(0);
     expect(details).not.toHaveFocus();
     details.scrollTop = 400;
@@ -985,57 +1056,101 @@ describe("GraphView", () => {
     rerender(graphElement({
       onCollapse: () => Promise.resolve(), onExpand: () => Promise.resolve(), payload: updated,
     }));
-    expect(within(details).getByText("Updated Ask title")).toBeInTheDocument();
+    expect(within(details).getByRole("heading", { level: 5, name: "Updated Ask title" })).toBeInTheDocument();
     expect(details.scrollTop).toBe(260);
     expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-selected", "node:ask");
   });
 
-  it("keeps main rows selection-only and offers exact scene-only members in selected folder details", async () => {
+  it("keeps list rows selection-only and offers exact scene-only members in selected folder details", async () => {
     const user = userEvent.setup();
     renderGraph({ payload: graphNavigationFixture() });
-    const contents = screen.getByRole("heading", { name: "Accessible graph contents" }).closest("section")!;
-    const folderRow = within(contents).getByText("Primary Folder").closest("li")!;
-    expect(folderRow.querySelector("details,.graph-list-actions")).toBeNull();
+    const list = screen.getByTestId("graph-list-view");
+    const folderRow = rowByLabel(list, "Primary Folder").closest("li")!;
+    expect(folderRow.querySelector("details")).toBeNull();
+    // One control per row; open links stay out of the Tab order (the row selects, Details opens).
     expect(within(folderRow).getAllByRole("button")).toHaveLength(1);
+    expect(screen.getByTestId("graph-list-view").querySelectorAll("a:not([tabindex='-1'])")).toHaveLength(0);
 
-    await user.click(within(folderRow).getByRole("button", { name: /Primary Folder.*Structure/ }));
+    await user.click(rowByLabel(list, "Primary Folder"));
     const details = screen.getByRole("heading", { name: "Details" }).closest("aside")!;
-    const detailsMembers = within(details).getByRole("list", { name: "Members in this scene" });
-    expect(within(detailsMembers).getAllByRole("button")).toHaveLength(2);
-    expect(within(detailsMembers).getByRole("button", { name: /Decision Log/ })).toBeVisible();
-    expect(within(detailsMembers).getByRole("button", { name: /Nested Folder/ })).toBeVisible();
-    expect(within(detailsMembers).queryByText("Nested Page")).not.toBeInTheDocument();
+    const members = within(details).getByRole("list", { name: "Outgoing" });
+    expect(within(members).getAllByRole("button")).toHaveLength(2);
+    expect(within(members).getByRole("button", { name: /Decision Log/ })).toBeVisible();
+    expect(within(members).getByRole("button", { name: /Nested Folder/ })).toBeVisible();
+    expect(within(members).queryByText("Nested Page")).not.toBeInTheDocument();
     expect(details).not.toHaveTextContent(/Primary placement|All members|omitted/);
 
-    await user.click(within(detailsMembers).getByRole("button", { name: /Decision Log/ }));
-    const folders = within(details).getByRole("list", { name: "Folders in this scene", hidden: true });
-    expect(within(folders).getAllByRole("button", { hidden: true })).toHaveLength(2);
+    await user.click(within(members).getByRole("button", { name: /Decision Log/ }));
+    const folders = within(details).getByRole("list", { name: "Incoming" });
     expect(folders).toHaveTextContent("Primary Folder");
     expect(folders).toHaveTextContent("Secondary Folder");
   });
 
-  it("uses one neighbor Tab entry and arrow emphasis without selecting, pinning, or moving the view", async () => {
+  it("searches the list, opens matching rings, and shows how a two-step item is reached from the seed", async () => {
+    const user = userEvent.setup();
+    renderGraph({ payload: graphNavigationFixture() });
+    const list = screen.getByTestId("graph-list-view");
+    const canvas = screen.getByTestId("mock-graph-canvas");
+    const related = rowByLabel(list, "Architecture Notes").closest("li")!;
+    const open = within(related).getByRole("link", { name: "Open document: Architecture Notes" });
+    expect(open).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+    expect(open).toHaveAttribute("tabindex", "-1");
+    expect(within(list).getByRole("button", { name: /^Two or more steps away/ })).toHaveAttribute("aria-expanded", "false");
+
+    const search = within(list).getByRole("searchbox", { name: "Find in the graph list" });
+    await user.type(search, "Distance");
+    expect(within(list).getByRole("status")).toHaveTextContent("“Distance” matches 1 node · 1 relationship");
+    expect(within(list).getByRole("button", { name: /^Two or more steps away/ })).toHaveAttribute("aria-expanded", "true");
+    const twoStep = rowByLabel(list, "Distance Two");
+    expect(twoStep).toHaveTextContent("via Architecture Notes");
+    await user.click(twoStep);
+    expect(canvas).toHaveAttribute("data-selected", "node:hop2");
+    const path = screen.getByRole("complementary", { name: "Details" }).querySelector<HTMLElement>(".graph-seed-path")!;
+    expect(path).toHaveTextContent("2 steps · 1 in between");
+    expect([...path.querySelectorAll("li strong")].map((name) => name.textContent))
+      .toEqual(["Decision Log", "Architecture Notes", "Distance Two"]);
+
+    // Escape clears the list search first; the selection stays.
+    act(() => search.focus());
+    await user.keyboard("{Escape}");
+    expect(search).toHaveValue("");
+    expect(canvas).toHaveAttribute("data-selected", "node:hop2");
+
+    // A node kind name finds the seed's relations by their far end: the
+    // matched node is listed, not only counted.
+    await user.type(search, "Ask turn");
+    expect(within(list).getByRole("status")).toHaveTextContent("“Ask turn” matches 1 node · 1 relationship");
+    expect(rowByLabel(list, "Why was this chosen?")).toBeVisible();
+
+    // Every seed row has the seed at its near end, so the seed's own name
+    // matches none of them; the seed itself is listed, as it is counted.
+    await user.clear(search);
+    await user.type(search, "Decision Log");
+    expect(within(list).getByRole("status")).toHaveTextContent("“Decision Log” matches 1 node · 0 relationships");
+    expect(list.querySelector('[data-local-graph-id="node:seed"]')).toBeVisible();
+  });
+
+  it("uses one relation Tab entry and arrow emphasis without selecting, pinning, or moving the view", async () => {
     const user = userEvent.setup();
     const onExpand = vi.fn(() => Promise.resolve());
     const onCollapse = vi.fn(() => Promise.resolve());
     const onDepthChange = vi.fn(() => Promise.resolve());
     renderGraph({ payload: graphNavigationFixture(), onExpand, onCollapse, onDepthChange });
     await pinAskFromDetails(user);
-    const contents = screen.getByRole("heading", { name: "Accessible graph contents" }).closest("section")!;
-    await user.click(within(contents).getByRole("button", { name: /Decision Log.*Document.*Published/ }));
+    await user.click(rowByLabel(screen.getByTestId("graph-list-view"), "Decision Log"));
     const details = screen.getByRole("heading", { name: "Details" }).closest("aside")!;
-    const neighbors = within(details).getByRole("list", { name: "Direct neighbors in this scene" });
-    const buttons = within(neighbors).getAllByRole("button");
+    const incoming = within(details).getByRole("list", { name: "Incoming" });
+    const buttons = within(incoming).getAllByRole("button");
     expect(buttons).toHaveLength(4);
-    expect(neighbors).not.toHaveTextContent(/Distance Two|Unknown Neighbor/);
+    expect(details).not.toHaveTextContent(/Distance Two|Unknown Neighbor/);
     const canvas = screen.getByTestId("mock-graph-canvas");
     const sceneCount = canvas.getAttribute("data-edges");
     for (const mock of Object.values(canvasHandle)) mock.mockClear();
     act(() => buttons[0].focus());
-    expect(canvas).toHaveAttribute("data-focused", "node:ask");
+    expect(canvas).toHaveAttribute("data-focused", "node:related");
     await user.keyboard("{ArrowDown}");
     expect(buttons[1]).toHaveFocus();
-    expect(canvas).toHaveAttribute("data-focused", "node:related");
+    expect(canvas).toHaveAttribute("data-focused", "node:primary-folder");
     await user.keyboard("{ArrowUp}");
     expect(buttons[0]).toHaveFocus();
     expect(canvas).toHaveAttribute("data-selected", "node:seed");
@@ -1052,13 +1167,12 @@ describe("GraphView", () => {
     expect(buttons[0]).toHaveFocus();
 
     await user.keyboard("{Enter}");
-    expect(canvas).toHaveAttribute("data-selected", "node:ask");
+    expect(canvas).toHaveAttribute("data-selected", "node:related");
     expect(details).toHaveFocus();
-    const nextNeighbors = within(details).getByRole("list", { name: "Direct neighbors in this scene" });
-    const seed = within(nextNeighbors).getByRole("button", { name: /Decision Log/ });
+    const seed = within(within(details).getByRole("list", { name: "Outgoing" })).getByRole("button", { name: /Decision Log/ });
     // No manual focus after selection: the actual keyboard sequence must
-    // reach the newly selected object's controls and its new neighbor list.
-    for (let step = 0; step < 8 && document.activeElement !== seed; step++) await user.tab();
+    // reach the newly selected object's controls and its relation list.
+    for (let step = 0; step < 10 && document.activeElement !== seed; step++) await user.tab();
     expect(seed).toHaveFocus();
     await user.tab({ shift: true });
     expect(seed).not.toHaveFocus();
@@ -1077,12 +1191,10 @@ describe("GraphView", () => {
     const user = userEvent.setup();
     renderGraph({ payload: graphNavigationFixture() });
     await pinAskFromDetails(user);
-    const contents = screen.getByRole("heading", { name: "Accessible graph contents" }).closest("section")!;
-    await user.click(within(contents).getByRole("button", { name: /Decision Log.*Document.*Published/ }));
+    await user.click(rowByLabel(screen.getByTestId("graph-list-view"), "Decision Log"));
     const graph = screen.getByTestId("graph-view");
     const details = screen.getByRole("heading", { name: "Details" }).closest("aside")!;
-    const neighbors = within(details).getByRole("list", { name: "Direct neighbors in this scene" });
-    const target = within(neighbors).getByRole("button", { name: /Why was this chosen/ });
+    const target = within(within(details).getByRole("list", { name: "Outgoing" })).getByRole("button", { name: /Why was this chosen/ });
     act(() => target.focus());
     await user.keyboard(key);
     const canvas = screen.getByTestId("mock-graph-canvas");
@@ -1099,16 +1211,15 @@ describe("GraphView", () => {
   it("preserves pointer focus but hands a connected keyboard row and same-ID activation to Details", async () => {
     const user = userEvent.setup();
     renderGraph({ payload: graphNavigationFixture() });
-    const contents = screen.getByRole("heading", { name: "Accessible graph contents" }).closest("section")!;
-    await user.click(within(contents).getByRole("button", { name: /Decision Log.*Document.*Published/ }));
+    const contents = screen.getByTestId("graph-list-view");
+    await user.click(rowByLabel(contents, "Decision Log"));
     const details = screen.getByRole("heading", { name: "Details" }).closest("aside")!;
     const focusDetails = vi.spyOn(details, "focus");
-    const neighbors = within(details).getByRole("list", { name: "Direct neighbors in this scene" });
-    await user.click(within(neighbors).getByRole("button", { name: /Why was this chosen/ }));
+    await user.click(within(within(details).getByRole("list", { name: "Outgoing" })).getByRole("button", { name: /Why was this chosen/ }));
     expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-selected", "node:ask");
     expect(focusDetails).not.toHaveBeenCalled();
 
-    const member = within(contents).getByRole("button", { name: /Decision Log.*Document.*Published/ });
+    const member = rowByLabel(contents, "Decision Log");
     act(() => member.focus());
     await user.keyboard("{Enter}");
     expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-selected", "node:seed");
@@ -1131,12 +1242,11 @@ describe("GraphView", () => {
     renderGraph({ payload: graphNavigationFixture(), onExpand, onCollapse, onDepthChange });
     await pinAskFromDetails(user);
     const graph = screen.getByTestId("graph-view");
-    const main = screen.getByRole("list", { name: "Nodes" });
-    await user.click(within(main).getByRole("button", { name: /Primary Folder.*Structure/ }));
+    await user.click(rowByLabel(screen.getByTestId("graph-list-view"), "Primary Folder"));
     const details = screen.getByRole("complementary", { name: "Details" });
     const focusDetails = vi.spyOn(details, "focus");
     const focusGraph = vi.spyOn(graph, "focus");
-    const member = within(within(details).getByRole("list", { name: "Members in this scene" }))
+    const member = within(within(details).getByRole("list", { name: "Outgoing" }))
       .getByRole("button", { name: /Decision Log/ });
     const canvas = screen.getByTestId("mock-graph-canvas");
     const nodeCount = canvas.getAttribute("data-nodes");
@@ -1166,12 +1276,11 @@ describe("GraphView", () => {
     const user = userEvent.setup();
     const payload = graphNavigationFixture();
     const { rerender } = renderGraph({ payload, workspaceId: "workspace:one" });
-    const contents = screen.getByRole("heading", { name: "Accessible graph contents" }).closest("section")!;
-    await user.click(within(contents).getByRole("button", { name: /Decision Log.*Document.*Published/ }));
+    await user.click(rowByLabel(screen.getByTestId("graph-list-view"), "Decision Log"));
     const details = screen.getByRole("heading", { name: "Details" }).closest("aside")!;
     const focusDetails = vi.spyOn(details, "focus");
     const focusGraph = vi.spyOn(screen.getByTestId("graph-view"), "focus");
-    const target = within(within(details).getByRole("list", { name: "Direct neighbors in this scene" }))
+    const target = within(within(details).getByRole("list", { name: "Outgoing" }))
       .getByRole("button", { name: /Why was this chosen/ });
     act(() => target.focus());
     act(() => {
@@ -1188,34 +1297,28 @@ describe("GraphView", () => {
     expect(focusGraph).not.toHaveBeenCalled();
   });
 
-  it("updates scene membership and neighbors when filters or the timeline remove their relationships", async () => {
+  it("updates a folder's relations when filters or the timeline remove them", async () => {
     const user = userEvent.setup();
     const payload = graphNavigationFixture();
     renderGraph({ payload });
-    const contents = screen.getByRole("heading", { name: "Accessible graph contents" }).closest("section")!;
-    const folderRow = within(contents).getByText("Primary Folder").closest("li")!;
-    await user.click(within(folderRow).getByRole("button", { name: /Primary Folder.*Structure/ }));
+    await user.click(rowByLabel(screen.getByTestId("graph-list-view"), "Primary Folder"));
     await user.click(screen.getByLabelText("Contains", { selector: "input" }));
     const details = screen.getByRole("heading", { name: "Details" }).closest("aside")!;
-    expect(details).toHaveTextContent("Members in this scene (0)");
-    expect(details).toHaveTextContent("No members are connected in this scene.");
-    expect(details).toHaveTextContent("No direct neighbors are connected in this scene.");
+    expect(details).toHaveTextContent("No relationships are shown in this scene.");
+    expect(within(details).queryByRole("list", { name: "Outgoing" })).not.toBeInTheDocument();
     expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-selected", "node:primary-folder");
     await user.click(screen.getByLabelText("Contains", { selector: "input" }));
-    expect(details).toHaveTextContent("Members in this scene (2)");
+    expect(within(within(details).getByRole("list", { name: "Outgoing" })).getAllByRole("button")).toHaveLength(2);
     fireEvent.change(screen.getByLabelText("Timeline position"), { target: { value: "0" } });
-    expect(details).toHaveTextContent("Members in this scene (0)");
-    expect(details).toHaveTextContent("No members are connected in this scene.");
+    expect(details).toHaveTextContent("No relationships are shown in this scene.");
   });
 
   it("clears transient neighbor focus when its relationship disappears but its node remains visible", async () => {
     const user = userEvent.setup();
     renderGraph({ payload: graphNavigationFixture() });
-    const contents = screen.getByRole("heading", { name: "Accessible graph contents" }).closest("section")!;
-    await user.click(within(contents).getByRole("button", { name: /Decision Log.*Document.*Published/ }));
+    await user.click(rowByLabel(screen.getByTestId("graph-list-view"), "Decision Log"));
     const details = screen.getByRole("heading", { name: "Details" }).closest("aside")!;
-    const neighbors = within(details).getByRole("list", { name: "Direct neighbors in this scene" });
-    act(() => within(neighbors).getByRole("button", { name: /Architecture Notes/ }).focus());
+    act(() => within(within(details).getByRole("list", { name: "Incoming" })).getByRole("button", { name: /Architecture Notes/ }).focus());
     const canvas = screen.getByTestId("mock-graph-canvas");
     expect(canvas).toHaveAttribute("data-focused", "node:related");
     // Preserve DOM focus while changing the scene, like an incoming update.
@@ -1223,23 +1326,25 @@ describe("GraphView", () => {
     expect(canvas).toHaveAttribute("data-nodes", "9");
     expect(canvas).toHaveAttribute("data-focused", "");
     expect(canvas).toHaveAttribute("data-selected", "node:seed");
-    expect(within(details).getByRole("list", { name: "Direct neighbors in this scene" }))
+    expect(within(details).getByRole("list", { name: "Incoming" }))
       .not.toHaveTextContent("Architecture Notes");
   });
 
-  it("localizes scene membership and keyboard navigation in Korean", async () => {
+  it("localizes the list view and a folder's relations in Korean", async () => {
     const user = userEvent.setup();
     await act(async () => { await i18n.changeLanguage("ko"); });
     try {
       renderGraph({ payload: graphNavigationFixture() });
-      const contents = screen.getByRole("heading", { name: "접근 가능한 그래프 내용" }).closest("section")!;
-      const row = within(contents).getByText("Primary Folder").closest("li")!;
-      await user.click(within(row).getByRole("button", { name: /Primary Folder.*구조.*게시됨/ }));
+      const list = screen.getByTestId("graph-list-view");
+      expect(within(list).getByRole("heading", { name: "그래프 목록" })).toBeInTheDocument();
+      expect(within(list).getByRole("list", { name: "들어오는 관계" })).toBeInTheDocument();
+      expect(list).toHaveTextContent("기준 문서를 가리킴");
+      await user.click(rowByLabel(list, "Primary Folder"));
       const details = screen.getByRole("heading", { name: "상세 정보" }).closest("aside")!;
-      expect(details).toHaveTextContent("이 장면의 소속 항목 (2)");
-      expect(within(details).getByRole("list", { name: "이 장면의 직접 이웃" })).toBeInTheDocument();
-      expect(details).toHaveTextContent("Tab으로 목록에 한 번 진입하세요. 위/아래 방향키 또는 Home/End로 항목을 강조하고 Enter 또는 Space로 선택하면 상세로 이동합니다.");
-      expect(details).not.toHaveTextContent(/Members in this scene|Direct neighbors in this scene/);
+      expect(within(within(details).getByRole("list", { name: "나가는 관계" })).getAllByRole("button")).toHaveLength(2);
+      expect(details).toHaveTextContent("선택한 폴더가 가리킴");
+      expect(details).toHaveTextContent("기준 문서와의 관계");
+      expect(details).not.toHaveTextContent(/Incoming|Outgoing|Relationship to the seed/);
     } finally {
       await act(async () => { await i18n.changeLanguage("en"); });
     }
@@ -1622,12 +1727,10 @@ describe("GraphView", () => {
     const user = userEvent.setup();
     renderGraph();
 
-    await user.click(screen.getByText("Relationships (2)"));
-    await user.click(screen.getByRole("button", { name: /Included.*Decision Log/ }));
-
-    const details = screen.getByRole("heading", { name: "Details" }).closest("aside");
-    expect(within(details!).getByText("Decision Log —Included→ Why was this chosen?", { selector: ".graph-edge-summary" }))
-      .toBeInTheDocument();
+    await user.click(rowByLabel(screen.getByTestId("graph-list-view"), "Why was this chosen?"));
+    const details = screen.getByRole("heading", { name: "Details" }).closest("aside")!;
+    await user.click(seedPathRelation(details, /^Decision Log to Why was this chosen\?/));
+    expect(details.querySelector(".relation-list-ends")).toHaveTextContent(/Decision Log.*Included.*Why was this chosen\?/);
   });
 
   it("loads retained citation evidence only for a selected pair and discards another reader's pending page", async () => {
@@ -1647,8 +1750,9 @@ describe("GraphView", () => {
       const props = { payload, onCollapse: (_node: GraphNode) => Promise.resolve(), onExpand: (_node: GraphNode) => Promise.resolve() };
       const view = renderGraph(props);
       expect(query).not.toHaveBeenCalled();
-      await user.click(screen.getByText("Relationships (3)"));
-      await user.click(screen.getByRole("button", { name: /Source citation.*Decision Log.*Source document/i }));
+      await user.click(rowByLabel(screen.getByTestId("graph-list-view"), "Source document"));
+      await user.click(seedPathRelation(screen.getByRole("complementary", { name: "Details" }),
+        /^Decision Log to Source document, Source citation/i));
       expect(query).toHaveBeenCalledTimes(1);
       expect(pending[0].request).toMatchObject({ source_page_id: payload.nodes[0].entity_id, target_kind: "library_item", target_id: targetId, limit: 20, cursor: null });
       const item = { id: "evidence-one", owner_kind: "context_page_version", owner_id: "source-published-version", source_version_id: "source-published-version", citation_type: "derived_artifact", library_item_version_id: "original-library-version", library_artifact_id: "original-artifact", snippet: "First retained quotation", verification_status: "strong", created_via: "manual_input" };
@@ -1720,8 +1824,9 @@ describe("GraphView", () => {
       sentence,
     );
 
-    await user.click(screen.getByText("Relationships (3)"));
-    await user.click(screen.getByRole("button", { name: /Often read together/ }));
+    await user.click(rowByLabel(screen.getByTestId("graph-list-view"), "Architecture Notes"));
+    await user.click(seedPathRelation(screen.getByRole("complementary", { name: "Details" }),
+      /^Decision Log and Architecture Notes/));
 
     const details = screen.getByRole("heading", { name: "Details" }).closest("aside");
     expect(within(details!).getByText(sentence)).toBeInTheDocument();
@@ -1834,7 +1939,7 @@ describe("GraphView", () => {
     const user = userEvent.setup();
     const onExpand = vi.fn(async () => undefined);
     const onDepthChange = vi.fn(async () => undefined);
-    renderGraph({ payload: folderOnlyCoverageFixture(), onExpand, onDepthChange });
+    renderGraph({ openContents: false, payload: folderOnlyCoverageFixture(), onExpand, onDepthChange });
     const summary = screen.getByText("Some folders omitted");
     const disclosure = summary.closest("details")!;
     const canvas = screen.getByTestId("mock-graph-canvas");
@@ -2079,7 +2184,7 @@ describe("GraphView", () => {
         ? `/graph?focus=${node.entity_id}`
         : null,
     });
-    await userEvent.click(screen.getByRole("button", { name: /Decision Log.*Document.*Published/ }));
+    await userEvent.click(rowByLabel(screen.getByTestId("graph-list-view"), "Decision Log"));
     fireEvent.click(screen.getByRole("complementary", { name: "Details" }).querySelector(".graph-details-more > summary")!);
     const links = within(screen.getByRole("complementary", { name: "Details" })).getAllByRole("link", { name: "Show in Knowledge Map" });
     expect(links.some((link) => link.getAttribute("href") === "/graph?focus=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
@@ -2119,6 +2224,24 @@ describe("GraphView", () => {
     expect(canvas).toHaveAttribute("data-nodes", nodesBeforeInactive);
   });
 });
+
+/** The row (or seed pill) that selects the item with this visible name. */
+function rowByLabel(container: HTMLElement, label: string) {
+  const row = [...container.querySelectorAll<HTMLButtonElement>("button[data-local-graph-id]")]
+    .find((candidate) => candidate.querySelector("strong")?.textContent === label);
+  if (!row) throw new Error(`No row for ${label}`);
+  return row;
+}
+
+/** A relation chip on the Details path card: where a seed relation opens from the list. */
+function seedPathRelation(details: HTMLElement, name: RegExp) {
+  return within(details.querySelector<HTMLElement>(".graph-seed-path")!).getByRole("button", { name });
+}
+
+/** Every relation row of the selected item's flow in Details. */
+function detailsRelationRows(details: HTMLElement) {
+  return [...details.querySelectorAll<HTMLButtonElement>(".relation-list-flow-row > button")];
+}
 
 async function pinAskFromDetails(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Select Ask from canvas" }));
@@ -2187,12 +2310,10 @@ function renderGraph({
     workspaceGraphHref,
     workspaceId,
   }));
-  // List interaction regressions explicitly enter the now-collapsed parity view.
-  // Scope the role query to the status actions: a document-wide one also walks
-  // the hidden parity list and costs seconds per render at 500+ relationships.
+  // List interaction regressions explicitly switch the canvas area to the list view.
   if (openContents) {
     fireEvent.click(within(view.container.querySelector<HTMLElement>(".graph-status-actions")!)
-      .getByRole("button", { name: /View as list|목록으로 보기/ }));
+      .getByRole("button", { name: /^(List|목록)$/ }));
   }
   return view;
 }
@@ -2281,6 +2402,18 @@ function rowCueKind(entityKind: string, family: string) {
 function cueOutline(path: Element | null) {
   const data = path?.getAttribute("d") ?? "";
   return data.includes("a") ? "circle" : `${data.split("L").length}-gon`;
+}
+
+/** The current document's rows show the legend's "This document" glyph; others their kind's. */
+function expectRowCue(payload: GraphQueryPayload, button: HTMLElement, node: GraphNode, forcedColors: boolean) {
+  const primary = payload.query.seeds[0];
+  if (node.entity_kind !== primary.kind || node.entity_id !== primary.id) {
+    expectCanonicalRowCue(button, rowCueKind(node.entity_kind, node.family), forcedColors);
+    return;
+  }
+  const cue = button.querySelector('[data-node-visual-kind="seed"]');
+  expect.soft(cue, `Missing seed cue on ${button.textContent}`).not.toBeNull();
+  expect(cue?.querySelector("circle")).toHaveAttribute("fill", forcedColors ? "rgb(255, 255, 255)" : "#7c3aed");
 }
 
 function expectCanonicalRowCue(

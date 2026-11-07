@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { GraphRenderScene } from "../../shared/rendererTypes";
 import { createLocalLayout } from "../layout";
+import { LOCATE_TRACE_MS } from "../locateTrace";
 import { buildLocalScene } from "../sceneInput";
 import { createSigmaGraphAdapter, type SigmaGraphAdapter } from "../sigmaAdapter";
 
@@ -209,6 +210,56 @@ describe("Local Sigma interactions", () => {
     expect(reduced.color).not.toBe("#ffffff");
     adapter.select(null);
     expect(reducer("context_page:other", data).color).toBe(data.color);
+  });
+
+  it("draws only the current document with the seed glyph at its relation size, never fades it, and traces its ring once when located", () => {
+    const attributes = (id: string) => state.sigma.graph.getNodeAttributes(`context_page:${id}`);
+    const reducer = () => state.sigma.settings.nodeReducer as (key: string, data: Record<string, unknown>) => Record<string, unknown>;
+    // A scene that names no current document keeps the seed glyph for every
+    // seed, without the current document's emphasis.
+    expect(attributes("seed")).toMatchObject({ type: "seed", zIndex: 0, isCurrent: false });
+    // "other" was expanded: a seed, but not the document the graph is opened from.
+    const current: GraphRenderScene = { ...cloneScene(), currentId: "seed",
+      nodes: cloneScene().nodes.map((node) => node.id === "other" ? { ...node, is_seed: true } : node) };
+    adapter.replaceScene(current);
+    const metric = buildLocalScene(cloneScene()).nodes.find((node) => node.key === "context_page:seed")!.radiusPx;
+    const seed = attributes("seed");
+    // The legend's "This document" glyph keeps the relation-count size.
+    expect(seed).toMatchObject({ type: "seed", shape: "circle", zIndex: 1, size: metric });
+    expect(attributes("other")).toMatchObject({ type: "circle", zIndex: 0 });
+    // Selecting the expanded seed puts the current document outside its star:
+    // the neighbor fades, the current document keeps its colour, glyph and label.
+    adapter.select("other");
+    expect(reducer()("context_page:seed", seed)).toMatchObject({
+      type: "seed", color: seed.color, borderColor: seed.borderColor, label: "seed", forceLabel: true,
+    });
+    expect(reducer()("context_page:neighbor", attributes("neighbor")).color).not.toBe(attributes("neighbor").color);
+
+    // Reduced motion centres without a trace.
+    adapter.locate("seed");
+    expect(state.setCameraState).toHaveBeenCalled();
+    expect(state.container!.querySelector(".graph-locate-trace")).toBeNull();
+    // Otherwise the ink ring is traced once over the bare disc, and the glyph
+    // comes back even when no animationend arrives.
+    vi.useFakeTimers();
+    try {
+      adapter.destroy();
+      adapter = createSigmaGraphAdapter(state.container!, current, {
+        callbacks, forcedColors: false, positions: {}, reducedMotion: false,
+      });
+      adapter.locate("seed");
+      expect(state.container!.querySelectorAll(".graph-locate-trace circle")).toHaveLength(1);
+      expect(reducer()("context_page:seed", attributes("seed"))).toMatchObject({ type: "circle", size: metric });
+      // Locating again mid-trace restarts it rather than cancelling it.
+      adapter.locate("seed");
+      expect(state.container!.querySelectorAll(".graph-locate-trace circle")).toHaveLength(1);
+      expect(reducer()("context_page:seed", attributes("seed"))).toMatchObject({ type: "circle", size: metric });
+      vi.advanceTimersByTime(LOCATE_TRACE_MS + 200);
+      expect(state.container!.querySelector(".graph-locate-trace")).toBeNull();
+      expect(reducer()("context_page:seed", attributes("seed"))).toMatchObject({ type: "seed", size: metric });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps nonincident original relationships dimmed and restores them without layout or camera changes", () => {

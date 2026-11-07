@@ -377,8 +377,6 @@ body[data-focus-mode="true"] .main-surface {
 .graph-view-header p,
 .graph-timeline h4,
 .graph-timeline p,
-.graph-relationship-list h4,
-.graph-relationship-list p,
 .graph-details h4,
 .graph-details h5 {
   margin: 0;
@@ -390,7 +388,6 @@ body[data-focus-mode="true"] .main-surface {
 }
 
 .graph-view-header p,
-.graph-relationship-list > p,
 .graph-details > p,
 .graph-timeline-heading-row p,
 .graph-timeline-motion-note {
@@ -600,8 +597,7 @@ body[data-focus-mode="true"] .main-surface {
 }
 
 .graph-legend,
-.graph-static-fallback,
-.graph-relationship-list > details {
+.graph-static-fallback {
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -609,8 +605,7 @@ body[data-focus-mode="true"] .main-surface {
 }
 
 .graph-legend > summary,
-.graph-static-fallback > summary,
-.graph-relationship-list > details > summary {
+.graph-static-fallback > summary {
   min-height: 38px;
   padding: 9px 12px;
   color: var(--ink);
@@ -940,7 +935,6 @@ body[data-focus-mode="true"] .main-surface {
 }
 
 .graph-timeline h4,
-.graph-relationship-list h4,
 .graph-details h4 {
   color: var(--ink);
   font-size: 14px;
@@ -1003,16 +997,9 @@ body[data-focus-mode="true"] .main-surface {
   font-style: normal;
 }
 
-.graph-parity-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
-  min-width: 0;
-}
-
-.graph-relationship-list,
 .graph-details {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 8px;
   min-width: 0;
@@ -1020,77 +1007,6 @@ body[data-focus-mode="true"] .main-surface {
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   background: var(--surface);
-}
-
-.graph-relationship-list > details > ul {
-  display: grid;
-  gap: 1px;
-  margin: 0;
-  padding: 0 8px 8px;
-  list-style: none;
-}
-
-.graph-relationship-list li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  border-top: 1px solid var(--border);
-}
-
-.graph-list-select {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-  min-height: 44px;
-  padding: 6px 4px;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  text-align: left;
-}
-
-.graph-list-select > span:last-child {
-  display: grid;
-  min-width: 0;
-}
-
-.graph-local-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.graph-local-list > li { min-width: 0; }
-.graph-relationship-list .graph-local-list > li { grid-template-columns: minmax(0, 1fr); }
-.graph-local-list > li > .graph-list-select { width: 100%; }
-.graph-scene-navigation { min-width: 0; }
-
-.graph-list-select strong,
-.graph-list-select small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.graph-list-select small {
-  color: var(--ink-muted);
-  font-size: 11px;
-}
-
-.graph-list-select[aria-pressed="true"] {
-  color: var(--context);
-  font-weight: 700;
-}
-
-.graph-scene-navigation > summary {
-  min-height: 44px;
-  padding: 10px 4px;
-  cursor: pointer;
-  overflow-wrap: anywhere;
 }
 
 .graph-list-actions {
@@ -1227,8 +1143,7 @@ body[data-focus-mode="true"] .main-surface {
   .graph-list-actions a,
   .graph-list-actions button,
   .graph-legend > summary,
-  .graph-static-fallback > summary,
-  .graph-relationship-list > details > summary {
+  .graph-static-fallback > summary {
     min-height: 44px;
   }
 
@@ -1237,7 +1152,6 @@ body[data-focus-mode="true"] .main-surface {
     min-width: 44px;
   }
 
-  .graph-relationship-list li { grid-template-columns: minmax(0, 1fr); }
   .graph-list-actions { padding: 0 4px 7px; }
   .graph-list-actions a,
   .graph-list-actions button { flex: 1 1 auto; }
@@ -1254,7 +1168,6 @@ body[data-focus-mode="true"] .main-surface {
   .graph-filter-group,
   .graph-legend,
   .graph-timeline,
-  .graph-relationship-list,
   .graph-details,
   .graph-static-fallback {
     forced-color-adjust: auto;
@@ -1268,7 +1181,6 @@ body[data-focus-mode="true"] .main-surface {
      would fill an Agent's inner outline gap with the outer ink. */
   .graph-node-cue,
   .graph-edge-cue { forced-color-adjust: none; }
-  .graph-list-select[aria-pressed="true"] { outline: 3px solid Highlight; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1287,7 +1199,7 @@ body[data-focus-mode="true"] .main-surface {
   .graph-canvas-toolbar,
   .graph-canvas-frame,
   .graph-timeline-controls,
-  .graph-parity-grid {
+  .graph-list-layer {
     display: none !important;
   }
 
@@ -2125,7 +2037,9 @@ p.workspace-graph-list-window-hint {
   background: color-mix(in srgb, var(--context) 6%, var(--surface));
 }
 
-.workspace-graph-list li > button {
+/* The open link (and the cluster expand button styled as one) keeps its own
+   size and colour: :where() leaves this rule at row-button specificity. */
+.workspace-graph-list li > button:where(:not(.relation-list-open-link)) {
   min-width: 0;
   min-height: 44px;
   border: 0;
@@ -2223,9 +2137,9 @@ p.workspace-graph-list-window-hint {
 /* Sidebar results, chips and the Details relation flow. Shapes, colours and
    strokes reuse the map and legend tokens (cosmosScene, GRAPH_EDGE_PATTERN). */
 .workspace-graph-node-cue.is-inline { width: 12px; height: 12px; }
-.workspace-graph-edge-cue { width: 16px; }
+.relation-list-stroke-cue { flex: none; width: 16px; }
 
-.workspace-graph-chip {
+.relation-list-chip {
   --chip-ink: var(--ink-muted);
   display: inline-flex;
   flex: none;
@@ -2243,23 +2157,27 @@ p.workspace-graph-list-window-hint {
   white-space: nowrap;
 }
 
-.workspace-graph-chip[data-node-kind="context"] { --chip-ink: var(--graph-node-context, #7c3aed); }
-.workspace-graph-chip[data-node-kind="library"] { --chip-ink: var(--graph-node-library, #0f9f8f); }
-.workspace-graph-chip[data-node-kind="agent"] { --chip-ink: var(--graph-node-agent, #d97706); }
-.workspace-graph-chip[data-node-kind="cluster"] { --chip-ink: var(--graph-node-folder, #64748b); }
-.workspace-graph-chip[data-visual="link"] { --chip-ink: var(--graph-edge-link, #64748b); }
-.workspace-graph-chip[data-visual="citation"] { --chip-ink: var(--graph-edge-citation, #0f9f8f); }
-.workspace-graph-chip[data-visual="coAccess"] { --chip-ink: var(--graph-edge-co-access, #0284c7); }
-.workspace-graph-chip[data-visual="membership"] { --chip-ink: var(--graph-edge-membership, #8391a7); }
-.workspace-graph-chip[data-visual="action"] { --chip-ink: var(--graph-edge-action, #475569); }
-.workspace-graph-chip .workspace-graph-node-cue.is-inline { width: 10px; height: 10px; }
-.workspace-graph-chip .workspace-graph-edge-cue { width: 12px; }
+.relation-list-chip[data-tone="context"] { --chip-ink: var(--graph-node-context, #7c3aed); }
+.relation-list-chip[data-tone="library"] { --chip-ink: var(--graph-node-library, #0f9f8f); }
+.relation-list-chip[data-tone="agent"] { --chip-ink: var(--graph-node-agent, #d97706); }
+.relation-list-chip[data-tone="conversation"] { --chip-ink: var(--graph-node-conversation, #0284c7); }
+.relation-list-chip:is([data-tone="folder"], [data-tone="cluster"]) { --chip-ink: var(--graph-node-folder, #64748b); }
+.relation-list-chip[data-tone="link"] { --chip-ink: var(--graph-edge-link, #64748b); }
+.relation-list-chip[data-tone="citation"] { --chip-ink: var(--graph-edge-citation, #0f9f8f); }
+.relation-list-chip[data-tone="coAccess"] { --chip-ink: var(--graph-edge-co-access, #0284c7); }
+.relation-list-chip[data-tone="membership"] { --chip-ink: var(--graph-edge-membership, #8391a7); }
+.relation-list-chip[data-tone="action"] { --chip-ink: var(--graph-edge-action, #475569); }
+.relation-list-chip > svg { flex: none; }
+.relation-list-chip :is(.workspace-graph-node-cue.is-inline, .graph-local-node-cue) { width: 10px; height: 10px; }
+.relation-list-chip .relation-list-stroke-cue { width: 12px; }
 
-.workspace-graph-row-meta {
+.relation-list-row-meta {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  /* A narrow column clips its chips rather than painting under the open link. */
+  overflow: hidden;
   color: var(--ink-muted);
   font-size: 11px;
   font-weight: 400;
@@ -2267,14 +2185,14 @@ p.workspace-graph-list-window-hint {
   white-space: nowrap;
 }
 
-.workspace-graph-row-meta-text {
+.relation-list-row-meta-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 /* Document icon + arrow reads as a link; the row itself selects on the map. */
-.workspace-graph-sidebar .workspace-graph-open-link {
+.relation-list-open-link {
   display: inline-flex;
   flex: none;
   align-items: flex-start;
@@ -2291,11 +2209,11 @@ p.workspace-graph-list-window-hint {
   cursor: pointer;
 }
 
-.workspace-graph-sidebar .workspace-graph-open-link .workspace-graph-open-arrow { margin: -3px 0 0 -1px; }
-.workspace-graph-sidebar .workspace-graph-open-link:hover { background: var(--context-soft); }
-.workspace-graph-sidebar .workspace-graph-open-link:focus-visible { outline: 2px solid var(--context); outline-offset: 1px; }
-.workspace-graph-sidebar button.workspace-graph-open-link { color: var(--ink-muted); }
-.workspace-graph-sidebar button.workspace-graph-open-link:disabled { cursor: default; opacity: 0.5; }
+.relation-list-open-link .relation-list-open-arrow { margin: -3px 0 0 -1px; }
+.relation-list-open-link:hover { background: var(--context-soft); }
+.relation-list-open-link:focus-visible { outline: 2px solid var(--context); outline-offset: 1px; }
+button.relation-list-open-link { color: var(--ink-muted); }
+button.relation-list-open-link:disabled { cursor: default; opacity: 0.5; }
 
 .workspace-graph-list > p.workspace-graph-list-status {
   color: var(--ink);
@@ -2316,7 +2234,7 @@ p.workspace-graph-list-window-hint {
   font-size: 12px;
 }
 
-.workspace-graph-fold-head {
+.relation-list-fold-head {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2333,11 +2251,11 @@ p.workspace-graph-list-window-hint {
   cursor: pointer;
 }
 
-.workspace-graph-fold-head:hover { background: var(--surface-hover); }
-.workspace-graph-fold-head:focus-visible { outline: 2px solid var(--context); outline-offset: -2px; }
-.workspace-graph-fold-chevron { flex: none; color: var(--ink-muted); }
+.relation-list-fold-head:hover { background: var(--surface-hover); }
+.relation-list-fold-head:focus-visible { outline: 2px solid var(--context); outline-offset: -2px; }
+.relation-list-fold-chevron { flex: none; color: var(--ink-muted); }
 
-.workspace-graph-fold-title {
+.relation-list-fold-title {
   min-width: 0;
   overflow: hidden;
   font-size: 13px;
@@ -2346,10 +2264,10 @@ p.workspace-graph-list-window-hint {
   white-space: nowrap;
 }
 
-.workspace-graph-fold-head[data-level="group"] { min-height: 32px; padding-left: 4px; }
-.workspace-graph-fold-head[data-level="group"] .workspace-graph-fold-title { font-size: 12px; font-weight: 700; }
+.relation-list-fold-head[data-level="group"] { min-height: 32px; padding-left: 4px; }
+.relation-list-fold-head[data-level="group"] .relation-list-fold-title { font-size: 12px; font-weight: 700; }
 
-.workspace-graph-fold-count {
+.relation-list-fold-count {
   flex: none;
   padding: 1px 7px;
   border-radius: 999px;
@@ -2360,7 +2278,7 @@ p.workspace-graph-list-window-hint {
 }
 
 /* The note gives way long before the title does. */
-.workspace-graph-fold-note {
+.relation-list-fold-note {
   flex: 0 100 auto;
   min-width: 0;
   overflow: hidden;
@@ -2370,7 +2288,7 @@ p.workspace-graph-list-window-hint {
   white-space: nowrap;
 }
 
-.workspace-graph-fold-summary {
+.relation-list-fold-summary {
   display: flex;
   flex: none;
   align-items: center;
@@ -2381,10 +2299,10 @@ p.workspace-graph-list-window-hint {
   white-space: nowrap;
 }
 
-.workspace-graph-fold-summary-item { display: inline-flex; align-items: center; gap: 4px; }
-.workspace-graph-fold-summary .workspace-graph-edge-cue { width: 12px; }
+.relation-list-fold-summary-item { display: inline-flex; align-items: center; gap: 4px; }
+.relation-list-fold-summary .relation-list-stroke-cue { width: 12px; }
 
-.workspace-graph-more {
+.relation-list-more {
   box-sizing: border-box;
   width: 100%;
   min-height: 32px;
@@ -2399,12 +2317,12 @@ p.workspace-graph-list-window-hint {
   cursor: pointer;
 }
 
-.workspace-graph-more:hover { background: var(--surface-hover); }
+.relation-list-more:hover { background: var(--surface-hover); }
 
 /* A result relation reads like the map: source, stroke + arrow, target. */
 .workspace-graph-list .workspace-graph-relation-select { display: block; }
 
-.workspace-graph-relation-map {
+.relation-list-map {
   display: grid;
   grid-template-columns: 14px minmax(0, 1fr);
   grid-template-rows: 20px 22px 20px;
@@ -2413,9 +2331,9 @@ p.workspace-graph-list-window-hint {
   min-width: 0;
 }
 
-.workspace-graph-relation-cue { display: flex; align-items: center; justify-content: center; }
+.relation-list-map-cue { display: flex; align-items: center; justify-content: center; }
 
-.workspace-graph-relation-end {
+.relation-list-map-end {
   min-width: 0;
   overflow: hidden;
   font-size: 13px;
@@ -2423,9 +2341,9 @@ p.workspace-graph-list-window-hint {
   white-space: nowrap;
 }
 
-.workspace-graph-relation-kind { display: flex; min-width: 0; }
+.relation-list-map-kind { display: flex; min-width: 0; }
 
-.workspace-graph-relation-stroke {
+.relation-list-map-stroke {
   --edge-ink: var(--graph-edge-link, #64748b);
   position: relative;
   grid-row: 2;
@@ -2437,32 +2355,32 @@ p.workspace-graph-list-window-hint {
   background: var(--edge-ink);
 }
 
-.workspace-graph-relation-stroke[data-visual="citation"] {
+.relation-list-map-stroke[data-visual="citation"] {
   --edge-ink: var(--graph-edge-citation, #0f9f8f);
   background: repeating-linear-gradient(to bottom, var(--edge-ink) 0 4px, transparent 4px 7px);
 }
 
-.workspace-graph-relation-stroke[data-visual="coAccess"] {
+.relation-list-map-stroke[data-visual="coAccess"] {
   --edge-ink: var(--graph-edge-co-access, #0284c7);
   background: repeating-linear-gradient(to bottom, var(--edge-ink) 0 2px, transparent 2px 4px);
 }
 
-.workspace-graph-relation-stroke[data-visual="membership"] {
+.relation-list-map-stroke[data-visual="membership"] {
   --edge-ink: var(--graph-edge-membership, #8391a7);
   background: repeating-linear-gradient(to bottom, var(--edge-ink) 0 3px, transparent 3px 6px);
 }
 
-.workspace-graph-relation-stroke[data-visual="action"] {
+.relation-list-map-stroke[data-visual="action"] {
   --edge-ink: var(--graph-edge-action, #475569);
   background: repeating-linear-gradient(to bottom, var(--edge-ink) 0 7px, transparent 7px 9px);
 }
 
-.workspace-graph-relation-stroke[data-visual="other"] {
+.relation-list-map-stroke[data-visual="other"] {
   --edge-ink: var(--ink-muted);
   background: repeating-linear-gradient(to bottom, var(--edge-ink) 0 2px, transparent 2px 4px);
 }
 
-.workspace-graph-relation-stroke[data-directed="true"]::after {
+.relation-list-map-stroke[data-directed="true"]::after {
   content: "";
   position: absolute;
   bottom: -3px;
@@ -2472,22 +2390,23 @@ p.workspace-graph-list-window-hint {
 }
 
 /* Details: the selected node's relations. */
-.workspace-graph-relations {
+.relation-list-relations {
   margin-top: 14px;
   padding-top: 10px;
   border-top: 1px solid var(--border-strong);
 }
 
-.workspace-graph-relations-head { display: flex; align-items: center; gap: 6px; }
-.workspace-graph-details .workspace-graph-relations h3 { margin: 0; font-size: 13px; }
-.workspace-graph-relations-head .workspace-graph-fold-summary { margin-left: auto; }
+.relation-list-relations-head { display: flex; align-items: center; gap: 6px; }
+/* Scoped so a screen's generic heading rule cannot override it. */
+.relation-list-relations .relation-list-relations-title { margin: 0; font-size: 13px; }
+.relation-list-relations-head .relation-list-fold-summary { margin-left: auto; }
 
-.workspace-graph-relations-search {
+.relation-list-search {
   position: relative;
   margin-top: 8px;
 }
 
-.workspace-graph-relations-search > svg {
+.relation-list-search > svg {
   position: absolute;
   top: 50%;
   left: 10px;
@@ -2496,7 +2415,7 @@ p.workspace-graph-list-window-hint {
   transform: translateY(-50%);
 }
 
-.workspace-graph-relations-search input {
+.relation-list-search input {
   box-sizing: border-box;
   width: 100%;
   min-height: 36px;
@@ -2509,15 +2428,15 @@ p.workspace-graph-list-window-hint {
   font-size: 12.5px;
 }
 
-.workspace-graph-relations-search input:focus-visible {
+.relation-list-search input:focus-visible {
   border-color: var(--context);
   outline: 2px solid color-mix(in srgb, var(--context) 30%, transparent);
   outline-offset: 0;
 }
 
-.workspace-graph-relations-search input::-webkit-search-cancel-button { display: none; }
+.relation-list-search input::-webkit-search-cancel-button { display: none; }
 
-.workspace-graph-relations-clear {
+.relation-list-search-clear {
   position: absolute;
   top: 50%;
   right: 4px;
@@ -2534,10 +2453,10 @@ p.workspace-graph-list-window-hint {
   transform: translateY(-50%);
 }
 
-.workspace-graph-relations-clear:hover { background: var(--surface-hover); color: var(--ink); }
+.relation-list-search-clear:hover { background: var(--surface-hover); color: var(--ink); }
 
-.workspace-graph-details .workspace-graph-relations-status,
-.workspace-graph-details .workspace-graph-relations-empty {
+.relation-list-relations .relation-list-relations-status,
+.relation-list-relations .relation-list-relations-empty {
   margin-top: 6px;
   color: var(--ink-muted);
   font-size: 11.5px;
@@ -2548,30 +2467,33 @@ p.workspace-graph-list-window-hint {
    owns it and stay continuous at any height. Branches curve into the rail:
    incoming ones merge 24px below a row's top, outgoing ones split 8px below
    it; the branch, node cue and name share the 16px centre line. */
-.workspace-graph-relation-flow {
+.relation-list-flow {
   --flow-ink: var(--graph-node-context, #7c3aed);
   margin-top: 6px;
 }
 
-.workspace-graph-relation-flow[data-node-kind="library"] { --flow-ink: var(--graph-node-library, #0f9f8f); }
-.workspace-graph-relation-flow[data-node-kind="cluster"] { --flow-ink: var(--graph-node-folder, #64748b); }
+:is(.relation-list-flow, .graph-list-bowtie, .graph-seed-path)[data-tone="library"] { --flow-ink: var(--graph-node-library, #0f9f8f); }
+:is(.relation-list-flow, .graph-list-bowtie, .graph-seed-path)[data-tone="cluster"] { --flow-ink: var(--graph-node-folder, #64748b); }
+:is(.relation-list-flow, .graph-list-bowtie, .graph-seed-path)[data-tone="agent"] { --flow-ink: var(--graph-node-agent, #d97706); }
+:is(.relation-list-flow, .graph-list-bowtie, .graph-seed-path)[data-tone="conversation"] { --flow-ink: var(--graph-node-conversation, #0284c7); }
+:is(.relation-list-flow, .graph-list-bowtie, .graph-seed-path)[data-tone="folder"] { --flow-ink: var(--graph-node-folder, #64748b); }
 
-.workspace-graph-flow-list {
+.relation-list-flow-list {
   display: grid;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.workspace-graph-flow-row,
-.workspace-graph-flow-hub,
-.workspace-graph-flow-head,
-.workspace-graph-flow-more {
+.relation-list-flow-row,
+.relation-list-flow-hub,
+.relation-list-flow-head,
+.relation-list-flow-more {
   position: relative;
 }
 
-.workspace-graph-flow-rail,
-.workspace-graph-flow-rail-arrow {
+.relation-list-flow-rail,
+.relation-list-flow-rail-arrow {
   position: absolute;
   top: 0;
   left: 0;
@@ -2579,49 +2501,50 @@ p.workspace-graph-list-window-hint {
   pointer-events: none;
 }
 
-.workspace-graph-flow-rail { height: 100%; }
-.workspace-graph-flow-rail-arrow { top: calc(50% - 4px); }
+.relation-list-flow-rail { height: 100%; }
+.relation-list-flow-rail-arrow { top: calc(50% - 4px); }
 
 /* Same strokes as the map: solid link, dashed citation (4/3 at list size). */
-.workspace-graph-flow-stroke {
+.relation-list-flow-stroke {
   fill: none;
   stroke: var(--graph-edge-link, #64748b);
   stroke-width: 2;
 }
 
-.workspace-graph-flow-stroke[data-visual="citation"] {
+.relation-list-flow-stroke[data-visual="citation"] {
   stroke: var(--graph-edge-citation, #0f9f8f);
   stroke-dasharray: 4 3;
 }
 
-.workspace-graph-flow-stroke[data-visual="coAccess"] {
+.relation-list-flow-stroke[data-visual="coAccess"] {
   stroke: var(--graph-edge-co-access, #0284c7);
   stroke-dasharray: 2 3;
 }
 
-.workspace-graph-flow-stroke[data-visual="membership"] {
+.relation-list-flow-stroke[data-visual="membership"] {
   stroke: var(--graph-edge-membership, #8391a7);
   stroke-dasharray: 3 3;
 }
 
-.workspace-graph-flow-stroke[data-visual="action"] {
+.relation-list-flow-stroke[data-visual="action"] {
   stroke: var(--graph-edge-action, #475569);
   stroke-dasharray: 7 2;
 }
 
-.workspace-graph-flow-stroke[data-visual="other"] {
+.relation-list-flow-stroke[data-visual="other"] {
   stroke: var(--ink-muted);
   stroke-dasharray: 2 2;
 }
 
-.workspace-graph-flow-arrow { fill: var(--graph-edge-link, #64748b); }
-.workspace-graph-flow-arrow[data-visual="citation"] { fill: var(--graph-edge-citation, #0f9f8f); }
-.workspace-graph-flow-arrow[data-visual="coAccess"] { fill: var(--graph-edge-co-access, #0284c7); }
-.workspace-graph-flow-arrow[data-visual="membership"] { fill: var(--graph-edge-membership, #8391a7); }
-.workspace-graph-flow-arrow[data-visual="action"] { fill: var(--graph-edge-action, #475569); }
-.workspace-graph-flow-arrow[data-visual="other"] { fill: var(--ink-muted); }
 
-.workspace-graph-flow-row {
+.relation-list-flow-arrow { fill: var(--graph-edge-link, #64748b); }
+.relation-list-flow-arrow[data-visual="citation"] { fill: var(--graph-edge-citation, #0f9f8f); }
+.relation-list-flow-arrow[data-visual="other"] { fill: var(--ink-muted); }
+.relation-list-flow-arrow[data-visual="coAccess"] { fill: var(--graph-edge-co-access, #0284c7); }
+.relation-list-flow-arrow[data-visual="membership"] { fill: var(--graph-edge-membership, #8391a7); }
+.relation-list-flow-arrow[data-visual="action"] { fill: var(--graph-edge-action, #475569); }
+
+.relation-list-flow-row {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) auto;
   align-items: start;
@@ -2629,7 +2552,7 @@ p.workspace-graph-list-window-hint {
   padding: 6px 0;
 }
 
-.workspace-graph-flow-row + .workspace-graph-flow-row::after {
+.relation-list-flow-row + .relation-list-flow-row::after {
   content: "";
   position: absolute;
   top: 0;
@@ -2638,9 +2561,8 @@ p.workspace-graph-list-window-hint {
   border-top: 1px solid var(--border);
 }
 
-.workspace-graph-flow-select {
+.relation-list-row-select {
   display: grid;
-  grid-column: 2;
   align-content: start;
   gap: 2px;
   min-width: 0;
@@ -2655,9 +2577,24 @@ p.workspace-graph-list-window-hint {
   cursor: pointer;
 }
 
-.workspace-graph-flow-select:hover { background: var(--surface-hover); }
+.relation-list-row-select:hover { background: var(--surface-hover); }
+/* Rows that can be the selection get room for the selected box. */
+.relation-list-row-select[aria-pressed] { padding: 4px 6px; border-radius: 6px; }
 
-.workspace-graph-flow-name {
+/* A selected row is one full box: a tint and a 2px ring on every side with
+   equal corners. Never a one-sided accent bar. */
+.relation-list-row-select[aria-pressed="true"],
+.relation-list-row-select[aria-pressed="true"]:hover {
+  background: color-mix(in srgb, var(--context) 8%, var(--surface));
+  box-shadow: inset 0 0 0 2px var(--context);
+}
+
+.relation-list-row-select[aria-pressed="true"] strong { color: var(--context); font-weight: 750; }
+
+.relation-list-flow-select { grid-column: 2; }
+.relation-list-flow-undirected { margin-top: 4px; }
+
+.relation-list-flow-name {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2665,7 +2602,7 @@ p.workspace-graph-list-window-hint {
   height: 20px;
 }
 
-.workspace-graph-flow-name strong {
+.relation-list-flow-name strong {
   min-width: 0;
   overflow: hidden;
   font-size: 13px;
@@ -2674,18 +2611,18 @@ p.workspace-graph-list-window-hint {
   white-space: nowrap;
 }
 
-.workspace-graph-flow-row .workspace-graph-open-link { grid-column: 3; align-self: center; }
+.relation-list-flow-row .relation-list-open-link { grid-column: 3; align-self: center; }
 
-.workspace-graph-flow-head .workspace-graph-fold-head { padding-left: 24px; }
-.workspace-graph-flow-more { padding-left: 32px; }
+.relation-list-flow-head .relation-list-fold-head { padding-left: 24px; }
+.relation-list-flow-more { padding-left: 32px; }
 
-.workspace-graph-flow-hub {
+.relation-list-flow-hub {
   display: flex;
   align-items: center;
   padding: 8px 0;
 }
 
-.workspace-graph-flow-hub-pill {
+.relation-list-flow-hub-pill {
   position: relative;
   z-index: 1;
   display: inline-flex;
@@ -2702,14 +2639,17 @@ p.workspace-graph-list-window-hint {
   font-size: 12.5px;
 }
 
-.workspace-graph-flow-hub-pill strong {
+button.relation-list-flow-hub-pill { color: var(--ink); font: inherit; font-size: 12.5px; cursor: pointer; }
+button.relation-list-flow-hub-pill:hover { background: color-mix(in srgb, var(--flow-ink) 18%, var(--surface)); }
+button.relation-list-flow-hub-pill[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--context); }
+.relation-list-flow-hub-pill strong {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.workspace-graph-flow-self {
+.relation-list-flow-self {
   flex: none;
   padding: 1px 6px;
   border-radius: 999px;
@@ -2720,9 +2660,9 @@ p.workspace-graph-list-window-hint {
 }
 
 /* A selected relation: source, the map stroke with its arrow, target. */
-.workspace-graph-relation-ends { display: grid; margin-top: 6px; }
+.relation-list-ends { display: grid; margin-top: 6px; }
 
-.workspace-graph-relation-end-row {
+.relation-list-end-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -2731,12 +2671,14 @@ p.workspace-graph-list-window-hint {
   padding: 2px 0 2px 2px;
 }
 
-.workspace-graph-relation-end-row > :not(.workspace-graph-open-link) { grid-column: 1; }
-.workspace-graph-relation-role { padding-left: 16px; color: var(--ink-muted); font-size: 11px; font-weight: 650; }
-.workspace-graph-relation-end-row .workspace-graph-row-meta { padding-left: 16px; }
-.workspace-graph-relation-end-row .workspace-graph-open-link { grid-row: 1 / span 3; grid-column: 2; }
+.relation-list-end-row > :not(.relation-list-open-link) { grid-column: 1; }
+.relation-list-end-role { padding-left: 16px; color: var(--ink-muted); font-size: 11px; font-weight: 650; }
+.relation-list-end-row .relation-list-row-meta { padding-left: 16px; }
+.relation-list-end-row .relation-list-open-link { grid-row: 1 / span 2; grid-column: 2; }
+.relation-list-end-body { display: grid; gap: 2px; min-width: 0; }
+.relation-list-end-select { min-height: 40px; margin-left: -4px; }
 
-.workspace-graph-relation-ends-stroke {
+.relation-list-ends-stroke {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2744,18 +2686,19 @@ p.workspace-graph-list-window-hint {
   padding-left: 6px;
 }
 
-.workspace-graph-relation-ends-stroke .workspace-graph-relation-stroke { height: 100%; margin: 0; }
+.relation-list-ends-stroke .relation-list-map-stroke { height: 100%; margin: 0; }
+.relation-list-ends-note { color: var(--ink-muted); font-size: 11px; }
 
 @media screen and (max-width: 640px) {
-  .workspace-graph-sidebar .workspace-graph-open-link {
+  .relation-list-open-link {
     width: 44px;
     min-height: 44px;
     height: 44px;
     padding-top: 14px;
   }
 
-  .workspace-graph-fold-head,
-  .workspace-graph-relations-search input { min-height: 44px; }
+  .relation-list-fold-head,
+  .relation-list-search input { min-height: 44px; }
 }
 
 .workspace-graph-canvas-panel {
@@ -3399,19 +3342,21 @@ p.workspace-graph-list-window-hint {
     outline: 3px solid Highlight;
   }
 
-  .workspace-graph-chip { border-color: CanvasText; }
+  .relation-list-chip { border-color: CanvasText; }
 
-  .workspace-graph-relation-stroke[data-visual] {
+  .relation-list-map-stroke[data-visual] {
     --edge-ink: CanvasText;
     forced-color-adjust: none;
   }
 
   /* Text keeps forced colours; only the rail graphics opt out (dashes stay). */
-  .workspace-graph-relation-flow { --flow-ink: CanvasText; }
-  .workspace-graph-flow-rail,
-  .workspace-graph-flow-rail-arrow { forced-color-adjust: none; }
-  .workspace-graph-flow-stroke[data-visual] { stroke: CanvasText; }
-  .workspace-graph-flow-arrow[data-visual] { fill: CanvasText; }
+  .relation-list-flow { --flow-ink: CanvasText; }
+  .relation-list-flow-rail,
+  .relation-list-flow-rail-arrow { forced-color-adjust: none; }
+  .relation-list-flow-stroke[data-visual] { stroke: CanvasText; }
+  .relation-list-flow-arrow[data-visual] { fill: CanvasText; }
+  .relation-list-row-select[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
+  button.relation-list-flow-hub-pill[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: 2px; }
 
   .workspace-graph-list-select[aria-pressed="true"] { outline: 3px solid Highlight; }
 
@@ -7131,10 +7076,15 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 .graph-frame .graph-local-stage { overflow: hidden; }
 .graph-view .graph-frame .graph-canvas-frame { height: 560px; min-height: 560px; border: 0; border-radius: 0; }
 .graph-view .graph-frame-history .graph-canvas-frame { height: 440px; min-height: 440px; }
-.graph-canvas-context { position: absolute; z-index: 1; left: 10px; top: 10px; display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: 7px; max-width: calc(100% - 140px); pointer-events: none; }
+.graph-canvas-context { position: absolute; z-index: 4; left: 10px; top: 10px; display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: 7px; max-width: calc(100% - 140px); pointer-events: none; }
 .graph-seed-pill, .graph-time-pill { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 5px 10px; border: 1px solid var(--border); border-radius: 20px; background: var(--surface); box-shadow: 0 1px 2px #0001; color: var(--ink-muted); font-size: 11px; }
 .graph-seed-pill strong { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .graph-seed-pill { white-space: nowrap; }
+/* The seed pill names the current document and moves the view to it. */
+button.graph-seed-pill { font: inherit; font-size: 11px; cursor: pointer; pointer-events: auto; }
+button.graph-seed-pill:hover { border-color: var(--context); }
+button.graph-seed-pill:focus-visible { outline: 2px solid var(--context); outline-offset: 2px; }
+.graph-seed-pill > svg { flex: none; color: var(--ink); }
 .graph-time-pill { border-color: color-mix(in srgb, var(--context) 50%, var(--border)); color: var(--context); white-space: nowrap; }
 .graph-time-pill strong { color: var(--ink); }
 .graph-canvas-utilities, .graph-camera-controls { position: absolute; z-index: 3; display: flex; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; box-shadow: 0 1px 3px #0001; }
@@ -7146,6 +7096,10 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 .graph-canvas-more > div { position: absolute; z-index: 8; right: 0; top: calc(100% + 5px); width: 250px; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 24px #0002; }
 .graph-canvas-more button, .graph-canvas-more label { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
 .graph-canvas-more button:hover, .graph-canvas-more label:hover { background: var(--surface-hover); }
+/* Stage layers: canvas internals (≤3) < seed/time pills and the list (4) <
+   Details (5) < the coverage notice and frame chrome (6+). The notice stays
+   operable while Details is open; Details starts below it instead
+   (--graph-stage-notice-bottom, measured by GraphView). */
 .graph-canvas-coverage { position: absolute; z-index: 6; top: 52px; right: 10px; display: flex; align-items: flex-start; gap: 4px; max-width: calc(100% - 20px); padding: 3px 7px; border: 1px solid #e0b553; border-radius: 8px; background: var(--surface); font-size: 11px; color: var(--ink-muted); }
 .graph-frame-history .graph-canvas-coverage { top: 88px; }
 .graph-canvas-coverage summary { cursor: pointer; }
@@ -7157,13 +7111,16 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 .graph-status-actions { display: flex; gap: 10px; margin-left: auto; }
 .graph-status-actions button { display: flex; align-items: center; gap: 4px; border: 0; padding: 0; min-height: 24px; background: transparent; font: inherit; color: var(--ink-muted); cursor: pointer; }
 .graph-status-omitted { color: var(--ink-muted); }
-.graph-view .graph-parity-grid[hidden], .graph-frame > [hidden] { display: none; }
+.graph-frame > [hidden] { display: none; }
 .graph-frame .graph-legend { margin: 0; padding-top: 10px; border-width: 1px 0 0; border-radius: 0; }
 /* The static diagram spans the graph view, inset like the legend rows, on
    the graph surface its cards and labels are coloured for. */
 .graph-static-fallback > .mermaid-diagram { margin: 0 12px 12px; }
 .graph-static-fallback > .mermaid-diagram .mermaid-diagram-viewport { background: var(--graph-surface); }
-.graph-frame:fullscreen { width: 100vw; height: 100dvh; display: flex; flex-direction: column; overflow: auto; border-radius: 0; }
+/* In fullscreen the frame, not the in-page .graph-view, has the width every
+   graph-view container rule inside it (Details sheet or panel, list gutters,
+   phone controls) must follow: the frame becomes that container. */
+.graph-frame:fullscreen { container: graph-view / inline-size; width: 100vw; height: 100dvh; display: flex; flex-direction: column; overflow: auto; border-radius: 0; }
 .graph-frame:fullscreen .graph-local-stage { flex: 1; min-height: 240px; }
 .graph-frame:fullscreen .graph-canvas-frame { height: 100%; min-height: 100%; }
 .graph-frame:fullscreen .graph-frame-header, .graph-frame:fullscreen .local-history, .graph-frame:fullscreen .graph-frame-status { flex-shrink: 0; }
@@ -7173,7 +7130,8 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 .graph-item-history time, .graph-details-location { color: var(--ink-muted); font-size: 11px; }
 .graph-item-history small { color: var(--context); }
 .graph-frame .graph-details { z-index: 5; border-radius: 10px; box-shadow: 0 12px 32px #0002; }
-.graph-frame .graph-local-stage .graph-details { top: 60px; max-height: calc(100% - 72px); }
+.graph-frame .graph-local-stage { --graph-details-top: max(60px, var(--graph-stage-notice-bottom, 0px)); }
+.graph-frame .graph-local-stage .graph-details { top: var(--graph-details-top); max-height: calc(100% - var(--graph-details-top) - 12px); }
 .graph-view :is(button, summary, select, input):focus-visible { outline: 2px solid var(--context); outline-offset: 2px; }
 @container graph-view (max-width: 620px) {
   .graph-type-row { flex-wrap: wrap; }
@@ -7208,6 +7166,144 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 @media (forced-colors: active) {
   .graph-type-options button[aria-checked="true"], .graph-scope-options button[aria-checked="true"] { outline: 2px solid Highlight; }
 }
+
+/* Context Graph tab: the list is a view in the canvas area (Graph | List).
+   The canvas stays mounted underneath; Details opens beside the list. */
+.graph-view-switch { display: inline-flex; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.graph-status-actions .graph-view-switch button { gap: 5px; min-height: 26px; padding: 0 9px; border-radius: 6px; }
+.graph-status-actions .graph-view-switch button[aria-pressed="true"] { background: var(--context-soft); color: var(--context); }
+.graph-local-stage.is-list-view .graph-canvas-context,
+.graph-local-stage.is-list-view .graph-camera-controls { display: none; }
+/* A stable gutter: a scrollbar appearing never narrows the list across the bow-tie threshold. */
+.graph-list-layer { position: absolute; inset: 0; z-index: 4; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; background: var(--surface); }
+/* One shrinkable column: a long unwrapped row must not widen the list past the stage. */
+/* --graph-list-head-size is the sticky head's measured height. Rows scroll
+   below everything stuck at the top: hub and keyboard focus stop under it. */
+.graph-list-view { --graph-list-sticky-top: var(--graph-list-head-size, 0px); container: graph-list / inline-size; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; min-width: 0; padding: 14px 16px 18px; }
+.graph-list-view :is(button, a, input) { scroll-margin-top: calc(var(--graph-list-sticky-top) + 8px); }
+.graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-view { padding-right: 328px; }
+/* The head (title, counts, search) stays at the top. Its background spans the
+   full width, so rows scroll under the head, never under the canvas utilities
+   that float in the top-right corner beside it. */
+.graph-list-head { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 280px); align-items: center; gap: 10px; margin: -14px -16px 0; padding: 14px 136px 10px 16px; background: var(--surface); }
+/* Details beside the list holds the corner: the head ends at the list column. */
+.graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-head { grid-template-columns: minmax(0, 1fr); margin-right: 0; padding-right: 0; }
+/* Stage status (loading, coverage) joins the list head in List mode: a
+   full-width row under the search, in flow, so it covers nothing. */
+.graph-list-notice { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; min-width: 0; }
+.graph-list-notice > :is(.graph-canvas-coverage, .graph-canvas-loading) { position: static; width: fit-content; max-width: 100%; transform: none; }
+.graph-list-notice > .graph-canvas-loading { padding: 6px 10px; font-size: 12px; }
+/* Title and counts wrap rather than widen the head (long locales, large counts). */
+.graph-list-title { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; min-width: 0; }
+.graph-list-title h4 { margin: 0; font-size: 14px; white-space: nowrap; }
+.graph-list-counts { min-width: 0; max-width: 100%; overflow: hidden; color: var(--ink-muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.graph-list-search { margin-top: 0; }
+.graph-list-status, .graph-list-empty { margin: 0; font-size: 12px; }
+.graph-list-status { color: var(--ink); font-weight: 650; }
+.graph-list-empty { color: var(--ink-muted); }
+.graph-list-empty p { margin: 0 0 6px; }
+.graph-list-group { min-width: 0; padding-top: 2px; border-top: 1px solid var(--border); }
+.graph-list-rows, .graph-list-bowtie-list { display: grid; margin: 0 0 4px; padding: 0; list-style: none; }
+.graph-list-rows { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); column-gap: 14px; }
+.graph-list-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 2px; padding: 3px 0; border-top: 1px solid var(--border); }
+.graph-list-relation-row { grid-template-columns: minmax(0, 1fr); }
+.graph-list-relation-row .relation-list-row-select { display: block; padding-block: 4px; }
+.graph-list-open-spacer { width: 32px; }
+/* Names wrap to two lines before they are cut. The first line keeps the 20px
+   line a flow rail joins at its centre, with the cue and badge on it; rows
+   grow downward and the rail below the joint stretches with them. */
+.graph-list-view .relation-list-flow-name { display: flex; align-items: flex-start; gap: 6px; min-width: 0; height: auto; }
+.graph-list-view .relation-list-flow-name > svg { margin-top: 2px; }
+.graph-list-view .relation-list-flow-name strong { display: -webkit-box; min-width: 0; overflow: hidden; font-size: 13px; line-height: 20px; overflow-wrap: anywhere; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.relation-list-relations[data-embedded] { margin-top: 0; padding-top: 0; border-top: 0; }
+.relation-list-relations[data-embedded] > .relation-list-relations-head { display: none; }
+
+/* The seed's relations: incoming on the left point at the seed, outgoing on the right leave it. */
+.graph-list-bowtie { --flow-ink: var(--graph-node-context, #7c3aed); display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: start; padding: 2px 0 8px; }
+.graph-list-bowtie-column { display: grid; align-content: start; min-width: 0; }
+.graph-list-bowtie-column[data-direction="undirected"] { grid-column: 1 / -1; margin-top: 6px; }
+.graph-list-bowtie-head { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 4px; }
+.graph-list-bowtie-head .relation-list-fold-title { font-size: 12px; font-weight: 700; }
+.graph-list-bowtie-hub { position: sticky; top: calc(var(--graph-list-sticky-top) + 8px); display: flex; justify-content: center; padding: 34px 6px 0; }
+/* The centre track is auto: cap the hub to a third of the list so a long seed
+   title cannot squeeze the incoming and outgoing columns. The pill shortens
+   the title instead; the full title stays in its tooltip. */
+.graph-list-bowtie > .graph-list-bowtie-hub { box-sizing: border-box; min-width: 0; max-width: 34cqi; }
+.graph-list-bowtie-none { margin: 4px; color: var(--ink-muted); font-size: 12px; }
+.graph-list-bowtie-hub.is-alone { position: static; justify-content: flex-start; padding: 8px 0; }
+.graph-list-bowtie-row { display: grid; grid-template-columns: minmax(0, 1fr) auto 30px; align-items: center; column-gap: 2px; padding: 3px 0; border-top: 1px solid var(--border); }
+.graph-list-bowtie-row[data-direction="outgoing"] { grid-template-columns: 30px minmax(0, 1fr) auto; }
+.graph-list-bowtie-row[data-direction="outgoing"] > .graph-list-bowtie-stroke { grid-row: 1; grid-column: 1; }
+.graph-list-bowtie-row[data-direction="outgoing"] > .relation-list-row-select { grid-row: 1; grid-column: 2; }
+.graph-list-bowtie-row[data-direction="outgoing"] > :is(.relation-list-open-link, .graph-list-open-spacer) { grid-row: 1; grid-column: 3; }
+.graph-list-bowtie-row[data-direction="undirected"] { grid-template-columns: minmax(0, 1fr) auto; }
+.graph-list-bowtie-row[data-direction="undirected"] > .graph-list-bowtie-stroke { display: none; }
+.graph-list-bowtie-stroke { --edge-ink: var(--graph-edge-link, #64748b); position: relative; height: 2px; margin: 0 5px; background: var(--edge-ink); }
+.graph-list-bowtie-stroke[data-visual="citation"] { --edge-ink: var(--graph-edge-citation, #0f9f8f); background: repeating-linear-gradient(to right, var(--edge-ink) 0 4px, transparent 4px 7px); }
+.graph-list-bowtie-stroke[data-visual="coAccess"] { --edge-ink: var(--graph-edge-co-access, #0284c7); background: repeating-linear-gradient(to right, var(--edge-ink) 0 2px, transparent 2px 4px); }
+.graph-list-bowtie-stroke[data-visual="membership"] { --edge-ink: var(--graph-edge-membership, #8391a7); background: repeating-linear-gradient(to right, var(--edge-ink) 0 3px, transparent 3px 6px); }
+.graph-list-bowtie-stroke[data-visual="action"] { --edge-ink: var(--graph-edge-action, #475569); background: repeating-linear-gradient(to right, var(--edge-ink) 0 7px, transparent 7px 9px); }
+.graph-list-bowtie-stroke[data-visual="other"] { --edge-ink: var(--ink-muted); background: repeating-linear-gradient(to right, var(--edge-ink) 0 2px, transparent 2px 4px); }
+.graph-list-bowtie-stroke[data-directed="true"]::after { content: ""; position: absolute; top: -4px; right: -4px; border-left: 7px solid var(--edge-ink); border-block: 5px solid transparent; }
+
+/* Details: the kind chip line, the seed mark, and the path from the seed. */
+.graph-details-meta { display: grid; gap: 3px; min-width: 0; }
+.graph-details-meta-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.graph-details-status { color: var(--ink-muted); font-size: 11px; }
+.graph-details-meta .graph-details-location { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.graph-details .relation-list-relations-title { margin: 0; font-size: 13px; }
+.graph-seed-path { --flow-ink: var(--graph-node-context, #7c3aed); display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--ink) 2%, var(--surface)); }
+.graph-details .graph-seed-path h5 { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; margin: 0; font-size: 12px; }
+.graph-seed-path-steps { color: var(--ink-muted); font-size: 11px; font-weight: 500; }
+.graph-seed-path ol { display: grid; margin: 0; padding: 0; list-style: none; }
+.graph-seed-path-node { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 30px; padding: 0 4px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; text-align: left; }
+button.graph-seed-path-node { cursor: pointer; }
+button.graph-seed-path-node:hover { background: var(--surface-hover); }
+.graph-seed-path-node strong { min-width: 0; overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.graph-seed-path-via { color: var(--ink-muted); font-size: 11px; }
+.graph-seed-path-link { display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: center; column-gap: 8px; min-height: 26px; margin-left: 4px; }
+.graph-seed-path-link .relation-list-map-stroke { grid-row: 1; align-self: stretch; margin: 0; }
+.relation-list-map-stroke[data-upward="true"]::after { top: -3px; bottom: auto; border-top: 0; border-bottom: 7px solid var(--edge-ink); }
+.graph-seed-path-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.graph-seed-path-relation { display: inline-flex; padding: 3px; border: 0; border-radius: 999px; background: transparent; cursor: pointer; }
+.graph-seed-path-relation:hover .relation-list-chip { border-color: var(--context); }
+.graph-seed-path-more { margin: 0; color: var(--ink-muted); font-size: 11px; }
+/* Seed relations the path does not show; each opens the relation itself. */
+.graph-details .graph-seed-links-title { margin: 4px 0 0; color: var(--ink-muted); font-size: 11px; font-weight: 650; }
+.graph-seed-links { display: grid; margin: 0; padding: 0; list-style: none; }
+.graph-seed-link { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 30px; padding: 0 4px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.graph-seed-link:hover { background: var(--surface-hover); }
+.graph-seed-link strong { min-width: 0; overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.graph-seed-link-direction { flex: none; color: var(--ink-muted); font-size: 12px; }
+/* Details is a bottom sheet (up to 45% of the stage) in a frame this narrow,
+   fullscreen or not: rows and keyboard focus scroll clear of it instead of
+   the right edge. */
+@container graph-view (max-width: 760px) {
+  .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-view { padding-right: 16px; }
+  /* The sheet is 45% of the stage: so is the space the list can scroll into
+     below its last row (percentages of the layer, which fills the stage). */
+  .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-layer { scroll-padding-bottom: 45%; }
+  .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-layer::after { content: ""; display: block; height: 45%; }
+  .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-head { grid-template-columns: minmax(0, 1fr) minmax(180px, 280px); margin-right: -16px; padding-right: 136px; }
+}
+@container graph-view (max-width: 620px) {
+  .graph-list-view { --graph-list-sticky-top: 60px; padding: 64px 10px 12px; }
+  .graph-list-layer::before { content: ""; position: sticky; top: 0; z-index: 3; display: block; height: 60px; margin-bottom: -60px; background: var(--surface); }
+  .graph-list-head,
+  .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-head { position: static; grid-template-columns: minmax(0, 1fr); margin: 0; padding: 0; background: none; }
+  .graph-local-stage.is-list-view:has(.graph-details:not([hidden])) .graph-list-view { padding-right: 10px; }
+  .graph-status-actions .graph-view-switch button { min-height: 40px; }
+  .graph-seed-path-node { min-height: 44px; }
+}
+/* Phones: every fold header in the Graph tab is a 44px target (group level included). */
+@media screen and (max-width: 640px) {
+  .graph-view .relation-list-fold-head { min-height: 44px; }
+  .graph-view button.graph-seed-pill { min-height: 44px; }
+}
+@media (forced-colors: active) {
+  .graph-list-bowtie-stroke[data-visual] { --edge-ink: CanvasText; forced-color-adjust: none; }
+  .graph-status-actions .graph-view-switch button[aria-pressed="true"] { outline: 2px solid Highlight; }
+}
 .graph-details-title-row { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px; background: var(--surface); }
 .graph-details-title-row h4 { flex: 1; margin: 0; font-size: 13px; }
 .graph-details-title { margin: 0; font-size: 15px; }
@@ -7221,9 +7317,6 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 .graph-details-more > summary { display: grid; place-items: center; min-width: 36px; min-height: 36px; border: 1px solid var(--border); border-radius: 7px; color: var(--ink-muted); cursor: pointer; }
 .graph-details-more > div { position: absolute; right: 0; bottom: calc(100% + 5px); z-index: 2; width: 180px; padding: 6px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); box-shadow: 0 5px 20px #0002; }
 .graph-details-more :is(button, a) { display: block; width: 100%; min-height: 36px; padding: 8px; border: 0; background: transparent; font: inherit; font-size: 12px; color: var(--ink); text-align: left; text-decoration: none; cursor: pointer; }
-.graph-seed-relationships { padding: 8px; border: 1px solid var(--border); border-radius: 8px; }
-.graph-seed-relationships h5, .graph-seed-relationships p { margin: 0; font-size: 12px; }
-.graph-seed-relationships p { margin-top: 6px; }
 .graph-canvas-coverage .graph-local-coverage-info > summary { min-height: 22px; padding: 0; background: transparent; border: 0; }
 .graph-canvas-coverage .graph-local-coverage-panel { z-index: 10; }
 @container graph-view (max-width: 760px) {
@@ -7251,11 +7344,19 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 .graph-history-inactive { color: var(--ink-muted); font-size: 11px; }
 @container graph-view (max-width: 760px) {
   .graph-frame .graph-local-stage .graph-details { inset: auto 0 0; max-height: 45%; border-radius: 12px 12px 0 0; }
-  .graph-frame .graph-local-stage .graph-details.is-sheet-expanded { max-height: min(88%, calc(100% - 64px)); }
+  .graph-frame .graph-local-stage .graph-details.is-sheet-expanded { max-height: min(88%, calc(100% - max(64px, var(--graph-stage-notice-bottom, 0px)))); }
   .graph-details-sheet-toggle { position: sticky; top: 44px; z-index: 2; display: block; min-height: 44px; border: 0; padding: 0; text-align: left; background: var(--surface); color: var(--context); font: inherit; font-size: 12px; cursor: pointer; }
 }
-.graph-frame:fullscreen .graph-local-stage .graph-details { inset: 60px 12px auto auto; width: min(300px, calc(100% - 24px)); max-height: calc(100% - 72px); border-radius: 10px; }
-.graph-frame:fullscreen .graph-details-sheet-toggle { display: none; }
+/* A wide fullscreen frame keeps Details as a top-right panel; a narrow one
+   uses the sheet above, like the page. */
+@container graph-view (min-width: 761px) {
+  .graph-frame:fullscreen .graph-local-stage .graph-details { inset: var(--graph-details-top) 12px auto auto; width: min(300px, calc(100% - 24px)); max-height: calc(100% - var(--graph-details-top) - 12px); border-radius: 10px; }
+}
+
+/* The current document's ink ring, traced once after the seed pill locates it. */
+.graph-locate-trace { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.graph-locate-trace circle { fill: none; stroke-dasharray: 1; stroke-dashoffset: 1; animation: graph-locate-trace 800ms cubic-bezier(0.33, 1, 0.68, 1) forwards; }
+@keyframes graph-locate-trace { to { stroke-dashoffset: 0; } }
 
 .graph-hover-chip {
   position: absolute;

@@ -16,6 +16,8 @@ import { readGraphTokens } from "./shared/graphTokens";
 
 export type GraphCanvasHandle = {
   centerOn(id: string): void;
+  /** Bring a document into view; the Local map also traces the current document's ring once. */
+  locate(id: string): void;
   fit(): void;
   pauseLayout(): void;
   resumeLayout(): void;
@@ -131,6 +133,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
 
     useImperativeHandle(ref, () => ({
       centerOn: (id) => adapterRef.current?.centerOn(id),
+      locate: (id) => adapterRef.current?.locate(id),
       fit: () => adapterRef.current?.fit(),
       pauseLayout: () => adapterRef.current?.stopLayout(),
       resumeLayout: () => adapterRef.current?.resumeLayout(),

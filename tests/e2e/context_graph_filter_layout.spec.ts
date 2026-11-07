@@ -80,9 +80,10 @@ for (const viewport of viewports) {
         if (request.method() === "POST" && /\/graph\/query(?:\?|$)/.test(request.url())) graphQueries += 1;
       });
       const nativeCanvas = await graph.locator("canvas.sigma-nodes").elementHandle();
-      await graph.getByRole("button", { name: "View as list" }).click();
-      const sourceRow = graph.locator(".graph-relationship-list > details > ul > li > button.graph-list-select")
-        .filter({ has: page.locator("strong", { hasText: `Graph source ${suffix}` }) });
+      await graph.getByRole("button", { name: "List", exact: true }).click();
+      // The list is a view of the canvas area; the canvas stays mounted underneath.
+      const sourceRow = graph.getByTestId("graph-list-view").locator("button[data-local-graph-id]")
+        .filter({ has: page.locator("strong", { hasText: `Graph source ${suffix}` }) }).first();
       await sourceRow.click();
       await expect(details.locator("h5.graph-details-title")).toHaveText(`Graph source ${suffix}`);
       await expect(details.getByRole("link", { name: "Open", exact: true })).toBeVisible();

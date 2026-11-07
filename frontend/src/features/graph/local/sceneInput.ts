@@ -12,6 +12,10 @@ export type LocalSceneNode = {
   entityKind: string;
   status: string | null;
   isSeed: boolean;
+  /** The document the graph is opened from; see GraphRenderScene.currentId. */
+  isCurrent: boolean;
+  /** Drawn with the seed glyph: the current document, or every seed when the scene names none. */
+  seedGlyph: boolean;
   radiusPx: number;
 };
 
@@ -102,6 +106,7 @@ export function buildLocalScene(scene: GraphRenderScene): LocalScene {
   }
 
   const { min, max } = GRAPH_NODE_RADIUS_PX.local;
+  const currentKey = scene.currentId ? keyByGraphId.get(scene.currentId) ?? null : null;
   const nodes = [...nodeByKey.entries()].sort(([left], [right]) => left.localeCompare(right))
     .map(([key, node]): LocalSceneNode => ({
       key,
@@ -111,6 +116,8 @@ export function buildLocalScene(scene: GraphRenderScene): LocalScene {
       entityKind: node.entity_kind ?? node.entityKind ?? "unknown",
       status: node.status ?? null,
       isSeed: Boolean(node.is_seed),
+      isCurrent: key === currentKey,
+      seedGlyph: scene.currentId === undefined ? Boolean(node.is_seed) : key === currentKey,
       radiusPx: Math.min(max, Math.max(min, min + 2 * Math.sqrt(degree.get(key) ?? 0))),
     }));
 
@@ -118,7 +125,7 @@ export function buildLocalScene(scene: GraphRenderScene): LocalScene {
   const uniqueIdentity = nodeByKey.size === scene.nodes.length
     && keyByGraphId.size === scene.nodes.length && wireEdges.size === scene.edges.length;
   const geometryKey = uniqueIdentity ? JSON.stringify([
-    nodes.map((node) => [node.key, node.graphId, node.radiusPx, node.isSeed]),
+    nodes.map((node) => [node.key, node.graphId, node.radiusPx, node.isSeed, node.isCurrent, node.seedGlyph]),
     edges.map((edge) => {
       const wire = wireEdges.get(edge.graphId)!;
       return [edge.graphId, wire.source, wire.target, wire.edge_kind, wire.direction ?? null,

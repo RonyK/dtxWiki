@@ -74,11 +74,12 @@ async function zoomAndPanLocalGraph(page: Page) {
   await page.getByRole("button", { name: "Zoom in", exact: true }).click();
   const bounds = await page.getByTestId("graph-canvas").boundingBox();
   if (!bounds) throw new Error("The Local Graph canvas has no bounds");
-  // Real stage input, away from the three document glyphs. Observe native
-  // camera animation completion instead of guessing a drag-inertia delay.
-  await page.mouse.move(bounds.x + 35, bounds.y + 35);
+  // Real stage input, away from the three document glyphs and below the seed
+  // pill, a button over the stage's top-left corner. Observe native camera
+  // animation completion instead of guessing a drag-inertia delay.
+  await page.mouse.move(bounds.x + 35, bounds.y + 80);
   await page.mouse.down();
-  await page.mouse.move(bounds.x + 73, bounds.y + 61, { steps: 5 });
+  await page.mouse.move(bounds.x + 73, bounds.y + 106, { steps: 5 });
   await page.mouse.up();
   await expect.poll(() => page.evaluate(() => window.__localCoverageFixture.cameraAnimated())).toBe(false);
   const moved = await page.evaluate(() => window.__localCoverageFixture.read());
@@ -200,13 +201,15 @@ for (const { locale, mode, viewport } of LOCAL_LAYOUT_CASES) {
     await expect(graph.locator(".graph-filter-bar")).toHaveCount(1);
     await expect(graph.locator(".graph-canvas-coverage .graph-local-coverage-info")).toHaveCount(1);
     const folderTop = await graph.evaluate((element) => element.querySelector(".graph-local-stage")!.getBoundingClientRect().top - element.getBoundingClientRect().top);
-    const target = graph.locator(".graph-relationship-list > details > ul > li > button.graph-list-select").first();
-    await target.click();
+    // A DOM list selection (the seed pill), then back to the painted canvas
+    // that owns the coverage chip, as before the list moved into the frame.
+    await (await openList(page)).locator('button[data-local-graph-id="node:seed"]').click();
     const details = graph.locator(".graph-details");
     await expect(details.locator("h5.graph-details-title")).toHaveText("Decision Log");
     await (await openLocalDetailsMore(details)).getByRole("button", { name: locale === "en" ? "Pin" : "고정", exact: true }).click();
     const unpin = details.getByRole("button", { name: locale === "en" ? "Unpin" : "고정 해제", exact: true, includeHidden: true });
     await expect(unpin).toHaveCount(1);
+    await showGraph(page);
     const before = await page.evaluate(() => window.__localCoverageFixture.read());
     const nativeCanvas = await graph.locator("canvas.sigma-nodes").elementHandle();
     await summary.focus();
@@ -705,55 +708,57 @@ for (const { locale, viewport } of LOCAL_LAYOUT_CASES) {
     test.setTimeout(60_000);
     const errors = await mount(page, "keyboard-boundary", locale, "light", viewport);
     const graph = page.getByTestId("graph-view");
-    const contents = graph.locator(".graph-relationship-list");
-    const nodesDisclosure = contents.locator(":scope > details").first();
-    const edgesDisclosure = contents.locator(":scope > details").nth(1);
-    const nodes = nodesDisclosure.locator(":scope > ul");
-    const details = graph.locator(".graph-details");
+    const list = await openList(page);
     const words = NAVIGATION_COPY[locale];
-    await expect(nodes.locator(":scope > li > button[data-local-graph-id]")).toHaveCount(250);
+    // The seed's relations open first (a bow-tie, or a flow when narrow):
+    // incoming documents 246/247 and folder A, then eight outgoing documents.
+    const seedGroup = list.locator('section.graph-list-group[data-list-group^="seed:"]');
+    const incoming = seedGroup.getByRole("list", { name: words.incoming, exact: true });
+    const outgoing = seedGroup.getByRole("list", { name: words.outgoing, exact: true });
+    const details = graph.locator(".graph-details");
+    const title = details.locator("h5.graph-details-title");
+    const clear = details.getByRole("button", { name: locale === "en" ? "Clear selection" : "선택 해제", exact: true });
+    // The list pages through the exact Local API ceiling the canvas renders.
+    await expect(list.locator(".graph-list-counts")).toHaveText(words.counts);
     expect((await page.evaluate(() => window.__localCoverageFixture.read())).positions).toHaveLength(250);
     const native = await graph.locator("canvas.sigma-nodes").elementHandle();
     const idleGeometry = await localStageGeometry(graph);
-    const ordinaryWitness = await page.evaluate(() => window.__localCoverageFixture.display("node:boundary:120"));
-    const firstEdgeId = await edgesDisclosure.locator(":scope > ul > li > button[data-local-graph-id]").first()
-      .getAttribute("data-local-graph-id");
-    const secondEdgeId = await edgesDisclosure.locator(":scope > ul > li > button[data-local-graph-id]").nth(1)
-      .getAttribute("data-local-graph-id");
-    const ordinaryEdge = await page.evaluate((id) => window.__localCoverageFixture.display(id!), firstEdgeId);
+    const ordinaryWitness = await page.evaluate(() => window.__localCoverageFixture.display("node:boundary:121"));
 
-    // Enter begins on an actual Tab entry, not a programmatic selection.
-    await nodesDisclosure.locator(":scope > summary").focus();
+    // Enter begins on an actual Tab entry, not a programmatic selection: the
+    // seed pill is the Tab stop after the incoming list.
+    await tabIntoList(page, incoming);
     await page.keyboard.press("Tab");
     expect(await activeLocalGraphId(page)).toBe("node:seed");
     await page.keyboard.press("Enter");
     await expect(details).toBeFocused();
-    await expect(details.locator("h5.graph-details-title")).toHaveText("Boundary document 000");
+    await expect(title).toHaveText("Boundary document 000");
     await page.keyboard.press("Tab");
-    await expect(details.getByRole("button", { name: locale === "en" ? "Clear selection" : "선택 해제", exact: true })).toBeFocused();
+    await expect(clear).toBeFocused();
     await (await openLocalDetailsMore(details)).getByRole("button", { name: locale === "en" ? "Pin" : "고정", exact: true }).click();
     await expect(details.getByRole("button", { name: locale === "en" ? "Unpin" : "고정 해제", exact: true, includeHidden: true })).toHaveCount(1);
-    await details.getByRole("button", { name: locale === "en" ? "Clear selection" : "선택 해제", exact: true }).click();
+    await clear.click();
     const idleState = await page.evaluate(() => window.__localCoverageFixture.read());
 
-    await expectNativeRovingList(page, graph, nodesDisclosure, nodes, 250, true);
-    await expect(edgesDisclosure.locator(":scope > summary")).toBeFocused();
+    await expectNativeRovingList(page, graph, incoming, 3, true);
+    // The next Tab stop is the seed pill, not another row of the list.
+    expect(await activeLocalGraphId(page)).toBe("node:seed");
     await expect(details).toBeHidden();
     expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(idleState);
     expect(await localStageGeometry(graph)).toEqual(idleGeometry);
-    // Focusing the folder-B last row lights its odd members, not the even
-    // witness; the original point remains visible and the GPU colors change.
+    // Focusing folder A, the incoming list's last row, lights its even
+    // members, not the odd witness; the point remains visible and GPU colors change.
     await page.keyboard.press("Shift+Tab");
-    expect(await activeLocalGraphId(page)).toBe("node:folder:b");
-    await expect.poll(() => page.evaluate(() => window.__localCoverageFixture.display("node:boundary:120").color))
+    expect(await activeLocalGraphId(page)).toBe("node:folder:a");
+    await expect.poll(() => page.evaluate(() => window.__localCoverageFixture.display("node:boundary:121").color))
       .not.toBe(ordinaryWitness.color);
-    expect(await page.evaluate(() => window.__localCoverageFixture.display("node:boundary:120").hidden)).toBe(false);
+    expect(await page.evaluate(() => window.__localCoverageFixture.display("node:boundary:121").hidden)).toBe(false);
     await page.keyboard.press("Space");
     await expect(details).toBeFocused();
-    await expect(details.locator("h5.graph-details-title")).toHaveText("Boundary folder B");
-    // Native End can scroll this uncapped bounded list far below the
-    // canvas. A keyboard handoff must expose its actions immediately, not
-    // wait for the next Tab to reveal an offscreen focused aside.
+    await expect(title).toHaveText("Boundary folder A");
+    // The list scrolls inside the frame. A keyboard handoff must still expose
+    // Details' actions immediately, not wait for the next Tab to reveal an
+    // offscreen focused aside.
     const firstAction = details.locator(".graph-details-close").first();
     const handoffViewport = await details.evaluate((element) => {
       const box = (target: Element) => {
@@ -778,43 +783,39 @@ for (const { locale, viewport } of LOCAL_LAYOUT_CASES) {
     await page.keyboard.press("Tab");
     await expect(details.locator(".graph-details-close").first()).toBeFocused();
 
-    for (const [name, count] of [[words.neighbors, 124], [words.members, 124]] as const) {
-      const disclosure = details.locator("details.graph-scene-navigation")
-        .filter({ has: page.locator(":scope > summary", { hasText: name }) });
-      await expectNativeRovingList(page, graph, disclosure,
-        disclosure.getByRole("list", { name, exact: true }), count, true);
-      await expect(details.locator("h5.graph-details-title")).toHaveText("Boundary folder B");
-    }
+    // Folder A's 124 members are its outgoing relations, five per page; a
+    // revealed page joins the same single entry.
+    const members = details.getByRole("list", { name: words.outgoing, exact: true });
+    await expectNativeRovingList(page, graph, members, 5, true);
+    await details.locator(".relation-list-more").click();
+    await expectNativeRovingList(page, graph, members, 10, true);
+    await expect(title).toHaveText("Boundary folder A");
 
-    // Home selects the seed by keyboard; its folder list has a separate
-    // entry even though the same original folder ID exists in main Nodes.
-    await nodesDisclosure.locator(":scope > summary").focus();
+    // The seed by keyboard; its folders are among its incoming relations,
+    // a separate entry even though folder A is also a main-list row.
+    await tabIntoList(page, incoming);
     await page.keyboard.press("Tab");
-    await page.keyboard.press("Home");
+    expect(await activeLocalGraphId(page)).toBe("node:seed");
     await page.keyboard.press("Enter");
     await expect(details).toBeFocused();
     await expect(details.getByRole("button", { name: locale === "en" ? "Unpin" : "고정 해제", exact: true, includeHidden: true })).toHaveCount(1);
-    const folders = details.locator("details.graph-scene-navigation")
-      .filter({ has: page.locator(":scope > summary", { hasText: words.folders }) });
-    await expectNativeRovingList(page, graph, folders,
-      folders.getByRole("list", { name: words.folders, exact: true }), 1, true);
-    const neighbors = details.locator("details.graph-scene-navigation")
-      .filter({ has: page.locator(":scope > summary", { hasText: words.neighbors }) });
-    const neighborList = neighbors.getByRole("list", { name: words.neighbors, exact: true });
-    await expectNativeRovingList(page, graph, neighbors, neighborList, 11, true);
-    await focusLocalRowWithKeyboard(page, neighbors, neighborList, "node:boundary:010");
-    expect(await activeLocalGraphId(page)).toBe("node:boundary:010");
+    const seedIncoming = details.getByRole("list", { name: words.incoming, exact: true });
+    await expect(seedIncoming.locator('button[data-local-graph-id="node:folder:a"]')).toHaveCount(1);
+    await expectNativeRovingList(page, graph, seedIncoming, 3, true);
+    const seedOutgoing = details.getByRole("list", { name: words.outgoing, exact: true });
+    await expectNativeRovingList(page, graph, seedOutgoing, 5, true);
+    await focusLocalRowWithKeyboard(page, seedOutgoing, "node:boundary:007");
     await page.keyboard.press("Enter");
     await expect(details).toBeFocused();
-    await expect(details.locator("h5.graph-details-title")).toHaveText("Boundary document 010");
+    await expect(title).toHaveText("Boundary document 007");
     await expect(details.getByRole("button", { name: locale === "en" ? "Expand" : "연결 펼치기", exact: true })).toBeEnabled();
     await expectAllLocalDetailsActions(details, "eligible-enter-all-actions-before-next-tab");
     await page.keyboard.press("Tab");
-    await expect(details.getByRole("button", { name: locale === "en" ? "Clear selection" : "선택 해제", exact: true })).toBeFocused();
+    await expect(clear).toBeFocused();
 
     // A pointer preserves focus on its row. Space on that SAME selected ID
     // still hands off to Details rather than relying on an ID state change.
-    const sameRow = nodes.locator('button[data-local-graph-id="node:boundary:010"]');
+    const sameRow = outgoing.locator('button[data-local-graph-id="node:boundary:007"]');
     await sameRow.click();
     await expect(sameRow).toBeFocused();
     await expect(details).not.toBeFocused();
@@ -828,29 +829,34 @@ for (const { locale, viewport } of LOCAL_LAYOUT_CASES) {
     await page.keyboard.press("Enter");
     await expect(details).toBeFocused();
     await expectAllLocalDetailsActions(details, "same-id-enter-all-actions-before-next-tab");
-    await details.getByRole("button", { name: locale === "en" ? "Clear selection" : "선택 해제", exact: true }).click();
+    await clear.click();
 
-    // The relation composite is independently bounded at the API ceiling.
-    await expectNativeRovingList(page, graph, edgesDisclosure,
-      edgesDisclosure.locator(":scope > ul"), 750, false);
-    await edgesDisclosure.locator(":scope > summary").focus();
-    await page.keyboard.press("Tab");
+    // Relation rows (the two-step ring) are a composite independent of node rows.
+    await list.locator('section[data-list-group="ringRelations"] > .relation-list-fold-head').click();
+    const relations = list.getByRole("list", { name: words.ringRelations, exact: true });
+    const [firstEdgeId, secondEdgeId] = await relations.locator(":scope > li > button[data-local-graph-id]")
+      .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-local-graph-id")!));
+    const ordinaryEdge = await page.evaluate((id) => window.__localCoverageFixture.display(id), firstEdgeId);
+    await expectNativeRovingList(page, graph, relations, 10, false);
+    await tabIntoList(page, relations);
     await page.keyboard.press("Home");
     expect(await activeLocalGraphId(page)).toBe(firstEdgeId);
-    await expect.poll(() => page.evaluate((id) => window.__localCoverageFixture.display(id!).color, firstEdgeId))
+    await expect.poll(() => page.evaluate((id) => window.__localCoverageFixture.display(id).color, firstEdgeId))
       .toBe(ordinaryEdge.color);
     await page.keyboard.press("ArrowDown");
     expect(await activeLocalGraphId(page)).toBe(secondEdgeId);
-    await expect.poll(() => page.evaluate((id) => window.__localCoverageFixture.display(id!).color, firstEdgeId))
+    await expect.poll(() => page.evaluate((id) => window.__localCoverageFixture.display(id).color, firstEdgeId))
       .not.toBe(ordinaryEdge.color);
     await expect(details).toBeHidden();
     await page.keyboard.press("Space");
     await expect(details).toBeFocused();
-    const selectedEdgeRow = edgesDisclosure.locator(`button[data-local-graph-id="${secondEdgeId}"]`);
+    const selectedEdgeRow = relations.locator(`button[data-local-graph-id="${secondEdgeId}"]`);
     await expect(selectedEdgeRow).toHaveAttribute("aria-pressed", "true");
-    await expect(details.locator("h5.graph-details-title")).toHaveText((await selectedEdgeRow.locator("strong").textContent())!);
+    // Details names the relation the row draws: its kind, then both ends.
+    await expect(title).toHaveText((await selectedEdgeRow.locator(".relation-list-map-kind .relation-list-chip").getAttribute("title"))!);
+    await expect(details.locator(".relation-list-ends strong")).toHaveText(await selectedEdgeRow.locator(".relation-list-map-end").allTextContents());
     await page.keyboard.press("Tab");
-    await expect(details.getByRole("button", { name: locale === "en" ? "Clear selection" : "선택 해제", exact: true })).toBeFocused();
+    await expect(clear).toBeFocused();
     await graph.locator(".graph-local-stage").scrollIntoViewIfNeeded();
     await evidenceScreenshot(page, testInfo, `local-${locale}-${viewport.width}-keyboard-selected-relation.png`);
     expect(await native!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
@@ -877,24 +883,24 @@ for (const { locale, viewport } of LOCAL_LAYOUT_CASES) {
 test("Local bounded keyboard entries retire on disclosure, tab, scene and workspace changes without late focus", async ({ page }, testInfo) => {
   const errors = await mount(page, "keyboard-boundary", "en", "light", { width: 1440, height: 900 });
   const graph = page.getByTestId("graph-view");
-  const nodesDisclosure = graph.locator(".graph-relationship-list > details").first();
-  const summary = nodesDisclosure.locator(":scope > summary");
-  const nodes = nodesDisclosure.locator(":scope > ul");
-  await focusLocalRowWithKeyboard(page, nodesDisclosure, nodes, "node:boundary:001");
+  const list = await openList(page);
+  const seedGroup = list.locator('section.graph-list-group[data-list-group^="seed:"]');
+  const fold = seedGroup.locator(":scope > .relation-list-fold-head");
+  const nodes = seedGroup.getByRole("list", { name: "Outgoing", exact: true });
+  await focusLocalRowWithKeyboard(page, nodes, "node:boundary:001");
   expect(await activeLocalGraphId(page)).toBe("node:boundary:001");
-  await summary.click();
-  await expect(nodesDisclosure).not.toHaveAttribute("open");
+  await fold.click();
+  await expect(fold).toHaveAttribute("aria-expanded", "false");
   await page.keyboard.press("Tab");
-  await expect(graph.locator(".graph-relationship-list > details").nth(1).locator(":scope > summary")).toBeFocused();
-  expect(await nodes.evaluate((element) => element.contains(document.activeElement))).toBe(false);
-  await summary.click();
-  // Native toggle updates the roving entry asynchronously; Tab requires that
-  // entry to be ready, then must focus the node list itself.
-  await expect(nodesDisclosure).toHaveAttribute("open");
+  await expect(list.locator('section[data-list-group="neighbors"] > .relation-list-fold-head')).toBeFocused();
+  expect(await seedGroup.evaluate((element) => element.contains(document.activeElement))).toBe(false);
+  await fold.click();
+  // Reopening remounts the rows with one entry; a real Tab from the control
+  // before them must then focus the list itself.
+  await expect(fold).toHaveAttribute("aria-expanded", "true");
   const restoredEntry = nodes.locator("button[tabindex='0']");
   await expect(restoredEntry).toHaveCount(1);
-  await summary.focus();
-  await page.keyboard.press("Tab");
+  await tabIntoList(page, nodes);
   await expect(restoredEntry).toBeFocused();
 
   await page.getByRole("button", { name: "Hide graph tab", exact: true }).click();
@@ -902,7 +908,7 @@ test("Local bounded keyboard entries retire on disclosure, tab, scene and worksp
   await page.getByRole("button", { name: "Show graph tab", exact: true }).click();
   await expect(graph).toBeVisible();
   await expect(page.getByRole("button", { name: "Hide graph tab", exact: true })).toBeFocused();
-  await focusLocalRowWithKeyboard(page, nodesDisclosure, nodes, "node:boundary:001");
+  await focusLocalRowWithKeyboard(page, nodes, "node:boundary:001");
   expect(await activeLocalGraphId(page)).toBe("node:boundary:001");
   const remove = page.getByRole("button", { name: "Remove boundary row 001", exact: true });
   await remove.click();
@@ -916,8 +922,7 @@ test("Local bounded keyboard entries retire on disclosure, tab, scene and worksp
   await expect(graph.locator(".graph-details")).toBeHidden();
   await page.getByRole("button", { name: "Restore graph scene", exact: true }).click();
   await expect(graph.locator(".graph-canvas-frame")).toHaveAttribute("data-renderer-status", "ready");
-  await summary.focus();
-  await page.keyboard.press("Tab");
+  await tabIntoList(page, nodes);
   await page.keyboard.press("Home");
   await page.keyboard.press("Enter");
   await expect(graph.locator(".graph-details")).toBeFocused();
@@ -926,6 +931,9 @@ test("Local bounded keyboard entries retire on disclosure, tab, scene and worksp
   await expect(graph.locator(".graph-details")).toBeHidden();
   await expect(scope).toBeFocused();
   await expect(graph.locator(".graph-canvas-frame")).toHaveAttribute("data-renderer-status", "ready");
+  // The new scope starts in the Graph view; its reopened list carries no selection.
+  await openList(page);
+  await expect(graph.locator("button[data-local-graph-id]").first()).toBeVisible();
   await expect(graph.locator("button[data-local-graph-id][aria-pressed='true']")).toHaveCount(0);
   await graph.locator(".graph-local-stage").scrollIntoViewIfNeeded();
   await evidenceScreenshot(page, testInfo, "local-keyboard-boundary-scope-restored.png");
@@ -938,7 +946,9 @@ test("Local revision-only refresh preserves an already pinned native drag until 
   const errors = await mount(page, "complete", "en", "light", { width: 1440, height: 900 });
   const graph = page.getByTestId("graph-view");
   const details = graph.locator(".graph-details");
-  const related = graph.locator('button.graph-list-select[data-local-graph-id="node:related"]').first();
+  // Details' title is the selection witness: the list and its pressed row
+  // give way to the canvas for the native drag.
+  const title = details.locator("h5.graph-details-title");
   const native = await graph.locator("canvas.sigma-nodes").elementHandle();
   const diagnosticPath = testInfo.outputPath("pinned-drag-native-gesture.json");
   const diagnostics: Array<{ phase: string; node: ReturnType<Window["__localCoverageFixture"]["nativeNode"]> }> = [];
@@ -950,11 +960,12 @@ test("Local revision-only refresh preserves an already pinned native drag until 
     await writeFile(diagnosticPath, JSON.stringify(diagnostics, null, 2));
     return node;
   };
-  await related.click();
-  await expect(details.locator("h5.graph-details-title")).toHaveText("Architecture Notes");
+  await (await openList(page)).locator('button[data-local-graph-id="node:related"]').click();
+  await expect(title).toHaveText("Architecture Notes");
   await (await openLocalDetailsMore(details)).getByRole("button", { name: "Pin", exact: true }).click();
   const unpin = details.getByRole("button", { name: "Unpin", exact: true, includeHidden: true });
   await expect(unpin).toHaveCount(1);
+  await showGraph(page);
   await observe("pinned-before-center");
   // Real Center keeps the selected node outside the overlaid Details drawer.
   await (await openLocalDetailsMore(details)).getByRole("button", { name: "Center", exact: true }).click();
@@ -1011,7 +1022,7 @@ test("Local revision-only refresh preserves an already pinned native drag until 
     expect(refreshed).toEqual(dragging);
     expect(await localStageGeometry(graph)).toEqual(geometry);
     expect(await native!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
-    await expect(related).toHaveAttribute("aria-pressed", "true");
+    await expect(title).toHaveText("Architecture Notes");
     await expect(unpin).toHaveCount(1);
     await evidenceScreenshot(page, testInfo, "local-pinned-drag-revision-held.png");
 
@@ -1026,7 +1037,7 @@ test("Local revision-only refresh preserves an already pinned native drag until 
     expect(released.camera).toEqual(before.camera);
     expect(released.instances).toBe(before.instances);
     expect(released.graphActions).toBe(before.graphActions);
-    await expect(related).toHaveAttribute("aria-pressed", "true");
+    await expect(title).toHaveText("Architecture Notes");
     await expect(unpin).toHaveCount(1);
     const invariantPath = testInfo.outputPath("pinned-drag-metadata-native-invariants.json");
     await writeFile(invariantPath, JSON.stringify({ fixture: "synthetic three-node actual GraphView/Sigma",
@@ -1045,7 +1056,7 @@ test("Local revision-only refresh preserves an already pinned native drag until 
 test("Local disappearing pointer member recovers scoped Escape without a keyboard Details handoff", async ({ page }, testInfo) => {
   const errors = await mount(page, "node-cues", "en", "light", { width: 390, height: 844 });
   const graph = page.getByTestId("graph-view");
-  const nodes = graph.locator(".graph-relationship-list > details").first().locator(":scope > ul");
+  const nodes = (await openList(page)).locator('section.graph-list-group[data-list-group^="seed:"]');
   const seed = nodes.locator('button[data-local-graph-id="node:seed"]');
   const details = graph.locator(".graph-details");
   await seed.click();
@@ -1056,14 +1067,18 @@ test("Local disappearing pointer member recovers scoped Escape without a keyboar
   const geometry = await localStageGeometry(graph);
   const native = await graph.locator("canvas.sigma-nodes").elementHandle();
 
+  // Pinning from More expanded the phone sheet over all but the list's top
+  // band; a reader collapses it to return to the list.
+  await details.getByRole("button", { name: "Collapse details", exact: true }).click();
   await nodes.locator('button[data-local-graph-id="node:folder"]').click();
   await expect(details.locator("h5.graph-details-title")).toHaveText("Visible Source Folder");
-  const members = details.getByRole("list", { name: "Members in this scene", exact: true });
+  // A folder's members are its outgoing relations (folder → member).
+  const members = details.getByRole("list", { name: "Outgoing", exact: true });
   const member = members.locator('button[data-local-graph-id="node:seed"]');
   const origin = await member.elementHandle();
   expect(origin).not.toBeNull();
-  // This is a native pointer click. Selecting the document removes the
-  // folder's member disclosure and the exact focused originating button.
+  // This is a native pointer click. Selecting the document replaces the
+  // folder's relation flow and the exact focused originating button.
   await member.click();
   await expect(details.locator("h5.graph-details-title")).toHaveText("Decision Log");
   expect(await origin!.evaluate((element) => element.isConnected)).toBe(false);
@@ -1110,15 +1125,16 @@ for (const { locale, size } of [
     const errors = await mount(page, "details-actions-long", locale, "light", size.viewport, size.hostWidth);
     const graph = page.getByTestId("graph-view");
     const details = graph.locator(".graph-details");
-    const nodesDisclosure = graph.locator(".graph-relationship-list > details").first();
-    const nodes = nodesDisclosure.locator(":scope > ul");
+    // Architecture Notes links to the seed: a row of the seed's incoming list.
+    const nodes = (await openList(page)).locator('section.graph-list-group[data-list-group^="seed:"]')
+      .getByRole("list", { name: locale === "en" ? "Incoming" : "들어오는 관계", exact: true });
     const native = await graph.locator("canvas.sigma-nodes").elementHandle();
     const geometry = await localStageGeometry(graph);
     const initial = await page.evaluate(() => window.__localCoverageFixture.read());
     const words = { open: locale === "en" ? "Open" : "열기", pin: locale === "en" ? "Pin" : "고정",
       unpin: locale === "en" ? "Unpin" : "고정 해제", expand: locale === "en" ? "Expand" : "연결 펼치기",
       map: locale === "en" ? "Show in Knowledge Map" : "지식 지도에서 보기" };
-    await focusLocalRowWithKeyboard(page, nodesDisclosure, nodes, "node:related");
+    await focusLocalRowWithKeyboard(page, nodes, "node:related");
     await page.keyboard.press("Enter");
     await expect(details).toBeFocused();
     await expect(nodes.locator('button[data-local-graph-id="node:related"]')).toHaveAttribute("aria-pressed", "true");
@@ -1179,7 +1195,7 @@ for (const { locale, size } of [
     await page.keyboard.press("Escape");
     await expect(details).toBeHidden();
     await expect(graph).toBeFocused();
-    await focusLocalRowWithKeyboard(page, nodesDisclosure, nodes, "node:related");
+    await focusLocalRowWithKeyboard(page, nodes, "node:related");
     await page.keyboard.press("Enter");
     await expect(details).toBeFocused();
     expect(await details.evaluate((element) => element.scrollTop)).toBe(0);
@@ -1207,40 +1223,49 @@ async function activeLocalGraphId(page: Page) {
   return page.evaluate(() => document.activeElement?.getAttribute("data-local-graph-id") ?? null);
 }
 
-async function focusLocalRowWithKeyboard(page: Page, disclosure: Locator, list: Locator, id: string) {
-  if (!await disclosure.evaluate((element) => (element as HTMLDetailsElement).open)) {
-    await disclosure.locator(":scope > summary").click();
-  }
-  await expect(disclosure).toHaveAttribute("open");
+/**
+ * Enter a list as a keyboard user does: a real Tab from the control before
+ * it in Tab order (document order; no positive tabindex) must reach its entry.
+ */
+async function tabIntoList(page: Page, list: Locator) {
   await expect(list.locator("button[tabindex='0']")).toHaveCount(1);
+  await list.evaluate((element) => {
+    const stops = Array.from(document.querySelectorAll<HTMLElement>("a[href],button,input,select,textarea,summary,[tabindex]"))
+      .filter((candidate) => candidate.tabIndex >= 0 && !candidate.matches(":disabled")
+        && candidate.getClientRects().length > 0 && !candidate.closest("[hidden],[inert]"));
+    const index = stops.indexOf(element.querySelector<HTMLElement>("button[tabindex='0']")!);
+    if (index < 1) throw new Error("The list entry has no preceding Tab stop");
+    stops[index - 1].focus();
+  });
+  await page.keyboard.press("Tab");
+  expect(await list.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+}
+
+async function focusLocalRowWithKeyboard(page: Page, list: Locator, id: string) {
   const ids = await list.locator(":scope > li > button[data-local-graph-id]")
     .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-local-graph-id")));
   const index = ids.indexOf(id);
   expect(index, `Original wire row ${id} must exist`).toBeGreaterThanOrEqual(0);
-  await disclosure.locator(":scope > summary").focus();
-  await page.keyboard.press("Tab");
+  await tabIntoList(page, list);
   await page.keyboard.press("Home");
   for (let cursor = 0; cursor < index; cursor += 1) await page.keyboard.press("ArrowDown");
   expect(await activeLocalGraphId(page)).toBe(id);
 }
 
-async function expectNativeRovingList(page: Page, graph: Locator, disclosure: Locator, list: Locator, count: number, nodes: boolean) {
-  if (!await disclosure.evaluate((element) => (element as HTMLDetailsElement).open)) {
-    await disclosure.locator(":scope > summary").click();
-  }
-  await expect(disclosure).toHaveAttribute("open");
+/** `count` is the rows shown: lists page their rows (ten in the list view, five in Details). */
+async function expectNativeRovingList(page: Page, graph: Locator, list: Locator, count: number, nodes: boolean) {
   const buttons = list.locator(":scope > li > button[data-local-graph-id]");
   await expect(buttons).toHaveCount(count);
   const ids = await buttons.evaluateAll((elements) => elements.map((element) => element.getAttribute("data-local-graph-id")));
   expect(new Set(ids).size).toBe(count);
   await expect(list.locator("button[tabindex='0']")).toHaveCount(1);
-  await expect(list.locator("a,button:not([tabindex='-1'])")).toHaveCount(1);
+  // Exactly one Tab stop: row open-document links stay out of the Tab order.
+  await expect(list.locator("a:not([tabindex='-1']),button:not([tabindex='-1'])")).toHaveCount(1);
   const before = await page.evaluate(() => window.__localCoverageFixture.read());
   const geometry = await localStageGeometry(graph);
   const selection = await graph.locator("button[data-local-graph-id][aria-pressed='true']")
     .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-local-graph-id")));
-  await disclosure.locator(":scope > summary").focus();
-  await page.keyboard.press("Tab");
+  await tabIntoList(page, list);
   expect(ids).toContain(await activeLocalGraphId(page));
   for (const [key, index] of [["Home", 0], ["ArrowDown", Math.min(1, count - 1)], ["ArrowUp", 0], ["End", count - 1], ["Home", 0], ["End", count - 1]] as const) {
     await page.keyboard.press(key);
@@ -1261,30 +1286,32 @@ async function expectNativeRovingList(page: Page, graph: Locator, disclosure: Lo
   await page.keyboard.press("Tab");
 }
 
-type CueKind = "context" | "version" | "library" | "conversation" | "folder";
+// "seed": the current document's rows show the legend's "This document" glyph.
+type CueKind = "seed" | "context" | "version" | "library" | "conversation" | "folder";
 type CueMode = "light" | "dark" | "forced";
-type CueRow = { label: string; kind: CueKind; family: "document" | "ask" | "chat" | "structural" };
+// `chip` names the row's kind chip: canvas kind, or the family for conversations.
+type CueRow = { label: string; kind: CueKind; chip: "context" | "version" | "library" | "ask" | "chat" | "folder" };
 const NODE_CUE_ROWS: CueRow[] = [
-  { label: "Decision Log", kind: "context", family: "document" },
-  { label: "Architecture Notes", kind: "context", family: "document" },
-  { label: "Why was this chosen?", kind: "conversation", family: "ask" },
-  { label: "Shared source title", kind: "version", family: "document" },
-  { label: "Shared source title", kind: "library", family: "document" },
-  { label: "Source Artifact", kind: "library", family: "document" },
-  { label: "MCP Conversation", kind: "conversation", family: "chat" },
-  { label: "Visible Source Folder", kind: "folder", family: "structural" },
+  { label: "Decision Log", kind: "seed", chip: "context" },
+  { label: "Architecture Notes", kind: "context", chip: "context" },
+  { label: "Why was this chosen?", kind: "conversation", chip: "ask" },
+  { label: "Shared source title", kind: "version", chip: "version" },
+  { label: "Shared source title", kind: "library", chip: "library" },
+  { label: "Source Artifact", kind: "library", chip: "library" },
+  { label: "MCP Conversation", kind: "conversation", chip: "chat" },
+  { label: "Visible Source Folder", kind: "folder", chip: "folder" },
 ];
 const CUE_COLORS = {
-  light: { context: "rgb(124, 58, 237)", version: "rgb(124, 58, 237)", library: "rgb(15, 159, 143)",
+  light: { seed: "rgb(124, 58, 237)", context: "rgb(124, 58, 237)", version: "rgb(124, 58, 237)", library: "rgb(15, 159, 143)",
     conversation: "rgb(2, 132, 199)", folder: "rgb(100, 116, 139)" },
-  dark: { context: "rgb(139, 92, 246)", version: "rgb(139, 92, 246)", library: "rgb(13, 148, 136)",
+  dark: { seed: "rgb(139, 92, 246)", context: "rgb(139, 92, 246)", version: "rgb(139, 92, 246)", library: "rgb(13, 148, 136)",
     conversation: "rgb(56, 189, 248)", folder: "rgb(148, 163, 184)" },
 } as const;
 const NAVIGATION_COPY = {
-  en: { members: "Members in this scene", neighbors: "Direct neighbors in this scene", folders: "Folders in this scene",
-    families: { document: "Document", ask: "Ask turn", chat: "Conversation", structural: "Structure" } },
-  ko: { members: "이 장면의 소속 항목", neighbors: "이 장면의 직접 이웃", folders: "이 장면의 소속 폴더",
-    families: { document: "문서", ask: "질문 턴", chat: "대화", structural: "구조" } },
+  en: { incoming: "Incoming", outgoing: "Outgoing", ringRelations: "Relationships further out", counts: "250 nodes · 750 relationships",
+    chips: { context: "Context", version: "Version", library: "Library", ask: "Ask turn", chat: "Conversation", folder: "Folder" } },
+  ko: { incoming: "들어오는 관계", outgoing: "나가는 관계", ringRelations: "2단계 이상 관계", counts: "노드 250 · 관계 750",
+    chips: { context: "컨텍스트", version: "버전", library: "라이브러리", ask: "질문 턴", chat: "대화", folder: "폴더" } },
 } as const;
 
 // Palette assertions do not depend on locale and translated family names do
@@ -1301,41 +1328,20 @@ for (const { locale, mode } of [
     const errors = await mount(page, "node-cues", locale, mode);
     const words = NAVIGATION_COPY[locale];
     const panel = page.getByTestId("graph-view");
-    const rows = panel.locator(".graph-relationship-list > details").first().locator(":scope > ul > li");
-    const mainButtons = rows.locator(":scope > button.graph-list-select");
-    await expectNodeCueRows(mainButtons, NODE_CUE_ROWS, locale, mode);
-    const members = NODE_CUE_ROWS.filter((node) => node.kind !== "folder");
-    const folderRow = rows.filter({ has: page.locator(":scope > button.graph-list-select strong", { hasText: /^Visible Source Folder$/ }) });
-    const details = panel.locator(".graph-details");
-    await folderRow.locator(":scope > button.graph-list-select").click();
-    await expect(details.locator("h5.graph-details-title")).toHaveText("Visible Source Folder");
-    // UX-12 gives actions/membership one selected-Details owner instead of
-    // duplicating interactive member lists in every main node row.
-    await expect(folderRow.locator(":scope > details.graph-scene-navigation")).toHaveCount(0);
-    const memberDisclosure = details.locator("details.graph-scene-navigation")
-      .filter({ has: page.locator("summary", { hasText: words.members }) });
-    await expect(memberDisclosure.locator(":scope > summary")).toHaveText(`${words.members} (7)`);
-    const memberButtons = memberDisclosure.getByRole("list", { name: words.members, exact: true }).locator(":scope > li > button");
-    await expectNodeCueRows(memberButtons, members, locale, mode);
-    const seedRow = rows.filter({ has: page.locator(":scope > button.graph-list-select strong", { hasText: /^Decision Log$/ }) });
-    await seedRow.locator(":scope > button.graph-list-select").click();
-    const neighborButtons = details.getByRole("list", { name: words.neighbors, exact: true }).locator(":scope > li > button");
+    // The seed's relations reach each of the seven other nodes once.
+    const seedGroup = (await openList(page)).locator('section.graph-list-group[data-list-group^="seed:"]');
+    const rows = seedGroup.locator("ul > li");
+    const mainButtons = rows.locator(":scope > button.relation-list-row-select");
     const neighbors = NODE_CUE_ROWS.filter((node) => node.label !== "Decision Log");
-    await expectNodeCueRows(neighborButtons, neighbors, locale, mode);
-    const folderDisclosure = details.locator("details.graph-scene-navigation")
-      .filter({ has: page.locator("summary", { hasText: words.folders }) });
-    await expect(folderDisclosure.locator(":scope > summary")).toHaveText(`${words.folders} (1)`);
-    await folderDisclosure.locator(":scope > summary").click();
-    await expectNodeCueRows(folderDisclosure.getByRole("list", { name: words.folders, exact: true }).locator(":scope > li > button"),
-      NODE_CUE_ROWS.filter((node) => node.kind === "folder"), locale, mode);
+    await expectNodeCueRows(mainButtons, neighbors, locale, mode);
 
     // Check the composited row SVG screenshots, not only attributes: a square
     // has filled corners, a folder has a hole, and a chat/activity diamond
     // reaches past the disc along its axes in every colour mode.
-    const silhouettes = [];
-    for (const [region, buttons] of [["main", mainButtons], ["neighbors", neighborButtons]] as const) {
+    const silhouettes: Array<{ region: string; kind: CueKind } & Awaited<ReturnType<typeof inspectCuePixels>>> = [];
+    const proveSilhouettes = async (region: "main" | "neighbors", buttons: Locator) => {
       for (const kind of ["context", "library", "conversation", "folder"] as const) {
-        const cue = buttons.locator(`:scope > svg[data-node-visual-kind="${kind}"]`).first();
+        const cue = buttons.locator(`:scope > .relation-list-flow-name > svg[data-node-visual-kind="${kind}"]`).first();
         await cue.scrollIntoViewIfNeeded();
         // Native sticky title/toggle/footer can cover a minimally revealed
         // row. Center its real SVG within the scrollport before pixel proof.
@@ -1355,7 +1361,36 @@ for (const { locale, mode } of [
         silhouettes.push({ region, kind, ...pixels });
         await testInfo.attach(`local-${locale}-${mode}-${region}-${kind}-cue.png`, { body: screenshot, contentType: "image/png" });
       }
-    }
+    };
+    // List rows first: on a phone the opened Details sheet overlays the list.
+    await proveSilhouettes("main", mainButtons);
+
+    const members = NODE_CUE_ROWS.filter((node) => node.kind !== "folder");
+    const folderRow = rows.filter({ has: page.locator(':scope > button[data-local-graph-id="node:folder"]') });
+    const details = panel.locator(".graph-details");
+    await folderRow.locator(":scope > button").click();
+    await expect(details.locator("h5.graph-details-title")).toHaveText("Visible Source Folder");
+    // UX-12 gives actions/membership one selected-Details owner instead of
+    // duplicating interactive member lists in every main node row.
+    await expect(folderRow.locator("button, details, ul")).toHaveCount(1);
+    // A folder's members are its outgoing relations, five per page.
+    await expect(details.locator(".relation-list-fold-head", { hasText: words.outgoing })
+      .locator(".relation-list-fold-count")).toHaveText("7");
+    await details.locator(".relation-list-more").click();
+    const memberButtons = details.getByRole("list", { name: words.outgoing, exact: true }).locator(":scope > li > button");
+    await expectNodeCueRows(memberButtons, members, locale, mode);
+    await seedGroup.locator('button[data-local-graph-id="node:seed"]').click();
+    await expect(details.locator("h5.graph-details-title")).toHaveText("Decision Log");
+    const neighborButtons = details.locator(".relation-list-flow-row > button");
+    await expectNodeCueRows(neighborButtons, neighbors, locale, mode);
+    // A document's folders are among its incoming relations.
+    await expectNodeCueRows(details.getByRole("list", { name: words.incoming, exact: true })
+      .locator(':scope > li > button[data-local-graph-id="node:folder"]'),
+    NODE_CUE_ROWS.filter((node) => node.kind === "folder"), locale, mode);
+    await proveSilhouettes("neighbors", neighborButtons);
+
+    // Canvas paint and GPU state are read from the Graph view, not under the list.
+    await showGraph(page);
     const nativeNodes = panel.locator("canvas.sigma-nodes");
     await expect(nativeNodes).toBeVisible();
     const gpu = await nativeNodes.evaluate((element) => {
@@ -1382,7 +1417,7 @@ for (const { locale, mode } of [
 async function expectNodeCueRows(buttons: Locator, expected: CueRow[], locale: keyof typeof NAVIGATION_COPY, mode: CueMode) {
   await expect(buttons).toHaveCount(expected.length);
   const actual = await buttons.evaluateAll((elements) => elements.map((element) => {
-    const cue = element.querySelector(":scope > svg[data-node-visual-kind]");
+    const cue = element.querySelector(":scope > .relation-list-flow-name > svg[data-node-visual-kind]");
     const bounds = cue?.getBoundingClientRect();
     let surface = "";
     for (let ancestor: Element | null = cue ?? element; ancestor; ancestor = ancestor.parentElement) {
@@ -1391,7 +1426,8 @@ async function expectNodeCueRows(buttons: Locator, expected: CueRow[], locale: k
     }
     return {
       label: element.querySelector("strong")?.textContent ?? "",
-      semantic: element.querySelector("small")?.textContent ?? "",
+      // The kind chip follows the relation chip and names the node kind in text.
+      semantic: Array.from(element.querySelectorAll(".relation-list-row-meta > .relation-list-chip")).at(-1)?.textContent ?? "",
       kind: cue?.getAttribute("data-node-visual-kind") ?? "missing",
       hidden: cue?.getAttribute("aria-hidden"),
       width: bounds?.width ?? 0, height: bounds?.height ?? 0,
@@ -1408,9 +1444,9 @@ async function expectNodeCueRows(buttons: Locator, expected: CueRow[], locale: k
   // Multiset comparison preserves both meanings of the duplicate title.
   expect(actual.map((row) => JSON.stringify([row.label, row.kind])).sort())
     .toEqual(expected.map((row) => JSON.stringify([row.label, row.kind])).sort());
-  const semantics = NAVIGATION_COPY[locale].families;
-  expect(actual.map((row) => JSON.stringify([row.label, row.kind, row.semantic.split(" · ")[0]])).sort())
-    .toEqual(expected.map((row) => JSON.stringify([row.label, row.kind, semantics[row.family]])).sort());
+  const semantics = NAVIGATION_COPY[locale].chips;
+  expect(actual.map((row) => JSON.stringify([row.label, row.kind, row.semantic])).sort())
+    .toEqual(expected.map((row) => JSON.stringify([row.label, row.kind, semantics[row.chip]])).sort());
   for (const row of actual) {
     const kind = row.kind as CueKind;
     const color = mode === "forced" ? row.foreground : CUE_COLORS[mode][kind];
@@ -1418,8 +1454,9 @@ async function expectNodeCueRows(buttons: Locator, expected: CueRow[], locale: k
     expect(row.legacy).toBe(false);
     expect(row.width).toBe(16);
     expect(row.height).toBe(16);
-    // One outline per glyph from the shared shape geometry; a folder is a stroked ring.
-    expect(row.shapes.map((shape) => shape.name)).toEqual(kind === "folder" ? ["circle"] : ["path"]);
+    // One outline per glyph from the shared shape geometry; a folder is a stroked
+    // ring and the current document a filled disc in an ink ring.
+    expect(row.shapes.map((shape) => shape.name)).toEqual(kind === "folder" || kind === "seed" ? ["circle"] : ["path"]);
     expect(row.shapes[0].fill).toBe(kind === "folder" ? "none" : color);
     if (kind === "folder") expect(row.shapes[0].stroke).toBe(color);
   }
@@ -1487,9 +1524,8 @@ async function mount(page: Page, scenario: string, locale: string, mode: CueMode
     await expect(page.getByTestId("graph-view")).toBeVisible();
     await expect(page.locator(".graph-canvas-frame")).toHaveAttribute("data-renderer-status", "ready");
     await expect.poll(() => page.locator(".graph-canvas canvas").count()).toBeGreaterThan(2);
-    // The redesigned graph opts into its accessible lists. These existing
-    // list/selection gates enter through the same visible user control.
-    await page.getByTestId("graph-view").getByRole("button", { name: /^(View as list|목록으로 보기)$/ }).click();
+    // The Graph view stays the default. The List view covers the canvas, so
+    // only cases that use its rows open it (openList) through the same switch.
     await page.getByTestId("graph-view").locator(".graph-local-stage").scrollIntoViewIfNeeded();
   } catch (failure) {
     // Preserve early module/network/React failures that used to disappear
@@ -1516,6 +1552,22 @@ async function mount(page: Page, scenario: string, locale: string, mode: CueMode
     throw failure;
   }
   return errors;
+}
+
+/** Choose List in the status-bar switch; the list replaces the canvas in its frame. */
+async function openList(page: Page) {
+  const graph = page.getByTestId("graph-view");
+  await graph.locator(".graph-view-switch").getByRole("button", { name: /^(List|목록)$/ }).click();
+  const list = graph.getByTestId("graph-list-view");
+  await expect(list).toBeVisible();
+  return list;
+}
+
+/** Return to the Graph view before native canvas input or canvas pixels. */
+async function showGraph(page: Page) {
+  const graph = page.getByTestId("graph-view");
+  await graph.locator(".graph-view-switch").getByRole("button", { name: /^(Graph|그래프)$/ }).click();
+  await expect(graph.getByTestId("graph-list-view")).toHaveCount(0);
 }
 
 async function purpleNodePixels(page: Page) {

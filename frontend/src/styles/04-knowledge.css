@@ -4936,6 +4936,8 @@ details.advanced-section summary {
 .graph-citation-evidence li + li { margin-top: 1rem; }
 .graph-citation-evidence dd, .graph-citation-evidence code, .graph-citation-evidence blockquote { overflow-wrap: anywhere; white-space: pre-wrap; }
 .graph-citation-evidence dl { margin: .5rem 0; }
+/* The Details panel's two-column dl would squeeze these pairs to a letter's width. */
+.graph-details .graph-citation-evidence dl { display: block; }
 .graph-citation-evidence dd { margin: .1rem 0 .5rem; }
 /* Editor references: one header button; the list floats over the editor so
    opening it never takes height from the editing surface. */

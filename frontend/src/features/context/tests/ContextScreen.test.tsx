@@ -96,13 +96,20 @@ const SECOND_PAGE_ID = "33333333-3333-4333-8333-333333333333";
 const fixtureUuid = (value: number) =>
   `00000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
 
+const GRAPH_LIST_ROW_NAME = '[data-testid="graph-list-view"] button[data-local-graph-id] strong';
+
 async function selectGraphNodeDetails(graph: HTMLElement, label: string) {
-  const toggle = within(graph).getByRole("button", { name: "View as list" });
-  if (toggle.getAttribute("aria-expanded") === "false") await userEvent.click(toggle);
-  const row = within(graph).getByText(label, {
+  const toggle = within(graph).getByRole("button", { name: "List" });
+  if (toggle.getAttribute("aria-pressed") === "false") await userEvent.click(toggle);
+  // Rings beyond the seed's own relations start folded.
+  for (const folded of graph.querySelectorAll<HTMLButtonElement>('[data-testid="graph-list-view"] .graph-list-group > [aria-expanded="false"]')) {
+    await userEvent.click(folded);
+  }
+  // A node related to the seed in two ways has a row in each direction; either selects it.
+  const row = within(graph).getAllByText(label, {
     exact: true,
-    selector: ".graph-relationship-list > details > ul > li > button strong",
-  }).closest("button");
+    selector: GRAPH_LIST_ROW_NAME,
+  })[0].closest("button");
   expect(row).not.toBeNull();
   await userEvent.click(row!);
   const details = within(graph).getByRole("complementary", { name: "Details" });
@@ -1749,7 +1756,7 @@ describe("ContextScreen", () => {
     expect(screen.getByTestId("graph-view")).toBe(nextGraph);
     expect(screen.getByTestId("context-graph-canvas")).toHaveAttribute("data-nodes", "1");
     expect(within(nextGraph).queryByText("Deployment Runbook", {
-      selector: ".graph-relationship-list > details > ul > li > button strong",
+      selector: GRAPH_LIST_ROW_NAME,
     })).toBeNull();
   });
 
@@ -2052,25 +2059,25 @@ describe("ContextScreen", () => {
     ).toHaveLength(1);
   });
 
-  it("navigates Local rows without querying and hands keyboard selections to Details", async () => {
+  it("focuses Local list rows without querying and hands keyboard selections to Details", async () => {
     const fetchMock = await renderDecisionLog();
     await userEvent.click(screen.getByRole("treeitem", { name: "Decision Log" }));
     await userEvent.click(within(await screen.findByRole("tablist", { name: "Context reader views" }))
       .getByRole("tab", { name: /^Graph, Preview$/ }));
     const graph = await screen.findByTestId("graph-view");
-    await userEvent.click(within(graph).getByRole("button", { name: "View as list" }));
-    const nodeList = within(graph).getByRole("list", { name: "Nodes" });
-    const rows = within(nodeList).getAllByRole("button");
-    expect(rows).toHaveLength(3);
-    expect(rows.filter((row) => row.tabIndex === 0)).toHaveLength(1);
-    expect(within(nodeList).queryByRole("link")).toBeNull();
+    await userEvent.click(within(graph).getByRole("button", { name: "List" }));
+    const list = within(graph).getByTestId("graph-list-view");
+    const incoming = within(within(list).getByRole("list", { name: "Incoming" })).getAllByRole("button");
+    const outgoing = within(within(list).getByRole("list", { name: "Outgoing" })).getAllByRole("button");
+    expect([...incoming, ...outgoing].map((row) => row.querySelector("strong")!.textContent))
+      .toEqual(["Architecture Notes", "Deployment Runbook"]);
+    // Each list is one Tab stop; arrow keys are covered with the shared roving list.
+    expect([...incoming, ...outgoing].every((row) => row.tabIndex === 0)).toBe(true);
+    expect(list.querySelectorAll("a:not([tabindex='-1'])")).toHaveLength(0);
     const queries = () => fetchMock.mock.calls.filter(([input]) =>
       String(input).endsWith(`/workspaces/${WORKSPACE_ID}/graph/query`));
-    await act(async () => rows[0].focus());
-    await userEvent.keyboard("{End}");
-    expect(rows[2]).toHaveFocus();
-    await userEvent.keyboard("{Home}{ArrowDown}");
-    expect(rows[1]).toHaveFocus();
+    const row = incoming[0];
+    await act(async () => row.focus());
     expect(within(graph).queryByRole("complementary", { name: "Details" })).toBeNull();
     expect(queries()).toHaveLength(1);
     await userEvent.keyboard("{Enter}");
@@ -2081,7 +2088,7 @@ describe("ContextScreen", () => {
     expect(within(details).getByRole("button", { name: "Clear selection" })).toHaveFocus();
     // Re-selecting the same ID must hand off even when selection state does
     // not change and the original main-list button remains connected.
-    await act(async () => rows[1].focus());
+    await act(async () => row.focus());
     await userEvent.keyboard(" ");
     expect(details).toHaveFocus();
     expect(queries()).toHaveLength(1);
@@ -2103,7 +2110,7 @@ describe("ContextScreen", () => {
     const relatedDetails = await selectGraphNodeDetails(graph, "Architecture Notes");
     expect(
       within(graph).getByText("Deployment Runbook", {
-        selector: ".graph-relationship-list > details > ul > li > button strong",
+        selector: GRAPH_LIST_ROW_NAME,
       }),
     ).toBeInTheDocument();
 
@@ -2120,7 +2127,7 @@ describe("ContextScreen", () => {
     // visible even if the projection revision did not change.
     expect(
       within(graph).queryByText("Deployment Runbook", {
-        selector: ".graph-relationship-list > details > ul > li > button strong",
+        selector: GRAPH_LIST_ROW_NAME,
       }),
     ).not.toBeInTheDocument();
 

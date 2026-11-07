@@ -273,10 +273,10 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
       const seed = local.nodes.find((node) => node.is_seed && node.entity_kind === "context_page"
         && node.entity_id === document.entity_id);
       if (!seed) throw new Error("The real Explore Local scene omitted the canonical Context seed entity");
-      await graphPanel.getByRole("button", { name: "View as list" }).click();
-      const originalSeedButton = graphPanel.locator(".graph-relationship-list")
-        .getByRole("list", { name: "Nodes", exact: true })
-        .locator(`button.graph-list-select[data-local-graph-id="${seed.id}"]`);
+      await graphPanel.getByRole("button", { name: "List", exact: true }).click();
+      // The seed is the list's hub pill.
+      const originalSeedButton = graphPanel.getByTestId("graph-list-view")
+        .locator(`.graph-list-bowtie-hub button[data-local-graph-id="${seed.id}"], .relation-list-flow-hub button[data-local-graph-id="${seed.id}"]`);
       await originalSeedButton.click();
       await expect(originalSeedButton).toHaveAttribute("aria-pressed", "true");
       await graphPanel.locator(".graph-details-more > summary").click();

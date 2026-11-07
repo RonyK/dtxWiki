@@ -3205,7 +3205,7 @@ async function findMapLabels(label: string) {
 /** Without a search the sidebar sections start folded; open both to browse the map list. */
 function openMapList() {
   for (const testId of ["workspace-graph-node-list", "workspace-graph-edge-list"]) {
-    const head = screen.queryByTestId(testId)?.querySelector<HTMLButtonElement>(".workspace-graph-fold-head");
+    const head = screen.queryByTestId(testId)?.querySelector<HTMLButtonElement>(".relation-list-fold-head");
     if (head?.getAttribute("aria-expanded") === "false") fireEvent.click(head);
   }
 }
