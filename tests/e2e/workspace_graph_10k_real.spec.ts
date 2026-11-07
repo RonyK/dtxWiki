@@ -6,7 +6,7 @@ import type { GraphRenderScene } from "../../frontend/src/features/graph/shared/
 import type { GraphQueryPayload, GraphQueryRequest } from "../../frontend/src/shared/api/graph";
 import type { components } from "../../frontend/src/shared/api/types.gen";
 import type { WorkspaceGraphDocumentNode, WorkspaceGraphOverviewRequest, WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
-import { backendBaseUrl, configureWorkspaceLabs, currentWorkspace, e2ePassword, login, enableKnowledgeMapLab, saveLabsSettings } from "./auth";
+import { backendBaseUrl, configureWorkspaceLabs, currentWorkspace, e2ePassword, login, enableKnowledgeMapLab } from "./auth";
 import { createOverviewResponseReader } from "./workspace_graph_response_reader";
 import { expectNativeCounts, installNativeDrawMeter, readNativeDraw } from "./workspace_graph_native_draw";
 
@@ -497,7 +497,7 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
   });
 
   test.describe("actual account transitions without credential trace retention", () => {
-    accountTransitionTest("actual same-browser owner-viewer-owner sign-ins purge 10K Map state and return to fresh 2K", async ({ page, request, browserName, trace }, testInfo) => {
+    accountTransitionTest("actual same-browser owner-viewer-owner sign-ins deny viewer Map access, purge 10K state and return to fresh 2K", async ({ page, request, browserName, trace }, testInfo) => {
       test.skip(browserName !== "chromium", "This actual account transition acceptance targets Chromium native WebGL");
       test.setTimeout(240_000);
       expect(trace, "This credential-flow case must never retain a trace").toBe("off");
@@ -512,7 +512,6 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
       const overviewRequests = watchOverviewRequests(page);
       const responseReader = await createOverviewResponseReader(page, workspace.id);
       const viewerEmail = `e2e-graph-10k-viewer-${testInfo.workerIndex}-${testInfo.retry}-${Date.now()}@example.com`;
-      let ownerReturnReader: Awaited<ReturnType<typeof createOverviewResponseReader>> | null = null;
       let viewerId: string | null = null;
       let membershipAdded = false;
       try {
@@ -552,56 +551,57 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
         const viewerSessionId = await test.step("Viewer signs in through the actual credential form", () =>
           signInAccountThroughUi(page, viewerEmail, timeOrigin));
         expect(viewerSessionId).toBe(viewerId);
-        const viewerRead = await test.step("Viewer chooses the same workspace and opens its default Map", () =>
-          openAccountWorkspaceMapThroughUi(page, workspace, { enableLab: true }));
-        expectOverviewRequest(viewerRead.request(), workspace.id, DEFAULT_BUDGET);
-        expectFreshAccountOverviewRequest(viewerRead.request());
-        const viewerScene = await responseReader.read(viewerRead);
-        expectCandidateUniverse(viewerScene);
-        expectAccountPublishedUniverse(viewerScene, initial);
-        const viewerState = await expectFreshAccountMap(page, viewerId, workspace.id, viewerScene, ownerState!, drag.changedNativeViewport);
+        await test.step("Viewer chooses the same workspace without owner-only Labs or Map access", async () => {
+          await chooseAccountWorkspaceThroughUi(page, workspace);
+          const capabilityRead = await page.request.get(`${backendBaseUrl}/api/v1/workspaces/${workspace.id}/graph/capability`);
+          expect(capabilityRead.ok()).toBe(true);
+          expect((await capabilityRead.json()).data).toMatchObject({
+            can_manage: false,
+            workspace_map: { workspace_enabled: true, effective_enabled: false, reason: "permission_denied" },
+          });
+          await expect(page.locator(`.sidebar-nav a[href="/workspaces/${workspace.id}/graph"]`)).toHaveCount(0);
+          await page.locator(`.sidebar-nav a[href="/workspaces/${workspace.id}/settings"]`).click();
+          await expect(page.getByRole("button", { name: "Labs Workspace admin", exact: true })).toHaveCount(0);
+          await expect(page.getByTestId("graph-canvas")).toHaveCount(0);
+          expect(await readAccountMapState(page, ownerId, workspace.id)).toBeNull();
+          expect(await readAccountMapState(page, viewerId!, workspace.id)).toBeNull();
+          expect(overviewRequests.map((item) => item.budget)).toEqual([DEFAULT_BUDGET, PC_BUDGET]);
+        });
         const viewerWorkspaceRead = await page.request.get(`${backendBaseUrl}/api/v1/workspaces`);
         expect(viewerWorkspaceRead.ok()).toBe(true);
         expect((await viewerWorkspaceRead.json()).data.workspaces.find((item: { id: string }) => item.id === workspace.id))
           .toMatchObject({ id: workspace.id, role: "viewer" });
-        await capture(page, testInfo, "real-api-pc10k-viewer-fresh-default2k.png");
-
-        // Keep the original bounded three-read CDP oracle intact. The fourth
-        // UI read gets its own public CDP session on this SAME Page/realm.
-        const firstUiResponseEvidence = responseReader.evidence();
-        await responseReader.dispose();
-        ownerReturnReader = await createOverviewResponseReader(page, workspace.id);
+        await capture(page, testInfo, "real-api-pc10k-viewer-owner-only-map.png");
 
         await test.step("Viewer signs out through the real Account UI", () => signOutAccountThroughUi(page, timeOrigin));
         expect(await test.step("Owner returns through the actual credential form", () =>
           signInAccountThroughUi(page, OWNER_EMAIL, timeOrigin))).toBe(ownerId);
         const ownerReturnRead = await test.step("Returned owner chooses the same workspace and opens its default Map", () =>
-          openAccountWorkspaceMapThroughUi(page, workspace, { enableLab: true }));
+          openAccountWorkspaceMapThroughUi(page, workspace));
         expectOverviewRequest(ownerReturnRead.request(), workspace.id, DEFAULT_BUDGET);
         expectFreshAccountOverviewRequest(ownerReturnRead.request());
-        const ownerReturnScene = await ownerReturnReader.read(ownerReturnRead);
+        const ownerReturnScene = await responseReader.read(ownerReturnRead);
         expectCandidateUniverse(ownerReturnScene);
         expectAccountPublishedUniverse(ownerReturnScene, initial);
         const returnedOwnerState = await expectFreshAccountMap(page, ownerId, workspace.id, ownerReturnScene, ownerState!, drag.changedNativeViewport);
         expect(await readAccountMapState(page, viewerId, workspace.id)).toBeNull();
         expect(await page.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
-        expect(overviewRequests.map((item) => item.budget)).toEqual([DEFAULT_BUDGET, PC_BUDGET, DEFAULT_BUDGET, DEFAULT_BUDGET]);
+        expect(overviewRequests.map((item) => item.budget)).toEqual([DEFAULT_BUDGET, PC_BUDGET, DEFAULT_BUDGET]);
         expect(failedReads).toEqual([]);
         expect(diagnostics.pageErrors).toEqual([]);
         expect(diagnostics.consoleErrors).toEqual([]);
         await capture(page, testInfo, "real-api-pc10k-owner-return-fresh-default2k.png");
         await attachJson(testInfo, "real-api-pc10k-actual-account-transition-evidence.json", {
           source: "same Page actual account logout/login forms, original production overview responses and native original-document drag",
-          scope: "actor-scoped scene/UI/storage/camera reset in one all-published synthetic workspace; not hidden-document privacy or target-hardware performance proof",
+          scope: "viewer Labs/Map exclusion and actor-scoped scene/UI/storage/camera reset in one all-published synthetic workspace; not hidden-document privacy or target-hardware performance proof",
           workspaceId: workspace.id, ownerId, viewerId, timeOrigin,
           originalDocument: { id: document.id, entityId: document.entity_id, label: document.label },
-          requests: overviewRequests, departureCounts: full.counts, viewerCounts: viewerScene.counts, ownerReturnCounts: ownerReturnScene.counts,
-          ownerState, viewerState, returnedOwnerState, drag, themeRoundtrip,
-          sameOriginalUiResponses: [...firstUiResponseEvidence, ...ownerReturnReader.evidence()],
+          requests: overviewRequests, departureCounts: full.counts, ownerReturnCounts: ownerReturnScene.counts,
+          ownerState, returnedOwnerState, drag, themeRoundtrip,
+          sameOriginalUiResponses: responseReader.evidence(),
         });
       } finally {
         await responseReader.dispose();
-        await ownerReturnReader?.dispose();
         if (membershipAdded && viewerId && testInfo.status !== "timedOut") {
           await login(request, OWNER_EMAIL);
           const removed = await request.delete(`${backendBaseUrl}/api/v1/workspaces/${workspace.id}/members/${viewerId}`);
@@ -848,25 +848,22 @@ async function signInAccountThroughUi(page: Page, email: string, timeOrigin: num
   return actorId;
 }
 
-async function openAccountWorkspaceMapThroughUi(
-  page: Page, workspace: { id: string; title: string }, { enableLab = false }: { enableLab?: boolean } = {},
-) {
+async function chooseAccountWorkspaceThroughUi(page: Page, workspace: { id: string; title: string }) {
   await page.locator(".workspace-switcher-button").click();
   const switcher = page.getByRole("dialog", { name: "Workspace switcher", exact: true });
-  // Switching from a Map keeps its section and can finish the original read
-  // before the switcher closes. Subscribe before that navigation starts.
-  const read = waitForOverview(page, DEFAULT_BUDGET, workspace.id);
   await switcher.locator(".workspace-menu-item").filter({ has: page.getByText(workspace.title, { exact: true }) }).click();
   await expect(switcher).not.toBeVisible();
   await expect(page.locator(".workspace-switcher-button")).toHaveAttribute("aria-label", `Switch workspace, current: ${workspace.title}`);
-  // Workspace administrators activate the Map through the real Labs save form.
-  // A same-actor picker transition already opened its Map: leaving and returning
-  // would issue a second overview and abandon the original UI response.
-  if (enableLab) {
-    await page.locator(`.sidebar-nav a[href="/workspaces/${workspace.id}/settings"]`).click();
-    await page.getByRole("button", { name: "Labs Workspace admin", exact: true }).click();
-    await page.getByRole("checkbox", { name: "Workspace Knowledge Map", exact: true }).check();
-    await saveLabsSettings(page, "graph");
+}
+
+async function openAccountWorkspaceMapThroughUi(page: Page, workspace: { id: string; title: string }) {
+  // Switching from a Map keeps its section and can finish the original read
+  // before the switcher closes. Subscribe before that navigation starts.
+  const read = waitForOverview(page, DEFAULT_BUDGET, workspace.id);
+  await chooseAccountWorkspaceThroughUi(page, workspace);
+  // Labs activation persists in the workspace. A returned owner can open the
+  // Map directly; an existing Map transition has already issued its one read.
+  if (!new URL(page.url()).pathname.endsWith("/graph")) {
     await page.locator(`.sidebar-nav a[href="/workspaces/${workspace.id}/graph"]`).click();
   }
   await expect(page).toHaveURL(/\/graph$/);
@@ -884,7 +881,7 @@ function expectFreshAccountOverviewRequest(request: Request) {
 
 function expectAccountPublishedUniverse(scene: WorkspaceGraphScene, initial: WorkspaceGraphScene) {
   // All authored documents in this fixture are published and unrestricted.
-  // Same IDs across actors prove the same workspace scene, not hidden-data privacy.
+  // Same IDs after sign-in prove the same workspace scene, not hidden-data privacy.
   expect(scene.nodes.map((node) => node.id).sort()).toEqual(initial.nodes.map((node) => node.id).sort());
   expect(scene.edges.map((edge) => [edge.id, edge.source, edge.target, edge.relation_kind]).sort())
     .toEqual(initial.edges.map((edge) => [edge.id, edge.source, edge.target, edge.relation_kind]).sort());
