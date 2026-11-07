@@ -1368,18 +1368,18 @@ def test_list_lint_rules_catalog(session_factory):
     assert by_id["md.code_fence_balance"].layer == "format"
     assert by_id["md.code_fence_balance"].enabled is True  # format default on
     assert by_id["kb.orphan_page"].layer == "knowledge"
-    assert by_id["kb.orphan_page"].enabled is True  # Sprint-6: knowledge default on
+    assert by_id["kb.orphan_page"].enabled is False
 
 
 def test_list_lint_rules_reflects_policy_override(session_factory):
     lint = LintService()
     with session_factory.begin() as session:
         ws = session.scalar(select(Workspace).where(Workspace.slug == "default"))
-        ws.lint_policy = {"kb.orphan_page": False}
+        ws.lint_policy = {"kb.orphan_page": True}
         session.flush()
         data = lint.list_rules(session, ws.id)
     by_id = {r.rule_id: r for r in data.rules}
-    assert by_id["kb.orphan_page"].enabled is False
+    assert by_id["kb.orphan_page"].enabled is True
     assert by_id["kb.orphan_page"].policy_locked is False
 
 

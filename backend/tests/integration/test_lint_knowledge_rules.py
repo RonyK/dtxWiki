@@ -296,25 +296,6 @@ def test_run_lint_clears_rule_caches_between_runs(session_factory):
     assert still_open == []
 
 
-def test_knowledge_rules_are_default_on():
-    # Sprint-6 decision: knowledge checks apply to existing and new workspaces.
-    ids = {
-        r.rule_id
-        for r in LintRegistry.builtin().enabled(None, target_type="context_page")
-    }
-    assert "kb.orphan_page" in ids
-    assert "kb.missing_backlink" in ids
-    assert "kb.duplicate_concept" in ids
-    # Workspace policy can still explicitly disable a noisy rule.
-    off = {
-        r.rule_id
-        for r in LintRegistry.builtin().enabled(
-            {"kb.orphan_page": False}, target_type="context_page"
-        )
-    }
-    assert "kb.orphan_page" not in off
-
-
 def test_term_collision_detects_cross_page_name_projection(session_factory):
     with session_factory.begin() as session:
         wsid = _ws(session)

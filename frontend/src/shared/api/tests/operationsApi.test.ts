@@ -30,7 +30,10 @@ describe("operations api", () => {
     vi.restoreAllMocks();
   });
 
-  it("does not downgrade Library policy saves to non-atomic legacy PATCHes", async () => {
+  it.each([
+    { group: "library", changes: { max_upload_bytes: 20_000_000 } },
+    { group: "lint", changes: { "kb.orphan_page": true, auto_fix: true } },
+  ] as const)("does not downgrade $group policy saves to non-atomic legacy PATCHes", async ({ group, changes }) => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse(
         { error_code: "not_found", message: "Batch route unavailable", warnings: [] },
@@ -40,9 +43,9 @@ describe("operations api", () => {
 
     await expect(
       updateSettingsPolicyBatch(WORKSPACE_ID, {
-        group: "library",
+        group,
         expected_revision: "a".repeat(64),
-        changes: { max_upload_bytes: 20_000_000 },
+        changes,
       }),
     ).rejects.toMatchObject({ status: 404 });
 

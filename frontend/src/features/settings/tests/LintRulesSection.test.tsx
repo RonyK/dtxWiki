@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -7,18 +7,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../../../shared/api/operations", () => ({
   getLintRules: vi.fn(),
   getSettingsPolicies: vi.fn(),
-  updateSettingsPolicy: vi.fn(),
+  updateSettingsPolicyBatch: vi.fn(),
 }));
+import { ApiError } from "../../../shared/api/client";
 import {
   getLintRules,
   getSettingsPolicies,
-  updateSettingsPolicy,
+  updateSettingsPolicyBatch,
 } from "../../../shared/api/operations";
 import { LintRulesSection } from "../LintRulesSection";
+import { SettingsDirtyProvider } from "../SettingsDirtyRegistry";
 
-// The card links out to the lint queue, so it needs a router context.
-function renderRouted(ui: ReactElement) {
-  return render(<MemoryRouter>{ui}</MemoryRouter>);
+// The card links to the lint queue and participates in Settings' dirty guard.
+function routed(ui: ReactElement) {
+  return <MemoryRouter><SettingsDirtyProvider>{ui}</SettingsDirtyProvider></MemoryRouter>;
 }
 
 const RULES = {
@@ -39,6 +41,13 @@ const RULES = {
       runtime_checkable: true,
     },
     {
+      rule_id: "kb.missing_backlink",
+      layer: "knowledge",
+      default_enabled: false,
+      enabled: false,
+      runtime_checkable: true,
+    },
+    {
       rule_id: "maintenance.client_suggestion",
       layer: "maintenance",
       default_enabled: true,
@@ -47,78 +56,157 @@ const RULES = {
     },
   ],
 };
-const POLICY = { lint: { policy: { auto_fix: false, link_fix_mode: "auto", auto_approve_link_fixes: true } } };
-
+const REVISION = "a".repeat(64);
+function policy(overrides: Record<string, boolean | string> = {}, revision = REVISION) {
+  return { lint: { name: "lint", title: "Lint rules", revision, policy: {
+    auto_fix: false,
+    link_fix_mode: "auto",
+    auto_approve_link_fixes: true,
+    ...overrides,
+  } } };
+}
+const POLICY = policy();
 const WORKSPACE_ID = "00000000-0000-4000-8000-000000000110";
+const OTHER_WORKSPACE_ID = "00000000-0000-4000-8000-000000000120";
+const saveButton = () => screen.getByRole("button", { name: /^(Save changes|Saving…)$/ });
+const discardButton = () => screen.getByRole("button", { name: /Discard/ });
+
+const checksToggle = () => screen.findByText(/^Show all checks/);
+
+async function openChecks() {
+  await userEvent.click(await checksToggle());
+  await screen.findByText("Code fence balance");
+}
+
+function beforeUnloadIsBlocked() {
+  const event = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
+}
 
 describe("LintRulesSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getLintRules).mockResolvedValue(RULES as never);
     vi.mocked(getSettingsPolicies).mockResolvedValue(POLICY as never);
-    vi.mocked(updateSettingsPolicy).mockResolvedValue({} as never);
+    vi.mocked(updateSettingsPolicyBatch).mockImplementation(async (_id, request) =>
+      policy(request.changes as Record<string, boolean | string>, "b".repeat(64)) as never,
+    );
   });
 
-  it("groups rules by layer and toggles via the lint policy", async () => {
+  it("groups rules and saves edited checks only when Save changes is clicked", async () => {
     const user = userEvent.setup();
-    renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
-
-    const checks = screen.getByText("Checks");
-    expect(checks.closest("details")).not.toHaveAttribute("open");
-    await user.click(checks);
-    expect(await screen.findByText("Format")).toBeInTheDocument();
-    expect(screen.getByText("Knowledge")).toBeInTheDocument();
-    expect(screen.getByText("Maintenance")).toBeInTheDocument();
-    expect(screen.getByText("Code fence balance")).toBeInTheDocument();
+    render(routed(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />));
+    expect((await checksToggle()).closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("0 of 2 optional checks on")).toBeInTheDocument();
+    await openChecks();
+    for (const group of ["Format", "Knowledge", "Maintenance"]) {
+      expect(screen.getByRole("heading", { level: 4, name: new RegExp(`^${group}`) })).toBeInTheDocument();
+    }
+    // Groups without a toggleable rule offer no bulk action.
+    expect(screen.getByRole("heading", { level: 4, name: /^Format/ })).toHaveTextContent("Read-only");
+    expect(screen.getAllByText("Off by default")).toHaveLength(2);
     expect(screen.getByText("External source")).toBeInTheDocument();
     expect(screen.getByText("Required safeguard")).toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: "Code fence balance" })).not.toBeInTheDocument();
     expect(screen.getByText("client suggestion").closest("label")).toBeNull();
 
-    // Queried by accessible name: the checkbox and its label are associated by
-    // id rather than nesting, and that association is what makes the row usable.
-    const checkbox = screen.getByRole("checkbox", { name: "Orphan page" });
-    await user.click(checkbox);
-
-    await waitFor(() =>
-      expect(updateSettingsPolicy).toHaveBeenCalledWith(WORKSPACE_ID, {
-        group: "lint",
-        key: "kb.orphan_page",
-        value: true,
-      }),
-    );
+    const orphan = screen.getByRole("checkbox", { name: "Orphan page" });
+    const backlink = screen.getByRole("checkbox", { name: "Missing backlink" });
+    expect(orphan).not.toBeChecked();
+    expect(backlink).not.toBeChecked();
+    expect(saveButton()).toBeDisabled();
+    expect(beforeUnloadIsBlocked()).toBe(false);
+    await user.click(orphan);
+    expect(orphan).toBeChecked();
+    expect(orphan.closest("li")).toHaveTextContent("Changed");
+    expect(screen.getByText(/^Unsaved changes: 1 · Save to apply/)).toBeInTheDocument();
+    expect(updateSettingsPolicyBatch).not.toHaveBeenCalled();
+    expect(beforeUnloadIsBlocked()).toBe(true);
+    const leave = vi.spyOn(window, "confirm").mockReturnValue(false);
+    try {
+      const queue = screen.getByRole("link", { name: "See what these checks found" });
+      await user.click(queue);
+      expect(leave).toHaveBeenCalledWith("You have unsaved changes here. Leave without saving them?");
+      leave.mockClear();
+      // A new-tab click loses nothing, so it must not ask or be blocked. The
+      // window listener runs after React's and stops jsdom's navigation.
+      let blocked: boolean | undefined;
+      const probe = (event: Event) => { blocked = event.defaultPrevented; event.preventDefault(); };
+      window.addEventListener("click", probe, { once: true });
+      fireEvent.click(queue, { ctrlKey: true });
+      expect(blocked).toBe(false);
+      expect(leave).not.toHaveBeenCalled();
+    } finally {
+      leave.mockRestore();
+    }
+    await user.click(saveButton());
+    expect(updateSettingsPolicyBatch).toHaveBeenCalledExactlyOnceWith(WORKSPACE_ID, {
+      group: "lint", expected_revision: REVISION, changes: { "kb.orphan_page": true },
+    });
+    await waitFor(() => expect(saveButton()).toBeDisabled());
+    expect(orphan).toBeChecked();
+    expect(orphan.closest("li")).not.toHaveTextContent("Changed");
+    expect(backlink).not.toBeChecked();
+    expect(beforeUnloadIsBlocked()).toBe(false);
   });
 
-  it("toggles auto-fix mode via the lint policy (F2b)", async () => {
+  it("discards option edits and atomically saves all changed options with busy controls", async () => {
     const user = userEvent.setup();
-    renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
+    let resolveSave!: (value: never) => void;
+    vi.mocked(updateSettingsPolicyBatch).mockImplementationOnce(() => new Promise(resolve => { resolveSave = resolve; }));
+    render(routed(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />));
     const autofix = screen.getByRole("checkbox", { name: /auto-fix/i });
     await waitFor(() => expect(autofix).toBeEnabled());
-    expect(autofix).not.toBeChecked();
-    await user.click(autofix);
-    await waitFor(() =>
-      expect(updateSettingsPolicy).toHaveBeenCalledWith(WORKSPACE_ID, {
-        group: "lint",
-        key: "auto_fix",
-        value: true,
-      }),
-    );
-    // Link mode and approval are independent settings with different value
-    // types; extending this policy control case avoids another UI fixture.
     const mode = screen.getByRole("combobox", { name: /Fix internal links/ });
-    expect(mode).toHaveValue("auto");
     const approval = screen.getByRole("checkbox", { name: /Automatically approve safe link fixes/ });
-    expect(approval).toBeChecked();
+    // Focusing a control announces what it does and what it does now.
+    expect(autofix).toHaveAccessibleDescription(/^Clean up heading.+Now Optional formatting cleanup is off/);
+    expect(mode).toHaveAccessibleDescription(/^Preserve destinations.+Now Automatic link fixing/);
+    expect(approval).toHaveAccessibleDescription(/^Immediately approve safe fix-only changes.+Now Safe fix-only changes/);
+    expect(screen.getAllByText("Now")).toHaveLength(3);
+    await user.click(autofix);
     await user.selectOptions(mode, "suggest");
-    expect(updateSettingsPolicy).toHaveBeenCalledWith(WORKSPACE_ID, { group: "lint", key: "link_fix_mode", value: "suggest" });
     await user.click(approval);
-    expect(updateSettingsPolicy).toHaveBeenCalledWith(WORKSPACE_ID, { group: "lint", key: "auto_approve_link_fixes", value: false });
+    expect(screen.getAllByText("After saving")).toHaveLength(3);
+    expect(beforeUnloadIsBlocked()).toBe(true);
+    await user.click(discardButton());
+    expect(screen.queryByText("After saving")).not.toBeInTheDocument();
+    expect(autofix).not.toBeChecked();
+    expect(mode).toHaveValue("auto");
+    expect(approval).toBeChecked();
+    expect(saveButton()).toBeDisabled();
+    expect(beforeUnloadIsBlocked()).toBe(false);
+    expect(updateSettingsPolicyBatch).not.toHaveBeenCalled();
+
+    await user.click(autofix);
+    await user.selectOptions(mode, "suggest");
+    await user.click(approval);
+    await user.click(saveButton());
+    expect(updateSettingsPolicyBatch).toHaveBeenCalledExactlyOnceWith(WORKSPACE_ID, {
+      group: "lint", expected_revision: REVISION,
+      changes: { auto_fix: true, link_fix_mode: "suggest", auto_approve_link_fixes: false },
+    });
+    expect(autofix).toBeDisabled();
+    expect(mode).toBeDisabled();
+    expect(approval).toBeDisabled();
+    expect(saveButton()).toBeDisabled();
+    expect(discardButton()).toBeDisabled();
+    await act(async () => resolveSave(policy({ auto_fix: true, link_fix_mode: "suggest", auto_approve_link_fixes: false }) as never));
+    expect(autofix).toBeChecked();
+    expect(mode).toHaveValue("suggest");
+    expect(approval).not.toBeChecked();
+    expect(saveButton()).toBeDisabled();
+    expect(beforeUnloadIsBlocked()).toBe(false);
   });
 
-  it("keeps checks editable on policy failure and retries the actual options", async () => {
+  it("blocks all edits when policy loading fails and retries authoritative options", async () => {
     const user = userEvent.setup();
     vi.mocked(getSettingsPolicies).mockRejectedValue(new Error("boom"));
-    renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
+    // This workspace opted in to Orphan page, so the server's catalog reports it on.
+    vi.mocked(getLintRules).mockResolvedValue({ rules: RULES.rules.map((rule) =>
+      rule.rule_id === "kb.orphan_page" ? { ...rule, enabled: true } : rule) } as never);
+    render(routed(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />));
     expect(await screen.findByRole("alert")).toHaveTextContent("could not be loaded");
     const autofix = screen.getByRole("checkbox", { name: /auto-fix/i });
     const mode = screen.getByRole("combobox", { name: /Fix internal links/ });
@@ -129,111 +217,207 @@ describe("LintRulesSection", () => {
     expect(autofix).toHaveProperty("indeterminate", true);
     expect(approval).toHaveProperty("indeterminate", true);
     expect(mode).toHaveValue("");
-    await user.click(autofix);
-    expect(updateSettingsPolicy).not.toHaveBeenCalled();
-    await user.click(screen.getByText("Checks"));
-    expect(screen.getByText("Code fence balance")).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "Orphan page" })).toBeEnabled();
-    vi.mocked(getSettingsPolicies).mockResolvedValue({ lint: { policy: {
-      auto_fix: true, link_fix_mode: "suggest", auto_approve_link_fixes: false,
-    } } } as never);
+    await openChecks();
+    expect(screen.getByRole("checkbox", { name: "Orphan page" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Orphan page" })).toBeChecked();
+    expect(saveButton()).toBeDisabled();
+    vi.mocked(getSettingsPolicies).mockResolvedValue(policy({
+      auto_fix: true, link_fix_mode: "suggest", auto_approve_link_fixes: false, "kb.orphan_page": true,
+    }) as never);
     await user.click(screen.getByRole("button", { name: "Retry options" }));
     await waitFor(() => expect(autofix).toBeEnabled());
     expect(autofix).toBeChecked();
     expect(autofix).toHaveProperty("indeterminate", false);
     expect(approval).toHaveProperty("indeterminate", false);
-    expect(screen.getByText(/Safe formatting-only saves may be approved immediately/)).toBeVisible();
     expect(mode).toHaveValue("suggest");
     expect(approval).not.toBeChecked();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(getLintRules).toHaveBeenCalledTimes(1);
-    expect(updateSettingsPolicy).not.toHaveBeenCalled();
+    expect(updateSettingsPolicyBatch).not.toHaveBeenCalled();
   });
 
-  it("disables toggles when read-only", async () => {
-    renderRouted(<LintRulesSection readOnly={true} workspaceId={WORKSPACE_ID} />);
-    await userEvent.click(screen.getByText("Checks"));
-    await screen.findByText("Code fence balance");
-    const checkboxes = screen.getAllByRole("checkbox");
-    expect(checkboxes.length).toBeGreaterThan(0);
-    for (const checkbox of checkboxes) {
-      expect(checkbox).toBeDisabled();
-    }
-    expect(screen.getByRole("combobox", { name: /Fix internal links/ })).toBeDisabled();
-    expect(updateSettingsPolicy).not.toHaveBeenCalled();
+  it("allows non-owners to inspect settings but disables every edit and omits save actions", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getSettingsPolicies).mockRejectedValueOnce(new Error("offline"));
+    const view = render(routed(<LintRulesSection readOnly={true} workspaceId={WORKSPACE_ID} />));
+    // Unconfirmed options never read as Off: the server keeps applying saved values.
+    expect(await screen.findByRole("alert")).toHaveTextContent("Saved settings still apply");
+    expect(within(screen.getByRole("group", { name: "Clean up on save" })).getAllByText("Not loaded")).toHaveLength(2);
+    expect(within(screen.getByRole("group", { name: "Review and publication" })).getByText("Not loaded")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry options" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    await openChecks();
+    expect(screen.getByText(/^Only workspace owners can change these/)).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    const saveGroup = screen.getByRole("group", { name: "Clean up on save" });
+    expect(within(saveGroup).getByText("Off")).toBeInTheDocument();
+    expect(within(saveGroup).getByText("Automatically")).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Review and publication" })).getByText("On")).toBeInTheDocument();
+    expect(screen.getByText("Orphan page").closest("li")).toHaveTextContent(/^Off/);
+    expect(screen.queryByRole("button", { name: /Turn all/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Discard/ })).not.toBeInTheDocument();
+    expect(updateSettingsPolicyBatch).not.toHaveBeenCalled();
+
+    view.rerender(routed(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />));
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /auto-fix/i })).toBeEnabled());
+    await user.click(screen.getByRole("checkbox", { name: /auto-fix/i }));
+    expect(beforeUnloadIsBlocked()).toBe(true);
+    // Permission is lost while that edit is being saved, and the save then conflicts.
+    let rejectSave!: (reason: unknown) => void;
+    vi.mocked(updateSettingsPolicyBatch).mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject; }));
+    await user.click(saveButton());
+    view.rerender(routed(<LintRulesSection readOnly={true} workspaceId={WORKSPACE_ID} />));
+    const cleanupGroup = () => screen.getByRole("group", { name: "Clean up on save" });
+    // The owner's unsaved auto-fix edit is dropped, not shown as the saved state.
+    expect(within(cleanupGroup()).getByText("Off")).toBeInTheDocument();
+    await act(async () => rejectSave(new ApiError(409, {
+      error_code: "settings_revision_conflict", message: "Changed elsewhere", request_id: "test", warnings: [],
+    })));
+    await waitFor(() => expect(getSettingsPolicies).toHaveBeenCalledTimes(3));
+    // The late conflict refreshes the baseline but never hands the edit back.
+    await waitFor(() => expect(within(cleanupGroup()).getByText("Off")).toBeInTheDocument());
+    expect(screen.queryByText("Changed")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+    expect(beforeUnloadIsBlocked()).toBe(false);
+    expect(updateSettingsPolicyBatch).toHaveBeenCalledTimes(1);
+    expect(getLintRules).toHaveBeenCalledTimes(1);
   });
-  it("loads policies independently while checks are pending and filters visible checks", async () => {
+
+  it("waits for both reads before editing and applies group toggles only to filtered checks", async () => {
     const user = userEvent.setup();
     let resolveRules!: (value: never) => void;
     let resolvePolicies!: (value: never) => void;
     vi.mocked(getLintRules).mockImplementation(() => new Promise(resolve => { resolveRules = resolve; }));
     vi.mocked(getSettingsPolicies).mockImplementation(() => new Promise(resolve => { resolvePolicies = resolve; }));
-    renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
+    render(routed(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />));
     const autofix = screen.getByRole("checkbox", { name: /auto-fix/i });
     expect(autofix).toBeDisabled();
-    expect(screen.getByRole("combobox")).toBeDisabled();
-    expect(screen.getByRole("combobox")).toHaveValue("");
     expect(autofix).toHaveProperty("indeterminate", true);
     await act(async () => resolvePolicies(POLICY as never));
-    expect(autofix).toBeEnabled();
+    expect(autofix).toBeDisabled();
     await act(async () => resolveRules(RULES as never));
-    await user.click(screen.getByText("Checks"));
+    expect(autofix).toBeEnabled();
+    await openChecks();
     await user.type(screen.getByRole("searchbox", { name: "Search checks" }), "orphan");
     expect(screen.queryByText("Code fence balance")).not.toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "Orphan page" })).toBeInTheDocument();
-    await user.click(screen.getByRole("checkbox", { name: "Toggle shown Knowledge checks" }));
-    expect(updateSettingsPolicy).toHaveBeenCalledWith(WORKSPACE_ID, { group: "lint", key: "kb.orphan_page", value: true });
+    expect(screen.queryByRole("checkbox", { name: "Missing backlink" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Turn all shown on: Knowledge" }));
+    expect(updateSettingsPolicyBatch).not.toHaveBeenCalled();
+    await user.clear(screen.getByRole("searchbox", { name: "Search checks" }));
+    expect(screen.getByRole("checkbox", { name: "Orphan page" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Missing backlink" })).not.toBeChecked();
+    await user.click(saveButton());
+    expect(updateSettingsPolicyBatch).toHaveBeenCalledWith(WORKSPACE_ID, {
+      group: "lint", expected_revision: REVISION, changes: { "kb.orphan_page": true },
+    });
   });
 
-  it("rejects incomplete policy responses and retries checks without resetting saved options", async () => {
+  it("waits for failed checks to be retried before editing", async () => {
     const user = userEvent.setup();
-    vi.mocked(getSettingsPolicies).mockResolvedValue({ lint: { policy: {} } } as never);
     vi.mocked(getLintRules).mockRejectedValue(new Error("checks offline"));
-    renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
-    await screen.findByText(/could not be loaded/);
-    expect(screen.getByText("Checks").closest("details")).not.toHaveAttribute("open");
-    expect(screen.getByRole("button", { name: "Retry checks" })).toBeVisible();
+    render(routed(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />));
+    expect(await screen.findByRole("button", { name: "Retry checks" })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("combobox")).toHaveValue("auto"));
     expect(screen.getByRole("combobox")).toBeDisabled();
-    vi.mocked(getSettingsPolicies).mockResolvedValue(POLICY as never);
-    await user.click(screen.getByRole("button", { name: "Retry options" }));
-    await waitFor(() => expect(screen.getByRole("combobox")).toBeEnabled());
-    await user.selectOptions(screen.getByRole("combobox"), "suggest");
     vi.mocked(getLintRules).mockResolvedValue(RULES as never);
     await user.click(screen.getByRole("button", { name: "Retry checks" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Retry checks" })).not.toBeInTheDocument());
-    expect(screen.getByText("Checks").closest("details")).not.toHaveAttribute("open");
-    await user.click(screen.getByText("Checks"));
-    await screen.findByText("Code fence balance");
-    expect(screen.getByRole("combobox")).toHaveValue("suggest");
-    expect(getSettingsPolicies).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(screen.getByRole("combobox")).toBeEnabled());
+    expect((await checksToggle()).closest("details")).not.toHaveAttribute("open");
+    expect(updateSettingsPolicyBatch).not.toHaveBeenCalled();
   });
 
-  it("preserves confirmed values when policy and rule saves fail", async () => {
+  it("preserves unsaved values when saving fails and supports retry with the same revision", async () => {
     const user = userEvent.setup();
-    vi.mocked(updateSettingsPolicy).mockRejectedValue(new Error("save failed"));
-    renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
+    vi.mocked(updateSettingsPolicyBatch).mockRejectedValueOnce(new Error("save failed"));
+    render(routed(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />));
     const autofix = screen.getByRole("checkbox", { name: /auto-fix/i });
     await waitFor(() => expect(autofix).toBeEnabled());
     await user.click(autofix);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Failed to update the option.");
-    expect(autofix).not.toBeChecked();
-    await user.click(screen.getByText("Checks"));
+    await openChecks();
     const orphan = screen.getByRole("checkbox", { name: "Orphan page" });
     await user.click(orphan);
-    await waitFor(() => expect(orphan).toBeEnabled());
-    expect(orphan).not.toBeChecked();
-    expect(screen.getByRole("alert")).toHaveTextContent("Failed to update the rule.");
+    await user.click(saveButton());
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(autofix).toBeChecked();
+    expect(orphan).toBeChecked();
+    expect(saveButton()).toBeEnabled();
+    expect(beforeUnloadIsBlocked()).toBe(true);
+    // The retry commits but its response card is unusable: reload, never report failure.
+    vi.mocked(updateSettingsPolicyBatch).mockResolvedValueOnce({ lint: { policy: {} } } as never);
+    vi.mocked(getSettingsPolicies).mockResolvedValue(policy({ auto_fix: true, "kb.orphan_page": true }, "e".repeat(64)) as never);
+    await user.click(saveButton());
+    expect(updateSettingsPolicyBatch).toHaveBeenLastCalledWith(WORKSPACE_ID, {
+      group: "lint", expected_revision: REVISION, changes: { auto_fix: true, "kb.orphan_page": true },
+    });
+    await waitFor(() => expect(getSettingsPolicies).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(autofix).toBeEnabled());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(autofix).toBeChecked();
+    expect(orphan).toBeChecked();
+    expect(saveButton()).toBeDisabled();
+    expect(beforeUnloadIsBlocked()).toBe(false);
   });
 
-  it("discards pending options when the workspace changes", async () => {
-    let resolveOld!: (value: never) => void;
-    vi.mocked(getSettingsPolicies).mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
-    const view = renderRouted(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />);
-    view.rerender(<MemoryRouter><LintRulesSection readOnly={false} workspaceId="00000000-0000-4000-8000-000000000120" /></MemoryRouter>);
+  it("reloads a conflicting revision without overwriting draft edits and retries explicitly", async () => {
+    const user = userEvent.setup();
+    const nextRevision = "c".repeat(64);
+    vi.mocked(updateSettingsPolicyBatch).mockRejectedValueOnce(new ApiError(409, {
+      error_code: "settings_revision_conflict", message: "Changed elsewhere", request_id: "test", warnings: [],
+    }));
+    render(routed(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />));
     const autofix = screen.getByRole("checkbox", { name: /auto-fix/i });
     await waitFor(() => expect(autofix).toBeEnabled());
-    await act(async () => resolveOld({ lint: { policy: { auto_fix: true, link_fix_mode: "suggest", auto_approve_link_fixes: false } } } as never));
+    await user.click(autofix);
+    let resolveReload!: (value: never) => void;
+    vi.mocked(getSettingsPolicies).mockImplementationOnce(() => new Promise(resolve => { resolveReload = resolve; }));
+    await user.click(saveButton());
+    await waitFor(() => expect(getSettingsPolicies).toHaveBeenCalledTimes(2));
+    // Nothing claims the latest settings are loaded until they are.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await act(async () => resolveReload(policy({ link_fix_mode: "suggest" }, nextRevision) as never));
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    expect(screen.getByRole("alert")).toHaveTextContent("changed elsewhere");
+    expect(getLintRules).toHaveBeenCalledTimes(1);
+    expect(autofix).toBeChecked();
+    // Only this actor's edited key is retried; the other owner's link mode survives.
+    await user.click(saveButton());
+    expect(updateSettingsPolicyBatch).toHaveBeenLastCalledWith(WORKSPACE_ID, {
+      group: "lint", expected_revision: nextRevision, changes: { auto_fix: true },
+    });
+  });
+
+  it("ignores old load responses after switching workspaces", async () => {
+    let resolveOld!: (value: never) => void;
+    vi.mocked(getSettingsPolicies).mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
+    const view = render(routed(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />));
+    view.rerender(routed(<LintRulesSection readOnly={false} workspaceId={OTHER_WORKSPACE_ID} />));
+    const autofix = screen.getByRole("checkbox", { name: /auto-fix/i });
+    await waitFor(() => expect(autofix).toBeEnabled());
+    await act(async () => resolveOld(policy({ auto_fix: true, link_fix_mode: "suggest", auto_approve_link_fixes: false }) as never));
     expect(autofix).not.toBeChecked();
     expect(screen.getByRole("combobox")).toHaveValue("auto");
+    expect(saveButton()).toBeDisabled();
+  });
+
+  it("isolates a pending save from the newly selected workspace", async () => {
+    const user = userEvent.setup();
+    let resolveOldSave!: (value: never) => void;
+    vi.mocked(updateSettingsPolicyBatch).mockImplementationOnce(() => new Promise(resolve => { resolveOldSave = resolve; }));
+    const view = render(routed(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />));
+    const autofix = screen.getByRole("checkbox", { name: /auto-fix/i });
+    await waitFor(() => expect(autofix).toBeEnabled());
+    await user.click(autofix);
+    await user.click(saveButton());
+    view.rerender(routed(<LintRulesSection readOnly={false} workspaceId={OTHER_WORKSPACE_ID} />));
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /auto-fix/i })).toBeEnabled());
+    await act(async () => resolveOldSave(policy({ auto_fix: true }, "d".repeat(64)) as never));
+    expect(screen.getByRole("checkbox", { name: /auto-fix/i })).not.toBeChecked();
+    expect(saveButton()).toBeDisabled();
+    expect(updateSettingsPolicyBatch).toHaveBeenCalledExactlyOnceWith(WORKSPACE_ID, {
+      group: "lint", expected_revision: REVISION, changes: { auto_fix: true },
+    });
+    expect(beforeUnloadIsBlocked()).toBe(false);
   });
 });

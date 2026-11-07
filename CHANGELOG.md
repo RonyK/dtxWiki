@@ -93,6 +93,21 @@
 - Keep the retained citation evidence table readable in the Details panel
   instead of squeezing its second column to a letter's width.
 
+### Lint settings
+
+- Turn the Orphan page and Missing backlink checks off by default, including
+  in existing workspaces that never changed them. Their open findings leave
+  the lint queue until an Owner turns the checks on in Settings.
+- Edit lint settings as a draft and apply them with **Save changes** in one
+  revision-checked save; **Discard** reverts them. If the settings changed
+  elsewhere, the latest values load and your edits are kept for another save.
+- Split the lint settings card into save-time options and checks. Each option
+  states its current effect, and what it will do once an edit is saved.
+  While edits are pending, the save bar stays at the bottom of the screen and
+  edited rows are marked. Checks show a summary while folded, mark checks
+  that are off by default, and fold the ones that are always on or external.
+  Members who cannot edit see each setting as On or Off.
+
 ## 0.2.1 — 2026-11-04
 
 Beta release with Graph View, document references, Inbox, and workspace-scoped
