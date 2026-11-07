@@ -934,6 +934,33 @@ def test_each_chat_is_one_node_with_one_relation_per_document(session_factory):
         )
         session.add(draft)
         session.flush()
+        seed.latest_draft_version_id = draft.id
+        # Codex's earlier draft was rejected: the review retired it
+        # (graph_status) and left its row status "draft".
+        rejected_change_set = ChangeSet(
+            workspace_id=workspace_id,
+            trigger_type="manual",
+            actor_type="agent",
+            status="rejected",
+        )
+        session.add(rejected_change_set)
+        session.flush()
+        rejected = ContextPageVersion(
+            workspace_id=workspace_id,
+            page_id=seed.id,
+            version_no=3,
+            body_md="# Chat Seed rejected",
+            content_hash="chat-seed-rejected",
+            actor_type="agent",
+            created_by_actor_kind="agent",
+            created_by_actor_id="chat-writer",
+            version_status="draft",
+            graph_status="discarded",
+            change_set_id=rejected_change_set.id,
+            created_at=t0 + timedelta(minutes=1, seconds=30),
+        )
+        session.add(rejected)
+        session.flush()
         chats = {}
         for name, client_type in (("Claude Code", "claude-code"), ("Codex", "codex")):
             client = MCPClient(
@@ -979,6 +1006,14 @@ def test_each_chat_is_one_node_with_one_relation_per_document(session_factory):
             ("Claude Code", "update_context_edit", 3, seed.id, "edited", change_set.id),
             ("Codex", "read", 1, seed.id, "viewed", None),
             ("Codex", "read", 1, other.id, "viewed", None),
+            (
+                "Codex",
+                "update_context_edit",
+                2,
+                seed.id,
+                "edited",
+                rejected_change_set.id,
+            ),
         ):
             chat, row = call(name, tool, minutes, change_set_id=change)
             _mcp_touch(session, chat, row, resource, verb, row.started_at)
@@ -993,6 +1028,32 @@ def test_each_chat_is_one_node_with_one_relation_per_document(session_factory):
                 created_at=t0 + timedelta(minutes=3),
             )
         )
+        # Each draft's review, reached the way the version history reaches it:
+        # the operation naming the version, its change set, that set's review.
+        session.add(
+            ChangeOperation(
+                workspace_id=workspace_id,
+                change_set_id=rejected_change_set.id,
+                target_type="context_page",
+                target_id=seed.id,
+                operation="update",
+                diff_ref=f"context_page_version:{rejected.id}",
+                created_at=t0 + timedelta(minutes=2),
+            )
+        )
+        for reviewed_set, review_status in (
+            (change_set, "changes_requested"),
+            (rejected_change_set, "rejected"),
+        ):
+            session.add(
+                ReviewItem(
+                    workspace_id=workspace_id,
+                    change_set_id=reviewed_set.id,
+                    review_type="context_update",
+                    status=review_status,
+                    risk_level="low",
+                )
+            )
         # The version also has more old audit rows than its record limit, all
         # older than its change row: the newest records must survive the cap.
         for minutes in (4, *range(-60, -20)):
@@ -1011,6 +1072,7 @@ def test_each_chat_is_one_node_with_one_relation_per_document(session_factory):
                 )
             )
         seed_id, other_id, draft_id = seed.id, other.id, draft.id
+        rejected_id = rejected.id
         chat_ids = {name: chat.id for name, (chat, _client) in chats.items()}
 
     request = _current_request(
@@ -1060,14 +1122,41 @@ def test_each_chat_is_one_node_with_one_relation_per_document(session_factory):
         t0,
         t0 + timedelta(minutes=3),
     )
+    # The whole tally rides on the relation, from the same rollup.
+    assert [(c.action_kind, c.count) for c in claude_seed.action_counts] == [
+        ("edited", 2),
+        ("viewed", 1),
+    ]
     assert set(relations) == {
         (claude.entity_id, seed_id),
         (claude.entity_id, other_id),
         (claude.entity_id, draft_id),
         (chat_ids["Codex"], seed_id),
         (chat_ids["Codex"], other_id),
+        (chat_ids["Codex"], rejected_id),
     }
     assert relations[(claude.entity_id, draft_id)].action_kind == "created"
+    # A version reads as its history does: the live draft is in review, the
+    # rejected one is not, whatever its row status says.
+    version_status = {
+        node.entity_id: node.status
+        for node in payload.nodes
+        if node.entity_kind == "context_page_version"
+    }
+    assert (version_status[draft_id], version_status[rejected_id]) == (
+        "current_draft",
+        "discarded_draft",
+    )
+    # Where each review stands rides beside the lifecycle state.
+    review_status = {
+        node.entity_id: node.review_status
+        for node in payload.nodes
+        if node.entity_kind == "context_page_version"
+    }
+    assert (review_status[draft_id], review_status[rejected_id]) == (
+        "changes_requested",
+        "rejected",
+    )
 
     kinds = {node.entity_kind for node in payload.nodes}
     assert kinds.isdisjoint({"mcp_tool_call", "change_operation", "audit_event"})

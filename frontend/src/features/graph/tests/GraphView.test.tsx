@@ -1797,9 +1797,10 @@ describe("GraphView", () => {
   });
 
   it("names a chat as Chats does and reads its details only while it is selected", async () => {
-    // A chat's own detail fills in its verbs and flow on selection. The
-    // graph's facts show at once; a late answer for a chat no longer
-    // selected never reaches the panel.
+    // What a chat did to the document comes whole with the graph relation;
+    // the chat's own detail, read only on selection, adds its flow and can
+    // never shorten that tally (its artifact list is capped). A late answer
+    // for a chat no longer selected never reaches the panel.
     const user = userEvent.setup();
     const pending: Array<{ id: string; signal?: AbortSignal; resolve: (value: operations.McpChatDetail) => void }> = [];
     const read = vi.spyOn(operations, "readMcpChat").mockImplementation((_workspace, id, init) =>
@@ -1817,15 +1818,17 @@ describe("GraphView", () => {
       });
       const editing = chat("1111aaaa", "Claude Code", "edit");
       const reading = chat("2222bbbb", "Codex", "read");
-      const version: GraphNode = { ...payload.nodes[1], id: "node:v2", entity_kind: "context_page_version", family: "document", label: "Version 2", status: "draft" };
-      const relation = (source: GraphNode, target: GraphNode, action: string, count: number | null) => ({
+      const version: GraphNode = { ...payload.nodes[1], id: "node:v2", entity_kind: "context_page_version", family: "document", label: "Version 2", status: "current_draft", review_status: "changes_requested" };
+      const relation = (source: GraphNode, target: GraphNode, action: string, count: number | null,
+        actionCounts: Array<[string, number]> = []) => ({
         ...payload.edges[0], id: `edge:${source.id}:${target.id}`, source: source.id, target: target.id,
         edge_kind: action, action_kind: action, label: action, layer: "action" as const, provenance: "domain" as const,
         aggregate: true, count, window_from: "2026-08-03T01:00:00Z", window_to: "2026-08-03T01:05:00Z",
+        action_counts: actionCounts.map(([action_kind, occurrences]) => ({ action_kind, count: occurrences })),
       });
       const outlined: GraphNode = { ...payload.nodes[1], id: "node:outlined", entity_id: "outlined", label: "Outline only" };
       payload.nodes = [seed, editing, reading, version, outlined];
-      payload.edges = [relation(editing, seed, "edited", 3), relation(editing, version, "created", null),
+      payload.edges = [relation(editing, seed, "edited", 3, [["edited", 2], ["viewed", 1]]), relation(editing, version, "created", null),
         relation(reading, seed, "viewed", 1), relation(reading, outlined, "referenced", 1)];
       payload.timeline = [];
       const props = { payload, onRefresh: vi.fn(async () => undefined),
@@ -1846,8 +1849,9 @@ describe("GraphView", () => {
       await user.click(rowByLabel(nodeList, "Edited Decision Log"));
       expect(read).toHaveBeenCalledTimes(1);
       const details = screen.getByRole("complementary", { name: "Details" });
-      expect(details).toHaveTextContent("Edited · 3 times");
-      expect(details).toHaveTextContent("Produced Version 2 · In review");
+      expect(details).toHaveTextContent("Edited ×2 · Viewed");
+      // The review says where the draft stands, not the lifecycle state alone.
+      expect(details).toHaveTextContent("Produced Version 2 · Changes requested");
       expect(within(details).getByRole("link", { name: "Open" }))
         .toHaveAttribute("href", `/workspaces/00000000-0000-4000-8000-000000000001/chats/${editing.entity_id}`);
 
@@ -1855,37 +1859,43 @@ describe("GraphView", () => {
         id, tool_name: action === "search" ? "search" : "read", action, result_status: "succeeded",
         title_source: "artifact", subject: "Decision Log", subject_kind: "context_page", primary_tool_name: null,
       }) as unknown as operations.McpChatTimelineItem;
-      const detail = (links: Array<[string, number]>) => ({
-        linked_artifacts: links.map(([verb, count]) => ({ resource_kind: "context_page", resource_id: seed.entity_id, verb, occurrence_count: count })),
-        timeline: [step("a", "search"), step("b", "read"), step("c", "edit")],
+      // A long, search-heavy chat: its capped artifact list kept only a view.
+      const detail = (actions: operations.McpChatTimelineItem["action"][]) => ({
+        linked_artifacts: [{ resource_kind: "context_page", resource_id: seed.entity_id, verb: "viewed", occurrence_count: 1 }],
+        timeline: actions.map((action, index) => step(`${action}-${index}`, action)),
       }) as unknown as operations.McpChatDetail;
-      await act(async () => { pending[0].resolve(detail([["edited", 2], ["viewed", 1]])); });
+      const flowSteps = () => within(screen.getByRole("complementary", { name: "Details" })).queryAllByRole("listitem")
+        .filter((item) => item.closest(".graph-session-flow")).length;
+      await act(async () => { pending[0].resolve(detail(["search", "read", "edit"])); });
       expect(details).toHaveTextContent("Edited ×2 · Viewed");
-      expect(within(details).getAllByRole("listitem").filter((item) => item.closest(".graph-session-flow"))).toHaveLength(3);
+      expect(flowSteps()).toBe(3);
 
       view.rerender(graphElement(props));
       expect(read).toHaveBeenCalledTimes(1);
       await user.click(screen.getByRole("button", { name: "Refresh graph" }));
       expect(props.onRefresh).toHaveBeenCalledOnce();
-      // Session activity can change without advancing the edge projection.
-      const refreshed = { ...payload, generated_at: "2026-08-05T00:00:00Z" };
+      // Session activity can change without advancing the edge projection;
+      // the tally follows the new relation at once.
+      const refreshed = { ...payload, generated_at: "2026-08-05T00:00:00Z",
+        edges: payload.edges.map((edge) => edge.source === editing.id && edge.target === seed.id
+          ? relation(editing, seed, "edited", 6, [["edited", 5], ["viewed", 1]]) : edge) };
       view.rerender(graphElement({ ...props, payload: refreshed }));
       expect(read).toHaveBeenCalledTimes(2);
-      expect(details).not.toHaveTextContent("Edited ×2 · Viewed");
+      expect(details).toHaveTextContent("Edited ×5 · Viewed");
       view.rerender(graphElement({ ...props, payload: { ...refreshed, generated_at: "2026-08-06T00:00:00Z" } }));
       expect(read).toHaveBeenCalledTimes(3);
       expect(pending[1].signal?.aborted).toBe(true);
-      await act(async () => { pending[1].resolve(detail([["edited", 9]])); });
-      expect(details).not.toHaveTextContent("Edited ×9");
-      await act(async () => { pending[2].resolve(detail([["edited", 5], ["viewed", 1]])); });
-      expect(details).toHaveTextContent("Edited ×5 · Viewed");
+      await act(async () => { pending[1].resolve(detail(["search", "read", "edit", "read", "edit"])); });
+      expect(flowSteps()).toBe(0);
+      await act(async () => { pending[2].resolve(detail(["read", "edit"])); });
+      expect(flowSteps()).toBe(2);
 
       await user.click(rowByLabel(nodeList, "Read Decision Log"));
       expect(read).toHaveBeenCalledTimes(4);
       await user.click(rowByLabel(nodeList, "Edited Decision Log"));
       expect(pending[3].signal?.aborted).toBe(true);
-      await act(async () => { pending[3].resolve(detail([["referenced", 9]])); });
-      expect(screen.getByRole("complementary", { name: "Details" })).not.toHaveTextContent("Referenced ×9");
+      await act(async () => { pending[3].resolve(detail(["search", "search", "read", "edit"])); });
+      expect(flowSteps()).toBe(0);
     } finally {
       read.mockRestore();
     }

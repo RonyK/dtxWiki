@@ -26,7 +26,7 @@ import { GraphEdgeCue, GraphNodeCue, GraphSeedCue } from "./shared/GraphCues";
 import { GRAPH_NODE_VISUALS, isActionEdgeVisualKind, readGraphTokens, type GraphEdgeVisualKind, type GraphNodeVisualKind } from "./shared/graphTokens";
 import { hasSessionDetails, SessionActivityDetails } from "./shared/SessionActivityDetails";
 import { isSessionGroupNode, isSessionNode } from "./shared/sessionNodes";
-import { sessionRelationSummary, withSessionLabels } from "./sessionActivity";
+import { sessionRelationSummary, versionOutcome, withSessionLabels } from "./sessionActivity";
 import type { GraphRenderScene } from "./shared/rendererTypes";
 import type {
   GraphEdge,
@@ -1327,7 +1327,7 @@ function GraphDetails({
         {!historyEvents.some((event) => eventInvolves(event, node?.id ?? edge?.id ?? null, historyEdges)) ? <p>{t("graph.historyUi.noItemRecords")}</p> : null}
       </div> : null}
       <dl>
-        {node ? <>{node.actor_label ? <GraphDetail label={t("graph.details.actor", { defaultValue: "Actor" })} value={node.actor_label} /> : null}</> : null}
+        {node ? <>{node.review_status ? <GraphDetail label={t("graph.details.review")} value={versionOutcome(node, t)} /> : null}{node.actor_label ? <GraphDetail label={t("graph.details.actor", { defaultValue: "Actor" })} value={node.actor_label} /> : null}</> : null}
         {edge ? <><GraphDetail label={t("graph.details.layer", { defaultValue: "Layer" })} value={graphLabel(t, "graphLayer", edge.layer)} /><GraphDetail label={t("graph.details.relationship", { defaultValue: "Relationship" })} value={graphLabel(t, "graphEdgeKind", edge.edge_kind)} />{edge.action_kind ? <GraphDetail label={t("graph.details.action", { defaultValue: "Action" })} value={graphLabel(t, "graphActionKind", edge.action_kind)} /> : null}<GraphDetail label={t("graph.details.direction", { defaultValue: "Direction" })} value={graphLabel(t, "graphDirection", edge.direction)} /><GraphDetail label={t("graph.details.provenance", { defaultValue: "Provenance" })} value={graphLabel(t, "graphProvenance", edge.provenance)} />{edge.aggregate && !coAccess ? <GraphDetail label={t("graph.details.aggregate", { defaultValue: "Aggregate" })} value={String(edge.count ?? edge.weight)} /> : null}</> : null}
         {(node?.occurred_at || edge?.occurred_at) ? <GraphDetail label={t("graph.details.time", { defaultValue: "Time" })} value={formatVersionTimestamp((node?.occurred_at ?? edge?.occurred_at)!, "long")} /> : null}
         {evidence ? <><GraphDetail label={t("graph.details.evidence", { defaultValue: "Evidence" })} value={evidence.label ?? graphLabel(t, "graphEvidenceKind", evidence.kind)} /><GraphDetail label={t("graph.details.evidenceRef", { defaultValue: "Evidence reference" })} value={evidence.available ? evidence.ref ?? evidence.id ?? t("graph.details.available", { defaultValue: "Available" }) : t("graph.details.unavailable", { defaultValue: "Unavailable" })} /></> : null}

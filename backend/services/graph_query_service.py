@@ -36,6 +36,7 @@ from backend.policy.trust_boundaries import _role_allows, actor_can_read_drafts
 from backend.repositories.workspace_scoped import select_in_workspace
 from backend.schemas.graph import (
     GRAPH_NODE_RECORD_LIMIT,
+    GraphActionCount,
     GraphBudgetResult,
     GraphCapabilities,
     GraphEdge,
@@ -53,6 +54,10 @@ from backend.services.actor_visible_read import (
     PUBLISHED_CONTEXT_VERSION_STATUSES,
     actor_can_read_audit_records,
     context_version_is_visible,
+)
+from backend.services.context_lifecycle import project_context_version
+from backend.services.context_review_disposition import (
+    context_version_review_metadata,
 )
 from backend.services.graph_observation_service import GraphObservationService
 from backend.services.graph_rank import (
@@ -377,6 +382,7 @@ class GraphQueryService:
                 hydration_context=hydration_context,
                 session_access=SessionAccess(ask_sessions=ask_sessions_visible),
                 deferred_identity=deferred_identity,
+                seed_pages=pages,
             )
             candidates.extend(domain_candidates)
             extra_nodes.update(domain_nodes)
@@ -1617,6 +1623,7 @@ class GraphQueryService:
         hydration_context: GraphHydrationContext,
         session_access: SessionAccess,
         deferred_identity: DeferredIdentityLabels | None = None,
+        seed_pages: dict[UUID, ContextPage] | None = None,
     ) -> tuple[
         list[_EdgeCandidate],
         dict[str, GraphNode],
@@ -1657,10 +1664,12 @@ class GraphQueryService:
         version_rows = session.scalars(version_statement.limit(source_limit + 1)).all()
         capped = capped or len(version_rows) > source_limit
         versions = version_rows[:source_limit]
+        expose_draft_state = actor_can_read_drafts(actor)
         for version in versions:
             if not context_version_is_visible(version, actor):
                 continue
             action_kind = "created" if version.version_no == 1 else "edited"
+            page = (seed_pages or {}).get(version.page_id)
             self._append_domain_action(
                 workspace_id,
                 request=request,
@@ -1669,7 +1678,19 @@ class GraphQueryService:
                 source_kind="context_page_version",
                 source_id=version.id,
                 source_label=f"Version {version.version_no}",
-                source_status=version.version_status,
+                # The state the version history shows (current draft,
+                # discarded draft, ...), not the raw row status: a rejected
+                # draft keeps version_status "draft" but is no longer in review.
+                source_status=(
+                    project_context_version(
+                        page,
+                        version,
+                        visible_version_id=None,
+                        expose_draft_state=expose_draft_state,
+                    ).history_status
+                    if page is not None
+                    else version.version_status
+                ),
                 occurred_at=version.created_at,
                 action_kind=action_kind,
                 evidence_kind="context_page_version",
@@ -1683,6 +1704,21 @@ class GraphQueryService:
                     else "action_occurred"
                 ),
             )
+
+        # A drawn version also says where its review stands, by the same
+        # batched rule the version history uses (one query for all of them).
+        drawn_versions = [
+            version
+            for version in versions
+            if graph_node_id("context_page_version", version.id) in nodes
+        ]
+        if drawn_versions:
+            for version_id, review in context_version_review_metadata(
+                session, drawn_versions, workspace_id=workspace_id
+            ).items():
+                nodes[
+                    graph_node_id("context_page_version", version_id)
+                ].review_status = review.status
 
         if request.time.mode == "action":
             audit_sources_allowed = actor_can_read_audit_records(
@@ -1914,6 +1950,7 @@ class GraphQueryService:
                         count=resource.count,
                         first_at=resource.first_at,
                         last_at=resource.last_at,
+                        counts=resource.counts,
                     )
                     if edge is None:
                         continue
@@ -1971,6 +2008,7 @@ class GraphQueryService:
                         count=resource.count,
                         first_at=resource.first_at,
                         last_at=resource.last_at,
+                        counts=resource.counts,
                     )
                     if edge is not None:
                         if visible_co_used >= CO_USED_PER_SESSION:
@@ -3341,6 +3379,7 @@ def _session_edge(
     count: int | None,
     first_at: datetime,
     last_at: datetime,
+    counts: tuple[tuple[str, int], ...] = (),
 ) -> GraphEdge | None:
     """One session's relation to one node, or None where filters drop it.
 
@@ -3378,6 +3417,10 @@ def _session_edge(
         occurred_at=last_at,
         aggregate=True,
         count=count,
+        action_counts=[
+            GraphActionCount(action_kind=kind, count=occurrences)
+            for kind, occurrences in counts
+        ],
         window_from=first_at,
         window_to=last_at,
         evidence=evidence,

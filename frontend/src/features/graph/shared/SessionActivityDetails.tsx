@@ -3,19 +3,21 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
 import type { GraphEdge, GraphNode } from "../../../shared/api/graph";
-import { readMcpChat, type McpChatArtifactLink, type McpChatTimelineItem } from "../../../shared/api/operations";
+import { readMcpChat, type McpChatTimelineItem } from "../../../shared/api/operations";
 import { useOptionalAuth } from "../../../shared/auth/AuthContext";
 import { formatVersionTimestamp } from "../../../shared/lib/datetime";
 import { workspacePath } from "../../../shared/lib/workspaceRoutes";
 import { groupChatFlow, type ChatFlowPhase } from "../../mcp-chats/chatFlow";
-import { artifactVerbPillLabel } from "../../mcp-chats/chatLabels";
 import { chatPresentationLine } from "../../mcp-chats/chatPresentation";
-import { sessionRelationSummary } from "../sessionActivity";
-import { isSessionGroupNode, sessionActionRank } from "./sessionNodes";
+import { sessionRelationSummary, versionOutcome } from "../sessionActivity";
+import { isSessionGroupNode } from "./sessionNodes";
 
-/** What a session's own screen adds to the graph: per-verb counts and its flow. */
+/**
+ * What a session's own screen adds to the graph: the order it worked in. Its
+ * tally per document comes with the graph relation, complete, so a capped
+ * chat detail can never shorten it.
+ */
 type SessionDetailData = {
-  links: (Pick<McpChatArtifactLink, "verb" | "occurrence_count"> & { resourceKind: string; resourceId: string })[];
   steps: { id: string; phase: ChatFlowPhase; items: McpChatTimelineItem[] }[];
 };
 
@@ -35,15 +37,7 @@ const SESSION_DETAIL_SOURCES: Record<string, SessionDetailSource> = {
     list: "chats",
     load: async (workspaceId, id, signal) => {
       const chat = await readMcpChat(workspaceId, id, { signal });
-      return {
-        links: chat.linked_artifacts.map((link) => ({
-          resourceKind: link.resource_kind,
-          resourceId: link.resource_id,
-          verb: link.verb,
-          occurrence_count: link.occurrence_count,
-        })),
-        steps: groupChatFlow(chat.timeline ?? []).steps,
-      };
+      return { steps: groupChatFlow(chat.timeline ?? []).steps };
     },
   },
   mcp_chat_session_group: { list: "chats" },
@@ -52,7 +46,6 @@ const SESSION_DETAIL_SOURCES: Record<string, SessionDetailSource> = {
 };
 
 const FLOW_STEP_LIMIT = 6;
-const VERSION_OUTCOMES = new Set(["published_snapshot", "superseded_snapshot", "draft", "editing", "discarded"]);
 
 type LoadState = { scope: string; data: SessionDetailData | null; loading: boolean; error: boolean };
 
@@ -125,13 +118,7 @@ export function SessionActivityDetails({ active, edges, node, nodes, href, revis
     return target?.entity_kind === "context_page_version" ? [target] : [];
   });
   const formatTime = (value: string) => formatVersionTimestamp(value);
-  const verbsFor = (seed: GraphNode, edge: GraphEdge) => {
-    const links = current?.data?.links.filter((link) => link.resourceKind === seed.entity_kind
-      && link.resourceId === seed.entity_id && link.verb !== "search_match") ?? [];
-    if (!links.length) return sessionRelationSummary(edge, t, formatTime);
-    return [...links].sort((left, right) => sessionActionRank(left.verb) - sessionActionRank(right.verb))
-      .map((link) => artifactVerbPillLabel(link, tChats)).join(" · ");
-  };
+  const verbsFor = (edge: GraphEdge) => sessionRelationSummary(edge, t, formatTime);
   const steps = current?.data?.steps ?? [];
   return (
     <section aria-labelledby={headingId} className="graph-session-details">
@@ -139,13 +126,12 @@ export function SessionActivityDetails({ active, edges, node, nodes, href, revis
       <ul className="graph-session-facts">
         {seedEdges.map((edge) => {
           const seed = byId.get(edge.target)!;
-          return <li key={edge.id}>{seedEdges.length > 1 ? <strong>{seed.label} </strong> : null}{verbsFor(seed, edge)}</li>;
+          return <li key={edge.id}>{seedEdges.length > 1 ? <strong>{seed.label} </strong> : null}{verbsFor(edge)}</li>;
         })}
         {versions.map((version) => <li key={version.id} data-version-status={version.status ?? undefined}>
           {t("graph.session.produced", {
             version: version.label,
-            outcome: VERSION_OUTCOMES.has(version.status ?? "")
-              ? t(`graph.session.outcome.${version.status}`) : version.status ?? "",
+            outcome: versionOutcome(version, t),
           })}
         </li>)}
       </ul>

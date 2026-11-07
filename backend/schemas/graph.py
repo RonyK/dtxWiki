@@ -173,9 +173,22 @@ class GraphNode(BaseModel):
     chat_presentation: McpChatPresentationDescriptor | None = None
     # A node standing for several sessions (the ones past a cap): how many.
     aggregate_count: int | None = Field(default=None, ge=1)
+    # Context versions only: the status of the review that speaks for the
+    # version (pending, changes_requested, approved, rejected), as the version
+    # history resolves it. ``status`` stays the version's lifecycle state.
+    review_status: str | None = Field(default=None, max_length=64)
     records: list[GraphNodeRecord] = Field(
         default_factory=list, max_length=GRAPH_NODE_RECORD_LIMIT
     )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class GraphActionCount(BaseModel):
+    """How often one action happened within an aggregate relation."""
+
+    action_kind: str = Field(min_length=1, max_length=64)
+    count: int = Field(ge=1)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -203,6 +216,9 @@ class GraphEdge(BaseModel):
     sequence: int | None = Field(default=None, ge=0)
     aggregate: bool = False
     count: int | None = Field(default=None, ge=1)
+    # Session relations only: count by action, strongest first. The same
+    # rollup that names the relation and totals ``count``, never a sample.
+    action_counts: list[GraphActionCount] = Field(default_factory=list, max_length=8)
     window_from: datetime | None = None
     window_to: datetime | None = None
     evidence: GraphEvidenceRef | None = None

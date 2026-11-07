@@ -8617,6 +8617,29 @@
         "title": "FeedbackListResponse",
         "type": "object"
       },
+      "GraphActionCount": {
+        "additionalProperties": false,
+        "description": "How often one action happened within an aggregate relation.",
+        "properties": {
+          "action_kind": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Action Kind",
+            "type": "string"
+          },
+          "count": {
+            "minimum": 1.0,
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "action_kind",
+          "count"
+        ],
+        "title": "GraphActionCount",
+        "type": "object"
+      },
       "GraphBudget": {
         "additionalProperties": false,
         "properties": {
@@ -8917,6 +8940,14 @@
       "GraphEdge": {
         "additionalProperties": false,
         "properties": {
+          "action_counts": {
+            "items": {
+              "$ref": "#/components/schemas/GraphActionCount"
+            },
+            "maxItems": 8,
+            "title": "Action Counts",
+            "type": "array"
+          },
           "action_kind": {
             "anyOf": [
               {
@@ -9560,6 +9591,18 @@
             "maxItems": 40,
             "title": "Records",
             "type": "array"
+          },
+          "review_status": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Status"
           },
           "status": {
             "anyOf": [

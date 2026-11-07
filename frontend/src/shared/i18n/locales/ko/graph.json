@@ -51,7 +51,15 @@
       "active": "활성",
       "completed": "완료됨",
       "failed": "실패",
-      "deleted": "삭제됨"
+      "deleted": "삭제됨",
+      "state_inconsistent": "상태 확인 필요",
+      "current_editing": "편집 중",
+      "current_draft": "현재 초안",
+      "published_snapshot": "현재 게시 스냅샷",
+      "alternative_draft": "대안 초안",
+      "discarded_draft": "폐기된 초안",
+      "superseded_snapshot": "대체된 스냅샷",
+      "superseded_draft": "대체된 초안"
     },
     "graphEdgeKind": {
       "wikilink": "위키 링크",
@@ -308,7 +316,8 @@
       "seedRelationships": "기준 문서와의 관계",
       "expandSheet": "상세 펼치기",
       "collapseSheet": "상세 접기",
-      "records": "이 버전의 기록"
+      "records": "이 버전의 기록",
+      "review": "리뷰"
     },
     "citationEvidence": {
       "title": "보존된 인용 근거",
@@ -565,13 +574,6 @@
       },
       "thisDocument": "이 문서에 한 일",
       "produced": "만든 버전 {{version}} · {{outcome}}",
-      "outcome": {
-        "published_snapshot": "게시됨",
-        "superseded_snapshot": "게시 후 대체됨",
-        "draft": "리뷰 대기",
-        "editing": "작성 중",
-        "discarded": "폐기됨"
-      },
       "flow": "작업 흐름",
       "loading": "대화 기록을 불러오는 중…",
       "loadFailed": "대화 기록을 불러오지 못했습니다.",
@@ -590,7 +592,12 @@
       "times_one": "{{count}}회",
       "times_other": "{{count}}회",
       "groupBody_one": "이 문서를 다룬 대화가 {{count}}개 더 있습니다. 가장 최근 대화만 그렸습니다.",
-      "groupBody_other": "이 문서를 다룬 대화가 {{count}}개 더 있습니다. 가장 최근 대화만 그렸습니다."
+      "groupBody_other": "이 문서를 다룬 대화가 {{count}}개 더 있습니다. 가장 최근 대화만 그렸습니다.",
+      "review": {
+        "pending": "리뷰 대기",
+        "changes_requested": "변경 요청됨",
+        "rejected": "반려됨"
+      }
     }
   },
   "workspaceGraph": {

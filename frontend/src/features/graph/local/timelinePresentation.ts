@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import type { GraphEdge, GraphHistoryMode, GraphNode, GraphTimelineEvent } from "../../../shared/api/graph";
 import { domainLabel } from "../../../shared/lib/domainLabel";
 import { graphActionFamily } from "../graphModel";
+import { sessionActionTally } from "../sessionActivity";
 import { isSessionNode } from "../shared/sessionNodes";
 
 export type TimelineMarkKind = "version" | "review" | "ask" | "tool" | "added" | "removed" | "activity";
@@ -44,8 +45,9 @@ function sessionPresentation(event: GraphTimelineEvent, session: GraphNode, even
     const target = nodes.get(edge.target);
     return target && !target.is_seed && target.entity_kind !== "context_page_version" ? [target.id] : [];
   })).size;
-  const action = domainLabel("graph", "graphActionKind", seedEdge?.action_kind ?? event.action_kind, t);
-  const verbs = seedEdge?.count && seedEdge.count > 1 ? `${action} ×${seedEdge.count}` : action;
+  // The relation's own tally; a relation without an action names the event's.
+  const verbs = seedEdge?.action_kind
+    ? sessionActionTally(seedEdge, t) : domainLabel("graph", "graphActionKind", event.action_kind, t);
   return {
     mark: session.entity_kind === "ask_session" ? "ask" : "tool",
     lane: 1,

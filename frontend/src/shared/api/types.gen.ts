@@ -6693,6 +6693,16 @@ export interface components {
             data: components["schemas"]["FeedbackEntry"][];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
+        /**
+         * GraphActionCount
+         * @description How often one action happened within an aggregate relation.
+         */
+        GraphActionCount: {
+            /** Action Kind */
+            action_kind: string;
+            /** Count */
+            count: number;
+        };
         /** GraphBudget */
         GraphBudget: {
             /**
@@ -6844,6 +6854,8 @@ export interface components {
         };
         /** GraphEdge */
         GraphEdge: {
+            /** Action Counts */
+            action_counts?: components["schemas"]["GraphActionCount"][];
             /** Action Kind */
             action_kind?: string | null;
             /**
@@ -7043,6 +7055,8 @@ export interface components {
             path?: string | null;
             /** Records */
             records?: components["schemas"]["GraphNodeRecord"][];
+            /** Review Status */
+            review_status?: string | null;
             /** Status */
             status?: string | null;
         };

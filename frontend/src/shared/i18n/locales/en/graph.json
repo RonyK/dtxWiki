@@ -51,7 +51,15 @@
       "active": "Active",
       "completed": "Completed",
       "failed": "Failed",
-      "deleted": "Deleted"
+      "deleted": "Deleted",
+      "state_inconsistent": "State review required",
+      "current_editing": "Currently editing",
+      "current_draft": "Current draft",
+      "published_snapshot": "Current published snapshot",
+      "alternative_draft": "Alternative draft",
+      "discarded_draft": "Discarded draft",
+      "superseded_snapshot": "Superseded snapshot",
+      "superseded_draft": "Superseded draft"
     },
     "graphEdgeKind": {
       "wikilink": "Wiki link",
@@ -308,7 +316,8 @@
       "seedRelationships": "Relationship to the seed",
       "expandSheet": "Expand details",
       "collapseSheet": "Collapse details",
-      "records": "Records of this version"
+      "records": "Records of this version",
+      "review": "Review"
     },
     "citationEvidence": {
       "title": "Retained citation evidence",
@@ -565,13 +574,6 @@
       },
       "thisDocument": "What it did here",
       "produced": "Produced {{version}} · {{outcome}}",
-      "outcome": {
-        "published_snapshot": "Published",
-        "superseded_snapshot": "Published, since superseded",
-        "draft": "In review",
-        "editing": "Being edited",
-        "discarded": "Discarded"
-      },
       "flow": "Flow",
       "loading": "Loading the chat…",
       "loadFailed": "Could not load the chat.",
@@ -590,7 +592,12 @@
       "times_one": "{{count}} time",
       "times_other": "{{count}} times",
       "groupBody_one": "{{count}} more conversation used this document. Only the most recent are drawn.",
-      "groupBody_other": "{{count}} more conversations used this document. Only the most recent are drawn."
+      "groupBody_other": "{{count}} more conversations used this document. Only the most recent are drawn.",
+      "review": {
+        "pending": "In review",
+        "changes_requested": "Changes requested",
+        "rejected": "Rejected"
+      }
     }
   },
   "workspaceGraph": {
