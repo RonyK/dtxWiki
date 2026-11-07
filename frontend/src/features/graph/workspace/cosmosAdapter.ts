@@ -1433,7 +1433,7 @@ export function createWorkspaceCosmosAdapter(
     svg.setAttribute("aria-hidden", "true");
     svg.dataset.workspaceMapSelectionRing = "";
     Object.assign(svg.style, {
-      // Above the title boxes, which are opaque and may sit beside the point.
+      // Above titles that may sit beside the point.
       position: "absolute", inset: "0", width: "100%", height: "100%", zIndex: "3",
       pointerEvents: "none", overflow: "visible", display: "none",
     });
@@ -1461,8 +1461,11 @@ export function createWorkspaceCosmosAdapter(
         position: "absolute", left: "0", top: "0", display: "none",
         maxWidth: "144px", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis",
         color: getComputedStyle(container).color || "#e5e7eb", font: "11px system-ui, sans-serif",
-        lineHeight: "14px", backgroundColor: tokens.surface, padding: "2px 4px", boxSizing: "border-box",
-        borderRadius: "3px", pointerEvents: "none",
+        lineHeight: "14px", backgroundColor: "transparent", padding: "2px 4px", boxSizing: "border-box",
+        // Paint the surface halo before the ink, leaving a 1.5px outline.
+        // A system colour keeps forced-colour browsers from remapping it to ink.
+        webkitTextStroke: `3px ${options.forcedColors ? "Canvas" : tokens.surface}`,
+        paintOrder: "stroke fill", pointerEvents: "none",
       });
       labelLayer?.appendChild(label);
       return label;

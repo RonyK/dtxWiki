@@ -1969,14 +1969,16 @@ describe("Cosmos Map presentation-only search", () => {
     expect(label.dataset.placementReason).toBe("placed"); expect(label.style.maxHeight).toBe("");
   });
 
-  it.each([false, true])("backs measured labels with the resolved surface in forcedColors=%s", async forcedColors => {
+  it.each([false, true])("outlines measured labels without covering edges in forcedColors=%s", async forcedColors => {
     const container = document.createElement("div"); container.style.color = "rgb(0, 0, 0)";
     container.style.backgroundColor = "rgb(255, 255, 255)"; document.body.appendChild(container);
     const adapter = createWorkspaceCosmosAdapter(container, columns(), { forcedColors, reducedMotion: true,
       callbacks: { onHover: vi.fn(), onSelect: vi.fn() } });
     adapters.push(adapter); await adapter.whenSettled();
     const label = container.querySelector<HTMLElement>("[data-workspace-map-labels] span")!;
-    expect(label.style.backgroundColor).toBe("rgb(255, 255, 255)");
+    expect(label.style.backgroundColor).toBe("transparent");
+    expect(label.style.webkitTextStroke).toBe(`3px ${forcedColors ? "Canvas" : "#ffffff"}`);
+    expect(label.style.paintOrder).toBe("stroke fill");
     expect(label.style.color).toBe("rgb(0, 0, 0)"); expect(label.style.padding).toBe("2px 4px");
     expect(label.style.boxSizing).toBe("border-box"); expect(label.style.forcedColorAdjust).not.toBe("none");
     expect(label.parentElement!.getAttribute("aria-hidden")).toBe("true");
