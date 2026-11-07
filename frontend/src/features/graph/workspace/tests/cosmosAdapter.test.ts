@@ -226,6 +226,31 @@ function installedSdkDrag(config: GraphConfig, index: number) {
     end: (type = "mouseup") => { event.sourceEvent = { type }; handlers.get("end")!(event); } };
 }
 
+// Default asynchronous GPU title rows: a read completes after the task that
+// requested it, with the rows a test placed here. Tests that inspect the tracker
+// install their own controller; the coordinate-upload tests restore the real one.
+const trackedRows = new Map<number, [number, number]>();
+function setTrackedRows(rows: Iterable<readonly [number, [number, number]]>) {
+  trackedRows.clear();
+  for (const [index, point] of rows) trackedRows.set(index, point);
+}
+const trackedDelivery = () => new Promise<void>(resolve => window.setTimeout(resolve, 0));
+function installAsyncTrackedRows() {
+  vi.spyOn(nativeTracking, "createWorkspaceTrackedPositions").mockImplementation(({ onPositions }) => {
+    let generation = 0, destroyed = false;
+    return {
+      request: vi.fn(() => {
+        if (destroyed) return false;
+        const issued = generation;
+        queueMicrotask(() => { if (!destroyed && issued === generation) onPositions(new Map(trackedRows)); });
+        return true;
+      }),
+      invalidate: vi.fn(() => { generation += 1; }),
+      destroy: vi.fn(() => { destroyed = true; generation += 1; }),
+    };
+  });
+}
+
 const defaultMockImplementations = {
   positions: graph.getPointPositions.getMockImplementation()!,
   setPositions: graph.setPointPositions.getMockImplementation()!,
@@ -390,6 +415,7 @@ beforeEach(() => {
   createGraph.mockImplementation(defaultMockImplementations.createGraph);
   graph.getZoomLevel.mockReturnValue(2);
   graph.spaceToScreenPosition.mockImplementation(() => [10, 10]);
+  trackedRows.clear(); installAsyncTrackedRows();
   adapters = [];
   cpu.instances = [];
   cpu.create.mockImplementation((input: WorkspaceForceAtlas2WorkerInput, options: WorkspaceForceAtlas2WorkerOptions) => {
@@ -555,6 +581,71 @@ describe("default 2K official CPU Worker with Cosmos GPU drawing", () => {
     // A native pick resolves asynchronously and can name a link with no rows in this frame.
     expect(() => createGraph.mock.calls.at(-1)![1].onLinkMouseOver?.(99)).not.toThrow();
     expect(container.querySelector<HTMLElement>(".graph-hover-chip")!.hidden).toBe(true);
+  });
+
+  it("publishes titles in each CPU frame, under the live camera and at the dragged pointer", async () => {
+    graph.spaceToScreenPosition.mockImplementation(point => point);
+    graph.screenToSpacePosition.mockImplementation(point => point);
+    const { adapter, container } = await mountCpu(), worker = cpu.instances[0];
+    const config = createGraph.mock.calls.at(-1)![1];
+    const title = () => container.querySelector<HTMLElement>('[data-workspace-map-labels] span[data-node-id="a"]')!.dataset;
+    // No heartbeat runs between these synchronous steps: each source publishes itself.
+    worker.options.onPositions(Float32Array.from([300, 400, 500, 600, 700, 800]));
+    expect(title()).toMatchObject({ pointX: "300", pointY: "400" });
+    // Zoom while the layout runs reprojects the current frame, not an emptied cache.
+    graph.spaceToScreenPosition.mockImplementation(([x, y]) => [x * 2, y * 2]);
+    config.onZoom?.({ transform: { k: 4 } } as Parameters<NonNullable<GraphConfig["onZoom"]>>[0], false);
+    expect(title()).toMatchObject({ pointX: "600", pointY: "800" });
+    // A drag stops the worker; the title follows the pointer, then the committed row.
+    graph.spaceToScreenPosition.mockImplementation(point => point);
+    config.onPointMouseOver?.(0, [300, 400], undefined, false, false);
+    const drag = installedSdkDrag(config, 0); drag.start(); drag.move(340, 420);
+    expect(worker.isRunning()).toBe(false);
+    expect(title()).toMatchObject({ pointX: "340", pointY: "420" });
+    drag.move(360, 430); drag.end();
+    expect(adapter.captureCoordinates()!.positions.slice(0, 2)).toEqual(Float32Array.from([360, 430]));
+    // The released title follows the resumed worker again, not the last pointer.
+    expect(worker.isRunning()).toBe(true);
+    worker.options.onPositions(Float32Array.from([380, 440, 500, 600, 700, 800]));
+    expect(title()).toMatchObject({ pointX: "380", pointY: "440" });
+  });
+
+  it("starts every title fade at the opacity on screen when an entering or leaving fade is interrupted", async () => {
+    // jsdom has no Web Animations: a fake whose progress the test sets.
+    type FakeAnimation = { element: Element; keyframes: Keyframe[]; progress: number;
+      cancel: ReturnType<typeof vi.fn>; onfinish: (() => void) | null };
+    const animations: FakeAnimation[] = [];
+    Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true,
+      value(this: Element, keyframes: Keyframe[]) {
+        const animation: FakeAnimation & { effect: object } = { element: this, keyframes, progress: 0, cancel: vi.fn(),
+          onfinish: null, effect: { getComputedTiming: () => ({ progress: animation.progress }) } };
+        animations.push(animation);
+        return animation;
+      } });
+    vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect").mockReturnValue(
+      { x: 0, y: 0, top: 0, left: 0, right: 800, bottom: 600, width: 800, height: 600, toJSON: () => ({}) });
+    try {
+      graph.spaceToScreenPosition.mockImplementation(point => point);
+      const { container } = await mountCpu(), worker = cpu.instances[0];
+      const label = container.querySelector<HTMLElement>('[data-workspace-map-labels] span[data-node-id="a"]')!;
+      const frame = (x: number) => worker.options.onPositions(Float32Array.from([x, 100, 400, 300, 600, 400]));
+      const fades = () => animations.filter(animation => animation.element === label);
+      const opacities = (animation: FakeAnimation) => animation.keyframes.map(keyframe => keyframe.opacity);
+      frame(-500); expect(label.style.display).toBe("none"); animations.length = 0;
+      frame(100);
+      expect(fades().map(opacities)).toEqual([[0, 1]]);
+      // Hidden a quarter of the way in: fade out from 0.25, not from 1.
+      fades()[0].progress = .25; frame(-500);
+      expect(fades()[0].cancel).toHaveBeenCalled(); expect(opacities(fades()[1])).toEqual([.25, 0]);
+      // Shown again halfway out: fade back in from 0.125, never from 0.
+      fades()[1].progress = .5; frame(100);
+      expect(fades()[1].cancel).toHaveBeenCalled(); expect(opacities(fades()[2])).toEqual([.125, 1]);
+      // An entering title that moves keeps its fade.
+      frame(110); expect(fades()).toHaveLength(3);
+      fades()[2].onfinish?.(); frame(-500);
+      expect(opacities(fades()[3])).toEqual([1, 0]); expect(label.style.display).toBe("block");
+      fades()[3].onfinish?.(); expect(label.style.display).toBe("none");
+    } finally { delete (HTMLElement.prototype as { animate?: unknown }).animate; }
   });
 
   const contactProgress: WorkspaceForceAtlas2Progress = Object.freeze({ profile: "gephi-lite-2k-v1",
@@ -1570,7 +1661,7 @@ describe("Cosmos Map scene-owned collision lifecycle", () => {
 });
 
 describe("Cosmos Map presentation-only search", () => {
-  it("owns bounded native picking and asynchronous labels only above the 2K boundary", async () => {
+  it("owns native picking only above the 2K boundary and asynchronous titles on both sides", async () => {
     let now = 1_000;
     vi.spyOn(performance, "now").mockImplementation(() => now);
     const controllers: Array<{ options: Parameters<typeof nativeTracking.createWorkspaceTrackedPositions>[0];
@@ -1593,7 +1684,8 @@ describe("Cosmos Map presentation-only search", () => {
     expect(owner.invalidate.mock.calls.length).toBeGreaterThan(invalidations);
     const beforeHide = owner.invalidate.mock.calls.length;
     adapter.setLabelsVisible(false); expect(owner.invalidate).toHaveBeenCalledTimes(beforeHide + 1);
-    now += 200; adapter.setLabelsVisible(true); expect(owner.request).toHaveBeenCalled();
+    owner.request.mockClear(); now += 200; adapter.setLabelsVisible(true);
+    expect(owner.request).not.toHaveBeenCalled(); await Promise.resolve(); expect(owner.request).toHaveBeenCalledOnce();
     graph.getPointPositions.mockClear();
     config.onBackgroundClick?.(new MouseEvent("click", { clientX: 700, clientY: 500 }));
     config.onLinkClick?.(0, new MouseEvent("click", { clientX: 700, clientY: 500 }));
@@ -1606,7 +1698,12 @@ describe("Cosmos Map presentation-only search", () => {
     graph.attachPointPicker.mockClear();
     await mount(sizedColumns(2_000));
     expect(graph.attachPointPicker.mock.calls.every(([picker]) => picker === null)).toBe(true);
-    expect(controllers).toHaveLength(2);
+    // The 2K scene tracks its titles the same way: a simulation frame reads
+    // asynchronously, never through the synchronous getter.
+    expect(controllers).toHaveLength(3);
+    graph.getTrackedPointPositionsMap.mockClear(); controllers[2].request.mockClear();
+    createGraph.mock.calls.at(-1)![1].onSimulationTick?.(.3); await Promise.resolve();
+    expect(controllers[2].request).toHaveBeenCalledOnce(); expect(graph.getTrackedPointPositionsMap).not.toHaveBeenCalled();
   });
 
   it("publishes a newly picked full title immediately without a throttled GPU label read", async () => {
@@ -1648,6 +1745,49 @@ describe("Cosmos Map presentation-only search", () => {
         [start + slot, [100 + start + slot, 200 + start + slot]]));
     }
 
+    it("reads tracked rows per moving simulation frame, at the heartbeat once still, and never on the heartbeat", async () => {
+      let now = 1_000;
+      vi.spyOn(performance, "now").mockImplementation(() => now);
+      const tracking = observeTrackedLabels(), { request } = tracking.controller;
+      graph.spaceToScreenPosition.mockImplementation(point => point);
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      try {
+      await mount(sizedColumns(2_001));
+      const config = createGraph.mock.calls[0][1];
+      const frame = async (ms = 16) => { now += ms; config.onSimulationTick?.(.3); await Promise.resolve(); };
+      tracking.publish(pointRows()); await Promise.resolve(); request.mockClear();
+      // The read waits for the end of the native frame's task, then once per frame.
+      config.onSimulationTick?.(.3);
+      expect(request).not.toHaveBeenCalled();
+      await Promise.resolve(); await frame();
+      expect(request).toHaveBeenCalledTimes(2);
+      // Two consecutive reads moved every title < 0.5 px: frames read at the heartbeat.
+      tracking.publish(pointRows()); tracking.publish(pointRows()); request.mockClear();
+      await frame(); await frame(); await frame();
+      expect(request).not.toHaveBeenCalled();
+      await frame(200);
+      expect(request).toHaveBeenCalledOnce();
+      // A visible move returns to one read per frame.
+      tracking.publish(new Map([...pointRows()].map(([index, [x, y]]) => [index, [x + 3, y]])));
+      request.mockClear(); await frame();
+      expect(request).toHaveBeenCalledOnce();
+      // Rows reach titles after the step that drew them: each title advances
+      // its row along the per-step velocity to the step on screen, at most 4.
+      const title = () => createGraph.mock.calls[0][0].querySelector<HTMLElement>('[data-node-id="node:0"]')!.dataset.pointX;
+      const rowsAt = (x: number) => new Map([...pointRows()].map(([index, [, y]]): [number, [number, number]] => [index, [x + index, y]]));
+      await frame(); tracking.publish(rowsAt(200));
+      await frame(); tracking.publish(rowsAt(210));
+      expect(title()).toBe("210");
+      await frame(); expect(title()).toBe("220");
+      for (let step = 0; step < 6; step += 1) await frame();
+      expect(title()).toBe("250");
+      // A stopped simulation has no frames; the heartbeat republishes without reading.
+      request.mockClear();
+      vi.advanceTimersByTime(1_000); await Promise.resolve();
+      expect(request).not.toHaveBeenCalled();
+      } finally { vi.useRealTimers(); }
+    });
+
     it("clears old slot coordinates before publishing disjoint node IDs inside the read throttle, then publishes the new readback", async () => {
       let now = 1_000;
       vi.spyOn(performance, "now").mockImplementation(() => now);
@@ -1666,7 +1806,9 @@ describe("Cosmos Map presentation-only search", () => {
         expect(label).not.toHaveAttribute("data-point-x");
         expect(label).not.toHaveAttribute("data-point-y");
       });
+      // New rows are read once, after this task, never inside it.
       expect(tracking.controller.request).not.toHaveBeenCalled();
+      await Promise.resolve(); expect(tracking.controller.request).toHaveBeenCalledOnce();
       tracking.publish(pointRows(100));
       labels.forEach((label, slot) => {
         expect(label.dataset).toMatchObject({ nodeId: `node:${100 + slot}`,
@@ -1693,6 +1835,7 @@ describe("Cosmos Map presentation-only search", () => {
         expect(label).not.toHaveAttribute("data-point-y");
       });
       expect(tracking.controller.request).not.toHaveBeenCalled();
+      await Promise.resolve(); expect(tracking.controller.request).toHaveBeenCalledOnce();
     });
 
     it("clears only rebound IDs during hidden-label reordering and reprojects their identity-keyed cache correctly", async () => {
@@ -1721,21 +1864,21 @@ describe("Cosmos Map presentation-only search", () => {
         }
       });
       expect(tracking.controller.request).not.toHaveBeenCalled();
+      await Promise.resolve(); expect(tracking.controller.request).toHaveBeenCalledOnce();
+      tracking.controller.request.mockClear();
       adapter.setLabelsVisible(true);
       config.onZoom?.({ transform: { k: 2 } } as Parameters<NonNullable<GraphConfig["onZoom"]>>[0], false);
+      // The cached rows reproject at once; showing titles reads once after this task.
       expect(labels[0].dataset).toMatchObject({ nodeId: "node:1", pointX: "101", pointY: "201" });
       expect(labels[1].dataset).toMatchObject({ nodeId: "node:0", pointX: "100", pointY: "200" });
       expect(tracking.controller.request).not.toHaveBeenCalled();
+      await Promise.resolve(); expect(tracking.controller.request).toHaveBeenCalledOnce();
     });
   });
 
   it("reprojects cached GPU-tracked labels immediately on ordinary native zoom without an extra GPU read", async () => {
-    let now = 1_000;
     let scale = 1;
-    vi.spyOn(performance, "now").mockImplementation(() => now);
-    graph.getTrackedPointPositionsMap.mockReturnValue(new Map(
-      Array.from({ length: 40 }, (_, index): [number, [number, number]] => [index, [100 + index * 10, 109]]),
-    ));
+    setTrackedRows(Array.from({ length: 40 }, (_, index): [number, [number, number]] => [index, [100 + index * 10, 109]]));
     graph.spaceToScreenPosition.mockImplementation(([x, y]) => [x * scale, y * scale]);
     await mount(sizedColumns(60));
     const [container, config] = createGraph.mock.calls[0];
@@ -1745,14 +1888,13 @@ describe("Cosmos Map presentation-only search", () => {
       .map(element => element.dataset.nodeId).filter(Boolean);
     const initialIds = candidateIds();
     expect(initialIds).toHaveLength(40);
-    const readsBeforeTimer = graph.getTrackedPointPositionsMap.mock.calls.length;
-    now += 200;
     await vi.waitFor(() => {
-      expect(graph.getTrackedPointPositionsMap.mock.calls.length).toBeGreaterThan(readsBeforeTimer);
       expect(label.dataset.pointX).toBe("100");
       expect(label.dataset.pointY).toBe("109");
     });
     graph.getTrackedPointPositionsMap.mockClear();
+    const { request } = vi.mocked(nativeTracking.createWorkspaceTrackedPositions).mock.results.at(-1)!.value;
+    request.mockClear();
     const projectionCalls = graph.spaceToScreenPosition.mock.calls.length;
     scale = 2;
     // This is an ordinary SDK camera callback, not an initial-Fit positions frame.
@@ -1762,6 +1904,7 @@ describe("Cosmos Map presentation-only search", () => {
     expect(label.style.transform).toBe("translate(208px, 209px)");
     expect(graph.spaceToScreenPosition.mock.calls.length - projectionCalls).toBe(40);
     expect(graph.getTrackedPointPositionsMap).not.toHaveBeenCalled();
+    await Promise.resolve(); expect(request).not.toHaveBeenCalled();
     expect(candidateIds()).toEqual(initialIds);
     expect(container.querySelectorAll("[data-workspace-map-labels] span")).toHaveLength(40);
   });
@@ -1847,16 +1990,14 @@ describe("Cosmos Map presentation-only search", () => {
     const adapter = await mount(input);
     const container = createGraph.mock.calls[0][0];
     vi.spyOn(container, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 500, 300));
-    graph.getTrackedPointPositionsMap.mockReturnValue(new Map([
-      [0, [100, 109]], [1, [100, 139]],
-    ]));
+    setTrackedRows([[0, [100, 109]], [1, [100, 139]]]);
     graph.spaceToScreenPosition.mockImplementation(position => position);
     const full = container.querySelector<HTMLElement>('[data-node-id="a"]')!;
     const ordinary = container.querySelector<HTMLElement>('[data-node-id="b"]')!;
     Object.defineProperty(full, "offsetHeight", { configurable: true,
       get: () => full.style.display === "none" ? 0 : 54 });
     now += 200;
-    adapter.select("a");
+    adapter.select("a"); await trackedDelivery();
     expect(full.style.display).toBe("block");
     expect(full.style.transform).toMatch(/, 100px\)$/);
     expect(full.dataset.fullTitle).toBe("true");
@@ -1874,7 +2015,7 @@ describe("Cosmos Map presentation-only search", () => {
     const adapter = await mount(input);
     const container = createGraph.mock.calls[0][0];
     vi.spyOn(container, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 300, 100));
-    graph.getTrackedPointPositionsMap.mockReturnValue(new Map([[1_999, [290, 99]]]));
+    setTrackedRows([[1_999, [290, 99]]]);
     graph.spaceToScreenPosition.mockImplementation(position => position);
     const label = container.querySelector<HTMLElement>("[data-workspace-map-labels] span")!;
     Object.defineProperties(label, {
@@ -1888,7 +2029,7 @@ describe("Cosmos Map presentation-only search", () => {
     graph.setZoomTransformByPointPositions.mockClear();
     community.compute.mockClear();
     now += 200;
-    adapter.select("node:1999");
+    adapter.select("node:1999"); await trackedDelivery();
     // Real display:none geometry is zero. The first paint, not a later timer
     // correction, must reserve the complete measured 132x54 title rectangle.
     expect(label.dataset.nodeId).toBe("node:1999");
@@ -1908,9 +2049,7 @@ describe("Cosmos Map presentation-only search", () => {
     const input = columns(); input.nodeLabels = input.nodeLabels.map((title) => `${title} ${"complete long title ".repeat(8)}`);
     const adapter = await mount(input), [container, config] = createGraph.mock.calls[0];
     vi.spyOn(container, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, width, 600));
-    graph.getTrackedPointPositionsMap.mockReturnValue(new Map([
-      [0, [width - 12, 440]], [1, [width - 12, 455]], [2, [width - 12, 470]],
-    ]));
+    setTrackedRows([[0, [width - 12, 440]], [1, [width - 12, 455]], [2, [width - 12, 470]]]);
     graph.spaceToScreenPosition.mockImplementation(position => position);
     for (const element of container.querySelectorAll<HTMLElement>("[data-workspace-map-labels] span")) {
       Object.defineProperties(element, {
@@ -1922,7 +2061,7 @@ describe("Cosmos Map presentation-only search", () => {
     graph.setPointPositions.mockClear(); graph.setLinks.mockClear(); graph.setPinnedPoints.mockClear();
     graph.setZoomTransformByPointPositions.mockClear(); graph.setZoomLevel.mockClear(); community.compute.mockClear();
     now += 200; adapter.select("a"); now += 200; adapter.focus("b"); now += 200;
-    config.onPointMouseOver?.(2, [width - 12, 470], undefined, false, false);
+    config.onPointMouseOver?.(2, [width - 12, 470], undefined, false, false); await trackedDelivery();
     const titles = [...container.querySelectorAll<HTMLElement>('[data-full-title="true"]')];
     expect(titles.map(element => element.dataset.nodeId)).toEqual(["b", "a"]);
     expect(titles.map(element => element.dataset.labelPriority)).toEqual(["active", "explicit"]);
@@ -1951,14 +2090,14 @@ describe("Cosmos Map presentation-only search", () => {
     const input = columns(); input.nodeLabels[0] = "Oversized full title ".repeat(40);
     const adapter = await mount(input), container = createGraph.mock.calls[0][0];
     vi.spyOn(container, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 300, 100));
-    graph.getTrackedPointPositionsMap.mockReturnValue(new Map([[0, [290, 99]], [1, [100, 50]]]));
+    setTrackedRows([[0, [290, 99]], [1, [100, 50]]]);
     graph.spaceToScreenPosition.mockImplementation(position => position);
     const label = container.querySelector<HTMLElement>("[data-workspace-map-labels] span")!;
     Object.defineProperties(label, {
       offsetWidth: { configurable: true, get: () => 284 },
       offsetHeight: { configurable: true, get: () => label.textContent === input.nodeLabels[0] ? 150 : 20 },
     });
-    now += 200; adapter.select("a");
+    now += 200; adapter.select("a"); await trackedDelivery();
     expect(label.style.display).toBe("block"); expect(label.textContent).toBe(input.nodeLabels[0]);
     expect(label.title).toBe(input.nodeLabels[0]); expect(label.dataset.viewportConstrained).toBe("true");
     expect(label.dataset.placementReason).toBe("viewport-constrained"); expect(label.style.maxHeight).toBe("100px");
@@ -2939,7 +3078,7 @@ describe("Cosmos Map interaction contracts", () => {
   });
 
   it.each([false, true])("preserves search and selection during node and edge hover (forced colors: %s)", async (forcedColors) => {
-    graph.getTrackedPointPositionsMap.mockReturnValue(new Map([[0, [0, 0]], [1, [100, 100]], [2, [200, 200]]]));
+    setTrackedRows([[0, [0, 0]], [1, [100, 100]], [2, [200, 200]]]);
     const input = sizedColumns(2_000, 3);
     // A's two neighbors also link to one another. Searching B/C highlights
     // that third relation; hovering A must retain the same search presentation.
@@ -3571,14 +3710,20 @@ describe("Cosmos Map interaction contracts", () => {
   });
 
   it("does not add per-hover GPU position reads beyond the six-per-second label cap", async () => {
-    await mount();
-    const clock = vi.spyOn(performance, "now").mockReturnValue(1000);
-    graph.getTrackedPointPositionsMap.mockClear();
-    for (let index = 0; index < 20; index += 1) {
-      createGraph.mock.calls[0][1].onPointMouseOver?.(index % 3, [0, 0], undefined, false, false);
-    }
-    clock.mockRestore();
-    expect(graph.getTrackedPointPositionsMap.mock.calls.length).toBeLessThanOrEqual(1);
+    // Only a graph without the tracked-frame seam (the rest-log diagnostic) reads synchronously.
+    const frameSeam = graph.getTrackedPointPositionsFrame;
+    delete (graph as { getTrackedPointPositionsFrame?: unknown }).getTrackedPointPositionsFrame;
+    try {
+      await mount(columns(), true, vi.fn(), false, vi.fn(), WORKSPACE_MAP_PC_10K_BUDGET, "rest-log");
+      const clock = vi.spyOn(performance, "now").mockReturnValue(1000);
+      graph.getTrackedPointPositionsMap.mockClear();
+      for (let index = 0; index < 20; index += 1) {
+        createGraph.mock.calls[0][1].onPointMouseOver?.(index % 3, [0, 0], undefined, false, false);
+        createGraph.mock.calls[0][1].onSimulationTick?.(.3);
+      }
+      clock.mockRestore();
+      expect(graph.getTrackedPointPositionsMap.mock.calls.length).toBeLessThanOrEqual(1);
+    } finally { graph.getTrackedPointPositionsFrame = frameSeam; }
   });
 });
 
@@ -4000,6 +4145,7 @@ describe("tracked label rows across a coordinate upload", () => {
   const settleFrames = async () => { for (let frame = 0; frame < 4; frame += 1) await new Promise<void>(resolve => window.setTimeout(resolve, 5)); };
 
   async function labelScene() {
+    vi.mocked(nativeTracking.createWorkspaceTrackedPositions).mockRestore();
     let now = 5_000;
     vi.spyOn(performance, "now").mockImplementation(() => now);
     const input = sizedColumns(2_001);
@@ -4024,7 +4170,9 @@ describe("tracked label rows across a coordinate upload", () => {
     reseed(); await settleFrames();
     expect(graph.getPointPositions().slice(0, 2)).not.toEqual(preSeed); // the upload really replaced the texture
     readback.signal(); await settleFrames();
-    for (const label of labels) expect(label.dataset.pointX).toBeUndefined();
+    // The upload dropped the pre-seed read and requested one of its own rows:
+    // a kept pre-seed read would occupy the only slot and publish preSeed here.
+    expect(labels[0].dataset).toMatchObject({ nodeId: input.nodeIds[0], pointX: "1000", pointY: "1001" });
 
     // The next bounded read, issued after the upload, is valid and publishes the new coordinates.
     advance(1_000); adapter.setLabelsVisible(true); await settleFrames();

@@ -54,6 +54,11 @@ describe("bounded asynchronous native label positions", () => {
     h.complete(); tick();
     expect(h.onPositions).toHaveBeenCalledExactlyOnceWith(new Map([[7, [10, 20]], [2, [30, 40]]]));
     expect(frames.size).toBe(0); expect(h.readback.readSync).not.toHaveBeenCalled();
+    // An owner asking every frame completes a signaled read itself and issues
+    // the next one, instead of being refused until that read's own poll.
+    expect(h.controller.request()).toBe(true); h.complete();
+    expect(h.controller.request()).toBe(true);
+    expect(h.onPositions).toHaveBeenCalledTimes(2); expect(h.readback.request).toHaveBeenCalledTimes(3);
     h.controller.destroy();
   });
 
