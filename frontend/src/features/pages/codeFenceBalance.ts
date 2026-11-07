@@ -3,41 +3,67 @@ export type UnclosedCodeFence = {
   line: number;
 };
 
-export function findUnclosedCodeFence(body: string): UnclosedCodeFence | null {
-  const lines = body.replace(/\r\n?/g, "\n").split("\n");
-  let marker: "`" | "~" | null = null;
-  let markerLength = 0;
-  let openingLine = 0;
+type OpenFence = { marker: "`" | "~"; length: number; openingLine: number };
+
+/** Walk the lines once, reporting for each whether it belongs to a fence. */
+function scanCodeFences(
+  lines: string[],
+  visit: (index: number, fenced: boolean) => void = () => undefined,
+): OpenFence | null {
+  let open: OpenFence | null = null;
 
   for (let index = 0; index < lines.length; index += 1) {
     const stripped = lines[index].trimStart();
-    if (marker) {
+    if (open) {
+      visit(index, true);
       const closing = stripped.trimEnd();
+      const marker = open.marker;
       if (
-        closing.length >= markerLength &&
+        closing.length >= open.length &&
         [...closing].every((character) => character === marker)
       ) {
-        marker = null;
-        markerLength = 0;
-        openingLine = 0;
+        open = null;
       }
       continue;
     }
     if (!stripped.startsWith("```") && !stripped.startsWith("~~~")) {
+      visit(index, false);
       continue;
     }
-    marker = stripped[0] as "`" | "~";
-    markerLength = stripped.length - stripped.replace(new RegExp(`^\\${marker}+`), "").length;
-    openingLine = index + 1;
+    const marker = stripped[0] as "`" | "~";
+    open = {
+      marker,
+      length: stripped.length - stripped.replace(new RegExp(`^\\${marker}+`), "").length,
+      openingLine: index + 1,
+    };
+    visit(index, true);
   }
+  return open;
+}
 
-  if (!marker) {
+function bodyLines(body: string) {
+  return body.replace(/\r\n?/g, "\n").split("\n");
+}
+
+export function findUnclosedCodeFence(body: string): UnclosedCodeFence | null {
+  const open = scanCodeFences(bodyLines(body));
+  if (!open) {
     return null;
   }
   return {
-    closingFence: marker.repeat(markerLength),
-    line: openingLine,
+    closingFence: open.marker.repeat(open.length),
+    line: open.openingLine,
   };
+}
+
+/** For each line of the body, whether it is a fence line or fenced content. */
+export function codeFenceLineMask(body: string): boolean[] {
+  const lines = bodyLines(body);
+  const mask = new Array<boolean>(lines.length).fill(false);
+  scanCodeFences(lines, (index, fenced) => {
+    mask[index] = fenced;
+  });
+  return mask;
 }
 
 export function appendClosingCodeFence(body: string, closingFence: string) {

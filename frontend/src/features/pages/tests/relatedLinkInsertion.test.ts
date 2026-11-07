@@ -1,41 +1,29 @@
 import { describe, expect, it } from "vitest";
 
-import { appendRelatedLink, bodyLinksToPage } from "../relatedLinkInsertion";
+import { appendRelatedLink } from "../relatedLinkInsertion";
 
 describe("relatedLinkInsertion", () => {
-  it("extends an existing related section in place and recognises an existing link", () => {
-    // The section is found by its heading wherever it sits; the item joins its
-    // list instead of starting a second section or landing after "Notes".
-    const body = [
-      "# Guide",
-      "",
-      "## Related pages",
-      "",
-      "- [Old](/p/w/old)",
-      "",
-      "## Notes",
-      "",
-      "Tail.",
-    ].join("\n");
-    expect(appendRelatedLink(body, "[New](/p/w/new)", "Related pages")).toBe(
-      [
-        "# Guide",
-        "",
-        "## Related pages",
-        "",
-        "- [Old](/p/w/old)",
-        "- [New](/p/w/new)",
-        "",
-        "## Notes",
-        "",
-        "Tail.",
-        "",
-      ].join("\n"),
+  it("extends the real related section and never writes the link into fenced code", () => {
+    const link = "[New](/p/w/new)";
+    // An existing section gets one more item before the next heading.
+    expect(
+      appendRelatedLink(
+        "# Guide\n\n## Related pages\n\n- [Old](/p/w/old)\n\n## Notes\n\nTail.",
+        link,
+        "Related pages",
+      ),
+    ).toBe("# Guide\n\n## Related pages\n\n- [Old](/p/w/old)\n- [New](/p/w/new)\n\n## Notes\n\nTail.\n");
+    // A heading inside a fenced example is not the section.
+    expect(
+      appendRelatedLink(
+        "# Guide\n\n```md\n## Related pages\n\n## Other\n```",
+        link,
+        "Related pages",
+      ),
+    ).toBe("# Guide\n\n```md\n## Related pages\n\n## Other\n```\n\n## Related pages\n\n- [New](/p/w/new)\n");
+    // A body ending inside an open fence is closed before the link is added.
+    expect(appendRelatedLink("# Guide\n\n~~~\ncode", link, "Related pages")).toBe(
+      "# Guide\n\n~~~\ncode\n~~~\n\n## Related pages\n\n- [New](/p/w/new)\n",
     );
-
-    const page = { id: "55555555-5555-4555-8555-555555555555", slug: "incident-runbook" };
-    expect(bodyLinksToPage(`See [x](/p/w/${page.id.toUpperCase()}).`, page)).toBe(true);
-    expect(bodyLinksToPage("See [[incident-runbook|the runbook]].", page)).toBe(true);
-    expect(bodyLinksToPage("See [[incident-runbook-v2]].", page)).toBe(false);
   });
 });

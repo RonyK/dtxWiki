@@ -218,7 +218,7 @@ import {
   summarizeMediaUploadBatches,
 } from "./mediaUploadCoordinator";
 import { clearEditorUploadSlots } from "./editorUploadSlots";
-import { appendRelatedLink, bodyLinksToPage } from "./relatedLinkInsertion";
+import { appendRelatedLink } from "./relatedLinkInsertion";
 import {
   DEFAULT_PAGE_METADATA,
   PAGE_TYPE_OPTIONS,
@@ -1435,6 +1435,10 @@ export function PageEditor({
   // Applied once per page and target.
   const relatedLinkAppliedRef = useRef<string | null>(null);
   const loadedPageId = page?.id ?? null;
+  // The server's own reading of the loaded body: the same parser that decides
+  // whether publishing creates a page link, so code, comments and stray ids in
+  // prose never count as an existing link.
+  const loadedLinkTargets = page?.link_targets;
   useEffect(() => {
     if (!addLinkPageId || pageLoadState !== "ready" || !loadedPageId || !workspaceId) {
       return;
@@ -1446,7 +1450,7 @@ export function PageEditor({
       .then((related) => {
         if (!isEditorMountedRef.current || pageIdRef.current !== loadedPageId) return;
         const before = bodyRef.current;
-        if (bodyLinksToPage(before, related)) {
+        if ((loadedLinkTargets ?? []).some((target) => target.target_page_id === related.id)) {
           setRelatedLinkNotice({ kind: "present", title: related.title, before, after: before, cursor: null });
           return;
         }
@@ -1468,7 +1472,7 @@ export function PageEditor({
       .catch(() => {
         // Gone or hidden from this author: there is nothing to link to.
       });
-  }, [addLinkPageId, loadedPageId, pageLoadState, workspaceId]);
+  }, [addLinkPageId, loadedLinkTargets, loadedPageId, pageLoadState, workspaceId]);
 
   // Put the cursor on the added line so it scrolls into view and carries the
   // active-line highlight. A selection change is not an edit.

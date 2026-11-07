@@ -2094,6 +2094,12 @@ async function expectContextReaderTabsAtPhoneWidth(page: Page) {
     const tab = page.locator(`#context-reader-tab-${key}`);
     await tab.click();
     await expect(tab).toHaveAttribute("aria-selected", "true");
+    // Activity loads its list, and with it the tab's count badge, on first
+    // open. At 390px the wider tab re-wraps the row, so a click aimed before
+    // the panel settles can land on the tab that moved under the pointer.
+    await expect(
+      page.locator(`#context-reader-panel-${key}`).getByText(/^Loading\b/),
+    ).toHaveCount(0);
     await expectNoHorizontalOverflow(page, `390px Context ${key} tab`);
   }
 
