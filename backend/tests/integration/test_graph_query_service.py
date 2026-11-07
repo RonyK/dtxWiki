@@ -983,7 +983,7 @@ def test_each_chat_is_one_node_with_one_relation_per_document(session_factory):
             session.flush()
             chats[name] = (chat, client)
 
-        def call(name, tool, minutes, *, change_set_id=None):
+        def call(name, tool, minutes, *, change_set_id=None, result_detail=None):
             chat, client = chats[name]
             row = MCPToolCall(
                 client_id=client.id,
@@ -994,6 +994,7 @@ def test_each_chat_is_one_node_with_one_relation_per_document(session_factory):
                 result_status="succeeded",
                 started_at=t0 + timedelta(minutes=minutes),
                 change_set_id=change_set_id,
+                result_detail=result_detail,
             )
             session.add(row)
             session.flush()
@@ -1017,6 +1018,49 @@ def test_each_chat_is_one_node_with_one_relation_per_document(session_factory):
         ):
             chat, row = call(name, tool, minutes, change_set_id=change)
             _mcp_touch(session, chat, row, resource, verb, row.started_at)
+        # Write paths keep different provenance; each must still link the chat
+        # to the version it produced. Codex created the seed (its first
+        # version has no change set; only the call's receipt names it), and
+        # Claude's revision kept nothing on the call: the revised version's
+        # own change set carries the chat as its origin.
+        first_version_id = seed.current_published_version_id
+        chat, row = call(
+            "Codex",
+            "create_context_page",
+            -5,
+            result_detail={
+                "page_id": str(seed.id),
+                "version_id": str(first_version_id),
+            },
+        )
+        _mcp_touch(session, chat, row, seed.id, "created", row.started_at)
+        revision_change_set = ChangeSet(
+            workspace_id=workspace_id,
+            trigger_type="agent_authenticated_write",
+            actor_type="agent",
+            status="draft_created",
+            origin_chat_session_id=chats["Claude Code"][0].id,
+        )
+        session.add(revision_change_set)
+        session.flush()
+        revision = ContextPageVersion(
+            workspace_id=workspace_id,
+            page_id=seed.id,
+            version_no=4,
+            body_md="# Chat Seed revision",
+            content_hash="chat-seed-revision",
+            actor_type="agent",
+            created_by_actor_kind="agent",
+            created_by_actor_id="chat-writer",
+            version_status="draft",
+            graph_status="branched",
+            change_set_id=revision_change_set.id,
+            created_at=t0 + timedelta(minutes=5),
+        )
+        session.add(revision)
+        session.flush()
+        chat, row = call("Claude Code", "submit_revision_for_review", 5)
+        _mcp_touch(session, chat, row, seed.id, "edited", row.started_at)
         session.add(
             ChangeOperation(
                 workspace_id=workspace_id,
@@ -1072,7 +1116,7 @@ def test_each_chat_is_one_node_with_one_relation_per_document(session_factory):
                 )
             )
         seed_id, other_id, draft_id = seed.id, other.id, draft.id
-        rejected_id = rejected.id
+        rejected_id, revision_id = rejected.id, revision.id
         chat_ids = {name: chat.id for name, (chat, _client) in chats.items()}
 
     request = _current_request(
@@ -1115,16 +1159,16 @@ def test_each_chat_is_one_node_with_one_relation_per_document(session_factory):
     claude_seed = relations[(claude.entity_id, seed_id)]
     assert (claude_seed.action_kind, claude_seed.count, claude_seed.aggregate) == (
         "edited",
-        3,
+        4,
         True,
     )
     assert (claude_seed.window_from, claude_seed.window_to) == (
         t0,
-        t0 + timedelta(minutes=3),
+        t0 + timedelta(minutes=5),
     )
     # The whole tally rides on the relation, from the same rollup.
     assert [(c.action_kind, c.count) for c in claude_seed.action_counts] == [
-        ("edited", 2),
+        ("edited", 3),
         ("viewed", 1),
     ]
     assert set(relations) == {
@@ -1134,6 +1178,8 @@ def test_each_chat_is_one_node_with_one_relation_per_document(session_factory):
         (chat_ids["Codex"], seed_id),
         (chat_ids["Codex"], other_id),
         (chat_ids["Codex"], rejected_id),
+        (chat_ids["Codex"], first_version_id),
+        (claude.entity_id, revision_id),
     }
     assert relations[(claude.entity_id, draft_id)].action_kind == "created"
     # A version reads as its history does: the live draft is in review, the

@@ -213,6 +213,10 @@ _EDIT_SUMMARY_TOOLS = frozenset(
 _SESSION_EDIT_TOOLS = frozenset(
     {"create_context_page", "update_context_edit", "patch_context_edit"}
 )
+# Calls whose receipt (result_detail.version_id) names the Context version they
+# wrote or submitted: Chats diffs that version, the graph links the chat to it.
+# begin only opens an edit and discard ends one; neither produced its version.
+VERSION_RECEIPT_TOOLS = _SESSION_EDIT_TOOLS | {"submit_context_edit_for_review"}
 # Commands whose input names the editing row they act on.
 _VERSION_NAMING_EDIT_TOOLS = frozenset(
     {"patch_context_edit", "submit_context_edit_for_review", "discard_context_edit"}

@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql import Select
 
 from backend.models.ask import AskSession, AskTurn, AskTurnCitation
+from backend.models.change import ChangeSet
 from backend.models.context import ContextPageVersion
 from backend.models.mcp_chat import (
     AUTHORING_VERBS,
@@ -449,12 +450,25 @@ class McpChatActivitySource:
         chat_ids: list[UUID],
         seed_ids: Sequence[UUID],
     ) -> dict[UUID, tuple[UUID, ...]]:
-        """Seed versions a chat's writes produced, by the write's change set.
+        """Seed versions a chat's writes produced, by the provenance each kept.
 
-        A write call records the change set it opened; the version it saved
-        carries the same change set. ChangeSet.origin_chat_session_id is not
-        used: most edit change sets leave it empty.
+        Write paths record it differently, so three exact keys are read, each
+        in one statement for the whole batch:
+        - the receipt a successful create/update/patch/submit call keeps
+          (result_detail.version_id), which names the version even when the
+          version has no change set (a page created and submitted directly);
+        - the call's change set equal to the version's change set (traces that
+          predate receipts);
+        - the version's own change set stamped with the chat as its origin,
+          the only record a revision (submit_revision_for_review) keeps.
+        A submit's own change set is never a version's change set, so its
+        origin stamp cannot credit a version to the wrong chat.
         """
+
+        from backend.services.mcp_chat_service import (
+            PRESENTATION_ELIGIBLE_STATUSES,
+            VERSION_RECEIPT_TOOLS,
+        )
 
         artifact = McpChatToolCallArtifact
         writes = select_projection_in_workspace(
@@ -472,16 +486,21 @@ class McpChatActivitySource:
                 artifact.verb.in_(tuple(str(verb) for verb in AUTHORING_VERBS)),
             ),
         ).cte("chat_seed_writes")
-        change_sets = select_projection_in_workspace(
+        calls = select_projection_in_workspace(
             MCPToolCall,
             workspace_id=workspace_id,
-            columns=(MCPToolCall.id, MCPToolCall.change_set_id),
+            columns=(
+                MCPToolCall.id,
+                MCPToolCall.tool_name,
+                MCPToolCall.change_set_id,
+                MCPToolCall.result_detail,
+            ),
             predicates=(
                 MCPToolCall.id.in_(select(writes.c.mcp_tool_call_id)),
-                MCPToolCall.change_set_id.is_not(None),
+                MCPToolCall.result_status.in_(tuple(PRESENTATION_ELIGIBLE_STATUSES)),
             ),
-        ).cte("chat_write_change_sets")
-        produced = select_projection_in_workspace(
+        ).cte("chat_seed_write_calls")
+        seed_versions = select_projection_in_workspace(
             ContextPageVersion,
             workspace_id=workspace_id,
             columns=(
@@ -489,27 +508,55 @@ class McpChatActivitySource:
                 ContextPageVersion.page_id,
                 ContextPageVersion.change_set_id,
             ),
-            predicates=(
-                ContextPageVersion.page_id.in_(seed_ids),
-                ContextPageVersion.change_set_id.in_(
-                    select(change_sets.c.change_set_id)
-                ),
-            ),
-        ).cte("chat_produced_versions")
-        rows = session.execute(
-            select(writes.c.chat_session_id, produced.c.id)
+            predicates=(ContextPageVersion.page_id.in_(seed_ids),),
+        ).cte("chat_seed_versions")
+
+        pairs: set[tuple[UUID, UUID]] = set()
+        seed_version_ids = {
+            row.id: row.page_id
+            for row in session.execute(
+                select(seed_versions.c.id, seed_versions.c.page_id)
+            )
+        }
+        for chat_id, page_id, raw_version_id in session.execute(
+            select(
+                writes.c.chat_session_id,
+                writes.c.resource_id,
+                calls.c.result_detail["version_id"].as_string(),
+            )
             .select_from(writes)
-            .join(change_sets, change_sets.c.id == writes.c.mcp_tool_call_id)
+            .join(calls, calls.c.id == writes.c.mcp_tool_call_id)
+            .where(calls.c.tool_name.in_(tuple(VERSION_RECEIPT_TOOLS)))
+        ):
+            version_id = _uuid_or_none(raw_version_id)
+            if version_id is not None and seed_version_ids.get(version_id) == page_id:
+                pairs.add((chat_id, version_id))
+        for chat_id, version_id in session.execute(
+            select(writes.c.chat_session_id, seed_versions.c.id)
+            .select_from(writes)
+            .join(calls, calls.c.id == writes.c.mcp_tool_call_id)
             .join(
-                produced,
+                seed_versions,
                 and_(
-                    produced.c.change_set_id == change_sets.c.change_set_id,
-                    produced.c.page_id == writes.c.resource_id,
+                    seed_versions.c.change_set_id == calls.c.change_set_id,
+                    seed_versions.c.page_id == writes.c.resource_id,
                 ),
             )
-            .distinct()
-            .order_by(writes.c.chat_session_id, produced.c.id)
-        ).all()
+        ):
+            pairs.add((chat_id, version_id))
+        origins = select_projection_in_workspace(
+            ChangeSet,
+            workspace_id=workspace_id,
+            columns=(ChangeSet.id, ChangeSet.origin_chat_session_id),
+            predicates=(ChangeSet.origin_chat_session_id.in_(chat_ids),),
+        ).cte("chat_origin_change_sets")
+        for chat_id, version_id in session.execute(
+            select(origins.c.origin_chat_session_id, seed_versions.c.id).join(
+                seed_versions, seed_versions.c.change_set_id == origins.c.id
+            )
+        ):
+            pairs.add((chat_id, version_id))
+        rows = sorted(pairs, key=lambda pair: (str(pair[0]), str(pair[1])))
         versions: dict[UUID, list[UUID]] = defaultdict(list)
         for chat_id, version_id in rows:
             versions[chat_id].append(version_id)
@@ -658,6 +705,15 @@ class AskSessionActivitySource:
                 )
             )
         return SessionActivityBatch(sessions=tuple(sessions), groups=tuple(groups))
+
+
+def _uuid_or_none(value: object) -> UUID | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return UUID(value)
+    except ValueError:
+        return None
 
 
 def _mcp_chats_visible(actor: ActorContext | None) -> bool:
