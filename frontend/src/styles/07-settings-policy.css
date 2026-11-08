@@ -3401,7 +3401,9 @@ button.history-card {
     align-self: center;
     justify-self: end;
     flex-direction: row;
-    margin: 8px 16px 8px auto;
+    gap: 6px;
+    margin: 8px 8px 8px auto;
+    max-width: calc(100% - 112px);
   }
 
   .context-screen > .feature-main {
@@ -4133,7 +4135,6 @@ button.history-card {
 }
 
 @media (max-width: 640px) {
-  .context-screen .workspace-mobile-actions .fab-label,
   .context-screen .workspace-mobile-inspector-toggle span {
     display: none;
   }
@@ -4691,4 +4692,11 @@ button.history-card {
   .lint-dirty-summary {
     flex-basis: 100%;
   }
+}
+
+@media (max-width: 1024px) {
+  .context-create-desktop {
+    display: none;
+  }
+
 }

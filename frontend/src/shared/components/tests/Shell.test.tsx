@@ -140,8 +140,10 @@ describe("Shell", () => {
       screen.queryByRole("menuitem", { name: "New Ask session" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("menuitem", { name: "New folder" }),
-    ).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/context/folders/new");
+      screen.getByRole("menuitem", { name: "New Library item" }),
+    ).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/library/items/new");
+    expect(screen.queryByRole("menuitem", { name: "New folder" })).toBeNull();
+    expect(screen.getByRole("separator")).toBeInTheDocument();
     expect(
       screen.getByRole("menuitem", { name: "Open Setup" }),
     ).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/setup");

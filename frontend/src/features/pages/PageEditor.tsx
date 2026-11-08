@@ -126,6 +126,8 @@ import { EmojiPicker } from "../../shared/components/EmojiPicker";
 import { FormField, joinIds } from "../../shared/components/FormField";
 import { KeyboardShortcutsModal } from "../../shared/components/KeyboardShortcutsModal";
 import { MobileDrawer } from "../../shared/components/MobileDrawer";
+import { PanelVisibilityIcon } from "../../shared/components/PanelVisibilityIcon";
+import { useWorkspaceRailState } from "../../shared/components/useWorkspaceRailState";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { TreePickerDropdown } from "../../shared/components/TreePickerDropdown";
 import { TreeRail } from "../../shared/components/TreeRail";
@@ -539,6 +541,7 @@ export function PageEditor({
   );
   const [focusMode, setFocusMode] = useState(false);
   const [contextRailOpen, setContextRailOpen] = useState(false);
+  const contextRail = useWorkspaceRailState("context");
   const [mediaContentUrls, setMediaContentUrls] = useState<Record<string, string>>({});
   const [imageUploadEntries, setImageUploadEntries] =
     useState<ContextImageUploadEntry[]>([]);
@@ -4731,6 +4734,8 @@ export function PageEditor({
   });
 
   const contextRailLabel = t("editor.rail.context", { defaultValue: "Context" });
+  const contextExplorerLabel = t("editor.explorer", { defaultValue: "Explorer" });
+  const contextRailStyle = { "--workspace-left-w": `${contextRail.width}px` } as CSSProperties;
   const navigationRail = focusMode ? null : (
     <>
       <button
@@ -4740,11 +4745,15 @@ export function PageEditor({
           defaultValue: "Open Context explorer",
         })}
         className="workspace-mobile-drawer-toggle icon-button text-button"
-        onClick={() => setContextRailOpen(true)}
+        onClick={() => {
+          contextRail.setOpen(true);
+          setContextRailOpen(true);
+        }}
         ref={contextRailToggleRef}
         type="button"
       >
-        <span>{contextRailLabel}</span>
+        <PanelVisibilityIcon side="left" action="show" size={16} />
+        <span>{contextExplorerLabel}</span>
       </button>
       {contextRailDrawerViewport && contextRailOpen ? (
         <button
@@ -4756,7 +4765,7 @@ export function PageEditor({
           type="button"
         />
       ) : null}
-      <MobileDrawer
+      {contextRail.open || contextRailDrawerViewport ? <MobileDrawer
         id="page-editor-context-rail"
         label={contextRailLabel}
         mobileLayout={contextRailDrawerViewport}
@@ -4790,6 +4799,12 @@ export function PageEditor({
             forceActivePathExpanded={false}
             emptyLabel={t("editor.rail.contextEmpty", { defaultValue: "No Context tree nodes" })}
             hideSystemRootNodes
+            expandWidthAtMax={contextRail.expandWidthAtMax}
+            expandWidthLabel={contextRail.expandWidthAtMax
+              ? t("shell:panel.resetWidth", { defaultValue: "Reset Explorer width", label: contextExplorerLabel })
+              : t("shell:panel.widen", { defaultValue: "Widen Explorer", label: contextExplorerLabel })}
+            onExpandWidth={contextRailDrawerViewport ? undefined : contextRail.expandWidth}
+            onClose={contextRailDrawerViewport ? undefined : () => contextRail.setOpen(false)}
             onExpandedNodeIdsChange={setContextExpandedNodeIds}
             onRefresh={refreshContextTree}
             onSelectTarget={(node) => {
@@ -4800,7 +4815,17 @@ export function PageEditor({
             }}
           />
         </div>
-      </MobileDrawer>
+      </MobileDrawer> : (
+        <button
+          aria-label={t("shell:panel.show", { defaultValue: "Show Explorer", label: contextExplorerLabel })}
+          className="workspace-panel-restore workspace-panel-restore-left"
+          onClick={() => contextRail.setOpen(true)}
+          type="button"
+        >
+          <PanelVisibilityIcon side="left" action="show" size={16} />
+          <span>{contextExplorerLabel}</span>
+        </button>
+      )}
     </>
   );
 
@@ -4809,6 +4834,7 @@ export function PageEditor({
       <div
         className={`page-workspace ${focusMode ? "focus-mode" : ""}`}
         data-focus-mode={focusMode ? "on" : "off"}
+        style={contextRailStyle}
       >
         {navigationRail}
         <section className="editor-panel">
@@ -4846,6 +4872,7 @@ export function PageEditor({
       <div
         className={`page-workspace ${focusMode ? "focus-mode" : ""}`}
         data-focus-mode={focusMode ? "on" : "off"}
+        style={contextRailStyle}
       >
         {navigationRail}
         <section className="editor-panel">
@@ -4909,6 +4936,7 @@ export function PageEditor({
       <div
         className={`page-workspace ${focusMode ? "focus-mode" : ""}`}
         data-focus-mode={focusMode ? "on" : "off"}
+        style={contextRailStyle}
       >
         {navigationRail}
         <section className="editor-panel">
@@ -4953,6 +4981,7 @@ export function PageEditor({
     <div
       className={`page-workspace ${focusMode ? "focus-mode" : ""}`}
       data-focus-mode={focusMode ? "on" : "off"}
+      style={contextRailStyle}
       data-save-state={saveState}
     >
       {navigationRail}

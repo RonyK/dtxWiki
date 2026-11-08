@@ -1169,16 +1169,6 @@ export function LibraryScreen() {
         )
       : null;
 
-  function openCreate(itemType: NewItemType, parentNodeId: string | null) {
-    if (itemType === "upload" && !canCreateLibraryFolder) {
-      pickFiles(parentNodeId);
-      return;
-    }
-    const segment = itemType === "folder" ? "folders" : "items";
-    const query = parentNodeId ? `?parent=${encodeURIComponent(parentNodeId)}` : "";
-    navigate(`${workspacePath(routeWorkspaceId, `library/${segment}/new`)}${query}`);
-  }
-
   function pickFiles(parentNodeId: string | null = null) {
     uploadParentNodeIdRef.current = parentNodeId;
     fileInputRef.current?.click();
@@ -1210,26 +1200,12 @@ export function LibraryScreen() {
             hideSystemRootNodes
             expandWidthLabel={expandWidthLabel}
             expandWidthAtMax={expandWidthAtMax}
-            canCreateFolder={canCreateLibraryFolder}
-            canCreatePage={false}
-            canUpload={canUpload}
-            onCreateItem={
-              canEdit
-                ? ({ itemType, parentNodeId }) => {
-                    // The dialog earns its step only when it has a choice to
-                    // offer. With folder creation disabled by policy, upload is
-                    // the only type left and NewItemDialog would render no
-                    // segmented control -- so go straight to the file picker
-                    // and keep uploading a one-click action, as it was before
-                    // the rail's "+" learned to offer folders.
-                    if (!canCreateLibraryFolder) {
-                      pickFiles(parentNodeId);
-                      return;
-                    }
-                openCreate(itemType, parentNodeId);
-                  }
-                : undefined
-            }
+            creation={canEdit ? {
+              folder: canCreateLibraryFolder ? createFolder : undefined,
+              upload: canUpload ? uploadFiles : undefined,
+              uploadAccept,
+              typeOrder: LIBRARY_NEW_ITEM_TYPE_ORDER,
+            } : undefined}
             onCopyNodeLink={copyTreeNodeLink}
             onDeleteNode={canEdit ? setDeleteNode : undefined}
             onDropNode={canEdit ? moveTreeNodeByDrop : undefined}

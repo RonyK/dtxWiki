@@ -5,7 +5,6 @@ import {
   CheckCircle2,
   Command,
   FileText,
-  FolderPlus,
   Inbox,
   LayoutDashboard,
   Library,
@@ -118,7 +117,7 @@ type ShellLabels = {
   create: string;
   createTitle: string;
   newContextPage: string;
-  newFolder: string;
+  newLibrary: string;
   addLibraryItem: string;
   sidebarAria: string;
   sidebarCollapse: string;
@@ -328,7 +327,7 @@ function shellLabelsFromT(t: TFunction<"shell">): ShellLabels {
     newContextPage: t("create.newContextPage", {
       defaultValue: "New Context page",
     }),
-    newFolder: t("create.newFolder", { defaultValue: "New folder" }),
+    newLibrary: t("create.newLibrary", { defaultValue: "New Library item" }),
     addLibraryItem: t("create.addLibraryItem", {
       defaultValue: "Add first Library item",
     }),
@@ -1453,11 +1452,12 @@ function CreateMenu({ labels }: { labels: ShellLabels }) {
             onClick={() => closeMenu()}
             role="menuitem"
             tabIndex={-1}
-            to={workspaceId ? workspacePath(workspaceId, "context/folders/new") : "/workspaces/find"}
+            to={workspaceId ? workspacePath(workspaceId, "library/items/new") : "/workspaces/find"}
           >
-            <FolderPlus size={15} aria-hidden="true" />
-            <span>{labels.newFolder}</span>
+            <Library size={15} aria-hidden="true" />
+            <span>{labels.newLibrary}</span>
           </Link>
+          <div className="create-menu-separator" role="separator" />
           <Link
             className="create-menu-item"
             onClick={() => closeMenu()}

@@ -75,7 +75,8 @@
     "newContextPage": "New Context page",
     "newFolder": "New folder",
     "newAsk": "New Ask session",
-    "addLibraryItem": "Open Setup"
+    "addLibraryItem": "Open Setup",
+    "newLibrary": "New Library item"
   },
   "workspace": {
     "loading": "Loading",

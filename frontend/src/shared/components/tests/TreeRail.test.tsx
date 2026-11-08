@@ -319,73 +319,62 @@ describe("TreeRail", () => {
     ).toBeInTheDocument();
   });
 
-  it("exposes folder creation actions for root and parent nodes", async () => {
+  it("uses the same folder dialog for the header and a parent node", async () => {
     const onCreateFolder = vi.fn();
     const folder = treeNode({
-      id: "folder-node",
-      title: "Folder",
-      node_kind: "folder",
-      can_have_children: true,
-      children_count: 0,
+      id: "folder-node", title: "Folder", node_kind: "folder",
+      can_have_children: true, children_count: 0,
+    });
+    render(<TreeRail title="Context" creation={{ folder: onCreateFolder }} nodes={[folder]} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Create Context item" }));
+    let dialog = screen.getByRole("dialog");
+    await userEvent.type(within(dialog).getByLabelText("Folder name"), "Root folder");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create folder" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(onCreateFolder).toHaveBeenNthCalledWith(1, {
+      parentNodeId: null, title: "Root folder", slug: undefined,
     });
 
-    render(
-      <TreeRail
-        title="Context"
-        activeTargetId={null}
-        canCreateFolder
-        onCreateFolder={onCreateFolder}
-        nodes={[folder]}
-      />,
-    );
-
-    await userEvent.click(
-      screen.getByRole("button", { name: "Create Context folder" }),
-    );
-    await userEvent.click(
-      screen.getByRole("button", { name: "Create folder under Folder" }),
-    );
-
-    expect(onCreateFolder).toHaveBeenNthCalledWith(1, null);
-    expect(onCreateFolder).toHaveBeenNthCalledWith(2, "folder-node");
+    expect(screen.queryByRole("button", { name: "Create folder under Folder" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Open actions for Folder" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "New folder" }));
+    dialog = screen.getByRole("dialog");
+    await userEvent.type(within(dialog).getByLabelText("Folder name"), "Nested folder");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create folder" }));
+    await waitFor(() => expect(onCreateFolder).toHaveBeenCalledTimes(2));
+    expect(onCreateFolder).toHaveBeenNthCalledWith(2, {
+      parentNodeId: "folder-node", title: "Nested folder", slug: undefined,
+    });
   });
 
-  it("exposes item creation actions for root and parent nodes", async () => {
-    const onCreateItem = vi.fn();
+  it("opens and cancels the common dialog, then creates a page under its parent", async () => {
+    const onCreatePage = vi.fn();
+    const onCreateFolder = vi.fn();
     const folder = treeNode({
-      id: "folder-node",
-      title: "Folder",
-      node_kind: "folder",
-      can_have_children: true,
-      children_count: 0,
+      id: "folder-node", title: "Folder", node_kind: "folder",
+      can_have_children: true, children_count: 0,
     });
+    render(<TreeRail title="Context" creation={{ page: onCreatePage, folder: onCreateFolder }} nodes={[folder]} />);
 
-    render(
-      <TreeRail
-        title="Context"
-        activeTargetId={null}
-        canCreateFolder
-        canCreatePage
-        onCreateItem={onCreateItem}
-        nodes={[folder]}
-      />,
-    );
+    await userEvent.click(screen.getByRole("button", { name: "Create Context item" }));
+    const rootDialog = screen.getByRole("dialog");
+    expect(within(rootDialog).getByRole("radio", { name: "Page" })).toBeChecked();
+    await userEvent.click(within(rootDialog).getByRole("button", { name: "Cancel" }));
+    expect(onCreatePage).not.toHaveBeenCalled();
+    expect(onCreateFolder).not.toHaveBeenCalled();
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Create Context item" }),
-    );
-    await userEvent.click(
-      screen.getByRole("button", { name: "Create item under Folder" }),
-    );
-
-    expect(onCreateItem).toHaveBeenNthCalledWith(1, {
-      itemType: "page",
-      parentNodeId: null,
+    expect(screen.queryByRole("button", { name: "Create item under Folder" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Open actions for Folder" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "New page" }));
+    const dialog = screen.getByRole("dialog");
+    await userEvent.type(within(dialog).getByLabelText("Page title"), "Nested page");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Open editor" }));
+    await waitFor(() => expect(onCreatePage).toHaveBeenCalledTimes(1));
+    expect(onCreatePage).toHaveBeenCalledWith({
+      parentNodeId: "folder-node", title: "Nested page", slug: undefined,
     });
-    expect(onCreateItem).toHaveBeenNthCalledWith(2, {
-      itemType: "page",
-      parentNodeId: "folder-node",
-    });
+    expect(onCreateFolder).not.toHaveBeenCalled();
   });
 
   it("exposes refresh as a direct header button when reload is available", async () => {
@@ -416,9 +405,8 @@ describe("TreeRail", () => {
       <TreeRail
         title="Context"
         activeTargetId={null}
-        canCreateFolder
+        creation={{ folder: () => undefined }}
         onClose={() => undefined}
-        onCreateFolder={() => undefined}
         onExpandWidth={() => undefined}
         onRefresh={() => undefined}
         nodes={[treeNode({ title: "Context root" })]}
@@ -434,7 +422,7 @@ describe("TreeRail", () => {
         .getAllByRole("button")
         .map((button) => button.getAttribute("aria-label")),
     ).toEqual([
-      "Create Context folder",
+      "Create Context item",
       "Refresh Context tree",
       "Widen Context explorer",
       "Hide Context explorer",
@@ -592,8 +580,6 @@ describe("TreeRail", () => {
       <TreeRail
         title="Context"
         activeTargetId={null}
-        canCreateFolder
-        canCreatePage
         onCopyNodeLink={onCopyNodeLink}
         onDeleteNode={onDeleteNode}
         onMoveNode={onMoveNode}
@@ -1113,30 +1099,23 @@ describe("TreeRail", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("hides folder creation actions when the section policy disables them", () => {
-    render(
-      <TreeRail
-        title="Library"
-        activeTargetId={null}
-        canCreateFolder={false}
-        onCreateFolder={() => undefined}
-        nodes={[
-          treeNode({
-            id: "folder-node",
-            title: "Folder",
-            node_kind: "folder",
-            can_have_children: true,
-          }),
-        ]}
-      />,
-    );
+  it("closes creation when policy disables it and keeps the dismissed draft closed", async () => {
+    const nodes = [treeNode({
+      id: "folder-node", title: "Folder", node_kind: "folder", can_have_children: true,
+    })];
+    const creation = { folder: vi.fn() };
+    const { rerender } = render(<TreeRail title="Library" creation={creation} nodes={nodes} />);
+    await userEvent.click(screen.getByRole("button", { name: "Create Library item" }));
+    expect(screen.getByRole("dialog")).toBeVisible();
 
-    expect(
-      screen.queryByRole("button", { name: "Create Library folder" }),
-    ).toBeNull();
-    expect(
-      screen.queryByRole("button", { name: "Create folder under Folder" }),
-    ).toBeNull();
+    rerender(<TreeRail title="Library" nodes={nodes} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create Library item" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create folder under Folder" })).toBeNull();
+
+    rerender(<TreeRail title="Library" creation={creation} nodes={nodes} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(creation.folder).not.toHaveBeenCalled();
   });
 
   it("expands unselected folders directly from the chevron", async () => {

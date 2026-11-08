@@ -1198,11 +1198,20 @@ describe("AgentScreen", () => {
       </MemoryRouter>,
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: "Create item under Persona" }));
-    // F-11: an Agent page opens the dedicated "New Agent page" editor directly,
-    // not the generic item dialog.
+    await userEvent.click(await screen.findByRole("button", { name: "Create Agent item" }));
+    const newItemDialog = screen.getByRole("dialog", { name: "New page" });
+    await userEvent.type(within(newItemDialog).getByLabelText("Page title"), "Header draft");
+    await userEvent.click(within(newItemDialog).getByRole("button", { name: "Open editor" }));
+    const headerEditor = await screen.findByRole("dialog", { name: "Create Agent draft" });
+    expect(within(headerEditor).getByLabelText("Title")).toHaveValue("Header draft");
+    await userEvent.click(within(headerEditor).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Open actions for Persona" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "New page" }));
+    const nestedItemDialog = screen.getByRole("dialog", { name: "New page" });
+    await userEvent.type(within(nestedItemDialog).getByLabelText("Page title"), "Nested Persona");
+    await userEvent.click(within(nestedItemDialog).getByRole("button", { name: "Open editor" }));
     const dialog = await screen.findByRole("dialog", { name: "Create Agent draft" });
-    await userEvent.type(within(dialog).getByLabelText("Title"), "Nested Persona");
+    expect(within(dialog).getByLabelText("Title")).toHaveValue("Nested Persona");
     await userEvent.click(within(dialog).getByRole("button", { name: "Create draft" }));
 
     await screen.findByRole("heading", { name: "Nested Persona" });
@@ -1650,7 +1659,7 @@ describe("AgentScreen", () => {
     const deleteDialog = await screen.findByRole("dialog", { name: "Delete Research Unit" });
     await userEvent.click(within(deleteDialog).getByRole("button", { name: "Delete" }));
 
-    await screen.findByRole("button", { name: "Create item under Persona" });
+    await screen.findByRole("button", { name: "Open actions for Persona" });
     expect(fetchMock.mock.calls.some(
       (call) =>
         call[0] === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5` &&

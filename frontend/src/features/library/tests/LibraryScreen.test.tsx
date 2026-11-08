@@ -3669,12 +3669,7 @@ describe("LibraryScreen", () => {
     });
   });
 
-  it("keeps upload one click, and the row + working, when folders are off", async () => {
-    // Two failures share this branch. The dialog would show no choice at all
-    // with folder creation disabled, so routing through it would add a step to
-    // a one-click upload -- and the per-row "+" emits "folder" regardless of
-    // canUpload, which used to open a dialog with zero available types: it
-    // rendered nothing, had no close button, and the click was simply lost.
+  it("opens the header upload dialog without row add buttons when folders are off", async () => {
     mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
@@ -3691,20 +3686,12 @@ describe("LibraryScreen", () => {
       </MemoryRouter>,
     );
 
-    const picked = vi.fn();
-    const trigger = await screen.findByRole("button", {
-      name: "Create Library item",
-    });
-    screen.getByLabelText("Upload Library file").addEventListener("click", picked);
-
-    await userEvent.click(trigger);
-    expect(picked).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("dialog")).toBeNull();
-
-    await userEvent.click(
-      screen.getByRole("button", { name: "Create item under References" }),
-    );
-    expect(picked).toHaveBeenCalledTimes(2);
+    await userEvent.click(await screen.findByRole("button", { name: "Create Library item" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByLabelText("Upload file")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("radiogroup")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create item under References" })).toBeNull();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

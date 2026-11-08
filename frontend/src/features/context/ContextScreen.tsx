@@ -133,7 +133,6 @@ import { HistoryGraphList } from "../../shared/components/HistoryGraphList";
 import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
 import { WorkspaceFirstUseChecklist } from "../../shared/components/FirstUseChecklist";
 import { NewItemDialog } from "../../shared/components/NewItemDialog";
-import type { NewItemType } from "../../shared/components/NewItemDialog";
 import { ReaderTabs } from "../../shared/components/ReaderTabs";
 import { RecentItemsList } from "../../shared/components/RecentItemsList";
 import { RouteLoading } from "../../shared/components/RouteLoading";
@@ -1218,7 +1217,7 @@ function ScopedContextScreen() {
   const routeFolderParentValid = !routeFolderParentId || Boolean(
     routeFolderParent?.section === "context" && routeFolderParent.can_have_children,
   );
-  const activeNewItemDialog = folderCreateRoute && canEdit && routeFolderParentValid;
+  const activeNewItemDialog = canEdit && folderCreateRoute && routeFolderParentValid;
   // F-5: folder destinations the new-item dialog's location picker can target.
   const contextFolderNodes = state.tree.filter(
     (node) => node.can_have_children,
@@ -1226,16 +1225,12 @@ function ScopedContextScreen() {
   const newItemParentNodeId = selectedNode?.can_have_children
     ? selectedNode.id
     : (selectedNode?.parent_id ?? null);
-  function openNewItem(itemType: NewItemType, parentNodeId: string | null) {
-    if (itemType === "page") {
-      navigate(contextNewHref(workspaceId, parentNodeId));
-      return;
-    }
-    const parentQuery = parentNodeId
-      ? `?parent=${encodeURIComponent(parentNodeId)}`
-      : "";
-    navigate(`${workspacePath(workspaceId, "context/folders/new")}${parentQuery}`);
-  }
+  const newPageAction = canEdit ? (
+    <Link className="icon-button primary" to={contextNewHref(workspaceId, newItemParentNodeId)}>
+      <Plus size={16} aria-hidden="true" />
+      <span>{t("header.newPage", { defaultValue: "New Context page" })}</span>
+    </Link>
+  ) : null;
   const moveTargetNodes = moveNode
     ? selectableMoveTargets(state.tree, moveNode)
     : [];
@@ -1249,20 +1244,7 @@ function ScopedContextScreen() {
         inspectorLabel={t("layout.details", { defaultValue: "Details" })}
         layoutKey="context"
         leftLabel={t("layout.explorer", { defaultValue: "Explorer" })}
-        mobileAction={
-          canEdit
-            ? {
-                ariaLabel: t("actions.createItem", {
-                  defaultValue: "Create Context item",
-                }),
-                label: t("actions.new", { defaultValue: "New" }),
-                onClick: () => openNewItem("page", newItemParentNodeId),
-                title: t("actions.createItem", {
-                  defaultValue: "Create Context item",
-                }),
-              }
-            : undefined
-        }
+        mobileAction={newPageAction}
         variant="context"
         left={({
           expandWidthLabel,
@@ -1285,17 +1267,10 @@ function ScopedContextScreen() {
             hideSystemRootNodes
             expandWidthLabel={expandWidthLabel}
             expandWidthAtMax={expandWidthAtMax}
-            canCreateFolder={
-              canEdit && contextPolicy?.allow_user_folder_create === true
-            }
-            canCreatePage={canEdit}
-            onCreateItem={
-              canEdit
-                ? ({ itemType, parentNodeId }) => {
-                    openNewItem(itemType, parentNodeId);
-                  }
-                : undefined
-            }
+            creation={canEdit ? {
+              page: createPage,
+              folder: contextPolicy?.allow_user_folder_create === true ? createFolder : undefined,
+            } : undefined}
             onCopyNodeLink={(node) => {
               void copyTreeNodeLink(node).then(setTreeCopyFeedback);
             }}
@@ -1343,19 +1318,9 @@ function ScopedContextScreen() {
                     })}
                   </p>
                 </div>
-                {/* Library and Agent both put their primary create action in this
-                slot; without it the only way to start a page from the list is
-                the tree rail's small +. Editors only — viewers cannot create. */}
-                {canEdit ? (
-                  <div className="feature-header-actions">
-                    <Link className="icon-button primary" to={contextNewHref(workspaceId, newItemParentNodeId)}>
-                      <Plus size={16} aria-hidden="true" />
-                      <span>
-                        {t("header.newPage", {
-                          defaultValue: "New Context page",
-                        })}
-                      </span>
-                    </Link>
+                {newPageAction ? (
+                  <div className="feature-header-actions context-create-desktop">
+                    {newPageAction}
                   </div>
                 ) : null}
               </div>

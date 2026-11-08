@@ -95,6 +95,7 @@ import {
   type VersionPair,
 } from "../../shared/lib/historyVersionPair";
 import { agentHistoryNodes } from "./agentHistory";
+import { FAB } from "../../shared/components/FAB";
 import { NewItemDialog } from "../../shared/components/NewItemDialog";
 import { ReaderTabs } from "../../shared/components/ReaderTabs";
 import { RouteLoading } from "../../shared/components/RouteLoading";
@@ -1080,8 +1081,9 @@ export function AgentScreen() {
       : href;
   }
 
-  function openCreateAgentPage(category: string, parentNodeId?: string | null) {
+  function openCreateAgentPage(category: string, parentNodeId?: string | null, title?: string) {
     const params = new URLSearchParams({ category });
+    if (title) params.set("title", title);
     if (parentNodeId) {
       params.set("parent", parentNodeId);
     }
@@ -1322,18 +1324,13 @@ export function AgentScreen() {
         layoutKey="agent"
         leftLabel={t("layout.explorer", { defaultValue: "Explorer" })}
         mobileAction={
-          canEdit && agentPolicy?.allow_user_folder_create === true
-            ? {
-                ariaLabel: t("layout.createFolder", {
-                  defaultValue: "Create Agent folder",
-                }),
-                label: t("layout.newFolder", { defaultValue: "New folder" }),
-                onClick: () => openFolderDialog(newItemParentNodeId),
-                title: t("layout.createFolder", {
-                  defaultValue: "Create Agent folder",
-                }),
-              }
-            : undefined
+          canEdit && agentPolicy?.allow_user_folder_create === true ? (
+            <FAB
+              ariaLabel={t("layout.createFolder", { defaultValue: "Create Agent folder" })}
+              label={t("layout.newFolder", { defaultValue: "New folder" })}
+              onClick={() => openFolderDialog(newItemParentNodeId)}
+            />
+          ) : null
         }
         left={({
           expandWidthLabel,
@@ -1356,31 +1353,13 @@ export function AgentScreen() {
             hideSystemRootNodes
             expandWidthLabel={expandWidthLabel}
             expandWidthAtMax={expandWidthAtMax}
-            canCreateFolder={
-              canEdit && agentPolicy?.allow_user_folder_create === true
-            }
-            canCreatePage={canEdit}
-            onCreateItem={
-              canEdit
-                ? ({ itemType, parentNodeId }) => {
-                    // F-11: an Agent page opens the dedicated "New Agent page"
-                    // editor directly; the rail dialog is folder-only.
-                    if (itemType === "page" && state) {
-                      const parentNode = parentNodeId
-                        ? (state.tree.find(
-                            (node) => node.id === parentNodeId,
-                          ) ?? null)
-                        : null;
-                      openCreateAgentPage(
-                        categoryForTreeParent(parentNode, state.pages),
-                        parentNodeId,
-                      );
-                      return;
-                    }
-                    openFolderDialog(parentNodeId);
-                  }
-                : undefined
-            }
+            creation={canEdit ? {
+              page: (input) => {
+                const parent = state.tree.find((node) => node.id === input.parentNodeId);
+                openCreateAgentPage(categoryForTreeParent(parent ?? null, state.pages), input.parentNodeId, input.title);
+              },
+              folder: agentPolicy?.allow_user_folder_create === true ? createFolder : undefined,
+            } : undefined}
             onCopyNodeLink={copyTreeNodeLink}
             onDeleteNode={canEdit ? setDeleteNode : undefined}
             onDropNode={canEdit ? moveTreeNodeByDrop : undefined}
@@ -1611,17 +1590,11 @@ export function AgentScreen() {
           parentNodes={agentFolderNodes}
           rootLabel={t("title", { defaultValue: "Agent" })}
           onClose={(reason) => {
-            if (reason === "cancel") {
+            if (reason === "cancel" && activeFolderDialog) {
               navigate(workspacePath(routeWorkspaceId, "agent"), { replace: true });
             }
           }}
-          onSubmit={(input) =>
-            createFolder({
-              parentNodeId: input.parentNodeId,
-              slug: input.slug,
-              title: input.title,
-            })
-          }
+          onSubmit={(input) => createFolder(input)}
         />
       ) : null}
       {renameNode ? (
@@ -1662,6 +1635,7 @@ export function AgentScreen() {
           categories={state.categories}
           defaultCategory={creationCategory}
           mode="create"
+          initialTitle={searchParams.get("title") ?? ""}
           parentNodeId={creationParentNodeId}
           onClose={closeCreateAgentPage}
           onSubmit={createAgentPage}
@@ -1841,6 +1815,7 @@ function AgentCreationModal({
   categories,
   defaultCategory,
   initialPage,
+  initialTitle = "",
   mode = "create",
   parentNodeId,
   onClose,
@@ -1849,6 +1824,7 @@ function AgentCreationModal({
   categories: AgentCategoryEntry[];
   defaultCategory: string;
   initialPage?: AgentPageDetail | null;
+  initialTitle?: string;
   mode?: "create" | "edit";
   parentNodeId?: string | null;
   onClose: () => void;
@@ -1859,7 +1835,7 @@ function AgentCreationModal({
   const [category, setCategory] = useState(
     initialPage?.category ?? defaultCategory,
   );
-  const [title, setTitle] = useState(initialPage?.title ?? "");
+  const [title, setTitle] = useState(initialPage?.title ?? initialTitle);
   const [customSlug, setCustomSlug] = useState(initialPage?.slug ?? "");
   const [showAdvanced, setShowAdvanced] = useState(false);
   // F-10: a NEW agent page whose category has a bundled template defaults to it

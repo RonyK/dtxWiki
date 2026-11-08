@@ -75,7 +75,8 @@
     "newContextPage": "새 컨텍스트 페이지",
     "newFolder": "새 폴더",
     "newAsk": "새 질문 세션",
-    "addLibraryItem": "Setup 열기"
+    "addLibraryItem": "Setup 열기",
+    "newLibrary": "새 라이브러리"
   },
   "workspace": {
     "loading": "로딩 중",
