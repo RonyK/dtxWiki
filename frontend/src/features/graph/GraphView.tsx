@@ -10,6 +10,7 @@ import { LOCAL_EDGE_VISUAL_KIND_ORDER, localEdgeKindsFor, localEdgeVisualKind } 
 import { decorateStaticDiagramSvg, graphSceneToMermaid, type StaticDiagramVisuals } from "./local/staticDiagram";
 import { GraphCameraControls, GraphPreviewBadge, GraphScopeSelector, GraphTypeSelector, eventInvolves } from "./local/LocalGraphChrome";
 import { LocalGraphTimeline, LocalTimelineMark } from "./local/LocalGraphTimeline";
+import { readCanvasRatio, storeCanvasRatio, type GraphCanvasRatio } from "./local/canvasRatio";
 import { timelinePresentation } from "./local/timelinePresentation";
 import { historySceneCatalog, renderHistoryScene } from "./local/historyScene";
 import { LocalGraphCoverageInfo } from "./local/LocalGraphCoverageInfo";
@@ -110,6 +111,7 @@ export function GraphView({
   const actionGenerationRef = useRef(0);
   const frameRef = useRef<HTMLDivElement>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [canvasRatio, setCanvasRatio] = useState<GraphCanvasRatio>(readCanvasRatio);
   const [showFuture, setShowFuture] = useState(false);
   const [hoveredEventId, setHoveredEventId] = useState<string | null>(null);
   const [dismissedCoverageKey, setDismissedCoverageKey] = useState<string | null>(null);
@@ -357,7 +359,7 @@ export function GraphView({
         event.preventDefault(); void document.exitFullscreen(); return;
       }
       const target = event.target instanceof Element ? event.target.closest("details[open]") : null;
-      if (target && target.matches(".graph-type-comparison,.graph-frame-filters,.graph-canvas-more,.graph-details-more,.graph-local-coverage-info")) {
+      if (target && target.matches(".graph-type-comparison,.graph-frame-filters,.graph-canvas-more,.graph-height-picker,.graph-details-more,.graph-local-coverage-info")) {
         target.removeAttribute("open"); target.querySelector("summary")?.focus();
         event.preventDefault(); event.stopPropagation(); return;
       }
@@ -376,7 +378,7 @@ export function GraphView({
     const closeOutside = (event: PointerEvent) => {
       if (!(event.target instanceof Node)) return;
       for (const details of Array.from(graphRegionRef.current?.querySelectorAll<HTMLDetailsElement>(
-        ".graph-type-comparison[open],.graph-frame-filters[open],.graph-canvas-more[open],.graph-details-more[open]",
+        ".graph-type-comparison[open],.graph-frame-filters[open],.graph-canvas-more[open],.graph-height-picker[open],.graph-details-more[open]",
       ) ?? [])) if (!details.contains(event.target)) details.open = false;
     };
     document.addEventListener("pointerdown", closeOutside);
@@ -902,7 +904,7 @@ export function GraphView({
       </details>
 
         </div>
-      <div className={`graph-local-stage ${busyAction ? "is-loading" : ""} ${listOpen ? "is-list-view" : ""}`} aria-busy={!!busyAction} ref={stageRef}>
+      <div className={`graph-local-stage ${busyAction ? "is-loading" : ""} ${listOpen ? "is-list-view" : ""}`} data-height-ratio={canvasRatio} aria-busy={!!busyAction} ref={stageRef}>
         {!listOpen ? loadingView : null}
         {!listOpen && !busyAction && !historical && scene.edges.length === 0 ? <div className="graph-canvas-empty" role="status">{emptyView}</div> : null}
         <div className="graph-canvas-context">
@@ -941,7 +943,8 @@ export function GraphView({
             notice={loadingView || coverageView ? <>{loadingView}{coverageView}</> : null} onBlur={clearItemFocus}
             onFocus={setFocusedId} onSelect={selectItem} scopeKey={canvasScopeKey} selectedId={effectiveSelectedId} />
         </div> : null}
-        <GraphCameraControls disabled={rendererStatus !== "ready"} onZoomIn={() => canvasRef.current?.zoomIn()} onZoomOut={() => canvasRef.current?.zoomOut()} onFit={() => canvasRef.current?.fit()} />
+        <GraphCameraControls disabled={rendererStatus !== "ready"} onZoomIn={() => canvasRef.current?.zoomIn()} onZoomOut={() => canvasRef.current?.zoomOut()} onFit={() => canvasRef.current?.fit()}
+          canvasRatio={canvasRatio} heightDisabled={fullscreen} onHeightChange={(ratio) => { setCanvasRatio(ratio); storeCanvasRatio(ratio); }} />
         {canvasScene.nodes.length ? (
           <GraphCanvas
           ref={canvasRef}
@@ -1370,7 +1373,7 @@ function GraphDetails({
         <button aria-label={clearLabel} className="graph-details-close" onClick={onClearSelection} type="button"><X size={17} aria-hidden="true" /></button>
       </div>
       <button className="graph-details-sheet-toggle" type="button" aria-expanded={sheetExpanded} onClick={() => setSheetExpanded((value) => !value)}>{t(sheetExpanded ? "graph.details.collapseSheet" : "graph.details.expandSheet")}</button>
-      <h5 className="graph-details-title">{node?.label ?? (edge ? localEdgeKindLabel(edge, t) : null)}</h5>
+      <h5 className="graph-details-title" title={node?.label ?? (edge ? localEdgeKindLabel(edge, t) : undefined)}>{node?.label ?? (edge ? localEdgeKindLabel(edge, t) : null)}</h5>
       {historicalOnly ? <p className="graph-history-inactive">{t("graph.historyUi.notPresent")}</p> : null}
       {node ? <LocalNodeMeta context={listContext} node={node} /> : null}
       {nodeActions?.reason ? <p className="graph-action-reason" id={actionReasonId}>{nodeActions.reason}</p> : null}

@@ -998,6 +998,7 @@ body[data-focus-mode="true"] .main-surface {
 }
 
 .graph-details {
+  --graph-details-padding: 12px;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-content: start;
@@ -1082,6 +1083,7 @@ body[data-focus-mode="true"] .main-surface {
     inset-inline: 0;
     width: auto;
     max-height: 45%;
+    --graph-details-padding: 8px;
     gap: 4px;
     padding: 8px;
   }
@@ -7419,11 +7421,15 @@ button.graph-seed-path-node:hover { background: var(--surface-hover); }
   .graph-list-bowtie-stroke[data-visual] { --edge-ink: CanvasText; forced-color-adjust: none; }
   .graph-status-actions .graph-view-switch button[aria-pressed="true"] { outline: 2px solid Highlight; }
 }
-.graph-details-title-row { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px; background: var(--surface); }
+.graph-details-title-row { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px; margin-inline: calc(-1 * var(--graph-details-padding)); padding: 4px 8px 4px var(--graph-details-padding); border-bottom: 1px solid var(--border); background: var(--surface); }
 .graph-details-title-row h4 { flex: 1; margin: 0; font-size: 13px; }
-.graph-details-title { margin: 0; font-size: 15px; }
+.graph-details-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; margin: 0; font-size: 15px; }
 .graph-details-close { display: grid; place-items: center; flex-shrink: 0; min-width: 36px; min-height: 36px; padding: 0; border: 0; background: transparent; color: var(--ink-muted); cursor: pointer; }
-.graph-frame .graph-details { padding-bottom: 0; }
+.graph-frame .graph-details { padding-top: 0; padding-bottom: 0; overflow-wrap: anywhere; }
+.graph-details > * { min-width: 0; }
+.graph-details :is(.graph-seed-path, .graph-seed-path ol, .graph-item-history li button) { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.graph-details .graph-seed-path-node { min-width: 0; max-width: 100%; }
+.graph-details .graph-seed-path-node > svg { flex-shrink: 0; }
 .graph-details-footer { position: sticky; bottom: 0; z-index: 4; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 12px -12px 0; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--surface); }
 .graph-details-footer .graph-details-open { display: inline-flex; justify-content: center; align-items: center; min-height: 36px; padding: 5px 10px; border-radius: 7px; background: var(--context); color: #fff; font-size: 12px; font-weight: 650; text-decoration: none; }
 .graph-details-footer .graph-details-context-actions { display: flex; }
@@ -7472,7 +7478,7 @@ button.graph-seed-path-node:hover { background: var(--surface-hover); }
 @container graph-view (max-width: 760px) {
   .graph-frame .graph-local-stage .graph-details { inset: auto 0 0; max-height: 45%; border-radius: 12px 12px 0 0; }
   .graph-frame .graph-local-stage .graph-details.is-sheet-expanded { max-height: min(88%, calc(100% - max(64px, var(--graph-stage-notice-bottom, 0px)))); }
-  .graph-details-sheet-toggle { position: sticky; top: 44px; z-index: 2; display: block; min-height: 44px; border: 0; padding: 0; text-align: left; background: var(--surface); color: var(--context); font: inherit; font-size: 12px; cursor: pointer; }
+  .graph-details-sheet-toggle { position: sticky; top: 53px; z-index: 2; display: block; min-height: 44px; border: 0; padding: 0; text-align: left; background: var(--surface); color: var(--context); font: inherit; font-size: 12px; cursor: pointer; }
 }
 /* A wide fullscreen frame keeps Details as a top-right panel; a narrow one
    uses the sheet above, like the page. */
@@ -7506,4 +7512,25 @@ button.graph-seed-path-node:hover { background: var(--surface-hover); }
 .graph-hover-chip[hidden] { display: none; }
 @media (forced-colors: active) {
   .graph-hover-chip { background: Canvas; color: CanvasText; border-color: CanvasText; }
+}
+
+/* Ratios apply only to the canvas; the timeline remains outside this stage. */
+.graph-local-stage[data-height-ratio="16:11"] { --graph-aspect-ratio: 16 / 11; }
+.graph-local-stage[data-height-ratio="16:9"] { --graph-aspect-ratio: 16 / 9; }
+.graph-local-stage[data-height-ratio="4:3"] { --graph-aspect-ratio: 4 / 3; }
+.graph-local-stage[data-height-ratio="1:1"] { --graph-aspect-ratio: 1; }
+.graph-view .graph-frame:not(:fullscreen) .graph-local-stage[data-height-ratio] .graph-canvas-frame {
+  height: auto;
+  min-height: 0;
+  aspect-ratio: var(--graph-aspect-ratio);
+}
+.graph-local-stage[data-height-ratio] .graph-canvas { min-height: 0; }
+.graph-height-picker { position: relative; border-left: 1px solid var(--border); }
+.graph-height-picker > summary { display: flex; align-items: center; gap: 5px; min-height: 36px; padding: 0 9px; color: var(--ink-muted); font-size: 11px; white-space: nowrap; cursor: pointer; }
+.graph-height-options { position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 8; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; width: 190px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 5px 20px #0002; }
+.graph-height-options p { grid-column: 1 / -1; margin: 0 0 4px; color: var(--ink-muted); font-size: 11px; }
+.graph-height-options button { min-height: 36px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; font-size: 12px; cursor: pointer; }
+.graph-height-options button[aria-pressed="true"] { border-color: var(--context); background: var(--surface-active); color: var(--context); }
+@container graph-view (max-width: 760px) {
+  .graph-height-picker > summary, .graph-height-options button { min-height: 44px; }
 }

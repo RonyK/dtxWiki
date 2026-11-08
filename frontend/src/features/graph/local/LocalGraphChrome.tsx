@@ -1,7 +1,8 @@
-import { Activity, History, Info, Network, Scan, ZoomIn, ZoomOut } from "lucide-react";
+import { Activity, History, Info, Network, Ratio, Scan, ZoomIn, ZoomOut } from "lucide-react";
 import { useId, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { GraphEdge, GraphHistoryMode, GraphRange, GraphTimelineEvent } from "../../../shared/api/graph";
+import { GRAPH_CANVAS_RATIOS, type GraphCanvasRatio } from "./canvasRatio";
 import { PreviewBadge } from "../../../shared/components/PreviewBadge";
 
 export function GraphPreviewBadge() {
@@ -88,7 +89,8 @@ export function GraphScopeSelector({ range, historical, busy, onChange }: {
   </div>;
 }
 
-export function GraphCameraControls({ onZoomIn, onZoomOut, onFit, disabled }: {
+export function GraphCameraControls({ onZoomIn, onZoomOut, onFit, disabled, canvasRatio, heightDisabled, onHeightChange }: {
+  canvasRatio: GraphCanvasRatio; heightDisabled: boolean; onHeightChange: (ratio: GraphCanvasRatio) => void;
   disabled: boolean;
   onZoomIn: () => void; onZoomOut: () => void; onFit: () => void;
 }) {
@@ -101,6 +103,21 @@ export function GraphCameraControls({ onZoomIn, onZoomOut, onFit, disabled }: {
         <ButtonIcon size={17} aria-hidden="true" />
       </button>;
     })}
+    {!heightDisabled ? <details className="graph-height-picker">
+      <summary title={t("graph.view.canvasHeight")}><Ratio size={16} aria-hidden="true" />
+        {t("graph.view.height")} · {canvasRatio}
+      </summary>
+      <div className="graph-height-options" role="group" aria-label={t("graph.view.canvasHeight")}>
+        <p>{t("graph.view.canvasAspectRatio")}</p>
+        {GRAPH_CANVAS_RATIOS.map((ratio) => <button key={ratio} type="button"
+          aria-pressed={canvasRatio === ratio} onClick={(event) => {
+            onHeightChange(ratio);
+            const picker = event.currentTarget.closest("details");
+            picker?.removeAttribute("open");
+            picker?.querySelector("summary")?.focus();
+          }}>{ratio}</button>)}
+      </div>
+    </details> : null}
   </div>;
 }
 
