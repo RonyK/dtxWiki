@@ -38,3 +38,15 @@ export const LOCAL_LAYOUT_PARAMS = {
   collidePadding: 2,
   dragAlphaTarget: 0.3,
 } as const;
+
+// A pin requested before its node entered the timeline frame waits for the
+// arrival motion to calm down, then fixes the node where it stands.
+export const LOCAL_ARRIVAL_PIN = {
+  minMs: 2_000,
+  maxMs: 5_000,
+  stillWindowMs: 250,
+  stillDistance: 1,
+  // A longer frame gap (hidden tab, long task) adds at most this much time and
+  // never counts as stillness; slow but steady frames still reach maxMs.
+  maxFrameGapMs: 250,
+} as const;

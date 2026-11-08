@@ -48,8 +48,13 @@ function semanticKey(node: GraphRenderNode): string | null {
   return `${node.entity_kind}:${node.entity_id}`;
 }
 
+/** Whether the Local canvas draws this node, i.e. buildLocalScene() admits it. */
+export function localSceneAdmits(node: GraphRenderNode): boolean {
+  return !node.hidden && semanticKey(node) !== null;
+}
+
 function edgeCount(edge: GraphRenderEdge): number {
-  const count = edge.layoutCount ?? edge.count ?? 1;
+  const count = edge.count ?? 1;
   return Number.isFinite(count) && count > 0 ? Math.floor(count) || 1 : 1;
 }
 
@@ -59,11 +64,12 @@ function edgeCount(edge: GraphRenderEdge): number {
  * enter the force topology or coordinate-cache fingerprint.
  */
 export function buildLocalScene(scene: GraphRenderScene): LocalScene {
+  const visibleNodes = scene.nodes.filter((node) => !node.hidden);
   const keyByGraphId = new Map<string, string>();
   const graphIdByKey = new Map<string, string>();
   const nodeByKey = new Map<string, GraphRenderNode>();
 
-  for (const node of [...scene.nodes].sort((a, b) => a.id.localeCompare(b.id))) {
+  for (const node of [...visibleNodes].sort((a, b) => a.id.localeCompare(b.id))) {
     const key = semanticKey(node);
     if (!key) continue;
     keyByGraphId.set(node.id, key);
@@ -74,11 +80,14 @@ export function buildLocalScene(scene: GraphRenderScene): LocalScene {
   }
 
   const edges: LocalSceneEdge[] = [];
+  const admittedWireEdges: GraphRenderEdge[] = [];
   for (const edge of scene.edges) {
+    if (edge.hidden) continue;
     const kind = localEdgeVisualKind(edge.edge_kind);
     const sourceKey = keyByGraphId.get(edge.source);
     const targetKey = keyByGraphId.get(edge.target);
     if (!kind || !sourceKey || !targetKey || sourceKey === targetKey) continue;
+    admittedWireEdges.push(edge);
     const [source, target] = edge.direction === "undirected" && sourceKey > targetKey
       ? [targetKey, sourceKey]
       : [sourceKey, targetKey];
@@ -128,9 +137,9 @@ export function buildLocalScene(scene: GraphRenderScene): LocalScene {
       badge: sessionBadge({ entity_kind: node.entity_kind ?? "", actor_label: node.actor_label ?? null }),
     }));
 
-  const wireEdges = new Map(scene.edges.map((edge) => [edge.id, edge]));
-  const uniqueIdentity = nodeByKey.size === scene.nodes.length
-    && keyByGraphId.size === scene.nodes.length && wireEdges.size === scene.edges.length;
+  const wireEdges = new Map(admittedWireEdges.map((edge) => [edge.id, edge]));
+  const uniqueIdentity = nodeByKey.size === visibleNodes.length
+    && keyByGraphId.size === visibleNodes.length && wireEdges.size === admittedWireEdges.length;
   const geometryKey = uniqueIdentity ? JSON.stringify([
     nodes.map((node) => [node.key, node.graphId, node.radiusPx, node.isSeed, node.isCurrent, node.seedGlyph]),
     edges.map((edge) => {

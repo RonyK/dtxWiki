@@ -50,18 +50,23 @@ describe("visible Local scene input", () => {
     expect(JSON.stringify(result.layout)).not.toContain("ephemeral-edge-id");
   });
 
-  it("never lets an absent endpoint or unknown relationship alter layout", () => {
+  it("excludes hidden items, absent endpoints and unknown relationships from geometry and forces", () => {
     const visible = scene(
       [node("a", "a", true), node("b", "b")],
       [edge("visible", "a", "b")],
     );
-    const withHiddenDecoys = scene(visible.nodes, [
+    const withHiddenDecoys = scene([
+      ...visible.nodes,
+      { ...node("hidden", "hidden"), hidden: true },
+      { ...node("a", "a", true), hidden: true },
+    ], [
       ...visible.edges,
       edge("hidden-target", "a", "hidden"),
+      { ...edge("hidden-relation", "a", "b", "wikilink", 1000), hidden: true },
+      { ...visible.edges[0], hidden: true },
       edge("unknown-kind", "a", "b", "future_private_kind"),
     ]);
-    expect(buildLocalScene(withHiddenDecoys).layout).toEqual(buildLocalScene(visible).layout);
-    expect(buildLocalScene(withHiddenDecoys).edges).toHaveLength(1);
+    expect(buildLocalScene(withHiddenDecoys)).toEqual(buildLocalScene(visible));
   });
 
   it("keeps genuine backend action occurrences in both canvas edges and force topology", () => {

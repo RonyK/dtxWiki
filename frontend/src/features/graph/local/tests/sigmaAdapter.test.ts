@@ -17,7 +17,7 @@ const state = vi.hoisted(() => ({
   layout: {
     destroy: vi.fn(), beginDrag: vi.fn(), moveDrag: vi.fn(), endDrag: vi.fn(),
     pin: vi.fn(() => ({ x: 4, y: 8 })), unpin: vi.fn(), clearPins: vi.fn(),
-    pause: vi.fn(), resume: vi.fn(), getPositions: vi.fn(() => ({})),
+    pause: vi.fn(), resume: vi.fn(), update: vi.fn(), pinWhenSettled: vi.fn(), getPositions: vi.fn(() => ({})),
   },
   setCameraState: vi.fn(), animateCamera: vi.fn(),
   setCustomBBox: vi.fn(),
@@ -779,6 +779,115 @@ describe("Local scene refresh boundary", () => {
     const reducer = state.sigma.settings.nodeReducer as (key: string, data: Record<string, unknown>) => Record<string, unknown>;
     return state.sigma.graph.nodes().map((key) => reducer(key, state.sigma.graph.getNodeAttributes(key)).color);
   };
+
+  it("joins and removes timeline members without resetting live pins, drag, selection or camera", () => {
+    adapter.destroy();
+    const initial = { ...cloneScene(), scopeKey: "workspace:appearance", nodes: scene.nodes.map((node) => ({
+      ...node, hidden: node.id === "other",
+    })) };
+    adapter = createSigmaGraphAdapter(state.container!, initial, {
+      callbacks, forcedColors: false, positions: {}, reducedMotion: false,
+    });
+    adapter.pin("neighbor", true, { x: 4, y: 8 });
+    adapter.select("neighbor");
+    state.sigma.emit("downNode", { node: "context_page:neighbor", event: event() });
+    state.sigma.emit("moveBody", { event: event(20, 30) });
+    // Pinning a point outside the frame keeps the request without a point yet.
+    expect(adapter.pin("other", true)).toBeNull();
+    expect(adapter.pin("other", true)).toBeNull();
+    const layoutOptions = vi.mocked(createLocalLayout).mock.calls.at(-1)![1]!;
+    vi.clearAllMocks();
+
+    const arrived = { ...initial, nodes: scene.nodes, edges: [...scene.edges, {
+      ...scene.edges[0], id: "new-link", source: "neighbor", target: "other",
+    }] };
+    state.layout.getPositions.mockReturnValueOnce({
+      "context_page:seed": { x: 0, y: 0 }, "context_page:neighbor": { x: 20, y: 30 },
+      "context_page:other": { x: 40, y: 35 },
+    });
+    expect(adapter.replaceScene(arrived)).toBe("topology");
+    expect(state.sigma.graph.nodes()).toContain("context_page:other");
+    expect(state.sigma.graph.getEdgeAttributes("new-link")).toHaveProperty("label", "link");
+    expect(state.sigma.graph.getNodeAttributes("context_page:neighbor")).toMatchObject({ x: 20, y: 30 });
+    expect(state.layout.update).toHaveBeenCalledWith(buildLocalScene(arrived).layout,
+      { "context_page:neighbor": { x: 4, y: 8 } });
+    expect(createLocalLayout).not.toHaveBeenCalled();
+    expect(state.layout.destroy).not.toHaveBeenCalled();
+    expect(state.layout.endDrag).not.toHaveBeenCalled();
+    expect(state.setCustomBBox).not.toHaveBeenCalled();
+    expect(state.setCameraState).not.toHaveBeenCalled();
+    expect(callbacks.onSelect).not.toHaveBeenCalled();
+    state.sigma.emit("moveBody", { event: event(30, 45) });
+    expect(state.layout.moveDrag).toHaveBeenLastCalledWith("context_page:neighbor", { x: 30, y: 45 });
+    // The arrival moves first; the layout fixes it once settled and the
+    // adapter reports that point once. A repeated request changes nothing.
+    expect(state.layout.pinWhenSettled).toHaveBeenCalledExactlyOnceWith("context_page:other");
+    expect(adapter.pin("other", true)).toBeNull();
+    expect(state.layout.pin).not.toHaveBeenCalled();
+    expect(callbacks.onPin).not.toHaveBeenCalled();
+    layoutOptions.onSettledPin!("context_page:other", { x: 41, y: 36 });
+    layoutOptions.onSettledPin!("context_page:other", { x: 41, y: 36 });
+    expect(callbacks.onPin).toHaveBeenCalledExactlyOnceWith("other", { x: 41, y: 36 });
+
+    expect(adapter.replaceScene(initial)).toBe("topology");
+    expect(state.sigma.graph.nodes()).not.toContain("context_page:other");
+    // Rewinding past the dragged node must end its transient drag too.
+    const seedOnly = { ...initial, nodes: initial.nodes.map((node) => ({ ...node, hidden: !node.is_seed })), edges: [] };
+    expect(adapter.replaceScene(seedOnly)).toBe("topology");
+    expect(state.sigma.graph.nodes()).toEqual(["context_page:seed"]);
+    expect(state.layout.endDrag).toHaveBeenCalledExactlyOnceWith("context_page:neighbor");
+    expect(callbacks.onPin).toHaveBeenCalledOnce();
+    expect(state.setCameraState).not.toHaveBeenCalled();
+
+    // An explicit release revokes a waiting pin before its point returns.
+    adapter.pin("other", false);
+    expect(adapter.pin("other", true)).toBeNull();
+    adapter.pin("other", false);
+    expect(adapter.replaceScene(arrived)).toBe("topology");
+    expect(state.layout.pinWhenSettled).toHaveBeenCalledOnce();
+    // A rebuilt layout already computed its points: a waiting pin adopts one now.
+    expect(adapter.replaceScene(seedOnly)).toBe("topology");
+    expect(adapter.pin("other", true)).toBeNull();
+    const changes = { ...arrived, scopeKey: "workspace:changes" };
+    expect(adapter.replaceScene(changes)).toBe("rebuild");
+    expect(state.layout.pin).toHaveBeenCalledExactlyOnceWith("context_page:other");
+    expect(callbacks.onPin).toHaveBeenLastCalledWith("other", { x: 4, y: 8 });
+    expect(state.layout.pinWhenSettled).toHaveBeenCalledOnce();
+
+    // Dragging a waiting point by hand: a cancelled drag leaves it waiting
+    // for its arrival; a drop pins it at once and ends the wait.
+    const settle = vi.mocked(createLocalLayout).mock.calls.at(-1)![1]!.onSettledPin!;
+    const arriveWaiting = () => {
+      adapter.pin("other", false);
+      expect(adapter.replaceScene({ ...seedOnly, scopeKey: "workspace:changes" })).toBe("topology");
+      expect(adapter.pin("other", true)).toBeNull();
+      expect(adapter.replaceScene(changes)).toBe("topology");
+      callbacks.onPin.mockClear();
+    };
+    arriveWaiting();
+    state.sigma.emit("downNode", { node: "context_page:other", event: event() });
+    state.sigma.emit("moveBody", { event: event(20, 30) });
+    window.dispatchEvent(new Event("pointercancel"));
+    expect(callbacks.onPin).not.toHaveBeenCalled();
+    settle("context_page:other", { x: 50, y: 60 });
+    expect(callbacks.onPin).toHaveBeenCalledExactlyOnceWith("other", { x: 50, y: 60 });
+    arriveWaiting();
+    state.sigma.emit("downNode", { node: "context_page:other", event: event() });
+    state.sigma.emit("moveBody", { event: event(20, 30) });
+    state.sigma.emit("upStage", { event: event(20, 30) });
+    expect(callbacks.onPin).toHaveBeenCalledExactlyOnceWith("other", { x: 4, y: 8 });
+    settle("context_page:other", { x: 50, y: 60 });
+    expect(callbacks.onPin).toHaveBeenCalledOnce();
+    // Reset revokes every waiting pin, in the adapter and in the layout.
+    adapter.pin("other", false);
+    expect(adapter.replaceScene({ ...seedOnly, scopeKey: "workspace:changes" })).toBe("topology");
+    expect(adapter.pin("other", true)).toBeNull();
+    adapter.reset();
+    expect(state.layout.clearPins).toHaveBeenCalled();
+    state.layout.pinWhenSettled.mockClear();
+    expect(adapter.replaceScene(changes)).toBe("topology");
+    expect(state.layout.pinWhenSettled).not.toHaveBeenCalled();
+  });
 
   it.each([
     { reducedMotion: true, paused: false }, { reducedMotion: true, paused: true },

@@ -6,7 +6,7 @@ import { buildLocalScene } from "../sceneInput";
 import { historySceneCatalog, renderHistoryScene } from "../historyScene";
 
 describe("history scene", () => {
-  it("keeps interval geometry stable while removals remain ghosts outside the active scene", () => {
+  it("admits visible timeline topology while removals remain ghosts outside the active scene", () => {
     const payload = graphFixture();
     const edge = { ...payload.edges[0], label: "Current relationship", count: 17, occurred_at: "2026-08-04T00:00:00Z" };
     const original = { ...edge, label: "Original relationship", count: 9, provenance: "observed" as const, occurred_at: "2026-08-02T00:00:00Z" };
@@ -29,8 +29,13 @@ describe("history scene", () => {
     expect(added.edges[0]).toMatchObject({ hidden: false, highlighted: true, removed: false });
     expect(active.edges).toEqual([]);
     expect(removed.edges[0]).toMatchObject({ ...original, hidden: false, highlighted: true, removed: true });
-    expect(buildLocalScene(before).geometryKey).toBe(buildLocalScene(added).geometryKey);
+    expect(buildLocalScene(before).edges).toEqual([]);
+    expect(buildLocalScene(before).geometryKey).not.toBe(buildLocalScene(added).geometryKey);
+    expect(buildLocalScene(added).edges).toHaveLength(1);
     expect(buildLocalScene(added).geometryKey).toBe(buildLocalScene(removed).geometryKey);
+    const afterRemoval = renderHistoryScene(catalog, active, { nodes: [], edges: [] }, undefined, false, false);
+    expect(buildLocalScene(afterRemoval).edges).toEqual([]);
+    expect(buildLocalScene(afterRemoval).geometryKey).not.toBe(buildLocalScene(removed).geometryKey);
     const preview = renderHistoryScene(catalog, deriveGraphScene(payload, filters, 2), deriveGraphScene(payload, filters, 0), payload.timeline[1], false, false, true);
     expect(preview.edges[0]).toMatchObject({ ...original, hidden: false, removed: true });
     const creationPreview = renderHistoryScene(catalog, active, deriveGraphScene(payload, filters, 0), payload.timeline[0], false, false, true);
@@ -75,15 +80,19 @@ describe("history scene", () => {
     const before = renderHistoryScene(catalog, frame, eventFrame, undefined, false, true);
     const preview = renderHistoryScene(catalog, frame, eventFrame, event, false, true, true);
     expect(preview.edges.find((edge) => edge.id === excludedCurrent.id)).toMatchObject({ hidden: true, highlighted: false, eventCaption: undefined });
-    expect(preview.edges.find((edge) => edge.id === admittedCurrent.id)).toMatchObject({ ...admittedSnapshot, hidden: false, highlighted: true, layoutCount: 23 });
+    expect(preview.edges.find((edge) => edge.id === admittedCurrent.id)).toMatchObject({ ...admittedSnapshot, hidden: false, highlighted: true });
     expect(preview.nodes.find((node) => node.id === historicalNode.id)).toMatchObject({ ...historicalNode, hidden: false, highlighted: true });
-    expect(buildLocalScene(preview).geometryKey).toBe(buildLocalScene(before).geometryKey);
+    expect(buildLocalScene(before).edges).toEqual([]);
+    expect(buildLocalScene(preview).edges.map((edge) => edge.graphId)).toEqual([admittedCurrent.id]);
+    expect(buildLocalScene(preview).geometryKey).not.toBe(buildLocalScene(before).geometryKey);
 
     const hiddenFilters = { ...filters, statuses: filters.statuses.filter((status) => status !== "draft") };
     const hidden = renderHistoryScene(historySceneCatalog(payload, hiddenFilters), deriveGraphScene(payload, hiddenFilters, -1),
       deriveGraphScene(payload, hiddenFilters, 0), event, false, true, true);
     expect(hidden.nodes.find((node) => node.id === historicalNode.id)).toMatchObject({ hidden: true, highlighted: false });
     expect(hidden.edges.find((edge) => edge.id === admittedCurrent.id)).toMatchObject({ hidden: true, highlighted: false });
+    expect(buildLocalScene(hidden).edges).toEqual([]);
+    expect(buildLocalScene(hidden).nodes.some((node) => node.graphId === historicalNode.id)).toBe(false);
 
     const future = renderHistoryScene(catalog, frame, eventFrame, event, true, true, true);
     expect(future.edges.find((edge) => edge.id === excludedCurrent.id)).toMatchObject({ ...excludedCurrent, hidden: false, highlighted: false });

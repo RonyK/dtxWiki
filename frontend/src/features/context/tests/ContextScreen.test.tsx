@@ -75,17 +75,25 @@ vi.mock("../../graph/useWorkspaceGraphCapability", () => ({
   }),
 }));
 vi.mock("../../graph/GraphCanvas", () => ({
-  GraphCanvas: ({ scene, pinnedIds }: {
+  GraphCanvas: function MockGraphCanvas({ scene, pinnedIds, pinnedPositions, onPin }: {
     scene: { nodes: unknown[]; edges: unknown[] };
     pinnedIds: string[];
-  }) => (
-    <div
-      data-edges={scene.edges.length}
-      data-nodes={scene.nodes.length}
-      data-pinned={pinnedIds.join(",")}
-      data-testid="context-graph-canvas"
-    />
-  ),
+    pinnedPositions: Record<string, { x: number; y: number }>;
+    onPin: (id: string, position: { x: number; y: number }) => void;
+  }) {
+    // Like the real canvas, report the coordinate it keeps for a new pin.
+    useEffect(() => {
+      for (const id of pinnedIds) if (!pinnedPositions[id]) onPin(id, { x: 0, y: 0 });
+    }, [onPin, pinnedIds, pinnedPositions]);
+    return (
+      <div
+        data-edges={scene.edges.length}
+        data-nodes={scene.nodes.length}
+        data-pinned={pinnedIds.join(",")}
+        data-testid="context-graph-canvas"
+      />
+    );
+  },
 }));
 
 const BASE = "http://127.0.0.1:21080";

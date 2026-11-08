@@ -106,7 +106,7 @@ describe("GraphCanvas reconciliation", () => {
 
   it.each([
     { path: "active", replayCount: 0 }, { path: "pending", replayCount: 1 },
-  ])("performs no extra reconciliation after an $path metadata refresh", async ({ path, replayCount }) => {
+  ])("performs no extra reconciliation after $path metadata and topology updates", async ({ path, replayCount }) => {
     const payload = graphFixture();
     const scene = deriveGraphScene(payload, graphFacets(payload), null);
     const nextScene = {
@@ -129,12 +129,32 @@ describe("GraphCanvas reconciliation", () => {
 
     // Active metadata must not clear a later hover or replay saved pin p over
     // live drag q. Reactivation still legitimately reconciles hidden-period
-    // props once through the independent effects, never twice.
+    // selection and focus once, never twice; pins are sent only when changed.
     view.rerender(<GraphCanvas {...common} scene={nextScene} />);
     await waitFor(() => expect(adapter.replaceScene).toHaveBeenCalledWith(nextScene));
     expect(adapter.select).toHaveBeenCalledTimes(replayCount);
     expect(adapter.focus).toHaveBeenCalledTimes(replayCount);
-    expect(adapter.pin).toHaveBeenCalledTimes(replayCount);
+    expect(adapter.pin).not.toHaveBeenCalled();
+    expect(createAdapter).toHaveBeenCalledOnce();
+    expect(adapter.destroy).not.toHaveBeenCalled();
+
+    // Timeline arrivals also preserve live drag/pin state in the adapter.
+    // Replaying the saved pin here would move a dragged node back on every birth.
+    const timelineScene = { ...nextScene, nodes: nextScene.nodes.slice(0, 1), edges: [] };
+    if (path === "pending") {
+      view.rerender(<GraphCanvas {...common} active={false} scene={nextScene} />);
+      view.rerender(<GraphCanvas {...common} active={false} scene={timelineScene} />);
+    }
+    adapter.replaceScene.mockClear();
+    adapter.select.mockClear();
+    adapter.focus.mockClear();
+    adapter.pin.mockClear();
+    adapter.replaceScene.mockReturnValueOnce("topology");
+    view.rerender(<GraphCanvas {...common} scene={timelineScene} />);
+    await waitFor(() => expect(adapter.replaceScene).toHaveBeenCalledWith(timelineScene));
+    expect(adapter.select).toHaveBeenCalledTimes(replayCount);
+    expect(adapter.focus).toHaveBeenCalledTimes(replayCount);
+    expect(adapter.pin).not.toHaveBeenCalled();
     expect(createAdapter).toHaveBeenCalledOnce();
     expect(adapter.destroy).not.toHaveBeenCalled();
 
@@ -142,7 +162,7 @@ describe("GraphCanvas reconciliation", () => {
     adapter.select.mockClear();
     adapter.focus.mockClear();
     adapter.pin.mockClear();
-    view.rerender(<GraphCanvas {...common} scene={nextScene} focusedId="node:related"
+    view.rerender(<GraphCanvas {...common} scene={timelineScene} focusedId="node:related"
       selectedId="node:related" pinnedPositions={{ "node:related": { x: 130, y: -45 } }} />);
     expect(adapter.replaceScene).not.toHaveBeenCalled();
     expect(adapter.select).toHaveBeenCalledExactlyOnceWith("node:related");
@@ -154,8 +174,11 @@ describe("GraphCanvas reconciliation", () => {
     const payload = graphFixture();
     const scene = deriveGraphScene(payload, graphFacets(payload), null);
     const nextScene = { ...scene, nodes: scene.nodes.map((node) => ({ ...node, status: "draft" })) };
-    const common = reconciliationProps();
-    const view = render(<GraphCanvas {...common} scene={scene} />);
+    // A second, unchanged pin: reporting one pin's coordinate must never
+    // re-pin another (that would pull a dragged point back to its saved spot).
+    const common = { ...reconciliationProps(), pinnedIds: ["node:related", "node:seed"] };
+    const saved = { "node:related": { x: 70, y: 80 }, "node:seed": { x: 0, y: 0 } };
+    const view = render(<GraphCanvas {...common} pinnedPositions={saved} scene={scene} />);
     await waitFor(() => expect(createAdapter).toHaveBeenCalledOnce());
     adapter.select.mockClear();
     adapter.focus.mockClear();
@@ -163,7 +186,7 @@ describe("GraphCanvas reconciliation", () => {
     adapter.replaceScene.mockReturnValueOnce("metadata");
 
     view.rerender(<GraphCanvas {...common} scene={nextScene} focusedId="node:related"
-      selectedId="node:related" pinnedPositions={{ "node:related": { x: 130, y: -45 } }} />);
+      selectedId="node:related" pinnedPositions={{ ...saved, "node:related": { x: 130, y: -45 } }} />);
     expect(adapter.replaceScene).toHaveBeenCalledWith(nextScene);
     expect(adapter.select).toHaveBeenCalledExactlyOnceWith("node:related");
     expect(adapter.focus).toHaveBeenCalledExactlyOnceWith("node:related");
@@ -215,6 +238,19 @@ describe("GraphCanvas reconciliation", () => {
       expect(adapter.replaceScene).toHaveBeenCalledWith(filteredScene),
     );
     expect(createAdapter).toHaveBeenCalledOnce();
+
+    // Pins already sent to a renderer rebuilt while the tab is hidden must
+    // still reach the new renderer when the tab returns, unchanged or not.
+    const pins = { pinnedIds: ["node:related"], pinnedPositions: {} };
+    view.rerender(<GraphCanvas {...common} {...pins} active scene={filteredScene} />);
+    expect(adapter.pin).toHaveBeenLastCalledWith("node:related", true, undefined);
+    const freshAdapter = { ...adapter, pin: vi.fn(() => ({ x: 0, y: 0 })) };
+    createAdapter.mockImplementationOnce(() => freshAdapter);
+    view.rerender(<GraphCanvas {...common} {...pins} active={false} forcedColors scene={filteredScene} />);
+    await waitFor(() => expect(createAdapter).toHaveBeenCalledTimes(2));
+    expect(freshAdapter.pin).not.toHaveBeenCalled();
+    view.rerender(<GraphCanvas {...common} {...pins} active forcedColors scene={filteredScene} />);
+    expect(freshAdapter.pin).toHaveBeenCalledExactlyOnceWith("node:related", true, undefined);
   });
 
   it("recreates the renderer boundary when application theme tokens change", async () => {
@@ -348,6 +384,7 @@ describe("GraphCanvas reconciliation", () => {
     const view = render(<GraphCanvas {...common} scene={scene} />);
     await waitFor(() => expect(createAdapter).toHaveBeenCalledOnce());
     type Options = { callbacks: {
+      onPin(id: string, position: { x: number; y: number }): void;
       onViewport(viewport: GraphViewport): void;
       onContextStatus(status: "lost" | "restored"): void;
     } };
@@ -360,6 +397,9 @@ describe("GraphCanvas reconciliation", () => {
     view.rerender(<GraphCanvas {...common} scene={scene} forcedColors />);
     await waitFor(() => expect(createAdapter).toHaveBeenCalledTimes(2));
     act(() => oldOptions.callbacks.onViewport({ zoom: 7, pan: { x: 7, y: 7 } }));
+    // A late pin report from a replaced renderer is as stale as its camera.
+    act(() => oldOptions.callbacks.onPin("node:related", { x: 7, y: 7 }));
+    expect(common.onPin).not.toHaveBeenCalled();
     const currentOptions = (createAdapter.mock.calls[1] as unknown as [HTMLElement, GraphRenderScene, Options])[2];
     act(() => currentOptions.callbacks.onContextStatus("lost"));
     act(() => currentOptions.callbacks.onViewport({ zoom: 8, pan: { x: 8, y: 8 } }));
