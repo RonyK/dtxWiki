@@ -54,6 +54,9 @@
       "ko": "한국어"
     }
   },
+  "dialog": {
+    "close": "닫기"
+  },
   "mobileNav": {
     "aria": "모바일 내비게이션",
     "listAria": "모바일"
@@ -128,7 +131,6 @@
   },
   "accessGuard": {
     "checking": "접근 권한 확인 중",
-    "retry": "다시 시도",
     "loadFailed": "워크스페이스를 불러오지 못했습니다."
   },
   "workspaceDirectory": {
@@ -144,7 +146,6 @@
     "loading": "워크스페이스 디렉터리 불러오는 중",
     "loadingMore": "더 불러오는 중",
     "loadMore": "더 보기",
-    "retry": "다시 시도",
     "results": "워크스페이스 검색 결과",
     "visibility": {
       "team": "팀",
@@ -186,7 +187,6 @@
   },
   "session": {
     "checking": "세션 확인 중",
-    "retry": "다시 시도",
     "verifyFailed": "세션을 확인하지 못했습니다.",
     "checkFailed": "세션 확인에 실패했습니다."
   },
@@ -407,7 +407,6 @@
     "unknownDate": "날짜 정보 없음"
   },
   "diff": {
-    "eyebrow": "버전 기록",
     "viewMode": "비교 보기 방식",
     "split": "분할",
     "unified": "통합",
@@ -480,5 +479,19 @@
     "selectWorkspace": "워크스페이스 선택",
     "closeChooser": "워크스페이스 선택 창 닫기",
     "openWorkspace": "{{title}} 대시보드 열기"
+  },
+  "actions": {
+    "approve": "승인",
+    "cancel": "취소",
+    "delete": "삭제",
+    "disable": "비활성화",
+    "discard": "폐기",
+    "refresh": "새로고침",
+    "reject": "거절",
+    "remove": "제거",
+    "retry": "다시 시도",
+    "revoke": "해지",
+    "save": "저장",
+    "unlink": "연결 해제"
   }
 }

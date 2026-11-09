@@ -396,7 +396,7 @@ export const McpAppHub = forwardRef<McpAppHubHandle, McpAppHubProps>(
             <div className="mcp-app-hub-recovery">
               <StatusBanner tone="warning">{error}</StatusBanner>
               {onRetry ? (
-                <button
+                <button aria-label={t("appHub.retryCatalog", { defaultValue: "Retry app catalog" })}
                   className="icon-button text-button"
                   disabled={loading}
                   onClick={onRetry}
@@ -404,7 +404,7 @@ export const McpAppHub = forwardRef<McpAppHubHandle, McpAppHubProps>(
                 >
                   <RefreshCw size={14} aria-hidden="true" />
                   <span>
-                    {t("appHub.retryCatalog", { defaultValue: "Retry app catalog" })}
+                    {t("shell:actions.retry")}
                   </span>
                 </button>
               ) : null}

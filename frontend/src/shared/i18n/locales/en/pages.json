@@ -42,7 +42,6 @@
     "visibilityVersionRefreshFailed": "The published version changed, but the current version could not be refreshed. Close Share and try again.",
     "visibilityOwnerRequired": "Only a Workspace owner using a browser session can expose a page from a non-public Workspace.",
     "visibilityPreviewFailed": "The published version preview could not be loaded.",
-    "visibilityPreviewEyebrow": "Published preview",
     "visibilityPreviewHelp": "This authenticated preview shows the exact published snapshot, not a newer draft.",
     "visibilityPreviewLoading": "Loading published version preview…",
     "visibilityClosePreview": "Close published version preview",
@@ -268,7 +267,6 @@
     "publishedNewerEdits": "An earlier version was published. Your newer changes remain in the editor.",
     "reviewApprovalFailed": "Could not approve the review: {{error}}",
     "publishStaleDraft": "This draft is no longer the latest one for this page. Reload to publish the current draft.",
-    "publishStaleReload": "Reload current draft",
     "publishStaleReloading": "Reloading current draft",
     "publishStaleReloadFailed": "The current draft could not be reloaded. Publishing remains blocked; try again.",
     "unknownError": "unknown error",
@@ -303,10 +301,8 @@
     "imageUploadCancel": "Cancel",
     "imageUploadCancelAria": "Cancel upload for {{name}}",
     "imageUploadCancelAll": "Cancel all",
-    "imageUploadRetry": "Retry",
     "imageUploadRetryAria": "Retry upload for {{name}}",
     "imageUploadRetryFailed": "Retry failed",
-    "imageUploadRemove": "Remove",
     "imageUploadRemoveAria": "Remove upload for {{name}}",
     "imageUploadRetryMissing": "The upload insertion slot was removed. Insert the image again.",
     "imageUploadPolicyRefreshFailed": "Media upload policy changed, but its current limits could not be loaded.",
@@ -392,7 +388,6 @@
     "metaDraftNotSaved": "Draft not saved yet",
     "metaNewDraft": "New draft",
     "metaLastSaved": "Last saved {{time}}",
-    "shortcutsModalEyebrow": "Editor",
     "shortcutsModalTitle": "Keyboard shortcuts",
     "shortcutsModalCloseAria": "Close keyboard shortcuts",
     "shortcut": {
@@ -485,17 +480,13 @@
     "closeAria": "Close page media",
     "loading": "Loading page media…",
     "actions": {
-      "refresh": "Refresh",
-      "retry": "Retry",
-      "delete": "Delete",
       "deleting": "Deleting…",
       "deleteAria": "Delete {{filename}}"
     },
     "confirmDelete": {
       "title": "Permanently delete {{filename}}?",
       "body": "This permanently deletes the upload. This cannot be undone.",
-      "cancel": "Cancel",
-      "confirm": "Delete permanently"
+      "cancel": "Cancel"
     },
     "groups": {
       "used": {
@@ -548,7 +539,6 @@
     "unavailable": "This image could not be displayed.",
     "altText": "Alt text: {{alt}}",
     "sourceHost": "Source: {{hostname}}",
-    "retry": "Retry",
     "retryAria": "Retry loading {{name}}",
     "retryLimitReached": "Retry limit reached.",
     "openOriginal": "Open original",

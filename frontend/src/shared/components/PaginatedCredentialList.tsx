@@ -42,6 +42,8 @@ type PaginatedCredentialListProps<TFilter extends string> = {
   recoveredFromCursor: boolean;
   recoveredText: string;
   retryLabel?: string;
+  /** Names what is retried when the visible label is the bare verb. */
+  retryAriaLabel?: string;
   searchClearLabel?: string;
   searchLabel?: string;
   searchPlaceholder?: string;
@@ -79,6 +81,7 @@ export function PaginatedCredentialList<TFilter extends string>({
   recoveredFromCursor,
   recoveredText,
   retryLabel,
+  retryAriaLabel,
   searchClearLabel,
   searchLabel,
   searchPlaceholder,
@@ -144,6 +147,7 @@ export function PaginatedCredentialList<TFilter extends string>({
           </StatusBanner>
           {onRetry && retryLabel ? (
             <button
+              aria-label={retryAriaLabel}
               className="icon-button text-button"
               disabled={loading}
               onClick={onRetry}

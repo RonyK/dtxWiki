@@ -74,7 +74,7 @@ export function ArtifactChatsSection({
             type="button"
             onClick={reload}
           >
-            {t("provenance.retry", { defaultValue: "Retry" })}
+            {t("shell:actions.retry")}
           </button>
         </div>
       ) : loading && !data ? (

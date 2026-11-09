@@ -53,7 +53,7 @@ export function ActivityReadGroup({ entry, loadGroup, renderEvent }: {
       </button>
       <div id={id} className="activity-read-group__members" hidden={!expanded}>
         {loading && <p className="activity-read-group__message" role="status">{t("feed.group.loading")}</p>}
-        {error && <div className="activity-read-group__message"><p role="alert">{t("feed.group.error")}</p><button className="activity-read-group__retry" type="button" onClick={() => void load()}>{t("feed.group.retry")}</button></div>}
+        {error && <div className="activity-read-group__message"><p role="alert">{t("feed.group.error")}</p><button className="activity-read-group__retry" type="button" onClick={() => void load()}>{t("shell:actions.retry")}</button></div>}
         {events && <>
           <ol className="activity-read-group__list">{events.map((event) => <li key={event.id}>{renderEvent(event)}</li>)}</ol>
           <button className="activity-read-group__collapse" type="button" onClick={collapse}><ChevronUp aria-hidden="true" size={14} />{t("feed.group.collapse")}</button>

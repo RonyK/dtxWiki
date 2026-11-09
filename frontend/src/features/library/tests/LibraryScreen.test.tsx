@@ -483,7 +483,7 @@ describe("LibraryScreen", () => {
     });
     await user.click(
       await within(dialog).findByRole("button", {
-        name: "Delete permanently",
+        name: "Delete",
       }),
     );
 

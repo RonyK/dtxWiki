@@ -6,7 +6,7 @@ import { ApiError, apiErrorMessage } from "../api/client";
 import { inputTextError, textInputLimit, trimShortText } from "../lib/inputPolicy";
 import { normalizeSlugInput, slugify } from "../text/slug";
 import { AdvancedSection } from "./AdvancedSection";
-import { Dialog, DialogCloseButton } from "./Dialog";
+import { Dialog } from "./Dialog";
 
 type NewFolderDialogProps = {
   parentLabel: string;
@@ -70,22 +70,13 @@ export function NewFolderDialog({
       dismissible={!submitting}
       labelledBy="new-folder-title"
       onClose={requestClose}
+      closeLabel={t("newItem.close")}
+      title={t("newItem.createFolder")}
     >
       <form className="dialog-form" onSubmit={submit}>
-        <header className="dialog-header">
-          <div>
-            <p className="eyebrow">{t("newItem.headings.folder")}</p>
-            <h2 id="new-folder-title">{t("newItem.createFolder")}</h2>
-            <p className="feature-subtitle">
-              {t("newItem.parent", { parent: parentLabel })}
-            </p>
-          </div>
-          <DialogCloseButton
-            disabled={submitting}
-            label={t("newItem.close")}
-            onClick={requestClose}
-          />
-        </header>
+        <p className="dialog-description">
+          {t("newItem.parent", { parent: parentLabel })}
+        </p>
         <label className="form-field">
           <span>{t("newItem.folderName")}</span>
           <input

@@ -465,7 +465,7 @@ describe.each([undefined, "history"] as const)("Activity recovery (%s)", lane =>
     expect(screen.getByRole("link", { name: "Known guide" })).toBeVisible();
     expect(screen.getAllByText("2 entries · 5 original events").length).toBeGreaterThan(0);
     expect(screen.getByText("Other activity")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("Original events could not be loaded. Try again.")).toBeVisible();
     expect(await screen.findByText("The service is temporarily unavailable. Try again shortly.")).toBeVisible();
     expect(screen.getByRole("link", { name: "Known guide" })).toBeVisible();

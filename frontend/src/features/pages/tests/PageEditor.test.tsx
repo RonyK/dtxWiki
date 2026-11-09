@@ -2889,7 +2889,7 @@ describe("PageEditor", () => {
     ).toHaveLength(1);
 
     await typist().click(
-      screen.getByRole("button", { name: "Reload current draft" }),
+      screen.getByRole("button", { name: "Refresh" }),
     );
     await waitFor(() =>
       expect(

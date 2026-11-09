@@ -17,7 +17,7 @@ import {
   type WorkspaceMemberSelector,
 } from "../../shared/api/workspaceAccess";
 import { normalizeAccountEmail } from "../../shared/auth/identityPolicy";
-import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
+import { Dialog } from "../../shared/components/Dialog";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { inputTextError, textInputLimit } from "../../shared/lib/inputPolicy";
 import { providerLabel } from "../auth/loginMethodBranding";
@@ -148,6 +148,7 @@ export function WorkspaceMemberAddDialog({
   return (
     <Dialog
       className="workspace-member-add-dialog"
+      closeLabel={t("workspaceMembers.add.close")}
       dismissible={!busy}
       labelledBy={`${id}-title`}
       onClose={onClose}
@@ -158,21 +159,10 @@ export function WorkspaceMemberAddDialog({
           </button>
         </div>
       )}
-      header={(
-        <>
-          <div>
-            <h2 id={`${id}-title`}>{t("workspaceMembers.add.title")}</h2>
-            <p className="field-hint">{t("workspaceMembers.add.description")}</p>
-          </div>
-          <DialogCloseButton
-            disabled={busy}
-            label={t("workspaceMembers.add.close")}
-            onClick={onClose}
-          />
-        </>
-      )}
+      title={t("workspaceMembers.add.title")}
     >
       <div className="workspace-member-add-content">
+        <p className="field-hint">{t("workspaceMembers.add.description")}</p>
         {directoryEnabled ? (
           <div
             className="workspace-member-add-tabs"

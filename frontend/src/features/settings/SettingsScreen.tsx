@@ -25,7 +25,6 @@ import {
 } from "lucide-react";
 import {
   type FormEvent,
-  type KeyboardEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -35,7 +34,6 @@ import {
 } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { JsonView, collapseAllNested, defaultStyles } from "react-json-view-lite";
 import "react-json-view-lite/dist/index.css";
@@ -109,7 +107,8 @@ import {
 } from "../../shared/api/workspace";
 import { AdvancedSection } from "../../shared/components/AdvancedSection";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
-import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
+import { ConfirmDialog } from "../../shared/components/ConfirmDialog";
+import { Dialog } from "../../shared/components/Dialog";
 import { CountChip } from "../../shared/components/CountChip";
 import { ListPanelHeader } from "../../shared/components/ListPanelHeader";
 import { PreviewBadge } from "../../shared/components/PreviewBadge";
@@ -2138,7 +2137,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
                 onClick={reloadPolicies}
                 type="button"
               >
-                {t("loadRetry", { defaultValue: "Retry" })}
+                {t("shell:actions.retry")}
               </button>
             }
             tone="warning"
@@ -2272,7 +2271,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
                 onClick={() => void refreshServerAdmin()}
                 type="button"
               >
-                {t("access.oauthCapabilityRetry", { defaultValue: "Try again" })}
+                {t("shell:actions.retry")}
               </button>
             </p>
           ) : null}
@@ -2515,9 +2514,8 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
             recoveredText={t("pagination.cursorReset", {
               defaultValue: "The list changed. Showing the first page.",
             })}
-            retryLabel={t("access.retryConsents", {
-              defaultValue: "Retry OAuth app list",
-            })}
+            retryAriaLabel={t("access.retryConsents")}
+          retryLabel={t("shell:actions.retry")}
           >
               <div className="operations-list">
                 {pagedConsents.map((consent) => {
@@ -2689,7 +2687,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
                           defaultValue: "Revoke all consents for {{client}}",
                           client: presentation.label,
                         })}
-                        className="icon-button text-button oauth-consent-revoke"
+                        className="icon-button text-button danger oauth-consent-revoke"
                         disabled={consentBusyClientId === consent.client_id}
                         onClick={() => {
                           clearConsentError();
@@ -2708,7 +2706,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
                       >
                         <Trash2 size={15} aria-hidden="true" />
                         <span>
-                          {t("access.revoke", { defaultValue: "Revoke" })}
+                          {t("shell:actions.revoke")}
                         </span>
                       </button>
                     </div>
@@ -3488,9 +3486,8 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
           recoveredText={t("pagination.cursorReset", {
             defaultValue: "The list changed. Showing the first page.",
           })}
-          retryLabel={t("accessKeys.retry", {
-            defaultValue: "Retry access key list",
-          })}
+          retryAriaLabel={t("accessKeys.retry")}
+          retryLabel={t("shell:actions.retry")}
           searchClearLabel={t("accessKeys.searchClear", {
             defaultValue: "Clear access key search",
           })}
@@ -5110,13 +5107,13 @@ function McpKeyRow({
                 value={renameDraft}
               />
             </label>
-            <button
+            <button aria-label={t("keyRow.saveName", { defaultValue: "Save name" })}
               className="icon-button primary"
               disabled={busy || !renameDraft.trim()}
               onClick={onSaveRename}
               type="button"
             >
-              {t("keyRow.saveName", { defaultValue: "Save name" })}
+              {t("shell:actions.save")}
             </button>
             <button
               className="icon-button"
@@ -5251,13 +5248,13 @@ function McpKeyRow({
                 defaultValue: "Revoke key {{name}}",
                 name: token.name,
               })}
-              className="icon-button text-button"
+              className="icon-button text-button danger"
               disabled={busy || isRenaming}
               onClick={onRequestDisable}
               type="button"
             >
               <Ban size={15} aria-hidden="true" />
-              <span>{t("keyRow.revoke", { defaultValue: "Revoke" })}</span>
+              <span>{t("shell:actions.revoke")}</span>
             </button>
           ) : null}
           {inactive ? (
@@ -5266,14 +5263,14 @@ function McpKeyRow({
                 defaultValue: "Delete key {{name}}",
                 name: token.name,
               })}
-              className="icon-button text-button"
+              className="icon-button text-button danger"
               disabled={busy || isRenaming}
               onClick={onRequestDelete}
               type="button"
             >
               <Trash2 size={15} aria-hidden="true" />
               <span>
-                {t("keyRow.deleteKey", { defaultValue: "Delete key" })}
+                {t("shell:actions.delete")}
               </span>
             </button>
           ) : null}
@@ -5404,9 +5401,8 @@ function McpClientList({
         recoveredText={t("pagination.cursorReset", {
           defaultValue: "The list changed. Showing the first page.",
         })}
-        retryLabel={t("mcpClients.retry", {
-          defaultValue: "Retry MCP client list",
-        })}
+        retryAriaLabel={t("mcpClients.retry")}
+          retryLabel={t("shell:actions.retry")}
         searchClearLabel={t("mcpClients.searchClear", {
           defaultValue: "Clear client search",
         })}
@@ -5492,7 +5488,7 @@ function McpClientList({
                         defaultValue: "Disable {{name}}",
                         name: clientName(client, index),
                       })}
-                      className="icon-button text-button"
+                      className="icon-button text-button warning"
                       disabled={actionsDisabled}
                       onClick={() => setDisableTarget(client)}
                       type="button"
@@ -5501,7 +5497,7 @@ function McpClientList({
                       <span>
                         {busy
                           ? t("clientRow.updating", { defaultValue: "Updating…" })
-                          : t("clientRow.disable", { defaultValue: "Disable" })}
+                          : t("shell:actions.disable")}
                       </span>
                     </button>
                   ) : null}
@@ -5530,14 +5526,14 @@ function McpClientList({
                         defaultValue: "Delete client {{name}}",
                         name: clientName(client, index),
                       })}
-                      className="icon-button text-button"
+                      className="icon-button text-button danger"
                       disabled={actionsDisabled}
                       onClick={() => setDeleteTarget(client)}
                       type="button"
                     >
                       <Trash2 size={15} aria-hidden="true" />
                       <span>
-                        {t("clientRow.delete", { defaultValue: "Delete client" })}
+                        {t("shell:actions.delete")}
                       </span>
                     </button>
                   ) : null}
@@ -6033,7 +6029,7 @@ export function WorkspaceDangerZone({
               />
             </label>
             <button
-              className="icon-button warning-action"
+              className="icon-button warning"
               disabled={slugSaveDisabled}
               type="submit"
             >
@@ -6078,8 +6074,10 @@ export function WorkspaceDangerZone({
               </p>
             )}
           </div>
-          <button
-            className="icon-button danger-action"
+          <button aria-label={t("dangerZone.deleteAction", {
+                defaultValue: "Delete workspace…",
+              })}
+            className="icon-button danger"
             disabled={!canDelete}
             onClick={() => {
               setDeleteFlow({ kind: "confirm", error: null });
@@ -6088,9 +6086,7 @@ export function WorkspaceDangerZone({
           >
             <Trash2 size={15} aria-hidden="true" />
             <span>
-              {t("dangerZone.deleteAction", {
-                defaultValue: "Delete workspace…",
-              })}
+              {t("shell:actions.delete")}
             </span>
           </button>
         </div>
@@ -6173,115 +6169,97 @@ function ConfirmWorkspaceDeleteModal({
   );
   const canSubmit = confirmed && (!requiresPurge || purgeAcknowledged);
   return (
-    <ConfirmModalFrame
+    <ConfirmDialog
       busy={busy}
+      busyLabel={t("modals.deleteWorkspace.deleting", {
+        defaultValue: "Deleting…",
+      })}
+      className="danger-modal-panel"
+      confirmDisabled={!canSubmit}
+      confirmLabel={
+        requiresPurge
+          ? t("modals.deleteWorkspace.confirmWithPurge", {
+              defaultValue: "Delete workspace and all its data",
+            })
+          : t("shell:actions.delete")
+      }
       labelledBy="delete-workspace-modal-title"
       onCancel={onCancel}
+      onConfirm={onConfirm}
+      title={t("modals.deleteWorkspace.title", {
+        defaultValue: "Delete workspace?",
+      })}
+      tone="danger"
     >
-      <div className="modal-panel danger-modal-panel">
-        <h2 id="delete-workspace-modal-title">
-          {t("modals.deleteWorkspace.title", {
-            defaultValue: "Delete workspace?",
-          })}
-        </h2>
-        <p>
-          {t("modals.deleteWorkspace.bodyPrefix", {
-            defaultValue: "This will permanently delete ",
-          })}
-          <strong>{workspace.title}</strong> (<code>{workspace.slug}</code>)
-          {t("modals.deleteWorkspace.bodySuffix", {
-            defaultValue:
-              ". If the workspace still holds content or operational records, they are listed here first so you can confirm deleting them too; retained audit history is detached, not erased.",
-          })}
-        </p>
-        {error ? (
-          <StatusBanner tone="warning">
-            <div className="workspace-delete-blockers">
-              <p>{error}</p>
-              {requiresPurge ? (
-                <>
-                  <ul>
-                    {blockers.map((blocker) => (
-                      <li key={blocker.code}>
-                        {workspaceDeleteBlockerLabel(t, blocker)}
-                      </li>
-                    ))}
-                  </ul>
-                  <p>
-                    {flow.kind === "purge_failed"
-                      ? t("modals.deleteWorkspace.purgeRetryHint", {
-                          defaultValue:
-                            "The deletion could not be completed. Confirm the retained records below before retrying.",
-                        })
-                      : t("modals.deleteWorkspace.purgeHint", {
-                          defaultValue:
-                            "Nothing has been deleted yet. Confirm below to delete these records along with the workspace.",
-                        })}
-                  </p>
-                  <label className="workspace-delete-purge-ack">
-                    <input
-                      checked={purgeAcknowledged}
-                      disabled={busy}
-                      onChange={(event) =>
-                        onPurgeAcknowledgedChange(event.target.checked)
-                      }
-                      type="checkbox"
-                    />
-                    <span>
-                      {t("modals.deleteWorkspace.purgeAcknowledge", {
-                        count: retainedTotal,
+      <p className="dialog-description">
+        {t("modals.deleteWorkspace.bodyPrefix", {
+          defaultValue: "This will permanently delete ",
+        })}
+        <strong>{workspace.title}</strong> (<code>{workspace.slug}</code>)
+        {t("modals.deleteWorkspace.bodySuffix", {
+          defaultValue:
+            ". If the workspace still holds content or operational records, they are listed here first so you can confirm deleting them too; retained audit history is detached, not erased.",
+        })}
+      </p>
+      {error ? (
+        <StatusBanner tone="warning">
+          <div className="workspace-delete-blockers">
+            <p>{error}</p>
+            {requiresPurge ? (
+              <>
+                <ul>
+                  {blockers.map((blocker) => (
+                    <li key={blocker.code}>
+                      {workspaceDeleteBlockerLabel(t, blocker)}
+                    </li>
+                  ))}
+                </ul>
+                <p>
+                  {flow.kind === "purge_failed"
+                    ? t("modals.deleteWorkspace.purgeRetryHint", {
                         defaultValue:
-                          "Also permanently delete these {{count}} records. This cannot be undone.",
+                          "The deletion could not be completed. Confirm the retained records below before retrying.",
+                      })
+                    : t("modals.deleteWorkspace.purgeHint", {
+                        defaultValue:
+                          "Nothing has been deleted yet. Confirm below to delete these records along with the workspace.",
                       })}
-                    </span>
-                  </label>
-                </>
-              ) : null}
-            </div>
-          </StatusBanner>
-        ) : null}
-        <label className="field-stack">
-          {t("modals.deleteWorkspace.confirmLabel", {
-            defaultValue: 'Type "{{expected}}" to confirm',
-            expected,
-          })}
-          <input
-            autoComplete="off"
-            autoFocus
-            onChange={(event) => setConfirmation(event.target.value)}
-            value={confirmation}
-          />
-        </label>
-        <div className="modal-actions">
-          <button
-            className="icon-button"
-            disabled={busy}
-            onClick={onCancel}
-            type="button"
-          >
-            {t("modals.deleteWorkspace.cancel", { defaultValue: "Cancel" })}
-          </button>
-          <button
-            className="icon-button primary danger-confirm-button"
-            disabled={busy || !canSubmit}
-            onClick={onConfirm}
-            type="button"
-          >
-            {busy
-              ? t("modals.deleteWorkspace.deleting", {
-                  defaultValue: "Deleting…",
-                })
-              : requiresPurge
-                ? t("modals.deleteWorkspace.confirmWithPurge", {
-                    defaultValue: "Delete workspace and all its data",
-                  })
-                : t("modals.deleteWorkspace.confirm", {
-                    defaultValue: "Permanently delete workspace",
-                  })}
-          </button>
-        </div>
-      </div>
-    </ConfirmModalFrame>
+                </p>
+                <label className="workspace-delete-purge-ack">
+                  <input
+                    checked={purgeAcknowledged}
+                    disabled={busy}
+                    onChange={(event) =>
+                      onPurgeAcknowledgedChange(event.target.checked)
+                    }
+                    type="checkbox"
+                  />
+                  <span>
+                    {t("modals.deleteWorkspace.purgeAcknowledge", {
+                      count: retainedTotal,
+                      defaultValue:
+                        "Also permanently delete these {{count}} records. This cannot be undone.",
+                    })}
+                  </span>
+                </label>
+              </>
+            ) : null}
+          </div>
+        </StatusBanner>
+      ) : null}
+      <label className="field-stack">
+        {t("modals.deleteWorkspace.confirmLabel", {
+          defaultValue: 'Type "{{expected}}" to confirm',
+          expected,
+        })}
+        <input
+          autoComplete="off"
+          autoFocus
+          onChange={(event) => setConfirmation(event.target.value)}
+          value={confirmation}
+        />
+      </label>
+    </ConfirmDialog>
   );
 }
 
@@ -6328,25 +6306,14 @@ function WorkspaceScopeEditModal({
   return (
     <Dialog
       className="workspace-picker-dialog"
+      closeLabel={t("workspacePicker.close")}
       dismissible={!busy}
       labelledBy="workspace-scope-modal-title"
       onClose={onCancel}
-      header={
-        <div className="workspace-picker-heading">
-          {" "}
-          <h2 id="workspace-scope-modal-title">
-            {t("access.workspaceScope.editTitle", {
-              defaultValue: "Workspaces for {{subject}}",
-              subject: subjectLabel,
-            })}
-          </h2>
-          <DialogCloseButton
-            disabled={busy}
-            label={t("workspacePicker.close")}
-            onClick={onCancel}
-          />
-        </div>
-      }
+      title={t("access.workspaceScope.editTitle", {
+        defaultValue: "Workspaces for {{subject}}",
+        subject: subjectLabel,
+      })}
       footer={
         <div className="modal-actions">
           <button
@@ -6369,9 +6336,7 @@ function WorkspaceScopeEditModal({
           >
             {busy
               ? t("access.workspaceScope.saving", { defaultValue: "Saving…" })
-              : t("access.workspaceScope.save", {
-                  defaultValue: "Save workspaces",
-                })}
+              : t("shell:actions.save")}
           </button>
         </div>
       }
@@ -6430,49 +6395,29 @@ function ConfirmRevokeModal({
 }) {
   const { t } = useTranslation("settings");
   return (
-    <ConfirmModalFrame
+    <ConfirmDialog
       busy={busy}
+      busyLabel={t("modals.revoke.revoking", { defaultValue: "Revoking…" })}
+      confirmLabel={t("shell:actions.revoke")}
+      error={error}
       labelledBy="revoke-modal-title"
       onCancel={onCancel}
+      onConfirm={onConfirm}
+      title={t("modals.revoke.title", { defaultValue: "Revoke OAuth consent" })}
+      tone="danger"
     >
-      <div className="modal-panel">
-        <h2 id="revoke-modal-title">
-          {t("modals.revoke.title", { defaultValue: "Revoke OAuth consent" })}
-        </h2>
-        <p>
-          {t("modals.revoke.bodyPrefix", {
-            defaultValue:
-              "This will revoke all consents and active refresh tokens for ",
-          })}
-          <strong>{oauthConsentDisplayLabel(consent)}</strong>
-          {t("modals.revoke.bodySuffix", {
-            defaultValue:
-              ". The client must re-authorize before it can call the API again.",
-          })}
-        </p>
-        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
-        <div className="modal-actions">
-          <button
-            className="icon-button"
-            disabled={busy}
-            onClick={onCancel}
-            type="button"
-          >
-            {t("modals.revoke.cancel", { defaultValue: "Cancel" })}
-          </button>
-          <button
-            className="icon-button primary"
-            disabled={busy}
-            onClick={onConfirm}
-            type="button"
-          >
-            {busy
-              ? t("modals.revoke.revoking", { defaultValue: "Revoking…" })
-              : t("modals.revoke.confirm", { defaultValue: "Revoke" })}
-          </button>
-        </div>
-      </div>
-    </ConfirmModalFrame>
+      <p className="dialog-description">
+        {t("modals.revoke.bodyPrefix", {
+          defaultValue:
+            "This will revoke all consents and active refresh tokens for ",
+        })}
+        <strong>{oauthConsentDisplayLabel(consent)}</strong>
+        {t("modals.revoke.bodySuffix", {
+          defaultValue:
+            ". The client must re-authorize before it can call the API again.",
+        })}
+      </p>
+    </ConfirmDialog>
   );
 }
 
@@ -6493,46 +6438,28 @@ function ConfirmConnectionCleanupModal({
 }) {
   const { t } = useTranslation("settings");
   return (
-    <Dialog
-      dismissible={!busy}
+    <ConfirmDialog
+      busy={busy}
+      busyLabel={t("connections.cleaning", { defaultValue: "Cleaning up…" })}
+      confirmDisabled={count === 0}
+      confirmLabel={t("connections.cleanupConfirm", { defaultValue: "Clean up" })}
+      error={error}
       labelledBy="connection-cleanup-modal-title"
-      onClose={onCancel}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
       restoreFocusFallback={restoreFocusFallback}
+      title={t("connections.cleanupTitle", {
+        defaultValue: "Clean up old connections",
+      })}
     >
-      <h2 id="connection-cleanup-modal-title">
-        {t("connections.cleanupTitle", {
-          defaultValue: "Clean up old connections",
-        })}
-      </h2>
-      <p>
+      <p className="dialog-description">
         {t("connections.cleanupBody", {
           count,
           defaultValue:
             "Remove {{count}} expired or revoked consent records? MCP client identities and their traces stay in history.",
         })}
       </p>
-      {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
-      <div className="modal-actions">
-        <button
-          className="icon-button"
-          disabled={busy}
-          onClick={onCancel}
-          type="button"
-        >
-          {t("actions.cancel", { defaultValue: "Cancel" })}
-        </button>
-        <button
-          className="icon-button primary"
-          disabled={busy || count === 0}
-          onClick={onConfirm}
-          type="button"
-        >
-          {busy
-            ? t("connections.cleaning", { defaultValue: "Cleaning up…" })
-            : t("connections.cleanupConfirm", { defaultValue: "Clean up" })}
-        </button>
-      </div>
-    </Dialog>
+    </ConfirmDialog>
   );
 }
 
@@ -6551,56 +6478,34 @@ function ConfirmTokenDisableModal({
 }) {
   const { t } = useTranslation("settings");
   return (
-    <ConfirmModalFrame
+    <ConfirmDialog
       busy={busy}
+      busyLabel={t("modals.disableToken.disabling", { defaultValue: "Revoking…" })}
+      confirmLabel={t("shell:actions.revoke")}
+      error={error}
       labelledBy="disable-token-modal-title"
       onCancel={onCancel}
+      onConfirm={onConfirm}
+      title={t("modals.disableToken.title", { defaultValue: "Revoke access key" })}
+      tone="danger"
     >
-      <div className="modal-panel">
-        <h2 id="disable-token-modal-title">
-          {t("modals.disableToken.title", { defaultValue: "Revoke access key" })}
-        </h2>
-        <p>
-          {t("modals.disableToken.bodyPrefix", {
-            defaultValue: "This will revoke ",
-          })}
-          <strong>{token.name}</strong>
-          {t("modals.disableToken.bodySuffix", {
-            name: token.name,
-            defaultValue:
-              ". Existing tools using this key will stop connecting until you generate and register a new key.",
-          })}
-        </p>
-        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
-        <div className="modal-actions">
-          <button
-            className="icon-button"
-            disabled={busy}
-            onClick={onCancel}
-            type="button"
-          >
-            {t("modals.disableToken.cancel", { defaultValue: "Cancel" })}
-          </button>
-          <button
-            className="icon-button primary"
-            disabled={busy}
-            onClick={onConfirm}
-            type="button"
-          >
-            {busy
-              ? t("modals.disableToken.disabling", {
-                  defaultValue: "Revoking…",
-                })
-              : t("modals.disableToken.confirm", { defaultValue: "Revoke key" })}
-          </button>
-        </div>
-      </div>
-    </ConfirmModalFrame>
+      <p className="dialog-description">
+        {t("modals.disableToken.bodyPrefix", {
+          defaultValue: "This will revoke ",
+        })}
+        <strong>{token.name}</strong>
+        {t("modals.disableToken.bodySuffix", {
+          name: token.name,
+          defaultValue:
+            ". Existing tools using this key will stop connecting until you generate and register a new key.",
+        })}
+      </p>
+    </ConfirmDialog>
   );
 }
 
 // A39: confirm the instant MCP-client Disable toggle, mirroring the sibling
-// access-key disable (ConfirmTokenDisableModal) — same ConfirmModalFrame shape
+// access-key disable (ConfirmTokenDisableModal) — same ConfirmDialog shape
 // so Escape/focus-trap/busy behavior is identical.
 function ConfirmClientDisableModal({
   busy,
@@ -6617,51 +6522,25 @@ function ConfirmClientDisableModal({
 }) {
   const { t } = useTranslation("settings");
   return (
-    <ConfirmModalFrame
+    <ConfirmDialog
       busy={busy}
+      busyLabel={t("mcpClients.disableConfirm.busy", { defaultValue: "Disabling…" })}
+      confirmLabel={t("shell:actions.disable")}
+      error={error}
       labelledBy="disable-client-modal-title"
       onCancel={onCancel}
+      onConfirm={onConfirm}
+      title={t("mcpClients.disableConfirm.title", { defaultValue: "Disable MCP client" })}
+      tone="warning"
     >
-      <div className="modal-panel">
-        <h2 id="disable-client-modal-title">
-          {t("mcpClients.disableConfirm.title", {
-            defaultValue: "Disable MCP client",
-          })}
-        </h2>
-        <p>
-          {t("mcpClients.disableConfirm.body", {
-            defaultValue:
-              "{{client}} stops accepting calls immediately. Re-enable any time.",
-            client: clientName,
-          })}
-        </p>
-        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
-        <div className="modal-actions">
-          <button
-            className="icon-button"
-            disabled={busy}
-            onClick={onCancel}
-            type="button"
-          >
-            {t("mcpClients.disableConfirm.cancel", { defaultValue: "Cancel" })}
-          </button>
-          <button
-            className="icon-button primary"
-            disabled={busy}
-            onClick={onConfirm}
-            type="button"
-          >
-            {busy
-              ? t("mcpClients.disableConfirm.busy", {
-                  defaultValue: "Disabling…",
-                })
-              : t("mcpClients.disableConfirm.confirm", {
-                  defaultValue: "Disable client",
-                })}
-          </button>
-        </div>
-      </div>
-    </ConfirmModalFrame>
+      <p className="dialog-description">
+        {t("mcpClients.disableConfirm.body", {
+          defaultValue:
+            "{{client}} stops accepting calls immediately. Re-enable any time.",
+          client: clientName,
+        })}
+      </p>
+    </ConfirmDialog>
   );
 }
 
@@ -6680,49 +6559,25 @@ function ConfirmClientDeleteModal({
 }) {
   const { t } = useTranslation("settings");
   return (
-    <ConfirmModalFrame
+    <ConfirmDialog
       busy={busy}
+      busyLabel={t("mcpClients.deleteConfirm.busy", { defaultValue: "Deleting…" })}
+      confirmLabel={t("shell:actions.delete")}
+      error={error}
       labelledBy="delete-client-modal-title"
       onCancel={onCancel}
+      onConfirm={onConfirm}
+      title={t("mcpClients.deleteConfirm.title", { defaultValue: "Delete deactivated MCP client" })}
+      tone="danger"
     >
-      <div className="modal-panel">
-        <h2 id="delete-client-modal-title">
-          {t("mcpClients.deleteConfirm.title", {
-            defaultValue: "Delete deactivated MCP client",
-          })}
-        </h2>
-        <p>
-          {t("mcpClients.deleteConfirm.body", {
-            defaultValue:
-              "Delete {{client}} from this list? Its history stays available, but this binding cannot be reactivated. A new authorization or access key is required to connect again.",
-            client: clientName,
-          })}
-        </p>
-        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
-        <div className="modal-actions">
-          <button
-            className="icon-button"
-            disabled={busy}
-            onClick={onCancel}
-            type="button"
-          >
-            {t("mcpClients.deleteConfirm.cancel", { defaultValue: "Cancel" })}
-          </button>
-          <button
-            className="icon-button primary"
-            disabled={busy}
-            onClick={onConfirm}
-            type="button"
-          >
-            {busy
-              ? t("mcpClients.deleteConfirm.busy", { defaultValue: "Deleting…" })
-              : t("mcpClients.deleteConfirm.confirm", {
-                  defaultValue: "Delete client",
-                })}
-          </button>
-        </div>
-      </div>
-    </ConfirmModalFrame>
+      <p className="dialog-description">
+        {t("mcpClients.deleteConfirm.body", {
+          defaultValue:
+            "Delete {{client}} from this list? Its history stays available, but this binding cannot be reactivated. A new authorization or access key is required to connect again.",
+          client: clientName,
+        })}
+      </p>
+    </ConfirmDialog>
   );
 }
 
@@ -6741,146 +6596,30 @@ function ConfirmTokenDeleteModal({
 }) {
   const { t } = useTranslation("settings");
   return (
-    <ConfirmModalFrame
+    <ConfirmDialog
       busy={busy}
+      busyLabel={t("modals.deleteToken.deleting", { defaultValue: "Deleting…" })}
+      confirmLabel={t("shell:actions.delete")}
+      error={error}
       labelledBy="delete-token-modal-title"
       onCancel={onCancel}
+      onConfirm={onConfirm}
+      title={t("modals.deleteToken.title", { defaultValue: "Delete inactive access key" })}
+      tone="danger"
     >
-      <div className="modal-panel">
-        <h2 id="delete-token-modal-title">
-          {t("modals.deleteToken.title", {
-            defaultValue: "Delete inactive access key",
-          })}
-        </h2>
-        <p>
-          {t("modals.deleteToken.bodyPrefix", {
-            defaultValue: "This removes ",
-          })}
-          <strong>{token.name}</strong>
-          {t("modals.deleteToken.bodySuffix", {
-            name: token.name,
-            defaultValue:
-              " from the access key list. The key is already revoked or expired and cannot be used to connect.",
-          })}
-        </p>
-        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
-        <div className="modal-actions">
-          <button
-            className="icon-button"
-            disabled={busy}
-            onClick={onCancel}
-            type="button"
-          >
-            {t("modals.deleteToken.cancel", { defaultValue: "Cancel" })}
-          </button>
-          <button
-            className="icon-button primary"
-            disabled={busy}
-            onClick={onConfirm}
-            type="button"
-          >
-            {busy
-              ? t("modals.deleteToken.deleting", { defaultValue: "Deleting…" })
-              : t("modals.deleteToken.confirm", { defaultValue: "Delete key" })}
-          </button>
-        </div>
-      </div>
-    </ConfirmModalFrame>
+      <p className="dialog-description">
+        {t("modals.deleteToken.bodyPrefix", {
+          defaultValue: "This removes ",
+        })}
+        <strong>{token.name}</strong>
+        {t("modals.deleteToken.bodySuffix", {
+          name: token.name,
+          defaultValue:
+            " from the access key list. The key is already revoked or expired and cannot be used to connect.",
+        })}
+      </p>
+    </ConfirmDialog>
   );
-}
-
-function ConfirmModalFrame({
-  busy,
-  children,
-  labelledBy,
-  onCancel,
-}: {
-  busy: boolean;
-  children: ReactNode;
-  labelledBy: string;
-  onCancel: () => void;
-}) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    previousFocusRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const focusable = focusableElements(containerRef.current);
-    focusable[0]?.focus();
-    return () => {
-      const previous = previousFocusRef.current;
-      if (previous && document.contains(previous)) {
-        previous.focus();
-      }
-    };
-  }, []);
-
-  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      if (!busy) {
-        onCancel();
-      }
-      return;
-    }
-    if (event.key !== "Tab") {
-      return;
-    }
-    const focusable = focusableElements(containerRef.current);
-    if (focusable.length === 0) {
-      event.preventDefault();
-      return;
-    }
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-      return;
-    }
-    if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  }
-
-  const dialog = (
-    // This focus-trapped modal handles Escape and Tab at the dialog boundary.
-    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
-    <div
-      aria-labelledby={labelledBy}
-      aria-modal="true"
-      className="modal-backdrop"
-      onKeyDown={handleKeyDown}
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !busy) {
-          onCancel();
-        }
-      }}
-      ref={containerRef}
-      role="dialog"
-      tabIndex={-1}
-    >
-      {children}
-    </div>
-  );
-
-  return typeof document === "undefined"
-    ? dialog
-    : createPortal(dialog, document.body);
-}
-
-function focusableElements(root: HTMLElement | null) {
-  if (!root) {
-    return [];
-  }
-  return Array.from(
-    root.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    ),
-  ).filter((element) => !element.hasAttribute("hidden"));
 }
 
 export type SettingsDestinationFlags = {
@@ -7693,13 +7432,13 @@ export function LibraryPolicyView({
         <StatusBanner
           tone="warning"
           action={
-            <button
+            <button aria-label={t("policy.libraryUpload.retryCapabilities")}
               className="icon-button text-button"
               disabled={capabilitiesLoading || readOnly}
               onClick={reloadCapabilities}
               type="button"
             >
-              {t("policy.libraryUpload.retryCapabilities")}
+              {t("shell:actions.refresh")}
             </button>
           }
         >
@@ -7925,7 +7664,7 @@ export function LibraryPolicyView({
                       }))}
                       type="button"
                     >
-                      {t("actions.remove", { defaultValue: "Remove" })}
+                      {t("shell:actions.remove")}
                     </button>
                   </div>
                 ) : null}
@@ -8143,7 +7882,7 @@ export function LibraryPolicyView({
                         }}
                         type="button"
                       >
-                        {t("policy.libraryUpload.advanced.remove")}
+                        {t("shell:actions.remove")}
                       </button>
                     </article>
                   );
@@ -8192,7 +7931,7 @@ export function LibraryPolicyView({
           onClick={save}
           type="button"
         >
-          {busy ? t("state.saving") : t("actions.save")}
+          {busy ? t("state.saving") : t("shell:actions.save")}
         </button>
       </div>
     </div>
@@ -8384,7 +8123,7 @@ export function PolicyGroupView({
             title={saveTitle}
             type="button"
           >
-            {busy ? t("actions.saving") : t("actions.save")}
+            {busy ? t("actions.saving") : t("shell:actions.save")}
           </button>
         </div>
       ) : null}
@@ -8734,7 +8473,7 @@ export function ReviewAutoApproveByRiskSettings({
             onClick={saveDrafts}
             type="button"
           >
-            {busy ? t("actions.saving") : t("actions.save")}
+            {busy ? t("actions.saving") : t("shell:actions.save")}
           </button>
         </div>
       ) : null}

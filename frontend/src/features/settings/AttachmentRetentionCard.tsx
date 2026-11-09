@@ -171,8 +171,8 @@ export function AttachmentRetentionCard({
       {policy ? <p>{t(`attachments.policy.source.${policy.source}`)}</p> : null}
       {error ? <p role="alert">{error}</p> : null}
       {!policy ? (
-        <button className="icon-button" type="button" onClick={onReload}>
-          {t("attachments.policy.reload")}
+        <button aria-label={t("attachments.policy.reload")} className="icon-button" type="button" onClick={onReload}>
+          {t("shell:actions.refresh")}
         </button>
       ) : null}
       {canEdit ? (
@@ -266,7 +266,7 @@ export function AttachmentRetentionCard({
               >
                 {t("attachments.policy.cancel")}
               </button>
-              <button
+              <button aria-label={t("attachments.policy.save")}
                 className="icon-button"
                 type="button"
                 ref={saveRef}
@@ -276,7 +276,7 @@ export function AttachmentRetentionCard({
                   else void save();
                 }}
               >
-                {t("attachments.policy.save")}
+                {t("shell:actions.save")}
               </button>
             </div>
             {confirm ? (
@@ -296,7 +296,7 @@ export function AttachmentRetentionCard({
                     {t("attachments.policy.cancel")}
                   </button>
                   <button
-                    className="icon-button danger-action"
+                    className="icon-button danger"
                     type="button"
                     disabled={busy}
                     onClick={() => void save()}

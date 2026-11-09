@@ -7,7 +7,6 @@
   },
   "breadcrumb": "설정",
   "loading": "설정 불러오는 중",
-  "loadRetry": "다시 시도",
   "errors": {
     "loadFailed": "설정을 불러오지 못했습니다.",
     "requestFailed": "설정 요청을 처리하지 못했습니다. 다시 시도하세요.",
@@ -182,7 +181,6 @@
       "loading": "가입 요청 불러오는 중…",
       "requested": "{{date}} 요청 · {{attempt}}번째 시도",
       "approve": "뷰어로 승인",
-      "reject": "거절",
       "updating": "처리 중…",
       "empty": {
         "title": "대기 중인 요청이 없습니다",
@@ -212,8 +210,7 @@
       "updating": "처리 중…",
       "confirmShare": "워크스페이스 전체 공유",
       "confirmSelfDemote": "소유자 권한 포기",
-      "confirmOwner": "소유자 권한 부여",
-      "confirmRemove": "멤버 제거"
+      "confirmOwner": "소유자 권한 부여"
     },
     "directory": {
       "title": "회사 디렉터리",
@@ -313,7 +310,6 @@
       "keepsPages_other": "공개 페이지 표시 {{count}}건은 변경하지 않습니다.",
       "forcesInviteOnly": "비공개 범위는 가입 정책을 초대 전용으로 강제합니다.",
       "wholeWorkspaceWarning": "이 변경은 워크스페이스 전체에 적용되며 검색 노출이나 공개 접근을 즉시 줄일 수 있습니다.",
-      "cancel": "취소",
       "saving": "저장 중…",
       "confirm": "확인하고 저장"
     }
@@ -833,7 +829,6 @@
           "addToFamily": "파일군에 추가",
           "addToFamilyLabel": "{{format}}을(를) 이 파일군에 추가",
           "editLabel": "{{format}} 편집",
-          "delete": "형식 삭제",
           "deleteLabel": "{{format}} 삭제",
           "newRequiresFamily": "새 사용자 정의 형식을 유지하려면 이 파일군과 함께 저장해야 합니다. 파일군을 추가하거나 수정하세요.",
           "familyChangesRequireSave": "파일군 변경 사항도 대기 중입니다. 두 변경 사항을 함께 적용하려면 파일군을 추가하거나 수정하세요.",
@@ -932,7 +927,6 @@
         "noSearchResults": "검색과 일치하는 파일 형식이 없습니다.",
         "empty": "설정된 파일 형식별 한도가 없습니다.",
         "inherited": "파일군 또는 워크스페이스 기본값",
-        "remove": "한도 제거",
         "removeLabel": "{{format}} 형식별 한도 제거",
         "loadMore": "형식 {{remaining}}개 더 보기"
       },
@@ -1219,7 +1213,6 @@
     "linkMissing": "서버가 복구 링크를 반환하지 않았습니다. 새 재설정을 발급하세요.",
     "linkDismissed": "일회용 링크를 숨겼습니다. 다른 링크가 필요하면 새 재설정을 발급하세요.",
     "dialog": {
-      "eyebrow": "권한 작업 확인",
       "title": "비밀번호 재설정을 발급할까요?",
       "description": "{{email}} 계정의 복구를 시작합니다. 새 비밀번호는 사용자가 직접 정하며 관리자는 볼 수 없습니다.",
       "delivery": "전달 방법",
@@ -1242,7 +1235,6 @@
       "confirm": "비밀번호 재설정 발급"
     },
     "linkDialog": {
-      "eyebrow": "일회성 표시",
       "title": "지금 복구 링크를 복사하세요",
       "warning": "이 링크는 한 번만 표시됩니다. 이 창을 닫으면 영구적으로 숨겨지며 다시 열 수 없습니다.",
       "recipient": "{{email}} 사용자에게 별도의 안전한 채널로 링크를 전달하세요.",
@@ -1330,7 +1322,6 @@
     "workspaceEyebrow": "이 워크스페이스",
     "title": "작업",
     "description": "백그라운드 작업 큐 상태, 영구 실패, 임대 시간을 초과한 작업입니다.",
-    "refresh": "새로고침",
     "loadError": "작업을 불러오지 못했습니다.",
     "summary": {
       "queued": "대기 중",
@@ -1353,7 +1344,6 @@
     "meta": "재시도 {{retryCount}} · {{updated}} 갱신",
     "incompleteWarning_one": "워크스페이스 {{count}}곳에 연결할 수 없어, 아래 합계와 목록에 해당 작업이 빠져 있을 수 있습니다.",
     "incompleteWarning_other": "워크스페이스 {{count}}곳에 연결할 수 없어, 아래 합계와 목록에 해당 작업이 빠져 있을 수 있습니다.",
-    "retry": "재시도",
     "retrying": "재시도 중…",
     "retryUnsupported": "이 작업 유형은 실패 시 도메인 레코드도 함께 갱신되어 아직 여기서 재시도할 수 없습니다.",
     "loadMore": "더 보기",
@@ -1375,7 +1365,6 @@
     },
     "countText_one": "{{count}}개",
     "countText_other": "{{count}}개",
-    "refresh": "새로고침",
     "loading": "첨부 파일을 불러오는 중…",
     "loadError": "첨부 파일을 불러오지 못했습니다.",
     "serverAdminFallbackNotice": "첨부 파일을 보려면 이 워크스페이스에 가입하세요.",
@@ -1426,7 +1415,6 @@
       "uploadedAt": "업로드 시각"
     },
     "actions": {
-      "delete": "삭제",
       "deleting": "삭제 중…",
       "loadMore": "더 보기",
       "loadingMore": "불러오는 중…"
@@ -1462,7 +1450,6 @@
       "delete": "선택 삭제",
       "confirm_other": "선택한 첨부 파일 {{count}}개를 삭제할까요?",
       "permanent": "파일이 영구 삭제되며 되돌릴 수 없습니다.",
-      "confirmAction": "삭제 확인",
       "progress": "삭제 중… {{done}}/{{total}}개 완료",
       "result": "{{deleted}}개 삭제, {{failed}}개 실패",
       "selectFile": "{{filename}} 선택",
@@ -1478,7 +1465,8 @@
       },
       "selectAll_one": "전체 선택 · 현재 불러온 {{count}}개",
       "selected_one": "{{count}}개 선택",
-      "confirm_one": "선택한 첨부 파일 {{count}}개를 삭제할까요?"
+      "confirm_one": "선택한 첨부 파일 {{count}}개를 삭제할까요?",
+      "confirmAria": "선택한 파일 삭제"
     },
     "policy": {
       "title": "미사용 파일 자동 회수",
@@ -1556,15 +1544,11 @@
     "disableConfirm": {
       "title": "MCP 클라이언트 비활성화",
       "body": "{{client, josaIGa}} 즉시 호출 수신을 중단합니다. 언제든 다시 활성화할 수 있습니다.",
-      "cancel": "취소",
-      "confirm": "클라이언트 비활성화",
       "busy": "비활성화 중…"
     },
     "deleteConfirm": {
       "title": "비활성 MCP 클라이언트 삭제",
       "body": "목록에서 {{client}}을(를) 삭제할까요? 과거 내역은 유지되지만 이 연결은 다시 활성화할 수 없습니다. 다시 연결하려면 새 승인 또는 액세스 키가 필요합니다.",
-      "cancel": "취소",
-      "confirm": "클라이언트 삭제",
       "busy": "삭제 중…"
     }
   },
@@ -1621,7 +1605,6 @@
     "discard": "되돌리기",
     "edit": "편집",
     "remove": "제거",
-    "save": "변경사항 저장",
     "saving": "저장 중…",
     "showRaw": "원시 값 보기"
   },
@@ -1753,7 +1736,6 @@
       "diffNone": "아직 변경 없음.",
       "diffAddedOnly": "추가 {{added}}개 · 제거 0개.",
       "diffWithRemovals": "추가 {{added}}개 · 제거 {{removed}}개({{names}} — 즉시 접근 불가). 진행 중인 편집본은 보존됩니다.",
-      "save": "워크스페이스 저장",
       "saving": "저장 중…"
     },
     "savingSessionSettings": "세션 설정 저장 중…",
@@ -1799,7 +1781,6 @@
     "noOauthAppsHintUrlClientId": "HTTPS URL 클라이언트 식별자가 설정된 클라이언트는 OAuth를 사용할 수 있습니다. 자동 등록이 필요한 클라이언트는 대신 액세스 키를 사용해야 합니다.",
     "noOauthAppsHintUnavailable": "이 서버에서는 OAuth를 사용할 수 없어 앱을 승인할 수 없습니다. 액세스 키를 사용하세요.",
     "consentGrantedMeta": "부여 {{granted}}",
-    "revoke": "해지",
     "consentRevoked": "OAuth 동의를 취소했습니다. 앱 1개를 업데이트했습니다.",
     "consentAlreadyRevoked": "OAuth 동의가 이미 취소되어 목록을 새로 고쳤습니다.",
     "revokeAllAria": "{{client}}의 모든 동의 취소",
@@ -1867,7 +1848,6 @@
     },
     "setupCommandPlaceholder": "키를 만들면 설정 명령이 여기에 나타납니다.",
     "oauthCapabilityUnknown": "이 서버의 연결 설정을 읽지 못해 OAuth 제공 가능 여부를 알 수 없습니다. 다시 시도하세요.",
-    "oauthCapabilityRetry": "다시 시도",
     "chooseSetupWorkspace": "연결을 설정할 Workspace를 선택하세요",
     "chooseWorkspace": "Workspace 선택"
   },
@@ -1896,10 +1876,8 @@
     "editWorkspaces": "워크스페이스 편집",
     "editWorkspacesNamed": "{{name}} 키의 워크스페이스 편집",
     "disableKey": "키 비활성화",
-    "revoke": "해지",
     "revokeNamed": "{{name}} 키 취소",
     "delete": "삭제",
-    "deleteKey": "키 삭제",
     "deleteNamed": "{{name}} 키 삭제"
   },
   "clientRow": {
@@ -1916,12 +1894,10 @@
     "connectionHealth": "연결 상태",
     "scopesLabel": "범위",
     "updating": "업데이트 중…",
-    "disable": "비활성화",
     "disableNamed": "{{name}} 비활성화",
     "enable": "활성화",
     "reactivate": "다시 활성화",
     "reactivateNamed": "{{name}} 다시 활성화",
-    "delete": "클라이언트 삭제",
     "deleteNamed": "{{name}} 클라이언트 삭제",
     "cleanup": "정리",
     "connectionTiming": "마지막 사용 {{lastUsed}} · 다음 만료 {{nextExpiry}}",
@@ -1987,34 +1963,26 @@
         "unknown": "기타 보존 기록: {{count}}개"
       },
       "confirmLabel": "확인하려면 \"{{expected}}\"{{expected, josaEulReulOnly}} 입력하세요",
-      "cancel": "취소",
       "deleting": "삭제 중…",
-      "confirm": "워크스페이스 영구 삭제",
       "confirmWithPurge": "워크스페이스와 모든 데이터 삭제"
     },
     "revoke": {
       "title": "OAuth 동의 취소",
       "bodyPrefix": "",
       "bodySuffix": "의 모든 동의와 활성 새로고침 토큰을 취소합니다. 클라이언트는 API를 다시 호출하기 전에 재인증해야 합니다.",
-      "cancel": "취소",
-      "revoking": "동의 취소 중…",
-      "confirm": "동의 취소"
+      "revoking": "동의 취소 중…"
     },
     "disableToken": {
       "title": "액세스 키 취소",
       "bodyPrefix": "",
       "bodySuffix": "{{name, josaEulReulOnly}} 취소합니다. 이 키를 사용하는 기존 도구는 새 키를 생성하고 등록할 때까지 연결이 중단됩니다.",
-      "cancel": "취소",
-      "disabling": "취소 중…",
-      "confirm": "키 취소"
+      "disabling": "취소 중…"
     },
     "deleteToken": {
       "title": "비활성 액세스 키 삭제",
       "bodyPrefix": "",
       "bodySuffix": "{{name, josaEulReulOnly}} 액세스 키 목록에서 제거합니다. 이 키는 이미 취소되었거나 만료되어 연결에 사용할 수 없습니다.",
-      "cancel": "취소",
-      "deleting": "삭제 중…",
-      "confirm": "키 삭제"
+      "deleting": "삭제 중…"
     }
   },
   "appHub": {
@@ -2122,7 +2090,6 @@
     "showSelected": "선택한 항목 ({{count}}개)",
     "loading": "Workspace 불러오는 중…",
     "loadError": "Workspace를 불러오지 못했습니다.",
-    "retry": "다시 시도",
     "range": "{{start}}–{{end}} / {{total}}개",
     "previous": "이전",
     "next": "다음",
@@ -2163,7 +2130,6 @@
     "confirmEmail": "확인을 위해 {{email}} 입력",
     "currentPassword": "현재 관리자 비밀번호",
     "cancel": "취소",
-    "submit": "계정 삭제 확정",
     "submitting": "계정 삭제 처리 중…",
     "scheduled": "{{date}} 이후 데이터 정리 예정",
     "success": "{{account}} 계정의 접근 권한을 폐기했습니다. {{date}} 이후 데이터를 정리합니다.",
@@ -2179,8 +2145,7 @@
       "saveFailed": "계정 데이터 보관 기간을 저장하지 못했습니다.",
       "saved": "계정 데이터 보관 기간을 저장했습니다.",
       "save": "보관 기간 저장",
-      "saving": "저장 중…",
-      "retry": "다시 시도"
+      "saving": "저장 중…"
     },
     "errors": {
       "user_deletion_last_owner": "아직 다른 멤버가 있는 워크스페이스가 있습니다. 새로고침한 뒤 다시 검토하세요.",

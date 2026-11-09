@@ -4095,6 +4095,9 @@ button.relation-list-flow-hub-pill[aria-pressed="true"] { box-shadow: 0 0 0 2px 
   color: white;
 }
 
+/* One color per meaning. Approve is green, proceed-with-care actions are
+   yellow, and delete, discard, reject or revoke are red. A button picks one of
+   these classes; it does not define its own shade. */
 .icon-button.success {
   border-color: #bbf7d0;
   background: var(--ok-soft);
@@ -4119,13 +4122,15 @@ button.relation-list-flow-hub-pill[aria-pressed="true"] { box-shadow: 0 0 0 2px 
   color: #78350f;
 }
 
-.icon-button.danger {
+.icon-button.danger,
+.text-button.danger {
   border-color: var(--danger-border);
   background: var(--danger-soft);
-  color: #be123c;
+  color: var(--danger-strong);
 }
 
-.icon-button.danger:hover {
+.icon-button.danger:hover,
+.text-button.danger:hover {
   border-color: var(--danger);
   background: var(--danger-surface);
   color: #9f1239;
@@ -4201,14 +4206,36 @@ button.relation-list-flow-hub-pill[aria-pressed="true"] { box-shadow: 0 0 0 2px 
 }
 
 .status-banner {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: center;
   margin-bottom: 16px;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+.status-banner > svg {
+  flex: none;
+}
+
+/* The message keeps a readable column beside its icon. When that column and
+   the action no longer fit on one line, the action takes the next line, so
+   this holds in any container, a page or a dialog, without a breakpoint. */
+.status-banner > div:not(.status-banner-action) {
+  flex: 1 1 min(240px, calc(100% - 26px));
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.status-banner-action {
+  max-width: 100%;
+  margin-inline-start: auto;
+}
+
+.status-banner-action > .dialog-actions {
+  flex-wrap: wrap;
 }
 
 .status-banner-warning {
@@ -5159,19 +5186,13 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 }
 
 .dialog-panel.editor-shortcut-dialog {
-  display: grid;
-  gap: 14px;
   width: min(960px, 100%);
   max-height: min(760px, calc(100vh - 40px));
-  overflow: auto;
-  padding: 18px;
 }
 
 .dialog-panel.context-media-dialog {
   width: min(780px, 100%);
   max-height: min(760px, calc(100vh - 40px));
-  overflow: auto;
-  padding: 18px;
 }
 
 .context-media-dialog-body,
@@ -5245,11 +5266,13 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 .context-media-item-body,
 .context-media-facts {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 7px;
   min-width: 0;
 }
 
 .context-media-item-title strong {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5280,10 +5303,6 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
   font-size: 12px;
 }
 
-.context-media-delete {
-  color: var(--danger);
-}
-
 @media (max-width: 720px) {
   .context-media-item {
     grid-template-columns: 72px minmax(0, 1fr);
@@ -5298,18 +5317,6 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
     grid-column: 1 / -1;
     justify-self: end;
   }
-}
-
-.editor-shortcut-dialog-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.editor-shortcut-dialog-header h2 {
-  font-size: 22px;
-  font-weight: 750;
 }
 
 .editor-shortcut-grid {

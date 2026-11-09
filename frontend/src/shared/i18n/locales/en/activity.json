@@ -359,7 +359,6 @@
       "collapse": "Collapse events",
       "loading": "Loading original events",
       "error": "Original events could not be loaded. Try again.",
-      "retry": "Try again",
       "timeRange": "First to last activity"
     },
     "groupReads": "Group repeated reads",

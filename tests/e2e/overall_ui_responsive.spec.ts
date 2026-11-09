@@ -1293,7 +1293,7 @@ test.describe("Overall UI responsive acceptance", () => {
     await expect(dialog.getByRole("button", { name: "Add family" })).toBeDisabled();
     await dialog.getByRole("button", { name: "Cancel" }).click();
 
-    await policy.getByRole("button", { name: "Save changes", exact: true }).click();
+    await policy.getByRole("button", { name: "Save", exact: true }).click();
     await expect(policy.getByText("Library upload policy saved", { exact: true }))
       .toBeVisible();
     await page.reload();

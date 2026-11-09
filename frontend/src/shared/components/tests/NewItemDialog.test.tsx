@@ -107,7 +107,7 @@ describe("NewItemDialog", () => {
       ".dialog-panel",
       ".dialog-form",
       ".dialog-form > *",
-      ".dialog-header > :first-child",
+      ".dialog-titlebar h2",
       ".form-field",
     ]) {
       expect(cssRule(dialogStyles, selector)).toMatch(/min-inline-size:\s*0/);

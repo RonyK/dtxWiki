@@ -10,7 +10,6 @@ import {
   RotateCcw,
   Settings2,
   ShieldAlert,
-  X,
 } from "lucide-react";
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -1658,32 +1657,14 @@ export function AgentScreen() {
           className="agent-editor-dialog agent-editor-loading-dialog"
           labelledBy="agent-edit-loading-title"
           onClose={closeEditAgentPage}
+          closeLabel={t("dialog.closeAria", {
+            defaultValue: "Close agent dialog",
+          })}
+          title={t("dialog.loadingDraftTitle", {
+            defaultValue: "Loading pending draft",
+          })}
         >
           <div className="dialog-form">
-            <header className="dialog-header">
-              <div>
-                <p className="eyebrow">
-                  {t("dialog.existingPage", {
-                    defaultValue: "Existing Agent page",
-                  })}
-                </p>
-                <h2 id="agent-edit-loading-title">
-                  {t("dialog.loadingDraftTitle", {
-                    defaultValue: "Loading pending draft",
-                  })}
-                </h2>
-              </div>
-              <button
-                aria-label={t("dialog.closeAria", {
-                  defaultValue: "Close agent dialog",
-                })}
-                className="icon-button"
-                onClick={closeEditAgentPage}
-                type="button"
-              >
-                <X size={16} aria-hidden="true" />
-              </button>
-            </header>
             {editDraftError ? (
               <>
                 <StatusBanner tone="warning">{editDraftError}</StatusBanner>
@@ -1694,7 +1675,7 @@ export function AgentScreen() {
                     type="button"
                   >
                     <RefreshCw size={16} aria-hidden="true" />
-                    <span>{t("dialog.retry", { defaultValue: "Retry" })}</span>
+                    <span>{t("shell:actions.retry")}</span>
                   </button>
                 </div>
               </>
@@ -2045,37 +2026,18 @@ function AgentCreationModal({
       dismissible={!submitting}
       labelledBy="agent-create-title"
       onClose={requestClose}
+      closeLabel={t("dialog.closeAria", {
+        defaultValue: "Close agent dialog",
+      })}
+      title={
+        isEdit
+          ? t("dialog.editTitle", { defaultValue: "Edit Agent draft" })
+          : t("dialog.createTitle", {
+              defaultValue: "Create Agent draft",
+            })
+      }
     >
       <form className="dialog-form agent-create-form" onSubmit={submit}>
-        <header className="dialog-header">
-          <div>
-            <p className="eyebrow">
-              {isEdit
-                ? t("dialog.existingPage", {
-                    defaultValue: "Existing Agent page",
-                  })
-                : t("dialog.newPage", { defaultValue: "New Agent page" })}
-            </p>
-            <h2 id="agent-create-title">
-              {isEdit
-                ? t("dialog.editTitle", { defaultValue: "Edit Agent draft" })
-                : t("dialog.createTitle", {
-                    defaultValue: "Create Agent draft",
-                  })}
-            </h2>
-          </div>
-          <button
-            aria-label={t("dialog.closeAria", {
-              defaultValue: "Close agent dialog",
-            })}
-            className="icon-button"
-            disabled={submitting}
-            onClick={requestClose}
-            type="button"
-          >
-            <X size={16} aria-hidden="true" />
-          </button>
-        </header>
         {isEdit ? (
           <div className="form-field">
             <span className="form-field-label">

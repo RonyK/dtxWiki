@@ -223,7 +223,7 @@ describe("repeated read disclosure", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Original events could not be loaded");
     expect(screen.getByRole("link", { name: "Guide", description: "Read 4 times 4 minutes ago" })).toBeVisible();
     expect(expand).toHaveAttribute("aria-expanded", "true");
-    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await user.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByRole("link", { name: "Guide", description: "Read 4 minutes ago" })).toBeVisible();
     expect(load).toHaveBeenNthCalledWith(2, "opaque-token");
     expect(container.querySelectorAll(".activity-feed-entry")).toHaveLength(2);

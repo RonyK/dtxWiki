@@ -89,7 +89,7 @@ describe("ContextMediaManagerDialog", () => {
     ).toBe(false);
 
     await userEvent.click(
-      within(dialog).getByRole("button", { name: "Delete permanently" }),
+      within(dialog).getByRole("button", { name: "Delete" }),
     );
 
     await waitFor(() => {
@@ -189,7 +189,7 @@ describe("ContextMediaManagerDialog", () => {
       within(dialog).getByRole("button", { name: "Delete unused.png" }),
     );
     await userEvent.click(
-      within(dialog).getByRole("button", { name: "Delete permanently" }),
+      within(dialog).getByRole("button", { name: "Delete" }),
     );
     await waitFor(() => {
       expect(
@@ -314,7 +314,7 @@ describe("ContextMediaManagerDialog", () => {
         await screen.findByRole("button", { name: "Delete unused.png" }),
       );
       await userEvent.click(
-        screen.getByRole("button", { name: "Delete permanently" }),
+        screen.getByRole("button", { name: "Delete" }),
       );
       expect(await screen.findByRole("alert")).toHaveTextContent(expected);
 

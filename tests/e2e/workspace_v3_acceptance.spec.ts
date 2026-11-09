@@ -217,7 +217,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             response.request().method() === "DELETE",
         );
         await dialog
-          .getByRole("button", { name: "Permanently delete workspace" })
+          .getByRole("button", { name: "Delete" })
           .click();
         const blocked = await deletionResponse;
         expect(blocked.status()).toBe(409);
@@ -497,7 +497,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
                 (request) =>
                   new URL(request.url()).pathname.endsWith(`/members/${memberUserId}`) &&
                   request.method() === "DELETE",
-                () => dialog.getByRole("button", { name: "Remove member" }).click(),
+                () => dialog.getByRole("button", { name: "Remove" }).click(),
               );
             });
             expect(removal.ok()).toBeTruthy();

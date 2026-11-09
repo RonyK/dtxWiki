@@ -817,6 +817,15 @@ export function FamilyEditorDialog({
       )}
       labelledBy={titleId}
       onClose={onCancel}
+      title={
+        initialFamily
+          ? t("policy.libraryUpload.families.editTitle", {
+              defaultValue: "Edit format family",
+            })
+          : t("policy.libraryUpload.families.addTitle", {
+              defaultValue: "Add format family",
+            })
+      }
     >
       <form
         className="library-family-editor"
@@ -833,15 +842,6 @@ export function FamilyEditorDialog({
         }}
       >
         <header className="library-family-editor-heading">
-          <h2 id={titleId}>
-            {initialFamily
-              ? t("policy.libraryUpload.families.editTitle", {
-                  defaultValue: "Edit format family",
-                })
-              : t("policy.libraryUpload.families.addTitle", {
-                  defaultValue: "Add format family",
-                })}
-          </h2>
           <p id={helpId}>
             {t("policy.libraryUpload.families.editorHint", {
               defaultValue: "Start from a preset or build a family from Workspace formats.",
@@ -1338,9 +1338,7 @@ export function FamilyEditorDialog({
                         onClick={() => removeDraftCustomFormat(format.format_id)}
                         type="button"
                       >
-                        {t("policy.libraryUpload.families.customFormat.delete", {
-                          defaultValue: "Delete format",
-                        })}
+                        {t("shell:actions.delete")}
                       </button>
                     </div>
                   </article>

@@ -291,7 +291,7 @@ export function AdminJobsSection({
             type="button"
           >
             <RefreshCw aria-hidden="true" size={16} />
-            {t("jobs.refresh", { defaultValue: "Refresh" })}
+            {t("shell:actions.refresh")}
           </button>
         }
         description={t("jobs.description", {
@@ -440,7 +440,7 @@ export function AdminJobsSection({
                   <RotateCcw aria-hidden="true" size={16} />
                   {retryingId === job.id
                     ? t("jobs.retrying", { defaultValue: "Retrying…" })
-                    : t("jobs.retry", { defaultValue: "Retry" })}
+                    : t("shell:actions.retry")}
                 </button>
                 ) : null}
                 {serverScope && job.status === "failed" && !job.retryable ? (

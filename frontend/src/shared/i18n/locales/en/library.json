@@ -9,7 +9,6 @@
     "drop": "Drop files to upload",
     "queue": "Upload queue",
     "cancel": "Cancel",
-    "retry": "Retry",
     "retryAfter": "Try again in {{seconds}} seconds.",
     "openPolicySettings": "Open Library policy settings",
     "failedFallback": "Failed to upload Library item",
@@ -117,7 +116,6 @@
     }
   },
   "deleteDialog": {
-    "eyebrow": "Delete item",
     "title": "Delete {{title}}",
     "close": "Close",
     "closeDialog": "Close delete dialog",
@@ -125,9 +123,7 @@
     "referenced_one": "1 page cites this item. Deleting it leaves a deleted-item marker on that page and notifies reviewers.",
     "referenced_other": "{{count}} pages cite this item. Deleting it leaves deleted-item markers on those pages and notifies reviewers.",
     "unreferenced": "This permanently deletes the item and all its versions. This cannot be undone.",
-    "cancel": "Cancel",
     "deleting": "Deleting",
-    "deletePermanently": "Delete permanently",
     "errors": {
       "loadReferences": "Failed to load references",
       "delete": "Failed to delete item"
@@ -144,7 +140,6 @@
       "activity": "Activity",
       "unavailable": "Not available yet"
     },
-    "delete": "Delete",
     "edit": "Edit Markdown",
     "addVersion": "Upload new version",
     "addingVersion": "Uploading new version…",
@@ -160,8 +155,6 @@
       "loading": "Loading editable Markdown…",
       "unavailable": "This version no longer has editable semantic Markdown.",
       "loadFailed": "Editable Markdown could not be loaded.",
-      "retry": "Try again",
-      "save": "Save",
       "saving": "Saving…",
       "saved": "Saved",
       "cancel": "Cancel",

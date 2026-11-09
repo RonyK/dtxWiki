@@ -418,7 +418,7 @@ export function AttachmentsSection({
             type="button"
           >
             <RefreshCw aria-hidden="true" size={16} />
-            {t("attachments.refresh", { defaultValue: "Refresh" })}
+            {t("shell:actions.refresh")}
           </button>
         }
         description={
@@ -568,8 +568,8 @@ export function AttachmentsSection({
               <span role="status">
                 {t("attachments.bulk.selected", { count: selectedCount })}
               </span>
-              <button
-                className="icon-button danger-action"
+              <button aria-label={t("attachments.bulk.delete")}
+                className="icon-button danger"
                 type="button"
                 ref={batchTriggerRef}
                 disabled={locked || selectedCount === 0}
@@ -582,7 +582,7 @@ export function AttachmentsSection({
                   setBatchResult(null);
                 }}
               >
-                {t("attachments.bulk.delete")}
+                {t("shell:actions.delete")}
               </button>
               {batch ? (
                 <div className="attachments-confirm">
@@ -612,12 +612,13 @@ export function AttachmentsSection({
                       {t("attachments.confirmDelete.cancel")}
                     </button>
                     <button
-                      className="icon-button danger-action"
+                      aria-label={t("attachments.bulk.confirmAria")}
+                      className="icon-button danger"
                       type="button"
                       disabled={deleteBusy}
                       onClick={() => void confirmBatchDelete()}
                     >
-                      {t("attachments.bulk.confirmAction")}
+                      {t("shell:actions.delete")}
                     </button>
                   </div>
                 </div>
@@ -864,8 +865,10 @@ export function AttachmentsSection({
                                 defaultValue: "Cancel",
                               })}
                             </button>
-                            <button
-                              className="icon-button danger-action"
+                            <button aria-label={t("attachments.confirmDelete.confirm", {
+                                    defaultValue: "Delete attachment",
+                                  })}
+                              className="icon-button danger"
                               disabled={deleteBusy}
                               onClick={() => void confirmDelete(item)}
                               type="button"
@@ -874,16 +877,14 @@ export function AttachmentsSection({
                                 ? t("attachments.actions.deleting", {
                                     defaultValue: "Deleting…",
                                   })
-                                : t("attachments.confirmDelete.confirm", {
-                                    defaultValue: "Delete attachment",
-                                  })}
+                                : t("shell:actions.delete")}
                             </button>
                           </div>
                         </div>
                       ) : (
                         <div className="attachments-actions">
                           <button
-                            className="icon-button danger-action"
+                            className="icon-button danger"
                             disabled={locked}
                             onClick={() => {
                               setDeleteError(null);
@@ -903,9 +904,7 @@ export function AttachmentsSection({
                             }}
                             type="button"
                           >
-                            {t("attachments.actions.delete", {
-                              defaultValue: "Delete",
-                            })}
+                            {t("shell:actions.delete")}
                           </button>
                         </div>
                       )

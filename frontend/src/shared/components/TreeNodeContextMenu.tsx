@@ -294,7 +294,7 @@ export function TreeNodeContextMenu({
         <MenuButton
           danger
           icon={<Trash2 size={14} aria-hidden="true" />}
-          label={t("delete")}
+          label={t("shell:actions.delete")}
           onClick={() => onAction({ type: "delete", node })}
         />
       ) : null}

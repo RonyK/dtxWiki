@@ -130,7 +130,8 @@ import {
 } from "../../shared/components/HistoryCard";
 import { HistoryDiffDialog } from "../../shared/components/HistoryDiffDialog";
 import { HistoryGraphList } from "../../shared/components/HistoryGraphList";
-import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
+import { ConfirmDialog } from "../../shared/components/ConfirmDialog";
+import { Dialog } from "../../shared/components/Dialog";
 import { WorkspaceFirstUseChecklist } from "../../shared/components/FirstUseChecklist";
 import { NewItemDialog } from "../../shared/components/NewItemDialog";
 import { ReaderTabs } from "../../shared/components/ReaderTabs";
@@ -1914,7 +1915,7 @@ function PendingDraftReview({
             <>
               <button
                 type="button"
-                className="icon-button pending-review-action"
+                className="icon-button warning pending-review-action"
                 disabled={busy}
                 aria-expanded={reasonOpen}
                 onClick={() => setReasonOpen((open) => !open)}
@@ -1928,7 +1929,7 @@ function PendingDraftReview({
               </button>
               <button
                 type="button"
-                className="icon-button primary pending-review-action"
+                className="icon-button success pending-review-action"
                 disabled={
                   busy ||
                   (review.status === "pending" && earlierReviewCount == null)
@@ -1937,7 +1938,7 @@ function PendingDraftReview({
               >
                 <Check size={16} aria-hidden="true" />
                 <span>
-                  {t("pendingReview.approve", { defaultValue: "Approve" })}
+                  {t("shell:actions.approve")}
                 </span>
               </button>
             </>
@@ -1957,7 +1958,7 @@ function PendingDraftReview({
             />
             <button
               type="button"
-              className="icon-button primary pending-review-action"
+              className="icon-button warning pending-review-action"
               disabled={busy || !reason.trim()}
               onClick={() => decide("request_changes")}
             >
@@ -3388,21 +3389,9 @@ function ContextShareDialog({
       dismissible={!savingPublicAccess}
       labelledBy="context-share-dialog-title"
       onClose={requestClose}
+      closeLabel={t("share.closeDialog")}
+      title={t("share.title", { title: detail.title })}
     >
-      <div className="context-share-dialog-heading dialog-header">
-        <div>
-          <p className="eyebrow">{t("share.eyebrow")}</p>
-          <h2 id="context-share-dialog-title">
-            {t("share.title", { title: detail.title })}
-          </h2>
-        </div>
-        <DialogCloseButton
-          disabled={savingPublicAccess}
-          label={t("share.closeDialog")}
-          onClick={requestClose}
-        />
-      </div>
-
       <section className="context-share-section">
         <h3>{t("share.workspaceLink.title")}</h3>
         <p>{t("share.workspaceLink.description")}</p>
@@ -4407,15 +4396,13 @@ export function ContextHistory({
                 this row can be discarded, and focus order matches the eye. */}
             {canEdit && entry.history_status === "alternative_draft" ? (
               <HistoryActionButton
-                accessibleLabel={t("history.discard", {
-                  defaultValue: "Discard",
-                })}
+                accessibleLabel={t("shell:actions.discard")}
                 busy={discardVersionId === entry.version_id}
                 icon={Trash2}
                 label={
                   discardVersionId === entry.version_id
                     ? t("history.discarding", { defaultValue: "Discarding" })
-                    : t("history.discard", { defaultValue: "Discard" })
+                    : t("shell:actions.discard")
                 }
                 onClick={() => {
                   setDiscardCandidate(entry);
@@ -4571,62 +4558,37 @@ export function ContextHistory({
         {olderHistoryControls}
       </div>
       {discardCandidate ? (
-        <Dialog
+        <ConfirmDialog
+          busy={discardVersionId !== null}
+          busyLabel={t("history.discarding", { defaultValue: "Discarding" })}
           className="context-history-discard-dialog"
-          dismissible={discardVersionId === null}
+          confirmDisabled={discardReason.trim().length === 0}
+          confirmLabel={t("shell:actions.discard")}
           labelledBy="context-history-discard-title"
-          onClose={() => {
-            if (!discardVersionId) {
-              setDiscardCandidate(null);
-              setDiscardReason("");
-            }
+          onCancel={() => {
+            setDiscardCandidate(null);
+            setDiscardReason("");
           }}
+          onConfirm={() => void discardAlternative(discardCandidate)}
+          title={t("history.discardConfirm", {
+            version: discardCandidate.version_no,
+            defaultValue:
+              "Discard alternative v{{version}}? This cannot be undone.",
+          })}
+          tone="danger"
         >
-          <div className="dialog-form">
-            <h2 id="context-history-discard-title">
-              {t("history.discardConfirm", {
-                version: discardCandidate.version_no,
-                defaultValue:
-                  "Discard alternative v{{version}}? This cannot be undone.",
-              })}
-            </h2>
-            <label>
-              <span>
-                {t("history.discardReason", { defaultValue: "Discard reason" })}
-              </span>
-              <textarea
-                autoFocus
-                required
-                value={discardReason}
-                onChange={(event) => setDiscardReason(event.currentTarget.value)}
-              />
-            </label>
-            <div className="dialog-actions">
-              <button
-                className="icon-button text-button"
-                disabled={discardVersionId !== null}
-                onClick={() => setDiscardCandidate(null)}
-                type="button"
-              >
-                {t("history.cancelDiscard", { defaultValue: "Cancel" })}
-              </button>
-              <button
-                className="danger"
-                disabled={
-                  discardVersionId !== null || discardReason.trim().length === 0
-                }
-                onClick={() => void discardAlternative(discardCandidate)}
-                type="button"
-              >
-                {discardVersionId
-                  ? t("history.discarding", { defaultValue: "Discarding" })
-                  : t("history.confirmDiscard", {
-                      defaultValue: "Discard branch permanently",
-                    })}
-              </button>
-            </div>
-          </div>
-        </Dialog>
+          <label className="form-field">
+            <span>
+              {t("history.discardReason", { defaultValue: "Discard reason" })}
+            </span>
+            <textarea
+              autoFocus
+              required
+              value={discardReason}
+              onChange={(event) => setDiscardReason(event.currentTarget.value)}
+            />
+          </label>
+        </ConfirmDialog>
       ) : null}
       {comparedVersion && comparePair ? (
         <HistoryDiffDialog

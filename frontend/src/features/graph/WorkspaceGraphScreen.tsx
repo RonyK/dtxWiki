@@ -1566,7 +1566,7 @@ export function WorkspaceGraphScreen() {
             action={(
               <div className="workspace-graph-error-actions">
                 <button className="workspace-graph-error-action" onClick={() => setRetryRevision((value) => value + 1)} type="button">
-                  {t("workspaceGraph.ui.retry")}
+                  {t("shell:actions.retry")}
                 </button>
                 <button className="workspace-graph-error-action" onClick={resetWorkspaceGraph} type="button">
                   {t("workspaceGraph.ui.resetSavedState")}

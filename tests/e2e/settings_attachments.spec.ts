@@ -261,7 +261,7 @@ for (const locale of ["en", "ko"]) {
     await evidenceScreenshot(page, testInfo, `attachments-${locale}-confirm`);
     await section
       .getByRole("button", {
-        name: locale === "en" ? "Confirm deletion" : "삭제 확인",
+        name: locale === "en" ? "Delete selected files" : "선택한 파일 삭제",
         exact: true,
       })
       .click();
@@ -508,7 +508,7 @@ for (const locale of ["en", "ko"]) {
     await current.click();
     await expect(
       section.getByRole("button", {
-        name: locale === "en" ? "Confirm deletion" : "삭제 확인",
+        name: locale === "en" ? "Delete selected files" : "선택한 파일 삭제",
         exact: true,
       }),
     ).toHaveCount(0);
@@ -546,7 +546,7 @@ for (const locale of ["en", "ko"]) {
       .click();
     await section
       .getByRole("button", {
-        name: locale === "en" ? "Confirm deletion" : "삭제 확인",
+        name: locale === "en" ? "Delete selected files" : "선택한 파일 삭제",
         exact: true,
       })
       .click();

@@ -67,7 +67,7 @@ import type {
   TreeSectionPolicy,
 } from "../../shared/api/workspace";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
-import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
+import { ConfirmDialog } from "../../shared/components/ConfirmDialog";
 import { WorkspaceFirstUseChecklist } from "../../shared/components/FirstUseChecklist";
 import {
   NewItemDialog,
@@ -1299,14 +1299,14 @@ export function LibraryScreen() {
               <StatusBanner
                 tone="warning"
                 action={
-                  <button
+                  <button aria-label={t("upload.reloadCapabilities", {
+                      defaultValue: "Reload policy",
+                    })}
                     className="icon-button text-button"
                     onClick={reload}
                     type="button"
                   >
-                    {t("upload.reloadCapabilities", {
-                      defaultValue: "Reload policy",
-                    })}
+                    {t("shell:actions.refresh")}
                   </button>
                 }
               >
@@ -1656,7 +1656,7 @@ function UploadStatusRegion({
                 }
                 onClick={() => onRetry(entry.id, now)}
               >
-                {t("upload.retry", { defaultValue: "Retry" })}
+                {t("shell:actions.retry")}
               </button>
             ) : null}
             {entry.status === "failed" &&
@@ -1762,97 +1762,63 @@ function LibraryDeleteDialog({
   }
 
   return (
-    <Dialog
-      dismissible={!deleting}
+    <ConfirmDialog
+      busy={deleting}
+      busyLabel={t("deleteDialog.deleting", { defaultValue: "Deleting" })}
+      closeLabel={t("deleteDialog.closeDialog", {
+        defaultValue: "Close delete dialog",
+      })}
+      confirmDisabled={references === null}
+      confirmLabel={t("shell:actions.delete")}
+      error={error}
       labelledBy="delete-item-title"
-      onClose={requestClose}
+      onCancel={requestClose}
+      onConfirm={() => void confirmDelete()}
+      title={t("deleteDialog.title", {
+        defaultValue: "Delete {{title}}",
+        title,
+      })}
+      tone="danger"
     >
-      <div className="dialog-form">
-        <header className="dialog-header">
-          <div>
-            <p className="eyebrow">
-              {t("deleteDialog.eyebrow", { defaultValue: "Delete item" })}
-            </p>
-            <h2 id="delete-item-title">
-              {t("deleteDialog.title", {
-                defaultValue: "Delete {{title}}",
-                title,
-              })}
-            </h2>
-          </div>
-          <DialogCloseButton
-            disabled={deleting}
-            label={t("deleteDialog.closeDialog", {
-              defaultValue: "Close delete dialog",
-            })}
-            onClick={requestClose}
-          />
-        </header>
-        {references === null && !error ? (
-          <p className="feature-subtitle">
-            {t("deleteDialog.checking", {
-              defaultValue: "Checking references…",
-            })}
-          </p>
-        ) : referenced ? (
-          <>
-            <StatusBanner tone="warning">
-              {references!.length === 1
-                ? t("deleteDialog.referenced_one", {
-                    defaultValue:
-                      "1 page cites this item. Deleting it leaves a deleted-item marker on that page and notifies reviewers.",
-                  })
-                : t("deleteDialog.referenced_other", {
-                    count: references!.length,
-                    defaultValue:
-                      "{{count}} pages cite this item. Deleting it leaves deleted-item markers on those pages and notifies reviewers.",
-                  })}
-            </StatusBanner>
-            <ul className="library-reference-list">
-              {references!.map((reference) => (
-                <li key={reference.id}>
-                  <Link to={contextPageHref(workspaceId, reference.id)}>
-                    {reference.title ?? reference.slug}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : (
-          <p className="feature-subtitle">
-            {t("deleteDialog.unreferenced", {
-              defaultValue:
-                "This permanently deletes the item and all its versions. This cannot be undone.",
-            })}
-          </p>
-        )}
-        {error ? <p className="form-error">{error}</p> : null}
-        <div className="dialog-actions">
-          <button
-            className="icon-button text-button"
-            disabled={deleting}
-            type="button"
-            onClick={requestClose}
-          >
-            {t("deleteDialog.cancel", { defaultValue: "Cancel" })}
-          </button>
-          {references !== null ? (
-            <button
-              className="icon-button danger"
-              disabled={deleting}
-              type="button"
-              onClick={confirmDelete}
-            >
-              {deleting
-                ? t("deleteDialog.deleting", { defaultValue: "Deleting" })
-                : t("deleteDialog.deletePermanently", {
-                    defaultValue: "Delete permanently",
-                  })}
-            </button>
-          ) : null}
-        </div>
-      </div>
-    </Dialog>
+      {references === null && !error ? (
+        <p className="feature-subtitle">
+          {t("deleteDialog.checking", {
+            defaultValue: "Checking references…",
+          })}
+        </p>
+      ) : referenced ? (
+        <>
+          <StatusBanner tone="warning">
+            {references!.length === 1
+              ? t("deleteDialog.referenced_one", {
+                  defaultValue:
+                    "1 page cites this item. Deleting it leaves a deleted-item marker on that page and notifies reviewers.",
+                })
+              : t("deleteDialog.referenced_other", {
+                  count: references!.length,
+                  defaultValue:
+                    "{{count}} pages cite this item. Deleting it leaves deleted-item markers on those pages and notifies reviewers.",
+                })}
+          </StatusBanner>
+          <ul className="library-reference-list">
+            {references!.map((reference) => (
+              <li key={reference.id}>
+                <Link to={contextPageHref(workspaceId, reference.id)}>
+                  {reference.title ?? reference.slug}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : (
+        <p className="feature-subtitle">
+          {t("deleteDialog.unreferenced", {
+            defaultValue:
+              "This permanently deletes the item and all its versions. This cannot be undone.",
+          })}
+        </p>
+      )}
+    </ConfirmDialog>
   );
 }
 
@@ -2102,13 +2068,13 @@ function LibraryReader({
       ) : null}
       {canEdit ? (
         <button
-          aria-label={t("reader.delete")}
+          aria-label={t("shell:actions.delete")}
           className="icon-button danger library-delete-action library-reader-delete-action"
           type="button"
           onClick={onDelete}
         >
           <Trash2 size={16} aria-hidden="true" />
-          <span>{t("reader.delete")}</span>
+          <span>{t("shell:actions.delete")}</span>
         </button>
       ) : null}
     </div>
@@ -2193,7 +2159,9 @@ function LibraryReader({
                   <p>{t(displayedConversionStatusKey)}</p>
                   {retryableConversionVersion ? (
                     <div className="library-preview-state-actions">
-                      <button
+                      <button aria-label={t("reader.retryConversion", {
+                                defaultValue: "Retry conversion",
+                              })}
                         aria-busy={conversionRetryStatus === "retrying"}
                         className="icon-button text-button"
                         disabled={conversionRetryStatus === "retrying"}
@@ -2206,9 +2174,7 @@ function LibraryReader({
                             ? t("reader.retryingConversion", {
                                 defaultValue: "Retrying conversion…",
                               })
-                            : t("reader.retryConversion", {
-                                defaultValue: "Retry conversion",
-                              })}
+                            : t("shell:actions.retry")}
                         </span>
                       </button>
                       {conversionRetryError ? (

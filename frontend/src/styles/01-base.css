@@ -197,10 +197,11 @@ button {
      neutral, so the "saved" / "ready" signals had no color at all. */
   --ok-strong: #166534;
   --danger: #dc2626;
+  /* Readable red for text on a light surface, the partner of --ok-strong. */
+  --danger-strong: #be123c;
   --danger-soft: #fff1f2;
   --danger-surface: #fff7f7;
   --danger-border: #fecaca;
-  --danger-border-strong: #fca5a5;
   --warning: #f59e0b;
   --warning-soft: #fff8eb;
   --info: #3b82f6;

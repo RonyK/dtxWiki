@@ -104,7 +104,7 @@ export function ActivityScreen() {
             <p className="activity-feed-scope">{t("feed.scope", { defaultValue: "Current query range" })}</p>
           </div>
         </div>
-        {error ? <StatusBanner tone="warning">{error}<button className="icon-button text-button activity-feed-reload" onClick={reload} type="button">{t("feed.reload", { defaultValue: "Reload activity" })}</button></StatusBanner> : null}
+        {error ? <StatusBanner tone="warning">{error}<button aria-label={t("feed.reload", { defaultValue: "Reload activity" })} className="icon-button text-button activity-feed-reload" onClick={reload} type="button">{t("shell:actions.refresh")}</button></StatusBanner> : null}
         <ActivityFiltersPanel
           kind={query.kind} kindFilterLabel={t("kind.label", { defaultValue: "Type" })}
           subtype={query.subtype} subtypeFilterLabel={t("subtype.label", { defaultValue: "Sub-type" })}
@@ -535,7 +535,7 @@ export function ActivityLanePage() {
   return <div className="workspace-screen single-column activity-screen"><section className="feature-main">
     <Breadcrumbs items={[{ label: t("breadcrumb", { defaultValue: "Activity" }), href: activityHref(query, undefined, routeWorkspaceId) }, { label: title }]} />
     <div className="feature-header"><div><p className="eyebrow">{t("header.eyebrow", { defaultValue: "Operations timeline" })}</p><h1>{title}</h1><p className="activity-feed-counts">{activityCountLabel(counts.returned_entry_count, counts.represented_event_count)}</p><p className="activity-feed-scope">{t("feed.scope", { defaultValue: "Current query range" })}</p></div></div>
-    {error ? <StatusBanner tone="warning">{error}<button className="icon-button text-button activity-feed-reload" onClick={reload} type="button">{t("feed.reload", { defaultValue: "Reload activity" })}</button></StatusBanner> : null}
+    {error ? <StatusBanner tone="warning">{error}<button aria-label={t("feed.reload", { defaultValue: "Reload activity" })} className="icon-button text-button activity-feed-reload" onClick={reload} type="button">{t("shell:actions.refresh")}</button></StatusBanner> : null}
     <ActivityFiltersPanel kind={query.kind} kindFilterLabel={t("kind.label", { defaultValue: "Type" })} subtype={query.subtype} subtypeFilterLabel={t("subtype.label", { defaultValue: "Sub-type" })} period={query.period} periodFilterLabel={t("period.label", { defaultValue: "Period" })} groupReads={query.group_reads} onGroupingChange={group_reads => update({ group_reads })} onKindChange={kind => update({ kind })} onPeriodChange={period => update({ period })} onSubtypeChange={subtype => update({ subtype })} onReset={reset} />
     <section className="feature-section activity-feed-panel">
       {data.feed.entries.length === 0 ? <ActivityLaneEmpty kind={query.kind} title={title} /> : <div className="operations-list activity-feed-list">{data.feed.entries.map(entry => <ActivityEntryRow entry={entry} query={query} loadGroup={loadGroup} key={entry.id} />)}</div>}
@@ -557,7 +557,7 @@ function ActivityLoadError({ error, reload }: { error: string; reload: () => voi
   const { t } = useTranslation("activity");
   return <div className="workspace-screen single-column activity-screen"><section className="feature-main">
     <h1>{t("header.title")}</h1>
-    <StatusBanner tone="warning">{error}<button className="icon-button text-button activity-feed-reload" type="button" onClick={reload}>{t("feed.reload")}</button></StatusBanner>
+    <StatusBanner tone="warning">{error}<button aria-label={t("feed.reload")} className="icon-button text-button activity-feed-reload" type="button" onClick={reload}>{t("shell:actions.refresh")}</button></StatusBanner>
   </section></div>;
 }
 

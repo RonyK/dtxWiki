@@ -1064,7 +1064,7 @@ describe("ChatsDetailScreen", () => {
     );
     await user.clear(screen.getByLabelText("Chat title"));
     await user.type(screen.getByLabelText("Chat title"), "Renamed MCP Session");
-    await user.click(screen.getByRole("button", { name: "Save title" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     const renamedHeading = await screen.findByRole("heading", {
       name: "Renamed MCP Session",
@@ -1098,7 +1098,7 @@ describe("ChatsDetailScreen", () => {
     await user.click(await screen.findByRole("button", { name: "Edit title" }));
     await user.clear(screen.getByLabelText("Chat title"));
     await user.type(screen.getByLabelText("Chat title"), "Late chat one title");
-    await user.click(screen.getByRole("button", { name: "Save title" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await user.click(screen.getByRole("button", { name: "Navigate to chat-2" }));
 
     expect(screen.queryByText("Codex Research Session")).toBeNull();
@@ -1141,7 +1141,7 @@ describe("ChatsDetailScreen", () => {
     const input = screen.getByLabelText("Chat title");
     await user.clear(input);
     await user.type(input, "Retryable title");
-    await user.click(screen.getByRole("button", { name: "Save title" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(input).toBeDisabled();
     expect(screen.getByRole("button", { name: "Saving title" })).toBeDisabled();
@@ -2142,7 +2142,7 @@ describe("ChatsDetailScreen", () => {
       });
       // Opening the dialog deletes nothing.
       expect(purged).toBe(false);
-      await user.click(within(dialog).getByRole("button", { name: "Delete previews" }));
+      await user.click(within(dialog).getByRole("button", { name: "Delete" }));
 
       expect(
         await screen.findByText("Deleted the edit previews of 3 calls."),

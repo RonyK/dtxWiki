@@ -66,7 +66,7 @@ export function ForgotPasswordScreen() {
                 type="button"
               >
                 <RotateCw size={15} aria-hidden="true" />
-                {t("forgot.retry")}
+                {t("shell:actions.retry")}
               </button>
             }
             tone="warning"

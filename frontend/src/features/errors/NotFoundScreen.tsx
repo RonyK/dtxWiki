@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
-import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
+import { Dialog } from "../../shared/components/Dialog";
 import { getSelectedWorkspaceId } from "../../shared/api/workspace";
 import { isWorkspaceProductRoute, readSafeReferenceReturnTo } from "../../shared/lib/navigationRecovery";
 import { workspaceIdFromPathname, workspacePath } from "../../shared/lib/workspaceRoutes";
@@ -145,20 +145,10 @@ export function NotFoundScreen() {
         <Dialog
           labelledBy="unavailable-workspace-title"
           onClose={() => setWorkspaceChooserOpen(false)}
+          closeLabel={t("unavailable.closeChooser", { defaultValue: "Close workspace chooser" })}
+          title={t("unavailable.selectWorkspace", { defaultValue: "Select a workspace" })}
         >
           <section className="dialog-form">
-            <header className="dialog-header">
-              <div>
-                <p className="eyebrow">{t("unavailable.breadcrumb", { defaultValue: "Unavailable" })}</p>
-                <h2 id="unavailable-workspace-title">
-                  {t("unavailable.selectWorkspace", { defaultValue: "Select a workspace" })}
-                </h2>
-              </div>
-              <DialogCloseButton
-                label={t("unavailable.closeChooser", { defaultValue: "Close workspace chooser" })}
-                onClick={() => setWorkspaceChooserOpen(false)}
-              />
-            </header>
             <label className="form-field" htmlFor="unavailable-workspace-select">
               <span>{t("unavailable.workspaces", { defaultValue: "Your workspaces" })}</span>
               <select

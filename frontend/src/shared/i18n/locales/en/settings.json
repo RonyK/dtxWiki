@@ -7,7 +7,6 @@
   },
   "breadcrumb": "Settings",
   "loading": "Loading Settings",
-  "loadRetry": "Retry",
   "errors": {
     "loadFailed": "Could not load Settings.",
     "requestFailed": "The Settings request failed. Please try again.",
@@ -182,7 +181,6 @@
       "loading": "Loading join requests…",
       "requested": "Requested {{date}} · attempt {{attempt}}",
       "approve": "Approve as Viewer",
-      "reject": "Reject",
       "updating": "Updating…",
       "empty": {
         "title": "No pending requests",
@@ -212,8 +210,7 @@
       "updating": "Updating…",
       "confirmShare": "Share whole workspace",
       "confirmSelfDemote": "Give up Owner access",
-      "confirmOwner": "Grant Owner access",
-      "confirmRemove": "Remove member"
+      "confirmOwner": "Grant Owner access"
     },
     "directory": {
       "title": "Company directory",
@@ -313,7 +310,6 @@
       "keepsPages_other": "{{count}} public-page flags will remain unchanged.",
       "forcesInviteOnly": "Private visibility forces the join policy to Invite only.",
       "wholeWorkspaceWarning": "This change applies to the entire workspace and can immediately reduce discovery or public access.",
-      "cancel": "Cancel",
       "saving": "Saving…",
       "confirm": "Confirm and save"
     }
@@ -833,7 +829,6 @@
           "addToFamily": "Add to family",
           "addToFamilyLabel": "Add {{format}} to this family",
           "editLabel": "Edit {{format}}",
-          "delete": "Delete format",
           "deleteLabel": "Delete {{format}}",
           "newRequiresFamily": "New custom formats must be saved with this family. Add/update the family to keep them.",
           "familyChangesRequireSave": "Family changes are also pending. Add/update the family to apply both changes together.",
@@ -932,7 +927,6 @@
         "noSearchResults": "No file formats match this search.",
         "empty": "No individual format limits.",
         "inherited": "Family or Workspace default",
-        "remove": "Remove limit",
         "removeLabel": "Remove the individual limit for {{format}}",
         "loadMore": "Show {{remaining}} more formats"
       },
@@ -1219,7 +1213,6 @@
     "linkMissing": "The server did not return a recovery link. Issue a new reset.",
     "linkDismissed": "The one-time link was hidden. Issue a new reset if another link is needed.",
     "dialog": {
-      "eyebrow": "Confirm privileged action",
       "title": "Issue a password reset?",
       "description": "This starts recovery for {{email}}. The user chooses the new password; you cannot view it.",
       "delivery": "Delivery method",
@@ -1242,7 +1235,6 @@
       "confirm": "Issue password reset"
     },
     "linkDialog": {
-      "eyebrow": "One-time reveal",
       "title": "Copy this recovery link now",
       "warning": "This link is shown once. Closing this dialog permanently hides it; it cannot be reopened.",
       "recipient": "Send the link to {{email}} through a separate secure channel.",
@@ -1330,7 +1322,6 @@
     "workspaceEyebrow": "This workspace",
     "title": "Jobs",
     "description": "Background job queue depth, terminal failures, and jobs stuck past their worker lease.",
-    "refresh": "Refresh",
     "loadError": "Could not load jobs.",
     "summary": {
       "queued": "Queued",
@@ -1353,7 +1344,6 @@
     "meta": "retry {{retryCount}} · updated {{updated}}",
     "incompleteWarning_one": "{{count}} workspace could not be reached; the totals and list below may be missing its jobs.",
     "incompleteWarning_other": "{{count}} workspaces could not be reached; the totals and list below may be missing their jobs.",
-    "retry": "Retry",
     "retrying": "Retrying…",
     "retryUnsupported": "This job type's failure also updated a domain record; it cannot be retried from here yet.",
     "loadMore": "Load more",
@@ -1375,7 +1365,6 @@
     },
     "countText_one": "{{count}} file",
     "countText_other": "{{count}} files",
-    "refresh": "Refresh",
     "loading": "Loading attachments…",
     "loadError": "Could not load attachments.",
     "serverAdminFallbackNotice": "Join this workspace to view its attachments.",
@@ -1426,7 +1415,6 @@
       "uploadedAt": "Uploaded"
     },
     "actions": {
-      "delete": "Delete",
       "deleting": "Deleting…",
       "loadMore": "Load more",
       "loadingMore": "Loading…"
@@ -1465,7 +1453,6 @@
       "confirm_one": "Delete {{count}} selected attachment?",
       "confirm_other": "Delete {{count}} selected attachments?",
       "permanent": "These files will be permanently deleted. This cannot be undone.",
-      "confirmAction": "Confirm deletion",
       "progress": "Deleting… {{done}}/{{total}} completed",
       "result": "{{deleted}} deleted, {{failed}} failed",
       "selectFile": "Select {{filename}}",
@@ -1478,7 +1465,8 @@
         "inUse_other": "{{count}} in use",
         "delete_one": "{{count}} request failed",
         "delete_other": "{{count}} requests failed"
-      }
+      },
+      "confirmAria": "Delete selected files"
     },
     "policy": {
       "title": "Unused file auto reclamation",
@@ -1556,15 +1544,11 @@
     "disableConfirm": {
       "title": "Disable MCP client",
       "body": "{{client}} stops accepting calls immediately. Re-enable any time.",
-      "cancel": "Cancel",
-      "confirm": "Disable client",
       "busy": "Disabling…"
     },
     "deleteConfirm": {
       "title": "Delete deactivated MCP client",
       "body": "Delete {{client}} from this list? Its history stays available, but this binding cannot be reactivated. A new authorization or access key is required to connect again.",
-      "cancel": "Cancel",
-      "confirm": "Delete client",
       "busy": "Deleting…"
     }
   },
@@ -1621,7 +1605,6 @@
     "discard": "Discard",
     "edit": "Edit",
     "remove": "Remove",
-    "save": "Save changes",
     "saving": "Saving…",
     "showRaw": "Show raw values"
   },
@@ -1753,7 +1736,6 @@
       "diffNone": "No change yet.",
       "diffAddedOnly": "{{added}} added · 0 removed.",
       "diffWithRemovals": "{{added}} added · {{removed}} removed ({{names}} — access stops immediately). Work already in progress is kept.",
-      "save": "Save workspaces",
       "saving": "Saving…"
     },
     "savingSessionSettings": "Saving session settings…",
@@ -1799,7 +1781,6 @@
     "noOauthAppsHintUrlClientId": "OAuth works for clients configured with an HTTPS URL client identifier. Clients that expect automatic self-registration need an access key instead.",
     "noOauthAppsHintUnavailable": "OAuth is unavailable on this server, so apps cannot be authorized here. Use an access key instead.",
     "consentGrantedMeta": "Granted {{granted}}",
-    "revoke": "Revoke",
     "consentRevoked": "OAuth consent revoked. 1 app updated.",
     "consentAlreadyRevoked": "OAuth consent was already revoked. The list was refreshed.",
     "revokeAllAria": "Revoke all consents for {{client}}",
@@ -1867,7 +1848,6 @@
     },
     "setupCommandPlaceholder": "The setup command appears here once a key exists.",
     "oauthCapabilityUnknown": "This server's connection settings could not be read, so whether OAuth can be offered is unknown. Reload to try again.",
-    "oauthCapabilityRetry": "Try again",
     "chooseSetupWorkspace": "Choose a workspace to set up a connection",
     "chooseWorkspace": "Choose a workspace"
   },
@@ -1896,10 +1876,8 @@
     "editWorkspaces": "Edit workspaces",
     "editWorkspacesNamed": "Edit workspaces for {{name}}",
     "disableKey": "Disable key",
-    "revoke": "Revoke",
     "revokeNamed": "Revoke key {{name}}",
     "delete": "Delete",
-    "deleteKey": "Delete key",
     "deleteNamed": "Delete key {{name}}"
   },
   "clientRow": {
@@ -1916,12 +1894,10 @@
     "connectionHealth": "Connection health",
     "scopesLabel": "Scopes",
     "updating": "Updating…",
-    "disable": "Disable",
     "disableNamed": "Disable {{name}}",
     "enable": "Enable",
     "reactivate": "Reactivate",
     "reactivateNamed": "Reactivate {{name}}",
-    "delete": "Delete client",
     "deleteNamed": "Delete client {{name}}",
     "cleanup": "Clean up",
     "connectionTiming": "Last used {{lastUsed}} · Next expiry {{nextExpiry}}",
@@ -1987,34 +1963,26 @@
         "unknown": "Other retained records: {{count}}"
       },
       "confirmLabel": "Type \"{{expected}}\" to confirm",
-      "cancel": "Cancel",
       "deleting": "Deleting…",
-      "confirm": "Permanently delete workspace",
       "confirmWithPurge": "Delete workspace and all its data"
     },
     "revoke": {
       "title": "Revoke OAuth consent",
       "bodyPrefix": "This will revoke all consents and active refresh tokens for ",
       "bodySuffix": ". The client must re-authorize before it can call the API again.",
-      "cancel": "Cancel",
-      "revoking": "Revoking…",
-      "confirm": "Revoke"
+      "revoking": "Revoking…"
     },
     "disableToken": {
       "title": "Revoke access key",
       "bodyPrefix": "This will revoke ",
       "bodySuffix": ". Existing tools using this key will stop connecting until you generate and register a new key.",
-      "cancel": "Cancel",
-      "disabling": "Revoking…",
-      "confirm": "Revoke key"
+      "disabling": "Revoking…"
     },
     "deleteToken": {
       "title": "Delete inactive access key",
       "bodyPrefix": "This removes ",
       "bodySuffix": " from the access key list. The key is already revoked or expired and cannot be used to connect.",
-      "cancel": "Cancel",
-      "deleting": "Deleting…",
-      "confirm": "Delete key"
+      "deleting": "Deleting…"
     }
   },
   "appHub": {
@@ -2122,7 +2090,6 @@
     "showSelected": "Selected items ({{count}})",
     "loading": "Loading workspaces…",
     "loadError": "Could not load workspaces.",
-    "retry": "Retry",
     "range": "{{start}}–{{end}} / {{total}}",
     "previous": "Previous",
     "next": "Next",
@@ -2164,7 +2131,6 @@
     "confirmEmail": "Type {{email}} to confirm",
     "currentPassword": "Your current password",
     "cancel": "Cancel",
-    "submit": "Confirm account deletion",
     "submitting": "Deleting account…",
     "scheduled": "Deletion scheduled after {{date}}",
     "success": "Account access revoked for {{account}}. Data cleanup is scheduled after {{date}}.",
@@ -2180,8 +2146,7 @@
       "saveFailed": "Could not save the account retention period.",
       "saved": "Account retention period saved.",
       "save": "Save retention period",
-      "saving": "Saving…",
-      "retry": "Retry"
+      "saving": "Saving…"
     },
     "errors": {
       "user_deletion_last_owner": "Some workspaces still have other members. Refresh and review the deletion again.",

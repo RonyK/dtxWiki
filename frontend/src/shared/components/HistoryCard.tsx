@@ -169,7 +169,7 @@ export function HistoryActionButton({
       aria-label={accessibleLabel}
       className={[
         "text-button compact-button history-action",
-        tone === "danger" ? "danger-action" : null,
+        tone === "danger" ? "danger" : null,
         className,
       ]
         .filter(Boolean)

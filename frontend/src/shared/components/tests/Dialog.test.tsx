@@ -25,6 +25,26 @@ describe("Dialog", () => {
     );
   });
 
+  it("renders the shared title bar and ties its close button to dismissal", async () => {
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <Dialog closeLabel="Close rename" labelledBy="dialog-heading" onClose={onClose} title="Rename">
+        <p>Body</p>
+      </Dialog>,
+    );
+
+    expect(screen.getByRole("dialog", { name: "Rename" })).toHaveClass("dialog-with-titlebar");
+    await userEvent.click(screen.getByRole("button", { name: "Close rename" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <Dialog dismissible={false} labelledBy="dialog-heading" onClose={onClose} title="Rename">
+        <p>Body</p>
+      </Dialog>,
+    );
+    expect(screen.getByRole("button", { name: "Close" })).toBeDisabled();
+  });
+
   it("closes when Escape is pressed", () => {
     const onClose = vi.fn();
     render(

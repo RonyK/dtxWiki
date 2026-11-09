@@ -374,12 +374,12 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
               })}
             </span>
             <br />
-            <button
+            <button aria-label={t("graph.rendererRetry")}
               className="icon-button text-button"
               onClick={() => setRendererRevision((revision) => revision + 1)}
               type="button"
             >
-              {t("graph.rendererRetry")}
+              {t("shell:actions.retry")}
             </button>
           </div>
         ) : null}

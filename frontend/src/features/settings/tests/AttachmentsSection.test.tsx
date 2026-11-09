@@ -697,7 +697,7 @@ describe("unused attachment selection", () => {
     const user = await openUnused();
     await user.click(screen.getByRole("checkbox", { name: /Select all/ }));
     await user.click(screen.getByRole("button", { name: "Delete selected" }));
-    await user.click(screen.getByRole("button", { name: "Confirm deletion" }));
+    await user.click(screen.getByRole("button", { name: "Delete selected files" }));
     expect(await screen.findByText(/1 deleted, 4 failed/)).toHaveTextContent(
       "1 in use · 1 changed · 1 access denied · 1 request failed",
     );
@@ -709,7 +709,7 @@ describe("unused attachment selection", () => {
       screen.getByRole("button", { name: "Delete selected" }),
     ).toBeDisabled();
     expect(
-      screen.queryByRole("button", { name: "Confirm deletion" }),
+      screen.queryByRole("button", { name: "Delete selected files" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Attachments" })).toHaveFocus();
   });
@@ -747,7 +747,7 @@ it("stops a pending batch when workspace changes and keeps its result out of the
   await user.click(screen.getByRole("radio", { name: "Unused" }));
   await user.click(await screen.findByRole("checkbox", { name: /Select all/ }));
   await user.click(screen.getByRole("button", { name: "Delete selected" }));
-  await user.click(screen.getByRole("button", { name: "Confirm deletion" }));
+  await user.click(screen.getByRole("button", { name: "Delete selected files" }));
   expect(deletePageContextMedia).toHaveBeenCalledTimes(1);
   view.rerender(<AttachmentsSection canViewEveryUpload workspaceId="00000000-0000-4000-8000-000000000007" />);
   await screen.findByText("new-workspace.png");
@@ -816,12 +816,12 @@ it("offers only administrators the two scopes and resets confirmations and filte
   await user.click(screen.getByRole("checkbox", { name: /Select all/ }));
   await user.click(screen.getByRole("button", { name: "Delete selected" }));
   expect(
-    screen.getByRole("button", { name: "Confirm deletion" }),
+    screen.getByRole("button", { name: "Delete selected files" }),
   ).toBeInTheDocument();
   await user.click(screen.getByRole("radio", { name: "Current workspace" }));
   await screen.findByText("diagram.png");
   expect(
-    screen.queryByRole("button", { name: "Confirm deletion" }),
+    screen.queryByRole("button", { name: "Delete selected files" }),
   ).not.toBeInTheDocument();
   expect(screen.queryByText("Workspace: Other team")).not.toBeInTheDocument();
   expect(screen.getByRole("radio", { name: "All" })).toBeChecked();
@@ -863,7 +863,7 @@ it("keeps identical asset IDs from separate workspaces independent during bulk c
   ).not.toBeChecked();
   await user.click(screen.getByRole("checkbox", { name: /Select all/ }));
   await user.click(screen.getByRole("button", { name: "Delete selected" }));
-  await user.click(screen.getByRole("button", { name: "Confirm deletion" }));
+  await user.click(screen.getByRole("button", { name: "Delete selected files" }));
   await screen.findByText("2 deleted, 0 failed");
   expect(vi.mocked(deleteAdminContextMediaAttachment).mock.calls).toEqual([
     ["00000000-0000-4000-8000-000000000006", ATTACHMENT.asset_id, ATTACHMENT.usage_token],

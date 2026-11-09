@@ -1520,7 +1520,7 @@ describe("ContextScreen", () => {
       name: "Discard alternative v1? This cannot be undone.",
     });
     const confirm = within(dialog).getByRole("button", {
-      name: "Discard branch permanently",
+      name: "Discard",
     });
     expect(confirm).toBeDisabled();
     await userEvent.type(
@@ -2487,7 +2487,7 @@ describe("ContextScreen", () => {
     expect(within(dialog).getByText("Ready")).toBeInTheDocument();
 
     await userEvent.click(
-      within(dialog).getByRole("button", { name: "Copy workspace link" }),
+      within(dialog).getByRole("button", { name: "Copy link" }),
     );
     expect(writeText).toHaveBeenCalledWith(
       expect.stringMatching(

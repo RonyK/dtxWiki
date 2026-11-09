@@ -397,14 +397,14 @@ export function TreeIndexPreview({ workspaceId, nodeId, nodes, loadIndexPreview 
           </div>
         ) : null}
         <button
-          aria-label={t("navSummary.previewRefresh", { defaultValue: "Refresh" })}
+          aria-label={t("shell:actions.refresh")}
           aria-disabled={!expanded || Boolean(current?.loading)}
           className="index-preview__refresh"
           disabled={!expanded}
           onClick={() => {
             if (expanded && !current?.loading) setReloadCount((count) => count + 1);
           }}
-          title={t("navSummary.previewRefresh", { defaultValue: "Refresh" })}
+          title={t("shell:actions.refresh")}
           type="button"
         >
           {current?.loading

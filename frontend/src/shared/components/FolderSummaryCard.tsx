@@ -176,7 +176,7 @@ export function FolderSummaryCard({
               onClick={submit}
               type="button"
             >
-              {t("navSummary.save", { defaultValue: "Save" })}
+              {t("shell:actions.save")}
             </button>
           </div>
         </div>

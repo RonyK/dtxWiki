@@ -49,7 +49,7 @@ import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceCon
 import { AdvancedSection } from "../../shared/components/AdvancedSection";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { CountChip } from "../../shared/components/CountChip";
-import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
+import { ConfirmDialog } from "../../shared/components/ConfirmDialog";
 import { ReaderTabs } from "../../shared/components/ReaderTabs";
 import { RouteLoading } from "../../shared/components/RouteLoading";
 import { StatusBanner } from "../../shared/components/StatusBanner";
@@ -280,7 +280,7 @@ export function ChatsDetailScreen() {
                     type="button"
                     onClick={reload}
                   >
-                    {t("detail.retry")}
+                    {t("shell:actions.retry")}
                   </button>
                 }
                 tone="warning"
@@ -356,7 +356,7 @@ export function ChatsDetailScreen() {
                     <button
                       aria-label={savingTitle
                         ? t("detail.savingTitle")
-                        : t("detail.saveTitle")}
+                        : t("shell:actions.save")}
                       className="icon-button"
                       disabled={savingTitle || (editTitle ?? "").trim().length === 0}
                       type="button"
@@ -364,7 +364,7 @@ export function ChatsDetailScreen() {
                     >
                       <Save size={15} aria-hidden="true" />
                       <span>
-                        {savingTitle ? t("detail.savingTitle") : t("detail.saveTitle")}
+                        {savingTitle ? t("detail.savingTitle") : t("shell:actions.save")}
                       </span>
                     </button>
                     <button
@@ -420,7 +420,7 @@ export function ChatsDetailScreen() {
                 )}
                 {canPurgePreviews ? (
                   <button
-                    className="icon-button"
+                    className="icon-button danger"
                     type="button"
                     onClick={() => setPurgeOpen(true)}
                   >
@@ -553,53 +553,24 @@ function PurgePreviewsDialog({
   }
 
   return (
-    <Dialog
-      dismissible={!submitting}
+    <ConfirmDialog
+      busy={submitting}
+      busyLabel={t("detail.purgePreviews.submitting")}
+      closeLabel={t("detail.purgePreviews.close")}
+      confirmLabel={t("shell:actions.delete")}
+      confirmRef={submitRef}
+      error={error}
       labelledBy="purge-chat-previews-title"
-      onClose={requestClose}
+      onCancel={requestClose}
+      onConfirm={() => void submit()}
+      title={t("detail.purgePreviews.title", { title: chatTitle })}
+      tone="danger"
     >
-      <div className="dialog-form">
-        <header className="dialog-header">
-          <div>
-            <p className="eyebrow">{t("breadcrumb")}</p>
-            <h2 id="purge-chat-previews-title">
-              {t("detail.purgePreviews.title", { title: chatTitle })}
-            </h2>
-            <p className="feature-subtitle">{t("detail.purgePreviews.body")}</p>
-          </div>
-          <DialogCloseButton
-            disabled={submitting}
-            label={t("detail.purgePreviews.close")}
-            onClick={requestClose}
-          />
-        </header>
-        {submitting ? (
-          <StatusBanner tone="info">{t("detail.purgePreviews.pending")}</StatusBanner>
-        ) : null}
-        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
-        <div className="dialog-actions">
-          <button
-            className="icon-button text-button"
-            disabled={submitting}
-            type="button"
-            onClick={requestClose}
-          >
-            {t("detail.purgePreviews.cancel")}
-          </button>
-          <button
-            ref={submitRef}
-            className="icon-button danger"
-            disabled={submitting}
-            type="button"
-            onClick={submit}
-          >
-            {submitting
-              ? t("detail.purgePreviews.submitting")
-              : t("detail.purgePreviews.action")}
-          </button>
-        </div>
-      </div>
-    </Dialog>
+      <p className="dialog-description">{t("detail.purgePreviews.body")}</p>
+      {submitting ? (
+        <StatusBanner tone="info">{t("detail.purgePreviews.pending")}</StatusBanner>
+      ) : null}
+    </ConfirmDialog>
   );
 }
 
@@ -644,63 +615,33 @@ function ArchiveChatDialog({
   }
 
   return (
-    <Dialog
-      dismissible={!submitting}
+    <ConfirmDialog
+      busy={submitting}
+      busyLabel={t("archiveConfirm.submitting", { defaultValue: "Archiving" })}
+      closeLabel={t("archiveConfirm.close", {
+        defaultValue: "Close archive dialog",
+      })}
+      confirmLabel={t("archiveConfirm.action", { defaultValue: "Archive" })}
+      confirmRef={submitRef}
+      error={error}
       labelledBy="archive-chat-title"
-      onClose={requestClose}
+      onCancel={requestClose}
+      onConfirm={() => void submit()}
+      title={t("archiveConfirm.title", {
+        defaultValue: "Archive {{title}}?",
+        title: chatTitle,
+      })}
     >
-      <div className="dialog-form">
-        <header className="dialog-header">
-          <div>
-            <p className="eyebrow">{t("breadcrumb")}</p>
-            <h2 id="archive-chat-title">
-              {t("archiveConfirm.title", {
-                defaultValue: "Archive {{title}}?",
-                title: chatTitle,
-              })}
-            </h2>
-            <p className="feature-subtitle">
-              {t("archiveConfirm.body", {
-                defaultValue:
-                  "Archiving hides the chat from the default list. Restore it any time from the Archived filter.",
-              })}
-            </p>
-          </div>
-          <DialogCloseButton
-            disabled={submitting}
-            label={t("archiveConfirm.close", {
-              defaultValue: "Close archive dialog",
-            })}
-            onClick={requestClose}
-          />
-        </header>
-        {submitting ? (
-          <StatusBanner tone="info">{t("archiveConfirm.pending")}</StatusBanner>
-        ) : null}
-        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
-        <div className="dialog-actions">
-          <button
-            className="icon-button text-button"
-            disabled={submitting}
-            type="button"
-            onClick={requestClose}
-          >
-            {t("archiveConfirm.cancel", { defaultValue: "Cancel" })}
-          </button>
-          <button
-            ref={submitRef}
-            className="icon-button primary"
-            disabled={submitting}
-            type="button"
-            onClick={submit}
-          >
-            {submitting
-              ? t("archiveConfirm.submitting", { defaultValue: "Archiving" })
-              : t("archiveConfirm.action", { defaultValue: "Archive" })}
-          </button>
-        </div>
-      </div>
-    </Dialog>
+      <p className="dialog-description">
+        {t("archiveConfirm.body", {
+          defaultValue:
+            "Archiving hides the chat from the default list. Restore it any time from the Archived filter.",
+        })}
+      </p>
+      {submitting ? (
+        <StatusBanner tone="info">{t("archiveConfirm.pending")}</StatusBanner>
+      ) : null}
+    </ConfirmDialog>
   );
 }
 

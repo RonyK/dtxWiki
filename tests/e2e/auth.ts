@@ -92,7 +92,7 @@ export async function saveLabsSettings(page: Page, group: "labs" | "graph" = "la
     name: group === "graph" ? /^(Workspace Knowledge Map|워크스페이스 지식 지도)$/ : /^Ask$/,
   });
   const card = page.locator(".policy-card").filter({ has: checkbox });
-  const save = card.getByRole("button", { name: /^(Save changes|변경사항 저장)$/ });
+  const save = card.getByRole("button", { name: /^(Save|저장)$/ });
   if (await save.isEnabled()) {
     const saved = page.waitForResponse((response) => response.request().method() === "PATCH"
       && response.url().endsWith("/settings/policies/batch")

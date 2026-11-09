@@ -1,4 +1,4 @@
-import { Check, Copy, ExternalLink, Eye, Globe, Info, Lock, X } from "lucide-react";
+import { Check, Copy, ExternalLink, Eye, Globe, Info, Lock } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -323,25 +323,13 @@ export function PagePublicShareControl({
           className="published-version-preview-dialog"
           labelledBy="published-version-preview-title"
           onClose={() => setPreviewOpen(false)}
+          closeLabel={t("reader.visibilityClosePreview")}
+          title={publishedVersionLabel}
         >
           <section className="dialog-form">
-            <header className="dialog-header">
-              <div>
-                <p className="eyebrow">{t("reader.visibilityPreviewEyebrow")}</p>
-                <h2 id="published-version-preview-title">{publishedVersionLabel}</h2>
-                <p className="feature-subtitle">
-                  {t("reader.visibilityPreviewHelp")}
-                </p>
-              </div>
-              <button
-                aria-label={t("reader.visibilityClosePreview")}
-                className="icon-button"
-                onClick={() => setPreviewOpen(false)}
-                type="button"
-              >
-                <X aria-hidden="true" size={16} />
-              </button>
-            </header>
+            <p className="dialog-description">
+              {t("reader.visibilityPreviewHelp")}
+            </p>
             {previewLoading ? (
               <p role="status">{t("reader.visibilityPreviewLoading")}</p>
             ) : null}

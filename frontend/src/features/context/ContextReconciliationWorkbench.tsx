@@ -15,7 +15,7 @@ import {
   type ContextReconciliationResult,
 } from "../../shared/api/contextReconciliation";
 import { discardAlternativeDraft } from "../../shared/api/pages";
-import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
+import { Dialog } from "../../shared/components/Dialog";
 import { RelativeTime } from "../../shared/components/RelativeTime";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { createUuidV4 } from "../../shared/lib/uuidV4";
@@ -423,24 +423,12 @@ export function ContextReconciliationWorkbench({
           </div>
         ) : null
       }
+      closeLabel={t("reconciliation.close", { defaultValue: "Close" })}
+      title={
+        detail?.page.title
+        ?? t("reconciliation.title", { defaultValue: "Reconcile branch" })
+      }
     >
-      <header className="context-reconciliation-header">
-        <div>
-          <p className="eyebrow">
-            {t("reconciliation.eyebrow", { defaultValue: "Branch reconciliation" })}
-          </p>
-          <h2 id={titleId}>
-            {detail?.page.title
-              ?? t("reconciliation.title", { defaultValue: "Reconcile branch" })}
-          </h2>
-        </div>
-        <DialogCloseButton
-          disabled={Boolean(busy)}
-          label={t("reconciliation.close", { defaultValue: "Close" })}
-          onClick={onClose}
-        />
-      </header>
-
       {loading ? (
         <div className="wiki-empty">
           {t("reconciliation.loading", { defaultValue: "Loading reconciliation" })}
@@ -451,13 +439,13 @@ export function ContextReconciliationWorkbench({
         <StatusBanner
           tone="warning"
           action={
-            <button
+            <button aria-label={t("reconciliation.refresh", { defaultValue: "Refresh conflicts" })}
               className="icon-button"
               disabled={Boolean(busy)}
               onClick={() => void loadDetail("replace")}
               type="button"
             >
-              {t("reconciliation.refresh", { defaultValue: "Refresh conflicts" })}
+              {t("shell:actions.refresh")}
             </button>
           }
         >
@@ -811,9 +799,7 @@ export function ContextReconciliationWorkbench({
                   >
                     {busy === "discard"
                       ? t("reconciliation.discarding", { defaultValue: "Discarding" })
-                      : t("reconciliation.confirmDiscard", {
-                          defaultValue: "Discard branch permanently",
-                        })}
+                      : t("shell:actions.discard")}
                   </button>
                 </div>
               </>
@@ -823,7 +809,7 @@ export function ContextReconciliationWorkbench({
                 onClick={() => setDiscardOpen(true)}
                 type="button"
               >
-                {t("reconciliation.discard", { defaultValue: "Discard branch" })}
+                {t("shell:actions.discard")}
               </button>
             )}
           </section>

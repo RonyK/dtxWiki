@@ -5078,9 +5078,7 @@ export function PageEditor({
                   ? t("editor.publishStaleReloading", {
                       defaultValue: "Reloading current draft",
                     })
-                  : t("editor.publishStaleReload", {
-                      defaultValue: "Reload current draft",
-                    })}
+                  : t("shell:actions.refresh")}
               </button>
             }
           >
@@ -5133,15 +5131,15 @@ export function PageEditor({
                     defaultValue: "Preserve mine as alternative",
                   })}
                 </button>
-                <button
+                <button aria-label={t("editor.conflictBannerReloadLatest", {
+                    defaultValue: "Reload latest",
+                  })}
                   className="inline-action"
                   type="button"
                   onClick={() => void reloadLatest()}
                   disabled={isSaving}
                 >
-                  {t("editor.conflictBannerReloadLatest", {
-                    defaultValue: "Reload latest",
-                  })}
+                  {t("shell:actions.refresh")}
                 </button>
               </span>
             }
@@ -5601,18 +5599,12 @@ export function PageEditor({
             className="fence-publish-dialog"
             labelledBy="fence-publish-dialog-title"
             onClose={() => setFencePublishPrompt(null)}
+            title={t("editor.fencePublishTitle", {
+              defaultValue: "Check the code fence before publishing",
+            })}
           >
             <section className="dialog-form">
-              <header className="dialog-header">
-                <div>
-                  <h2 id="fence-publish-dialog-title">
-                    {t("editor.fencePublishTitle", {
-                      defaultValue: "Check the code fence before publishing",
-                    })}
-                  </h2>
-                  <p className="feature-subtitle">{fencePublishPrompt.message}</p>
-                </div>
-              </header>
+              <p className="dialog-description">{fencePublishPrompt.message}</p>
               <p>
                 {t("editor.fencePublishDescription", {
                   defaultValue:
@@ -5628,7 +5620,7 @@ export function PageEditor({
                   {t("editor.fencePublishCancel", { defaultValue: "Cancel" })}
                 </button>
                 <button
-                  className="icon-button text-button"
+                  className="icon-button text-button warning"
                   onClick={publishDespiteFenceFinding}
                   type="button"
                 >
@@ -6477,7 +6469,7 @@ function ContextImageUploadStatusRegion({
                   type="button"
                   onClick={() => onRetry(entry.marker)}
                 >
-                  {t("editor.imageUploadRetry", { defaultValue: "Retry" })}
+                  {t("shell:actions.retry")}
                 </button>
               ) : null}
               {entry.status === "failed" || entry.status === "cancelled" ||
@@ -6491,7 +6483,7 @@ function ContextImageUploadStatusRegion({
                   type="button"
                   onClick={() => onRemove(entry.marker)}
                 >
-                  {t("editor.imageUploadRemove", { defaultValue: "Remove" })}
+                  {t("shell:actions.remove")}
                 </button>
               ) : null}
             </li>

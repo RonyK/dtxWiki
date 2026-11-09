@@ -398,7 +398,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
               onClick={() => void refreshSession()}
               type="button"
             >
-              {t("session.retry", { defaultValue: "Retry" })}
+              {t("shell:actions.retry")}
             </button>
           }
           tone="warning"
@@ -474,7 +474,7 @@ export function RequireEditor({ children }: { children: ReactNode }) {
               onClick={() => void refreshWorkspaces()}
               type="button"
             >
-              {t("accessGuard.retry")}
+              {t("shell:actions.retry")}
             </button>
           }
           tone="warning"

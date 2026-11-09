@@ -8,7 +8,7 @@ import type { TreeNodePayload } from "../api/workspace";
 import { inputTextError, textInputLimit, trimShortText } from "../lib/inputPolicy";
 import { normalizeSlugInput, slugify } from "../text/slug";
 import { AdvancedSection } from "./AdvancedSection";
-import { Dialog, DialogCloseButton } from "./Dialog";
+import { Dialog } from "./Dialog";
 import { FormField } from "./FormField";
 import { SegmentedControl } from "./SegmentedControl";
 import { TreePickerDropdown } from "./TreePickerDropdown";
@@ -207,54 +207,22 @@ export function NewItemDialog({
 
   return (
     <Dialog
+      closeLabel={t("newItem.close", {
+        defaultValue: "Close new item dialog",
+      })}
       dismissible={!submitting}
       labelledBy="new-item-title"
       onClose={requestClose}
+      title={t(`newItem.headings.${itemType}`, {
+        defaultValue:
+          itemType === "page"
+            ? "New page"
+            : itemType === "folder"
+              ? "New folder"
+              : "Upload files",
+      })}
     >
       <form className="dialog-form" onSubmit={submit}>
-        <header className="dialog-header">
-          <div>
-            <p className="eyebrow">
-              {t("newItem.eyebrow", { defaultValue: "New item" })}
-            </p>
-            <h2 id="new-item-title">
-              {t(`newItem.headings.${itemType}`, {
-                defaultValue:
-                  itemType === "page"
-                    ? "New page"
-                    : itemType === "folder"
-                      ? "New folder"
-                      : "Upload files",
-              })}
-            </h2>
-            <p className="feature-subtitle">
-              {availableTypes.length === 1
-                ? t(`newItem.subtitleSingle.${availableTypes[0]}`, {
-                    defaultValue:
-                      availableTypes[0] === "page"
-                        ? "Create a page in this location."
-                        : availableTypes[0] === "folder"
-                          ? "Create a folder in this location."
-                          : "Upload source files to this location.",
-                  })
-                : canUpload
-                ? t("newItem.subtitleUpload", {
-                    defaultValue: "Upload a source file or add a folder.",
-                  })
-                : t("newItem.subtitleCreate", {
-                    defaultValue:
-                      "Choose whether this branch should hold a page or a folder.",
-                  })}
-            </p>
-          </div>
-          <DialogCloseButton
-            label={t("newItem.close", {
-              defaultValue: "Close new item dialog",
-            })}
-            disabled={submitting}
-            onClick={requestClose}
-          />
-        </header>
         {availableTypes.length > 1 ? (
           <SegmentedControl
             compact

@@ -1045,8 +1045,7 @@
   justify-content: space-between;
 }
 
-.settings-pane-head h2,
-.admin-recovery-modal h2 {
+.settings-pane-head h2 {
   margin: 0;
 }
 
@@ -1214,10 +1213,12 @@
   max-width: 390px;
 }
 
-.admin-recovery-modal {
+.dialog-panel.admin-recovery-modal {
   width: min(560px, 100%);
-  max-height: calc(100vh - 40px);
-  overflow-y: auto;
+}
+
+.admin-recovery-modal p {
+  color: var(--ink-muted);
 }
 
 .admin-recovery-mode {
@@ -1670,16 +1671,6 @@
 
   .admin-user-recovery-actions .meta-line {
     grid-column: 1;
-  }
-
-  .admin-recovery-modal .modal-actions {
-    display: grid;
-    grid-template-columns: 1fr;
-  }
-
-  .admin-recovery-modal .modal-actions .icon-button {
-    width: 100%;
-    justify-content: center;
   }
 }
 

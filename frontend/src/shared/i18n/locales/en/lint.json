@@ -291,13 +291,11 @@
     "body": "Ignored findings leave the unresolved queue and remain in resolved history.",
     "reason": "Reason",
     "reasonOptional": "Reason (optional)",
-    "cancel": "Cancel",
     "confirm": "Ignore finding"
   },
   "fixDialog": {
     "title": "Record as fixed",
     "body": "This action changes the finding status only. It never modifies page content.",
-    "cancel": "Cancel",
     "confirm": "Record as fixed"
   },
   "mutation": {

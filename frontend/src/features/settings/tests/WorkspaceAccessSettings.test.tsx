@@ -839,7 +839,7 @@ describe("Workspace Settings membership and access", () => {
     expect(mutationBodies).toHaveLength(0);
     expect(
       within(dialog).getByRole("button", { name: "Give up Owner access" }),
-    ).toHaveClass("danger-action");
+    ).toHaveClass("danger");
 
     await user.click(
       within(dialog).getByRole("button", { name: "Give up Owner access" }),
@@ -1620,7 +1620,7 @@ describe("Workspace Settings membership and access", () => {
     await user.click(
       within(
         screen.getByRole("dialog", { name: "Remove this member?" }),
-      ).getByRole("button", { name: "Remove member" }),
+      ).getByRole("button", { name: "Remove" }),
     );
 
     expect(await screen.findByText("Fallback route")).toBeInTheDocument();
@@ -1737,7 +1737,7 @@ describe("Workspace Settings membership and access", () => {
     await user.click(
       within(
         screen.getByRole("dialog", { name: "Remove this member?" }),
-      ).getByRole("button", { name: "Remove member" }),
+      ).getByRole("button", { name: "Remove" }),
     );
 
     expect(await screen.findByText("Fallback route")).toBeInTheDocument();

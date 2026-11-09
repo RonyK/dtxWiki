@@ -69,7 +69,7 @@ export function CitationEvidenceSection({ active = true, pair, revision, workspa
       {current?.data ? <p>{t("graph.citationEvidence.sourceVersion")}: <code>{current.data.source_version_id}</code></p> : null}
       {!current || current.loading ? <p role="status">{t("graph.citationEvidence.loading")}</p> : null}
       {current?.error ? <><p role="alert">{t("graph.citationEvidence.failed")}</p>
-        <button className="icon-button text-button" disabled={current.loading} onClick={() => { void load(current.data?.next_cursor ?? null); }} type="button">{t("graph.citationEvidence.retry")}</button></> : null}
+        <button aria-label={t("graph.citationEvidence.retry")} className="icon-button text-button" disabled={current.loading} onClick={() => { void load(current.data?.next_cursor ?? null); }} type="button">{t("shell:actions.retry")}</button></> : null}
       {current?.data && !current.data.items.length && !current.data.next_cursor && !current.loading ? <p>{t("graph.citationEvidence.empty")}</p> : null}
       <ol>{current?.data?.items.map((item) => <li key={item.id}>
         <dl>

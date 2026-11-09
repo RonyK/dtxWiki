@@ -226,7 +226,7 @@ export function DashboardScreen() {
   if (!state || state.workspaceId !== routeWorkspaceId || state.queryKey !== queryKey) {
     if (error && !loading) return <div className="workspace-screen single-column"><section className="feature-main">
       <h1>{t("header.title", { defaultValue: "Workspace Operations" })}</h1>
-      <StatusBanner tone="warning">{error}<button className="icon-button text-button activity-feed-reload" type="button" onClick={reload}>{t("activity:feed.reload")}</button></StatusBanner>
+      <StatusBanner tone="warning">{error}<button aria-label={t("activity:feed.reload")} className="icon-button text-button activity-feed-reload" type="button" onClick={reload}>{t("shell:actions.refresh")}</button></StatusBanner>
     </section></div>;
     return <RouteLoading />;
   }
@@ -254,7 +254,7 @@ export function DashboardScreen() {
             />
           ) : null}
         </div>
-        {error ? <StatusBanner tone="warning">{error}<button className="icon-button text-button activity-feed-reload" type="button" onClick={reload}>{t("activity:feed.reload")}</button></StatusBanner> : null}
+        {error ? <StatusBanner tone="warning">{error}<button aria-label={t("activity:feed.reload")} className="icon-button text-button activity-feed-reload" type="button" onClick={reload}>{t("shell:actions.refresh")}</button></StatusBanner> : null}
         {editorRequired ? (
           <StatusBanner tone="info">
             {t("editorRequiredBanner", {

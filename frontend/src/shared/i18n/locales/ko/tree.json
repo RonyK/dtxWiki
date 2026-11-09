@@ -46,7 +46,6 @@
     "noMatches": "일치하는 상위 폴더가 없습니다"
   },
   "dialogs": {
-    "eyebrow": "트리 노드",
     "close": "닫기",
     "closeDialog": "대화상자 닫기",
     "cancel": "취소",
@@ -61,7 +60,6 @@
       "failed": "이름을 변경하지 못했습니다"
     },
     "move": {
-      "eyebrow": "트리 이동",
       "title": "{{title}} 이동",
       "childBranchNotice": "하위 분기도 함께 이동합니다.",
       "targetParent": "대상 상위 항목",
@@ -77,24 +75,15 @@
       "title": "{{title}} 삭제",
       "body": "이 노드를 보관 처리합니다. 트리·검색·공개 노출에서 빠지며 버전 이력은 보존됩니다.",
       "childWarning": "아래 하위 분기 전체가 함께 보관 처리됩니다.",
-      "submit": "삭제",
       "submitting": "삭제 중",
       "failed": "삭제하지 못했습니다"
     }
   },
   "newItem": {
-    "eyebrow": "새 항목",
     "headings": {
       "page": "새 페이지",
       "folder": "새 폴더",
       "upload": "파일 업로드"
-    },
-    "subtitleUpload": "소스 파일을 업로드하거나 폴더를 추가합니다.",
-    "subtitleCreate": "이 위치에 페이지 또는 폴더를 만들지 선택합니다.",
-    "subtitleSingle": {
-      "page": "이 위치에 페이지를 만듭니다.",
-      "folder": "이 위치에 폴더를 만듭니다.",
-      "upload": "이 위치에 소스 파일을 업로드합니다."
     },
     "close": "새 항목 대화상자 닫기",
     "itemType": "항목 유형",
@@ -140,7 +129,6 @@
   },
   "navSummary": {
     "edit": "요약 편집",
-    "save": "저장",
     "cancel": "취소",
     "inputLabel": "폴더 라우팅 요약",
     "placeholder": "이 폴더로 와야 하는 질의와, 오면 안 되는 질의('~는 X 참조')를 쓰세요.",
@@ -157,7 +145,6 @@
     "previewLoading": "불러오는 중…",
     "previewUpdated": "인덱스를 갱신했습니다.",
     "previewError": "인덱스 미리보기를 불러오지 못했습니다.",
-    "previewRefresh": "새로고침",
     "previewOverflow": "…외 {{count}}개",
     "previewEmpty": "인덱스 항목이 없습니다."
   },

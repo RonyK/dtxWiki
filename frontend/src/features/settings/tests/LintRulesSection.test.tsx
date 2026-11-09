@@ -68,7 +68,7 @@ function policy(overrides: Record<string, boolean | string> = {}, revision = REV
 const POLICY = policy();
 const WORKSPACE_ID = "00000000-0000-4000-8000-000000000110";
 const OTHER_WORKSPACE_ID = "00000000-0000-4000-8000-000000000120";
-const saveButton = () => screen.getByRole("button", { name: /^(Save changes|Saving…)$/ });
+const saveButton = () => screen.getByRole("button", { name: /^(Save|Saving…)$/ });
 const discardButton = () => screen.getByRole("button", { name: /Discard/ });
 
 const checksToggle = () => screen.findByText(/^Show all checks/);
@@ -94,7 +94,7 @@ describe("LintRulesSection", () => {
     );
   });
 
-  it("groups rules and saves edited checks only when Save changes is clicked", async () => {
+  it("groups rules and saves edited checks only when Save is clicked", async () => {
     const user = userEvent.setup();
     render(routed(<LintRulesSection readOnly={false} workspaceId={WORKSPACE_ID} />));
     expect((await checksToggle()).closest("details")).not.toHaveAttribute("open");
@@ -255,7 +255,7 @@ describe("LintRulesSection", () => {
     expect(within(screen.getByRole("group", { name: "Review and publication" })).getByText("On")).toBeInTheDocument();
     expect(screen.getByText("Orphan page").closest("li")).toHaveTextContent(/^Off/);
     expect(screen.queryByRole("button", { name: /Turn all/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Discard/ })).not.toBeInTheDocument();
     expect(updateSettingsPolicyBatch).not.toHaveBeenCalled();
 
@@ -279,7 +279,7 @@ describe("LintRulesSection", () => {
     await waitFor(() => expect(within(cleanupGroup()).getByText("Off")).toBeInTheDocument());
     expect(screen.queryByText("Changed")).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     expect(beforeUnloadIsBlocked()).toBe(false);
     expect(updateSettingsPolicyBatch).toHaveBeenCalledTimes(1);
     expect(getLintRules).toHaveBeenCalledTimes(1);

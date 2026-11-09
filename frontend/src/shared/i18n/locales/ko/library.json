@@ -10,7 +10,6 @@
     "drop": "파일을 끌어다 놓아 업로드",
     "queue": "업로드 대기열",
     "cancel": "취소",
-    "retry": "재시도",
     "retryAfter": "{{seconds}}초 후에 다시 시도하세요.",
     "openPolicySettings": "라이브러리 정책 설정 열기",
     "failedFallback": "라이브러리 항목을 업로드하지 못했습니다.",
@@ -117,7 +116,6 @@
     }
   },
   "deleteDialog": {
-    "eyebrow": "항목 삭제",
     "title": "{{title}} 삭제",
     "close": "닫기",
     "closeDialog": "삭제 대화상자 닫기",
@@ -125,9 +123,7 @@
     "referenced_one": "1개 페이지가 이 항목을 인용합니다. 삭제하면 해당 페이지에 삭제된 항목 표시가 남고 리뷰어에게 알림이 생성됩니다.",
     "referenced_other": "{{count}}개 페이지가 이 항목을 인용합니다. 삭제하면 해당 페이지들에 삭제된 항목 표시가 남고 리뷰어에게 알림이 생성됩니다.",
     "unreferenced": "이 작업은 항목과 모든 버전을 영구 삭제합니다. 되돌릴 수 없습니다.",
-    "cancel": "취소",
     "deleting": "삭제 중",
-    "deletePermanently": "영구 삭제",
     "errors": {
       "loadReferences": "참조를 불러오지 못했습니다",
       "delete": "항목을 삭제하지 못했습니다"
@@ -144,7 +140,6 @@
       "activity": "활동",
       "unavailable": "아직 사용할 수 없습니다"
     },
-    "delete": "삭제",
     "edit": "마크다운 편집",
     "addVersion": "새 버전 업로드",
     "addingVersion": "새 버전 업로드 중…",
@@ -160,8 +155,6 @@
       "loading": "편집 가능한 마크다운을 불러오는 중…",
       "unavailable": "이 버전에는 더 이상 편집 가능한 시맨틱 마크다운이 없습니다.",
       "loadFailed": "편집 가능한 마크다운을 불러오지 못했습니다.",
-      "retry": "다시 시도",
-      "save": "저장",
       "saving": "저장 중…",
       "saved": "저장됨",
       "cancel": "취소",

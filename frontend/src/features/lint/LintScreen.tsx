@@ -33,7 +33,7 @@ import type { TreeNodePayload } from "../../shared/api/workspace";
 import { ActionMenu } from "../../shared/components/ActionMenu";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { CountChip } from "../../shared/components/CountChip";
-import { Dialog } from "../../shared/components/Dialog";
+import { ConfirmDialog } from "../../shared/components/ConfirmDialog";
 import { NumericPagination } from "../../shared/components/NumericPagination";
 import { ReaderTabs } from "../../shared/components/ReaderTabs";
 import { RouteLoading } from "../../shared/components/RouteLoading";
@@ -824,37 +824,16 @@ export function LintScreen() {
             </button>
           ) : null}
           {fixFindingId ? (
-            <Dialog
-              dismissible={!fixBusy}
+            <ConfirmDialog
+              busy={fixBusy}
+              confirmLabel={t("fixDialog.confirm")}
               labelledBy="lint-fix-title"
-              onClose={closeFixDialog}
+              onCancel={closeFixDialog}
+              onConfirm={() => void decide(fixFindingId, "fix")}
+              title={t("fixDialog.title")}
             >
-              <div className="dialog-header">
-                <div>
-                  <p className="eyebrow">{t("actions.fix")}</p>
-                  <h2 id="lint-fix-title">{t("fixDialog.title")}</h2>
-                </div>
-              </div>
               <p>{t("fixDialog.body")}</p>
-              <div className="dialog-actions">
-                <button
-                  className="icon-button text-button"
-                  disabled={fixBusy}
-                  type="button"
-                  onClick={closeFixDialog}
-                >
-                  {t("fixDialog.cancel")}
-                </button>
-                <button
-                  className="icon-button primary"
-                  disabled={fixBusy}
-                  type="button"
-                  onClick={() => void decide(fixFindingId, "fix")}
-                >
-                  {t("fixDialog.confirm")}
-                </button>
-              </div>
-            </Dialog>
+            </ConfirmDialog>
           ) : null}
         </div>
         {roleKnown && !canEdit ? (
@@ -1035,17 +1014,24 @@ export function LintScreen() {
         ) : null}
       </section>
       {dismissFindingId || batchDismiss ? (
-        <Dialog
-          dismissible={!dismissBusy}
+        <ConfirmDialog
+          busy={dismissBusy}
+          confirmDisabled={dismissRequiresReason && !dismissReason.trim()}
+          confirmLabel={t("dismissDialog.confirm")}
           labelledBy="lint-dismiss-title"
-          onClose={closeDismissDialog}
+          onCancel={closeDismissDialog}
+          onConfirm={() =>
+            batchDismiss
+              ? void decideBatch("dismiss", dismissReason.trim() || null)
+              : void decide(
+                  dismissFindingId!,
+                  "dismiss",
+                  dismissReason.trim() || null,
+                )
+          }
+          title={t("dismissDialog.title")}
+          tone="danger"
         >
-          <div className="dialog-header">
-            <div>
-              <p className="eyebrow">{t("actions.dismiss")}</p>
-              <h2 id="lint-dismiss-title">{t("dismissDialog.title")}</h2>
-            </div>
-          </div>
           <p>{t("dismissDialog.body")}</p>
           <label className="field-stack">
             <span>
@@ -1059,35 +1045,7 @@ export function LintScreen() {
               onChange={(event) => setDismissReason(event.target.value)}
             />
           </label>
-          <div className="dialog-actions">
-            <button
-              className="icon-button text-button"
-              disabled={dismissBusy}
-              type="button"
-              onClick={closeDismissDialog}
-            >
-              {t("dismissDialog.cancel")}
-            </button>
-            <button
-              className="icon-button danger"
-              disabled={
-                dismissBusy || (dismissRequiresReason && !dismissReason.trim())
-              }
-              type="button"
-              onClick={() =>
-                batchDismiss
-                  ? void decideBatch("dismiss", dismissReason.trim() || null)
-                  : void decide(
-                      dismissFindingId!,
-                      "dismiss",
-                      dismissReason.trim() || null,
-                    )
-              }
-            >
-              {t("dismissDialog.confirm")}
-            </button>
-          </div>
-        </Dialog>
+        </ConfirmDialog>
       ) : null}
     </div>
   );

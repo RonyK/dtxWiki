@@ -164,7 +164,7 @@ export function LibrarySemanticMarkdownEditor({
             onClick={() => setRetry((current) => current + 1)}
             type="button"
           >
-            {t("reader.editor.retry", { defaultValue: "Try again" })}
+            {t("shell:actions.retry")}
           </button>
         </div>
       </div>
@@ -186,13 +186,13 @@ export function LibrarySemanticMarkdownEditor({
         </div>
         <div className="library-semantic-editor-actions">
           {saveState === "stale" ? (
-            <button
+            <button aria-label={t("reader.editor.reloadLatest", { defaultValue: "Reload latest" })}
               className="icon-button text-button"
               disabled={saving}
               onClick={() => setRetry((current) => current + 1)}
               type="button"
             >
-              {t("reader.editor.reloadLatest", { defaultValue: "Reload latest" })}
+              {t("shell:actions.refresh")}
             </button>
           ) : null}
           <button
@@ -215,7 +215,7 @@ export function LibrarySemanticMarkdownEditor({
             <span>
               {saving
                 ? t("reader.editor.saving", { defaultValue: "Saving…" })
-                : t("reader.editor.save", { defaultValue: "Save" })}
+                : t("shell:actions.save")}
             </span>
           </button>
         </div>
