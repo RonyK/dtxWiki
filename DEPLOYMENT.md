@@ -3,7 +3,7 @@
 Fresh Ubuntu 22.04+ VM에 dtxWiki를 self-host 설치하는 절차입니다. 아래 **Quick install**은 서버에서 한
 명령으로 설치하는 권장 경로이고, Step 1~8은 같은 일을 손으로 하는 수동/디버그 경로입니다. Docker
 경로는 릴리스 태그의 checkout에서 이미지를 로컬 빌드합니다(게시된 컨테이너 이미지는 없습니다).
-Desktop 설치 파일은 v0.2.3에 포함되지 않습니다.
+Desktop 설치 파일은 현재 릴리스에 포함되지 않습니다.
 
 이 릴리스의 storage topology는 `single_database` 하나뿐이며, workspace별 DB 물리 분리는
 지원하지 않습니다(자세한 내용은 [데이터베이스](#데이터베이스) 절).
@@ -1346,7 +1346,14 @@ dtxwiki db rename-revisions --apply
 
 ### 이름 규칙과 실행 순서
 
-실행 파일의 경로는 다음 형식입니다.
+개발 중인 실행 파일은 버전을 정하지 않고 다음 경로에 둡니다. 이름은 CHANGELOG의
+`Unreleased`와 같은 상태를 뜻합니다.
+
+```text
+backend/migrations/versions/unreleased/<revision_id>_<description>.py
+```
+
+배포할 릴리스 브랜치에서 이동·통합을 마친 실행 파일은 다음 형식입니다.
 
 ```text
 backend/migrations/versions/v<major>_<minor>/<revision_id>_<description>.py
@@ -1354,6 +1361,7 @@ backend/migrations/versions/v<major>_<minor>/<revision_id>_<description>.py
 
 | 요소 | 의미 | 예시 |
 | --- | --- | --- |
+| `unreleased` | 개발 중인 변경. 릴리스 번호를 아직 부여하지 않음 | `unreleased` |
 | `v<major>_<minor>` | DB 변경이 포함된 릴리스의 Major/Minor 그룹. Patch는 생략 | `v0_1` |
 | `<revision_id>` | Alembic이 생성하는 식별자. 전역 자동 증가 번호를 사용하지 않음 | `efcbcf724889` |
 | `<description>` | 변경 목적을 나타내는 영문 소문자와 밑줄 이름 | `core_schema`, `add_workspace_settings` |
@@ -1372,7 +1380,9 @@ down_revision = "bd62193d5cf6"
 사용하며, DB 변경이 없는 배포는 같은 DB head를 유지합니다. Patch 배포에서 DB 변경이
 필요하면 같은 그룹 안에 새 revision을 추가합니다. Major/Minor가 달라질 때는 해당 릴리스의
 그룹 디렉터리를 사용합니다. 그룹이 바뀌어도 `down_revision`으로 이전 head와 연결합니다.
-이미 배포한 파일은 기존 그룹에 두고, 새 DB 변경 파일만 해당 릴리스 그룹에 추가합니다.
+이미 배포한 파일은 기존 그룹에 둡니다. 새 DB 변경은 개발 중에는 `unreleased`에 두고,
+릴리스 브랜치에서 확정한 그룹으로 옮기거나 통합합니다. 앱의 현재 배포 버전이 새 migration의
+목표 버전을 정하지는 않습니다.
 
 ### 디렉터리 구조
 
@@ -1387,22 +1397,25 @@ backend/migrations/
 │   │   ├── efcbcf724889_core_schema.py
 │   │   ├── 19db79d3e622_release_0_1_3.py
 │   │   └── eb86fdacb1bb_release_0_1_4.py
-│   └── v0_2/
-│       ├── 5b7e5c149279_release_0_2.py
-│       └── 00ba02774c4a_release_0_2_3.py
+│   ├── v0_2/
+│   │   ├── 5b7e5c149279_release_0_2.py
+│   │   └── 00ba02774c4a_release_0_2_3.py
+│   └── unreleased/                        # 개발 중인 revision, 배포 전 이동·통합
 ├── initialization/                        # 새 설치용 v0.2.1 초기화
 │   ├── versions/v0_2/5b7e5c149279_initial_schema.py
 │   └── schema/                            # SQLite·PostgreSQL의 고정된 v0.2.1 DDL
 ├── revision_modules/                      # 릴리스 그룹별 고정 helper 구현
 │   ├── v0_1/
-│   └── v0_2/
+│   ├── v0_2/
+│   └── unreleased/                        # 개발 중인 helper, 배포 전 import 경로 변경
 ├── release_manifest.json                  # 스키마 릴리스별 그룹과 head 매핑
 └── frozen_revisions.json                  # 배포된 migration 구현의 해시
 ```
 
 `versions/`에는 `revision`과 `down_revision`을 선언하는 실행 파일만 둡니다. 보조 코드는
-`revision_modules/<릴리스 그룹>/<revision_id>_<description>/`에 모아 두므로, 경로만 보고도
-어느 릴리스 그룹과 revision에 속하는지 알 수 있습니다. 이 모듈들은 해당 revision에서
+개발 중에는 `revision_modules/unreleased/<revision_id>_<description>/`에 두고,
+배포할 때 `revision_modules/<릴리스 그룹>/<revision_id>_<description>/`으로 옮깁니다.
+이 모듈들은 해당 revision에서
 호출하며, 독립적인 migration 단계로 실행하지 않습니다. Python 패키지 이름이 숫자로
 시작할 때는 import할 수 있도록 앞에 `_`를 붙입니다.
 
@@ -1413,18 +1426,24 @@ backend/migrations/
 
 ### 새 DB 변경 추가
 
-개발 checkout의 저장소 루트에서 다음 helper로 실행 파일을 생성합니다. 아래 `0.2.4`는
-0.2.3 이후 schema 변경을 추가하는 예시입니다. 버전만 바뀌고 DB 변경이 없으면
-새 migration이 필요하지 않습니다.
+개발 checkout의 저장소 루트에서 다음 helper로 실행 파일을 생성합니다. 버전 인자는 없으며,
+현재 앱 버전이나 다음 릴리스 번호를 지정할 필요도 없습니다. DB 변경이 없으면 새 migration은
+필요하지 않습니다.
 
 ```bash
-.venv/bin/python scripts/new_migration.py --release 0.2.4 -m "add workspace settings"
+.venv/bin/python scripts/new_migration.py -m "add workspace settings"
 ```
 
-이 명령은 `versions/v0_2/<생성된 ID>_add_workspace_settings.py`를 만들고 직전 head와
-연결합니다. 필요하면 같은 이름의 보조 패키지를 `revision_modules/v0_2/`에 추가합니다.
-스키마 변경을 구현한 뒤 릴리스별 head 매핑과 배포 해시를 갱신하고, migration 및 패키지
-검증을 수행합니다. helper는 파일을 생성하는 명령이며 DB 적용은 별도로 수행합니다.
+이 명령은 `versions/unreleased/<생성된 ID>_add_workspace_settings.py`를 만들고 직전 head와
+연결합니다. 보조 패키지는 `revision_modules/unreleased/`에 추가합니다. 이 파일들은 아직
+freeze하지 않고 개발 중 수정·통합할 수 있습니다. helper는 파일을 생성하는 명령이며 DB 적용은
+별도로 수행합니다. Alembic은 하위 디렉터리를 재귀 탐색하므로 추가 설정 없이 읽습니다.
+
+릴리스 브랜치에서 앱 버전을 정한 뒤 revision과 helper를 릴리스 그룹으로 이동·통합하고,
+import 경로를 바꿉니다. 이어서 `release_manifest.json`의 head와 `frozen_revisions.json` 및
+검증기의 고정 해시를 확정하고, 새 wheel·sdist를 `make verify-release-artifacts`로 확인합니다.
+배포 산출물의 두 `unreleased/` 경로는 비어 있어야 하며 helper의 `__init__.py`도 남기지 않습니다.
+이전에 미배포 revision을 적용한 dev DB는 위의 "미배포 중간 revision" 절차로 전환합니다.
 
 ### 배포 시 DB 적용과 상태 확인
 

@@ -50,6 +50,8 @@ jobs:
           node-version: "22.18.0"
       - name: Install Python dependencies
         run: uv sync --locked --extra dev
+      - name: Check release versions and README references
+        run: make check-version
       - name: Lint backend and tests
         run: .venv/bin/ruff check backend tests scripts
       # Dedicated SQLite/PostgreSQL migration regressions run in Release checks.

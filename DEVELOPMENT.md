@@ -645,6 +645,50 @@ docker-build-push: docker-build docker-push
 
 <!-- markdownlint-enable MD010 -->
 
+## 릴리스 버전 관리
+
+현재 앱 버전의 원본은 `pyproject.toml`의 `[project].version` 하나입니다.
+버전 변경은 다음 명령으로 수행합니다. `X.Y.Z`는 실제 배포할 숫자 버전으로 바꾸세요.
+
+```bash
+make version
+make set-version VERSION=X.Y.Z
+make check-version
+```
+
+`set-version`은 Desktop·npm·agent plugin manifest, 두 lock 파일의 자체 패키지 버전,
+OpenAPI와 README의 현재 앱 버전 표기를 함께 갱신하고 editable 설치 metadata를 동기화합니다. 의존성 버전은
+갱신하지 않습니다. 버전을 직접 고친 뒤에는 `make sync-version`으로 같은 생성물을 갱신합니다.
+OpenAPI export는 설치된 패키지의 오래된 버전이나 `DTXWIKI_APP_VERSION` 대신 소스 버전을
+사용합니다. CLI와 실행 중인 서버는 계속 설치 metadata와 runtime 설정을 사용합니다.
+
+`README.md`, `README.ko.md`, `npm/dtxwiki/README.md`는 직접 편집합니다. 템플릿은 없으며
+동기화 도구는 설치 명령·wheel 이름·릴리스 태그 링크·현재 버전 안내의 앱 버전 패턴만 제자리에서
+바꿉니다. 다른 본문과 과거 기록·앵커는 보존합니다. Docs의 지원 시리즈 경로는 앱 버전과 별도로
+확인하세요. CI의 `check-version`은 파일을 수정하지 않고 현재 버전 참조의 불일치를 거부합니다.
+
+README 이미지는 `dev/.github/assets/readme/`의 URL을 유지합니다. 이미 배포된 PyPI 설명과
+릴리스 태그를 수정하지 않으며, 앞으로도 같은 URL을 사용하는 과거 릴리스 페이지를 위해 해당
+asset 파일 이름과 경로를 유지하세요.
+
+CHANGELOG의 과거 릴리스, 운영 증거, DB schema 경계와 백업의 당시 버전은 자동 치환하지
+않습니다. DB 변경은 아래의 `unreleased` 절차를 따릅니다. 이 명령은 Git 태그 생성, push,
+registry 게시를 수행하지 않습니다.
+
+릴리스 브랜치에서는 다음 순서로 배포할 migration을 확정합니다.
+
+1. `make set-version VERSION=X.Y.Z`로 배포할 앱 버전을 정합니다.
+2. `versions/unreleased/`의 revision을 `versions/v<major>_<minor>/`로 옮기거나 통합합니다.
+   보조 모듈도 `revision_modules/unreleased/`에서 해당 릴리스 그룹으로 옮기고 import 경로를
+   고칩니다. 배포된 revision과 helper는 보존하고, 두 `unreleased/` 디렉터리의 잔여 파일과
+   빈 `__init__.py`도 제거합니다.
+3. DB 변경이 있으면 `release_manifest.json`에 해당 앱 버전과 최종 head를 기록합니다.
+4. 배포할 파일을 확정한 뒤 `frozen_revisions.json`과 패키지 검증기의 고정 해시를 갱신합니다.
+5. `make build-wheel`로 새 산출물을 만들고 `make verify-release-artifacts`로 검증합니다.
+
+DB 변경이 없는 patch에는 새 schema 경계가 필요하지 않습니다. 릴리스 검증기는 wheel과
+sdist에 `unreleased/` 파일이 남아 있으면 거부합니다. 개발 산출물에는 이를 허용합니다.
+
 ## 외부 서버용 wheel artifact 만들기
 
 릴리스 wheel은 PyPI 에서 받을 수 있으므로 일반 운영자는 이 절차가 필요 없습니다. 소스에서 직접 만든 wheel
@@ -660,7 +704,7 @@ make test-packaged                        # frontend + wheel build, packaged UI/
 
 # 검증은 wheel 파일이 아니라 dist 디렉터리를 받으며, 이전 빌드 잔여물이 섞이지 않도록 깨끗한 dist 에서 합니다.
 rm -rf dist && make build-wheel
-.venv/bin/python scripts/verify_wheel_artifact.py dist --release-version 0.2.3
+make verify-release-artifacts
 WHEEL="$(find dist -maxdepth 1 -name 'dtxwiki-*.whl' -print -quit)"
 sha256sum "$WHEEL" infra/prod/install.sh
 ```
@@ -672,22 +716,23 @@ helper의 고정 해시를 확인합니다. 추출본 안에서 Alembic graph를
 넘기면 사용법 오류(exit 2)입니다. 이미 만든 `dist/` 에 이전 빌드가 있으면(`make build-wheel` 은 그것을
 `dist/prev/` 로 옮깁니다) 검사 대상이 모호해지므로 위처럼 `rm -rf dist` 로 시작하세요.
 
-Migration은 `backend/migrations/versions/v<major>_<minor>/<id>_<description>.py`
-형식으로 관리합니다. ID는 Alembic이 생성하고, 실행 순서는 `down_revision`으로
-결정합니다. Patch는 디렉터리명에 포함하지 않습니다. DB 변경이 없는 릴리스에는
-새 migration이 필요하지 않습니다. 새 파일은 다음 명령으로 생성합니다.
+개발 중인 migration은 `backend/migrations/versions/unreleased/<id>_<description>.py`
+형식으로 관리합니다. 이름은 CHANGELOG의 `Unreleased`와 같은 배포 전 상태를 뜻합니다.
+앱 버전과 다음 배포 버전을 추측해 연결하지 않습니다. ID는 Alembic이 생성하고, 실행 순서는
+`down_revision`으로 결정합니다. DB 변경이 없는 릴리스에는 새 migration이 필요하지 않습니다.
+새 파일은 버전 인자 없이 다음 명령으로 생성합니다.
 
 ```bash
-.venv/bin/python scripts/new_migration.py --release 0.2.4 -m "add workspace settings"
+.venv/bin/python scripts/new_migration.py -m "add workspace settings"
 ```
 
-보조 모듈이 필요하면 `revision_modules/v0_2/<id>_add_workspace_settings/`에
+보조 모듈이 필요하면 `revision_modules/unreleased/<id>_add_workspace_settings/`에
 두고, migration 파일에서 import합니다. Python import 경로로 쓸 패키지 이름이
 숫자로 시작하는 경우에는 앞에 `_`를 붙입니다. `versions/` 아래에는 실행 가능한
-revision 파일만 둡니다. 릴리스의 DB head 매핑은 `release_manifest.json`에 기록하고,
-배포되는 migration과 보조 모듈의 해시는 `frozen_revisions.json` 및 독립된
-패키지 검증기의 해시 목록에 함께 고정합니다. 기존에 배포된 migration은 수정하거나
-다시 합치지 않습니다.
+revision 파일만 둡니다. 개발 중인 파일은 수정·통합할 수 있으며 `frozen_revisions.json`에
+추가하지 않습니다. 릴리스 때 위 절차로 그룹·최종 head·배포 해시를 확정합니다. 이미 배포된
+migration은 수정하거나 다시 합치지 않습니다. Alembic은 하위 디렉터리를 재귀 탐색하므로
+`unreleased/`를 위해 별도 설정을 추가할 필요는 없습니다.
 
 여러 브랜치에서 같은 head 뒤에 migration을 추가한 경우에는 기존 revision을
 유지하고, 두 revision을 부모로 지정한 병합 revision을 추가합니다. 최종 그래프는

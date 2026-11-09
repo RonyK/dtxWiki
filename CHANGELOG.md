@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Release maintenance
+
+- Read the release version from `pyproject.toml` and synchronize package
+  manifests, lock metadata, OpenAPI and current version references in existing
+  README files with `make set-version VERSION=X.Y.Z`. Preserve README prose,
+  historical examples and the `dev` asset URLs; check version consistency in CI.
+- Export the source version into OpenAPI even when installed metadata or a
+  runtime override reports a different version. Read artifact verification
+  versions automatically.
+- Create new migrations and helpers under `unreleased`, matching this changelog,
+  without assigning a release number. Move or consolidate them on the release
+  branch and reject remaining `unreleased` files in published wheel and sdist
+  artifacts.
+- Restore the published 0.1.4 release notes and correct their attribution,
+  preserving historical schema boundaries.
+
 ## 0.2.3 — 2026-11-07
 
 Beta update with shared browser drafts, clearer graph navigation and legends,
@@ -429,87 +445,6 @@ MCP workflows. Installation and package metadata now target 0.2.1.
 
 ### Fixes
 
-- Users can delete their account, and server administrators can delete any
-  account. Access ends immediately; the account is removed after a
-  configurable retention period (default 30 days). Until cleanup starts, an
-  administrator can restore the account to its previous status. Accounts
-  without a password confirm withdrawal with a recent sign-in or verification,
-  and the account email is typed to confirm only when the account has one.
-- Workspaces whose only admin is the departing account are held with it:
-  closed to members and joins, then deleted with the account. Withdrawal waits
-  until such a workspace with other active members is deleted or has another
-  admin; an administrator deleting an account approves every workspace left
-  without an admin, and can keep one by appointing an active member as admin.
-  Changes routed to an inactive recipient go to the workspace owners. Existing
-  claim lifetimes are unchanged.
-- Account cleanup preserves documents, submitted drafts, attachments, and
-  conversation history in other workspaces, and deletes unsubmitted private
-  edits.
-- Show email sign-in before external providers. User search groups its controls
-  and continuous account rows in one Settings panel, with ID copying beneath the
-  email and recovery in an account menu. Workspace members
-  are listed first, with a separate dialog for account-email/ID entry and the
-  company directory enabled by Core policy.
-- External login plugins support immediate SSO signup without email, SMTP, or a
-  local password. Trusted, IdP-verified addresses become unique account emails;
-  a matching existing account requires signing in and explicitly linking instead
-  of creating another account. Unverified profile addresses do not reserve account
-  emails, and accounts never merge automatically. Missing OIDC email/name claims
-  can be supplemented by subject-checked UserInfo within the requested scopes.
-  Users receive stable UUID-derived usernames separately from display names.
-  Members can be added by user UUID or registered account email,
-  with an optional company directory restricted to a configured provider/tenant.
-- A trusted SSO address held by an account whose email was never verified no
-  longer creates a second account. Its owner signs in and links the provider, or
-  the requester asks a server admin to release the address (deactivate, clear the
-  email, revoke credentials; data is kept). `email_collision_policy = "auto_release"`
-  releases at once on providers with `trust_email_verified`; server-admin accounts
-  are never released automatically.
-- Server-admin grants and revocations, operator-created users, CLI email and
-  display-name repairs, and email-conflict decisions are now audited. Server-level
-  audit history is readable only by server admins with recent confirmation.
-- Setting an initial password is rate-limited per account and refuses an existing
-  password before hashing.
-- Sensitive account and server-admin actions accept a primary login or confirmation
-  from the last 60 minutes by default. `DTXWIKI_AUTH_REAUTHENTICATION_MAX_AGE_SECONDS`
-  configures the window. This also changes password admins: a recent password login
-  needs no separate proof, and proof lifetime increases from 5 to 60 minutes.
-  Session renewal preserves confirmation binding and does not extend freshness.
-- Server admins can rebind an externally verified identity to an existing user UUID
-  after independent ownership verification. Recovery preserves data and roles and
-  revokes sessions, pending challenges, and API/OAuth credentials.
-- Plugin provisioning returns constrained membership requests; worker handlers use
-  typed public inputs and results instead of core database/runtime objects.
-- Skip periodic bundle expiration, media recovery/GC, and credential replica
-  jobs when their read-only checks find no work. Registration cadence stays
-  unchanged; a failed check still registers the repair job. Gradually remove
-  completed scheduled checks older than seven days after their encoded period
-  ends, plus expired MCP write retry receipts, in bounded worker batches.
-  Failed/manual jobs and content-processing history remain retained. SQLite
-  reuses freed pages; operators can reclaim file space with the offline
-  `VACUUM` procedure in [DEPLOYMENT.md](DEPLOYMENT.md#정기-작업-이력과-sqlite-파일-용량).
-- Apply MCP Access Key workspace edits to existing streamable MCP sessions
-  on the next request instead of keeping the workspaces granted at
-  initialize.
-- Review evidence now distinguishes the current document destination from the
-  exact reviewed Context version and its comparison baseline. Group approvals
-  use a fixed, signed selection and preserve individual results across batches;
-  single decisions accept a durable receipt ID for safe retries.
-- MCP tool contract revision 17 adds authorized document and content descriptors
-  to `list_requested_changes` evidence, including the earlier draft a candidate
-  was written on. Existing clients can ignore these additive fields and
-  continue using the existing target and `diff_ref` fields.
-- MCP tool contract revision 18 makes each `what_changed` entry one move of a
-  page's published version. It adds `unpublished` when an undone first
-  publication leaves no published version: invalidate the cached publication
-  by `page_id`; `version_id` is null. `created` also covers a page published
-  again after it was unpublished or archived, including restoring an archived
-  page, so treat it as an upsert. `previous_version_id` is the version
-  published right before the entry, not the version's parent, and is also set
-  on `unpublished` and `archived` entries. `reason` says why the version moved
-  (for example `review decision undone` or `page restored from archive`).
-  Draft visibility still applies, so readers without draft access receive no
-  unpublished-page metadata.
 - MCP tool contract revision 19 stops repeating the whole page in the
   responses of `create_context_page`, `update_context_edit`,
   `patch_context_edit` and `submit_context_edit_for_review`: a one-word patch
@@ -561,71 +496,6 @@ MCP workflows. Installation and package metadata now target 0.2.1.
   published version, and the next submit replaces the review. Other chats,
   other people, and reviewed submissions still start a new branch. Guidance now
   says to keep one edit per task and submit it once.
-- Approving a Context review publishes the changes up to that draft; rejecting
-  one also rejects the later drafts written on it and returns the edit head to
-  the draft below them. Earlier drafts and branched alternatives are untouched.
-  A reject confirmation whose impact changed meanwhile is refused with 409
-  `review_decision_impact_changed`.
-- A Context review decision can be undone while its recorded result is current:
-  an approval (including an automatic one), a rejection, or a first-round
-  change request. Undoing restores the published and draft heads, page
-  metadata and the reviews the decision settled or opened; the decision stays
-  in the history followed by an `undo` record. The decider (or an owner) may
-  undo a decision, any editor an automatic approval, which then waits for a
-  person. Browser sessions only:
-  `POST /api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decisions/{decision_id}/undo`,
-  refused with 409 `review_decision_undo_unavailable` after a newer version or
-  a change to the recorded result. Later metadata changes the decision did
-  not touch, such as a tree rename, are preserved. Claims on restored change
-  requests return with their original timestamps and expiry.
-  Decisions made before this release, and approvals that revived an archived
-  page, cannot be undone. Reading a page as of a later time follows the undone
-  publication, the page's own stale warning returns with its older content,
-  and a withdrawn change request leaves `list_requested_changes` and refuses
-  revisions.
-- Preserve restored drafts' mandatory human-review conditions and first-publish
-  metadata across page-first submissions and authenticated autosaves. Restart
-  rejected content only while its surviving head is unchanged, refresh rejection
-  previews when confirming, and compare draft parents independently of the
-  published version's diff limit.
-
-- Overlays can pass explicit lint modules to `assemble(lint_modules=...)`.
-  Writers and readers share that container's registry. Workers passed the same
-  `services` use it too; standalone CLI worker processes build their own builtin
-  registry and do not inherit another process's injected modules. Supply modules
-  before the registry is first used; late injection raises `ValueError`.
-  Module injection is typed as `tuple[LintModule, ...]`;
-  `LintPolicy.rule_enabled` requires an explicit `default_enabled` argument.
-- Context lint modules receive the actual caller provenance, including browser
-  reconciliation and MCP revision and maintenance writes.
-- Preserve Markdown hard breaks during formatting and block identities after
-  formatted patches. Whole-body edit retries retain their original receipt.
-- With auto-fix disabled, `write_page`/`update_page` and Context writes preserve
-  authored trailing whitespace. For those writes, NFC/NFD differences, line
-  endings and the final newline do not create a new version on their own.
-  Autosave retains its existing exact-text comparison.
-- Autosave checks the supplied base before preparing content. A stale base takes
-  precedence when both the base and save-time content checks would fail.
-- Keep legacy citation-only updates and patch previews compatible with stored
-  frontmatter, and verify reconciliation independently of current fixer settings.
-- The workspace a new account starts with is an ordinary private workspace.
-  It gets the same initial content as any created workspace, and nothing treats
-  it specially afterwards: its owner can be changed like any other owner, it is
-  not a landing fallback, and it is not recreated after deletion. The
-  `users.personal_workspace_id` column is dropped; existing workspaces keep
-  their data and memberships.
-- The REST workspace list and MCP `list_my_workspaces` no longer return
-  `personal_workspace_id`, and workspace members no longer carry
-  `is_personal_anchor_owner`. MCP tool contract revision 16: clients that
-  read `personal_workspace_id` should use `default_workspace_id` or
-  `current_workspace_id` and refresh `tools/list`.
-- Name a new account's workspace `<display name>'s Personal Workspace` with a
-  `personal-<email local part>` slug, numbered on collision. Accounts without a
-  usable local part get a random eight-character hex token.
-- Reserve the `personal-` slug prefix for those workspaces. Workspace creation
-  and slug changes refuse it; a slug generated from a title that would start
-  with it gets a `ws-` prefix instead. All workspace slugs fold accented Latin
-  letters to ASCII.
 - The Context reader's `…` menu adds or removes the page from the reader's own
   favorites, kept in sync with the tree's star.
 - Dragging a tree item before or after a row in another folder moves it to that
@@ -701,7 +571,181 @@ MCP workflows. Installation and package metadata now target 0.2.1.
 - Source builds and tests use Node.js 22.18.x. Python package metadata marks
   this release Beta; security fixes target the latest 0.2.x release.
 
-## 0.1.4 — 2026-10-23
+## 0.1.4 — 2026-10-28
+
+### Accounts and workspaces
+
+- Users can delete their account, and server administrators can delete any
+  account. Access ends immediately; the account is removed after a
+  configurable retention period (default 30 days). Until cleanup starts, an
+  administrator can restore the account to its previous status. Accounts
+  without a password confirm withdrawal with a recent sign-in or verification,
+  and the account email is typed to confirm only when the account has one.
+- Workspaces whose only admin is the departing account are held with it:
+  closed to members and joins, then deleted with the account. Withdrawal waits
+  until such a workspace with other active members is deleted or has another
+  admin; an administrator deleting an account approves every workspace left
+  without an admin, and can keep one by appointing an active member as admin.
+  Changes routed to an inactive recipient go to the workspace owners. Existing
+  claim lifetimes are unchanged.
+- Account cleanup preserves documents, submitted drafts, attachments, and
+  conversation history in other workspaces, and deletes unsubmitted private
+  edits.
+
+### External login and account security
+
+- Show email sign-in before external providers. User search groups its controls
+  and continuous account rows in one Settings panel, with ID copying beneath the
+  email and recovery in an account menu. Workspace members
+  are listed first, with a separate dialog for account-email/ID entry and the
+  company directory enabled by Core policy.
+- External login plugins support immediate SSO signup without email, SMTP, or a
+  local password. Trusted, IdP-verified addresses become unique account emails;
+  a matching existing account requires signing in and explicitly linking instead
+  of creating another account. Unverified profile addresses do not reserve account
+  emails, and accounts never merge automatically. Missing OIDC email/name claims
+  can be supplemented by subject-checked UserInfo within the requested scopes.
+  Users receive stable UUID-derived usernames separately from display names.
+  Members can be added by user UUID or registered account email,
+  with an optional company directory restricted to a configured provider/tenant.
+- A trusted SSO address held by an account whose email was never verified no
+  longer creates a second account. Its owner signs in and links the provider, or
+  the requester asks a server admin to release the address (deactivate, clear the
+  email, revoke credentials; data is kept). `email_collision_policy = "auto_release"`
+  releases at once on providers with `trust_email_verified`; server-admin accounts
+  are never released automatically.
+- Server-admin grants and revocations, operator-created users, CLI email and
+  display-name repairs, and email-conflict decisions are now audited. Server-level
+  audit history is readable only by server admins with recent confirmation.
+- Setting an initial password is rate-limited per account and refuses an existing
+  password before hashing.
+- Sensitive account and server-admin actions accept a primary login or confirmation
+  from the last 60 minutes by default. `DTXWIKI_AUTH_REAUTHENTICATION_MAX_AGE_SECONDS`
+  configures the window. This also changes password admins: a recent password login
+  needs no separate proof, and proof lifetime increases from 5 to 60 minutes.
+  Session renewal preserves confirmation binding and does not extend freshness.
+- Server admins can rebind an externally verified identity to an existing user UUID
+  after independent ownership verification. Recovery preserves data and roles and
+  revokes sessions, pending challenges, and API/OAuth credentials.
+- Plugin provisioning returns constrained membership requests; worker handlers use
+  typed public inputs and results instead of core database/runtime objects.
+
+### Operations and MCP
+
+- Server administrators can check for a newer dtxWiki version in Settings
+  and see upgrade guidance for the detected installation method.
+- Skip periodic bundle expiration, media recovery/GC, and credential replica
+  jobs when their read-only checks find no work. Registration cadence stays
+  unchanged; a failed check still registers the repair job. Gradually remove
+  completed scheduled checks older than seven days after their encoded period
+  ends, plus expired MCP write retry receipts, in bounded worker batches.
+  Failed/manual jobs and content-processing history remain retained. SQLite
+  reuses freed pages; operators can reclaim file space with the offline
+  `VACUUM` procedure in [DEPLOYMENT.md](DEPLOYMENT.md#정기-작업-이력과-sqlite-파일-용량).
+- Apply MCP Access Key workspace edits to existing streamable MCP sessions
+  on the next request instead of keeping the workspaces granted at
+  initialize.
+
+### Review and publication
+
+- Review evidence now distinguishes the current document destination from the
+  exact reviewed Context version and its comparison baseline. Group approvals
+  use a fixed, signed selection and preserve individual results across batches;
+  single decisions accept a durable receipt ID for safe retries.
+- MCP tool contract revision 17 adds authorized document and content descriptors
+  to `list_requested_changes` evidence, including the earlier draft a candidate
+  was written on. Existing clients can ignore these additive fields and
+  continue using the existing target and `diff_ref` fields.
+- MCP tool contract revision 18 makes each `what_changed` entry one move of a
+  page's published version. It adds `unpublished` when an undone first
+  publication leaves no published version: invalidate the cached publication
+  by `page_id`; `version_id` is null. `created` also covers a page published
+  again after it was unpublished or archived, including restoring an archived
+  page, so treat it as an upsert. `previous_version_id` is the version
+  published right before the entry, not the version's parent, and is also set
+  on `unpublished` and `archived` entries. `reason` says why the version moved
+  (for example `review decision undone` or `page restored from archive`).
+  Draft visibility still applies, so readers without draft access receive no
+  unpublished-page metadata.
+- Approving a Context review publishes the changes up to that draft; rejecting
+  one also rejects the later drafts written on it and returns the edit head to
+  the draft below them. Earlier drafts and branched alternatives are untouched.
+  A reject confirmation whose impact changed meanwhile is refused with 409
+  `review_decision_impact_changed`.
+- A Context review decision can be undone while its recorded result is current:
+  an approval (including an automatic one), a rejection, or a first-round
+  change request. Undoing restores the published and draft heads, page
+  metadata and the reviews the decision settled or opened; the decision stays
+  in the history followed by an `undo` record. The decider (or an owner) may
+  undo a decision, any editor an automatic approval, which then waits for a
+  person. Browser sessions only:
+  `POST /api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decisions/{decision_id}/undo`,
+  refused with 409 `review_decision_undo_unavailable` after a newer version or
+  a change to the recorded result. Later metadata changes the decision did
+  not touch, such as a tree rename, are preserved. Claims on restored change
+  requests return with their original timestamps and expiry.
+  Decisions made before this release, and approvals that revived an archived
+  page, cannot be undone. Reading a page as of a later time follows the undone
+  publication, the page's own stale warning returns with its older content,
+  and a withdrawn change request leaves `list_requested_changes` and refuses
+  revisions.
+- Preserve restored drafts' mandatory human-review conditions and first-publish
+  metadata across page-first submissions and authenticated autosaves. Restart
+  rejected content only while its surviving head is unchanged, refresh rejection
+  previews when confirming, and compare draft parents independently of the
+  published version's diff limit.
+
+### Lint and editing
+
+- Overlays can pass explicit lint modules to `assemble(lint_modules=...)`.
+  Writers and readers share that container's registry. Workers passed the same
+  `services` use it too; standalone CLI worker processes build their own builtin
+  registry and do not inherit another process's injected modules. Supply modules
+  before the registry is first used; late injection raises `ValueError`.
+  Module injection is typed as `tuple[LintModule, ...]`;
+  `LintPolicy.rule_enabled` requires an explicit `default_enabled` argument.
+- Context lint modules receive the actual caller provenance, including browser
+  reconciliation and MCP revision and maintenance writes.
+- Preserve Markdown hard breaks during formatting and block identities after
+  formatted patches. Whole-body edit retries retain their original receipt.
+- With auto-fix disabled, `write_page`/`update_page` and Context writes preserve
+  authored trailing whitespace. For those writes, NFC/NFD differences, line
+  endings and the final newline do not create a new version on their own.
+  Autosave retains its existing exact-text comparison.
+- Autosave checks the supplied base before preparing content. A stale base takes
+  precedence when both the base and save-time content checks would fail.
+- Keep legacy citation-only updates and patch previews compatible with stored
+  frontmatter, and verify reconciliation independently of current fixer settings.
+
+### Starter workspaces
+
+- The workspace a new account starts with is an ordinary private workspace.
+  It gets the same initial content as any created workspace, and nothing treats
+  it specially afterwards: its owner can be changed like any other owner, it is
+  not a landing fallback, and it is not recreated after deletion. The
+  `users.personal_workspace_id` column is dropped; existing workspaces keep
+  their data and memberships.
+- The REST workspace list and MCP `list_my_workspaces` no longer return
+  `personal_workspace_id`, and workspace members no longer carry
+  `is_personal_anchor_owner`. MCP tool contract revision 16: clients that
+  read `personal_workspace_id` should use `default_workspace_id` or
+  `current_workspace_id` and refresh `tools/list`.
+- Name a new account's workspace `<display name>'s Personal Workspace` with a
+  `personal-<email local part>` slug, numbered on collision. Accounts without a
+  usable local part get a random eight-character hex token.
+- Reserve the `personal-` slug prefix for those workspaces. Workspace creation
+  and slug changes refuse it; a slug generated from a title that would start
+  with it gets a `ws-` prefix instead. All workspace slugs fold accented Latin
+  letters to ASCII.
+
+### Navigation
+
+- Authenticated page permalinks redirect to the page in its current
+  workspace.
+- Refresh menu overview data when returning to a screen, including
+  through browser history or breadcrumbs, while preserving unsaved
+  Settings changes.
+- Dismiss stale tree tooltips after interacting with a row.
 
 ### Search results
 
@@ -725,11 +769,17 @@ MCP workflows. Installation and package metadata now target 0.2.1.
 
 ### Database
 
+- Upgrade the published 0.1.3 database directly to the final 0.1.4 schema in
+  one revision: external login and retained account deletion storage, removal
+  of the personal workspace pointer (its workspaces and memberships stay), and
+  lookup indexes for change operations and review decision history. All
+  `users` changes share one table rebuild, and a refused downgrade changes
+  nothing.
 - Index `change_operation.change_set_id` for Review, explicit change searches,
-  and cascading deletion. Upgrade from the unchanged 0.1.3 revision and retain
-  all existing change-operation rows when adding or removing the index.
-- Freeze the 0.1.3 migration and its helper modules together with the new
-  0.1.4 revision in both source and package artifact checks.
+  and cascading deletion. Retain all existing change-operation rows when
+  adding or removing the index.
+- Freeze the 0.1.3 migration and its helper modules together with the 0.1.4
+  release revision in both source and package artifact checks.
 
 ## 0.1.3 — 2026-10-23
 

@@ -439,9 +439,22 @@ def test_verifier_rejects_an_artifact_whose_graph_violates_release_boundaries(
 
 
 def test_verifier_accepts_a_linear_revision_after_the_released_chain(tmp_path):
-    """C11: the gate no longer forces the next schema change into 0002."""
+    """C11: development artifacts can carry unreleased revisions and helpers."""
 
-    result = _run_verifier(_dist(tmp_path, mutate=_write_stray_revision))
+    def add_unreleased_revision(stage):
+        _write_stray_revision(stage)
+        versions = stage / "backend/migrations/versions"
+        unreleased = versions / "unreleased"
+        unreleased.mkdir(exist_ok=True)
+        (versions / "0003_stray.py").rename(unreleased / "0003_stray.py")
+        helpers = stage / "backend/migrations/revision_modules/unreleased"
+        helpers.mkdir(parents=True, exist_ok=True)
+        (helpers / "__init__.py").touch()
+        (helpers / "new_schema.py").write_text(
+            "def upgrade():\n    pass\n", encoding="utf-8"
+        )
+
+    result = _run_verifier(_dist(tmp_path, mutate=add_unreleased_revision))
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert f"{WHEEL_NAME}: alembic head 0003_stray, " in result.stdout

@@ -478,7 +478,8 @@ def _check_release_schema(
     A patch with no database changes inherits its nearest earlier boundary.
     A future entry must not make an older package with a new migration pass.
     This is an explicit publishing check: development artifacts may qualify
-    their runtime before the owner chooses the next release version.
+    their runtime before the owner chooses the next release version. Release
+    artifacts must contain no unreleased revision or helper files.
     """
 
     try:
@@ -489,7 +490,29 @@ def _check_release_schema(
     return [
         *_check_release_identity(root, artifact, release_version, expected),
         *_check_schema_boundary(root, head, expected),
+        *_check_unreleased_migrations(root),
     ]
+
+
+def _check_unreleased_migrations(root: Path) -> list[str]:
+    """Development revisions and helpers must be promoted before publishing."""
+
+    failures = []
+    for relative in (
+        "backend/migrations/versions/unreleased",
+        "backend/migrations/revision_modules/unreleased",
+    ):
+        directory = root / relative
+        for path in sorted([directory, *directory.rglob("*")]):
+            # Empty directories are harmless archive scaffolding, but even an
+            # empty __init__.py means the unreleased package was not cleared.
+            if path.is_symlink() or (path.exists() and not path.is_dir()):
+                failures.append(
+                    "release artifact contains unreleased migration file: "
+                    f"{path.relative_to(root).as_posix()}; promote or remove it "
+                    "before publishing"
+                )
+    return failures
 
 
 def _check_release_identity(
@@ -971,7 +994,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--release-version",
         help=(
             "require artifact metadata and effective schema boundary to match "
-            "this tag version"
+            "this tag version, with no unreleased migration or helper files"
         ),
     )
     arguments = parser.parse_args(argv)
