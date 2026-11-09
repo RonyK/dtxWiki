@@ -408,16 +408,27 @@ def test_dir_mode_keeps_the_break_glass_hard_fail(tmp_path):
 
 def test_the_self_runner_job_pins_a_node_that_can_strip_types():
     job = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]["frontend"]
-    self_runners = [
+    validation_steps = [
         step
         for step in job["steps"]
-        if "tests/e2e/network_retry.test.mjs" in step.get("run", "")
+        if step.get("run") == "VENV=.venv make check-frontend"
     ]
-    assert self_runners, (
-        "the `frontend` job is the only job that executes the e2e helper "
-        "self-runners: the `backend` job that runs `make test-static` has no "
-        "node, so both tests/static wrappers skip there"
+    assert validation_steps, (
+        "the frontend job must execute the shared validation target with "
+        "frontend dependencies installed so the helper self-runners can run"
     )
+    # Follow the actual Make target instead of pinning the command's location
+    # inside workflow YAML. Dry-run expands recursive targets without running
+    # the suites (this test is itself part of test-static).
+    plan = subprocess.run(
+        ["make", "--dry-run", "check-frontend"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert plan.returncode == 0, plan.stdout + plan.stderr
+    assert "node tests/e2e/network_retry.test.mjs" in plan.stdout
 
     setups = [
         step

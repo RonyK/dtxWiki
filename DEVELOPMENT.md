@@ -251,6 +251,7 @@ make lint                  # ruff(backend, tests, scripts) + frontend ESLint
 make test-backend          # backend pytest (PYTEST_WORKERS 개 프로세스, 기본 4)
 make test-backend-serial   # 같은 backend 스위트를 워커 없이 (parity canary)
 make test-graph-view       # Graph View 확장 검증 (PR CI 밖, 요청 시 실행)
+VENV=.venv make check-frontend # UI 변경 검증: frontend CI와 동일한 통합 검사
 npm --workspace frontend run test -- --run   # frontend unit (vitest)
 make test-packaged         # frontend bundle + wheel 빌드 후 packaged UI/API smoke
 npm --workspace frontend run build           # frontend production build (tsc + vite)
@@ -261,6 +262,14 @@ make export-schemas && make gen-client       # OpenAPI/MCP schema + generated cl
 make check-i18n            # i18n namespace 커버리지 + en/ko parity (= npm run check:i18n)
 npm run lint:md            # markdown lint (markdownlint-cli2)
 ```
+
+UI·공통 컴포넌트·CSS 변경의 검증에는 `VENV=.venv make check-frontend`를 사용합니다.
+이 명령은 생성 schema/client, `tests/static` 전체, TypeScript, ESLint, 번역,
+frontend unit, desktop, E2E helper self-runner를 순서대로 검사하고 실패하면 중단합니다.
+frontend CI도 같은 명령을 실행합니다. UI 구조 검사 일부가 backend CI의
+`tests/static`에 있으므로 Vitest만 통과한 결과를 UI 변경 전체 검증으로 취급하지 않습니다.
+Node는 `.nvmrc`의 `22.18.0`을 사용합니다. Backend 기능 테스트와 실제 브라우저 E2E,
+leak scan은 이 명령에 포함되지 않으며 별도 CI 작업과 검증 결과로 구분합니다.
 
 일반 `CI` 워크플로(`.github/workflows/ci.yml`)는 pull request와 `main` push에서
 leak scan, backend·static, frontend·desktop, 기본 E2E 검증을 실행합니다.

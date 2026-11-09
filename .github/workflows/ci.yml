@@ -65,41 +65,21 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - uses: actions/setup-node@v7
         with:
-          # Pinned, not the floating major. The "Run e2e helper self-runners"
-          # step below imports tests/e2e/*.ts and is only correct on a node
-          # that strips TypeScript types without a flag -- which lands in
-          # 22.18. A bare `22` resolved to whatever the runner had, and this is
-          # the only job in which those 21 behavioural cases execute at all
-          # (the `backend` job that runs `make test-static` has no
-          # node_modules, so both tests/static wrappers skip there).
+          # Pinned, not the floating major. The shared frontend validation
+          # target runs helpers importing tests/e2e/*.ts, which require
+          # unflagged TypeScript type stripping from Node 22.18. This job
+          # installs the frontend dependencies the backend job does not have.
           node-version: "22.18.0"
           cache: npm
       - name: Install Python dependencies
         run: uv sync --locked --extra dev
       - name: Install frontend dependencies
         run: npm ci
-      - name: Verify generated schemas and client
-        run: VENV=.venv make verify-generated-schemas
-      - name: Typecheck frontend
-        run: npm --workspace frontend run typecheck
-      - name: Lint frontend
-        run: npm --workspace frontend run lint
-      - name: Check i18n locale coverage
-        run: npm run check:i18n
-      - name: Run frontend tests
-        run: npm --workspace frontend run test -- --run
-      - name: Run desktop shell tests
-        run: npm run desktop:test
-      - name: Run e2e helper self-runners
-        # These import tests/e2e/*.ts, so they need node >= 22.18 for
-        # unflagged type stripping AND the root node_modules for
-        # @playwright/test. The `backend` job that runs `make test-static` has
-        # no node_modules, so both tests/static wrappers skip there and their
-        # cases would never execute in CI. This job has both.
-        run: |
-          node tests/e2e/network_retry.test.mjs
-          node tests/e2e/redact-network.test.mjs
-          node tests/e2e/page-diagnostics.test.mjs
+      # Include the shared UI/CSS contracts from tests/static in the same gate
+      # developers run locally, alongside schemas, types, lint, unit/desktop
+      # tests and E2E helper self-runners. Browser E2E remains a separate job.
+      - name: Run frontend validation gate
+        run: VENV=.venv make check-frontend
 
   e2e:
     name: E2E (${{ matrix.name }})
