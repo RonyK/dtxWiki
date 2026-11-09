@@ -109,7 +109,7 @@ export function GraphCameraControls({ onZoomIn, onZoomOut, onFit, disabled, canv
       </summary>
       <div className="graph-height-options" role="group" aria-label={t("graph.view.canvasHeight")}>
         <p>{t("graph.view.canvasAspectRatio")}</p>
-        {GRAPH_CANVAS_RATIOS.map((ratio) => <button key={ratio} type="button"
+        {GRAPH_CANVAS_RATIOS.map((ratio) => <button className="graph-height-option" key={ratio} type="button"
           aria-pressed={canvasRatio === ratio} onClick={(event) => {
             onHeightChange(ratio);
             const picker = event.currentTarget.closest("details");
