@@ -70,6 +70,16 @@ const e2eDatabaseUrl = (() => {
   }
   return url;
 })();
+const e2eDataDir = (() => {
+  const root = process.env.DTXWIKI_E2E_DATA_DIR;
+  if (!root) {
+    throw new Error(
+      "DTXWIKI_E2E_DATA_DIR must be set by tests/e2e/run-e2e.mjs. " +
+        "Run `npm run test:e2e`, do not invoke `playwright test` directly.",
+    );
+  }
+  return root;
+})();
 const e2eLibraryBlobRoot = (() => {
   const root = process.env.DTXWIKI_E2E_LIBRARY_BLOB_ROOT;
   if (!root) {
@@ -232,6 +242,7 @@ export default defineConfig({
         DTXWIKI_BACKEND_PORT: String(backendPort),
         DTXWIKI_CORS_ORIGINS: corsOrigins,
         DTXWIKI_DATABASE_URL: e2eDatabaseUrl,
+        DTXWIKI_DATA_DIR: e2eDataDir,
         DTXWIKI_LIBRARY_BLOB_ROOT: e2eLibraryBlobRoot,
         DTXWIKI_SESSION_SECRET: "dtxwiki-e2e-session-secret",
         // Explicit, so the run cannot fall back to mount_spa's default
@@ -259,6 +270,7 @@ export default defineConfig({
         ...inheritedEnv,
         ...identityRecoveryEnv,
         DTXWIKI_DATABASE_URL: e2eDatabaseUrl,
+        DTXWIKI_DATA_DIR: e2eDataDir,
         DTXWIKI_LIBRARY_BLOB_ROOT: e2eLibraryBlobRoot,
         DTXWIKI_SESSION_SECRET: "dtxwiki-e2e-session-secret",
       },

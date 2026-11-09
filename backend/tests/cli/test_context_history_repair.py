@@ -5,9 +5,12 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from typer.testing import CliRunner
 
+from backend.app.data_dir import data_dir
 from backend.app.db import make_engine, make_session_factory
 from backend.cli import main as cli_main
-from backend.models.base import Base
+from backend.context_versions.adapters.git_libgit2 import GitSnapshotStore
+from backend.context_versions.codecs import MarkdownCodec
+from backend.models.base import Base, utc_now
 from backend.models.change import ChangeSet
 from backend.models.context import ContextCitation, ContextPage, ContextPageVersion
 from backend.models.review import ReviewDecision, ReviewItem
@@ -485,13 +488,34 @@ def _version(
     graph_status: str,
     parent_version_id: UUID | None = None,
 ) -> ContextPageVersion:
+    version_id = uuid4()
+    created_at = utc_now()
+    body = f"# Context History Repair\n\nv{version_no}"
+    oid = None
+    if status in {"published_snapshot", "superseded_snapshot"}:
+        # These fixtures model corruption after the Git migration. Provision
+        # actual snapshot objects rather than bypassing required Git storage.
+        store = GitSnapshotStore(data_dir() / "repositories")
+        oid = store.commit(
+            workspace_id=workspace_id,
+            page_id=page_id,
+            version_id=version_id,
+            created_at=created_at,
+            payload=MarkdownCodec().encode(body),
+            parents=[],
+        )
+        if status == "published_snapshot":
+            store.set_head(workspace_id, page_id, oid)
     return ContextPageVersion(
-        id=uuid4(),
+        id=version_id,
+        created_at=created_at,
+        commit_oid=oid,
+        content_byte_size=len(body.encode("utf-8")) if oid else None,
         workspace_id=workspace_id,
         page_id=page_id,
         parent_version_id=parent_version_id,
         version_no=version_no,
-        body_md=f"# Context History Repair\n\nv{version_no}",
+        body_md=body,
         content_hash=str(version_no) * 64,
         graph_status=graph_status,
         actor_type="human",
@@ -542,7 +566,15 @@ def _preserved_history_evidence_snapshot(session_factory, page_id: UUID):
         version_columns = [
             column.name
             for column in ContextPageVersion.__table__.columns
-            if column.name not in {"version_status", "graph_status"}
+            if column.name
+            not in {
+                "version_status",
+                "graph_status",
+                # New storage bookkeeping may be filled when repairing a
+                # corrupt canonical pointer that had named a mutable draft.
+                "commit_oid",
+                "content_byte_size",
+            }
         ]
         return {
             "page_non_pointer_fields": _rows_snapshot(

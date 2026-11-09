@@ -39,6 +39,7 @@ from backend.services.graph_service import (
     RANK_DENOMINATOR_BATCH_SIZE,
     GraphService,
 )
+from backend.tests.utils.migration_paths import configure_test_repositories
 from backend.tests.utils.postgres import drop_reflected_postgres_metadata
 
 pytestmark = pytest.mark.integration
@@ -406,6 +407,7 @@ def test_ranked_projection_sql_runs_on_postgres():
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", database_url)
+    configure_test_repositories(config)
     drop_reflected_postgres_metadata(engine)
     try:
         command.upgrade(config, "head")

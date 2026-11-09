@@ -1082,6 +1082,10 @@ def service_error_response(exc: PageServiceError) -> JSONResponse:
 
 
 def status_code_for_error(exc: PageServiceError) -> int:
+    if exc.error_code in {"context_repository_unavailable", "context_repository_busy"}:
+        return 503
+    if exc.error_code == "context_format_unsupported":
+        return 422
     if isinstance(exc, PageNotFoundError):
         return 404
     if isinstance(exc, PageConflictError):

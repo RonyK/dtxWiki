@@ -1617,6 +1617,20 @@ def test_editing_full_flow_begin_save_submit_publish(page_service):
         )
         assert decision.status_code == 200, decision.text
 
+    # Approval has already published this exact version. A failed earlier
+    # transaction may leave the derived Git ref behind; the replay branch
+    # must still align it before returning its existing audit result.
+    if review_item_id:
+        store = page_service.session_factory.kw["info"]["context_snapshot_store"]
+        with page_service.session_factory() as session:
+            baseline_oid = session.get(
+                ContextPageVersion, UUID(created["version_id"])
+            ).commit_oid
+            selected_oid = session.get(
+                ContextPageVersion, UUID(editing_version_id)
+            ).commit_oid
+        store.set_head(UUID(workspace_id), UUID(page_id), baseline_oid)
+
     published = client.post(
         f"{pages_url(page_service)}/{page_id}/versions/{editing_version_id}/publish",
         json={
@@ -1626,6 +1640,8 @@ def test_editing_full_flow_begin_save_submit_publish(page_service):
         },
     )
     assert published.status_code == 200, published.text
+    if review_item_id:
+        assert store.list_heads(UUID(workspace_id))[UUID(page_id)] == selected_oid
     assert published.json()["data"]["body_md"] == "# Full Flow Target\n\nEdited body."
 
     everyone_now_sees_it = other_client.get(

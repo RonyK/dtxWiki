@@ -122,6 +122,7 @@ def test_worker_registry_roster_is_explicit():
         "context_media_orphan_sweep",
         "credential_replica_reconcile",
         "media_blob_gc",
+        "context_repository_maintenance",
         "context_reconciliation_reminder",
         "email_delivery",
     }
@@ -1195,11 +1196,14 @@ def test_two_phase_failure_marker_errors_do_not_mask_job_failure(monkeypatch):
     assert "unsupported source storage ref" in stored_job.last_error
 
 
-def test_business_success_commits_then_marks_complete():
+def test_business_success_commits_then_marks_complete(tmp_path, monkeypatch):
     """BIZ-H-4: on success, both the business rows and the job "completed"
     status are persisted to the DB. The two-phase dispatcher must commit
     phase 1 (business writes) before opening phase 2 (status update)."""
-    session_factory = make_session_factory()
+    database = tmp_path / "worker-business.db"
+    engine = create_engine(f"sqlite+pysqlite:///{database}")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     queue = JobQueueService()
     worker = OneShotWorker(job_queue=queue)
     library_service = LibraryService(job_queue=queue)
@@ -1233,6 +1237,113 @@ def test_business_success_commits_then_marks_complete():
     # Phase 1 business writes are durable.
     assert artifact is not None
     assert index_text == "happy body"
+
+    # Repository maintenance owns short SQL transactions around filesystem work.
+    # A separate SQLite connection proves pack runs after releasing the writer.
+    import sqlite3
+
+    from backend.app.container import ServiceRegistry
+    from backend.context_versions.adapters.git_libgit2 import GitSnapshotStore
+    from backend.context_versions.application import ContextVersionWriter
+    from backend.context_versions.domain import ContentPayload
+    from backend.models.context import ContextPage, ContextPageVersion
+
+    git = GitSnapshotStore(tmp_path / "repositories")
+    page_id, version_id = uuid4(), uuid4()
+    now = datetime(2026, 11, 9, tzinfo=UTC)
+    oid = git.commit(
+        workspace_id=workspace_id,
+        page_id=page_id,
+        version_id=version_id,
+        created_at=now,
+        payload=ContentPayload(b"durable body"),
+        parents=[],
+    )
+    failed_oid = git.commit(
+        workspace_id=workspace_id,
+        page_id=page_id,
+        version_id=uuid4(),
+        created_at=now,
+        payload=ContentPayload(b"rolled back candidate"),
+        parents=[oid],
+    )
+    git.set_head(workspace_id, page_id, failed_oid)
+    with session_factory.begin() as session:
+        page = ContextPage(
+            id=page_id,
+            workspace_id=workspace_id,
+            slug="maintenance",
+            title="Stored",
+        )
+        session.add(page)
+        session.flush()
+        session.add(
+            ContextPageVersion(
+                id=version_id,
+                workspace_id=workspace_id,
+                page_id=page_id,
+                body_md="durable body",
+                content_hash="hash",
+                actor_type="human",
+                created_by_actor_kind="human",
+                created_by_actor_id="worker-test",
+                version_status="published_snapshot",
+                commit_oid=oid,
+                content_byte_size=len(b"durable body"),
+            )
+        )
+        session.flush()
+        page.current_published_version_id = version_id
+        maintenance_job = queue.enqueue(
+            session=session,
+            workspace_id=workspace_id,
+            job_type="context_repository_maintenance",
+            trigger_type="scheduled",
+            idempotency_key="context-maintenance:business-success",
+            target_ref={},
+        )
+        maintenance_job_id = maintenance_job.id
+    real_pack = git.pack
+    packed = []
+
+    def pack_without_sql_writer(target_workspace_id, roots):
+        with sqlite3.connect(database, timeout=0) as probe:
+            probe.execute("BEGIN IMMEDIATE")
+            probe.rollback()
+        packed.append(target_workspace_id)
+        return real_pack(target_workspace_id, roots)
+
+    monkeypatch.setattr(git, "pack", pack_without_sql_writer)
+    services = ServiceRegistry()
+    services.context_media_session_for = lambda _workspace_id: session_factory
+    services.__dict__["context_storage"] = (
+        git,
+        ContextVersionWriter(reader=git, writer=git),
+    )
+    # Injected sessionmakers need the same storage binding as the default
+    # application factory, otherwise the periodic precheck silently skips Git.
+    from backend.app.context_version_storage import bind_context_storage
+    from backend.worker.periodic import _context_repository_probe
+
+    bind_context_storage(services, session_factory)
+    with session_factory() as probe_session:
+        assert _context_repository_probe(
+            probe_session, workspace_id=workspace_id, now=now
+        )
+
+    maintenance_worker = OneShotWorker(job_queue=queue, services=services)
+    maintained = maintenance_worker.dispatch_once_with_session_factory(
+        session_factory=session_factory,
+        workspace_id=workspace_id,
+        job_types={"context_repository_maintenance"},
+    )
+    assert maintained is not None and maintained.status == "completed"
+    assert packed == [workspace_id]
+    assert git.list_heads(workspace_id) == {page_id: oid}
+    assert git.inspect(workspace_id).pack_count == 1
+    with session_factory() as session:
+        assert session.get(Job, maintenance_job_id).status == "completed"
+        assert session.get(ContextPageVersion, version_id).body_md == "durable body"
 
 
 def test_complete_commit_failure_preserves_business_writes(monkeypatch):

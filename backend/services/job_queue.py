@@ -50,6 +50,7 @@ HIDDEN_JOB_TYPES = frozenset(
         # NOISY_UNTIL_FAILED_JOB_TYPES below and the owner failure email, the
         # same split embed already has.
         "credential_replica_reconcile",
+        "context_repository_maintenance",
     }
 )
 
@@ -87,7 +88,12 @@ ALWAYS_HIDDEN_JOB_TYPES = frozenset({"email_delivery"})
 # reconcile itself dying. Its routine successes stay hidden (see
 # HIDDEN_JOB_TYPES).
 NOISY_UNTIL_FAILED_JOB_TYPES = frozenset(
-    {"embed", "context_reconciliation_reminder", "credential_replica_reconcile"}
+    {
+        "embed",
+        "context_reconciliation_reminder",
+        "credential_replica_reconcile",
+        "context_repository_maintenance",
+    }
 )
 
 # Job types whose failure state is NOT confined to the Job row: on terminal

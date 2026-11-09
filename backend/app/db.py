@@ -63,7 +63,15 @@ def _configure_sqlite_pragmas(engine: Engine) -> None:
 
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:
-    return sessionmaker(bind=engine, expire_on_commit=False, future=True)
+    from backend.app.context_version_storage import build_context_storage
+
+    store, writer = build_context_storage()
+    return sessionmaker(
+        bind=engine,
+        expire_on_commit=False,
+        future=True,
+        info={"context_snapshot_store": store, "context_version_writer": writer},
+    )
 
 
 def make_session_factory_from_settings(settings: Settings) -> Callable[[], Session]:

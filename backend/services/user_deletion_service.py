@@ -67,6 +67,7 @@ from backend.services.credential_hashing import CredentialHasher
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.inbox.recipients import retire_workspace_recipient
 from backend.services.oauth_service import revoke_live_token_grant_families
+from backend.services.workspace_content_storage import WorkspaceContentStorage
 from backend.services.workspace_membership_service import WorkspaceMembershipService
 from backend.services.workspace_write import WorkspaceWriteService
 from backend.utils.content_hash import content_hash
@@ -364,6 +365,7 @@ class UserDeletionService:
     session_factory: object
     credential_hasher: CredentialHasher = field(default_factory=CredentialHasher)
     audit_service: AuditService = field(default_factory=AuditService)
+    workspace_content_storage: WorkspaceContentStorage | None = None
 
     def get_policy(self) -> int:
         with self.session_factory() as session:
@@ -971,6 +973,13 @@ class UserDeletionService:
     def _purge_one(
         self, user_id: UUID, blob_store_provider: object, now: datetime
     ) -> bool:
+        storage = self.workspace_content_storage
+        if storage is None:
+            raise UserDeletionError(
+                "workspace content cleanup is unavailable",
+                error_code="user_deletion_unavailable",
+                status_code=503,
+            )
         intent_key = f"{_BLOB_PENDING_PREFIX}{user_id}"
         # 1. The manifest names the held workspaces to delete. Once it exists
         #    the account can no longer be restored; later sweeps resume from it.
@@ -997,16 +1006,8 @@ class UserDeletionService:
                 )
             else:
                 manifest = _manifest_ids(intent.value)
-            stores = {}
             for workspace_id in manifest:
-                store = blob_store_provider.store_for(workspace_id)
-                if not callable(getattr(store, "purge_workspace", None)):
-                    raise UserDeletionError(
-                        "blob storage cannot reclaim deleted workspace data",
-                        error_code="user_deletion_unavailable",
-                        status_code=503,
-                    )
-                stores[workspace_id] = store
+                storage.prepare(workspace_id)
             if intent is None:
                 session.add(
                     AppMetadata(
@@ -1022,9 +1023,10 @@ class UserDeletionService:
         #    right after its rows commit; a retry repeats that idempotently.
         deleted = []
         for workspace_id in manifest:
-            if self._delete_held_workspace(user_id, workspace_id):
-                stores[workspace_id].purge_workspace(workspace_id)
-                deleted.append(workspace_id)
+            with storage.prepare(workspace_id) as cleanup:
+                if self._delete_held_workspace(user_id, workspace_id):
+                    cleanup.purge()
+                    deleted.append(workspace_id)
             if yield_writer:
                 time.sleep(_SQLITE_WRITER_YIELD_SECONDS)
         # 3. The account's references in the remaining workspaces, then the

@@ -37,6 +37,7 @@ process.env.DTXWIKI_E2E_PROFILE = E2E_PROFILE;
 
 const e2eDir = mkdtempSync(path.join(tmpdir(), "dtxwiki-e2e-"));
 const dbPath = path.join(e2eDir, "dtxwiki-e2e.db");
+const e2eDataDir = path.join(e2eDir, "app-data");
 const dbUrl = `sqlite+pysqlite:///${dbPath.replace(/\\/g, "/")}`;
 const libraryBlobRoot = path.join(e2eDir, "library-blobs");
 const oauthJwtKeyPath = path.join(e2eDir, "oauth-jwt.pem");
@@ -54,6 +55,8 @@ if (!isWindows) {
 }
 
 process.env.DTXWIKI_E2E_DATABASE_PATH = dbPath;
+process.env.DTXWIKI_E2E_DATA_DIR = e2eDataDir;
+process.env.DTXWIKI_DATA_DIR = e2eDataDir;
 process.env.DTXWIKI_E2E_DATABASE_URL = dbUrl;
 process.env.DTXWIKI_E2E_LIBRARY_BLOB_ROOT = libraryBlobRoot;
 process.env.DTXWIKI_OAUTH_JWT_PRIVATE_KEY_PATH = oauthJwtKeyPath;

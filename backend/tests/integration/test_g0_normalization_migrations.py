@@ -10,6 +10,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
+from backend.tests.utils.migration_paths import configure_test_repositories
 
 pytestmark = pytest.mark.integration
 
@@ -26,6 +27,7 @@ def _config(tmp_path, templates):
     database_url = templates.clone("base_0001", tmp_path / "g0.db")
     config = Config("alembic.ini")
     config.set_main_option("sqlalchemy.url", database_url)
+    configure_test_repositories(config)
     return config, database_url
 
 

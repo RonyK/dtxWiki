@@ -7,6 +7,7 @@ from backend.policy.auth import ActorContext
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.services.domain_read import DomainReadService
 from backend.services.page_service import PageService
+from backend.tests.utils.context_git import configure_test_context_storage
 
 UNCLOSED_FENCE_BODY = "# Title\n\n```python\nx = 1\n"
 CLEAN_BODY = "# Title\n\nA clean paragraph.\n"
@@ -25,10 +26,12 @@ def _editor(workspace_id=None):
     )
 
 
-def make_session_factory():
+def make_session_factory(tmp_path):
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine, expire_on_commit=False)
+    return configure_test_context_storage(
+        sessionmaker(bind=engine, expire_on_commit=False), tmp_path / "repositories"
+    )
 
 
 def _write(session_factory, *, slug, body):
@@ -43,10 +46,10 @@ def _write(session_factory, *, slug, body):
     )
 
 
-def test_context_detail_surfaces_format_lint_warnings():
+def test_context_detail_surfaces_format_lint_warnings(tmp_path):
     # E-T3: a format issue (unclosed code fence) shows up as a non-blocking
     # warning on the page detail, which the Context inspector renders.
-    session_factory = make_session_factory()
+    session_factory = make_session_factory(tmp_path)
     read_service = DomainReadService()
     with session_factory.begin() as session:
         seed_default_workspace(session)
@@ -63,10 +66,10 @@ def test_context_detail_surfaces_format_lint_warnings():
         assert any("fence" in w.lower() for w in detail.warnings)
 
 
-def test_inspector_warnings_are_version_aware_and_skippable():
+def test_inspector_warnings_are_version_aware_and_skippable(tmp_path):
     # M1: warnings reflect the EXACT version read (version-aware), and the
     # internal existence-check path can skip the lint work entirely.
-    session_factory = make_session_factory()
+    session_factory = make_session_factory(tmp_path)
     read_service = DomainReadService(
         context_link_origins=frozenset({"https://docs.example"})
     )
@@ -99,8 +102,8 @@ def test_inspector_warnings_are_version_aware_and_skippable():
         assert skipped.warnings == []
 
 
-def test_clean_context_detail_has_no_format_warnings():
-    session_factory = make_session_factory()
+def test_clean_context_detail_has_no_format_warnings(tmp_path):
+    session_factory = make_session_factory(tmp_path)
     read_service = DomainReadService()
     with session_factory.begin() as session:
         seed_default_workspace(session)
@@ -116,8 +119,8 @@ def test_clean_context_detail_has_no_format_warnings():
         assert detail.warnings == []
 
 
-def test_disabling_a_format_rule_suppresses_its_inspector_warning():
-    session_factory = make_session_factory()
+def test_disabling_a_format_rule_suppresses_its_inspector_warning(tmp_path):
+    session_factory = make_session_factory(tmp_path)
     read_service = DomainReadService()
     with session_factory.begin() as session:
         workspace_id = seed_default_workspace(session).id

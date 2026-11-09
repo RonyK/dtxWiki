@@ -28,6 +28,7 @@ from backend.services.ops.alembic_migration_graph import schema_release_head
 from backend.services.workspace_purge import purge_workspace_data
 from backend.services.workspace_write import WorkspaceWriteService
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
+from backend.tests.utils.migration_paths import configure_test_repositories
 
 INITIAL_REVISION = "bd62193d5cf6"
 CORE_REVISION = "efcbcf724889"
@@ -38,6 +39,7 @@ def _config(database_url: str) -> Config:
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", database_url)
+    configure_test_repositories(config)
     return config
 
 

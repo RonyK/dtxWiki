@@ -659,7 +659,9 @@ class ContextWriteService:
         media_installer_factory: Callable[[Session, UUID], object] | None = None,
         body_preparer: BodyPreparer | None = None,
         actor_context: ActorContext | None = None,
+        context_version_writer=None,
     ) -> None:
+        self.context_version_writer = context_version_writer
         self.audit_service = audit_service or AuditService()
         self.actor_context = actor_context
         self.risk_resolver = ReviewRiskResolver()
@@ -3428,6 +3430,11 @@ class ContextWriteService:
                 previous_id = parse_uuid_or_none(
                     audit_event.payload.get("previous_published_version_id")
                 )
+                from backend.services.context_version_storage import align_publication
+
+                align_publication(
+                    session, page, version.commit_oid, self.context_version_writer
+                )
                 return PublishContextPageResult(
                     page_id=page.id,
                     published_version_id=version.id,
@@ -3533,6 +3540,7 @@ class ContextWriteService:
             )
             previous_published_version_id = apply_context_publication(
                 session,
+                context_version_writer=self.context_version_writer,
                 page=page,
                 version=version,
                 require_latest_draft=True,

@@ -15,6 +15,7 @@ from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.models.context import ContextCitation, ContextPage, PageLink
 from backend.schemas.workspace_graph import WorkspaceGraphOverviewRequest
 from backend.services.workspace_graph_service import WorkspaceGraphService
+from backend.tests.utils.migration_paths import configure_test_repositories
 from backend.tests.utils.postgres import drop_reflected_postgres_metadata
 from backend.tests.utils.workspace_graph_capacity import build_capacity_workspace
 from backend.tests.utils.workspace_graph_corpora import (
@@ -235,6 +236,7 @@ def test_postgres_10k_and_100k_capacity_boundaries():
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", database_url)
+    configure_test_repositories(config)
     drop_reflected_postgres_metadata(engine)
     try:
         command.upgrade(config, "head")

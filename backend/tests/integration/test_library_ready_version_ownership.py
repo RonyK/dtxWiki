@@ -16,6 +16,7 @@ from backend.models.base import Base
 from backend.models.library import LibraryItem, LibraryItemVersion
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
+from backend.tests.utils.migration_paths import configure_test_repositories
 
 
 def _seed_owned_ready_version(
@@ -123,6 +124,7 @@ def test_core_schema_migration_installs_and_removes_ready_version_ownership(
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", database_url)
+    configure_test_repositories(config)
 
     engine = make_engine(database_url)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)

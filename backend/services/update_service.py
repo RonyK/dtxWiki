@@ -856,7 +856,10 @@ def _npm_update_instructions(settings, version, echo) -> UpdateResult:
         f"npm launcher detected — the {NPM_PACKAGE} version decides which "
         "dtxWiki runs, so update the launcher instead:"
     )
-    echo("  # 1. stop dtxWiki (server and worker), then back up the data directory:")
+    echo(
+        "  # 1. stop dtxWiki (server and worker), then back up "
+        "DB, Library and repositories:"
+    )
     echo(f"  #    {data_dir_paths.data_dir()}")
     echo("  # 2. start the new version; it migrates the database as it starts:")
     echo(f"  npx {NPM_PACKAGE}@{target}")

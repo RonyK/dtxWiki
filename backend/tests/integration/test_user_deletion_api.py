@@ -38,6 +38,7 @@ from backend.services.library_blob_storage import FilesystemLibraryBlobStore
 from backend.services.server_admin_service import grant_server_admin
 from backend.services.user_admin_service import UserAdminService
 from backend.services.user_deletion_service import UserDeletionService
+from backend.services.workspace_content_storage import WorkspaceContentStorage
 
 
 def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
@@ -671,7 +672,24 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         b"retained personal content", workspace_id=personal_id, max_bytes=1024
     )
     provider = BlobStoreProvider(None, store=store)
-    service = UserDeletionService(factory)
+    from backend.context_versions.adapters.git_libgit2 import GitSnapshotStore
+    from backend.context_versions.domain import ContentPayload
+
+    git = GitSnapshotStore(tmp_path / "repositories")
+    git.commit(
+        workspace_id=personal_id,
+        page_id=uuid4(),
+        version_id=uuid4(),
+        created_at=utc_now(),
+        payload=ContentPayload(b"personal Context history"),
+        parents=[],
+    )
+    service = UserDeletionService(
+        factory,
+        workspace_content_storage=WorkspaceContentStorage(
+            blob_store_provider=provider, repository_purger=git
+        ),
+    )
     assert (
         service.purge_due(
             blob_store_provider=provider, now=deadline - timedelta(seconds=1)
@@ -698,6 +716,7 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
             == "v1"
         )
     assert store.path_for_key(stored.storage_key).exists()
+    assert git.exists(personal_id)
 
     original_purge = store.purge_workspace
 
@@ -706,6 +725,8 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
 
     monkeypatch.setattr(store, "purge_workspace", fail_purge)
     assert service.purge_due(blob_store_provider=provider, now=deadline) == 0
+    # Library failure must not prevent the independent Git cleanup.
+    assert not git.exists(personal_id)
     with factory() as session:
         assert session.get(User, target.user_id) is not None
         assert session.get(Workspace, personal_id) is None

@@ -6,10 +6,9 @@ from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
 
-from sqlalchemy.orm import sessionmaker
-
 from backend.app.bootstrap import run_alembic_upgrade
-from backend.app.db import make_engine
+from backend.app.data_dir import data_dir
+from backend.app.db import make_engine, make_session_factory
 from backend.models.api_token import ApiToken, ApiTokenWorkspace
 from backend.models.oauth import OAuthClient, OAuthConsent, OAuthRefreshToken
 from backend.models.password_reset import PasswordResetToken
@@ -19,8 +18,10 @@ from backend.models.workspace import MCPClient, Workspace, WorkspaceMembership
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.services import server_admin_service
 from backend.services.credential_hashing import CredentialHasher
+from backend.services.ops.runtime_lock import RuntimeLock, acquire_exclusive
 from backend.services.password_recovery_service import password_reset_token_digest
 from backend.services.session_service import SessionService, SessionTokenCodec
+from backend.tests.utils.context_git_snapshots import seed_offline_context_snapshots
 from backend.tests.utils.workspace_graph_capacity import build_capacity_workspace
 from backend.tests.utils.workspace_graph_corpora import (
     WorkspaceGraphCorpusBuilder,
@@ -33,15 +34,20 @@ from backend.tests.utils.workspace_graph_synthetic import SYNTHETIC_GENERATOR_VE
 
 _DATABASE_PATH = os.environ.get("DTXWIKI_E2E_DATABASE_PATH")
 _DATABASE_URL = os.environ.get("DTXWIKI_E2E_DATABASE_URL")
-if not _DATABASE_PATH or not _DATABASE_URL:
+_DATA_DIR = os.environ.get("DTXWIKI_E2E_DATA_DIR")
+if not _DATABASE_PATH or not _DATABASE_URL or not _DATA_DIR:
     raise RuntimeError(
-        "Both DTXWIKI_E2E_DATABASE_PATH and DTXWIKI_E2E_DATABASE_URL must be "
+        "DTXWIKI_E2E_DATABASE_PATH, DTXWIKI_E2E_DATABASE_URL and "
+        "DTXWIKI_E2E_DATA_DIR must be "
         "set by tests/e2e/run-e2e.mjs. Do not invoke this script directly; "
         "use `npm run test:e2e`."
     )
 
 DATABASE_PATH = Path(_DATABASE_PATH)
 DATABASE_URL = _DATABASE_URL
+DATA_DIR = Path(_DATA_DIR).resolve()
+if data_dir().resolve() != DATA_DIR:
+    raise RuntimeError("E2E runtime and seeder must share the wrapper's data directory")
 E2E_PASSWORD = "correct-password"
 E2E_GRAPH_OWNER_EMAIL = "e2e-graph-owner@example.com"
 E2E_GRAPH_2K_OWNER_EMAIL = "e2e-graph-2k-owner@example.com"
@@ -65,10 +71,18 @@ E2E_PROJECT_KEYS = (
 
 
 def main() -> None:
+    with acquire_exclusive(DATA_DIR) as offline_guard:
+        _seed_database(offline_guard)
+
+
+def _seed_database(offline_guard: RuntimeLock) -> None:
     DATABASE_PATH.unlink(missing_ok=True)
-    run_alembic_upgrade(DATABASE_URL)
+    run_alembic_upgrade(
+        DATABASE_URL,
+        repositories_root=DATA_DIR / "repositories",
+    )
     engine = make_engine(DATABASE_URL)
-    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    session_factory = make_session_factory(engine)
     with session_factory.begin() as session:
         seed_default_workspace(session)
     _seed_identity_recovery_accounts(session_factory)
@@ -101,6 +115,12 @@ def main() -> None:
         )
     if os.environ.get("DTXWIKI_E2E_GRAPH_10K_AGGREGATED") == "1":
         _seed_workspace_graph_10k_owner_corpus(session_factory, aggregated=True)
+    seed_offline_context_snapshots(
+        session_factory,
+        repositories_root=DATA_DIR / "repositories",
+        offline_guard=offline_guard,
+    )
+    engine.dispose()
 
 
 def _seed_identity_recovery_accounts(session_factory) -> None:

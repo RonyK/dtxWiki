@@ -710,52 +710,56 @@ async function seedKnowledge40(python, databasePath) {
   const databaseUrl = `sqlite+pysqlite:///${databasePath.replaceAll("\\", "/")}`;
   const script = `
 from sqlalchemy import select
-from sqlalchemy.orm import sessionmaker
 from backend.app.bootstrap import run_alembic_upgrade
-from backend.app.db import make_engine
+from backend.app.data_dir import data_dir
+from backend.app.db import make_engine, make_session_factory
 from backend.models.context import ContextPageVersion
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
 from backend.services.credential_hashing import CredentialHasher
+from backend.services.ops.runtime_lock import acquire_exclusive
+from backend.tests.utils.context_git_snapshots import seed_offline_context_snapshots
 from backend.tests.utils.workspace_graph_corpora import build_knowledge_40, fixture_time, fixture_uuid
 from backend.utils.content_hash import content_hash as calculate_content_hash
 
-database_url = ${JSON.stringify(databaseUrl)}
-run_alembic_upgrade(database_url)
-engine = make_engine(database_url)
-factory = sessionmaker(bind=engine, expire_on_commit=False)
-with factory.begin() as session:
-    corpus = build_knowledge_40(session)
-    for version in session.scalars(
-        select(ContextPageVersion).where(
-            ContextPageVersion.workspace_id == corpus.workspace_id
+with acquire_exclusive(data_dir()) as offline_guard:
+    database_url = ${JSON.stringify(databaseUrl)}
+    run_alembic_upgrade(database_url, repositories_root=data_dir() / "repositories")
+    engine = make_engine(database_url)
+    factory = make_session_factory(engine)
+    with factory.begin() as session:
+        corpus = build_knowledge_40(session)
+        for version in session.scalars(
+            select(ContextPageVersion).where(
+                ContextPageVersion.workspace_id == corpus.workspace_id
+            )
+        ):
+            version.content_hash = calculate_content_hash(version.body_md)
+        owner_id = fixture_uuid("knowledge-40", "owner")
+        owner = User(
+            id=owner_id,
+            email=${JSON.stringify(KNOWLEDGE_40_EMAIL)},
+            email_verified_at=fixture_time(),
+            password_hash=CredentialHasher().hash_password(${JSON.stringify(KNOWLEDGE_40_PASSWORD)}),
+            display_name="Graph render benchmark owner",
+            status="active",
+            default_workspace_id=corpus.workspace_id,
+            created_at=fixture_time(),
+            updated_at=fixture_time(),
         )
-    ):
-        version.content_hash = calculate_content_hash(version.body_md)
-    owner_id = fixture_uuid("knowledge-40", "owner")
-    owner = User(
-        id=owner_id,
-        email=${JSON.stringify(KNOWLEDGE_40_EMAIL)},
-        email_verified_at=fixture_time(),
-        password_hash=CredentialHasher().hash_password(${JSON.stringify(KNOWLEDGE_40_PASSWORD)}),
-        display_name="Graph render benchmark owner",
-        status="active",
-        default_workspace_id=corpus.workspace_id,
-        created_at=fixture_time(),
-        updated_at=fixture_time(),
-    )
-    session.add(owner)
-    session.flush()
-    workspace = session.get(Workspace, corpus.workspace_id)
-    workspace.owner_actor_id = owner_id
-    workspace.owner_user_id = owner_id
-    session.add(WorkspaceMembership(
-        user_id=owner_id,
-        workspace_id=corpus.workspace_id,
-        role="owner",
-        joined_at=fixture_time(),
-    ))
-engine.dispose()
+        session.add(owner)
+        session.flush()
+        workspace = session.get(Workspace, corpus.workspace_id)
+        workspace.owner_actor_id = owner_id
+        workspace.owner_user_id = owner_id
+        session.add(WorkspaceMembership(
+            user_id=owner_id,
+            workspace_id=corpus.workspace_id,
+            role="owner",
+            joined_at=fixture_time(),
+        ))
+    seed_offline_context_snapshots(factory, repositories_root=data_dir() / "repositories", offline_guard=offline_guard)
+    engine.dispose()
 `;
   await runChecked(python, ["-c", script], {
     cwd: REPOSITORY_ROOT,

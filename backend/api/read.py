@@ -1,6 +1,7 @@
 import json
 import logging
 import sqlite3
+from contextlib import ExitStack
 from dataclasses import replace
 from typing import Annotated, Literal
 from urllib.parse import quote
@@ -44,7 +45,6 @@ from backend.api.middleware.request_body_limit import BodyLimit, request_body_li
 from backend.api.middleware.security_headers import (
     CSP_SANDBOXED_DOCUMENT_STATE_KEY,
 )
-from backend.app.container import PurgeableBlobStore
 from backend.app.errors import build_rest_error_response
 from backend.app.settings import Settings
 from backend.app.state import get_container_from_app
@@ -258,6 +258,7 @@ from backend.services.settings_service import (
     settings_policy_revision,
 )
 from backend.services.tree_service import require_tree_node, resolve_tree_parent
+from backend.services.workspace_content_storage import WorkspaceContentStorageError
 from backend.services.workspace_purge_grant import (
     consume_purge_grant,
     issue_purge_grant,
@@ -610,136 +611,122 @@ def delete_workspace(
             message="workspace purge grant is missing, invalid, or expired",
             status_code=403,
         )
-    # 260912 review, F-1: resolved and capability-checked BEFORE anything is
-    # deleted. `store_for` used to be called only after the delete
-    # transaction had already committed, so a backend store that does not
-    # implement `purge_workspace` (duck-typed, no Protocol) raised
-    # AttributeError into the broad `except Exception` below -- by which
-    # point the workspace row and its content rows were already gone. That
-    # made an unsupported store a silent, permanent byte leak instead of a
-    # rejected request. Only relevant when purge_contents is requested at
-    # all: an unqualified delete never calls purge_workspace.
-    store = None
+    # Both storage capabilities and the repository guard precede SQL deletion.
+    # Keep the guard through commit and both byte cleanup calls.
+    cleanup = None
+    cleanup_stack = ExitStack()
     if purge_contents:
-        # `.get_services().blob_store_provider`, not `.blob_store_provider`
-        # directly: the latter does not exist on `AppContainer` at all (the
-        # cached_property lives on `ServiceRegistry`, see
-        # `backend/api/context_media.py`'s content-read route for the
-        # correct shape). Before this fix that typo meant `store_for` was
-        # never reached for ANY workspace purge -- the AttributeError was
-        # swallowed by the broad `except Exception` below, so blob cleanup
-        # silently no-op'd on every purge this codebase has ever run.
         container = get_container_from_app(request)
-        store = container.get_services().blob_store_provider.store_for(workspace_id)
-        if not isinstance(store, PurgeableBlobStore):
+        try:
+            cleanup = cleanup_stack.enter_context(
+                container.get_services().workspace_content_storage.prepare(workspace_id)
+            )
+        except WorkspaceContentStorageError as exc:
+            cleanup_stack.close()
             return build_rest_error_response(
-                error_code="purge_unavailable",
-                message=(
-                    "This deployment's storage backend does not support "
-                    "workspace purge."
-                ),
-                status_code=503,
+                error_code=exc.error_code, message=str(exc), status_code=exc.status_code
             )
-    try:
-        with session_factory.begin() as session:
-            if purge_contents:
-                # Take the media-intent -> workspace -> user -> membership
-                # locks before touching the grant row. Besides closing the
-                # earlier dependency-check race, this matches media writes and
-                # membership changes without introducing a lock cycle.
-                svc.workspace_write.require_delete_authorization(
-                    session=session,
-                    workspace_id=workspace_id,
-                    actor=actor,
-                )
-                # S-4: one conditional DELETE, in the SAME transaction as the
-                # purge it gates, before purge_workspace_data runs -- doing
-                # this after would find its own grant row already destroyed
-                # by the purge and 403 every valid request (T-4/T-9). A
-                # rollback of this transaction (T-8) undoes the DELETE along
-                # with everything else, so a failed purge leaves the grant
-                # usable for a retry.
-                if not consume_purge_grant(
-                    session,
-                    user_id=actor.user_id,
-                    workspace_id=workspace_id,
-                    token=x_purge_grant,
-                ):
-                    raise RejectedByPolicyError(
-                        "workspace purge grant is missing, invalid, or expired",
-                        error_code="purge_grant_required",
-                    )
-                # S-2: the service re-checks this scope itself; it is not
-                # persisted anywhere and exists only for this one call.
-                actor = replace(actor, scopes=actor.scopes + ("workspace-purge",))
-            deleted = svc.workspace_write.delete_workspace(
-                session=session,
-                workspace_id=workspace_id,
-                actor=actor,
-                purge_contents=purge_contents,
-            )
-    except ReadServiceError as exc:
-        return read_service_error_response(exc)
-    except WorkspaceDeleteRejectedError as exc:
-        extra = (
-            {
-                "blockers": [
-                    {"code": code, "count": count}
-                    for code, count in sorted(exc.blockers.items())
-                ]
-            }
-            if exc.blockers
-            else None
-        )
-        if exc.blockers:
-            # S-3: minted in a SEPARATE, freshly-committed transaction. The
-            # transaction above already rolled back (it raised from inside
-            # `session_factory.begin()`), so a grant written there would
-            # never have survived to be returned. Only for a
-            # purge-recoverable refusal (non-empty blockers). Policy denials
-            # never reach this branch, and no grant can fix those.
-            try:
-                with session_factory.begin() as grant_session:
-                    # The refusal transaction has rolled back.  Re-lock and
-                    # re-check both the workspace and the live owner before
-                    # inserting its FK child: another owner may have deleted
-                    # the workspace (or changed this actor's role) in between.
+    with cleanup_stack:
+        try:
+            with session_factory.begin() as session:
+                if purge_contents:
+                    # Take the media-intent -> workspace -> user -> membership
+                    # locks before touching the grant row. Besides closing the
+                    # earlier dependency-check race, this matches media writes and
+                    # membership changes without introducing a lock cycle.
                     svc.workspace_write.require_delete_authorization(
-                        session=grant_session,
+                        session=session,
                         workspace_id=workspace_id,
                         actor=actor,
                     )
-                    purge_grant, purge_grant_expires_at = issue_purge_grant(
-                        grant_session,
+                    # S-4: one conditional DELETE, in the SAME transaction as the
+                    # purge it gates, before purge_workspace_data runs -- doing
+                    # this after would find its own grant row already destroyed
+                    # by the purge and 403 every valid request (T-4/T-9). A
+                    # rollback of this transaction (T-8) undoes the DELETE along
+                    # with everything else, so a failed purge leaves the grant
+                    # usable for a retry.
+                    if not consume_purge_grant(
+                        session,
                         user_id=actor.user_id,
                         workspace_id=workspace_id,
-                    )
-            except ReadServiceError as grant_exc:
-                return read_service_error_response(grant_exc)
-            extra["purge_grant"] = purge_grant
-            extra["purge_grant_expires_at"] = purge_grant_expires_at
-        return build_rest_error_response(
-            error_code=exc.error_code,
-            message=str(exc) or exc.error_code,
-            status_code=409,
-            extra=extra,
-        )
-    # Only after the transaction above has committed. The database is the
-    # record of what exists, so bytes must not disappear while a rollback could
-    # still restore the rows that referenced them. Orphaned bytes are wasted
-    # disk, not a correctness failure, so a purge failure is logged rather than
-    # turned into an error for a deletion the owner already confirmed and that
-    # has, at this point, already happened. `store` was already resolved and
-    # capability-checked above; only the call itself is still guarded here.
-    if purge_contents:
-        try:
-            store.purge_workspace(workspace_id)
-        except Exception:  # pragma: no cover - defensive, see comment above
-            logger.exception(
-                "workspace blob purge failed after deletion committed",
-                extra={"workspace_id": str(workspace_id)},
+                        token=x_purge_grant,
+                    ):
+                        raise RejectedByPolicyError(
+                            "workspace purge grant is missing, invalid, or expired",
+                            error_code="purge_grant_required",
+                        )
+                    # S-2: the service re-checks this scope itself; it is not
+                    # persisted anywhere and exists only for this one call.
+                    actor = replace(actor, scopes=actor.scopes + ("workspace-purge",))
+                deleted = svc.workspace_write.delete_workspace(
+                    session=session,
+                    workspace_id=workspace_id,
+                    actor=actor,
+                    purge_contents=purge_contents,
+                )
+        except ReadServiceError as exc:
+            return read_service_error_response(exc)
+        except WorkspaceDeleteRejectedError as exc:
+            extra = (
+                {
+                    "blockers": [
+                        {"code": code, "count": count}
+                        for code, count in sorted(exc.blockers.items())
+                    ]
+                }
+                if exc.blockers
+                else None
             )
-    return {"data": {"deleted_workspace_id": deleted}}
+            if exc.blockers:
+                # S-3: minted in a SEPARATE, freshly-committed transaction. The
+                # transaction above already rolled back (it raised from inside
+                # `session_factory.begin()`), so a grant written there would
+                # never have survived to be returned. Only for a
+                # purge-recoverable refusal (non-empty blockers). Policy denials
+                # never reach this branch, and no grant can fix those.
+                try:
+                    with session_factory.begin() as grant_session:
+                        # The refusal transaction has rolled back.  Re-lock and
+                        # re-check both the workspace and the live owner before
+                        # inserting its FK child: another owner may have deleted
+                        # the workspace (or changed this actor's role) in between.
+                        svc.workspace_write.require_delete_authorization(
+                            session=grant_session,
+                            workspace_id=workspace_id,
+                            actor=actor,
+                        )
+                        purge_grant, purge_grant_expires_at = issue_purge_grant(
+                            grant_session,
+                            user_id=actor.user_id,
+                            workspace_id=workspace_id,
+                        )
+                except ReadServiceError as grant_exc:
+                    return read_service_error_response(grant_exc)
+                extra["purge_grant"] = purge_grant
+                extra["purge_grant_expires_at"] = purge_grant_expires_at
+            return build_rest_error_response(
+                error_code=exc.error_code,
+                message=str(exc) or exc.error_code,
+                status_code=409,
+                extra=extra,
+            )
+        # Only after the transaction above has committed. The database is the
+        # record of what exists, so bytes must not disappear while a rollback could
+        # still restore the rows that referenced them. Orphaned bytes are wasted
+        # disk, not a correctness failure, so a purge failure is logged rather than
+        # turned into an error for a deletion the owner already confirmed and that
+        # has, at this point, already happened. Both stores were capability-checked
+        # before deletion and the Git management guard is still held here.
+        if purge_contents:
+            try:
+                cleanup.purge()
+            except Exception:  # pragma: no cover - defensive, see comment above
+                logger.exception(
+                    "workspace content purge failed after deletion committed",
+                    extra={"workspace_id": str(workspace_id)},
+                )
+        return {"data": {"deleted_workspace_id": deleted}}
 
 
 @router.get(
@@ -3474,7 +3461,9 @@ def discard_reconciliations_bulk(
 
 def _review_selection_error_response(exc: ReviewSelectionError) -> JSONResponse:
     response = build_rest_error_response(
-        error_code=exc.error_code, message=str(exc), status_code=exc.status_code,
+        error_code=exc.error_code,
+        message=str(exc),
+        status_code=exc.status_code,
     )
     payload = json.loads(response.body)
     if exc.status_code == 409:
@@ -3484,7 +3473,9 @@ def _review_selection_error_response(exc: ReviewSelectionError) -> JSONResponse:
         payload["details"] = {"total": exc.total, "limit": exc.limit}
         return JSONResponse(
             status_code=exc.status_code,
-            content=ReviewSelectionLimitErrorBody.model_validate(payload).model_dump(mode="json"),
+            content=ReviewSelectionLimitErrorBody.model_validate(payload).model_dump(
+                mode="json"
+            ),
         )
     return response
 
@@ -3512,10 +3503,15 @@ def create_review_selection(
     )
     try:
         with session_factory() as session:
-            return {"data": selection.create(
-                session, workspace_id, request_body,
-                actor=actor, actor_role=access.role,
-            )}
+            return {
+                "data": selection.create(
+                    session,
+                    workspace_id,
+                    request_body,
+                    actor=actor,
+                    actor_role=access.role,
+                )
+            }
     except ReviewSelectionError as exc:
         return _review_selection_error_response(exc)
     except ReadServiceError as exc:
@@ -3545,11 +3541,17 @@ def decide_reviews_bulk(
             get_container_from_app(http_request).settings.effective_session_secret,
         )
         try:
-            return {"data": selection.execute(
-                session_factory, workspace_id, request_body.selection_token,
-                actor=actor, actor_role=access.role,
-                batch_limit=request_body.batch_limit, dry_run=request_body.dry_run,
-            )}
+            return {
+                "data": selection.execute(
+                    session_factory,
+                    workspace_id,
+                    request_body.selection_token,
+                    actor=actor,
+                    actor_role=access.role,
+                    batch_limit=request_body.batch_limit,
+                    dry_run=request_body.dry_run,
+                )
+            }
         except ReviewSelectionError as exc:
             return _review_selection_error_response(exc)
         except ReadServiceError as exc:
@@ -3563,12 +3565,16 @@ def decide_reviews_bulk(
                 if filters is not None and filters.target_page_id is not None:
                     selection = ReviewSelectionService(
                         svc.review,
-                        get_container_from_app(http_request).settings.effective_session_secret,
+                        get_container_from_app(
+                            http_request
+                        ).settings.effective_session_secret,
                     )
                     target_ids = selection.target_ids(
-                        session, workspace_id,
+                        session,
+                        workspace_id,
                         ReviewSelectionRequest(filters=filters),
-                        actor, access.role,
+                        actor,
+                        access.role,
                     )
                 else:
                     target_ids = svc.review.bulk_review_ids(
@@ -3609,8 +3615,11 @@ def decide_reviews_bulk(
                 seen.add(review_item_id)
                 try:
                     preflight = svc.review.approval_preflight(
-                        session, workspace_id, review_item_id,
-                        actor=actor, actor_role=access.role,
+                        session,
+                        workspace_id,
+                        review_item_id,
+                        actor=actor,
+                        actor_role=access.role,
                     )
                     if preflight.eligible:
                         approved.append(review_item_id)
@@ -3632,11 +3641,15 @@ def decide_reviews_bulk(
                             "reason": str(exc) or getattr(exc, "error_code", "skipped"),
                         }
                     )
-        return {"data": {
-            "approved": approved, "skipped": skipped,
-            "auto_settled_review_item_ids": sorted(auto_settled, key=str),
-            "processed_count": len(seen), "total": len(seen),
-        }}
+        return {
+            "data": {
+                "approved": approved,
+                "skipped": skipped,
+                "auto_settled_review_item_ids": sorted(auto_settled, key=str),
+                "processed_count": len(seen),
+                "total": len(seen),
+            }
+        }
 
     for review_item_id in target_ids:
         if review_item_id in seen:
@@ -3650,23 +3663,32 @@ def decide_reviews_bulk(
             with session_factory.begin() as session:
                 acquire_workspace_write_intent(session)
                 preflight = svc.review.approval_preflight(
-                    session, workspace_id, review_item_id,
-                    actor=actor, actor_role=access.role, lock=True,
+                    session,
+                    workspace_id,
+                    review_item_id,
+                    actor=actor,
+                    actor_role=access.role,
+                    lock=True,
                     publication_checks=False,
                 )
                 if not preflight.eligible:
-                    skipped.append({
-                        "id": review_item_id,
-                        "reason": preflight.reason or "not eligible for approval",
-                        "reason_code": preflight.reason_code,
-                    })
-                    outcomes.append({
-                        "id": review_item_id, "outcome": "excluded",
-                        "reason": preflight.reason,
-                        "reason_code": preflight.reason_code,
-                        "target_title": preflight.target_title,
-                        "target_version_no": preflight.target_version_no,
-                    })
+                    skipped.append(
+                        {
+                            "id": review_item_id,
+                            "reason": preflight.reason or "not eligible for approval",
+                            "reason_code": preflight.reason_code,
+                        }
+                    )
+                    outcomes.append(
+                        {
+                            "id": review_item_id,
+                            "outcome": "excluded",
+                            "reason": preflight.reason,
+                            "reason_code": preflight.reason_code,
+                            "target_title": preflight.target_title,
+                            "target_version_no": preflight.target_version_no,
+                        }
+                    )
                     continue
                 svc.review.apply_decision(
                     session=session,
@@ -3681,21 +3703,27 @@ def decide_reviews_bulk(
                     actor=actor,
                 )
             approved.append(review_item_id)
-            outcomes.append({
-                "id": review_item_id, "outcome": "approved",
-                "target_title": preflight.target_title,
-                "target_version_no": preflight.target_version_no,
-            })
+            outcomes.append(
+                {
+                    "id": review_item_id,
+                    "outcome": "approved",
+                    "target_title": preflight.target_title,
+                    "target_version_no": preflight.target_version_no,
+                }
+            )
             internal_settled.update(preflight.superseded_review_ids)
             for sibling_id in preflight.visible_superseded_review_ids:
                 if sibling_id not in auto_settled:
                     auto_settled.add(sibling_id)
-                    outcomes.append({
-                        "id": sibling_id, "outcome": "auto_settled",
-                        "reason_code": "superseded_by_approved_publish",
-                        "target_title": preflight.target_title,
-                        "target_version_no": preflight.target_version_no,
-                    })
+                    outcomes.append(
+                        {
+                            "id": sibling_id,
+                            "outcome": "auto_settled",
+                            "reason_code": "superseded_by_approved_publish",
+                            "target_title": preflight.target_title,
+                            "target_version_no": preflight.target_version_no,
+                        }
+                    )
         except ReadServiceError as exc:
             skipped.append(
                 {
@@ -3704,17 +3732,24 @@ def decide_reviews_bulk(
                     "reason_code": exc.error_code,
                 }
             )
-            outcomes.append({
-                "id": review_item_id, "outcome": "failed",
-                "reason": str(exc) or exc.error_code, "reason_code": exc.error_code,
-            })
-    return {"data": {
-        "approved": approved,
-        "skipped": [item for item in skipped if item["id"] not in auto_settled],
-        "outcomes": list({item["id"]: item for item in outcomes}.values()),
-        "auto_settled_review_item_ids": sorted(auto_settled, key=str),
-        "processed_count": len(seen), "total": len(seen),
-    }}
+            outcomes.append(
+                {
+                    "id": review_item_id,
+                    "outcome": "failed",
+                    "reason": str(exc) or exc.error_code,
+                    "reason_code": exc.error_code,
+                }
+            )
+    return {
+        "data": {
+            "approved": approved,
+            "skipped": [item for item in skipped if item["id"] not in auto_settled],
+            "outcomes": list({item["id"]: item for item in outcomes}.values()),
+            "auto_settled_review_item_ids": sorted(auto_settled, key=str),
+            "processed_count": len(seen),
+            "total": len(seen),
+        }
+    }
 
 
 @router.get(

@@ -259,7 +259,9 @@ class ReviewService:
         | None = None,
         body_preparer: BodyPreparer | None = None,
         decision_listeners: Iterable[ReviewDecisionListener] = (),
+        context_version_writer=None,
     ) -> None:
+        self.context_version_writer = context_version_writer
         self.audit_service = audit_service or AuditService()
         self.body_preparer = (
             body_preparer if body_preparer is not None else BodyPreparer()
@@ -2769,6 +2771,7 @@ class ReviewService:
                     self_origins=self.body_preparer.self_origins,
                 )
                 ContextWriteService(
+                    context_version_writer=self.context_version_writer,
                     audit_service=self.audit_service,
                     body_preparer=self.body_preparer,
                     context_media_repository_factory=(
@@ -2871,6 +2874,7 @@ class ReviewService:
                 provenance=actor_provenance,
             )
             published = ContextWriteService(
+                context_version_writer=self.context_version_writer,
                 audit_service=self.audit_service,
                 body_preparer=self.body_preparer,
                 actor_context=publication_actor,

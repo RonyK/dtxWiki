@@ -3,6 +3,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     CheckConstraint,
     Float,
@@ -268,6 +269,20 @@ class ContextPageVersion(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     )
     version_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     body_md: Mapped[str] = mapped_column(Text, nullable=False)
+    commit_oid: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_format: Mapped[str] = mapped_column(
+        Text, nullable=False, default="markdown", server_default="markdown"
+    )
+    format_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    media_type: Mapped[str] = mapped_column(
+        Text, nullable=False, default="text/markdown", server_default="text/markdown"
+    )
+    encoding: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default="utf-8", server_default="utf-8"
+    )
+    content_byte_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     rendering_profile: Mapped[str] = mapped_column(
         Text,
         nullable=False,

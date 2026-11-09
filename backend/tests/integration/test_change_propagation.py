@@ -21,6 +21,7 @@ from backend.services.change_propagation import (
 )
 from backend.services.context_write_service import ContextWriteService
 from backend.services.lint_service import LintService
+from backend.tests.utils.context_git import seed_published_snapshot
 from backend.tests.utils.prepared_body import prepare_context_body
 
 
@@ -49,6 +50,7 @@ def _page(session, workspace_id, slug):
     session.flush()
     page.current_version_id = version.id
     page.current_published_version_id = version.id
+    seed_published_snapshot(session, version)
     return page, version
 
 

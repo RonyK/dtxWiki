@@ -66,7 +66,20 @@ class PeriodicJob:
     enqueue: Callable[..., Job] | None = None
 
 
+def _context_repository_probe(
+    session: Session, *, workspace_id: UUID, now: datetime
+) -> bool:
+    del now
+    store = session.info.get("context_snapshot_store")
+    return store is not None and store.exists(workspace_id)
+
+
 PERIODIC_JOBS = (
+    PeriodicJob(
+        "context_repository_maintenance",
+        lambda settings, policy: 24,
+        session_probe=_context_repository_probe,
+    ),
     PeriodicJob(
         "bundle_expiration_sweep",
         session_probe=BundleExpirationService.has_due_work,

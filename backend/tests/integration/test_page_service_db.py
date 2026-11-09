@@ -34,12 +34,15 @@ from backend.services.page_service import (
 )
 from backend.services.search_service import SearchService
 from backend.services.tree_service import TreeService
+from backend.tests.utils.context_git import configure_test_context_storage
 
 
 def make_service(change_audit_recorder=None) -> PageService:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
-    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    session_factory = configure_test_context_storage(
+        sessionmaker(bind=engine, expire_on_commit=False)
+    )
     with session_factory.begin() as session:
         seed_default_workspace(session)
     return PageService(

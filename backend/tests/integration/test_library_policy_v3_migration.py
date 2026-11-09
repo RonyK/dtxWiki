@@ -13,6 +13,7 @@ from sqlalchemy import create_engine
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.services.library_formats import DEFAULT_FORMATS
+from backend.tests.utils.migration_paths import configure_test_repositories
 
 epic1 = import_module("backend.migrations.versions.v0_1.efcbcf724889_core_schema")
 workspace_phase = import_module(
@@ -250,6 +251,7 @@ def test_alembic_upgrade_sanitizes_an_existing_v3_workspace_row(tmp_path):
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", database_url)
+    configure_test_repositories(config)
     command.upgrade(config, "bd62193d5cf6")
 
     engine = create_engine(database_url)

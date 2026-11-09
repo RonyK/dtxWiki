@@ -30,6 +30,7 @@ from backend.services.indexing.edge_registry import refresh_co_access_edge_proje
 from backend.services.mcp_chat_service import McpChatService
 from backend.services.trail_analysis import recompute_authority
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
+from backend.tests.utils.migration_paths import configure_test_repositories
 
 NOW = datetime(2026, 9, 12, 3, 0, tzinfo=UTC)
 
@@ -44,6 +45,7 @@ def _seed_initial_release_search_matches(tmp_path: Path, sqlite_templates):
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", database_url)
+    configure_test_repositories(config)
     engine = create_engine(database_url)
     workspace_id = uuid4()
     client_id = uuid4()

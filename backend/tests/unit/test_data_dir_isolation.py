@@ -56,7 +56,9 @@ def test_writing_through_the_resolved_data_dir_cannot_touch_the_real_tree():
     passing assertion into an error.
     """
 
-    target = Path(tempfile.mkdtemp(dir=data_dir(), prefix="isolation-probe-"))
+    root = data_dir()
+    root.mkdir(parents=True, exist_ok=True)
+    target = Path(tempfile.mkdtemp(dir=root, prefix="isolation-probe-"))
     try:
         assert not is_inside_real_data_dir(target.resolve())
     finally:

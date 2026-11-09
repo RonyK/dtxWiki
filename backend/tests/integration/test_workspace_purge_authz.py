@@ -12,7 +12,7 @@ HTTP/auth stack") those service-level tests structurally cannot cover.
 from __future__ import annotations
 
 from datetime import timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -253,9 +253,7 @@ def test_refusal_revalidates_authorization_before_issuing_a_grant(
     assert response.json()["error_code"] == "workspace_role_insufficient"
     assert authorization_calls == 2
     with page_service.session_factory() as session:
-        assert (
-            session.get(WorkspacePurgeGrant, (owner_id, UUID(workspace_id))) is None
-        )
+        assert session.get(WorkspacePurgeGrant, (owner_id, UUID(workspace_id))) is None
 
 
 def test_purge_without_a_grant_is_refused_and_touches_no_grant_row(page_service):
@@ -441,7 +439,7 @@ def test_a_purge_failure_rolls_back_grant_consumption_so_a_retry_can_succeed(
 
 
 def test_purge_workspace_data_runs_only_after_the_grant_row_is_gone(
-    page_service, monkeypatch
+    page_service, monkeypatch, tmp_path
 ):
     """T-4 + T-9: the only end-to-end verification of the purge path through
     the real HTTP/auth stack, and the ORDER T-8 cannot pin -- the grant's
@@ -459,6 +457,41 @@ def test_purge_workspace_data_runs_only_after_the_grant_row_is_gone(
     owner_id = _user_id(page_service, "purge-t9@example.com")
     workspace_id = _workspace_with_blocker(owner, "T9 Workspace")
     grant = _issue_grant(owner, workspace_id)
+
+    from backend.app.container import BlobStoreProvider
+    from backend.context_versions.adapters.git_libgit2 import GitSnapshotStore
+    from backend.context_versions.domain import ContentPayload
+    from backend.models.base import utc_now
+    from backend.services.library_blob_storage import FilesystemLibraryBlobStore
+    from backend.services.workspace_content_storage import WorkspaceContentStorage
+
+    repositories = GitSnapshotStore(tmp_path / "repositories")
+    library = FilesystemLibraryBlobStore(root=tmp_path / "library")
+    stored = library.put_bytes(
+        b"workspace Library content", workspace_id=UUID(workspace_id), max_bytes=1024
+    )
+    repositories.commit(
+        workspace_id=UUID(workspace_id),
+        page_id=uuid4(),
+        version_id=uuid4(),
+        created_at=utc_now(),
+        payload=ContentPayload(b"workspace Context content"),
+        parents=[],
+    )
+    owner.app.state.container.get_services().__dict__["workspace_content_storage"] = (
+        WorkspaceContentStorage(
+            blob_store_provider=BlobStoreProvider(None, store=library),
+            repository_purger=repositories,
+        )
+    )
+    # Management contention must leave the grant and SQL rows available to retry.
+    with repositories.management_guard(UUID(workspace_id)):
+        busy = owner.delete(
+            f"/api/v1/workspaces/{workspace_id}?purge=true",
+            headers={"X-Purge-Grant": grant},
+        )
+    assert busy.status_code == 503, busy.text
+    assert busy.json()["error_code"] == "context_repository_busy"
 
     from backend.services.workspace_purge import purge_workspace_data as real_purge
 
@@ -478,6 +511,8 @@ def test_purge_workspace_data_runs_only_after_the_grant_row_is_gone(
         f"/api/v1/workspaces/{workspace_id}?purge=true",
         headers={"X-Purge-Grant": grant},
     )
+    assert not repositories.exists(UUID(workspace_id))
+    assert not library.path_for_key(stored.storage_key).exists()
     assert response.status_code == 200, response.text
     assert response.json()["data"]["deleted_workspace_id"] == workspace_id
     assert observed["grant_already_gone"] is True

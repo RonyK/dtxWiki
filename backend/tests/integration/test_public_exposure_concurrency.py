@@ -13,6 +13,7 @@ from backend.services.page_service import (
     PagePublicVersionConflictError,
     PageService,
 )
+from backend.tests.utils.context_git import configure_test_context_storage
 
 
 def test_concurrent_unlisted_share_and_publish_never_exposes_stale_version(
@@ -23,7 +24,9 @@ def test_concurrent_unlisted_share_and_publish_never_exposes_stale_version(
         connect_args={"check_same_thread": False, "timeout": 10},
     )
     Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    factory = configure_test_context_storage(
+        sessionmaker(bind=engine, expire_on_commit=False), tmp_path / "repositories"
+    )
     try:
         with factory.begin() as session:
             workspace = seed_default_workspace(session)

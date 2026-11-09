@@ -164,6 +164,12 @@ _FAST_ARGON2 = dict(
 
 
 @pytest.fixture(autouse=True)
+def isolated_context_data_dir(tmp_path, monkeypatch):
+    # Every Git-writing service/CLI test gets an explicit disposable data root.
+    monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path / "data-dir"))
+
+
+@pytest.fixture(autouse=True)
 def fast_argon2(request, monkeypatch):
     if request.node.get_closest_marker("real_argon2") is not None:
         return
@@ -259,7 +265,7 @@ def _empty_sqlite_schema():
 
 
 @pytest.fixture
-def session_factory(_empty_sqlite_schema):
+def session_factory(_empty_sqlite_schema, tmp_path):
     connection = sqlite3.connect(":memory:", check_same_thread=False)
     engine = None
     try:
@@ -269,7 +275,17 @@ def session_factory(_empty_sqlite_schema):
             creator=lambda: connection,
             poolclass=StaticPool,
         )
-        factory = sessionmaker(bind=engine, expire_on_commit=False)
+        from backend.app.context_version_storage import build_context_storage
+
+        store, writer = build_context_storage(tmp_path / "repositories")
+        factory = sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            info={
+                "context_snapshot_store": store,
+                "context_version_writer": writer,
+            },
+        )
         with factory.begin() as session:
             workspace = seed_default_workspace(session)
             # Production creates MCPClient lifecycle rows only when an

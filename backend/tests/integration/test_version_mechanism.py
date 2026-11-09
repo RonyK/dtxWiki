@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from backend.app.settings import Settings
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
+from backend.tests.utils.migration_paths import configure_test_repositories
 
 
 def _current_alembic_head() -> str:
@@ -25,6 +26,7 @@ def _alembic_config(settings: Settings):
 
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("sqlalchemy.url", settings.database_url)
+    configure_test_repositories(config)
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     return config
 

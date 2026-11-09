@@ -56,6 +56,7 @@ from backend.models.media import (
 from backend.models.workspace import Workspace
 from backend.tests.integration import test_context_media_repository as media_fixtures
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
+from backend.tests.utils.migration_paths import configure_test_repositories
 
 epic1 = import_module("backend.migrations.versions.v0_1.efcbcf724889_core_schema")
 workspace_phase = import_module(
@@ -100,6 +101,7 @@ def _config(database_url: str) -> Config:
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", database_url)
+    configure_test_repositories(config)
     return config
 
 

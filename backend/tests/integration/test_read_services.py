@@ -40,12 +40,15 @@ from backend.services.tree_read import TreeReadService
 from backend.services.tree_service import TreeService
 from backend.services.workspace_read import WorkspaceReadService
 from backend.services.workspace_write import WorkspaceWriteService
+from backend.tests.utils.context_git import configure_test_context_storage
 
 
 def make_session_factory():
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine, expire_on_commit=False)
+    return configure_test_context_storage(
+        sessionmaker(bind=engine, expire_on_commit=False)
+    )
 
 
 def _system_actor(workspace_id):

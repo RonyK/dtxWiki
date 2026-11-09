@@ -1211,7 +1211,9 @@ def _proven_linear_draft(
     return drafts[0] if len(drafts) == 1 else None
 
 
-def repair_context_history(session: Session) -> ContextHistoryRepairResult:
+def repair_context_history(
+    session: Session, *, context_version_writer=None
+) -> ContextHistoryRepairResult:
     """Repair every unambiguous published-lineage violation, page by page.
 
     The caller owns the transaction.  The entry gate and the residual check
@@ -1227,6 +1229,9 @@ def repair_context_history(session: Session) -> ContextHistoryRepairResult:
     a later ``--apply`` can reach them.
     """
 
+    from backend.services.db_write_intent import acquire_write_intent
+
+    acquire_write_intent(session)
     before = audit_context_history(session, lock=True)
     blocked_page_ids = {
         violation.page_id for violation in before.violations if not violation.repairable
@@ -1254,6 +1259,7 @@ def repair_context_history(session: Session) -> ContextHistoryRepairResult:
             repaired_versions += repair_context_published_lineage(
                 session,
                 page=page,
+                context_version_writer=context_version_writer,
             )
     session.flush()
 
@@ -1280,6 +1286,7 @@ def repair_context_history(session: Session) -> ContextHistoryRepairResult:
 def repair_context_published_lineage(
     session: Session,
     *,
+    context_version_writer=None,
     page: ContextPage,
 ) -> int:
     """Repair one page only when its stored published pointer proves the head."""
@@ -1292,6 +1299,7 @@ def repair_context_published_lineage(
 
     repaired_versions = _normalize_context_published_rows(
         session,
+        context_version_writer=context_version_writer,
         page=page,
         version=head,
     )
@@ -1441,11 +1449,18 @@ def _repair_context_head_pointers(
 def _normalize_context_published_rows(
     session: Session,
     *,
+    context_version_writer=None,
     page: ContextPage,
     version: ContextPageVersion,
 ) -> int:
     """Demote old snapshots before promoting one proven canonical head."""
 
+    from backend.services.context_version_storage import (
+        align_publication,
+        prepare_publication,
+    )
+
+    prepared = prepare_publication(session, page, version, context_version_writer)
     prior_snapshots = session.scalars(
         select(ContextPageVersion)
         .where(
@@ -1494,6 +1509,8 @@ def _normalize_context_published_rows(
     ):
         repaired_versions += 1
         preserved_last_saved_at[version.id] = version.last_saved_at
+    version.commit_oid = prepared.commit_oid
+    version.content_byte_size = prepared.content_byte_size
     version.version_status = "published_snapshot"
     version.graph_status = "linear"
     session.add(version)
@@ -1516,6 +1533,7 @@ def _normalize_context_published_rows(
                 touched.last_saved_at = original_last_saved_at
         session.flush()
 
+    align_publication(session, page, prepared.commit_oid, context_version_writer)
     return repaired_versions
 
 
@@ -1536,6 +1554,7 @@ def _require_repair_candidate_allowed(
 def apply_context_publication(
     session: Session,
     *,
+    context_version_writer=None,
     page: ContextPage,
     version: ContextPageVersion,
     require_latest_draft: bool,
@@ -1598,7 +1617,12 @@ def apply_context_publication(
         or previous.rendering_profile != version.rendering_profile
     ):
         page.content_changed_at = utc_now()
-    _normalize_context_published_rows(session, page=page, version=version)
+    _normalize_context_published_rows(
+        session,
+        page=page,
+        version=version,
+        context_version_writer=context_version_writer,
+    )
     # A multi-step draft chain (ordinary since staged autosave shipped -- see
     # commit 60593953 -- not an edge case) leaves every ancestor between the
     # published tip and the previous published head `draft`/`linear`. This

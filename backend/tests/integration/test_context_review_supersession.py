@@ -15,6 +15,7 @@ from backend.services.context_write_service import ContextWriteService
 from backend.services.domain_read import DomainReadService
 from backend.services.page_service import PageService
 from backend.services.review_service import ReviewService
+from backend.tests.utils.context_git import configure_test_context_storage
 
 ACTOR = "00000000-0000-0000-0000-000000000010"
 CLAIMANT = UUID("00000000-0000-0000-0000-000000000099")
@@ -23,7 +24,9 @@ CLAIMANT = UUID("00000000-0000-0000-0000-000000000099")
 def _make_session_factory():
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine, expire_on_commit=False)
+    return configure_test_context_storage(
+        sessionmaker(bind=engine, expire_on_commit=False)
+    )
 
 
 def _add_page_review(

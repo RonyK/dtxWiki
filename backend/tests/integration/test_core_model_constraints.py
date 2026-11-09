@@ -38,7 +38,9 @@ from backend.scripts.seed_dev import (
     seed_default_workspace,
 )
 from backend.services.page_service import PageService
+from backend.tests.utils.context_git import configure_test_context_storage
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
+from backend.tests.utils.migration_paths import configure_test_repositories
 
 CORE_TABLES = {
     "agent_input_bundle",
@@ -616,10 +618,11 @@ def test_bundle_item_cannot_be_included_and_omitted():
             session.flush()
 
 
-def test_page_service_populates_design_context_version_fields():
+def test_page_service_populates_design_context_version_fields(tmp_path):
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    configure_test_context_storage(session_factory, tmp_path / "repositories")
     with session_factory.begin() as session:
         seed_default_workspace(session)
     service = PageService(session_factory)
@@ -842,6 +845,7 @@ def test_core_migration_accepts_runtime_precreated_fts_tables(
     database_url = sqlite_templates.clone("base_0001", tmp_path / "precreated-fts.db")
     config = Config("alembic.ini")
     config.set_main_option("sqlalchemy.url", database_url)
+    configure_test_repositories(config)
     engine = create_engine(database_url)
     with engine.begin() as connection:
         ensure_fts5_tables(connection)

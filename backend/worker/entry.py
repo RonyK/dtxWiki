@@ -641,8 +641,16 @@ def _sweep_user_deletions(
 ) -> None:
     if declared_storage_topology(database_provider) != SINGLE_DATABASE_TOPOLOGY:
         return
+    from backend.app.context_version_storage import build_context_storage
+    from backend.services.workspace_content_storage import WorkspaceContentStorage
+
+    content_storage = WorkspaceContentStorage(
+        blob_store_provider=blob_store_provider,
+        repository_purger=build_context_storage()[0],
+    )
     try:
         UserDeletionService(
+            workspace_content_storage=content_storage,
             session_factory=database_provider.control_session_factory(),
         ).purge_due(blob_store_provider=blob_store_provider)
     except Exception:

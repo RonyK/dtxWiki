@@ -9,6 +9,14 @@ The integrations/ directory is licensed under the Apache License, Version 2.0.
 
 Third-party material
 
+Context Git storage uses pygit2 (https://github.com/libgit2/pygit2), copyright
+the pygit2 contributors, and libgit2 (https://github.com/libgit2/libgit2),
+copyright the libgit2 contributors. Both are distributed under the GNU
+General Public License version 2 with a linking exception permitting their
+use in combined programs. These are installed dependencies, not copied
+application source. Their distributions carry the full copyright notices,
+GPL version 2 text, linking exception, and notices for bundled components.
+
 The files below are copied from other projects and are licensed under the
 terms reproduced here, not under the licenses above. The built web UI lists
 them in THIRD_PARTY_NOTICES.txt as well.

@@ -25,6 +25,7 @@ from backend.models.favorite import UserFavorite
 from backend.models.library import LibraryItem
 from backend.services.context_media_policy import resolve_context_media_policy
 from backend.services.ops.input_maintenance import audit_inputs, repair_input
+from backend.tests.utils.migration_paths import configure_test_repositories
 
 pytestmark = pytest.mark.xdist_group("postgres")
 
@@ -37,6 +38,7 @@ def _config(url):
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", url)
+    configure_test_repositories(config)
     return config
 
 

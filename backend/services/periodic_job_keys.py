@@ -18,6 +18,7 @@ PERIODIC_JOB_TYPES = MINUTE_JOB_TYPES | {
     "librarian_tick",
     POLICY_KEYED_JOB_TYPE,
     "media_blob_gc",
+    "context_repository_maintenance",
 }
 
 

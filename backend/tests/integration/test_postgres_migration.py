@@ -8,6 +8,7 @@ from alembic.config import Config
 from sqlalchemy import Boolean, MetaData, Table, create_engine, inspect, select, text
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
+from backend.tests.utils.migration_paths import configure_test_repositories
 
 # Every test here reflects and drops the tables of whatever PostgreSQL database
 # it is pointed at, and CI aims several of these files at one database, so they
@@ -41,6 +42,7 @@ def test_postgres_alembic_upgrade_head_and_downgrade_base():
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", database_url)
+    configure_test_repositories(config)
     upgraded = False
     try:
         command.upgrade(config, "bd62193d5cf6")
@@ -244,6 +246,7 @@ def test_downgrade_refuses_when_oauth_sessions_exist():
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", database_url)
+    configure_test_repositories(config)
     upgraded = False
     try:
         command.upgrade(config, "bd62193d5cf6")
