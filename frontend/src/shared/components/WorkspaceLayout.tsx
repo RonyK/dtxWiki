@@ -32,6 +32,8 @@ type WorkspaceLayoutProps = {
     expandWidthLabel: string;
     expandWidthAtMax: boolean;
     onClose: () => void;
+    /** Closes only the mobile drawer, leaving the desktop panel in place. */
+    onCloseDrawer: () => void;
     onExpandWidth?: () => void;
   }) => ReactNode;
   leftLabel?: string;
@@ -338,6 +340,7 @@ export function WorkspaceLayout({
               setMobileLeftOpen(false);
               setLeftOpen(false);
             },
+            onCloseDrawer: closeMobileLeft,
             onExpandWidth: mobileLayout
               ? undefined
               : expandLeftWidth,

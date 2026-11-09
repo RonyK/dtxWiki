@@ -448,6 +448,46 @@ describe("appRoutes role gating", () => {
     },
   );
 
+  it("shares one Library screen across read and create routes without gating readers", () => {
+    const routeShape = (path: string) => {
+      const auth = findRoute(appRoutes, path)?.element;
+      if (!isValidElement<{ children: ReactNode }>(auth)) {
+        throw new Error(`route ${path} has no element`);
+      }
+      const guard = auth.props.children;
+      if (!isValidElement<{ children: ReactNode; enabled?: boolean }>(guard)) {
+        throw new Error(`route ${path} has no guard`);
+      }
+      const screenElement = guard.props.children;
+      return {
+        enabled: guard.props.enabled,
+        types: [auth.type, guard.type, isValidElement(screenElement) ? screenElement.type : null],
+      };
+    };
+    const create = routeShape("/workspaces/:workspaceId/library/items/new");
+    expect(create.enabled).not.toBe(false);
+    for (const path of ["", "/items/:itemId", "/artifacts/:artifactId", "/folders/:nodeId"]) {
+      const read = routeShape(`/workspaces/:workspaceId/library${path}`);
+      expect(read.types).toEqual(create.types);
+      expect(read.enabled).toBe(false);
+    }
+    expect(routeShape("/workspaces/:workspaceId/library/folders/new").types).toEqual(create.types);
+
+    workspaceState.current = {
+      loading: false,
+      initialized: true,
+      selectedWorkspace: { role: "viewer" },
+    };
+    render(
+      <MemoryRouter>
+        <RequireEditor enabled={false}>
+          <div>Library for readers</div>
+        </RequireEditor>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("Library for readers")).toBeInTheDocument();
+  });
+
   it("gates every Agent destination behind the workspace experiment", () => {
     for (const path of ["agent", "agent/pages/new", "agent/pages/:agentPageId", "agent/pages/:agentPageId/edit", "agent/folders/new", "agent/folders/:nodeId"]) {
       const route = findRoute(appRoutes, `/workspaces/:workspaceId/${path}`);

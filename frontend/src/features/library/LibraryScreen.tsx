@@ -1185,6 +1185,7 @@ export function LibraryScreen() {
           expandWidthLabel,
           expandWidthAtMax,
           onClose,
+          onCloseDrawer,
           onExpandWidth,
         }) => (
           <TreeRail
@@ -1202,7 +1203,13 @@ export function LibraryScreen() {
             expandWidthAtMax={expandWidthAtMax}
             creation={canEdit ? {
               folder: canCreateLibraryFolder ? createFolder : undefined,
-              upload: canUpload ? uploadFiles : undefined,
+              // The upload queue is on the page behind the mobile drawer.
+              upload: canUpload
+                ? (files, parentNodeId) => {
+                    onCloseDrawer();
+                    return uploadFiles(files, parentNodeId);
+                  }
+                : undefined,
               uploadAccept,
               typeOrder: LIBRARY_NEW_ITEM_TYPE_ORDER,
             } : undefined}

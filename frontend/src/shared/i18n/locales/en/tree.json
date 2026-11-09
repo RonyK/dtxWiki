@@ -90,10 +90,9 @@
     "location": "Location",
     "locationRoot": "Top level",
     "parent": "Parent: {{parent}}",
-    "file": "File",
-    "uploadFile": "Upload file",
-    "uploading": "Uploading…",
-    "pickSourceFile": "Pick a source file to add to the Library.",
+    "file": "Files",
+    "uploadFile": "Upload files",
+    "pickSourceFile": "Pick one or more source files to add to the Library.",
     "pageTitle": "Page title",
     "folderName": "Folder name",
     "titleLength": "Enter 1-{{maximum}} characters.",
@@ -112,7 +111,6 @@
     },
     "errors": {
       "create": "Failed to create {{itemType}}",
-      "upload": "Failed to upload file",
       "duplicateSlug": "Slug already in use under this folder"
     }
   },

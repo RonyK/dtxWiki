@@ -3688,7 +3688,7 @@ describe("LibraryScreen", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "Create Library item" }));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByLabelText("Upload file")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Upload files")).toHaveAttribute("multiple");
     expect(within(dialog).queryByRole("radiogroup")).toBeNull();
     expect(screen.queryByRole("button", { name: "Create item under References" })).toBeNull();
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));

@@ -38,6 +38,11 @@ type NewItemDialogProps = {
     slug?: string;
     title: string;
   }) => Promise<void> | void;
+  /**
+   * Receives every chosen file. The dialog closes as soon as they are handed
+   * over: a batch can take a while, and the caller's page shows its per-file
+   * progress, retries and failures.
+   */
   onPickFiles?: (
     files: File[],
     parentNodeId: string | null,
@@ -181,28 +186,14 @@ export function NewItemDialog({
     }
   }
 
-  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.currentTarget.files ?? []);
     event.currentTarget.value = "";
     if (files.length === 0) {
       return;
     }
-    setSubmitting(true);
-    setError(null);
-    try {
-      await onPickFiles?.(files, parentId || null);
-      onClose("success");
-    } catch (exc) {
-      setError(
-        apiErrorMessage(
-          exc,
-          t("newItem.errors.upload", {
-            defaultValue: "Failed to upload file",
-          }),
-        ),
-      );
-      setSubmitting(false);
-    }
+    void onPickFiles?.(files, parentId || null);
+    onClose("success");
   }
 
   return (
@@ -262,20 +253,19 @@ export function NewItemDialog({
         ) : null}
         {itemType === "upload" ? (
           <label className="form-field">
-            <span>{t("newItem.file", { defaultValue: "File" })}</span>
+            <span>{t("newItem.file", { defaultValue: "Files" })}</span>
             <input
               accept={uploadAccept}
-              aria-label={t("newItem.uploadFile", { defaultValue: "Upload file" })}
+              aria-label={t("newItem.uploadFile", { defaultValue: "Upload files" })}
               disabled={submitting}
+              multiple
               onChange={handleFileChange}
               type="file"
             />
             <small className="field-hint">
-              {submitting
-                ? t("newItem.uploading", { defaultValue: "Uploading…" })
-                : t("newItem.pickSourceFile", {
-                    defaultValue: "Pick a source file to add to the Library.",
-                  })}
+              {t("newItem.pickSourceFile", {
+                defaultValue: "Pick one or more source files to add to the Library.",
+              })}
             </small>
           </label>
         ) : (
