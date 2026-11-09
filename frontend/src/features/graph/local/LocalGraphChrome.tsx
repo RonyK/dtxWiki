@@ -33,9 +33,10 @@ export function GraphTypeSelector({ mode, busy, onChange }: {
       <div className="graph-type-options" role="radiogroup" aria-label={t("graph.view.heading")} aria-busy={busy}>
         {modes.map((value) => {
           const Icon = icons[value];
-          return <button key={value} type="button" role="radio" aria-checked={mode === value} aria-disabled={busy} tabIndex={mode === value ? 0 : -1}
+          return <button key={value} type="button" role="radio" aria-checked={mode === value} aria-disabled={busy} aria-label={t(`graph.view.${value}.name`)} tabIndex={mode === value ? 0 : -1}
             onClick={() => { if (!busy) onChange(value); }} onKeyDown={navigateChoices}>
-            <Icon size={17} aria-hidden="true" /><span>{t(`graph.view.${value}.name`)}</span>
+            <Icon size={17} aria-hidden="true" /><span className="graph-type-full">{t(`graph.view.${value}.name`)}</span>
+            <span className="graph-type-short">{t(`graph.view.${value}.short`)}</span>
             {value !== "current" ? <GraphPreviewBadge /> : null}
           </button>;
         })}

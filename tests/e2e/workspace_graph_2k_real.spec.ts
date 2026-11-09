@@ -1448,7 +1448,8 @@ async function expectLocalSceneNavigation(
       clientHeight: element.clientHeight,
       scrollHeight: element.scrollHeight,
     }));
-    expect(folderDetailsSize.height).toBeLessThanOrEqual(initialCanvasBox!.height + 1);
+    // A phone places Details after the canvas, where it may be taller than the canvas.
+    if (page.viewportSize()!.width > 760) expect(folderDetailsSize.height).toBeLessThanOrEqual(initialCanvasBox!.height + 1);
     await panel.locator(".graph-local-stage").scrollIntoViewIfNeeded();
     await capture(page, testInfo, `real-api-2k-local-members-${suffix}.png`);
 

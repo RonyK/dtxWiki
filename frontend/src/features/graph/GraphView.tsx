@@ -743,6 +743,55 @@ export function GraphView({
       stage.style.removeProperty("--graph-stage-notice-bottom");
     };
   }, [coverageShown, historical, listOpen]);
+  // A narrow page frame shows Details after the canvas and timeline: a phone
+  // canvas is too short to carry it. Same 760px reader boundary as the sheet CSS.
+  const [detailsBelow, setDetailsBelow] = useState(false);
+  useLayoutEffect(() => {
+    const region = graphRegionRef.current;
+    if (!region || typeof ResizeObserver === "undefined") return undefined;
+    const update = () => {
+      const { width } = region.getBoundingClientRect();
+      setDetailsBelow(!fullscreen && width > 0 && width <= 760);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(region);
+    return () => observer.disconnect();
+  }, [fullscreen]);
+  const detailsView = (
+    <GraphDetails
+      active={active}
+      below={detailsBelow}
+      citationEvidenceActive={active && !historical && timelineCursor === null}
+      citationEvidenceRevision={payload.projection_revision}
+      sessionActivityRevision={`${payload.projection_revision}:${payload.generated_at}`}
+      historyEvents={historical ? timeline : undefined}
+      historyEdges={historyCatalog.edges}
+      historyNodes={historical ? historyCatalog.nodes : undefined}
+      historicalOnly={historical && !!selectedId && !scene.nodes.some((node) => node.id === selectedId) && !scene.edges.some((edge) => edge.id === selectedId)}
+      currentEventId={currentEvent?.id}
+      onSeekEvent={(id) => seekEvent(timeline.findIndex((event) => event.id === id))}
+      busyAction={busyAction}
+      edge={selectedEdge}
+      node={selectedNode}
+      nodes={scene.nodes}
+      analysis={sceneAnalysis}
+      listContext={listContext}
+      onCenter={(id) => canvasRef.current?.centerOn(id)}
+      onClearSelection={clearSelection}
+      onBlur={clearItemFocus}
+      onCollapse={(node) => runAction(`collapse:${node.id}`, () => onCollapse(node))}
+      onExpand={(node) => runAction(`expand:${node.id}`, () => onExpand(node))}
+      onFocus={setFocusedId}
+      onSelect={selectItem}
+      onTogglePin={togglePin}
+      pinState={selectedNode ? pinStateOf(selectedNode.id) : "unpinned"}
+      querySeeds={payload.query.seeds}
+      supportsExpand={payload.capabilities?.expand !== false}
+      workspaceGraphHref={workspaceGraphHref}
+      workspaceId={workspaceId}
+    />
+  );
   return (
     <section
       aria-labelledby="graph-view-heading"
@@ -950,8 +999,9 @@ export function GraphView({
           ref={canvasRef}
           viewportInsets={() => {
             const stage = graphRegionRef.current?.querySelector(".graph-local-stage")?.getBoundingClientRect();
-            const detail = graphRegionRef.current?.querySelector(".graph-details:not([hidden])")?.getBoundingClientRect();
-            // Details is a bottom sheet in a narrow frame (fullscreen too), a side panel otherwise.
+            // Below the canvas Details covers none of it. Otherwise it is a bottom
+            // sheet in a narrow fullscreen frame and a side panel in a wide one.
+            const detail = detailsBelow ? undefined : graphRegionRef.current?.querySelector(".graph-details:not([hidden])")?.getBoundingClientRect();
             const sheet = !!stage && !!detail && detail.width > stage.width * .75;
             return { top: historical ? 90 : 60, left: 0,
               right: detail && !sheet ? detail.width + 24 : 0,
@@ -986,37 +1036,7 @@ export function GraphView({
             })}
           </p>
         )}
-        <GraphDetails
-          active={active}
-          citationEvidenceActive={active && !historical && timelineCursor === null}
-          citationEvidenceRevision={payload.projection_revision}
-          sessionActivityRevision={`${payload.projection_revision}:${payload.generated_at}`}
-          historyEvents={historical ? timeline : undefined}
-          historyEdges={historyCatalog.edges}
-          historyNodes={historical ? historyCatalog.nodes : undefined}
-          historicalOnly={historical && !!selectedId && !scene.nodes.some((node) => node.id === selectedId) && !scene.edges.some((edge) => edge.id === selectedId)}
-          currentEventId={currentEvent?.id}
-          onSeekEvent={(id) => seekEvent(timeline.findIndex((event) => event.id === id))}
-          busyAction={busyAction}
-          edge={selectedEdge}
-          node={selectedNode}
-          nodes={scene.nodes}
-          analysis={sceneAnalysis}
-          listContext={listContext}
-          onCenter={(id) => canvasRef.current?.centerOn(id)}
-          onClearSelection={clearSelection}
-          onBlur={clearItemFocus}
-          onCollapse={(node) => runAction(`collapse:${node.id}`, () => onCollapse(node))}
-          onExpand={(node) => runAction(`expand:${node.id}`, () => onExpand(node))}
-          onFocus={setFocusedId}
-          onSelect={selectItem}
-          onTogglePin={togglePin}
-          pinState={selectedNode ? pinStateOf(selectedNode.id) : "unpinned"}
-          querySeeds={payload.query.seeds}
-          supportsExpand={payload.capabilities?.expand !== false}
-          workspaceGraphHref={workspaceGraphHref}
-          workspaceId={workspaceId}
-        />
+        {detailsBelow ? null : detailsView}
       </div>
 
         {historical ? <LocalGraphTimeline cursor={visibleCursor} onCursorChange={seekEvent} restoredLatest={!!storedEvent && storedIndex < 0}
@@ -1024,6 +1044,7 @@ export function GraphView({
           onSpeedChange={setPlaybackSpeed} onStep={stepTimeline} onShowEvent={showEventInGraph}
           payload={payload} playing={playing} reducedMotion={reducedMotion} selectedId={selectedId}
           speed={playbackSpeed} timeline={timeline} /> : null}
+        {detailsBelow ? detailsView : null}
         <footer className="graph-frame-status">
           <strong>{t(`graph.range.${range}.name`)} · {t(payload.history.mode === "action" ? "graph.range.actionDescription" : `graph.range.${range}.description`)}</strong>
           <span className="graph-view-count" aria-live={playing ? "off" : "polite"}>{t("graph.visibleCount", { nodes: scene.nodes.length, edges: scene.edges.length })}</span>
@@ -1265,6 +1286,7 @@ function GraphDetailsPinButton({ onToggle, state }: { onToggle: () => void; stat
 
 function GraphDetails({
   active,
+  below,
   historyEvents,
   historyEdges,
   historyNodes,
@@ -1295,6 +1317,8 @@ function GraphDetails({
   workspaceId,
 }: {
   active: boolean;
+  /** Placed after the canvas and timeline, in the page, rather than over the canvas. */
+  below: boolean;
   historyEvents?: GraphTimelineEvent[];
   historyEdges: GraphEdge[];
   historyNodes?: GraphNode[];
@@ -1331,13 +1355,21 @@ function GraphDetails({
   useFocusRecovery(detailsRef, () => detailsRef.current, node?.id ?? edge?.id ?? null);
   const [sheetExpanded, setSheetExpanded] = useState(false);
   const actionReasonId = useId();
+  const selectedId = node?.id ?? edge?.id ?? null;
+  const revealedIdRef = useRef(selectedId);
   useLayoutEffect(() => {
     // A newly selected object starts at its title and actions. Keep the
-    // sidebar's scroll position for ordinary updates to the same selection;
-    // never scroll the outer reader or move keyboard/pointer focus here.
+    // panel's scroll position for ordinary updates to the same selection and
+    // never move keyboard/pointer focus here. Over the canvas the outer reader
+    // stays put; below it the page is the scroller, so a new title is brought
+    // into view by the least movement.
     if (detailsRef.current) detailsRef.current.scrollTop = 0;
     setSheetExpanded(false);
-  }, [node?.id, edge?.id]);
+    if (below && selectedId && revealedIdRef.current !== selectedId) {
+      detailsRef.current?.querySelector(".graph-details-title-row")?.scrollIntoView?.({ block: "nearest" });
+    }
+    revealedIdRef.current = selectedId;
+  }, [below, selectedId]);
   useLayoutEffect(() => {
     // Expanding upward from a scrolled canvas must keep the close control
     // and the revealed actions within the reader viewport.
@@ -1372,7 +1404,7 @@ function GraphDetails({
         <h4 id="graph-details-heading">{t("graph.details.heading")}</h4>
         <button aria-label={clearLabel} className="graph-details-close" onClick={onClearSelection} type="button"><X size={17} aria-hidden="true" /></button>
       </div>
-      <button className="graph-details-sheet-toggle" type="button" aria-expanded={sheetExpanded} onClick={() => setSheetExpanded((value) => !value)}>{t(sheetExpanded ? "graph.details.collapseSheet" : "graph.details.expandSheet")}</button>
+      {below ? null : <button className="graph-details-sheet-toggle" type="button" aria-expanded={sheetExpanded} onClick={() => setSheetExpanded((value) => !value)}>{t(sheetExpanded ? "graph.details.collapseSheet" : "graph.details.expandSheet")}</button>}
       <h5 className="graph-details-title" title={node?.label ?? (edge ? localEdgeKindLabel(edge, t) : undefined)}>{node?.label ?? (edge ? localEdgeKindLabel(edge, t) : null)}</h5>
       {historicalOnly ? <p className="graph-history-inactive">{t("graph.historyUi.notPresent")}</p> : null}
       {node ? <LocalNodeMeta context={listContext} node={node} /> : null}
@@ -1407,7 +1439,12 @@ function GraphDetails({
       <div className="graph-details-footer">
         {href ? <Link className="graph-details-open" to={href}>{t("graph.open")}</Link> : null}
         {node && nodeActions ? <GraphSelectedNodeActions actions={{ ...nodeActions, href: null }} node={node} onCollapse={onCollapse} onExpand={onExpand} reasonId={actionReasonId} /> : null}
-        <details className="graph-details-more" onToggle={(event) => { if (event.currentTarget.open) setSheetExpanded(true); }}><summary aria-label={t("graph.view.more")}><MoreHorizontal size={17} aria-hidden="true" /></summary><div>
+        <details className="graph-details-more" onToggle={(event) => {
+          if (!event.currentTarget.open) return;
+          const more = event.currentTarget;
+          if (!below) setSheetExpanded(true);
+          requestAnimationFrame(() => fitDetailsMenu(detailsRef.current, more, below));
+        }}><summary aria-label={t("graph.view.more")}><MoreHorizontal size={17} aria-hidden="true" /></summary><div>
           <button type="button" onClick={(event) => {
             event.currentTarget.closest("details")?.removeAttribute("open");
             setSheetExpanded(false);
@@ -1422,6 +1459,26 @@ function GraphDetails({
   );
 }
 
+
+/** More opens upward from the footer; it stops under the title row so it never covers Clear selection. */
+function fitDetailsMenu(details: HTMLElement | null, more: HTMLDetailsElement, below: boolean) {
+  const title = details?.querySelector<HTMLElement>(".graph-details-title-row");
+  const footer = details?.querySelector<HTMLElement>(".graph-details-footer");
+  const menu = more.querySelector<HTMLElement>(":scope > div");
+  if (!title || !footer || !menu || !more.open) return;
+  menu.style.maxHeight = "";
+  if (!menu.offsetHeight) return;
+  const gap = 6;
+  const overlap = () => title.getBoundingClientRect().bottom + gap - menu.getBoundingClientRect().top;
+  if (below && overlap() > 0) {
+    // The sticky footer holds its place while the page lifts the title clear of the menu.
+    title.style.scrollMarginBottom = `${footer.getBoundingClientRect().bottom - menu.getBoundingClientRect().top + gap}px`;
+    title.scrollIntoView({ block: "nearest" });
+    title.style.scrollMarginBottom = "";
+  }
+  const remaining = overlap();
+  if (remaining > 0) menu.style.maxHeight = `${Math.max(0, menu.offsetHeight - remaining)}px`;
+}
 
 type SelectedNodeActions = {
   action: "expand" | "collapse";

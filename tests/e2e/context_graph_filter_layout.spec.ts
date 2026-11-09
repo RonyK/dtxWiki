@@ -92,10 +92,6 @@ for (const viewport of viewports) {
       await details.getByRole("button", { name: "Pin", exact: true }).click();
       await expect(details.getByRole("button", { name: "Unpin", exact: true })).toBeVisible();
       await details.locator(".graph-details-more > summary").click();
-      // More reveals an expanded mobile sheet; inspect the default sheet
-      // geometry after returning through its visible collapse control.
-      const collapseSheet = details.getByRole("button", { name: "Collapse details", exact: true });
-      if (await collapseSheet.isVisible()) await collapseSheet.click();
       await stage.scrollIntoViewIfNeeded();
       const selectedGeometry = await graph.evaluate((element) => {
         const owner = element.querySelector(".graph-local-stage")!.getBoundingClientRect();
@@ -114,12 +110,12 @@ for (const viewport of viewports) {
       expect(selectedGeometry.canvasHeight).toBe(geometry.canvasHeight);
       expect(selectedGeometry.panelLeft).toBeGreaterThanOrEqual(0);
       expect(selectedGeometry.panelRight).toBeLessThanOrEqual(0);
-      expect(selectedGeometry.panelBottom).toBeLessThanOrEqual(1);
       expect(selectedGeometry.painted).toBe(true);
       if (selectedGeometry.stageWidth <= 760) {
-        expect(selectedGeometry.panelTop).toBeGreaterThan(geometry.stageHeight * 0.4);
-        expect(selectedGeometry.panelHeight).toBeLessThanOrEqual(geometry.stageHeight * 0.45 + 1);
+        // Details follows the canvas in the page and leaves it uncovered.
+        expect(selectedGeometry.panelTop).toBeGreaterThanOrEqual(geometry.stageHeight);
       } else {
+        expect(selectedGeometry.panelBottom).toBeLessThanOrEqual(1);
         expect(selectedGeometry.panelTop).toBe(60);
         expect(selectedGeometry.panelRight).toBe(-12);
       }

@@ -1410,9 +1410,6 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           // A seed relation opens from its chip on the selected item's path card.
           const createdRows = graphPanel.getByTestId("graph-list-view").locator(".graph-list-bowtie-row, .relation-list-flow-row")
             .filter({ has: page.locator(".relation-list-chip", { hasText: /^Created$/ }) });
-          // An expanded phone Details sheet covers the list; collapse it as a reader would.
-          const collapseSheet = graphPanel.locator(".graph-details").getByRole("button", { name: "Collapse details", exact: true });
-          if (await collapseSheet.isVisible()) await collapseSheet.click();
           await createdRows.first().locator("button[data-local-graph-id]").click();
           await graphPanel.locator(".graph-seed-path .graph-seed-path-relation").filter({ hasText: /^Created$/ }).first().click();
           await expect(graphPanel.locator("h5.graph-details-title")).toHaveText("Created");

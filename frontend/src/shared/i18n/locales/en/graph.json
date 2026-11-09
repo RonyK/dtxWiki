@@ -377,6 +377,7 @@
       },
       "current": {
         "name": "Current relationships",
+        "short": "Current",
         "question": "What is connected now",
         "description": "Explore current links, citations, read-together signals, and folder membership. There is no time navigation.",
         "nodes": "Documents, sources, folders, and connected items",
@@ -387,6 +388,7 @@
       },
       "appearance": {
         "name": "Change history",
+        "short": "Changes",
         "question": "When relationships appeared or changed",
         "description": "Replay document versions and relationship additions or removals on the timeline. Only recorded history is available.",
         "nodes": "Documents, sources, folders, and document versions",
@@ -397,6 +399,7 @@
       },
       "action": {
         "name": "Activity history",
+        "short": "Activity",
         "question": "Who or which tools used this document",
         "description": "Explore edits, reviews, Ask citations, and MCP usage with their parent sessions. Current relationships remain as a muted background.",
         "nodes": "Versions, reviews, Ask, MCP activity, and connected items",
