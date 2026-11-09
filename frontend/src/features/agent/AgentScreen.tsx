@@ -1830,7 +1830,7 @@ function AgentCreationModal({
   const defaultNewBody = () =>
     initialPage?.body_markdown ??
     defaultNewTemplate?.body ??
-    defaultAgentBody(defaultCategory, "");
+    defaultAgentBody(defaultCategory, title);
   const [body, setBody] = useState(defaultNewBody);
   const [templateId, setTemplateId] = useState(
     defaultNewTemplate ? defaultNewTemplate.id : BLANK_TEMPLATE_ID,

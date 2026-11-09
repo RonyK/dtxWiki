@@ -1204,6 +1204,11 @@ describe("AgentScreen", () => {
     await userEvent.click(within(newItemDialog).getByRole("button", { name: "Open editor" }));
     const headerEditor = await screen.findByRole("dialog", { name: "Create Agent draft" });
     expect(within(headerEditor).getByLabelText("Title")).toHaveValue("Header draft");
+    expect(within(headerEditor).getByLabelText("Body")).toHaveValue("# Header draft\n\n");
+    fireEvent.change(within(headerEditor).getByLabelText("Title"), {
+      target: { value: "Renamed header draft" },
+    });
+    expect(within(headerEditor).getByLabelText("Body")).toHaveValue("# Renamed header draft\n\n");
     await userEvent.click(within(headerEditor).getByRole("button", { name: "Cancel" }));
     await userEvent.click(await screen.findByRole("button", { name: "Open actions for Persona" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "New page" }));
@@ -1212,6 +1217,7 @@ describe("AgentScreen", () => {
     await userEvent.click(within(nestedItemDialog).getByRole("button", { name: "Open editor" }));
     const dialog = await screen.findByRole("dialog", { name: "Create Agent draft" });
     expect(within(dialog).getByLabelText("Title")).toHaveValue("Nested Persona");
+    expect(within(dialog).getByLabelText("Body")).toHaveValue("# Nested Persona\n\n");
     await userEvent.click(within(dialog).getByRole("button", { name: "Create draft" }));
 
     await screen.findByRole("heading", { name: "Nested Persona" });
@@ -1225,6 +1231,7 @@ describe("AgentScreen", () => {
       parent_node_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3",
       slug: "nested-persona",
       title: "Nested Persona",
+      body_markdown: "# Nested Persona\n\n",
     });
   });
 
