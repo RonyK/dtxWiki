@@ -363,8 +363,10 @@ body[data-focus-mode="true"] .main-surface {
   gap: 14px;
   min-width: 0;
   max-width: 100%;
-  /* clip, unlike hidden, leaves the page as the Details footer's sticky scroller. */
-  overflow: clip;
+  /* Clip sideways only: this must stay no scroll container, so the page scrolls
+     the sticky Details footer and popovers can run past a short graph. */
+  overflow-x: clip;
+  overflow-y: visible;
 }
 
 .graph-view-header {
