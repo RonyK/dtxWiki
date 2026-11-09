@@ -31,6 +31,7 @@ from backend.schemas.inbox import (
     InboxMarkResponse,
     InboxPageResponse,
     InboxStateParam,
+    InboxTypeParam,
 )
 from backend.services.inbox import (
     DEFAULT_INBOX_CONFIG,
@@ -100,13 +101,19 @@ def add_inbox_routes(
         inbox: InboxDep,
         services: ServicesDep,
         state: InboxStateParam = "all",
+        item_type: InboxTypeParam = "all",
         cursor: str | None = None,
         limit: LimitParam = _LISTING.page_size_default,
     ):
         try:
             with inbox.session_factory() as session:
                 page = services.inbox.list_items(
-                    session, inbox.viewer, state=state, cursor=cursor, limit=limit
+                    session,
+                    inbox.viewer,
+                    state=state,
+                    item_type=item_type,
+                    cursor=cursor,
+                    limit=limit,
                 )
         except ReadServiceError as exc:
             return read_service_error_response(exc)

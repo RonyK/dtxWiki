@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from backend.policy.auth import ActorContext
 
 InboxState = Literal["all", "unread", "archived"]
+InboxPosition = tuple[datetime, str, str]
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,7 @@ class ComputedScan:
     items: Sequence[InboxSnapshot]
     # Every item the source has for this viewer, not just the ones returned.
     total: int
+    has_more: bool = False
 
 
 class InboxScope(ABC):
@@ -131,12 +133,16 @@ class WritableSource(InboxSource):
 
 
 class StatusSource(InboxSource):
-    """A source whose items stand as current state, listed whole on the
-    first page instead of in the message stream."""
+    """Current-state items in the inbox's shared chronological order."""
 
     @abstractmethod
     def status(
-        self, session: Session, viewer: InboxViewer, kind: str, limit: int
+        self,
+        session: Session,
+        viewer: InboxViewer,
+        kind: str,
+        limit: int,
+        after: InboxPosition | None = None,
     ) -> ComputedScan: ...
 
 

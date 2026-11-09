@@ -8,7 +8,7 @@ from hashlib import sha256
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
-from sqlalchemy import and_, exists, false, func, or_, select
+from sqlalchemy import and_, case, exists, false, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
@@ -29,8 +29,10 @@ from backend.policy.trust_boundaries import actor_can_read_drafts
 from backend.repositories.review_receipts import decision_id_conflict
 from backend.repositories.workspace_scoped import (
     get_in_workspace,
+    join_in_workspace,
     select_in_workspace,
     select_in_workspace_by_ids,
+    where_in_workspace,
 )
 from backend.schemas.context_write import (
     PublishContextPageRequest,
@@ -69,6 +71,8 @@ from backend.services.actor_visible_read import (
 from backend.services.audit_service import AuditService
 from backend.services.body_preparer import BodyPreparer
 from backend.services.db_write_intent import acquire_workspace_write_intent
+from backend.services.inbox.base import InboxPosition
+from backend.services.inbox.status_pagination import chronological_after, uuid_key
 from backend.services.job_queue import (
     JobQueueService,
     context_page_undo_embed_idempotency_key,
@@ -844,10 +848,14 @@ class ReviewService:
         principal: UUID,
         principal_role: str | None,
         limit: int,
+        after: InboxPosition | None = None,
     ) -> tuple[list[tuple[ReviewItem, ReviewDecision | None]], int]:
-        """Reviews the principal can decide now, most recently active first,
-        and how many there are. A changes_requested review comes with its
-        current request for changes."""
+        """Actionable reviews in descending inbox event order, plus total.
+
+        A claim changes updated_at, but not the event: pending items use the
+        review's creation time and changes_requested items use the current
+        request's creation time.
+        """
 
         statement = self._actionable_statement(
             workspace_id, principal=principal, principal_role=principal_role
@@ -855,10 +863,47 @@ class ReviewService:
         if statement is None:
             return [], 0
         total = session.scalar(select(func.count()).select_from(statement.subquery()))
+        inbox_request = aliased(ReviewDecision)
+        statement = join_in_workspace(
+            statement,
+            ReviewItem,
+            inbox_request,
+            workspace_id=workspace_id,
+            on=inbox_request.id == self._latest_request_changes_subquery(),
+            isouter=True,
+        )
+        event_at = case(
+            (ReviewItem.status == CHANGES_REQUESTED_STATUS, inbox_request.created_at),
+            else_=ReviewItem.created_at,
+        )
+
+        def key_before(item_key: str):
+            raw_id, separator, stage = item_key.partition(":")
+            if not separator or not stage:
+                raise ReadValidationError("invalid inbox cursor item key")
+            review_id = uuid_key(raw_id)
+            current_stage = case(
+                (
+                    ReviewItem.status == CHANGES_REQUESTED_STATUS,
+                    CHANGES_REQUESTED_STATUS,
+                ),
+                else_="pending",
+            )
+            return or_(
+                ReviewItem.id < review_id,
+                and_(ReviewItem.id == review_id, current_stage < stage),
+            )
+
+        statement = where_in_workspace(
+            statement,
+            ReviewItem,
+            workspace_id=workspace_id,
+            conditions=(
+                chronological_after(event_at, "review_attention", after, key_before),
+            ),
+        )
         reviews = session.scalars(
-            statement.order_by(
-                ReviewItem.updated_at.desc(), ReviewItem.id.desc()
-            ).limit(limit)
+            statement.order_by(event_at.desc(), ReviewItem.id.desc()).limit(limit)
         ).all()
         return self._with_current_requests(session, workspace_id, reviews), int(
             total or 0

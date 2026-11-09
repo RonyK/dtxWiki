@@ -15,10 +15,15 @@
     "unread": "Unread",
     "archived": "Archived"
   },
+  "itemType": {
+    "label": "Type",
+    "all": "All",
+    "status": "Current status",
+    "message": "Stored messages"
+  },
   "status": {
     "label": "Live",
-    "hint": "Leaves automatically when it is handled or expires at its source.",
-    "overflow": "{{total}} in total; open the source for the rest."
+    "hint": "Leaves automatically when it is handled or expires at its source."
   },
   "items": {
     "label": "Messages"

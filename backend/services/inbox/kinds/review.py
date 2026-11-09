@@ -27,6 +27,7 @@ from backend.services.inbox.base import (
     ComputedScan,
     InboxDisplay,
     InboxKind,
+    InboxPosition,
     InboxSnapshot,
     InboxViewer,
 )
@@ -88,16 +89,24 @@ def _attention_snapshot(
     )
 
 
-def _attention_scan(session: Session, viewer: InboxViewer, limit: int) -> ComputedScan:
+def _attention_scan(
+    session: Session,
+    viewer: InboxViewer,
+    limit: int,
+    after: InboxPosition | None = None,
+) -> ComputedScan:
     rows, total = _reviews().actionable_reviews(
         session,
         _workspace_id(viewer),
         principal=viewer.user_id,
         principal_role=viewer.role,
-        limit=limit,
+        limit=limit + 1,
+        after=after,
     )
     return ComputedScan(
-        [_attention_snapshot(review, request) for review, request in rows], total
+        [_attention_snapshot(review, request) for review, request in rows[:limit]],
+        total,
+        len(rows) > limit,
     )
 
 

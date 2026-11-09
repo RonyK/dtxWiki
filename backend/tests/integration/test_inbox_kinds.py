@@ -3,9 +3,11 @@ from datetime import timedelta
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import select
 
 from backend.models.api_token import ApiToken
 from backend.models.base import utc_now
+from backend.models.review import ReviewItem
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
 from backend.models.workspace_join import WorkspaceJoinRequest
@@ -110,6 +112,53 @@ def test_builtin_kinds_follow_their_sources_without_announcing_undo(session_fact
             )
 
     one, two = first.review_item_id, second.review_item_id
+    # Displayed event times, not mutable update times, define the shared
+    # order. A live claim removing a previous row must not skip its successor.
+    with session_factory.begin() as session:
+        pending = session.scalars(
+            select(ReviewItem).where(ReviewItem.workspace_id == workspace_id)
+        ).all()
+        original_times = {
+            review.id: (review.created_at, review.updated_at) for review in pending
+        }
+        tied_at = utc_now()
+        for index, review in enumerate(
+            sorted(pending, key=lambda r: r.id, reverse=True)
+        ):
+            review.created_at = tied_at
+            review.updated_at = tied_at + timedelta(seconds=index)
+    attention = inbox.registry.kind("workspace", "review_attention").source
+    with session_factory() as session:
+        attention_first = attention.status(
+            session, viewer(REVIEWER), "review_attention", 1
+        )
+    ordered_review_ids = sorted(original_times, reverse=True)
+    assert [i.item_key for i in attention_first.items] == [
+        f"{ordered_review_ids[0]}:pending"
+    ]
+    assert attention_first.has_more
+    review_position = (
+        attention_first.items[0].event_at,
+        "review_attention",
+        attention_first.items[0].item_key,
+    )
+    with session_factory.begin() as session:
+        claimed = session.get(ReviewItem, ordered_review_ids[0])
+        claimed.claimed_by, claimed.claimed_at = EDITOR, utc_now()
+    with session_factory() as session:
+        attention_rest = attention.status(
+            session, viewer(REVIEWER), "review_attention", 2, review_position
+        )
+    assert [i.item_key for i in attention_rest.items] == [
+        f"{review_id}:pending" for review_id in ordered_review_ids[1:]
+    ]
+    assert not attention_rest.has_more
+    with session_factory.begin() as session:
+        for review_id, (created_at, updated_at) in original_times.items():
+            review = session.get(ReviewItem, review_id)
+            review.claimed_by = review.claimed_at = None
+            review.created_at, review.updated_at = created_at, updated_at
+
     # Pending reviews are for any editor, the submitter included; a viewer
     # cannot decide and sees none.
     assert [key for _k, key, _t, _u in listed(REVIEWER)] == [
@@ -188,19 +237,115 @@ def test_builtin_kinds_follow_their_sources_without_announcing_undo(session_fact
                 user_id=owner_id, workspace_id=workspace_id, role="owner"
             )
         )
+        # The full join key starts with workspace UUID; its descending order
+        # deliberately opposes request-ID order across two workspaces.
+        another_workspace = Workspace(
+            id=UUID("ffffffff-ffff-ffff-ffff-fffffffffffe"),
+            slug=f"join-{uuid4().hex}",
+            title="Another workspace",
+            name="another",
+            owner_user_id=owner_id,
+        )
+        session.add(another_workspace)
+        session.flush()
+        session.add(
+            WorkspaceMembership(
+                user_id=owner_id, workspace_id=another_workspace.id, role="owner"
+            )
+        )
+        requested_at = utc_now()
         request = WorkspaceJoinRequest(
-            workspace_id=workspace_id, requester_user_id=requester_id
+            id=UUID("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+            workspace_id=workspace_id,
+            requester_user_id=requester_id,
+            requested_at=requested_at,
+        )
+        another_request = WorkspaceJoinRequest(
+            id=UUID("00000000-0000-0000-0000-000000000001"),
+            workspace_id=another_workspace.id,
+            requester_user_id=requester_id,
+            requested_at=requested_at,
         )
         token = ApiToken(
             user_id=requester_id,
             name="CI key",
             token_lookup_hash=uuid4().hex,
             hashed_token="x",
-            expires_at=utc_now() + timedelta(days=3),
+            expires_at=requested_at + timedelta(days=3),
         )
-        session.add_all([request, token])
+        newer_warning = ApiToken(
+            user_id=requester_id,
+            name="Newer warning",
+            token_lookup_hash=uuid4().hex,
+            hashed_token="x",
+            expires_at=requested_at + timedelta(days=6),
+        )
+        expired_token = ApiToken(
+            user_id=requester_id,
+            name="Expired key",
+            token_lookup_hash=uuid4().hex,
+            hashed_token="x",
+            expires_at=requested_at - timedelta(days=2),
+        )
+        session.add_all([request, another_request, token, newer_warning, expired_token])
         session.flush()
         join_key, token_key = f"{workspace_id}:{request.id}", str(token.id)
+
+    def account_viewer(user_id):
+        return InboxViewer(
+            ActorContext("human", str(user_id), user_id=user_id),
+            user_id,
+            AccountInbox(),
+        )
+
+    joins = inbox.registry.kind("account", "workspace_join").source
+    with session_factory() as session:
+        joins_first = joins.status(
+            session, account_viewer(owner_id), "workspace_join", 1
+        )
+    assert [i.item_key for i in joins_first.items] == [
+        f"{another_workspace.id}:{another_request.id}"
+    ]
+    assert joins_first.has_more
+    join_position = (
+        joins_first.items[0].event_at,
+        "workspace_join",
+        joins_first.items[0].item_key,
+    )
+    with session_factory.begin() as session:
+        session.get(WorkspaceJoinRequest, another_request.id).status = "cancelled"
+    with session_factory() as session:
+        joins_rest = joins.status(
+            session, account_viewer(owner_id), "workspace_join", 1, join_position
+        )
+    assert [i.item_key for i in joins_rest.items] == [join_key]
+    assert not joins_rest.has_more
+
+    # Expiring warnings use expires_at-warn_before as their event time;
+    # expired keys use expires_at. Sorting expiry alone reverses this page.
+    keys = inbox.registry.kind("account", "access_key_expiry").source
+    with session_factory() as session:
+        keys_first = keys.status(
+            session, account_viewer(requester_id), "access_key_expiry", 1
+        )
+    assert [i.item_key for i in keys_first.items] == [str(newer_warning.id)]
+    assert keys_first.has_more
+    key_position = (
+        keys_first.items[0].event_at,
+        "access_key_expiry",
+        keys_first.items[0].item_key,
+    )
+    with session_factory.begin() as session:
+        session.get(ApiToken, newer_warning.id).revoked_at = utc_now()
+    with session_factory() as session:
+        keys_rest = keys.status(
+            session, account_viewer(requester_id), "access_key_expiry", 2, key_position
+        )
+    assert [i.item_key for i in keys_rest.items] == [str(expired_token.id), token_key]
+    assert not keys_rest.has_more
+    with session_factory.begin() as session:
+        session.delete(session.get(ApiToken, newer_warning.id))
+        session.delete(session.get(ApiToken, expired_token.id))
 
     def listed(user_id, state="all"):
         actor = ActorContext("human", str(user_id), user_id=user_id)

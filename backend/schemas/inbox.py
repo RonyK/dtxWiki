@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from backend.schemas.common import RESTResponseBase
 
 InboxStateParam = Literal["all", "unread", "archived"]
+InboxTypeParam = Literal["all", "status", "message"]
 
 
 class InboxDisplayPayload(BaseModel):

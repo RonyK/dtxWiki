@@ -6,12 +6,9 @@ source supplies its items; each kind's resolver decides what the viewer sees;
 listeners react to written items. Table details stay in ``entries``.
 """
 
-import base64
-import binascii
-import json
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import datetime
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, Literal
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -25,14 +22,15 @@ from backend.services.inbox.base import (
     InboxKind,
     InboxListener,
     InboxMarkResult,
-    InboxOverflow,
     InboxPage,
+    InboxPosition,
     InboxScope,
     InboxSnapshot,
     InboxState,
     InboxViewer,
 )
 from backend.services.inbox.config import DEFAULT_INBOX_CONFIG, InboxListingConfig
+from backend.services.inbox.cursors import decode_cursor, encode_cursor, parse_position
 from backend.services.inbox.entries import InboxEntryRow
 from backend.services.inbox.registry import UNREGISTERED_DISPLAY, InboxRegistry
 from backend.services.read_errors import ReadNotFoundError, ReadValidationError
@@ -88,66 +86,124 @@ class InboxService:
         viewer: InboxViewer,
         *,
         state: InboxState = "all",
+        item_type: Literal["all", "status", "message"] = "all",
         cursor: str | None = None,
         limit: int | None = None,
     ) -> InboxPage:
-        """Status items come whole on the first page; stored items page by
-        keyset, reading ahead past items the viewer can no longer see.
+        """Merge bounded source pages into one chronological inbox page.
 
-        The Archived list pages every archived entry, computed items included,
-        newest archive first. Call on a fresh session: mark counts, scans and
-        marks are read from one database snapshot."""
+        Current items and stored messages share the same keyset boundary.
+        Archived rows retain their archive-time order and batched hydration.
+        """
 
         acquire_consistent_read_snapshot(session)
         if limit is None:
             limit = self.listing.page_size_default
+        if not 1 <= limit <= self.listing.page_size_max:
+            raise ReadValidationError("invalid inbox page size")
+        if item_type not in ("all", "status", "message"):
+            raise ReadValidationError("invalid inbox item type")
+        position = _decode_cursor(cursor, viewer, state, item_type) if cursor else None
         scope = viewer.scope
         kinds = self.registry.in_scope(scope.name)
-        status_items: list[InboxItem] = []
-        status_overflow: list[InboxOverflow] = []
-        if cursor is None:
-            for spec in self.registry.status_kinds(scope.name):
-                items, overflow = self._status(session, viewer, spec, state)
-                status_items.extend(items)
-                status_overflow.extend(overflow)
-            status_items.sort(key=_newest_first)
-
+        status_kinds = self.registry.status_kinds(scope.name)
+        status_names = [spec.name for spec in status_kinds]
         reopen = [name for name, spec in kinds.items() if spec.reopen_on_new_revision]
-        position = _decode_cursor(cursor) if cursor is not None else None
+        status_items: list[InboxItem] = []
         items: list[InboxItem] = []
-        last: InboxEntryRow | None = None
+        # Batch independently of the requested visible limit: limit=1 must
+        # not turn a long run of read marks into one source query per row.
+        budget = limit + self.listing.read_mark_scan_cap
         for _ in range(self.listing.stream_scan_batches):
-            rows = entries.message_page(
-                session,
-                scope,
-                viewer.user_id,
-                state=state,
-                reopen_kinds=reopen,
-                after=position,
-                limit=limit + 1,
-            )
-            resolved = self._resolve_rows(session, viewer, rows)
-            for row in rows:
-                if len(items) == limit:
-                    return InboxPage(
-                        status_items,
-                        status_overflow,
-                        items,
-                        _encode_cursor(last, state),
+            batch_size = min(max(limit, self.listing.page_size_default), budget)
+            candidates: list[tuple[InboxPosition, InboxSnapshot | InboxEntryRow]] = []
+            more = False
+            if state != "archived" and item_type != "message":
+                for spec in status_kinds:
+                    scan = spec.source.status(
+                        session, viewer, spec.name, batch_size, position
                     )
-                last = row
-                found = resolved.get((row.kind, row.item_key))
+                    more = more or scan.has_more
+                    candidates.extend(
+                        (
+                            _position(snapshot.event_at, spec.name, snapshot.item_key),
+                            snapshot,
+                        )
+                        for snapshot in scan.items
+                    )
+            if state == "archived" or item_type != "status":
+                rows = entries.message_page(
+                    session,
+                    scope,
+                    viewer.user_id,
+                    state=state,
+                    reopen_kinds=reopen,
+                    after=position,
+                    limit=batch_size + 1,
+                    item_type=item_type,
+                    status_kinds=status_names,
+                )
+                candidates.extend(
+                    (_position(*entries.list_position(row, state)), row) for row in rows
+                )
+            candidates.sort(key=lambda candidate: candidate[0], reverse=True)
+            more = more or len(candidates) > batch_size
+            batch = candidates[:batch_size]
+            if not batch:
+                if more:
+                    raise ValueError(
+                        "inbox source returned continuation without candidates"
+                    )
+                return InboxPage(status_items, [], items, None)
+            selected_rows = [
+                row for _, row in batch if not isinstance(row, InboxSnapshot)
+            ]
+            resolved = self._resolve_rows(session, viewer, selected_rows)
+            status_batches: dict[str, list[InboxSnapshot]] = {}
+            for (_, kind, _), candidate in batch:
+                if isinstance(candidate, InboxSnapshot):
+                    status_batches.setdefault(kind, []).append(candidate)
+            for kind, snapshots in status_batches.items():
+                for item in self._status_items(
+                    session, viewer, kinds[kind], state, snapshots
+                ):
+                    resolved[(kind, item.item_key)] = item
+            for at, candidate in batch:
+                found = resolved.get((at[1], at[2]))
                 if found is not None:
-                    snapshot, display = found
-                    spec = self.registry.kind(scope.name, row.kind)
-                    item = _item(spec, snapshot, row, display)
+                    if isinstance(found, InboxItem):
+                        item = found
+                    else:
+                        snapshot, display = found
+                        item = _item(
+                            self.registry.kind(scope.name, at[1]),
+                            snapshot,
+                            candidate,
+                            display,
+                        )
                     if _matches(item, state):
-                        items.append(item)
-            if len(rows) <= limit:
-                return InboxPage(status_items, status_overflow, items, None)
-            position = entries.list_position(last, state)
+                        if len(status_items) + len(items) == limit:
+                            return InboxPage(
+                                status_items,
+                                [],
+                                items,
+                                _encode_cursor(position, viewer, state, item_type),
+                            )
+                        (
+                            status_items
+                            if isinstance(candidate, InboxSnapshot)
+                            else items
+                        ).append(item)
+                # A filtered tail is consumed even after this page fills.
+                # Only an eligible following row requires another page.
+                position = at
+            if not more:
+                return InboxPage(status_items, [], items, None)
+            budget -= len(batch)
+            if budget <= 0:
+                break
         return InboxPage(
-            status_items, status_overflow, items, _encode_cursor(last, state)
+            status_items, [], items, _encode_cursor(position, viewer, state, item_type)
         )
 
     def mark(
@@ -204,54 +260,31 @@ class InboxService:
             session.flush()
         return InboxMarkResult(applied, _item(spec, current, entry, display))
 
-    def _status(
-        self, session: Session, viewer: InboxViewer, spec: InboxKind, state: InboxState
-    ) -> tuple[list[InboxItem], list[InboxOverflow]]:
-        """A kind's current items for this view, at most the per-kind limit.
-
-        The source applies who may see an item before its limit, so only the
-        viewer's own marks can hide a candidate. Every candidate a mark hides
-        has a mark row, so ask for one more candidate per hiding mark, up to
-        a cap. The overflow total is the source's own count.
-        """
-
-        if state == "archived":
-            # Archived items, computed ones included, page with the messages.
-            return [], []
-        shown = self.listing.status_items_per_kind
-        extra = entries.count_hidden_marks(
-            session,
-            viewer.scope,
-            viewer.user_id,
-            spec.name,
-            state=state,
-            cap=self.listing.read_mark_scan_cap,
-        )
-        wanted = shown + extra
-        scan = spec.source.status(session, viewer, spec.name, wanted)
-        found = list(scan.items)[:wanted]
-        if not found:
-            return [], [InboxOverflow(spec.name, scan.total)] if scan.total else []
+    def _status_items(
+        self,
+        session: Session,
+        viewer: InboxViewer,
+        spec: InboxKind,
+        state: InboxState,
+        snapshots: Sequence[InboxSnapshot],
+    ) -> list[InboxItem]:
         marks = entries.marks_for(
             session,
             viewer.scope,
             viewer.user_id,
             spec.name,
-            [snapshot.item_key for snapshot in found],
+            [snapshot.item_key for snapshot in snapshots],
         )
-        displays = self._resolve(session, viewer, spec, found)
-        items = [
+        displays = self._resolve(session, viewer, spec, snapshots)
+        return [
             item
-            for snapshot in found
+            for snapshot in snapshots
             if (display := displays.get(snapshot.item_key)) is not None
             and _matches(
                 item := _item(spec, snapshot, marks.get(snapshot.item_key), display),
                 state,
             )
         ]
-        more = scan.total > len(found) or len(items) > shown
-        overflow = [InboxOverflow(spec.name, scan.total)] if more else []
-        return items[:shown], overflow
 
     def _resolve_rows(
         self, session: Session, viewer: InboxViewer, rows: Sequence[InboxEntryRow]
@@ -318,21 +351,55 @@ def _matches(item: InboxItem, state: InboxState) -> bool:
     return not item.archived and (state == "all" or item.unread)
 
 
-def _newest_first(item: InboxItem) -> tuple[float, str, str]:
-    stamp = item.event_at.timestamp() if item.event_at is not None else 0.0
-    return (-stamp, item.kind, item.item_key)
+def _position(at: datetime | None, kind: str, item_key: str) -> InboxPosition:
+    moment = at or datetime.min.replace(tzinfo=UTC)
+    moment = (
+        moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment.astimezone(UTC)
+    )
+    return moment, kind, item_key
 
 
-def _encode_cursor(entry: InboxEntryRow, state: InboxState) -> str:
-    at, kind, item_key = entries.list_position(entry, state)
-    raw = json.dumps([at.isoformat(), kind, item_key])
-    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+def _cursor_scope(viewer: InboxViewer) -> dict[str, Any]:
+    return {
+        "name": viewer.scope.name,
+        "owner": {
+            key: str(value) for key, value in viewer.scope.owner(viewer.user_id).items()
+        },
+    }
 
 
-def _decode_cursor(cursor: str) -> tuple[datetime, str, str]:
-    try:
-        raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
-        event_at, kind, item_key = json.loads(raw)
-        return datetime.fromisoformat(event_at), str(kind), str(item_key)
-    except (binascii.Error, ValueError, TypeError) as exc:
-        raise ReadValidationError("invalid inbox cursor") from exc
+def _encode_cursor(
+    position: InboxPosition,
+    viewer: InboxViewer,
+    state: InboxState,
+    item_type: str,
+) -> str:
+    at, kind, item_key = position
+    return encode_cursor(
+        {
+            "v": 2,
+            "scope": _cursor_scope(viewer),
+            "state": state,
+            "item_type": item_type,
+            "after": [at.isoformat(), kind, item_key],
+        }
+    )
+
+
+def _decode_cursor(
+    cursor: str, viewer: InboxViewer, state: InboxState, item_type: str
+) -> InboxPosition:
+    payload = decode_cursor(cursor)
+    # Released stored-message cursors had only this three-element position.
+    if isinstance(payload, list):
+        return parse_position(payload)
+    if (
+        not isinstance(payload, dict)
+        or type(payload.get("v")) is not int
+        or payload.get("v") != 2
+        or payload.get("scope") != _cursor_scope(viewer)
+        or payload.get("state") != state
+        or payload.get("item_type") != item_type
+    ):
+        raise ReadValidationError("invalid inbox cursor")
+    return parse_position(payload.get("after"))

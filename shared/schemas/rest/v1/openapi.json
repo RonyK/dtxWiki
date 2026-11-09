@@ -32578,6 +32578,21 @@
           },
           {
             "in": "query",
+            "name": "item_type",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "status",
+                "message"
+              ],
+              "title": "Item Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "cursor",
             "required": false,
             "schema": {
@@ -32597,7 +32612,7 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 30,
+              "default": 20,
               "maximum": 100,
               "minimum": 1,
               "title": "Limit",
@@ -40729,6 +40744,21 @@
           },
           {
             "in": "query",
+            "name": "item_type",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "status",
+                "message"
+              ],
+              "title": "Item Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "cursor",
             "required": false,
             "schema": {
@@ -40748,7 +40778,7 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 30,
+              "default": 20,
               "maximum": 100,
               "minimum": 1,
               "title": "Limit",

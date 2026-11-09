@@ -17218,6 +17218,7 @@ export interface operations {
         parameters: {
             query?: {
                 state?: "all" | "unread" | "archived";
+                item_type?: "all" | "status" | "message";
                 cursor?: string | null;
                 limit?: number;
             };
@@ -22197,6 +22198,7 @@ export interface operations {
         parameters: {
             query?: {
                 state?: "all" | "unread" | "archived";
+                item_type?: "all" | "status" | "message";
                 cursor?: string | null;
                 limit?: number;
             };

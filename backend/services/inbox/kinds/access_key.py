@@ -20,6 +20,7 @@ from backend.services.inbox.base import (
     ComputedScan,
     InboxDisplay,
     InboxKind,
+    InboxPosition,
     InboxSnapshot,
     InboxViewer,
 )
@@ -27,6 +28,7 @@ from backend.services.inbox.config import AccessKeyExpiryConfig
 from backend.services.inbox.links import ACCESS_KEYS_PATH
 from backend.services.inbox.scopes import AccountInbox
 from backend.services.inbox.sources import ComputedSource
+from backend.services.inbox.status_pagination import chronological_after, uuid_key
 from backend.utils.uuid import parse_uuid_or_none
 
 ACCESS_KEY_EXPIRY = "access_key_expiry"
@@ -66,21 +68,54 @@ class _ExpiringKeys:
             },
         )
 
-    def scan(self, session: Session, viewer: InboxViewer, limit: int) -> ComputedScan:
+    def scan(
+        self,
+        session: Session,
+        viewer: InboxViewer,
+        limit: int,
+        after: InboxPosition | None = None,
+    ) -> ComputedScan:
         now = utc_now()
         conditions = self._conditions(viewer, now)
         total = session.scalar(
             select(func.count()).select_from(ApiToken).where(*conditions)
         )
-        tokens = session.scalars(
-            select(ApiToken)
-            .where(*conditions)
-            .order_by(ApiToken.expires_at.asc(), ApiToken.id.asc())
-            .limit(limit)
-        ).all()
-        return ComputedScan(
-            [self._snapshot(token, now) for token in tokens], total or 0
-        )
+        snapshots = []
+        # Each stage is monotone in expires_at. Merge two bounded queries
+        # rather than subtracting intervals in SQL, which loses subsecond
+        # precision on SQLite and differs from PostgreSQL date arithmetic.
+        for expired in (True, False):
+            branch_after = after
+            if after is not None and not expired:
+                try:
+                    branch_after = (
+                        after[0] + self.config.warn_before,
+                        after[1],
+                        after[2],
+                    )
+                except OverflowError:
+                    # Every representable expiry precedes this boundary.
+                    branch_after = None
+            tokens = session.scalars(
+                select(ApiToken)
+                .where(
+                    *conditions,
+                    ApiToken.expires_at <= now
+                    if expired
+                    else ApiToken.expires_at > now,
+                    chronological_after(
+                        ApiToken.expires_at,
+                        ACCESS_KEY_EXPIRY,
+                        branch_after,
+                        lambda key: ApiToken.id < uuid_key(key),
+                    ),
+                )
+                .order_by(ApiToken.expires_at.desc(), ApiToken.id.desc())
+                .limit(limit + 1)
+            ).all()
+            snapshots.extend(self._snapshot(token, now) for token in tokens)
+        snapshots.sort(key=lambda item: (item.event_at, item.item_key), reverse=True)
+        return ComputedScan(snapshots[:limit], total or 0, len(snapshots) > limit)
 
     def lookup(
         self, session: Session, viewer: InboxViewer, item_keys: Sequence[str]
