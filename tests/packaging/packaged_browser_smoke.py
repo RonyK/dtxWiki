@@ -105,7 +105,7 @@ def isolated_server_env(data_dir: Path) -> dict[str, str]:
     env.pop("PYTHONPATH", None)
     env.pop("PYTHONHOME", None)
     env["DTXWIKI_DATA_DIR"] = str(data_dir)
-    # Exercise the shipped security policy, including Blob/module Workers.
+    # Exercise the shipped security policy, including same-origin module Workers.
     env["DTXWIKI_FORCE_SECURITY_HEADERS"] = "true"
     return env
 
@@ -173,7 +173,7 @@ const apiRequests = [];
 const failedRequests = [];
 const pageErrors = [];
 const consoleErrors = [];
-const collisionResponses = [];
+const layoutResponses = [];
 const workerUrls = [];
 const baseUrl = `http://127.0.0.1:${port}`;
 page.on('request', (request) => {
@@ -193,8 +193,8 @@ page.on('console', (message) => {
 page.on('worker', (worker) => workerUrls.push(worker.url()));
 page.context().on('response', (response) => {
   const path = new URL(response.url()).pathname;
-  if (/\/forceAtlas2Collision\.worker-[^/]+\.js$/.test(path)) {
-    collisionResponses.push({ url: response.url(), status: response.status(),
+  if (/\/d3Layout\.worker-[^/]+\.js$/.test(path)) {
+    layoutResponses.push({ url: response.url(), status: response.status(),
       contentType: response.headers()['content-type'] ?? '' });
   }
 });
@@ -263,13 +263,16 @@ for (const { name, group } of [
   const checkbox = page.getByRole('checkbox', { name });
   await checkbox.check();
   const card = page.locator('.policy-card').filter({ has: checkbox });
-  const save = card.getByRole('button', { name: /^(Save changes|변경사항 저장)$/ });
-  const saved = page.waitForResponse(response =>
-    new URL(response.url()).pathname === `${workspacePath}/settings/policies/batch`
-    && response.request().method() === 'PATCH'
-    && response.request().postDataJSON()?.group === group);
-  await save.click();
-  expect((await saved).ok()).toBeTruthy();
+  const save = card.getByRole('button', { name: /^(Save|저장)$/ });
+  await expect(save).toBeEnabled();
+  const [saved] = await Promise.all([
+    page.waitForResponse(response =>
+      new URL(response.url()).pathname === `${workspacePath}/settings/policies/batch`
+      && response.request().method() === 'PATCH'
+      && response.request().postDataJSON()?.group === group),
+    save.click(),
+  ]);
+  expect(saved.ok()).toBeTruthy();
   await expect(save).toBeDisabled();
 }
 // New workspaces include a real active Agent page. Read its identity through
@@ -301,21 +304,17 @@ for (let index = 0; index < 8; index++) {
     });
   documents.push(created);
 }
-// Use the real application's workspace selection hint, resolved against its
-// authenticated workspace list. No response, Worker or coordinate is mocked.
-await page.evaluate(({ id, slug }) => {
-  localStorage.setItem('dtxwiki.selectedWorkspaceId', id);
-  localStorage.setItem('dtxwiki.selectedWorkspaceSlug', slug);
-}, workspace);
+// Navigate with the authored workspace identity; the unscoped /graph alias
+// can resolve the user's default workspace before selection hints are read.
 const overviewPromise = page.waitForResponse(response =>
   new URL(response.url()).pathname === `${workspacePath}/graph/overview/query`
   && response.request().method() === 'POST');
-const navigation = await page.goto(`${baseUrl}/graph`);
+const navigation = await page.goto(`${baseUrl}/workspaces/${workspace.id}/graph`);
 if (!navigation?.ok()) throw new Error('packaged Graph View document failed to load');
 const csp = navigation.headers()['content-security-policy'] ?? '';
 if (!csp.split(';').some(directive => /^\s*worker-src\s/.test(directive)
-  && directive.includes("'self'") && directive.includes('blob:'))) {
-  throw new Error('packaged Graph View has no shipped Blob/module Worker CSP');
+  && directive.trim() === "worker-src 'self'")) {
+  throw new Error('packaged Graph View has no shipped same-origin module Worker CSP');
 }
 const overviewResponse = await overviewPromise;
 if (!overviewResponse.ok()) {
@@ -346,30 +345,28 @@ expect(scene.edges.every(edge => edge.relation_kind === 'wikilink'
 const canvas = page.getByTestId('graph-canvas');
 await expect(canvas.locator('..')).toHaveAttribute(
   'data-renderer-status', 'ready', { timeout: 30000 });
-await expect(canvas).toHaveAttribute('data-map-physics', 'force-atlas2-worker');
+await expect(canvas).toHaveAttribute('data-map-physics', 'd3-worker');
 await expect(canvas.locator('canvas')).toHaveCount(1);
 await expect.poll(async () =>
   Number(await canvas.getAttribute('data-map-layout-ticks')),
 { timeout: 30000 }).toBeGreaterThan(0);
 const readPublishedLayout = () => canvas.evaluate(element => ({
   phase: element.dataset.mapLayoutPhase,
-  iterations: Number(element.dataset.mapLayoutIterations),
-  structureIterations: Number(element.dataset.mapLayoutStructureIterations),
-  contactZoom: Number(element.dataset.mapContactReferenceZoom),
+  ticks: Number(element.dataset.mapLayoutTicks),
 }));
 await expect.poll(async () => {
   const state = await readPublishedLayout();
-  return state.phase === 'contact' && state.iterations > state.structureIterations
-    && state.contactZoom > 0 && Number.isFinite(state.contactZoom);
+  return ['live', 'cooled'].includes(state.phase) && state.ticks > 0;
 }, { timeout: 45000 }).toBe(true);
 await expect(page.getByTestId('workspace-map-layout-status')).toHaveCount(0);
 // The default canvas hides the unlinked Agent; every Context is in the chain.
 expect(Number(await canvas.getAttribute('data-map-node-count'))).toBe(documents.length);
 expect(Number(await canvas.getAttribute('data-map-edge-count')))
   .toBe(documents.length - 1);
-expect(workerUrls.some(url => url.startsWith('blob:'))).toBe(true);
-expect(collisionResponses.length).toBeGreaterThan(0);
-expect(collisionResponses.every(response => response.status === 200
+expect(workerUrls.some(url =>
+  /\/d3Layout\.worker-[^/]+\.js$/.test(new URL(url).pathname))).toBe(true);
+expect(layoutResponses.length).toBeGreaterThan(0);
+expect(layoutResponses.every(response => response.status === 200
   && new URL(response.url).origin === baseUrl
   && /javascript/.test(response.contentType))).toBe(true);
 if (pageErrors.length > 0) {
@@ -395,7 +392,7 @@ const sameOrigin = apiRequests.filter((url) => url.startsWith(expectedPrefix));
 if (sameOrigin.length === 0) {
   throw new Error(`no same-origin packaged API requests: ${apiRequests.join(', ')}`);
 }
-console.log(JSON.stringify({ apiRequests: sameOrigin, collisionResponses,
+console.log(JSON.stringify({ apiRequests: sameOrigin, layoutResponses,
   graph: { nodes: scene.nodes.length, originalRelations: scene.edges.length,
     physics: await canvas.getAttribute('data-map-physics'),
     ...await readPublishedLayout() },

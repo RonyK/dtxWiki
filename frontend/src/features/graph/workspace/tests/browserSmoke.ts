@@ -5,15 +5,14 @@ import { workspaceMapCommunityIdentityKey } from "../../map/communityJob";
 import type { GraphViewport } from "../../shared/rendererTypes";
 import { createWorkspaceCosmosAdapter } from "../cosmosAdapter";
 import { detectWorkspaceMapWebGL } from "../webglSupport";
-import type { WorkspaceForceAtlas2Units } from "../forceAtlas2Units";
 import { WORKSPACE_MAP_PC_10K_BUDGET } from "../../shared/workspaceMapBudget";
-import { workspaceNominalGlyphRadiusCss } from "../forceAtlas2Units";
+import { workspaceNominalGlyphRadiusCss } from "../../shared/workspaceGlyphGeometry";
 import { measureNativeGeometry } from "./nativeGeometry";
 import { assertPcNativePositions, hasPcNativeMovement, observePcNativeFrame, type PcNativeDiagnostics, type PcNativeFrame, type PcNativeSource } from "./pcNativeObservation";
 
 type InitialCameraObservation = {
   fits: Array<{ at: number; points: number; before: GraphViewport | null }>;
-  contactCanonicalFits: Array<{ at: number; points: number }>;
+  settledCanonicalFits: Array<{ at: number; points: number }>;
   viewportEvents: number;
   cancellation: { before: GraphViewport | null; after: GraphViewport | null;
     positionsBefore: number[]; positionsAfter: number[]; echoes: number } | null;
@@ -133,7 +132,6 @@ declare global {
         running: boolean;
         layoutRunning: boolean;
         layoutTicks: number;
-        layoutUnits: WorkspaceForceAtlas2Units | null;
         pinned: number[];
         glError: number;
       };
@@ -241,7 +239,7 @@ let nativePositionReads = 0;
 let remountCaptures = 0;
 const observedTicks = new WeakSet<Graph>();
 let calibrationViewport: { width: number; height: number } | null = null;
-const initialCamera: InitialCameraObservation = { fits: [], contactCanonicalFits: [], viewportEvents: 0, cancellation: null };
+const initialCamera: InitialCameraObservation = { fits: [], settledCanonicalFits: [], viewportEvents: 0, cancellation: null };
 let observeAutomaticFit: (() => void) | null = null;
 if (searchFixture || interactionFixture) {
   if (pcScene) {
@@ -306,8 +304,8 @@ if (searchFixture || interactionFixture) {
     // Observation after the real SDK submission, before its queued D3 Fit.
     // Only the new progressive initial Fits retain simulation permission.
     if (args[4] === true) observeAutomaticFit?.();
-    if (args[4] === false && document.getElementById("stage")?.dataset.mapLayoutPhase === "contact") {
-      initialCamera.contactCanonicalFits.push({ at: performance.now(), points: args[0].length / 2 });
+    if (args[4] === false && ["live", "cooled"].includes(document.getElementById("stage")?.dataset.mapLayoutPhase ?? "")) {
+      initialCamera.settledCanonicalFits.push({ at: performance.now(), points: args[0].length / 2 });
     }
     return result;
   };
@@ -555,7 +553,6 @@ async function main() {
           running: observedGraph.current!.isSimulationRunning,
           layoutRunning: stage.dataset.mapLayoutRunning === "true",
           layoutTicks: Number(stage.dataset.mapLayoutTicks ?? 0),
-          layoutUnits: coordinates?.forceAtlas2Units ?? null,
           pinned: nativeSceneState(observedGraph.current!).pinned,
           glError: gl.getError(),
         };

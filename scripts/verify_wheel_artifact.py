@@ -40,12 +40,12 @@ from packaging.utils import (
 )
 from packaging.version import InvalidVersion, Version
 
-# This is Vite's emitted URL literal for our one module collision Worker,
+# This is Vite's emitted URL literal for our one shared D3 module Worker,
 # not a general JavaScript/import parser. Match its quoted content hash so an
 # unrelated old Worker file cannot stand in for the adapter's required asset.
-_COLLISION_WORKER_URL = re.compile(
+_D3_WORKER_URL = re.compile(
     r'new\s+URL\(\s*(?P<quote>["\'])'
-    r"(?P<path>/assets/forceAtlas2Collision\.worker-[A-Za-z0-9_-]+\.js)"
+    r"(?P<path>/assets/d3Layout\.worker-[A-Za-z0-9_-]+\.js)"
     r"(?P=quote)\s*,\s*import\.meta\.url\s*\)"
 )
 
@@ -335,16 +335,15 @@ def _check_graph_release_bundle(root: Path) -> list[str]:
     failures: list[str] = []
     # The module Worker is lazy-loaded from the map adapter, not index.html.
     # A missing package-data entry used to pass the direct-entry check above
-    # and fail only when the 2K layout reached contact projection. Check both
-    # wheel and sdist here; the upstream ForceAtlas2 Blob Worker is embedded in
-    # the adapter and does not have a separate file to require.
+    # and fail only when the 2K layout started. Check both wheel and sdist: the
+    # shared D3 simulation is a separate module asset requested by the proxy.
     if not any(
         path.is_file() and path.stat().st_size > 0
-        for path in (static / "assets").glob("forceAtlas2Collision.worker-*.js")
+        for path in (static / "assets").glob("d3Layout.worker-*.js")
     ):
         failures.append(
-            "backend/static/assets/forceAtlas2Collision.worker-*.js is missing "
-            "or empty (the 2K layout requires its module collision Worker)"
+            "backend/static/assets/d3Layout.worker-*.js is missing "
+            "or empty (the 2K layout requires its shared D3 module Worker)"
         )
     failures.extend(_check_2k_worker_references(static))
     return failures
@@ -366,11 +365,11 @@ def _check_2k_worker_references(static: Path) -> list[str]:
             continue
         references.update(
             (javascript.relative_to(static), Path(match["path"].lstrip("/")))
-            for match in _COLLISION_WORKER_URL.finditer(source)
+            for match in _D3_WORKER_URL.finditer(source)
         )
     if not references:
         failures.append(
-            "backend/static/assets JavaScript has no 2K collision Worker URL "
+            "backend/static/assets JavaScript has no 2K D3 Worker URL "
             "reference (expected Vite's new URL(...,import.meta.url) literal)"
         )
     for javascript, reference in sorted(references):

@@ -1325,7 +1325,10 @@ export function WorkspaceGraphScreen() {
           }}
           onToggleLayout={() => {
             if (!sceneIsCurrent()) return;
-            setLayoutPaused((paused) => !paused);
+            const paused = !layoutPaused;
+            if (paused) canvasRef.current?.pauseLayout();
+            else canvasRef.current?.resumeLayout();
+            setLayoutPaused(paused);
           }}
           reducedMotion={reducedMotion}
           staticLayout={staticLayout}

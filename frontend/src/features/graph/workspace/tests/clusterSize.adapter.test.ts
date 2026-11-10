@@ -33,22 +33,19 @@ const { graph, createNativeGraph, cpu } = vi.hoisted(() => {
     }
     return graph;
   });
-  // The official 2K Worker is replaced by a recorder: its input is what the layout is made of.
+  // The shared D3 Worker is replaced by a recorder: its input is what the layout is made of.
   const cpu = { inputs: [] as Array<Record<string, unknown>> };
   return { graph, createNativeGraph, cpu };
 });
 
 vi.mock("../cosmosNative", () => ({ NativeGraph: createNativeGraph }));
 vi.mock("../webglSupport", () => ({ detectWorkspaceMapWebGL: () => ({ supported: true }) }));
-vi.mock("../forceAtlas2WorkerLayout", () => ({
-  createWorkspaceForceAtlas2WorkerLayout: vi.fn((input: Record<string, unknown>) => {
+vi.mock("../../shared/physics/d3WorkerLayout", () => ({
+  createD3WorkerLayout: vi.fn((input: Record<string, unknown>) => {
     cpu.inputs.push(input);
     return {
-      start: vi.fn(), stop: vi.fn(), setPositions: vi.fn(), destroy: vi.fn(), isRunning: () => true,
-      getProgress: vi.fn(() => input.progress ?? Object.freeze({
-        profile: "gephi-lite-2k-v1", phase: "structure", iterations: 0, structureIterations: 0, transitionReason: null,
-      })),
-      getContactUnits: vi.fn(() => input.contactUnits),
+      resume: vi.fn(), pause: vi.fn(), setPositions: vi.fn(), destroy: vi.fn(), isRunning: () => true,
+      setReducedMotion: vi.fn(),
     };
   }),
 }));
@@ -148,7 +145,7 @@ async function run(input: WorkspaceMapColumns, options: RunOptions) {
   const result = {
     physics: container.dataset.mapPhysics,
     workerInput: stand(cpu.inputs.at(-1)),
-    layoutBasis: stand({ force: snapshot?.forceBasis, collision: snapshot?.collisionBasis, units: snapshot?.forceAtlas2Units }),
+    layoutBasis: stand({ force: snapshot?.forceBasis, collision: snapshot?.collisionBasis }),
     configs: stand(graph.setConfigPartial.mock.calls.map(([partial]) => partial)),
     radiiCalls: stand(radiiCalls),
     lastRadii: radiiCalls.filter((value): value is Float32Array => value !== null).at(-1),
@@ -178,9 +175,9 @@ async function withAndWithoutCounts(count: number, options: RunOptions) {
 }
 
 describe("Aggregated Map: cluster emphasis is render-only", () => {
-  it("hands the official 2K Worker the same input with and without cluster counts, and draws the emphasised sizes", async () => {
+  it("hands the shared D3 Worker the same input with and without cluster counts, and draws the emphasised sizes", async () => {
     const { plain, emphasised } = await withAndWithoutCounts(2_000, { reducedMotion: false });
-    expect(emphasised.physics).toBe("force-atlas2-worker");
+    expect(emphasised.physics).toBe("d3-worker");
     expect(plain.workerInput).toBeDefined();
   });
 

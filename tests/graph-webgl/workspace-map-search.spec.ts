@@ -25,10 +25,16 @@ test("2k Cosmos matching, no-match and cleared search preserve GPU coordinates a
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   await page.setViewportSize({ width: 1100, height: 760 });
   await page.goto(`${origin}/src/features/graph/workspace/tests/browserSmoke.html?geometry=2000&theme=light&motion=reduce&topology=links&search=stability`);
-  await page.waitForFunction(() => window.__workspaceMapSmoke?.status !== "loading");
+  await page.waitForFunction(() => Boolean(window.__workspaceMapSmoke && window.__workspaceMapSmoke.status !== "loading"));
   expect(await page.evaluate(() => window.__workspaceMapSmoke?.status)).toBe("ready");
   const canvas = page.locator("#stage canvas");
   await expect(canvas).toHaveCount(1);
+  // Renderer readiness precedes the asynchronous reduced-motion D3 solve.
+  // Search invariance starts from its final published geometry, not phyllotaxis.
+  await expect(page.locator("#stage")).toHaveAttribute("data-map-layout-phase", /^(live|cooled)$/, { timeout: 30_000 });
+  await expect.poll(async () => Number(await page.locator("#stage").getAttribute("data-map-layout-ticks")),
+    { timeout: 30_000 }).toBeGreaterThan(0);
+  await expect(page.locator("#stage")).toHaveAttribute("data-map-layout-running", "false");
   const before = await page.evaluate(async () => {
     window.__workspaceMapSearch!.zoom();
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));

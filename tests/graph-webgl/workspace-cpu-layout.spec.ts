@@ -11,12 +11,13 @@ let server: ViteDevServer;
 let origin: string;
 
 test.beforeAll(async () => {
-  // Use the deployed application's actual CSP, not a dev-only blob exception.
+  // Use the deployed application's actual CSP, only same-origin module Workers.
   const source = await readFile("backend/api/middleware/security_headers.py", "utf8");
   const block = source.match(/"content-security-policy": \(([\s\S]*?)\n {4}\),/);
   if (!block) throw new Error("Application CSP was not found");
   const csp = [...block[1].matchAll(/"([^"]*)"/g)].map(match => match[1]).join("");
-  expect(csp).toContain("worker-src 'self' blob:");
+  expect(csp).toContain("worker-src 'self';");
+  expect(csp).not.toContain("blob:");
   expect(csp).toContain("script-src 'self';");
   expect(csp).not.toContain("unsafe-eval");
   server = await createServer({
@@ -31,14 +32,17 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => { await server?.close(); });
 
-test("official CPU layout preserves an actual pointer drag pin through a fresh Worker resume", async ({ page }, testInfo) => {
+test("shared D3 layout preserves an actual pointer drag pin through a Worker resume", async ({ page }, testInfo) => {
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`${origin}/src/features/graph/workspace/tests/browserSmoke.html?geometry=2000&theme=light&motion=normal&topology=links&interaction=targets`);
-  await page.waitForFunction(() => Number(document.getElementById("stage")?.dataset.mapLayoutTicks) >= 3);
-  await expect(page.locator("#stage")).toHaveAttribute("data-map-layout-phase", "contact", { timeout: 45_000 });
-  const contactZoom = await page.locator("#stage").getAttribute("data-map-contact-reference-zoom");
-  expect(Number(contactZoom)).toBeGreaterThan(0);
+  // The bounded cold solve may already be cooled. Explicit Resume owns the
+  // live phase exercised below; readiness does not require continued motion.
+  await page.waitForFunction(() => Number(document.getElementById("stage")?.dataset.mapLayoutTicks) >= 1);
+  const initialTicks = await page.locator("#stage").getAttribute("data-map-layout-ticks");
+  await page.evaluate(() => window.__workspaceMapInteraction!.resume());
+  await page.waitForFunction(previous => Number(document.getElementById("stage")?.dataset.mapLayoutTicks) > Number(previous) + 2, initialTicks);
+  await expect(page.locator("#stage")).toHaveAttribute("data-map-layout-phase", "live");
   await page.evaluate(() => { window.__workspaceMapInteraction!.stop(); window.__workspaceMapInteraction!.fit(); });
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const target = await page.evaluate(() => window.__workspaceMapInteraction!.dragTarget());
@@ -68,13 +72,12 @@ test("official CPU layout preserves an actual pointer drag pin through a fresh W
     .toEqual(pinned.canonicalPositions.slice(target.index * 2, target.index * 2 + 2));
   expect(resumed.canonicalPositions).not.toEqual(pinned.canonicalPositions);
   expect(resumed.running).toBe(false);
-  await expect(page.locator("#stage")).toHaveAttribute("data-map-contact-reference-zoom", contactZoom!);
   expect(resumed.glError).toBe(0);
   await evidenceScreenshot(page, testInfo, "cpu-2k-native-drag-pin.png");
 });
 
 // The CSP and Worker protocol are viewport-independent; desktop pointer drag is covered above.
-test("official CPU Worker draws 2K with GPU physics off under production CSP at mobile viewport", async ({ page }, testInfo) => {
+test("shared D3 Worker draws 2K with GPU physics off under production CSP at mobile viewport", async ({ page }, testInfo) => {
   test.setTimeout(60_000);
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -84,15 +87,15 @@ test("official CPU Worker draws 2K with GPU physics off under production CSP at 
   await page.waitForFunction(() => Boolean(window.__workspaceMapSmoke && window.__workspaceMapSmoke.status !== "loading"));
   expect(await page.evaluate(() => window.__workspaceMapSmoke?.status)).toBe("ready");
   await expect.poll(() => page.evaluate(() => ({ physics: document.getElementById("stage")?.dataset.mapPhysics,
-    error: window.__workspaceMapSmoke?.runtimeError ?? null }))).toEqual({ physics: "force-atlas2-worker", error: null });
-  await page.waitForFunction(() => Number(document.getElementById("stage")?.dataset.mapLayoutTicks) >= 3);
-  await expect(page.locator("#stage")).toHaveAttribute("data-map-layout-phase", "contact", { timeout: 45_000 });
-  const contactTicks = await page.locator("#stage").getAttribute("data-map-layout-ticks");
-  // These later publications require the real module collision Worker to
-  // return, and its projected XY to feed the official next matrix under CSP.
-  await page.waitForFunction(ticks => Number(document.getElementById("stage")?.dataset.mapLayoutTicks) > Number(ticks) + 2, contactTicks);
-  const contactZoom = await page.locator("#stage").getAttribute("data-map-contact-reference-zoom");
-  expect(Number(contactZoom)).toBeGreaterThan(0);
+    error: window.__workspaceMapSmoke?.runtimeError ?? null }))).toEqual({ physics: "d3-worker", error: null });
+  // Exercise a user-requested live Worker after its completed static solve.
+  await page.waitForFunction(() => Number(document.getElementById("stage")?.dataset.mapLayoutTicks) >= 1);
+  const initialTicks = await page.locator("#stage").getAttribute("data-map-layout-ticks");
+  await page.evaluate(() => window.__workspaceMapInteraction!.resume());
+  await page.waitForFunction(previous => Number(document.getElementById("stage")?.dataset.mapLayoutTicks) > Number(previous) + 2, initialTicks);
+  await expect(page.locator("#stage")).toHaveAttribute("data-map-layout-phase", "live");
+  const liveTicks = await page.locator("#stage").getAttribute("data-map-layout-ticks");
+  await page.waitForFunction(ticks => Number(document.getElementById("stage")?.dataset.mapLayoutTicks) > Number(ticks) + 2, liveTicks);
   const live = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
   expect(live.running, "the native GPU force pipeline must stay off").toBe(false);
   expect(live.canonicalPositions).toHaveLength(4000);
@@ -122,7 +125,6 @@ test("official CPU Worker draws 2K with GPU physics off under production CSP at 
   expect(resumed.canonicalPositions.slice(2)).not.toEqual(pinned.canonicalPositions.slice(2));
   expect(resumed.running).toBe(false);
   expect(resumed.pinned).toContain(0);
-  await expect(page.locator("#stage")).toHaveAttribute("data-map-contact-reference-zoom", contactZoom!);
 
   await page.evaluate(() => { window.__workspaceMapInteraction!.reduce(true); window.__workspaceMapInteraction!.resume(); });
   const reduced = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());

@@ -102,15 +102,15 @@ vi.mock("../workspace/WorkspaceMapCanvas", async () => {
         if (previousPaused.current === layoutPaused) return;
         previousPaused.current = layoutPaused;
         if (layoutPaused) canvasPauseMock();
-        else canvasResumeMock();
+        else canvasResumeMock(false);
       }, [layoutPaused]);
       React.useImperativeHandle(ref, () => ({
         centerOn: canvasCenterOnMock,
         fit: vi.fn(),
-        pauseLayout: canvasPauseMock,
+        pauseLayout: () => { previousPaused.current = true; canvasPauseMock(); },
         pin: vi.fn(() => null),
         reset: vi.fn(),
-        resumeLayout: canvasResumeMock,
+        resumeLayout: () => { previousPaused.current = false; canvasResumeMock(); },
         setViewport: vi.fn(),
         zoomIn: vi.fn(),
         zoomOut: vi.fn(),
@@ -1173,8 +1173,10 @@ describe("WorkspaceGraphScreen", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Pause layout" }));
     expect(screen.getByRole("button", { name: "Resume layout" })).toBeInTheDocument();
+    expect(canvasPauseMock).toHaveBeenCalledExactlyOnceWith();
     fireEvent.click(screen.getByRole("button", { name: "Resume layout" }));
     expect(screen.getByRole("button", { name: "Pause layout" })).toBeInTheDocument();
+    expect(canvasResumeMock).toHaveBeenCalledExactlyOnceWith();
     fireEvent.click(screen.getByRole("button", { name: "Pause layout" }));
     fireEvent.click(screen.getByRole("button", { name: "Reset viewport, pins, and selection" }));
     expect(screen.getByRole("button", { name: "Pause layout" })).toBeInTheDocument();

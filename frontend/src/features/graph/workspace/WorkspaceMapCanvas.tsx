@@ -182,14 +182,14 @@ export const WorkspaceMapCanvas = forwardRef<GraphCanvasHandle, WorkspaceMapCanv
       const visible = new Set(columnsRef.current.nodeIds);
       const next = new Set(pinnedIdsRef.current.filter((id) => visible.has(id)));
       for (const id of appliedPinsRef.current.keys()) {
-        if (!next.has(id)) adapter.pin(id, false);
+        if (!next.has(id)) adapter.pin(id, false, undefined, { reconcile: true });
       }
       const applied = new Map<string, GraphPoint | null>();
       for (const id of next) {
         const position = finitePoint(pinnedPositionsRef.current[id]);
         if (!appliedPinsRef.current.has(id)
           || !samePoint(appliedPinsRef.current.get(id) ?? null, position)) {
-          adapter.pin(id, true, position ?? undefined);
+          adapter.pin(id, true, position ?? undefined, { reconcile: true });
         }
         applied.set(id, position);
       }
@@ -198,8 +198,8 @@ export const WorkspaceMapCanvas = forwardRef<GraphCanvasHandle, WorkspaceMapCanv
     const reconcileLayoutPause = (adapter: WorkspaceCosmosAdapter) => {
       const shouldPause = layoutPausedRef.current || !activeRef.current;
       if (appliedPauseRef.current === shouldPause) return;
-      if (shouldPause) adapter.stopLayout();
-      else adapter.resumeLayout();
+      if (shouldPause) adapter.stopLayout(true);
+      else adapter.resumeLayout(false);
       appliedPauseRef.current = shouldPause;
     };
     const failRuntime = (adapter: WorkspaceCosmosAdapter) => {

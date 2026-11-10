@@ -39,12 +39,12 @@ def _stage(tmp_path, name="stage"):
         encoding="utf-8",
     )
     (assets / "cosmosAdapter-abc123.js").write_text(
-        "export const createCollisionWorker=()=>new Worker(new URL("
-        '"/assets/forceAtlas2Collision.worker-abc123.js",import.meta.url),'
-        '{type:"module",name:"workspace-fa2-collision"});\n',
+        "export const createD3Worker=()=>new Worker(new URL("
+        '"/assets/d3Layout.worker-abc123.js",import.meta.url),'
+        '{type:"module",name:"shared-d3-layout"});\n',
         encoding="utf-8",
     )
-    (assets / "forceAtlas2Collision.worker-abc123.js").write_text(
+    (assets / "d3Layout.worker-abc123.js").write_text(
         "self.onmessage = () => {};\n", encoding="utf-8"
     )
     return stage
@@ -102,11 +102,9 @@ def test_verifier_rejects_missing_graph_payload(tmp_path, artifact_kind, relativ
 
 @pytest.mark.parametrize("artifact_kind", ["wheel", "sdist"])
 @pytest.mark.parametrize("damage", ["missing", "empty"])
-def test_verifier_rejects_a_missing_2k_collision_worker(
-    tmp_path, artifact_kind, damage
-):
+def test_verifier_rejects_a_missing_2k_d3_worker(tmp_path, artifact_kind, damage):
     def damage_worker(stage):
-        worker = stage / "backend/static/assets/forceAtlas2Collision.worker-abc123.js"
+        worker = stage / "backend/static/assets/d3Layout.worker-abc123.js"
         if damage == "missing":
             worker.unlink()
         else:
@@ -118,7 +116,7 @@ def test_verifier_rejects_a_missing_2k_collision_worker(
 
     assert result.returncode == 1, result.stdout + result.stderr
     artifact = WHEEL_NAME if artifact_kind == "wheel" else SDIST_NAME
-    assert f"{artifact}: backend/static/assets/forceAtlas2Collision.worker" in (
+    assert f"{artifact}: backend/static/assets/d3Layout.worker" in (
         result.stdout + result.stderr
     )
 
@@ -129,8 +127,8 @@ def test_verifier_rejects_a_stale_2k_worker_instead_of_the_referenced_hash(
 ):
     def keep_only_stale_worker(stage):
         assets = stage / "backend/static/assets"
-        (assets / "forceAtlas2Collision.worker-abc123.js").rename(
-            assets / "forceAtlas2Collision.worker-old456.js"
+        (assets / "d3Layout.worker-abc123.js").rename(
+            assets / "d3Layout.worker-old456.js"
         )
 
     result = _run_verifier(
@@ -145,7 +143,7 @@ def test_verifier_rejects_a_stale_2k_worker_instead_of_the_referenced_hash(
     artifact = WHEEL_NAME if artifact_kind == "wheel" else SDIST_NAME
     assert (
         f"{artifact}: backend/static/assets/cosmosAdapter-abc123.js references "
-        "backend/static/assets/forceAtlas2Collision.worker-abc123.js"
+        "backend/static/assets/d3Layout.worker-abc123.js"
     ) in result.stdout + result.stderr
 
 
@@ -165,7 +163,7 @@ def test_verifier_rejects_a_worker_file_without_an_actual_bundle_reference(
     )
 
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "JavaScript has no 2K collision Worker URL reference" in (
+    assert "JavaScript has no 2K D3 Worker URL reference" in (
         result.stdout + result.stderr
     )
 
@@ -176,8 +174,8 @@ def test_verifier_resolves_the_vite_worker_url_literal(tmp_path, quote):
     adapter = stage / "backend/static/assets/cosmosAdapter-abc123.js"
     adapter.write_text(
         "new Worker(new URL( "
-        f"{quote}/assets/forceAtlas2Collision.worker-abc123.js{quote}"
-        ', import.meta.url ), {type:"module",name:"workspace-fa2-collision"});',
+        f"{quote}/assets/d3Layout.worker-abc123.js{quote}"
+        ', import.meta.url ), {type:"module",name:"shared-d3-layout"});',
         encoding="utf-8",
     )
 

@@ -73,7 +73,7 @@ describe("Workspace Map cluster glyph size", () => {
     if (buffers.pointSizes.every(size => size >= 3)) expect(buffers.drawPointSizes).toBe(buffers.pointSizes);
   });
 
-  // `pointSizes` is the one array layout, FA2 units and collision read. The emphasis must never reach it.
+  // `pointSizes` is the one array layout and collision read. The emphasis must never reach it.
   it("keeps pointSizes bit for bit what the same scene gets without document counts", () => {
     for (const [total, budget] of [[40, undefined], [2_500, WORKSPACE_MAP_PC_10K_BUDGET]] as const) {
       const input = sceneWithClusters([9_244, 747, 2], total);

@@ -1,3 +1,4 @@
+import { workspaceBaseBodyDiameterCss } from "../shared/workspaceGlyphGeometry";
 import type { GraphVisualTokens } from "../shared/graphTokens";
 import { FORCED_OUTLINE_INSETS, RING_BAND_FACTOR } from "../shared/nodeShapes";
 import { WORKSPACE_MAP_NODE_KIND, type WorkspaceMapColumns } from "../map/sceneColumns";
@@ -9,7 +10,7 @@ export type CosmosSceneBuffers = {
   positions: Float32Array;
   pointColors: Float32Array;
   pointShapes: Float32Array;
-  /** Relation-based sizes: the only sizes that layout, FA2 units and collision may read. */
+  /** Relation-based sizes: the only sizes that layout and collision may read. */
   pointSizes: Float32Array;
   /**
    * What is drawn and picked, including minimum visible diameters and cluster
@@ -187,7 +188,7 @@ function initialPositions(columns: WorkspaceMapColumns): Float32Array {
  * documents its glyph grows with log10(members), bounded, and never below its
  * relation-based size. The ceiling stays inside the native picker's 12 px
  * accessible target. Render emphasis only: it lives in `drawPointSizes`, so
- * columns, fingerprint, layout, FA2 units, collision and every cluster-free
+ * columns, fingerprint, layout, collision and every cluster-free
  * scene are untouched.
  */
 const CLUSTER_EMPHASIS = { fromDocuments: 10, fullAtDocuments: 10_000, minCss: 7, maxCss: 22 } as const;
@@ -240,11 +241,11 @@ export function buildCosmosSceneBuffers(
   }
   // Improve visible bodies without changing force, collision or degree inputs.
   let drawPointSizes = pointSizes;
-  const minimumDiameter = count > 1_000 ? 3 : 5;
   for (let node = 0; node < count; node += 1) {
-    if (pointSizes[node] >= minimumDiameter) continue;
+    const diameter = workspaceBaseBodyDiameterCss(pointSizes[node], count);
+    if (pointSizes[node] >= diameter) continue;
     if (drawPointSizes === pointSizes) drawPointSizes = pointSizes.slice();
-    drawPointSizes[node] = minimumDiameter;
+    drawPointSizes[node] = diameter;
   }
   if (documentCounts) {
     for (let node = 0; node < count; node += 1) {

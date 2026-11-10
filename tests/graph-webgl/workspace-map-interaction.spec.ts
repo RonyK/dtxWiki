@@ -39,7 +39,6 @@ test("native PC 10K preserves 100000 relations, real movement and finite camera 
     expect(before.positions.every(Number.isFinite)).toBe(true);
     expect(before.uploadedRelationCount).toBe(relations);
     expect(before.uploadedTopologyMatches).toBe(true);
-    expect(before.layoutUnits).toBeNull();
     expect(before.collisionRadius).toBe(0);
     expect(before.collisionFootprint?.radii).toBe(10_000);
     expect(before.running).toBe(true);
@@ -208,8 +207,7 @@ test("native 2k supports a 4096 texture limit without clamping canonical documen
   await page.waitForFunction(() => Boolean(window.__workspaceMapSmoke && window.__workspaceMapSmoke.status !== "loading"));
   expect(await page.evaluate(() => window.__workspaceMapSmoke?.status)).toBe("ready");
   await page.waitForFunction(() => document.getElementById("stage")?.dataset.mapCommunityLayoutStatus === "applied"
-    && window.__workspaceMapInteraction?.snapshot().layoutRunning
-    && window.__workspaceMapInteraction.snapshot().layoutTicks >= 3);
+    && (window.__workspaceMapInteraction?.snapshot().layoutTicks ?? 0) >= 1);
   await page.evaluate(() => window.__workspaceMapInteraction!.stop());
   const before = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
   await evidenceScreenshot(page, testInfo, "map-2k-texture-limit-4096.png");
@@ -217,7 +215,7 @@ test("native 2k supports a 4096 texture limit without clamping canonical documen
   expect(before.maxTextureSize).toBe(4096);
   expect(before.nativeSpaceSize).toBe(2048);
   expect(before.positions).toHaveLength(4000);
-  // Official CPU coordinates are signed and unclamped; only the native GPU
+  // D3 coordinates are signed and unclamped; only the native GPU
   // coordinate conversion changes at this capability limit.
   expect(before.positions.every(Number.isFinite)).toBe(true);
   expect(before.canonicalPositions).toEqual(before.positions.map(value => value * 2));
@@ -232,97 +230,6 @@ test("native 2k supports a 4096 texture limit without clamping canonical documen
   expect(after.forceConfig).toEqual(before.forceConfig);
   expect(after.geometryUploads).toBe(before.geometryUploads);
   expect(after.running).toBe(false);
-});
-
-test("native 2k collision basis belongs to the scene, not Fit, zoom, focus, pin or resize", async ({ page }, testInfo) => {
-  await page.goto(`${origin}/src/features/graph/workspace/tests/browserSmoke.html?geometry=2000&theme=light&motion=normal&topology=links&interaction=targets`);
-  await page.waitForFunction(() => Boolean(window.__workspaceMapSmoke && window.__workspaceMapSmoke.status !== "loading"));
-  expect(await page.evaluate(() => window.__workspaceMapSmoke?.status)).toBe("ready");
-  await page.waitForFunction(() => document.getElementById("stage")?.dataset.mapCommunityLayoutStatus === "applied");
-  await page.evaluate(() => window.__workspaceMapInteraction!.stop());
-  const before = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
-  expect(await page.locator("#stage").getAttribute("data-map-physics")).toBe("force-atlas2-worker");
-  await evidenceScreenshot(page, testInfo, "map-2k-cpu-native-drawing-desktop.png");
-  const calibration = await page.evaluate(() => window.__workspaceMapInteraction!.calibration());
-  // Independently compute the pinned SDK's initial Fit conversion from actual
-  // native input columns and CSS dimensions, not an evolving camera/readback.
-  const expectedBasis = (positions: number[]) => {
-    const xs = positions.filter((_value, index) => index % 2 === 0);
-    const ys = positions.filter((_value, index) => index % 2 === 1);
-    const dx = Math.max(...xs) - Math.min(...xs);
-    const dy = Math.max(...ys) - Math.min(...ys);
-    const zoom = Math.max(.001, Math.min(calibration.width * .84 / (dx || 1),
-      calibration.height * .84 / (dy || 1)));
-    return { radius: Math.max(...calibration.pointSizes) / (2 * zoom), padding: 1 / zoom };
-  };
-  const fallbackBasis = expectedBasis(calibration.fallbackPositions);
-  const workerBasis = expectedBasis(calibration.workerPositions);
-  expect(before.collisionRadius).toBeGreaterThan(0);
-  expect(before.collisionPadding).toBeGreaterThan(0);
-  expect(before.collisionRadius).toBeCloseTo(workerBasis.radius, 8);
-  expect(before.collisionPadding).toBeCloseTo(workerBasis.padding, 8);
-  expect(before.collisionRadius).not.toBeCloseTo(fallbackBasis.radius, 3);
-  expect(before.collisionCommits).toBe(2);
-  expect(before.forceCommits).toBe(0);
-  expect(before.running).toBe(false);
-  const units = before.layoutUnits!;
-  expect(units.nodeCount).toBe(2000);
-  expect(units.referenceViewport).toEqual({ width: calibration.width, height: calibration.height });
-  expect(units.referenceZoom).toBeCloseTo(1 / workerBasis.padding, 8);
-  expect(units.rendererUnitsPerModelUnit).toBe(1);
-  expect(units.collisionRadiusModel).toEqual(units.nominalRadiusCss.map(radius =>
-    Math.fround((radius + units.pairGapCss / 2) / units.referenceZoom)));
-  const basis = (value: typeof before) => [value.collisionRadius, value.collisionPadding,
-    value.collisionCommits, value.forceCommits, ...value.forceConfig];
-  for (const action of ["fit", "zoom", "focus", "pin", "resize", "fit"] as const) {
-    await page.evaluate(async (action) => {
-      const fixture = window.__workspaceMapInteraction!;
-      if (action === "zoom") fixture.zoom(3);
-      else if (action === "focus") fixture.focus("node-0");
-      else if (action === "pin") fixture.isolate();
-      else if (action === "resize") {
-        const stage = document.getElementById("stage")!;
-        stage.style.width = "640px";
-        stage.style.height = "520px";
-        fixture.resize();
-      }
-      else fixture[action]();
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    }, action);
-    const after = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
-    expect(basis(after), `${action} must not recalibrate physics`).toEqual(basis(before));
-    expect(after.layoutUnits, `${action} must preserve canonical CPU force units`).toEqual(units);
-    expect(after.topologyUploads).toBe(before.topologyUploads);
-    expect(after.running).toBe(false);
-    expect(after.glError).toBe(0);
-    if (action === "fit" || action === "zoom" || action === "focus") {
-      // Before the explicit pin, camera/presentation actions keep all points.
-      if (after.pinned.length === 0) expect(after.positions).toEqual(before.positions);
-    }
-  }
-  const pinned = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
-  expect(pinned.pinned).toContain(0);
-  await page.evaluate(() => window.__workspaceMapInteraction!.resume());
-  await page.waitForFunction(previousTicks => {
-    const next = window.__workspaceMapInteraction!.snapshot();
-    return next.layoutRunning && next.layoutTicks > previousTicks + 2;
-  }, pinned.layoutTicks);
-  await page.evaluate(() => window.__workspaceMapInteraction!.stop());
-  const resumed = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
-  expect(basis(resumed)).toEqual(basis(before));
-  expect(resumed.pinned).toContain(0);
-  expect(resumed.positions.slice(0, 2)).toEqual(pinned.positions.slice(0, 2));
-  expect(resumed.positions.slice(2)).not.toEqual(pinned.positions.slice(2));
-  expect(resumed.running).toBe(false);
-  expect(resumed.layoutUnits).toEqual(units);
-  expect(resumed.topologyUploads).toBe(before.topologyUploads);
-  await testInfo.attach("scene-collision-basis", { contentType: "application/json", body: JSON.stringify({
-    radius: before.collisionRadius, padding: before.collisionPadding, commits: resumed.collisionCommits,
-    forceCommits: resumed.forceCommits, forceConfig: resumed.forceConfig, fallbackBasis, workerBasis,
-    calibrationViewport: { width: calibration.width, height: calibration.height },
-    originalPoints: before.positions.length / 2, pinned: resumed.pinned,
-    scope: "Actual official CPU Worker and Cosmos GPU drawing; scene-lifetime calibration, not target-device performance",
-  }) });
 });
 
 // Default texture limits give native/canonical scale 1 (every other 2K case);
@@ -341,7 +248,7 @@ test("native 2k Cosmos pointer drag saves its canonical position through Resume,
   await page.waitForFunction(() => Boolean(window.__workspaceMapSmoke && window.__workspaceMapSmoke.status !== "loading"));
   expect(await page.evaluate(() => window.__workspaceMapSmoke?.status)).toBe("ready");
   await page.waitForFunction(() => document.getElementById("stage")?.dataset.mapCommunityLayoutStatus === "applied");
-  expect(await page.locator("#stage").getAttribute("data-map-physics")).toBe("force-atlas2-worker");
+  expect(await page.locator("#stage").getAttribute("data-map-physics")).toBe("d3-worker");
   await page.evaluate(async () => {
     const fixture = window.__workspaceMapInteraction!;
     fixture.stop();
@@ -438,7 +345,7 @@ test("native 2k Cosmos pointer drag saves its canonical position through Resume,
     target, pointerStart, destination, deliveredMouseCoordinates, pinnedPosition,
     pinCallback: dragged.dragPins[0], geometryUploads: resumed.geometryUploads, topologyUploads: resumed.topologyUploads,
     pinnedAfterResume: resumed.pinned, paused: !resumed.layoutRunning, reducedMotionRunning: reduced.layoutRunning,
-    errors, scope: "Actual native 2K mouse drag with official CPU Worker layout and Cosmos GPU drawing; not target-device performance or real-API acceptance",
+    errors, scope: "Actual native 2K mouse drag with shared D3 Worker layout and Cosmos GPU drawing; not target-device performance or real-API acceptance",
   }) });
 });
 
@@ -449,7 +356,7 @@ test("native 2k hover shows a chip without changing labels, emphasis or geometry
   await page.waitForFunction(() => Boolean(window.__workspaceMapSmoke && window.__workspaceMapSmoke.status !== "loading"));
   expect(await page.evaluate(() => window.__workspaceMapSmoke?.status)).toBe("ready");
   await page.waitForFunction(() => document.getElementById("stage")?.dataset.mapCommunityLayoutStatus === "applied");
-  expect(await page.locator("#stage").getAttribute("data-map-physics")).toBe("force-atlas2-worker");
+  expect(await page.locator("#stage").getAttribute("data-map-physics")).toBe("d3-worker");
   await page.evaluate(async () => {
     const fixture = window.__workspaceMapInteraction!;
     fixture.stop();
@@ -646,7 +553,7 @@ test("native 2k first boundary-label placement contains Korean and newly admitte
   await page.waitForFunction(() => Boolean(window.__workspaceMapSmoke && window.__workspaceMapSmoke.status !== "loading"));
   expect(await page.evaluate(() => window.__workspaceMapSmoke?.status)).toBe("ready");
   await page.waitForFunction(() => document.getElementById("stage")?.dataset.mapCommunityLayoutStatus === "applied");
-  expect(await page.locator("#stage").getAttribute("data-map-physics")).toBe("force-atlas2-worker");
+  expect(await page.locator("#stage").getAttribute("data-map-physics")).toBe("d3-worker");
   await page.mouse.move(0, 0);
   const result = await page.evaluate(async () => {
     const fixture = window.__workspaceMapInteraction!;
@@ -746,11 +653,11 @@ test("2k Map touch targets, zoom direction/growth, full focused title and backgr
   await page.goto(`${origin}/src/features/graph/workspace/tests/browserSmoke.html?geometry=2000&theme=light&motion=normal&topology=links&interaction=targets`);
   await page.waitForFunction(() => Boolean(window.__workspaceMapSmoke && window.__workspaceMapSmoke.status !== "loading"));
   expect(await page.evaluate(() => window.__workspaceMapSmoke?.status)).toBe("ready");
-  // The relation-first 2K map is live by default. Pause it explicitly when
-  // testing camera-only transforms; elapsed physics is not a zoom relayout.
+  // The accepted cold solve may already be cooled. Freeze those actual rows
+  // for camera/touch checks; the explicit Resume below owns the motion check.
   await page.waitForFunction(() => {
     const next = window.__workspaceMapInteraction!.snapshot();
-    return next.layoutRunning && next.layoutTicks >= 3 && !next.running;
+    return next.layoutTicks >= 1 && !next.running;
   });
   await page.evaluate(() => window.__workspaceMapInteraction!.stop());
   const fit = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
@@ -857,78 +764,81 @@ for (const count of [40, 2000]) {
   });
 }
 
-test("native 2k relation layout remains live after five seconds and explicit pause freezes every point", async ({ page }, testInfo) => {
-  const errors: string[] = [];
-  page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto(`${origin}/src/features/graph/workspace/tests/browserSmoke.html?geometry=2000&theme=light&motion=normal&topology=links&interaction=targets`);
-  await page.waitForFunction(() => Boolean(window.__workspaceMapSmoke && window.__workspaceMapSmoke.status !== "loading"), { timeout: 30_000 });
-  expect(await page.evaluate(() => window.__workspaceMapSmoke?.status)).toBe("ready");
-  // This elapsed-time check is the original2K lifecycle contract, not a FPS
-  // budget or target-GPU benchmark. Real CPU forces and GPU drawing run throughout.
-  await page.waitForTimeout(5_100);
-  const before = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
-  expect(before.running).toBe(false);
-  expect(before.layoutRunning).toBe(true);
-  await page.waitForFunction((positions) => window.__workspaceMapInteraction!.snapshot().positions.some((value, index) =>
-    Math.abs(value - positions[index]) > 0.01), before.positions, { timeout: 5_000 });
-  await page.evaluate(() => window.__workspaceMapInteraction!.stop());
-  const paused = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
-  await page.waitForTimeout(250);
-  const after = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
-  expect(after.running).toBe(false);
-  expect(after.layoutRunning).toBe(false);
-  expect(after.topologyUploads).toBe(before.topologyUploads);
-  expect(after.positions).toHaveLength(4000);
-  expect(after.positions).toEqual(paused.positions);
-  expect(after.glError).toBe(0);
-  expect(errors).toEqual([]);
-  await testInfo.attach("native-2k-five-second-lifecycle", { contentType: "application/json", body: JSON.stringify({
-    elapsedBeforeReadMs: 5100, liveAfterFiveSeconds: before.layoutRunning, nativeGpuRunning: before.running,
-    layoutTicks: before.layoutTicks, pausedPoints: after.positions.length / 2,
-    stablePausedCoordinates: true, glError: after.glError,
-    scope: "Synthetic original2K corpus with official CPU Worker and actual Cosmos GPU drawing; not target-hardware performance acceptance",
-  }) });
-});
-
-test("native 2k initial framing ends at the published contact boundary without changing physics or rearming on Resume", async ({ page }, testInfo) => {
+test("D3 2k layout cools while idle and keeps every coordinate stable", async ({ page }, testInfo) => {
   test.setTimeout(60_000);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(`${origin}/src/features/graph/workspace/tests/browserSmoke.html?geometry=2000&theme=light&motion=normal&topology=links&interaction=targets`);
-  await page.waitForFunction(() => window.__workspaceMapInteraction?.initialCamera().fits.length);
-  const first = await page.evaluate(() => window.__workspaceMapInteraction!.initialCamera().fits[0]);
-  await page.waitForFunction(() => document.getElementById("stage")?.dataset.mapLayoutPhase === "contact", null, { timeout: 45_000 });
+  await page.waitForFunction(() => Boolean(window.__workspaceMapSmoke && window.__workspaceMapSmoke.status !== "loading"));
+  expect(await page.evaluate(() => window.__workspaceMapSmoke?.status)).toBe("ready");
+  await expect(page.locator("#stage")).toHaveAttribute("data-map-layout-phase", "cooled", { timeout: 45_000 });
+  const cooled = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
+  expect(cooled.running).toBe(false);
+  expect(cooled.layoutRunning).toBe(false);
+  expect(cooled.layoutTicks).toBeGreaterThan(0);
+  await page.waitForTimeout(250); // Detect late or restarted Worker publications.
+  const after = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
+  expect(after.running).toBe(false);
+  expect(after.layoutRunning).toBe(false);
+  expect(after.topologyUploads).toBe(cooled.topologyUploads);
+  expect(after.geometryUploads).toBe(cooled.geometryUploads);
+  expect(after.positions).toHaveLength(4000);
+  expect(after.positions).toEqual(cooled.positions);
+  expect(after.layoutTicks).toBe(cooled.layoutTicks);
+  expect(after.glError).toBe(0);
+  expect(errors).toEqual([]);
+  await testInfo.attach("d3-2k-idle-cooling", { contentType: "application/json", body: JSON.stringify({
+    cooled, after, errors,
+    scope: "Synthetic original2K corpus with shared D3 Worker and actual Cosmos GPU drawing; idle cooling and coordinate stability, not target-hardware performance acceptance",
+  }) });
+});
+
+test("native 2k initial framing ends at the first published D3 layout without changing physics or rearming on Resume", async ({ page }, testInfo) => {
+  test.setTimeout(60_000);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(`${origin}/src/features/graph/workspace/tests/browserSmoke.html?geometry=2000&theme=light&motion=normal&topology=links&interaction=targets`);
+  // The first D3 frame is already pre-settled in its Worker. It may complete
+  // the canonical Fit before any progressive camera frame is necessary.
+  await page.waitForFunction(() => window.__workspaceMapInteraction?.initialCamera().settledCanonicalFits.length);
+  const first = await page.evaluate(() => window.__workspaceMapInteraction!.initialCamera().settledCanonicalFits[0]);
+  await page.waitForFunction(() => ["live", "cooled"].includes(document.getElementById("stage")?.dataset.mapLayoutPhase ?? ""), null, { timeout: 45_000 });
   // The final duration=0 canonical Fit is still a queued native D3 transition.
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const expired = await page.evaluate(() => window.__workspaceMapInteraction!.initialCamera());
-  expect(expired.fits.length).toBeGreaterThan(0);
   expect(expired.fits.length).toBeLessThanOrEqual(60);
   expect(expired.fits.every((fit) => fit.points === 2000 && fit.at - first.at < 30_000)).toBe(true);
-  expect(expired.contactCanonicalFits).toHaveLength(1);
-  expect(expired.contactCanonicalFits[0].points).toBe(2000);
-  await expect(page.locator("#stage")).toHaveAttribute("data-map-layout-phase", "contact");
-  expect(Number(await page.locator("#stage").getAttribute("data-map-layout-iterations"))).toBeGreaterThanOrEqual(32);
+  expect(expired.settledCanonicalFits).toHaveLength(1);
+  expect(expired.settledCanonicalFits[0].points).toBe(2000);
+  await expect(page.locator("#stage")).toHaveAttribute("data-map-layout-phase", /^(live|cooled)$/);
+  expect(Number(await page.locator("#stage").getAttribute("data-map-layout-ticks"))).toBeGreaterThan(0);
   await page.waitForTimeout(250);
   expect(await page.evaluate(() => window.__workspaceMapInteraction!.initialCamera().fits)).toEqual(expired.fits);
-  expect(await page.evaluate(() => window.__workspaceMapInteraction!.initialCamera().contactCanonicalFits)).toEqual(expired.contactCanonicalFits);
+  expect(await page.evaluate(() => window.__workspaceMapInteraction!.initialCamera().settledCanonicalFits)).toEqual(expired.settledCanonicalFits);
   const before = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
   expect(before.running).toBe(false);
-  expect(before.layoutRunning).toBe(true);
-  expect(before.collisionCommits).toBe(2);
-  expect(before.forceCommits).toBe(0);
   await evidenceScreenshot(page, testInfo, "initial-2k-framing.png");
   await page.evaluate(() => { window.__workspaceMapInteraction!.stop(); window.__workspaceMapInteraction!.resume(); });
-  await page.waitForTimeout(250);
+  await page.waitForFunction(ticks => {
+    const next = window.__workspaceMapInteraction!.snapshot();
+    return next.layoutRunning && next.layoutTicks > ticks + 2;
+  }, before.layoutTicks);
   expect(await page.evaluate(() => window.__workspaceMapInteraction!.initialCamera().fits)).toEqual(expired.fits);
-  expect(await page.evaluate(() => window.__workspaceMapInteraction!.initialCamera().contactCanonicalFits)).toEqual(expired.contactCanonicalFits);
+  expect(await page.evaluate(() => window.__workspaceMapInteraction!.initialCamera().settledCanonicalFits)).toEqual(expired.settledCanonicalFits);
+  const resumed = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
+  expect(resumed.layoutRunning).toBe(true);
+  expect(resumed.positions).not.toEqual(before.positions);
+  expect(resumed.collisionCommits).toBe(before.collisionCommits);
+  expect(resumed.forceCommits).toBe(before.forceCommits);
+  expect(resumed.forceConfig).toEqual(before.forceConfig);
   expect(before.glError).toBe(0);
   expect(errors).toEqual([]);
   const report = testInfo.outputPath("bounded-initial-camera.json");
   await writeFile(report, JSON.stringify({
-    fits: expired.fits, contactCanonicalFits: expired.contactCanonicalFits,
+    fits: expired.fits, settledCanonicalFits: expired.settledCanonicalFits,
     viewportEvents: expired.viewportEvents, forceCommits: before.forceCommits,
     collisionCommits: before.collisionCommits, errors,
-    scope: "Actual CPU structure/contact and native D3/Cosmos 2K fixture; bounded camera ownership, not convergence or target-device performance acceptance",
+    scope: "Actual D3 Worker and Cosmos 2K fixture; bounded camera ownership, not convergence or target-device performance acceptance",
   }, null, 2));
   await testInfo.attach("bounded-initial-camera", { contentType: "application/json", path: report });
 });

@@ -125,10 +125,8 @@ afterEach(() => {
 describe("WorkspaceMapCanvas lifecycle", () => {
   it.each([
     { language: "en", arranging: "Arranging the map… You can explore while it settles.",
-      spacing: "Separating nodes… You can keep exploring.",
       paused: "Layout paused. Resume to continue.", motionOff: "Layout motion is off for reduced motion." },
     { language: "ko", arranging: "지도 배치 중… 정리되는 동안에도 탐색할 수 있습니다.",
-      spacing: "노드 간격 조정 중… 계속 탐색할 수 있습니다.",
       paused: "배치가 일시 정지되었습니다. 다시 시작하면 계속합니다.",
       motionOff: "동작 줄이기 설정에 따라 배치 움직임이 꺼져 있습니다." },
   ])("keeps renderer readiness independent from semantic layout progress in $language", async (messages) => {
@@ -139,7 +137,7 @@ describe("WorkspaceMapCanvas lifecycle", () => {
     const callbacks = vi.mocked(createWorkspaceCosmosAdapter).mock.calls[0][2].callbacks;
     props.onRendererStatusChange.mockClear();
     for (const [state, text] of [
-      ["arranging", messages.arranging], ["spacing", messages.spacing],
+      ["arranging", messages.arranging],
       ["paused", messages.paused], ["motion-off", messages.motionOff],
     ] as const) {
       await act(async () => { callbacks.onLayoutStatusChange?.(state, input.identity); });
@@ -176,12 +174,12 @@ describe("WorkspaceMapCanvas lifecycle", () => {
     const view = render(<WorkspaceMapCanvas {...props} columns={first} />);
     await waitFor(() => expect(props.onRendererStatusChange).toHaveBeenLastCalledWith("ready"));
     const callbacks = vi.mocked(createWorkspaceCosmosAdapter).mock.calls[0][2].callbacks;
-    await act(async () => { callbacks.onLayoutStatusChange?.("spacing", first.identity); });
-    expect(screen.getByTestId("workspace-map-layout-status")).toHaveAttribute("data-layout-state", "spacing");
+    await act(async () => { callbacks.onLayoutStatusChange?.("arranging", first.identity); });
+    expect(screen.getByTestId("workspace-map-layout-status")).toHaveAttribute("data-layout-state", "arranging");
     view.rerender(<WorkspaceMapCanvas {...props} columns={second} />);
     expect(screen.queryByTestId("workspace-map-layout-status")).not.toBeInTheDocument();
     await act(async () => {
-      callbacks.onLayoutStatusChange?.("spacing", first.identity);
+      callbacks.onLayoutStatusChange?.("arranging", first.identity);
       callbacks.onLayoutStatusChange?.("arranging", { ...second.identity, actorId: "retired-actor" });
     });
     expect(screen.queryByTestId("workspace-map-layout-status")).not.toBeInTheDocument();
@@ -201,9 +199,9 @@ describe("WorkspaceMapCanvas lifecycle", () => {
     await waitFor(() => expect(screen.getByTestId("graph-canvas").closest(".graph-canvas-frame"))
       .toHaveAttribute("data-renderer-status", "ready"));
     const current = vi.mocked(createWorkspaceCosmosAdapter).mock.calls[1][2].callbacks;
-    await act(async () => { current.onLayoutStatusChange?.("spacing", input.identity); });
+    await act(async () => { current.onLayoutStatusChange?.("arranging", input.identity); });
     await act(async () => { retired.onLayoutStatusChange?.("live", input.identity); });
-    expect(screen.getByTestId("workspace-map-layout-status")).toHaveAttribute("data-layout-state", "spacing");
+    expect(screen.getByTestId("workspace-map-layout-status")).toHaveAttribute("data-layout-state", "arranging");
   });
 
   it.each(["runtime failure", "context loss"] as const)(
@@ -216,7 +214,7 @@ describe("WorkspaceMapCanvas lifecycle", () => {
       await act(async () => {
         if (failure === "runtime failure") callbacks.onRuntimeError?.(new Error("layout failed"));
         else callbacks.onContextStatus?.("lost");
-        callbacks.onLayoutStatusChange?.("spacing", input.identity);
+        callbacks.onLayoutStatusChange?.("arranging", input.identity);
       });
       expect(screen.queryByTestId("workspace-map-layout-status")).not.toBeInTheDocument();
       expect(props.onRendererStatusChange).toHaveBeenLastCalledWith("error");
@@ -619,7 +617,8 @@ describe("WorkspaceMapCanvas lifecycle", () => {
     view.rerender(<WorkspaceMapCanvas {...props} columns={input} layoutPaused showLabels={false} />);
     expect(adapter.stopLayout).toHaveBeenCalledOnce();
     view.rerender(<WorkspaceMapCanvas {...props} columns={input} layoutPaused={false} />);
-    expect(adapter.resumeLayout).toHaveBeenCalledOnce();
+    expect(adapter.resumeLayout).toHaveBeenCalledExactlyOnceWith(false);
+    expect(adapter.stopLayout).toHaveBeenCalledExactlyOnceWith(true);
     expect(createAdapter).toHaveBeenCalledOnce();
     expect(screen.getByTestId("graph-canvas")).toBe(canvas);
     expect(adapter.destroy).not.toHaveBeenCalled();
@@ -721,8 +720,8 @@ describe("WorkspaceMapCanvas lifecycle", () => {
     ref.current?.pauseLayout();
     ref.current?.resumeLayout();
     expect(adapter.centerOn).toHaveBeenCalledExactlyOnceWith("node-2");
-    expect(adapter.stopLayout).toHaveBeenCalledOnce();
-    expect(adapter.resumeLayout).toHaveBeenCalledOnce();
+    expect(adapter.stopLayout).toHaveBeenCalledExactlyOnceWith();
+    expect(adapter.resumeLayout).toHaveBeenCalledExactlyOnceWith();
   });
 
   it.each(["webgl2", "float-render-target"] as const)(
@@ -808,7 +807,7 @@ describe("WorkspaceMapCanvas lifecycle", () => {
     resolveReady();
     await waitFor(() => expect(screen.getByTestId("graph-canvas").closest(".graph-canvas-frame"))
       .toHaveAttribute("data-renderer-status", "ready"));
-    expect(adapter.pin).toHaveBeenCalledExactlyOnceWith("node-1", true, { x: 12, y: 25 });
+    expect(adapter.pin).toHaveBeenCalledExactlyOnceWith("node-1", true, { x: 12, y: 25 }, { reconcile: true });
     expect(adapter.select).toHaveBeenCalledWith("node-2");
   });
 
@@ -835,13 +834,13 @@ describe("WorkspaceMapCanvas lifecycle", () => {
     view.rerender(<WorkspaceMapCanvas {...props} pinnedPositions={{
       "node-1": { x: 12, y: 25 }, "node-2": { x: -9, y: 4 },
     }} columns={input} />);
-    expect(adapter.pin).toHaveBeenCalledExactlyOnceWith("node-2", true, { x: -9, y: 4 });
+    expect(adapter.pin).toHaveBeenCalledExactlyOnceWith("node-2", true, { x: -9, y: 4 }, { reconcile: true });
 
     adapter.pin.mockClear();
     view.rerender(<WorkspaceMapCanvas {...props} pinnedIds={["node-2"]} pinnedPositions={{
       "node-2": { x: -9, y: 4 },
     }} columns={input} />);
-    expect(adapter.pin).toHaveBeenCalledExactlyOnceWith("node-1", false);
+    expect(adapter.pin).toHaveBeenCalledExactlyOnceWith("node-1", false, undefined, { reconcile: true });
   });
 
   it.each([true, false])("does not re-upload native pinned positions on a metadata-only columns object refresh (active=%s)", async (active) => {
@@ -885,7 +884,7 @@ describe("WorkspaceMapCanvas lifecycle", () => {
     if (change === "geometry") next.edgeWeights[0] = 2;
     if (change === "semantic-owner") next.nodeKeys[0] = "context:new-owner";
     view.rerender(<WorkspaceMapCanvas {...props} columns={next} />);
-    expect(adapter.pin).toHaveBeenCalledExactlyOnceWith("node-1", true, { x: 12, y: 25 });
+    expect(adapter.pin).toHaveBeenCalledExactlyOnceWith("node-1", true, { x: 12, y: 25 }, { reconcile: true });
   });
 
   it("reconciles removed and renamed projection pin IDs on a metadata refresh without retaining stale owners", async () => {
@@ -899,7 +898,7 @@ describe("WorkspaceMapCanvas lifecycle", () => {
     view.rerender(<WorkspaceMapCanvas {...props} columns={refreshed}
       pinnedIds={["renamed-projection"]} pinnedPositions={{ "renamed-projection": { x: 12, y: 25 } }} />);
     expect(adapter.pin.mock.calls).toEqual([
-      ["node-1", false], ["renamed-projection", true, { x: 12, y: 25 }],
+      ["node-1", false, undefined, { reconcile: true }], ["renamed-projection", true, { x: 12, y: 25 }, { reconcile: true }],
     ]);
   });
 

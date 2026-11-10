@@ -39,7 +39,6 @@
     "dompurify": "^3.4.16",
     "graphology": "0.26.0",
     "graphology-communities-louvain": "2.0.2",
-    "graphology-layout-forceatlas2": "0.10.1",
     "highlight.js": "^11.11.1",
     "i18next": "^26.3.0",
     "katex": "^0.17.0",

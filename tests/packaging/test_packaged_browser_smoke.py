@@ -130,7 +130,7 @@ def test_installed_console_server_uses_disposable_cwd(smoke, monkeypatch, tmp_pa
     assert calls[0][1]["env"] is env
 
 
-def test_browser_script_keeps_real_rest_and_corrected_worker_runtime_oracles(
+def test_browser_script_keeps_real_rest_and_d3_worker_runtime_oracles(
     smoke, monkeypatch
 ):
     calls = []
@@ -148,10 +148,10 @@ def test_browser_script_keeps_real_rest_and_corrected_worker_runtime_oracles(
     assert "response.request().postDataJSON()?.group === group" in script
     assert "edge.relation_count === 1" in script
     assert "data-renderer-status', 'ready'" in script
-    assert "data-map-physics', 'force-atlas2-worker'" in script
-    assert "state.phase === 'contact'" in script
-    assert "state.iterations > state.structureIterations" in script
-    assert "forceAtlas2Collision\\.worker-" in script
+    assert "data-map-physics', 'd3-worker'" in script
+    assert "['live', 'cooled'].includes(state.phase)" in script
+    assert "state.ticks > 0" in script
+    assert "d3Layout\\.worker-" in script
     assert "response.status === 200" in script
     assert "content-security-policy" in script
     assert "consoleErrors.length > 0" in script

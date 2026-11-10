@@ -71,7 +71,7 @@ def _csp_directives(policy):
     }
 
 
-def test_blob_workers_are_allowed_without_widening_script_or_network_sources():
+def test_same_origin_workers_are_allowed_without_widening_script_or_network_sources():
     app = FastAPI()
 
     @app.get("/graph")
@@ -82,7 +82,7 @@ def test_blob_workers_are_allowed_without_widening_script_or_network_sources():
     response = TestClient(app).get("/graph")
 
     directives = _csp_directives(response.headers["content-security-policy"])
-    assert directives["worker-src"] == ["'self'", "blob:"]
+    assert directives["worker-src"] == ["'self'"]
     assert directives["script-src"] == ["'self'"]
     assert directives["connect-src"] == ["'self'"]
     assert directives["default-src"] == ["'self'"]
@@ -90,7 +90,6 @@ def test_blob_workers_are_allowed_without_widening_script_or_network_sources():
     assert all(
         "blob:" not in sources
         for name, sources in directives.items()
-        if name != "worker-src"
     )
     assert "'unsafe-eval'" not in response.headers["content-security-policy"]
 
@@ -246,7 +245,7 @@ def test_header_values_exact_match(tmp_path, monkeypatch):
     assert response.headers["content-security-policy"] == (
         "default-src 'self'; "
         "script-src 'self'; "
-        "worker-src 'self' blob:; "
+        "worker-src 'self'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: https:; "
         "font-src 'self' data:; "
@@ -274,7 +273,7 @@ def test_per_response_csp_override_only_changes_requested_directives():
     assert "form-action 'self' http://127.0.0.1:58713" in csp
     assert "script-src 'self' 'nonce-test-nonce'" in csp
     directives = _csp_directives(csp)
-    assert directives["worker-src"] == ["'self'", "blob:"]
+    assert directives["worker-src"] == ["'self'"]
     expected = _csp_directives(SECURITY_HEADERS["content-security-policy"])
     expected["form-action"] = ["'self'", "http://127.0.0.1:58713"]
     expected["script-src"] = ["'self'", "'nonce-test-nonce'"]
