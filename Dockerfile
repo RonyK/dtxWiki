@@ -15,9 +15,8 @@ COPY frontend ./frontend
 # *.test.mjs files and still miss write-if-changed.mjs. The packaging test
 # test_frontend_generator_dependencies_are_copied_before_npm_install
 # (tests/packaging/test_docker_artifacts.py) fails when the list drifts.
-COPY scripts/generate-cosmos-rest-log.mjs ./scripts/
-COPY scripts/cosmos-rest-log-patch.mjs ./scripts/
-COPY scripts/cosmos-gpu-simulation-patch.mjs ./scripts/
+COPY scripts/generate-cosmos-native.mjs ./scripts/
+COPY scripts/cosmos-source.mjs ./scripts/
 COPY scripts/cosmos-collision-radii-patch.mjs ./scripts/
 COPY scripts/cosmos-point-picker-patch.mjs ./scripts/
 COPY scripts/write-if-changed.mjs ./scripts/

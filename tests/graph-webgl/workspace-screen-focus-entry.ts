@@ -266,7 +266,8 @@ function observeGraph(instance: Graph): NativeGraphObservation {
     if (observation.destroys > 0) observation.callsAfterDestroy += 1;
     onTick?.apply(instance.config, args);
     observation.ticks += 1;
-    observation.nodeCount = instance.getGpuSimulationFrame()?.nodeCount ?? null;
+    // Observe the pinned SDK's native row count without a simulation host API.
+    observation.nodeCount = (instance as unknown as { graph: { pointsNumber: number } }).graph.pointsNumber;
   };
   return observation;
 }

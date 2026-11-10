@@ -13,8 +13,8 @@ const { graph, createNativeGraph, cpu } = vi.hoisted(() => {
   let positions = new Float32Array();
   const graph = {
     ready: Promise.resolve(),
-    attachGpuSimulation: vi.fn(), attachPointPicker: vi.fn(), getTrackedPointPositionsFrame: vi.fn(() => null),
-    getGpuSimulationFrame: vi.fn(() => null), get isSimulationRunning() { return false; },
+    attachPointPicker: vi.fn(), getTrackedPointPositionsFrame: vi.fn(() => null),
+    get isSimulationRunning() { return false; },
     destroy: vi.fn(), create: vi.fn(), fitView: vi.fn(), getPointPositions: vi.fn(() => positions.slice()),
     getTrackedPointPositionsMap: vi.fn(() => new Map()), getZoomLevel: vi.fn(() => 2), pause: vi.fn(),
     render: vi.fn(), screenToSpacePosition: vi.fn(() => [2048, 2048]), setClusterPositions: vi.fn(),
@@ -39,7 +39,6 @@ const { graph, createNativeGraph, cpu } = vi.hoisted(() => {
 });
 
 vi.mock("../cosmosNative", () => ({ NativeGraph: createNativeGraph }));
-vi.mock("../cosmosRestLog", () => ({ RestLogGraph: vi.fn() }));
 vi.mock("../webglSupport", () => ({ detectWorkspaceMapWebGL: () => ({ supported: true }) }));
 vi.mock("../forceAtlas2WorkerLayout", () => ({
   createWorkspaceForceAtlas2WorkerLayout: vi.fn((input: Record<string, unknown>) => {
@@ -103,7 +102,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   cpu.inputs.length = 0;
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    MAX_TEXTURE_SIZE: 0x0D33, getParameter: () => 16_384,
+    MAX_TEXTURE_SIZE: 0x0D33,
+    ALIASED_POINT_SIZE_RANGE: 0x846D,
+    getParameter: (parameter: number) => parameter === 0x0D33 ? 16_384
+      : parameter === 0x846D ? Float32Array.of(1, 1024) : null,
   } as unknown as WebGL2RenderingContext);
   graph.ready = Promise.resolve();
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>

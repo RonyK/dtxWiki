@@ -1,3 +1,5 @@
+import { detectWorkspaceMapWebGL } from "../workspace/webglSupport";
+
 /** A device capability profile, never a viewport breakpoint or authorization. */
 export type WorkspaceMapDeviceProfile = "desktop" | "mobile" | "unknown";
 export type WorkspaceMapScale = "2k" | "10k";
@@ -13,6 +15,8 @@ export type WorkspaceMapDeviceSignals = {
   mobileHint?: boolean;
   finePointer: boolean;
   hover: boolean;
+  /** Native 10K collision accumulates into a floating-point blend target. */
+  floatBlend: boolean;
 };
 
 export function classifyWorkspaceMapDevice(signals: WorkspaceMapDeviceSignals): WorkspaceMapDeviceProfile {
@@ -25,6 +29,9 @@ export function classifyWorkspaceMapDevice(signals: WorkspaceMapDeviceSignals): 
   // them from touch PCs/hybrids, so all remaining touch-capable devices retain
   // the 2K limit deliberately, including otherwise genuine touch PCs.
   if (signals.maxTouchPoints > 0) return "unknown";
+  // A non-touch PC without floating-point blending can retain the 2K
+  // render-only path, but cannot opt into the native 10K simulation.
+  if (signals.floatBlend !== true) return "unknown";
   return /Windows NT|Macintosh|X11/i.test(signals.userAgent) && signals.finePointer && signals.hover
     ? "desktop" : "unknown";
 }
@@ -34,6 +41,7 @@ export function readWorkspaceMapDeviceProfile(): WorkspaceMapDeviceProfile {
   if (typeof window === "undefined" || typeof navigator === "undefined") return "unknown";
   try {
     const agent = navigator as Navigator & { userAgentData?: { mobile?: boolean } };
+    const support = detectWorkspaceMapWebGL();
     return classifyWorkspaceMapDevice({
       userAgent: agent.userAgent,
       platform: agent.platform,
@@ -41,6 +49,7 @@ export function readWorkspaceMapDeviceProfile(): WorkspaceMapDeviceProfile {
       mobileHint: agent.userAgentData?.mobile,
       finePointer: window.matchMedia("(pointer: fine)").matches,
       hover: window.matchMedia("(hover: hover)").matches,
+      floatBlend: support.supported && support.floatBlend,
     });
   } catch {
     return "unknown";

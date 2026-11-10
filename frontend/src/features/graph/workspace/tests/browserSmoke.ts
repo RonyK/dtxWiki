@@ -208,6 +208,23 @@ const boundaryLabelFixture = query.get("labels") === "boundary";
 const pcNativeCameraDiagnostic = query.get("camera") === "cancel-focus" && query.get("budget") === "pc10k";
 const pcBudget = query.get("budget") === "pc10k";
 const observedGraph: { current: Graph | null } = { current: null };
+
+/** Fixture-only observation of the pinned SDK, without a production simulation hook. */
+function nativeSceneState(graph: Graph) {
+  const native = graph as unknown as {
+    graph: { pointsNumber: number; inputPinnedPoints?: readonly number[] };
+    store: { draggingPointIndex?: number };
+    dragInstance: { isActive: boolean };
+  };
+  const nodeCount = native.graph.pointsNumber;
+  const index = native.dragInstance.isActive ? native.store.draggingPointIndex : undefined;
+  return {
+    nodeCount,
+    pinned: [...(native.graph.inputPinnedPoints ?? [])],
+    draggingIndex: typeof index === "number" && Number.isInteger(index) && index >= 0 && index < nodeCount ? index : null,
+  };
+}
+
 let geometryUploads = 0;
 let topologyUploads = 0;
 let uploadedRelationCount = 0;
@@ -475,7 +492,7 @@ async function main() {
       const radii = Float32Array.from(pointSizes!, (diameter, index) =>
         workspaceNominalGlyphRadiusCss(Math.min(diameter * sizeScale, cap), columns.nodeKinds[index] === 1 ? 1 : 0) / zoom);
       return measureNativeGeometry(positions, radii, graph.config.spaceSize,
-        graph.getGpuSimulationFrame()?.pinnedIndices ?? []);
+        nativeSceneState(graph).pinned);
     };
     const pcSource: PcNativeSource = {
       positions: () => {
@@ -526,7 +543,7 @@ async function main() {
             ...observedGraph.current!.config.simulationLinkDistRandomVariationRange],
           selectedId, selections: [...selections],
           dragPins: dragPins.map(({ id, position }) => ({ id, position: [...position] })),
-          draggingIndex: observedGraph.current!.getGpuSimulationFrame()?.draggingIndex ?? null,
+          draggingIndex: nativeSceneState(observedGraph.current!).draggingIndex,
           geometryUploads,
           topologyUploads,
           uploadedRelationCount,
@@ -539,7 +556,7 @@ async function main() {
           layoutRunning: stage.dataset.mapLayoutRunning === "true",
           layoutTicks: Number(stage.dataset.mapLayoutTicks ?? 0),
           layoutUnits: coordinates?.forceAtlas2Units ?? null,
-          pinned: [...(observedGraph.current!.getGpuSimulationFrame()?.pinnedIndices ?? [])],
+          pinned: nativeSceneState(observedGraph.current!).pinned,
           glError: gl.getError(),
         };
       },
@@ -654,11 +671,10 @@ async function main() {
           adapter.resumeLayout();
           const afterResume = read();
           adapter.stopLayout();
-          const frame = graph.getGpuSimulationFrame();
-          if (!frame) throw new Error("Native cooling diagnostic lost its GPU frame");
+          const scene = nativeSceneState(graph);
           return { afterStep, afterEnd, afterCamera, afterResume, endEvents, manualTicks, cameraTicks,
-            nodeCount: frame.nodeCount, relationCount: uploadedRelationCount,
-            geometryUploads, topologyUploads, glError: frame.gl.getError() };
+            nodeCount: scene.nodeCount, relationCount: uploadedRelationCount,
+            geometryUploads, topologyUploads, glError: gl.getError() };
         } finally { graph.config.onSimulationEnd = priorEnd; }
       },
       nativePinRelease: async action => {
@@ -670,14 +686,14 @@ async function main() {
         const graph = observedGraph.current!;
         const store = (graph as unknown as { store: { alpha: number } }).store;
         const read = (): NativePinReleaseFrame => {
-          const frame = graph.getGpuSimulationFrame(), positions = graph.getPointPositions();
-          if (!frame || frame.nodeCount !== columns.nodeIds.length) throw new Error("Released-pin diagnostic lost its native scene");
+          const scene = nativeSceneState(graph), positions = graph.getPointPositions();
+          if (scene.nodeCount !== columns.nodeIds.length) throw new Error("Released-pin diagnostic lost its native scene");
           assertPcNativePositions(positions, columns.nodeIds.length);
           const scale = 4096 / graph.config.spaceSize;
           return { alpha: store.alpha, running: graph.isSimulationRunning, nativeTicks,
-            canonicalPosition: [positions[0] * scale, positions[1] * scale], pinned: [...frame.pinnedIndices],
-            nodeCount: frame.nodeCount, relationCount: uploadedRelationCount, topologyMatches: uploadedTopologyMatches,
-            geometryUploads, topologyUploads, forceCommits, collisionCommits, glError: frame.gl.getError() };
+            canonicalPosition: [positions[0] * scale, positions[1] * scale], pinned: scene.pinned,
+            nodeCount: scene.nodeCount, relationCount: uploadedRelationCount, topologyMatches: uploadedTopologyMatches,
+            geometryUploads, topologyUploads, forceCommits, collisionCommits, glError: gl.getError() };
         };
         const id = columns.nodeIds[0];
         adapter.focus(id); // Retire automatic camera work, not forces or user pause.
@@ -721,7 +737,7 @@ async function main() {
         const screens = columns.nodeIds.map((_id, index) => graph.spaceToScreenPosition([
           positions[index * 2], positions[index * 2 + 1],
         ]));
-        const pins = new Set(graph.getGpuSimulationFrame()?.pinnedIndices ?? []);
+        const pins = new Set(nativeSceneState(graph).pinned);
         let best: { index: number; id: string; screen: [number, number]; clearance: number } | null = null;
         screens.forEach((screen, index) => {
           if (pins.has(index) || screen[0] < 48 || screen[1] < 48

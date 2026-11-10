@@ -3,13 +3,12 @@ import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { COSMOS_POINT_PICKER_PATCH_HUNKS, patchCosmosPointPicker } from "./cosmos-point-picker-patch.mjs";
-import { patchCosmosGpuSimulation, COSMOS_GPU_SIMULATION_PATCH_HUNKS } from "./cosmos-gpu-simulation-patch.mjs";
 import { patchCosmosCollisionRadii, COSMOS_COLLISION_RADII_PATCH_HUNKS } from "./cosmos-collision-radii-patch.mjs";
-import { COSMOS_VERSION, COSMOS_SOURCE_SHA256, sha256 } from "./cosmos-rest-log-patch.mjs";
+import { COSMOS_VERSION, COSMOS_SOURCE_SHA256, sha256 } from "./cosmos-source.mjs";
 
 const require = createRequire(import.meta.url);
 const original = await readFile(require.resolve("@cosmos.gl/graph"), "utf8");
-const native = patchCosmosCollisionRadii(patchCosmosGpuSimulation(original, COSMOS_VERSION), COSMOS_VERSION);
+const native = patchCosmosCollisionRadii(original, COSMOS_VERSION);
 const modified = patchCosmosPointPicker(native, COSMOS_VERSION);
 const hunk = id => COSMOS_POINT_PICKER_PATCH_HUNKS.find(value => value.id === id);
 
@@ -78,9 +77,9 @@ function pickerFixture(calls = []) {
   };
 }
 
-test("all optional picking hunks reverse through collision/GPU changes to the pinned SDK", () => {
+test("all optional picking hunks reverse through collision changes to the pinned SDK", () => {
   let reversed = modified;
-  for (const hunks of [COSMOS_POINT_PICKER_PATCH_HUNKS, COSMOS_COLLISION_RADII_PATCH_HUNKS, COSMOS_GPU_SIMULATION_PATCH_HUNKS]) {
+  for (const hunks of [COSMOS_POINT_PICKER_PATCH_HUNKS, COSMOS_COLLISION_RADII_PATCH_HUNKS]) {
     for (const { before, after } of [...hunks].reverse()) {
       assert.equal(reversed.split(after).length, 2);
       reversed = reversed.replace(after, before);

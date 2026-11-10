@@ -301,22 +301,3 @@ test("collision own-cell centroid excludes self for separated points while a rea
   expect(translated.after).toEqual(translated.before);
   expect(sameCell.after).toEqual(sameCell.before);
 });
-
-test("shared RestLog GPU artifact obeys the independent seven-case relation law", async ({ page }, testInfo) => {
-  test.setTimeout(60_000);
-  const errors: string[] = [];
-  page.on("pageerror", error => errors.push(error.message));
-  page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
-  await page.goto(`${origin}/@fs/${path.resolve("tests/graph-webgl/workspace-relation-forces.html")}`);
-  await page.waitForFunction(() => ["ready", "error"].includes(window.__workspaceRelationForces?.status));
-  expect(await page.evaluate(() => ({ status: window.__workspaceRelationForces.status,
-    error: window.__workspaceRelationForces.error ?? null }))).toEqual({ status: "ready", error: null });
-  const evidence = await page.evaluate(() => window.__workspaceRelationForces.relationLaw());
-  await attachEvidence(testInfo, "shared-rest-log-law", { evidence, errors });
-  expect(evidence.cases.map(sample => sample.name)).toEqual([
-    "compression", "rest", "extension20", "extension40", "sqrt-strength", "scale-covariance", "pinned-source",
-  ]);
-  expect(evidence.failures).toEqual([]);
-  expect(evidence.passed).toBe(true);
-  expect(errors).toEqual([]);
-});

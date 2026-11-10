@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { COSMOS_SOURCE_SHA256, COSMOS_VERSION, sha256 } from "./cosmos-rest-log-patch.mjs";
-import { COSMOS_GPU_SIMULATION_PATCH_HUNKS } from "./cosmos-gpu-simulation-patch.mjs";
+import { COSMOS_SOURCE_SHA256, COSMOS_VERSION, sha256 } from "./cosmos-source.mjs";
 
 const pinnedPointsComment = "  /**\n   * Sets which points are pinned (fixed) in position.";
 const collisionMethods = `  /** Optional native-world glyph radii; null preserves the upstream size column. */
@@ -42,12 +41,7 @@ export const COSMOS_COLLISION_RADII_PATCH_HUNKS = Object.freeze([
 
 export function patchCosmosCollisionRadii(source, version) {
   assert.equal(version, COSMOS_VERSION, "Review glyph collision units before upgrading Cosmos");
-  let original = source;
-  for (const { id, before, after } of [...COSMOS_GPU_SIMULATION_PATCH_HUNKS].reverse()) {
-    assert.equal(original.split(after).length, 2, `Expected exactly one reviewed GPU ${id} seam`);
-    original = original.replace(after, before);
-  }
-  assert.equal(sha256(original), COSMOS_SOURCE_SHA256, "Cosmos source differs from the reviewed package");
+  assert.equal(sha256(source), COSMOS_SOURCE_SHA256, "Cosmos source differs from the reviewed package");
   let modified = source;
   for (const { id, before, after } of COSMOS_COLLISION_RADII_PATCH_HUNKS) {
     assert.equal(modified.split(before).length, 2, `Expected exactly one ${id} seam`);
