@@ -145,6 +145,10 @@ class PagePayload(PageSummary):
     # payload stays unchanged. The command ledger retains it separately for
     # an identical receipt when an idempotent patch is replayed.
     _edit_receipt: EditReceipt | None = PrivateAttr(default=None)
+    _metadata_overrides: list[dict] = PrivateAttr(default_factory=list)
+    _replayed: bool = PrivateAttr(default=False)
+    _placement_parent_node_id: UUID | None = PrivateAttr(default=None)
+    _placement_changed: bool = PrivateAttr(default=False)
     # Whether the actor this payload was built for may submit this exact
     # version for review now. Private so MCP tool schemas stay unchanged; REST
     # exposes it as ``ContextPageDetail.can_submit_for_review``.
@@ -434,11 +438,6 @@ class PageAutosaveRequest(PageUpdateRequest):
         description="Browser-session save: stage a shared, unpublished draft.",
     )
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
-    # P8.5: ask "what happened to this key" without executing anything. A
-    # caller unsure whether its own prior send landed uses this instead of
-    # guessing -- a valid receipt still replays, but a missing/expired one
-    # answers `operation_outcome_unknown` rather than autosaving fresh.
-    retry_only: bool = False
 
 
 class UpdateContextEditRequest(InputRequest):
@@ -462,28 +461,14 @@ class UpdateContextEditRequest(InputRequest):
     page_type: ContextPageType | None = None
     tags: list[str] | None = Field(default=None, max_length=TAGS_MAX_ITEMS)
     aliases: list[str] | None = Field(default=None, max_length=ALIASES_MAX_ITEMS)
-    # Optional for the caller's own open edit: every save of that row bumps
-    # editing_revision, so it alone is the concurrency check. Requiring the
-    # version id and content hash as well only added two more values an agent
-    # could hold stale. When sent, both are still checked.
-    base_version_id: UUID | None = Field(
-        default=None,
-        description=(
-            "Optional when saving your own open edit (expected_editing_revision "
-            "is the concurrency check). If sent, base_content_hash must be sent "
-            "too and both must match."
-        ),
-    )
-    base_content_hash: str | None = Field(default=None, pattern=CONTENT_HASH_PATTERN)
     # Binds the save to the editing row the caller read. The revision alone
     # cannot say WHICH row that was: a row discarded or submitted since, and a
     # new one opened in its place, used to start from the same revisions.
-    version_id: UUID | None = Field(
-        default=None,
+    version_id: UUID = Field(
         description=(
             "Your open edit's version_id, from your last create/begin/update/"
             "patch response (or read_structure_map with version='my_edit'). "
-            "When sent, the save applies only to that edit: if it was "
+            "The save applies only to that edit: if it was "
             "discarded or submitted, or another edit is open now, the call is "
             "a conflict and nothing is saved."
         ),
@@ -496,9 +481,8 @@ class UpdateContextEditRequest(InputRequest):
             "is saved; re-read the edit before trying again."
         ),
     )
-    destination_node_id: UUID | None = None
+    placement_parent_node_id: UUID | None = None
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
-    retry_only: bool = False
 
     model_config = ConfigDict(extra="forbid")
 
@@ -511,14 +495,6 @@ class UpdateContextEditRequest(InputRequest):
     @classmethod
     def _validate_alias_items(cls, value: list[str] | None) -> list[str] | None:
         return _check_alias_lengths(value)
-
-    @model_validator(mode="after")
-    def _base_is_all_or_nothing(self) -> "UpdateContextEditRequest":
-        if (self.base_version_id is None) != (self.base_content_hash is None):
-            raise ValueError(
-                "send base_version_id and base_content_hash together, or neither"
-            )
-        return self
 
 
 class MyContextEditSummary(BaseModel):
@@ -590,7 +566,6 @@ class BeginContextEditRequest(BaseModel):
     base_version_id: UUID | None = None
     base_content_hash: str | None = None
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
-    retry_only: bool = False
 
     model_config = ConfigDict(extra="forbid")
 
@@ -600,7 +575,6 @@ class SubmitContextEditRequest(InputRequest):
     expected_editing_revision: int = Field(ge=1)
     reason: str = Field(default="author submitted for review", min_length=1)
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
-    retry_only: bool = False
 
     model_config = ConfigDict(extra="forbid")
 
@@ -608,7 +582,6 @@ class SubmitContextEditRequest(InputRequest):
 class DiscardContextEditRequest(BaseModel):
     version_id: UUID
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
-    retry_only: bool = False
 
     model_config = ConfigDict(extra="forbid")
 
@@ -619,6 +592,7 @@ class DiscardContextEditResult(BaseModel):
 
     version_id: UUID
     page_archived: bool
+    replayed: bool = False
 
     model_config = ConfigDict(extra="forbid")
 

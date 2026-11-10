@@ -379,7 +379,7 @@ def test_mcp_patch_draft_accepts_the_section_hash_read_context_outline_returned(
         "read_context_outline",
         {
             "workspace_id": str(workspace_id),
-            "target": {"page_id": str(created.page_id)},
+            "page_id": str(created.page_id),
         },
         actor=actor,
         page_service=page_service,
@@ -436,7 +436,7 @@ def test_mcp_patch_draft_replace_section_receipt_carries_both_section_hashes(
         "read_context_outline",
         {
             "workspace_id": str(workspace_id),
-            "target": {"page_id": str(created.page_id)},
+            "page_id": str(created.page_id),
         },
         actor=actor,
         page_service=page_service,

@@ -64,7 +64,7 @@ def _open_editing_page(page_service, actor):
     """Create a fresh page-first page with its own open editing version.
 
     Every upload_image call now requires a real page_id and the caller's own
-    open editing_version_id (P2/P3 page-first contract), so tests that need a
+    open version_id (P2/P3 page-first contract), so tests that need a
     real upload target open one through the same service-layer path
     (`create_page_first`) production page-first creation uses.
     """
@@ -81,7 +81,7 @@ def _payload(
     content: bytes = PNG,
     *,
     page_id,
-    editing_version_id,
+    version_id,
     **overrides,
 ):
     payload = {
@@ -92,7 +92,7 @@ def _payload(
         "marker_uuid": str(uuid4()),
         "alt_text": "diagram [v1]",
         "page_id": str(page_id),
-        "editing_version_id": str(editing_version_id),
+        "version_id": str(version_id),
     }
     payload.update(overrides)
     return payload
@@ -131,7 +131,7 @@ def test_upload_image_accepts_format_matrix(
             content,
             mime_type=mime_type,
             page_id=editing_page.id,
-            editing_version_id=editing_page.version_id,
+            version_id=editing_page.version_id,
         ),
     )
 
@@ -170,7 +170,7 @@ def test_upload_image_rejects_svg_mismatch_and_empty(
         _payload(
             _workspace_id(page_service),
             page_id=editing_page.id,
-            editing_version_id=editing_page.version_id,
+            version_id=editing_page.version_id,
             **payload_patch,
         ),
     )
@@ -181,7 +181,7 @@ def test_upload_image_rejects_svg_mismatch_and_empty(
 def test_upload_image_decoded_size_boundary():
     workspace_id = uuid4()
     page_id = uuid4()
-    editing_version_id = uuid4()
+    version_id = uuid4()
     at_limit = b"\x89PNG\r\n\x1a\n" + bytes(MAX_CONTEXT_IMAGE_UPLOAD_BYTES - 8)
     accepted = UploadImageInput.model_validate(
         {
@@ -189,7 +189,7 @@ def test_upload_image_decoded_size_boundary():
                 workspace_id,
                 at_limit,
                 page_id=page_id,
-                editing_version_id=editing_version_id,
+                version_id=version_id,
             ),
             "conversation_token": "new",
         }
@@ -205,7 +205,7 @@ def test_upload_image_decoded_size_boundary():
                 workspace_id,
                 over_limit,
                 page_id=page_id,
-                editing_version_id=editing_version_id,
+                version_id=version_id,
             ),
             "conversation_token": "new",
         }
@@ -258,7 +258,7 @@ def test_upload_image_uses_workspace_plane_not_control_plane(
 
     workspace_id = uuid4()
     page_id = uuid4()
-    editing_version_id = uuid4()
+    version_id = uuid4()
     with control_factory.begin() as session:
         session.add(
             ContextPage(
@@ -327,7 +327,7 @@ def test_upload_image_uses_workspace_plane_not_control_plane(
             workspace_id,
             PNG,
             page_id=page_id,
-            editing_version_id=editing_version_id,
+            version_id=version_id,
         ),
         ctx,
     )
@@ -349,7 +349,7 @@ def test_marker_idempotency_and_different_bytes_rejection(
         workspace_id,
         marker_uuid=str(marker_uuid),
         page_id=editing_page.id,
-        editing_version_id=editing_page.version_id,
+        version_id=editing_page.version_id,
     )
 
     first = _dispatch_upload(page_service, actor, payload)
@@ -363,7 +363,7 @@ def test_marker_idempotency_and_different_bytes_rejection(
             marker_uuid=str(marker_uuid),
             mime_type="image/jpeg",
             page_id=editing_page.id,
-            editing_version_id=editing_page.version_id,
+            version_id=editing_page.version_id,
         ),
     )
 
@@ -411,7 +411,7 @@ def test_upload_image_rejects_cross_workspace_page(
         _payload(
             workspace_id,
             page_id=page_id,
-            editing_version_id=uuid4(),
+            version_id=uuid4(),
         ),
     )
     assert response.envelope.error_code == "not_found"
@@ -427,7 +427,7 @@ def test_upload_image_rejects_missing_page_as_not_found(
         _payload(
             _workspace_id(page_service),
             page_id=uuid4(),
-            editing_version_id=uuid4(),
+            version_id=uuid4(),
         ),
     )
 
@@ -460,7 +460,7 @@ def test_upload_image_rejects_archived_page_as_not_found(
         _payload(
             workspace_id,
             page_id=page_id,
-            editing_version_id=uuid4(),
+            version_id=uuid4(),
         ),
     )
 
@@ -519,7 +519,7 @@ def test_upload_image_rejects_visible_page_from_a_different_workspace(
         _payload(
             workspace_id,
             page_id=page_id,
-            editing_version_id=uuid4(),
+            version_id=uuid4(),
         ),
     )
 
@@ -540,7 +540,7 @@ def test_upload_image_page_target_binds_asset_to_the_open_editing_version(
         _payload(
             workspace_id,
             page_id=editing_page.id,
-            editing_version_id=editing_page.version_id,
+            version_id=editing_page.version_id,
         ),
     )
 
@@ -604,7 +604,7 @@ def test_upload_image_rejects_foreign_actor_editing_version_without_residue(
             filename="foreign.jpg",
             mime_type="image/jpeg",
             page_id=editing_page.id,
-            editing_version_id=editing_page.version_id,
+            version_id=editing_page.version_id,
         ),
     )
 
@@ -655,7 +655,7 @@ def test_upload_image_preserves_canonical_ingest_error_contract(
         _payload(
             _workspace_id(page_service),
             page_id=editing_page.id,
-            editing_version_id=editing_page.version_id,
+            version_id=editing_page.version_id,
         ),
     )
 
@@ -671,7 +671,7 @@ def test_upload_image_scope_role_and_token_refusals(
     scope_denied = _dispatch_upload(
         page_service,
         mcp_default_actor(scopes=("mcp:read",)),
-        _payload(workspace_id, page_id=uuid4(), editing_version_id=uuid4()),
+        _payload(workspace_id, page_id=uuid4(), version_id=uuid4()),
     )
     assert scope_denied.envelope.error_code == "scope_denied"
 
@@ -705,7 +705,7 @@ def test_upload_image_scope_role_and_token_refusals(
     async def run_without_token():
         return await call_tool_async(
             "upload_image",
-            _payload(workspace_id, page_id=uuid4(), editing_version_id=uuid4()),
+            _payload(workspace_id, page_id=uuid4(), version_id=uuid4()),
             actor=mcp_default_actor(scopes=("draft-write",)),
             page_service=page_service,
         )
@@ -727,7 +727,7 @@ def test_failing_upload_redacts_trace_error_chat_params_and_audit(
         workspace_id,
         marker_uuid=str(marker_uuid),
         page_id=editing_page.id,
-        editing_version_id=editing_page.version_id,
+        version_id=editing_page.version_id,
     )
 
     async def run(payload):
@@ -746,7 +746,7 @@ def test_failing_upload_redacts_trace_error_chat_params_and_audit(
         marker_uuid=str(marker_uuid),
         mime_type="image/jpeg",
         page_id=editing_page.id,
-        editing_version_id=editing_page.version_id,
+        version_id=editing_page.version_id,
     )
     secret = failing_payload["content_base64"]
 
@@ -810,7 +810,7 @@ def test_upload_redacts_base64_duplicated_into_filename(
         filename=f"prefix-{secret}-suffix",
         mime_type="image/gif",
         page_id=editing_page.id,
-        editing_version_id=editing_page.version_id,
+        version_id=editing_page.version_id,
     )
 
     async def run():
@@ -843,7 +843,7 @@ def test_failing_upload_scrubs_base64_even_if_an_exception_mentions_it(
     payload = _payload(
         workspace_id,
         page_id=editing_page.id,
-        editing_version_id=editing_page.version_id,
+        version_id=editing_page.version_id,
     )
     secret = payload["content_base64"]
 

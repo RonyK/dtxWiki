@@ -56,7 +56,7 @@ def upload_image(payload: dict, ctx: ToolCallContext) -> UploadImageToolOutput:
                 declared_media_type=request.mime_type,
                 content=decode_image_base64(request.content_base64),
                 page_id=request.page_id,
-                editing_version_id=request.editing_version_id,
+                editing_version_id=request.version_id,
                 actor_kind=actor.actor_kind,
                 actor_id=actor.actor_id,
                 policy_revision=CONTEXT_MEDIA_POLICY_REVISION,

@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from backend.schemas.common import MCPResultEnvelope
 from backend.schemas.context_write import (
@@ -23,6 +23,7 @@ from backend.schemas.context_write import (
     WriteDraftRequest,
 )
 from backend.schemas.input_policy import InputRequest
+from backend.schemas.page import CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
 
 CONVERSATION_TOKEN_FIELD = Field(
     default=None,
@@ -109,6 +110,7 @@ class MCPRevisionUpdateRequest(UpdateDraftRequest):
 
 class SubmitRevisionForReviewInput(InputRequest):
     workspace_id: UUID
+    idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
     review_item_id: UUID
     # EXACTLY ONE revision source. `update` revises an existing page version
     # (preferred: carries base_version_id/base_content_hash stale-write
@@ -135,6 +137,8 @@ class SubmitRevisionForReviewResult(BaseModel):
     # True when an idempotent retry (same principal + same content) returned the
     # prior result instead of creating a duplicate draft.
     deduplicated: bool = False
+    replayed: bool = False
+    _operation_authorization: dict = PrivateAttr(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
 

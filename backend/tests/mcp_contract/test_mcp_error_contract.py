@@ -33,8 +33,7 @@ _VALID_UPDATE_CONTEXT_EDIT_PAYLOAD = {
     "workspace_id": "00000000-0000-0000-0000-000000000001",
     "page_id": "00000000-0000-0000-0000-000000000002",
     "body_md": "body",
-    "base_version_id": "00000000-0000-0000-0000-000000000003",
-    "base_content_hash": "a" * 64,
+    "version_id": "00000000-0000-0000-0000-000000000003",
     "expected_editing_revision": 1,
     "idempotency_key": "error-contract-key-1",
 }
@@ -67,8 +66,8 @@ def test_missing_field_names_the_field_and_the_repair():
     assert envelope.error_message
     fields = {detail.field for detail in envelope.error_details}
     assert "body_md" in fields
-    # base_version_id/base_content_hash are optional for your own open edit;
-    # the revision is the concurrency check that is always required.
+    # Every update identifies its own open version and last observed revision.
+    assert "version_id" in fields
     assert "expected_editing_revision" in fields
     # Resending the same arguments can never pass the same validator.
     assert envelope.retryable is False
@@ -196,7 +195,7 @@ def test_media_editing_not_open_is_a_nonretryable_conflict():
 def test_media_editing_not_open_guidance_names_the_explicit_recovery_field():
     guidance = ERROR_CODE_GUIDANCE["media_editing_not_open"]
 
-    assert "editing_version_id" in guidance
+    assert "version_id" in guidance
     assert "upload_image" in guidance
 
 
@@ -205,7 +204,7 @@ def test_embedded_image_guidance_never_tells_agents_to_persist_transport_urls():
 
     assert "data.markdown" in guidance
     assert "data.logical_ref" in guidance
-    assert "editing_version_id" in guidance
+    assert "version_id" in guidance
     assert "Never persist data.content_url" in guidance
     assert "relative URL" not in guidance
 

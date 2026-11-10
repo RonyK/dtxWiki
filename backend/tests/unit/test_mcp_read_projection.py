@@ -629,8 +629,12 @@ def test_all_context_read_handlers_capture_exact_editing_revision(
         "read": {"target_type": "context_page_version", "target_id": str(version_id)},
         "fetch": {"id": str(page_id), "type": "context_page"},
         "read_concept": {"path": f"/context/{slug}.md", "include_neighbors": False},
-        "read_context_outline": {"target": {"version_id": str(version_id)}},
-        "read_structure_map": {"target": {"version_id": str(version_id)}},
+        "read_context_outline": {
+            "page_id": str(page_id), "version_id": str(version_id)
+        },
+        "read_structure_map": {
+            "page_id": str(page_id), "version_id": str(version_id)
+        },
     }[tool]
     response = dispatch(
         tool,

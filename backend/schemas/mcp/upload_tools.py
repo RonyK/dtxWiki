@@ -29,7 +29,7 @@ class UploadImageInput(BaseModel):
     content_base64: str = Field(min_length=1, max_length=MAX_ENCODED_IMAGE_CHARS)
     marker_uuid: UUID
     page_id: MCPPageInput
-    editing_version_id: UUID = Field(
+    version_id: UUID = Field(
         description=(
             "The caller's own currently-open editing version for this page. "
             "The image is registered against it; uploading requires an open "

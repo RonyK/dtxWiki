@@ -4341,6 +4341,11 @@ export interface components {
              */
             next_action: "owner_activation_required" | "review_required";
             normalization_report?: components["schemas"]["IndexRefNormalizationReport"];
+            /**
+             * Replayed
+             * @default false
+             */
+            replayed: boolean;
             /** Review Item Id */
             review_item_id?: string | null;
         };
@@ -4944,11 +4949,6 @@ export interface components {
              * @description 24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.
              */
             idempotency_key: string;
-            /**
-             * Retry Only
-             * @default false
-             */
-            retry_only: boolean;
         };
         /** Body_add_library_item_version_api_v1_workspaces__workspace_id__library_items__item_id__versions_post */
         Body_add_library_item_version_api_v1_workspaces__workspace_id__library_items__item_id__versions_post: {
@@ -6480,11 +6480,6 @@ export interface components {
              */
             idempotency_key: string;
             /**
-             * Retry Only
-             * @default false
-             */
-            retry_only: boolean;
-            /**
              * Version Id
              * Format: uuid
              */
@@ -6638,7 +6633,7 @@ export interface components {
              * @description Stable warning code; must be drawn from WARNING_CODES.
              * @enum {string}
              */
-            code: "stale" | "permission_limited" | "citation_missing" | "citation_weak" | "citation_stale" | "token_budget" | "workflow_sequence_incomplete" | "draft_not_injectable" | "expired_context" | "archived" | "unsupported_retrieval_mode_fallback" | "deprecated_tool" | "conversation_token_not_supplied" | "unresolved_diverged_branch" | "conversation_read_stale" | "lint_publish_blocked" | "published_with_findings" | "draft_unpublished" | "text_occurrence_mismatch" | "text_not_found" | "unsupported_filter_tag" | "unsupported_filter_date" | "semantic_fallback_used" | "keyword_lane_unavailable" | "coverage_gap_recorded" | "evidence_not_citable" | "mrtr_preview_unavailable" | "borrowed_rerank_applied" | "borrowed_query_rewrite_applied" | "llm_provider_unavailable" | "llm_composer_failed" | "job_fanout_incomplete" | "context_page_has_no_graph_visible_links";
+            code: "metadata_frontmatter_overridden" | "stale" | "permission_limited" | "citation_missing" | "citation_weak" | "citation_stale" | "token_budget" | "workflow_sequence_incomplete" | "draft_not_injectable" | "expired_context" | "archived" | "unsupported_retrieval_mode_fallback" | "deprecated_tool" | "conversation_token_not_supplied" | "unresolved_diverged_branch" | "conversation_read_stale" | "lint_publish_blocked" | "published_with_findings" | "draft_unpublished" | "text_occurrence_mismatch" | "text_not_found" | "unsupported_filter_tag" | "unsupported_filter_date" | "semantic_fallback_used" | "keyword_lane_unavailable" | "coverage_gap_recorded" | "evidence_not_citable" | "mrtr_preview_unavailable" | "borrowed_rerank_applied" | "borrowed_query_rewrite_applied" | "llm_provider_unavailable" | "llm_composer_failed" | "job_fanout_incomplete" | "context_page_has_no_graph_visible_links";
             /** Message */
             message: string;
         };
@@ -9611,11 +9606,6 @@ export interface components {
             on_stale: "conflict" | "preserve_as_alternative";
             /** Page Type */
             page_type?: ("overview" | "source" | "entity" | "concept" | "synthesis" | "comparison" | "decision" | "contradiction" | "query" | "guide") | null;
-            /**
-             * Retry Only
-             * @default false
-             */
-            retry_only: boolean;
             /** Session Version Id */
             session_version_id?: string | null;
             /**
@@ -10508,11 +10498,6 @@ export interface components {
             idempotency_key: string;
             /** Remove */
             remove?: components["schemas"]["DocumentReferenceRemoveInput"][];
-            /**
-             * Retry Only
-             * @default false
-             */
-            retry_only: boolean;
             /**
              * Version Id
              * Format: uuid
@@ -11644,11 +11629,6 @@ export interface components {
              * @default author submitted for review
              */
             reason: string;
-            /**
-             * Retry Only
-             * @default false
-             */
-            retry_only: boolean;
             /**
              * Version Id
              * Format: uuid

@@ -99,7 +99,8 @@
       "upload_image": "Upload image",
       "what_changed": "What changed",
       "wiki_maintenance": "Perform staged wiki maintenance",
-      "write_agent_page_draft": "Write agent page draft"
+      "write_agent_page_draft": "Write agent page draft",
+      "get_operation_status": "Get operation status"
     },
     "genericTool": "Tool",
     "genericActivity": "MCP activity",

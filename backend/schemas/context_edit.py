@@ -11,6 +11,11 @@ from backend.schemas.page import BODY_MD_MAX_LENGTH
 
 _SHA256_HEX_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _HEADING_PATH_SEPARATOR = ">"
+_EXPECTED_HASH_DESCRIPTION = (
+    "Hash of the addressed block or row, from read_structure_map.blocks[].hash "
+    "(also edit_receipt.changed_blocks[].hash) or blocks[].rows[].hash. "
+    "It protects that block or row only, not a complete section subtree."
+)
 
 
 class _StrictModel(BaseModel):
@@ -75,7 +80,7 @@ class BlockTextAddress(_StrictModel):
 
     by: Literal["block"]
     block: str = Field(min_length=1)
-    expected: str
+    expected: str = Field(description=_EXPECTED_HASH_DESCRIPTION)
 
     @field_validator("expected")
     @classmethod
@@ -237,7 +242,12 @@ class ReplaceDocumentOperation(_Operation):
     content: str = Field(
         min_length=1, max_length=BODY_MD_MAX_LENGTH, description=_CONTENT_DESCRIPTION
     )
-    expected_content_hash: str
+    expected_content_hash: str = Field(
+        description=(
+            "The whole document's normalized content_hash from the last read "
+            "or edit response; not a section or block hash."
+        )
+    )
 
     @field_validator("content")
     @classmethod
@@ -261,7 +271,12 @@ class ReplaceSectionOperation(_AnchorScopedOperation):
     content: str = Field(
         min_length=1, max_length=BODY_MD_MAX_LENGTH, description=_CONTENT_DESCRIPTION
     )
-    expected_section_hash: str
+    expected_section_hash: str = Field(
+        description=(
+            "section_hash from read_context_outline for this complete section "
+            "subtree (heading and descendants); not a heading block's hash."
+        )
+    )
 
     @field_validator("content")
     @classmethod
@@ -308,7 +323,12 @@ class InsertSectionOperation(_AnchorScopedOperation):
 class DeleteSectionOperation(_AnchorScopedOperation):
     op: Literal["delete_section"]
     at: SectionAddress
-    expected_section_hash: str
+    expected_section_hash: str = Field(
+        description=(
+            "section_hash from read_context_outline for this complete section "
+            "subtree (heading and descendants); not a heading block's hash."
+        )
+    )
 
     @field_validator("expected_section_hash")
     @classmethod
@@ -326,7 +346,7 @@ class ReplaceBlockOperation(_Operation):
     # resolution involved.
     op: Literal["replace_block"]
     block: str = Field(min_length=1)
-    expected: str
+    expected: str = Field(description=_EXPECTED_HASH_DESCRIPTION)
     content: str = Field(
         min_length=1, max_length=BODY_MD_MAX_LENGTH, description=_CONTENT_DESCRIPTION
     )
@@ -349,7 +369,7 @@ class ReplaceBlockOperation(_Operation):
 class InsertAfterOperation(_Operation):
     op: Literal["insert_after"]
     block: str = Field(min_length=1)
-    expected: str
+    expected: str = Field(description=_EXPECTED_HASH_DESCRIPTION)
     content: str = Field(
         min_length=1, max_length=BODY_MD_MAX_LENGTH, description=_CONTENT_DESCRIPTION
     )
@@ -372,7 +392,7 @@ class InsertAfterOperation(_Operation):
 class InsertRowOperation(_Operation):
     op: Literal["insert_row"]
     row: str = Field(min_length=1)
-    expected: str
+    expected: str = Field(description=_EXPECTED_HASH_DESCRIPTION)
     content: str = Field(min_length=1, description=_CONTENT_DESCRIPTION)
 
     @field_validator("content")
@@ -393,7 +413,7 @@ class InsertRowOperation(_Operation):
 class DeleteBlockOperation(_Operation):
     op: Literal["delete_block"]
     block: str = Field(min_length=1)
-    expected: str
+    expected: str = Field(description=_EXPECTED_HASH_DESCRIPTION)
 
     @field_validator("expected")
     @classmethod

@@ -93,6 +93,7 @@ def test_partial_edit_costs_a_fraction_of_a_whole_body_round_trip(
         {
             "workspace_id": str(workspace_id),
             "title": "Phase5 Measurement",
+            "idempotency_key": "cost-create",
             "body_md": body,
         },
         actor=actor,

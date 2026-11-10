@@ -99,7 +99,8 @@
       "upload_image": "이미지 업로드",
       "what_changed": "변경 사항 보기",
       "wiki_maintenance": "단계별 위키 유지관리",
-      "write_agent_page_draft": "에이전트 페이지 초안 작성"
+      "write_agent_page_draft": "에이전트 페이지 초안 작성",
+      "get_operation_status": "작업 상태 조회"
     },
     "genericTool": "도구",
     "genericActivity": "MCP 활동",

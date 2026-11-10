@@ -1326,7 +1326,7 @@ def _replace_document(
     # the caller-supplied `base`.
     if section_content_hash(body) != op.expected_content_hash:
         raise ContextEditError(
-            "stale_base_version",
+            "content_hash_mismatch",
             "document content did not match expected_content_hash",
         )
     return ResolvedEdit(0, len(body), op.content, op.op, op.content == body)

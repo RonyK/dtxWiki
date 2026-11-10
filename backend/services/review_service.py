@@ -3743,45 +3743,12 @@ class ReviewService:
             review_item_id=review_item_id,
         )
         review = self._require_review_for_update(session, workspace_id, review_item_id)
-        if principal is None:
-            # No effective principal (owner-less caller) → no audience.
-            raise ReadNotFoundError("review item not found")
-        # The principal-keyed prior result (proof THIS principal already
-        # submitted this exact revision for this item). Computed up front but
-        # applied AFTER the audience gate so it can never leak existence to an
-        # out-of-audience caller (HIGH #1).
         content_hash = _revision_content_hash(update, create)
-        prior = self._prior_revision_result(
-            session, review_item_id, principal, content_hash
+        prior = self._authorize_revision_prior(
+            session, review, principal, principal_role, content_hash
         )
-        # Audience gate FIRST (no existence leak outside the caller's audience).
-        # An active changes_requested item must pass the current-audience
-        # predicate. Once the item has been resolved back to pending, the only
-        # legitimate caller is a retry by the principal who authored the prior
-        # revision — its own prior result is the proof of past membership.
-        if review.status == CHANGES_REQUESTED_STATUS:
-            if not self._principal_in_current_audience(
-                session, review, principal, principal_role
-            ):
-                raise ReadNotFoundError("review item not found")
-            if prior is not None:
-                return prior
-        else:
-            # Not changes_requested: the only valid caller is a same-principal
-            # idempotent retry (its prior result proves past audience
-            # membership). Anyone else — including an out-of-audience caller on
-            # the same MCP client — gets not_found, never a status leak that the
-            # item exists (HIGH #1: no existence leak outside audience).
-            if prior is not None:
-                return prior
-            if self._withdrawn_request_reached(
-                session, review, principal, principal_role
-            ):
-                raise ReadNotFoundError(
-                    "the change request on this review was withdrawn; it no "
-                    "longer accepts revisions"
-                )
-            raise ReadNotFoundError("review item not found")
+        if prior is not None:
+            return prior
 
         # Bind the revision to the original review's target (P1). The revised
         # draft MUST update the SAME context page this change-request is about.
@@ -3878,6 +3845,59 @@ class ReviewService:
             new_review_status="pending",
             deduplicated=False,
         )
+
+    def authorize_revision_submission(
+        self,
+        session: Session,
+        *,
+        workspace_id: UUID,
+        review_item_id: UUID,
+        principal: UUID | None,
+        principal_role: str | None,
+        update: UpdateDraftRequest | None = None,
+        create: WriteDraftRequest | None = None,
+        content_hash: str | None = None,
+    ) -> str | None:
+        """Apply the revision audience gate before disclosing a stored outcome.
+
+        This read-only preflight does not replace the locked authorization in
+        the mutation. An idempotency receipt must not bypass that same
+        effective-principal/current-audience policy.
+        """
+        review = self._require_review(session, workspace_id, review_item_id)
+        resolved_hash = content_hash or _revision_content_hash(update, create)
+        self._authorize_revision_prior(
+            session, review, principal, principal_role, resolved_hash
+        )
+        return resolved_hash
+
+    def _authorize_revision_prior(
+        self,
+        session: Session,
+        review: ReviewItem,
+        principal: UUID | None,
+        principal_role: str | None,
+        content_hash: str | None,
+    ) -> SubmitRevisionForReviewResult | None:
+        if principal is None:
+            raise ReadNotFoundError("review item not found")
+        prior = self._prior_revision_result(session, review.id, principal, content_hash)
+        if review.status == CHANGES_REQUESTED_STATUS:
+            if not self._principal_in_current_audience(
+                session, review, principal, principal_role
+            ):
+                raise ReadNotFoundError("review item not found")
+            return prior
+        # Only a result authored by THIS principal proves past audience
+        # membership after the review leaves changes_requested.
+        if prior is not None:
+            return prior
+        if self._withdrawn_request_reached(session, review, principal, principal_role):
+            raise ReadNotFoundError(
+                "the change request on this review was withdrawn; it no "
+                "longer accepts revisions"
+            )
+        raise ReadNotFoundError("review item not found")
 
     def _withdrawn_request_reached(
         self,

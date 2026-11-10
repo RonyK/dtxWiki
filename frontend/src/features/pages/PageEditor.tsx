@@ -3130,7 +3130,6 @@ export function PageEditor({
             destination_node_id: followUpDraft.destinationNodeId || null,
             idempotency_key: newIdempotencyKey(),
             on_stale: "conflict",
-            retry_only: false,
           }, { signal: controller.signal });
           if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
           if (!isEditorMountedRef.current) return;
@@ -3316,7 +3315,6 @@ export function PageEditor({
         destination_node_id: submittedDraft.destinationNodeId || null,
         idempotency_key: newIdempotencyKey(),
         on_stale: "conflict" as const,
-        retry_only: false,
       };
       const updated = await autosavePage(workspaceId, page.id, payload, {
         signal: controller.signal,
@@ -3635,7 +3633,6 @@ export function PageEditor({
         destination_node_id: draft.destinationNodeId || null,
         idempotency_key: newIdempotencyKey(),
         on_stale: "conflict",
-        retry_only: false,
       });
     };
   });
@@ -4257,7 +4254,6 @@ export function PageEditor({
         expected_editing_revision: page.editing_revision ?? 1,
         idempotency_key: reviewSubmissionRef.current.key,
         reason: "Requested review from Page editor.",
-        retry_only: false,
       });
       if (!isCurrent()) return;
       reviewSubmissionRef.current = null;
@@ -4310,7 +4306,7 @@ export function PageEditor({
             base_version_id: savedPage.version_id, base_content_hash: savedPage.content_hash,
             expected_editing_revision: savedPage.editing_revision, session_version_id: savedPage.version_id,
             destination_node_id: snapshot.destinationNodeId || null,
-            idempotency_key: newIdempotencyKey(), on_stale: "conflict", retry_only: false,
+            idempotency_key: newIdempotencyKey(), on_stale: "conflict",
           });
         }
         if (!isCurrent()) return;

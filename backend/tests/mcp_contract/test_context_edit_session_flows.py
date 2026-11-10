@@ -10,6 +10,8 @@ the realistic sequences end to end.
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 from sqlalchemy import select
 
@@ -43,6 +45,7 @@ def _create(page_service, actor, workspace_id, body_md):
             "workspace_id": str(workspace_id),
             "title": "Session Flow Page",
             "body_md": body_md,
+            "idempotency_key": str(uuid4()),
         },
         actor=actor,
         page_service=page_service,
@@ -59,8 +62,7 @@ def _update(page_service, actor, workspace_id, base, body_md, key):
             "page_id": str(base.id),
             "title": base.title,
             "body_md": body_md,
-            "base_version_id": str(base.version_id),
-            "base_content_hash": base.content_hash,
+            "version_id": str(base.version_id),
             "expected_editing_revision": base.editing_revision,
             "idempotency_key": key,
         },
@@ -88,7 +90,7 @@ def _patch(page_service, actor, workspace_id, base, operations, key):
 def _structure_map(page_service, actor, workspace_id, page_id):
     response = dispatch(
         "read_structure_map",
-        {"workspace_id": str(workspace_id), "target": {"page_id": str(page_id)}},
+        {"workspace_id": str(workspace_id), "page_id": str(page_id)},
         actor=actor,
         page_service=page_service,
     )
@@ -117,19 +119,22 @@ def _review_statuses_for_page(page_service, page_id):
         )
 
 
-def _save(page_service, actor, workspace_id, page_id, body_md, revision, key, **extra):
+def _save(
+    page_service, actor, workspace_id, page_id, body_md, revision, key,
+    *, version_id,
+):
     """update_context_edit as an agent sends it: no base, only the revision
-    it last saw (and, when given, the edit's version_id)."""
+    it last saw and the edit's version_id."""
 
     return dispatch(
         "update_context_edit",
         {
             "workspace_id": str(workspace_id),
             "page_id": str(page_id),
+            "version_id": str(version_id),
             "body_md": body_md,
             "expected_editing_revision": revision,
             "idempotency_key": key,
-            **extra,
         },
         actor=actor,
         page_service=page_service,
@@ -208,20 +213,27 @@ def test_repeated_updates_stay_on_one_editing_row_until_submit(page_service, act
         page_service=page_service,
     )
     assert resumed.data.version_id == created.version_id
+    assert resumed.data.version_status == "editing"
     assert resumed.data.history_status == "current_editing"
     assert resumed.data.inconsistency_reasons == []
+    assert resumed.data.references == []
 
     # The existing session fixture checks final normalized bytes at MCP update
     # and typed patch boundaries; the stored map, report and retry must agree.
     patch_replay = _patch(
         page_service, actor, workspace_id, second.data, operations, "p-1"
     )
-    assert patch_replay.data.model_dump() == patched.data.model_dump()
+    assert patch_replay.data.replayed is True
+    assert patch_replay.data.model_dump(exclude={"replayed"}) == (
+        patched.data.model_dump(exclude={"replayed"})
+    )
     structure = _structure_map(page_service, actor, workspace_id, created.id)
     stored = _stored(page_service, created.version_id)
     assert not structure.document.map_repaired
     assert (
-        structure.document.root_hash == patched.data.content_hash == stored.content_hash
+        structure.document.content_hash
+        == patched.data.content_hash
+        == stored.content_hash
     )
     assert {block["id"]: block["hash"] for block in stored.block_map} == {
         block.id: block.hash for block in structure.blocks
@@ -560,6 +572,7 @@ def test_update_receipt_and_update_without_base_fields(page_service, actor):
             "workspace_id": str(workspace_id),
             "page_id": str(created.id),
             "body_md": "# Hello\n\n## Part A\n\nKeep.\n\n## Part B\n\nNew text.\n",
+            "version_id": str(created.version_id),
             "expected_editing_revision": created.editing_revision,
             "idempotency_key": "u-no-base",
         },
@@ -580,6 +593,7 @@ def test_update_receipt_and_update_without_base_fields(page_service, actor):
             "workspace_id": str(workspace_id),
             "page_id": str(created.id),
             "body_md": "# Hello\n\nLost update.\n",
+            "version_id": str(created.version_id),
             "expected_editing_revision": created.editing_revision,
             "idempotency_key": "u-no-base-stale",
         },
@@ -628,7 +642,7 @@ def test_structure_map_my_edit_reads_the_open_edit_without_opening_one(
         "read_structure_map",
         {
             "workspace_id": str(workspace_id),
-            "target": {"page_id": str(created.id)},
+            "page_id": str(created.id),
             "version": "my_edit",
         },
         actor=actor,
@@ -644,7 +658,7 @@ def test_structure_map_my_edit_reads_the_open_edit_without_opening_one(
         "read_structure_map",
         {
             "workspace_id": str(workspace_id),
-            "target": {"page_id": str(created.id)},
+            "page_id": str(created.id),
             "version": "my_edit",
         },
         actor=other,
@@ -661,11 +675,47 @@ def test_structure_map_my_edit_reads_the_open_edit_without_opening_one(
         ).all()
     assert len(editing_rows) == 1
 
+    submitted = dispatch(
+        "submit_context_edit_for_review",
+        {
+            "workspace_id": str(workspace_id),
+            "page_id": str(created.id),
+            "version_id": str(created.version_id),
+            "expected_editing_revision": created.editing_revision,
+            "idempotency_key": "submit-before-my-edit-read",
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+    assert submitted.envelope.result_status == "succeeded", submitted.envelope
+    closed = dispatch(
+        "read_structure_map",
+        {
+            "workspace_id": str(workspace_id),
+            "page_id": f"/p/{workspace_id}/{created.id}",
+            "version": "my_edit",
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+    assert closed.envelope.error_code == "no_open_edit"
+    never_opened = dispatch(
+        "read_context_outline",
+        {
+            "workspace_id": str(workspace_id),
+            "page_id": str(created.id),
+            "version": "my_edit",
+        },
+        actor=other,
+        page_service=page_service,
+    )
+    assert never_opened.envelope.error_code == "no_open_edit"
+
 
 def _read_visible(page_service, reader, workspace_id, page_id):
     return dispatch(
         "read_structure_map",
-        {"workspace_id": str(workspace_id), "target": {"page_id": str(page_id)}},
+        {"workspace_id": str(workspace_id), "page_id": str(page_id)},
         actor=reader,
         page_service=page_service,
     )
@@ -779,7 +829,8 @@ def test_discarding_an_edit_of_a_published_page_restores_its_head(
         "read_structure_map",
         {
             "workspace_id": str(workspace_id),
-            "target": {"version_id": str(begun.data.version_id)},
+            "page_id": str(published.id),
+            "version_id": str(begun.data.version_id),
         },
         actor=other_editor,
         page_service=page_service,
@@ -823,7 +874,7 @@ def test_submit_conflict_names_the_current_revision(page_service, actor):
         page_service=page_service,
     )
     assert stale.envelope.result_status == "conflict"
-    assert stale.envelope.error_code == "stale_base_version"
+    assert stale.envelope.error_code == "editing_revision_conflict"
     assert (
         f"server_editing_revision={patched.data.editing_revision}"
         in stale.envelope.error_message
@@ -934,6 +985,7 @@ def test_an_ai_save_never_lands_on_an_edit_begun_after_the_one_it_saw(
         "# Doc\n\nAI draft text.\n",
         created.editing_revision,
         "ai-1",
+        version_id=created.version_id,
     )
     assert ai_saved.envelope.result_status == "succeeded", ai_saved.envelope
     seen_by_ai = ai_saved.data.editing_revision
@@ -980,9 +1032,10 @@ def test_an_ai_save_never_lands_on_an_edit_begun_after_the_one_it_saw(
         "# Doc\n\nAI draft text, second pass.\n",
         seen_by_ai,
         "ai-2",
+        version_id=created.version_id,
     )
     assert stale.envelope.result_status == "conflict", stale.envelope
-    assert stale.envelope.error_code == "stale_base_version"
+    assert stale.envelope.error_code == "editing_revision_conflict"
     stored = _stored(page_service, begun.version_id)
     assert stored.body_md == typed.body_md
     assert stored.editing_revision == typed.editing_revision
@@ -992,7 +1045,7 @@ def test_an_ai_save_never_lands_on_an_edit_begun_after_the_one_it_saw(
         str(begun.version_id),
         typed.editing_revision,
     )
-    assert "Re-read" in stale.envelope.result_summary
+    assert "Read" in stale.envelope.result_summary
 
 
 def test_an_update_naming_its_edit_refuses_any_other_one(page_service, actor):
@@ -1106,6 +1159,7 @@ def test_a_revision_seen_before_a_submit_does_not_reach_the_next_edit(
         "# Doc\n\nSubmitted text.\n",
         created.editing_revision,
         "u-1",
+        version_id=created.version_id,
     )
     submitted = dispatch(
         "submit_context_edit_for_review",
@@ -1142,6 +1196,7 @@ def test_a_revision_seen_before_a_submit_does_not_reach_the_next_edit(
         "# Doc\n\nA save meant for the submitted edit.\n",
         saved.data.editing_revision,
         "u-2",
+        version_id=created.version_id,
     )
     assert stale.envelope.result_status == "conflict", stale.envelope
     assert _stored(page_service, begun.data.version_id).body_md == begun.data.body_md
@@ -1165,6 +1220,7 @@ def test_a_hard_break_only_save_is_stored(page_service, actor):
         "# Poem\n\nline one  \nline two\n",
         created.editing_revision,
         "u-1",
+        version_id=created.version_id,
     )
     assert added.envelope.result_status == "succeeded", added.envelope
     assert added.data.editing_revision == created.editing_revision + 1
@@ -1261,6 +1317,7 @@ def test_discarding_an_edit_never_brings_back_a_rejected_draft(page_service, act
         "# Discard After Reject\n\nMy private edit.",
         begun.data.editing_revision,
         "u-1",
+        version_id=begun.data.version_id,
     )
     assert saved.envelope.result_status == "succeeded", saved.envelope
     discarded = dispatch(
@@ -1395,7 +1452,7 @@ def test_the_same_chat_keeps_refining_one_submitted_version(page_service, actor)
 
     first = call("begin_context_edit", None, idempotency_key="b-1")
     replayed = call(
-        "begin_context_edit", "conv_same", idempotency_key="b-1", retry_only=True
+        "begin_context_edit", "conv_same", idempotency_key="b-1"
     )
     assert replayed.version_id == first.version_id
     first = call(

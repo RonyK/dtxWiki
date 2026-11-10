@@ -40,6 +40,10 @@ from backend.schemas.mcp.maintenance_tools import (
     WikiMaintenanceInput,
     WikiMaintenanceOutput,
 )
+from backend.schemas.mcp.operation_tools import (
+    GetOperationStatusInput,
+    GetOperationStatusOutput,
+)
 from backend.schemas.mcp.read_tools import (
     FetchInput,
     FetchOutput,
@@ -94,6 +98,10 @@ def build_mcp_schemas() -> dict[str, dict]:
         "list_my_workspaces": {
             "input": ListMyWorkspacesInput.model_json_schema(),
             "output": ListMyWorkspacesOutput.model_json_schema(),
+        },
+        "get_operation_status": {
+            "input": GetOperationStatusInput.model_json_schema(),
+            "output": GetOperationStatusOutput.model_json_schema(),
         },
         "guide": {
             "input": GuideInput.model_json_schema(),

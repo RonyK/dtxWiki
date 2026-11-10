@@ -233,7 +233,9 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #  30 -- begin_context_edit adds block_map_stale for missing or stale editing
 #        metadata; a whole-body save rebuilds it. Refresh cached tool catalogs
 #        and result schemas.
-MCP_TOOL_CONTRACT_REVISION = 30
+#  31 -- Unified Context locators, write identities and metadata resolution;
+#        key-only operation status replaces retry_only. Refresh cached tools.
+MCP_TOOL_CONTRACT_REVISION = 31
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their
 # declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
 # a field carrying this marker is always sent, so an absent value can never be
@@ -241,6 +243,11 @@ MCP_TOOL_CONTRACT_REVISION = 30
 WIRE_EXPLICIT_FIELD = {"x-wire-explicit": True}
 ERROR_CODES = (
     "not_found",
+    "no_open_edit",
+    "editing_revision_conflict",
+    "content_hash_mismatch",
+    "operation_interrupted",
+    "operation_tracking_unavailable",
     "stale_base_version",
     "stale_context_draft",
     # patch_draft push semantics (design doc section 5): `base` names
@@ -366,6 +373,7 @@ ContextHistoryStatus = Literal[
     "superseded_draft",
 ]
 WARNING_CODES = (
+    "metadata_frontmatter_overridden",
     "stale",
     "permission_limited",
     "citation_missing",

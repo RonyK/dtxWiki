@@ -21,33 +21,6 @@
         "x-normalized-item-maxLength": 80,
         "x-normalized-item-minLength": 1
       },
-      "base_content_hash": {
-        "anyOf": [
-          {
-            "pattern": "^[a-f0-9]{64}$",
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Base Content Hash"
-      },
-      "base_version_id": {
-        "anyOf": [
-          {
-            "format": "uuid",
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "description": "Optional when saving your own open edit (expected_editing_revision is the concurrency check). If sent, base_content_hash must be sent too and both must match.",
-        "title": "Base Version Id"
-      },
       "body_md": {
         "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
         "maxLength": 1000000,
@@ -70,19 +43,6 @@
         "default": null,
         "description": "Opaque MCP conversation token. Omit or pass 'new' to start a new dtxWiki MCP chat; echo the returned envelope value to append.",
         "title": "Conversation Token"
-      },
-      "destination_node_id": {
-        "anyOf": [
-          {
-            "format": "uuid",
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Destination Node Id"
       },
       "expected_editing_revision": {
         "description": "The editing_revision from your last create/begin/update/patch response for this edit. Any other value is a conflict and nothing is saved; re-read the edit before trying again.",
@@ -130,10 +90,18 @@
         "default": null,
         "title": "Page Type"
       },
-      "retry_only": {
-        "default": false,
-        "title": "Retry Only",
-        "type": "boolean"
+      "placement_parent_node_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Placement Parent Node Id"
       },
       "tags": {
         "anyOf": [
@@ -170,18 +138,10 @@
         "x-normalized-maxLength": 256
       },
       "version_id": {
-        "anyOf": [
-          {
-            "format": "uuid",
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "description": "Your open edit's version_id, from your last create/begin/update/patch response (or read_structure_map with version='my_edit'). When sent, the save applies only to that edit: if it was discarded or submitted, or another edit is open now, the call is a conflict and nothing is saved.",
-        "title": "Version Id"
+        "description": "Your open edit's version_id, from your last create/begin/update/patch response (or read_structure_map with version='my_edit'). The save applies only to that edit: if it was discarded or submitted, or another edit is open now, the call is a conflict and nothing is saved.",
+        "format": "uuid",
+        "title": "Version Id",
+        "type": "string"
       },
       "workspace_id": {
         "format": "uuid",
@@ -191,6 +151,7 @@
     },
     "required": [
       "body_md",
+      "version_id",
       "expected_editing_revision",
       "idempotency_key",
       "workspace_id",
@@ -203,7 +164,7 @@
     "$defs": {
       "ContextEditResult": {
         "additionalProperties": false,
-        "description": "What an edit command saved: the version to address next and what changed.\n\nThe body is not repeated. edit_receipt.changes quotes the replaced\nregions; when you need text the receipt does not show, read this version\nby version_id (target.version_id), which still names it after a submit.",
+        "description": "What an edit command saved: the version to address next and what changed.\n\nThe body is not repeated. edit_receipt.changes quotes the replaced\nregions; when you need text the receipt does not show, read this version\nby page_id and version_id, which still name it after a submit.",
         "properties": {
           "change_set_id": {
             "anyOf": [
@@ -239,16 +200,29 @@
             "title": "Editing Revision",
             "type": "integer"
           },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
           "lint_report": {
             "additionalProperties": true,
             "description": "Save-time fixes and findings for the final stored body.",
             "title": "Lint Report",
             "type": "object"
+          },
+          "page_id": {
+            "format": "uuid",
+            "title": "Page Id",
+            "type": "string"
+          },
+          "placement_parent_node_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Placement Parent Node Id"
           },
           "publish_blocked_reasons": {
             "items": {
@@ -256,6 +230,11 @@
             },
             "title": "Publish Blocked Reasons",
             "type": "array"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
           },
           "review_item_id": {
             "anyOf": [
@@ -297,7 +276,7 @@
           }
         },
         "required": [
-          "id",
+          "page_id",
           "version_id",
           "editing_revision",
           "content_hash",
@@ -666,6 +645,7 @@
           "code": {
             "description": "Stable warning code; must be drawn from WARNING_CODES.",
             "enum": [
+              "metadata_frontmatter_overridden",
               "stale",
               "permission_limited",
               "citation_missing",

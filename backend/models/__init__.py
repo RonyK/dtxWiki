@@ -104,7 +104,11 @@ from backend.models.mcp_chat import (
     McpChatSession,
     McpChatToolCallArtifact,
 )
-from backend.models.mcp_trace import MCPToolCall, MCPWriteIdempotency
+from backend.models.mcp_trace import (
+    MCPOperationAttempt,
+    MCPToolCall,
+    MCPWriteIdempotency,
+)
 from backend.models.media import (
     BlobIncarnationRow,
     MediaBlobGcCandidate,
@@ -219,6 +223,7 @@ __all__ = [
     "MCPClient",
     "MCPToolCall",
     "MCPWriteIdempotency",
+    "MCPOperationAttempt",
     "McpChatArtifactKind",
     "McpChatArtifactLink",
     "McpChatArtifactVerb",

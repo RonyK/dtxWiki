@@ -204,7 +204,7 @@ def test_body_reads_are_viewed_and_structural_reads_remain_referenced(
             }
         }
     else:
-        payload = {"data": {"id": str(page_id), "version_id": str(version_id)}}
+        payload = {"data": {"page_id": str(page_id), "version_id": str(version_id)}}
 
     with page_service.session_factory() as session:
         links = derive_artifact_links(
@@ -247,7 +247,7 @@ def test_patch_context_edit_links_the_edited_page(page_service):
             arguments={"workspace_id": str(ws.id), "page_id": str(page.id)},
             payload={
                 "data": {
-                    "id": str(page.id),
+                    "page_id": str(page.id),
                     "version_id": str(version_id),
                     "content_hash": content_hash,
                 }
@@ -277,7 +277,7 @@ def test_read_context_outline_links_the_resolved_page(page_service):
             session=session,
             tool_name="read_context_outline",
             # Addressed by path: only the response knows which page it resolved to.
-            arguments={"workspace_id": str(ws.id), "target": {"path": "context/x"}},
+            arguments={"workspace_id": str(ws.id), "page_id": "/context/x.md"},
             # ReadContextOutlineOutput is flat -- document lives at the
             # payload's top level, not under a "data" wrapper like the write
             # tools' outputs.
@@ -315,7 +315,7 @@ def test_upload_image_links_the_created_asset_page_bound(page_service):
             arguments={
                 "workspace_id": str(ws.id),
                 "page_id": str(page.id),
-                "editing_version_id": str(editing_version_id),
+                "version_id": str(editing_version_id),
                 "filename": "diagram.png",
                 "mime_type": "image/png",
                 "marker_uuid": str(asset_id),
@@ -381,7 +381,7 @@ def test_upload_image_edge_survives_the_real_response_and_redaction(page_service
     )
     arguments = {
         "page_id": str(page_id),
-        "editing_version_id": str(editing_version_id),
+        "version_id": str(editing_version_id),
         "filename": "diagram.png",
         "mime_type": "image/png",
         "content_base64": content_base64,
@@ -515,7 +515,7 @@ def test_persist_trace_stores_the_masked_edit_receipt(page_service, mcp_default_
         _edit_trace_payload(
             workspace_id,
             data={
-                "id": str(page_id),
+                "page_id": str(page_id),
                 "version_id": str(version_id),
                 "content_hash": "a" * 64,
                 "body_md": "FULL-BODY-MUST-NOT-BE-STORED",

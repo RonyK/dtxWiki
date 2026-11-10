@@ -472,6 +472,14 @@
         ],
         "default": null
       },
+      "idempotency_key": {
+        "description": "24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.",
+        "maxLength": 160,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9._:-]+$",
+        "title": "Idempotency Key",
+        "type": "string"
+      },
       "note": {
         "anyOf": [
           {
@@ -510,6 +518,7 @@
     },
     "required": [
       "workspace_id",
+      "idempotency_key",
       "review_item_id"
     ],
     "title": "SubmitRevisionForReviewInput",
@@ -524,6 +533,7 @@
           "code": {
             "description": "Stable warning code; must be drawn from WARNING_CODES.",
             "enum": [
+              "metadata_frontmatter_overridden",
               "stale",
               "permission_limited",
               "citation_missing",
@@ -944,6 +954,11 @@
             "format": "uuid",
             "title": "Original Review Item Id",
             "type": "string"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
           }
         },
         "required": [

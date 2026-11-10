@@ -1,6 +1,11 @@
 {
   "p0_0": [
     "not_found",
+    "no_open_edit",
+    "editing_revision_conflict",
+    "content_hash_mismatch",
+    "operation_interrupted",
+    "operation_tracking_unavailable",
     "stale_base_version",
     "stale_context_draft",
     "base_not_found",
@@ -183,6 +188,7 @@
     "workspace_user_required"
   ],
   "warnings": [
+    "metadata_frontmatter_overridden",
     "stale",
     "permission_limited",
     "citation_missing",

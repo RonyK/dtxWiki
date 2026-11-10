@@ -17,6 +17,7 @@ from backend.schemas.context_write import (
 )
 from backend.schemas.mcp.context_tools import (
     BeginContextEditInput,
+    BeginContextEditResult,
     BeginContextEditToolOutput,
     CiteInput,
     CiteResult,
@@ -198,14 +199,13 @@ def _stale_base_details(exc: PageConflictError) -> list[MCPErrorDetail]:
         return [
             MCPErrorDetail(
                 field="version_id",
-                code="stale_base_version",
+                code=exc.error_code,
                 message=(
-                    "You have no open edit on this page any more; the edit you "
-                    "named was submitted or discarded."
+                    "You have no open edit on this page."
                 ),
                 fix=(
-                    "Call begin_context_edit to open a new edit, read it, and "
-                    "make your change there."
+                    "Read content by page_id and version_id if needed. To edit, "
+                    "call begin_context_edit with a new key."
                 ),
             )
         ]
@@ -214,7 +214,7 @@ def _stale_base_details(exc: PageConflictError) -> list[MCPErrorDetail]:
     return [
         MCPErrorDetail(
             field="version_id",
-            code="stale_base_version",
+            code=exc.error_code,
             message=(
                 f"Your open edit on this page is version_id={exc.server_version_id}."
             ),
@@ -222,7 +222,7 @@ def _stale_base_details(exc: PageConflictError) -> list[MCPErrorDetail]:
         ),
         MCPErrorDetail(
             field="expected_editing_revision",
-            code="stale_base_version",
+            code=exc.error_code,
             message=(
                 f"Your open edit is at editing_revision={exc.server_editing_revision}."
             ),
@@ -248,12 +248,51 @@ def _edit_result(data: PagePayload) -> ContextEditResult:
     reaches the runner's trace capture.
     """
 
-    return ContextEditResult.model_validate(
+    result = ContextEditResult.model_validate(
         {
             **data.model_dump(include=set(ContextEditResult.model_fields)),
+            "page_id": data.id,
+            "replayed": data._replayed,
+            "placement_parent_node_id": (
+                data._placement_parent_node_id if data._placement_changed else None
+            ),
             "edit_receipt": data._edit_receipt,
         }
     )
+    object.__setattr__(result, "_metadata_overrides", data._metadata_overrides)
+    return result
+
+
+def _begin_edit_result(data: PagePayload) -> BeginContextEditResult:
+    result = BeginContextEditResult.model_validate(
+        {
+            **data.model_dump(exclude={"id"}),
+            "page_id": data.id,
+            "replayed": data._replayed,
+        }
+    )
+    result._metadata_overrides = data._metadata_overrides
+    return result
+
+
+def _edit_success_envelope(actor, data):
+    envelope = ok_envelope(actor)
+    overrides = getattr(data, "_metadata_overrides", ())
+    if overrides:
+        import json
+
+        from backend.schemas.common import EnvelopeWarning
+
+        envelope.warnings.append(
+            EnvelopeWarning(
+                code="metadata_frontmatter_overridden",
+                message="Explicit metadata overrides frontmatter: "
+                + json.dumps(
+                    list(overrides), ensure_ascii=False, separators=(",", ":")
+                ),
+            )
+        )
+    return envelope
 
 
 def _read_error_envelope(actor, exc: ReadServiceError):
@@ -294,6 +333,7 @@ def create_context_page(
             actor_id=actor.actor_id,
             actor_provenance=actor.provenance,
             placement_parent_node_id=request.placement_parent_node_id,
+            idempotency_key=request.idempotency_key,
             with_edit_receipt=True,
         )
         data = _edit_result(data)
@@ -309,7 +349,9 @@ def create_context_page(
         )
     except ReadServiceError as exc:
         return CreateContextPageToolOutput(envelope=_read_error_envelope(actor, exc))
-    return CreateContextPageToolOutput(envelope=ok_envelope(actor), data=data)
+    return CreateContextPageToolOutput(
+        envelope=_edit_success_envelope(actor, data), data=data
+    )
 
 
 def begin_context_edit(
@@ -328,7 +370,6 @@ def begin_context_edit(
             idempotency_key=request.idempotency_key,
             base_version_id=request.base_version_id,
             base_content_hash=request.base_content_hash,
-            retry_only=request.retry_only,
             chat_session_id=_chat_session_id(ctx),
         )
     except ValidationError as exc:
@@ -347,7 +388,10 @@ def begin_context_edit(
         return BeginContextEditToolOutput(
             envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
         )
-    return BeginContextEditToolOutput(envelope=ok_envelope(actor), data=data)
+    data = _begin_edit_result(data)
+    return BeginContextEditToolOutput(
+        envelope=_edit_success_envelope(actor, data), data=data
+    )
 
 
 def update_context_edit(
@@ -364,16 +408,15 @@ def update_context_edit(
             body_md=request.body_md,
             actor_kind=actor.actor_kind,
             actor_id=actor.actor_id,
-            base_version_id=request.base_version_id,
-            base_content_hash=request.base_content_hash,
+            base_version_id=None,
+            base_content_hash=None,
             actor_provenance=actor.provenance,
             idempotency_key=request.idempotency_key,
             expected_editing_revision=request.expected_editing_revision,
             page_type=request.page_type,
             tags=request.tags,
             aliases=request.aliases,
-            destination_node_id=request.destination_node_id,
-            retry_only=request.retry_only,
+            destination_node_id=request.placement_parent_node_id,
             with_edit_receipt=True,
             editing_version_id=request.version_id,
         )
@@ -394,7 +437,9 @@ def update_context_edit(
         return UpdateContextEditToolOutput(
             envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
         )
-    return UpdateContextEditToolOutput(envelope=ok_envelope(actor), data=data)
+    return UpdateContextEditToolOutput(
+        envelope=_edit_success_envelope(actor, data), data=data
+    )
 
 
 def submit_context_edit_for_review(
@@ -414,7 +459,6 @@ def submit_context_edit_for_review(
             expected_editing_revision=request.expected_editing_revision,
             idempotency_key=request.idempotency_key,
             reason=request.reason,
-            retry_only=request.retry_only,
             chat_session_id=_chat_session_id(ctx),
         )
         data = _edit_result(data)
@@ -438,7 +482,7 @@ def submit_context_edit_for_review(
         return SubmitContextEditForReviewToolOutput(
             envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
         )
-    envelope = ok_envelope(actor)
+    envelope = _edit_success_envelope(actor, data)
     try:
         with ctx.session_factory() as session:
             advisory = context_link_advisory_state(
@@ -482,7 +526,6 @@ def discard_context_edit(
             actor_kind=actor.actor_kind,
             actor_id=actor.actor_id,
             idempotency_key=request.idempotency_key,
-            retry_only=request.retry_only,
         )
     except ValidationError as exc:
         return DiscardContextEditToolOutput(
@@ -547,7 +590,6 @@ def patch_context_edit(
             actor_provenance=actor.provenance,
             expected_editing_revision=request.expected_editing_revision,
             idempotency_key=request.idempotency_key,
-            retry_only=request.retry_only,
         )
         data = _edit_result(data)
     except ValidationError as exc:
@@ -564,4 +606,6 @@ def patch_context_edit(
         )
     except ReadServiceError as exc:
         return PatchContextEditToolOutput(envelope=_read_error_envelope(actor, exc))
-    return PatchContextEditToolOutput(envelope=ok_envelope(actor), data=data)
+    return PatchContextEditToolOutput(
+        envelope=_edit_success_envelope(actor, data), data=data
+    )

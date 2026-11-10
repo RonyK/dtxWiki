@@ -1,58 +1,5 @@
 {
   "input": {
-    "$defs": {
-      "ContextOutlineTarget": {
-        "additionalProperties": false,
-        "properties": {
-          "page_id": {
-            "anyOf": [
-              {
-                "description": "Context page UUID or stable_url: /p/<workspace_id>/<page_id> or /p/<page_id> in this workspace.",
-                "maxLength": 512,
-                "minLength": 1,
-                "pattern": "^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|/p/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?:/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?(?:#[^\\s]*)?)$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Page Id"
-          },
-          "path": {
-            "anyOf": [
-              {
-                "description": "Context page UUID or stable URL. Legacy /context/...md paths remain accepted for read_concept and outline path fields.",
-                "maxLength": 512,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Path"
-          },
-          "version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Version Id"
-          }
-        },
-        "title": "ContextOutlineTarget",
-        "type": "object"
-      }
-    },
     "additionalProperties": false,
     "properties": {
       "conversation_token": {
@@ -98,12 +45,16 @@
         "title": "Max Rows Per Block",
         "type": "integer"
       },
-      "target": {
-        "$ref": "#/$defs/ContextOutlineTarget"
+      "page_id": {
+        "description": "Context page UUID, stable /p/<workspace_id>/<page_id> or /p/<page_id> URL, or legacy /context/<slug>.md path.",
+        "maxLength": 512,
+        "minLength": 1,
+        "title": "Page Id",
+        "type": "string"
       },
       "version": {
         "default": "visible",
-        "description": "Which version to read: 'visible' (default; what this caller sees), 'draft', 'published', or 'my_edit' -- your own open editing row, the exact body patch_context_edit edits (not_found when you have none; it never opens one). An explicit target.version_id overrides this.",
+        "description": "Which version to read: 'visible' (default; what this caller sees), 'draft', 'published', or 'my_edit' -- your own open editing row, the exact body patch_context_edit edits (no_open_edit when this page is visible but you have none; it never opens one). An explicit version_id overrides this.",
         "enum": [
           "visible",
           "draft",
@@ -113,6 +64,20 @@
         "title": "Version",
         "type": "string"
       },
+      "version_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Read this exact version of page_id, overriding version. A version belonging to a different page returns not_found.",
+        "title": "Version Id"
+      },
       "workspace_id": {
         "format": "uuid",
         "title": "Workspace Id",
@@ -121,7 +86,7 @@
     },
     "required": [
       "workspace_id",
-      "target"
+      "page_id"
     ],
     "title": "ReadStructureMapInput",
     "type": "object"
@@ -135,6 +100,7 @@
           "code": {
             "description": "Stable warning code; must be drawn from WARNING_CODES.",
             "enum": [
+              "metadata_frontmatter_overridden",
               "stale",
               "permission_limited",
               "citation_missing",
@@ -533,6 +499,7 @@
         "additionalProperties": false,
         "properties": {
           "hash": {
+            "description": "This block's normalized hash; pass as block operations' expected. A heading block excludes the following section body, so this is not expected_section_hash.",
             "title": "Hash",
             "type": "string"
           },
@@ -609,6 +576,11 @@
             "title": "Block Count",
             "type": "integer"
           },
+          "content_hash": {
+            "description": "The version's content_hash. It identifies the body these block ids and hashes describe; patch_context_edit's concurrency check is editing_revision, not this hash.",
+            "title": "Content Hash",
+            "type": "string"
+          },
           "editing_revision": {
             "anyOf": [
               {
@@ -635,7 +607,7 @@
           },
           "resolved_version_source": {
             "default": "visible",
-            "description": "How version_id was chosen: the requested `version` mode, or exact_version when target.version_id was given.",
+            "description": "How version_id was chosen: the requested `version` mode, or exact_version when version_id was given.",
             "enum": [
               "visible",
               "draft",
@@ -644,11 +616,6 @@
               "exact_version"
             ],
             "title": "Resolved Version Source",
-            "type": "string"
-          },
-          "root_hash": {
-            "description": "The version's content_hash. It identifies the body these block ids and hashes describe; patch_context_edit's concurrency check is editing_revision, not this hash.",
-            "title": "Root Hash",
             "type": "string"
           },
           "version_id": {
@@ -665,7 +632,7 @@
           "page_id",
           "version_id",
           "version_status",
-          "root_hash",
+          "content_hash",
           "block_count"
         ],
         "title": "StructureMapDocument",
@@ -675,6 +642,7 @@
         "additionalProperties": false,
         "properties": {
           "hash": {
+            "description": "This table row's normalized hash; pass as insert_row.expected.",
             "title": "Hash",
             "type": "string"
           },

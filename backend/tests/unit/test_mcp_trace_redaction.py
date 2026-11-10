@@ -28,7 +28,7 @@ def _upload_arguments() -> dict:
         "mime_type": "image/png",
         "marker_uuid": "22222222-2222-2222-2222-222222222222",
         "page_id": "55555555-5555-5555-5555-555555555555",
-        "editing_version_id": "44444444-4444-4444-4444-444444444444",
+        "version_id": "44444444-4444-4444-4444-444444444444",
         "content_base64": base64.b64encode(PNG_BYTES).decode("ascii"),
     }
 
@@ -79,7 +79,7 @@ def test_redact_tool_arguments_is_idempotent_with_success_payload():
     assert "url" not in second_pass
     assert second_pass["logical_ref"].startswith("dtx-media://asset/")
     assert (
-        second_pass["editing_version_id"] == _upload_arguments()["editing_version_id"]
+        second_pass["version_id"] == _upload_arguments()["version_id"]
     )
 
 
@@ -136,8 +136,7 @@ def _write_arguments(tool_name: str, path: tuple[str, ...], body_field: str) -> 
     elif tool_name == "update_context_edit":
         body_container.update(
             page_id="11111111-1111-1111-1111-111111111111",
-            base_version_id="22222222-2222-2222-2222-222222222222",
-            base_content_hash="a" * 64,
+            version_id="22222222-2222-2222-2222-222222222222",
             expected_editing_revision=1,
         )
     elif tool_name == "write_agent_page_draft":
@@ -544,7 +543,6 @@ def test_reference_notes_are_digest_only_and_reentry_is_idempotent(monkeypatch):
         "workspace_id": "00000000-0000-0000-0000-000000000001",
         "page_id": "00000000-0000-0000-0000-000000000002",
         "expected_editing_revision": 1,
-        "retry_only": True,
         "add": [
             {
                 "target_kind": "context_page",
@@ -563,7 +561,7 @@ def test_reference_notes_are_digest_only_and_reentry_is_idempotent(monkeypatch):
     assert redact_tool_arguments("cite", first) == first
     assert arguments["add"][0]["note"] == "private reference note"
     assert first["page_id"] == arguments["page_id"]
-    assert first["expected_editing_revision"] == 1 and first["retry_only"]
+    assert first["expected_editing_revision"] == 1
 
     from backend.services import mcp_trace_redaction
 

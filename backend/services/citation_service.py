@@ -170,7 +170,7 @@ class CitationService:
             idempotency_key=request.idempotency_key,
             fingerprint=request_fingerprint(
                 request.model_dump(
-                    mode="json", exclude={"idempotency_key", "retry_only"}
+                    mode="json", exclude={"idempotency_key"}
                 )
             ),
             result_model=CiteResult,
@@ -178,5 +178,4 @@ class CitationService:
             replay_transform=lambda result: result.model_copy(
                 update={"replayed": True}
             ),
-            retry_only=request.retry_only,
         )

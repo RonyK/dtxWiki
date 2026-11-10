@@ -106,7 +106,7 @@ def test_patch_draft_auto_fills_base_from_the_conversations_last_read(
 
     read_args = {
         "workspace_id": str(workspace_id),
-        "target": {"page_id": str(page.id)},
+        "page_id": str(page.id),
         "conversation_token": conversation_token,
     }
     read_result = dispatch(
@@ -168,7 +168,7 @@ def test_patch_draft_auto_filled_base_still_diverges_when_stale(
 
     read_args = {
         "workspace_id": str(workspace_id),
-        "target": {"page_id": str(page.id)},
+        "page_id": str(page.id),
         "conversation_token": conversation_token,
     }
     read_result = dispatch(
@@ -238,7 +238,7 @@ def test_patch_draft_with_no_read_ledger_entry_requires_base(
     )
     structure_map = dispatch(
         "read_structure_map",
-        {"workspace_id": str(workspace_id), "target": {"page_id": str(page.id)}},
+        {"workspace_id": str(workspace_id), "page_id": str(page.id)},
         actor=actor,
         page_service=page_service,
     )
@@ -284,7 +284,7 @@ def test_omitted_base_is_frozen_once_before_key_and_execution(
     )
     structure = dispatch(
         "read_structure_map",
-        {"workspace_id": str(workspace_id), "target": {"page_id": str(page.id)}},
+        {"workspace_id": str(workspace_id), "page_id": str(page.id)},
         actor=actor,
         page_service=page_service,
     )
@@ -347,7 +347,7 @@ def test_explicit_key_replays_before_an_omitted_base_observes_a_newer_ledger(
     )
     read_args = {
         "workspace_id": str(workspace_id),
-        "target": {"page_id": str(page.id)},
+        "page_id": str(page.id),
         "conversation_token": conversation_token,
     }
     first_read = dispatch(
@@ -443,7 +443,7 @@ def test_auto_key_replays_the_same_effective_base_and_operations(
     )
     structure = dispatch(
         "read_structure_map",
-        {"workspace_id": str(workspace_id), "target": {"page_id": str(page.id)}},
+        {"workspace_id": str(workspace_id), "page_id": str(page.id)},
         actor=actor,
         page_service=page_service,
     )
@@ -484,7 +484,7 @@ def test_reconcile_semantics_never_use_the_legacy_fingerprint_compatibility_path
     )
     structure = dispatch(
         "read_structure_map",
-        {"workspace_id": str(workspace_id), "target": {"page_id": str(page.id)}},
+        {"workspace_id": str(workspace_id), "page_id": str(page.id)},
         actor=actor,
         page_service=page_service,
     )

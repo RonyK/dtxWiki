@@ -30,6 +30,28 @@ MAX_ERROR_MESSAGE_CHARS = 600
 # even when a call site supplies no message or details. result_summary keeps
 # the same cause and recovery text for the trace.
 ERROR_CODE_GUIDANCE = {
+    "no_open_edit": (
+        "You have no open edit on this page. If you need its content, read "
+        "the returned page_id and version_id. To edit again, call "
+        "begin_context_edit with a new idempotency_key."
+    ),
+    "editing_revision_conflict": (
+        "Your edit changed or was replaced. Read the required range of your "
+        "open edit, rebuild the change and send a new key with its version_id "
+        "and editing_revision. Do not overwrite unseen changes."
+    ),
+    "content_hash_mismatch": (
+        "The document content hash does not match. Read its current content "
+        "and content_hash, rebuild the change, and send a new request."
+    ),
+    "operation_interrupted": (
+        "No committed result was found before the operation deadline. "
+        "Resend the original request with the same idempotency_key."
+    ),
+    "operation_tracking_unavailable": (
+        "The server could not record this operation, so it did not execute. "
+        "Retry the same request with the same idempotency_key."
+    ),
     "validation_failed": (
         "Fix the fields named in this failure, then call the tool again."
     ),
@@ -50,7 +72,7 @@ ERROR_CODE_GUIDANCE = {
         "revision or base swapped in."
     ),
     "base_not_found": (
-        "Call read_structure_map to get the page's current root_hash/version_id "
+        "Call read_structure_map to get the page's current content_hash/version_id "
         "and use that as base, then send a new request."
     ),
     "reconcile_target_invalid": (
@@ -95,8 +117,9 @@ ERROR_CODE_GUIDANCE = {
         "current section ids and heading paths, then send a new request."
     ),
     "section_hash_mismatch": (
-        "The section changed since you read it. Call read_context_outline for "
-        "its current hash, then send a new request."
+        "expected_section_hash must be the section_hash from "
+        "read_context_outline, covering the heading and its entire subtree. "
+        "A heading block's hash is different. Read that section before retrying."
     ),
     "block_not_found": (
         "Call read_structure_map to get current block ids, then send a new request."
@@ -200,7 +223,7 @@ ERROR_CODE_GUIDANCE = {
         "Call upload_image first and store data.markdown or data.logical_ref. "
         "For a new page, create it (page-first) before uploading -- "
         "upload_image always requires an existing page_id and your own open "
-        "editing_version_id, never a page-less upload. Never persist "
+        "version_id, never a page-less upload. Never persist "
         "data.content_url or another /api/v1 transport URL, and never fall "
         "back to a data: URI."
     ),
@@ -232,9 +255,9 @@ ERROR_CODE_GUIDANCE = {
         "quota before uploading again. Do not retry unchanged."
     ),
     "media_editing_not_open": (
-        "The named editing_version_id is no longer open (already submitted, "
+        "The named version_id is no longer open (already submitted, "
         "published, or discarded). Open or resume your own editing session on "
-        "this page, then upload_image against its current editing_version_id "
+        "this page, then upload_image against its current version_id "
         "with a new marker_uuid. Do not retry unchanged."
     ),
     "media_staging_bytes_exceeded": (
@@ -274,6 +297,11 @@ ERROR_CODE_GUIDANCE = {
 # Codes where resending the identical request can never succeed. Everything
 # else stays None (unknown) rather than claiming a retry is safe.
 RETRYABLE_BY_CODE = {
+    "no_open_edit": False,
+    "editing_revision_conflict": False,
+    "content_hash_mismatch": False,
+    "operation_interrupted": True,
+    "operation_tracking_unavailable": True,
     "validation_failed": False,
     "idempotency_key_conflict": False,
     "rejected_by_policy": False,
@@ -334,6 +362,9 @@ RETRYABLE_BY_CODE = {
 }
 
 CONFLICT_ERROR_CODES = {
+    "no_open_edit",
+    "editing_revision_conflict",
+    "content_hash_mismatch",
     "legacy_media_cutover_conflict",
     "media_editing_not_open",
     "media_install_in_progress",

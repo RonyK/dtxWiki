@@ -2393,6 +2393,11 @@
           "normalization_report": {
             "$ref": "#/components/schemas/IndexRefNormalizationReport"
           },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
+          },
           "review_item_id": {
             "anyOf": [
               {
@@ -4111,11 +4116,6 @@
             "pattern": "^[A-Za-z0-9._:-]+$",
             "title": "Idempotency Key",
             "type": "string"
-          },
-          "retry_only": {
-            "default": false,
-            "title": "Retry Only",
-            "type": "boolean"
           }
         },
         "required": [
@@ -8088,11 +8088,6 @@
             "title": "Idempotency Key",
             "type": "string"
           },
-          "retry_only": {
-            "default": false,
-            "title": "Retry Only",
-            "type": "boolean"
-          },
           "version_id": {
             "format": "uuid",
             "title": "Version Id",
@@ -8447,6 +8442,7 @@
           "code": {
             "description": "Stable warning code; must be drawn from WARNING_CODES.",
             "enum": [
+              "metadata_frontmatter_overridden",
               "stale",
               "permission_limited",
               "citation_missing",
@@ -17058,11 +17054,6 @@
             ],
             "title": "Page Type"
           },
-          "retry_only": {
-            "default": false,
-            "title": "Retry Only",
-            "type": "boolean"
-          },
           "session_version_id": {
             "anyOf": [
               {
@@ -19428,11 +19419,6 @@
             "maxItems": 500,
             "title": "Remove",
             "type": "array"
-          },
-          "retry_only": {
-            "default": false,
-            "title": "Retry Only",
-            "type": "boolean"
           },
           "version_id": {
             "format": "uuid",
@@ -22810,11 +22796,6 @@
             "minLength": 1,
             "title": "Reason",
             "type": "string"
-          },
-          "retry_only": {
-            "default": false,
-            "title": "Retry Only",
-            "type": "boolean"
           },
           "version_id": {
             "format": "uuid",

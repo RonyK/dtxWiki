@@ -106,6 +106,11 @@ _PUBLIC_ERRORS = frozenset(
         "restricted_library_denied",
         "conflict",
         "stale_base_version",
+        "no_open_edit",
+        "editing_revision_conflict",
+        "content_hash_mismatch",
+        "operation_interrupted",
+        "operation_tracking_unavailable",
         "internal_error",
         "unsupported_retrieval_mode",
     }
@@ -567,8 +572,11 @@ def _legacy_read_projection(
     elif call.tool_name in {
         "read_context_outline",
         "read_structure_map",
-    } and isinstance(arguments.get("target"), dict):
-        version_id = arguments["target"].get("version_id")
+    }:
+        version_id = arguments.get("version_id")
+        if version_id is None and isinstance(arguments.get("target"), dict):
+            # Historical trace summaries retain the removed wire shape.
+            version_id = arguments["target"].get("version_id")
     try:
         version_id = UUID(str(version_id))
     except (ValueError, TypeError):

@@ -212,8 +212,8 @@ def derive_artifact_links(
                 )
             )
     elif tool_name == "create_context_page":
-        # `data` is a PagePayload (`id`/`version_id`).
-        page_id = _uuid_or_none(data.get("id"))
+        # Current responses use page_id; stored historical payloads used id.
+        page_id = _uuid_or_none(data.get("page_id") or data.get("id"))
         if page_id is not None:
             candidates.append(
                 ArtifactLinkCandidate(
@@ -227,7 +227,7 @@ def derive_artifact_links(
     elif tool_name == "begin_context_edit":
         # Opens or resumes the caller's own editing session -- no content
         # changes yet, so this is closer to a read-like touch than a write.
-        page_id = _uuid_or_none(data.get("id"))
+        page_id = _uuid_or_none(data.get("page_id") or data.get("id"))
         if page_id is not None:
             candidates.append(
                 ArtifactLinkCandidate(
@@ -242,7 +242,7 @@ def derive_artifact_links(
         "submit_context_edit_for_review",
         "patch_context_edit",
     }:
-        page_id = _uuid_or_none(data.get("id"))
+        page_id = _uuid_or_none(data.get("page_id") or data.get("id"))
         if page_id is not None:
             candidates.append(
                 ArtifactLinkCandidate(
@@ -286,13 +286,10 @@ def derive_artifact_links(
     elif tool_name == "fetch":
         candidates.extend(_fetch_links(session, arguments))
     elif tool_name in {"read_context_outline", "read_structure_map"}:
-        # Resolve from the response document, not the request target: the
-        # target may be a concept path or a version id, and the document is
-        # the page the read actually landed on. The read ledger (design doc
-        # section 9) records exactly the version this read served --
-        # read_structure_map's document already names it "root_hash" (its
-        # own vocabulary); read_context_outline calls the same normalized
-        # value "content_hash".
+        # Resolve from the response document, not the request locator: a
+        # page_id may be a legacy path or stable URL. The read ledger records
+        # exactly the version served. Both partial reads expose content_hash;
+        # root_hash below only accepts historical captured response shapes.
         #
         # Unlike the write tools, these two output schemas are flat (no
         # "data" wrapper -- see ReadContextOutlineOutput/ReadStructureMapOutput
@@ -381,6 +378,8 @@ EDGE_LESS_TOOLS = frozenset(
         # P8.6: lists across many of the caller's own pages, like
         # list_changes/list_requested_changes above.
         "list_my_context_edits",
+        # Recovery reports an earlier operation; it consumes no new artifact.
+        "get_operation_status",
         # The legacy Pages tools are deregistered and their handlers are
         # gone, but these names stay: MCPToolCall rows written before the
         # removal still carry them, and this classification is applied to
@@ -432,10 +431,9 @@ def _result_detail(
         return {"error_details": error_details} if error_details else None
     data = _data(payload)
     detail: dict[str, Any] = {}
-    # Every context-edit response carries id/version_id (begin's PagePayload,
-    # the other commands' ContextEditResult) except discard's small result,
-    # which carries only version_id.
-    page_id = _uuid_or_none(data.get("id"))
+    # Context edit responses use page_id/version_id. Keep id only for traces
+    # captured before that wire rename; discard carries only version_id.
+    page_id = _uuid_or_none(data.get("page_id") or data.get("id"))
     if page_id is not None:
         detail["page_id"] = str(page_id)
     version_id = _uuid_or_none(data.get("version_id"))

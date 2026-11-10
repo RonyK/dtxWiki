@@ -58,6 +58,7 @@ def _create_context_page_args(workspace_id, slug: str, **extra):
         "title": slug.replace("-", " ").title(),
         "page_type": "overview",
         "body_md": f"# {slug}\n\nBody.\n",
+        "idempotency_key": slug,
         **extra,
     }
 
@@ -110,7 +111,32 @@ def test_new_sentinel_starts_exactly_one_chat_and_the_token_continues_it(
                     workspace_id, "continuity-one", conversation_token="new"
                 ),
             )
+            # Model a lost first response: the client still has literal 'new'
+            # and the same operation key, not the server-minted token.
+            replay = await client.call_tool(
+                "create_context_page",
+                _create_context_page_args(
+                    workspace_id, "continuity-one", conversation_token="new"
+                ),
+            )
             token = json.loads(first.content[0].text)["envelope"]["conversation_token"]
+            recovered = await client.call_tool(
+                "get_operation_status",
+                {
+                    "workspace_id": str(workspace_id),
+                    "idempotency_key": "continuity-one",
+                    "conversation_token": token,
+                },
+            )
+            original = json.loads(first.content[0].text)
+            replayed = json.loads(replay.content[0].text)
+            status = json.loads(recovered.content[0].text)
+            assert replayed["envelope"]["conversation_token"] == token
+            assert replayed["data"]["page_id"] == original["data"]["page_id"]
+            assert replayed["data"]["replayed"] is True
+            assert status["data"]["status"] == "committed", status
+            assert status["data"]["result"]["page_id"] == original["data"]["page_id"]
+            assert "body_md" not in status["data"]["result"]
             second = await client.call_tool(
                 "create_context_page",
                 _create_context_page_args(

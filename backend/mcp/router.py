@@ -12,6 +12,7 @@ from backend.mcp import (
     agent_tools,
     context_tools,
     maintenance_tools,
+    operation_tools,
     read_tools,
     review_tools,
     upload_tools,
@@ -47,6 +48,7 @@ from backend.services.read_errors import ReadServiceError
 logger = logging.getLogger(__name__)
 
 TOOL_HANDLERS = {
+    "get_operation_status": operation_tools.get_operation_status,
     "list_my_workspaces": read_tools.list_my_workspaces,
     "guide": read_tools.guide,
     "search": read_tools.search,

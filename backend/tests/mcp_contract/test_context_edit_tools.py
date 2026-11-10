@@ -59,6 +59,7 @@ def _create_page(page_service, actor, workspace_id, **overrides):
         "workspace_id": str(workspace_id),
         "title": "P8.6 Edit Tools Page",
         "body_md": "# Hello\n\nInitial body.",
+        "idempotency_key": str(uuid4()),
     }
     payload.update(overrides)
     response = dispatch(
@@ -81,7 +82,11 @@ def test_read_only_actor_cannot_create_context_page(
     workspace_id = _workspace(page_service)
     response = dispatch(
         "create_context_page",
-        {"workspace_id": str(workspace_id), "title": "Denied"},
+        {
+            "workspace_id": str(workspace_id),
+            "title": "Denied",
+            "idempotency_key": "denied-create",
+        },
         actor=read_only_actor,
         page_service=page_service,
     )
@@ -123,8 +128,7 @@ def test_update_then_submit_context_edit_happy_path(page_service, actor):
             "page_id": str(created.id),
             "title": created.title,
             "body_md": "# Hello\n\nUpdated body.",
-            "base_version_id": str(created.version_id),
-            "base_content_hash": created.content_hash,
+            "version_id": str(created.version_id),
             "expected_editing_revision": created.editing_revision,
             "idempotency_key": "update-happy-1",
         },
@@ -179,7 +183,7 @@ def test_cite_changes_references_on_private_edit_and_replays(page_service, actor
     assert _stored(page_service, created.version_id).version_status == "editing"
 
 
-def test_update_context_edit_rejects_stale_base_as_conflict(page_service, actor):
+def test_update_context_edit_rejects_stale_revision_as_conflict(page_service, actor):
     workspace_id = _workspace(page_service)
     created = _create_page(page_service, actor, workspace_id)
 
@@ -188,8 +192,7 @@ def test_update_context_edit_rejects_stale_base_as_conflict(page_service, actor)
         "page_id": str(created.id),
         "title": created.title,
         "body_md": "# Hello\n\nFirst update.",
-        "base_version_id": str(created.version_id),
-        "base_content_hash": created.content_hash,
+        "version_id": str(created.version_id),
         "expected_editing_revision": created.editing_revision,
     }
     first = dispatch(
@@ -200,7 +203,7 @@ def test_update_context_edit_rejects_stale_base_as_conflict(page_service, actor)
     )
     assert first.envelope.result_status == "succeeded", first.envelope
 
-    # Same (now stale) base + revision resent with a fresh key: must conflict,
+    # Same (now stale) revision resent with a fresh key: must conflict,
     # not silently clobber the save above.
     stale = dispatch(
         "update_context_edit",
@@ -209,7 +212,7 @@ def test_update_context_edit_rejects_stale_base_as_conflict(page_service, actor)
         page_service=page_service,
     )
     assert stale.envelope.result_status == "conflict"
-    assert stale.envelope.error_code == "stale_base_version"
+    assert stale.envelope.error_code == "editing_revision_conflict"
     assert stale.data is None
 
 
@@ -316,8 +319,7 @@ def test_update_context_edit_on_another_actors_private_page_is_not_found(
             "page_id": str(created.id),
             "title": created.title,
             "body_md": "# Hello\n\nActor B's own words, not A's.",
-            "base_version_id": str(created.version_id),
-            "base_content_hash": created.content_hash,
+            "version_id": str(created.version_id),
             "expected_editing_revision": created.editing_revision,
             "idempotency_key": "wrong-actor-update-not-found",
         },
@@ -445,7 +447,7 @@ def test_begin_context_edit_rejects_unknown_page(page_service, actor):
 def _structure_map(workspace_id, page_id, actor, page_service):
     return dispatch(
         "read_structure_map",
-        {"workspace_id": str(workspace_id), "target": {"page_id": str(page_id)}},
+        {"workspace_id": str(workspace_id), "page_id": str(page_id)},
         actor=actor,
         page_service=page_service,
     )
@@ -592,7 +594,7 @@ def test_patch_context_edit_rejects_stale_revision_as_masked_conflict(
         page_service=page_service,
     )
     assert stale.envelope.result_status == "conflict"
-    assert stale.envelope.error_code == "stale_base_version"
+    assert stale.envelope.error_code == "editing_revision_conflict"
     assert stale.data is None
     # The conflict names the caller's OWN current version -- masking
     # (_disclosable_version_fields) must pass through real data for the

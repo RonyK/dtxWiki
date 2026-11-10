@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 import threading
 import time
 from dataclasses import replace
@@ -63,6 +64,10 @@ from backend.services.context_write_service import (
 from backend.services.mcp_client_service import (
     MCPClientRuntimeDenied,
     evaluate_mcp_client_runtime,
+)
+from backend.services.mcp_operation_attempt import (
+    finish_operation_attempt,
+    start_operation_attempt,
 )
 from backend.services.mcp_trace_capture import persist_mcp_tool_trace
 from backend.services.mcp_trace_redaction import (
@@ -317,6 +322,8 @@ async def call_tool_async(
             requested_workspace_id=trace_workspace_id,
             requested_workspace_authorized=requested_workspace_authorized,
             require_token=is_content_call,
+            tool_name=name if is_content_call else None,
+            idempotency_key=_operation_key(arguments) if is_content_call else None,
         )
         conversation_token = conversation.token
         # conversation_token is a transport concern consumed above for chat
@@ -391,7 +398,7 @@ async def call_tool_async(
             # metric_status stays "error"; the finally emits it.
             return _tool_result(payload, is_error=True)
         response = await asyncio.to_thread(
-            dispatch,
+            _dispatch_recorded_operation,
             name,
             arguments,
             actor,
@@ -677,6 +684,144 @@ async def call_tool_async(
         return _tool_result(payload, is_error=True)
     finally:
         inc_mcp_tool_call(tool=name, status=metric_status)
+
+
+def _operation_key(arguments: dict[str, Any]) -> str | None:
+    value = arguments.get("idempotency_key")
+    return (
+        value
+        if (
+            isinstance(value, str)
+            and 1 <= len(value) <= 160
+            and re.fullmatch(r"[A-Za-z0-9._:-]+", value)
+        )
+        else None
+    )
+
+
+def _dispatch_recorded_operation(
+    name,
+    arguments,
+    actor,
+    page_service,
+    session_factory,
+    conversation_token,
+    *,
+    search_service=None,
+    tool_context=None,
+):
+    """Run and finalize in the worker, even when the async caller disconnects."""
+
+    identity = None
+    operation_factory = None
+    key = _operation_key(arguments) if name in CONTENT_TOOLS else None
+    if key is not None:
+        from backend.app.container import DatabaseProvider, ServiceRegistry
+        from backend.mcp.router import PolicyRejection, resolve_target_actor
+
+        context = tool_context or ToolCallContext(
+            actor=actor,
+            db=DatabaseProvider(
+                None, session_factory=(session_factory or page_service.session_factory)
+            ),
+            page_service=page_service,
+            services=ServiceRegistry(),
+        )
+        services = context.services or ServiceRegistry()
+        scoped_actor = resolve_target_actor(
+            tool_name=name,
+            payload=arguments,
+            actor=context.actor,
+            session_factory=context.db.control_session_factory(),
+            db=context.db,
+            directory=services.workspace_directory,
+        )
+        if isinstance(scoped_actor, PolicyRejection):
+            return MCPErrorResponse(
+                envelope=error_envelope(actor, scoped_actor.error_code)
+            )
+        operation_factory = context.db.session_for(scoped_actor.workspace_id)
+        try:
+            from backend.services.mcp_chat_service import resolve_effective_principal
+
+            with operation_factory() as operation_session:
+                principal = resolve_effective_principal(
+                    operation_session,
+                    workspace_id=scoped_actor.workspace_id,
+                    mcp_session_id=conversation_token,
+                    fallback_user_id=scoped_actor.user_id,
+                )
+            authorization_context = {
+                "principal_id": str(principal) if principal is not None else None,
+            }
+            if "review_item_id" in arguments:
+                try:
+                    authorization_context["review_item_id"] = str(
+                        UUID(str(arguments["review_item_id"]))
+                    )
+                except (ValueError, TypeError, AttributeError):
+                    pass
+            identity = start_operation_attempt(
+                operation_factory,
+                workspace_id=scoped_actor.workspace_id,
+                actor_kind=scoped_actor.actor_kind,
+                actor_id=scoped_actor.actor_id,
+                tool_name=name,
+                idempotency_key=key,
+                authorization_context=authorization_context,
+            )
+        except Exception:
+            logger.exception("MCP operation arrival could not be committed")
+            return MCPErrorResponse(
+                envelope=error_envelope(
+                    actor,
+                    "operation_tracking_unavailable",
+                    retryable=True,
+                )
+            )
+
+    def finish(**values):
+        if identity is None:
+            return
+        try:
+            finish_operation_attempt(operation_factory, identity, **values)
+        except Exception:
+            # Dispatch may already have committed. Its atomic receipt still
+            # proves success; do not turn a completion-record failure into an
+            # apparent domain-write failure.
+            logger.exception("MCP operation completion could not be committed")
+
+    try:
+        response = dispatch(
+            name,
+            arguments,
+            actor,
+            page_service,
+            session_factory,
+            conversation_token,
+            search_service=search_service,
+            tool_context=tool_context,
+        )
+    except BaseException:
+        finish(
+            error_code="internal_error",
+            error_message="The operation ended unexpectedly; retry with the same key.",
+            retryable=True,
+        )
+        raise
+    if identity is None:
+        return response
+    envelope = response.envelope
+    if envelope.result_status == "succeeded":
+        data = getattr(response, "data", None)
+        finish(result_payload=data.model_dump(mode="json") if data is not None else {})
+    else:
+        finish(
+            error_code=envelope.error_code or "internal_error",
+            error_message=(envelope.error_message or "The operation failed.")[:600],
+            retryable=envelope.retryable,
+        )
+    return response
 
 
 def _metric_status(result_status) -> str:

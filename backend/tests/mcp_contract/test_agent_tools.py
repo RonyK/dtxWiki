@@ -32,6 +32,7 @@ def test_mcp_write_agent_page_draft_never_activates(page_service, actor):
         "write_agent_page_draft",
         {
             "workspace_id": str(workspace_id),
+            "idempotency_key": str(uuid4()),
             "category": "persona",
             "title": "MCP Persona",
             "slug": "mcp-persona",
@@ -59,6 +60,7 @@ def test_mcp_agent_page_draft_keeps_live_gating_metadata(page_service, actor):
         "write_agent_page_draft",
         {
             "workspace_id": str(workspace_id),
+            "idempotency_key": str(uuid4()),
             "category": "skill",
             "title": "Downgraded Prompt",
             "slug": "default-system-prompt",
@@ -94,6 +96,7 @@ def test_mcp_agent_page_draft_first_write_stamps_origin_chat_session(
         "write_agent_page_draft",
         {
             "workspace_id": str(workspace_id),
+            "idempotency_key": str(uuid4()),
             "category": "persona",
             "title": "MCP Persona Origin",
             "slug": "mcp-persona-origin",
@@ -131,6 +134,7 @@ def test_mcp_agent_page_draft_without_token_leaves_origin_null(page_service, act
         "write_agent_page_draft",
         {
             "workspace_id": str(workspace_id),
+            "idempotency_key": str(uuid4()),
             "category": "persona",
             "title": "MCP Persona No Token",
             "slug": "mcp-persona-no-token",
@@ -160,6 +164,7 @@ def test_mcp_sensitive_agent_page_draft_returns_review_action(page_service, acto
         "write_agent_page_draft",
         {
             "workspace_id": str(workspace_id),
+            "idempotency_key": str(uuid4()),
             "category": "memory",
             "title": "MCP Memory",
             "slug": "mcp-memory",

@@ -103,18 +103,6 @@ class IdempotencyKeyConflictError(ReadServiceError):
         )
 
 
-class OperationOutcomeUnknownError(ReadServiceError):
-    """``retry_only`` found no valid (unexpired) receipt for the given key.
-
-    This is a read-only answer, not a license to execute: a caller in doubt
-    about whether its own prior send landed must not treat "no receipt" as
-    "safe to try for real" -- it re-sends the same idempotency_key WITHOUT
-    ``retry_only`` only once it has decided that on its own terms.
-    """
-
-    error_code = "operation_outcome_unknown"
-
-
 class BundleExpiredError(ReadServiceError):
     error_code = "bundle_expired"
 

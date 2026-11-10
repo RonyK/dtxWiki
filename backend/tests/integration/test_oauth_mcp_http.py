@@ -450,6 +450,7 @@ def test_mcp_http_enforces_live_workspace_role_matrix(
                     "title": f"MCP live {role}",
                     "page_type": "overview",
                     "body_md": f"# MCP live {role}",
+                    "idempotency_key": f"oauth-write-{role}",
                     "conversation_token": "new",
                 },
             },

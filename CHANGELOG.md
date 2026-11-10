@@ -42,6 +42,21 @@
 - Show the backup path, creation time, version change and loss of writes since
   the checkpoint before rollback, including `--dry-run` and `--yes`.
 
+### MCP editing contract
+
+- Recover lost write responses with `get_operation_status` using only the original
+  idempotency key. Track arrival, completion and interruption separately from
+  atomic write receipts; preserve the conversation when retrying a first write.
+- Remove `retry_only` from MCP and browser save requests. Require retry keys for
+  Context creation, review revisions and Agent draft writes.
+- Use top-level `page_id` and optional `version_id` for partial reads; remove
+  `target`. Context write results return `page_id`; structure maps return
+  `content_hash`. Uploads take `version_id`, and Context updates require it and use
+  `placement_parent_node_id` without `base_version_id`/`base_content_hash`.
+- Preserve staged metadata across updates and synchronize frontmatter through
+  one metadata resolver. Distinguish missing edits, revision conflicts and
+  content hash mismatches; trust successful receipts without a confirmation read.
+
 ## 0.2.4 — 2026-11-11
 
 Beta update improving Context graph navigation, history layout, and shared

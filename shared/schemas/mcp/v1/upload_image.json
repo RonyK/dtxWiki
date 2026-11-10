@@ -39,12 +39,6 @@
         "title": "Conversation Token",
         "type": "string"
       },
-      "editing_version_id": {
-        "description": "The caller's own currently-open editing version for this page. The image is registered against it; uploading requires an open editing session, not merely page access.",
-        "format": "uuid",
-        "title": "Editing Version Id",
-        "type": "string"
-      },
       "filename": {
         "maxLength": 255,
         "minLength": 1,
@@ -67,6 +61,12 @@
         "title": "Page Id",
         "type": "string"
       },
+      "version_id": {
+        "description": "The caller's own currently-open editing version for this page. The image is registered against it; uploading requires an open editing session, not merely page access.",
+        "format": "uuid",
+        "title": "Version Id",
+        "type": "string"
+      },
       "workspace_id": {
         "format": "uuid",
         "title": "Workspace Id",
@@ -80,7 +80,7 @@
       "content_base64",
       "marker_uuid",
       "page_id",
-      "editing_version_id",
+      "version_id",
       "conversation_token"
     ],
     "title": "UploadImageInput",
@@ -104,6 +104,7 @@
           "code": {
             "description": "Stable warning code; must be drawn from WARNING_CODES.",
             "enum": [
+              "metadata_frontmatter_overridden",
               "stale",
               "permission_limited",
               "citation_missing",

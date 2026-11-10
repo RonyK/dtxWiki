@@ -475,7 +475,6 @@ class ReferenceCommandRequest(BaseModel):
     version_id: UUID
     expected_editing_revision: int = Field(ge=1)
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
-    retry_only: bool = False
     add: list[DocumentReferenceInput] = Field(default_factory=list, max_length=500)
     remove: list[DocumentReferenceRemoveInput] = Field(
         default_factory=list, max_length=500

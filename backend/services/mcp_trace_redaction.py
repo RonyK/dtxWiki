@@ -102,7 +102,6 @@ _PATCH_CONTEXT_EDIT_TOP_LEVEL_FIELDS = frozenset(
         "version_id",
         "expected_editing_revision",
         "idempotency_key",
-        "retry_only",
         "conversation_token",
     }
 )
@@ -118,7 +117,7 @@ _UPLOAD_ARGUMENT_FIELDS = (
     "mime_type",
     "marker_uuid",
     "page_id",
-    "editing_version_id",
+    "version_id",
 )
 _UPLOAD_RESULT_FIELDS = (
     "asset_id",
@@ -357,7 +356,6 @@ _REFERENCE_ARGUMENT_FIELDS = frozenset(
         "version_id",
         "expected_editing_revision",
         "idempotency_key",
-        "retry_only",
     }
 )
 _REFERENCE_TARGET_FIELDS = frozenset({"target_kind", "target_id", "reference_id"})
@@ -524,8 +522,6 @@ def _valid_patch_context_edit_top_level_metadata(field: str, value: Any) -> bool
         return True
     if field == "expected_editing_revision":
         return type(value) is int and value >= 1
-    if field == "retry_only":
-        return type(value) is bool
     if field in {"idempotency_key", "conversation_token"}:
         return value is None or (isinstance(value, str) and 1 <= len(value) <= 160)
     return False

@@ -18,7 +18,6 @@ from backend.schemas.page import PagePayload
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.read_errors import (
     IdempotencyKeyConflictError,
-    OperationOutcomeUnknownError,
 )
 
 IDEMPOTENCY_WINDOW = timedelta(hours=24)
@@ -43,11 +42,9 @@ def execute_idempotent_write[ResultT: BaseModel](
     result_model: type[ResultT],
     execute: Callable[[], ResultT],
     replay_transform: Callable[[ResultT], ResultT] | None = None,
-    retry_only: bool = False,
+    replay_authorizer: Callable[[dict], None] | None = None,
 ) -> ResultT:
     if idempotency_key is None:
-        if retry_only:
-            raise ValueError("retry_only requires an idempotency_key")
         return execute()
 
     # pysqlite does not emit a real transaction for a SELECT-only outer scope.
@@ -66,9 +63,7 @@ def execute_idempotent_write[ResultT: BaseModel](
         MCPWriteIdempotency.tool_name == tool_name,
         MCPWriteIdempotency.idempotency_key == idempotency_key,
     )
-    row = session.scalar(
-        select(MCPWriteIdempotency).where(*scope).with_for_update()
-    )
+    row = session.scalar(select(MCPWriteIdempotency).where(*scope).with_for_update())
     if row is not None and row.expires_at > now:
         return _replay_result(
             row,
@@ -76,13 +71,8 @@ def execute_idempotent_write[ResultT: BaseModel](
             compatible_fingerprints=compatible_fingerprints,
             result_model=result_model,
             replay_transform=replay_transform,
+            replay_authorizer=replay_authorizer,
         )
-    if retry_only:
-        # No valid receipt: answer "unknown", never fall through to a claim +
-        # execute below. This is the same answer whether an expired receipt
-        # remains or maintenance already removed it. This read path leaves
-        # receipts untouched; only a real (non-retry_only) resend may execute.
-        raise OperationOutcomeUnknownError()
     if row is not None:
         session.execute(
             delete(MCPWriteIdempotency).where(MCPWriteIdempotency.id == row.id)
@@ -122,6 +112,7 @@ def execute_idempotent_write[ResultT: BaseModel](
             compatible_fingerprints=compatible_fingerprints,
             result_model=result_model,
             replay_transform=replay_transform,
+            replay_authorizer=replay_authorizer,
         )
 
     try:
@@ -131,12 +122,24 @@ def execute_idempotent_write[ResultT: BaseModel](
         # commit from preserving a visible pending claim or partial side effect.
         result = execute()
         payload = result.model_dump(mode="json")
+        authorization = getattr(result, "_operation_authorization", None)
+        if authorization is not None:
+            payload["_operation_authorization"] = authorization
         if isinstance(result, PagePayload) and result._edit_receipt is not None:
             # Keep command metadata internal; PagePayload's REST schema and
             # ordinary model serialization still omit this private receipt.
             payload["_edit_receipt"] = result._edit_receipt.model_dump(mode="json")
         if isinstance(result, PagePayload) and result._can_submit_for_review:
             payload["_can_submit_for_review"] = True
+        if isinstance(result, PagePayload) and result._metadata_overrides:
+            payload["_metadata_overrides"] = result._metadata_overrides
+        if isinstance(result, PagePayload) and result._placement_changed:
+            payload["_placement_changed"] = True
+            payload["_placement_parent_node_id"] = (
+                str(result._placement_parent_node_id)
+                if result._placement_parent_node_id is not None
+                else None
+            )
         claim.result_payload = payload
         session.flush()
     except BaseException:
@@ -163,7 +166,10 @@ def _replay_result[ResultT: BaseModel](
     compatible_fingerprints: Collection[str] = (),
     result_model: type[ResultT],
     replay_transform: Callable[[ResultT], ResultT] | None = None,
+    replay_authorizer: Callable[[dict], None] | None = None,
 ) -> ResultT:
+    if replay_authorizer is not None:
+        replay_authorizer(dict(row.result_payload))
     if (
         row.request_fingerprint != fingerprint
         and row.request_fingerprint not in compatible_fingerprints
@@ -175,13 +181,29 @@ def _replay_result[ResultT: BaseModel](
         # executing a second mutation against an indeterminate first attempt.
         raise RuntimeError("idempotency claim has no committed result")
     payload = dict(row.result_payload)
+    authorization = payload.pop("_operation_authorization", None)
     receipt = payload.pop("_edit_receipt", None)
     can_submit_for_review = payload.pop("_can_submit_for_review", False) is True
+    metadata_overrides = payload.pop("_metadata_overrides", [])
+    placement_changed = payload.pop("_placement_changed", False)
+    placement_parent_node_id = payload.pop("_placement_parent_node_id", None)
     result = result_model.model_validate(payload)
+    if authorization is not None:
+        result._operation_authorization = authorization
     if isinstance(result, PagePayload) and receipt is not None:
         result._edit_receipt = _stored_edit_receipt(receipt)
     if isinstance(result, PagePayload):
         result._can_submit_for_review = can_submit_for_review
+        result._metadata_overrides = metadata_overrides
+        result._placement_changed = placement_changed
+        result._placement_parent_node_id = (
+            UUID(placement_parent_node_id)
+            if placement_parent_node_id is not None
+            else None
+        )
+        result._replayed = True
+    elif "replayed" in type(result).model_fields:
+        result = result.model_copy(update={"replayed": True})
     if replay_transform is not None:
         return replay_transform(result)
     return result

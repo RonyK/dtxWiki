@@ -58,11 +58,6 @@
         "title": "Page Id",
         "type": "string"
       },
-      "retry_only": {
-        "default": false,
-        "title": "Retry Only",
-        "type": "boolean"
-      },
       "workspace_id": {
         "format": "uuid",
         "title": "Workspace Id",
@@ -79,6 +74,349 @@
   },
   "output": {
     "$defs": {
+      "BeginContextEditResult": {
+        "additionalProperties": false,
+        "description": "The complete open edit, with the MCP page identity spelling.",
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "alternative_draft_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Alternative Draft Id"
+          },
+          "block_map_stale": {
+            "default": false,
+            "description": "Whether the stored block map is missing or differs from the body; a whole-body save rebuilds it.",
+            "title": "Block Map Stale",
+            "type": "boolean"
+          },
+          "body_md": {
+            "title": "Body Md",
+            "type": "string"
+          },
+          "change_set_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Change Set Id"
+          },
+          "content_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_published_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Current Published Version Id"
+          },
+          "current_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Current Version Id"
+          },
+          "draft_saved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Draft Saved At"
+          },
+          "editing_revision": {
+            "default": 1,
+            "title": "Editing Revision",
+            "type": "integer"
+          },
+          "graph_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Graph Status"
+          },
+          "history_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "state_inconsistent",
+                  "current_editing",
+                  "current_draft",
+                  "published_snapshot",
+                  "alternative_draft",
+                  "discarded_draft",
+                  "superseded_snapshot",
+                  "superseded_draft"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "History Status"
+          },
+          "inconsistency_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Inconsistency Reasons",
+            "type": "array"
+          },
+          "is_alternative": {
+            "default": false,
+            "title": "Is Alternative",
+            "type": "boolean"
+          },
+          "is_discarded": {
+            "default": false,
+            "title": "Is Discarded",
+            "type": "boolean"
+          },
+          "is_draft_head": {
+            "default": false,
+            "title": "Is Draft Head",
+            "type": "boolean"
+          },
+          "is_public": {
+            "default": false,
+            "title": "Is Public",
+            "type": "boolean"
+          },
+          "is_published_head": {
+            "default": false,
+            "title": "Is Published Head",
+            "type": "boolean"
+          },
+          "is_visible_head": {
+            "default": false,
+            "title": "Is Visible Head",
+            "type": "boolean"
+          },
+          "lint_report": {
+            "additionalProperties": true,
+            "description": "Save-time fixes and findings for the final stored body.",
+            "title": "Lint Report",
+            "type": "object"
+          },
+          "page_id": {
+            "format": "uuid",
+            "title": "Page Id",
+            "type": "string"
+          },
+          "page_type": {
+            "default": "overview",
+            "enum": [
+              "overview",
+              "source",
+              "entity",
+              "concept",
+              "synthesis",
+              "comparison",
+              "decision",
+              "contradiction",
+              "query",
+              "guide"
+            ],
+            "title": "Page Type",
+            "type": "string"
+          },
+          "parent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parent Version Id"
+          },
+          "preserved_as_alternative": {
+            "default": false,
+            "title": "Preserved As Alternative",
+            "type": "boolean"
+          },
+          "publish_blocked_reasons": {
+            "items": {
+              "$ref": "#/$defs/DraftReviewReason"
+            },
+            "title": "Publish Blocked Reasons",
+            "type": "array"
+          },
+          "published_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Published Version No"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/$defs/ReferenceView"
+            },
+            "title": "References",
+            "type": "array"
+          },
+          "references_hash": {
+            "default": "",
+            "pattern": "^(?:[a-f0-9]{64})?$",
+            "title": "References Hash",
+            "type": "string"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "review_item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Review Item Id"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "superseded_review_count": {
+            "default": 0,
+            "title": "Superseded Review Count",
+            "type": "integer"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "version_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version Status"
+          },
+          "visible_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Visible Version Id"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "page_id",
+          "slug",
+          "title",
+          "updated_at",
+          "content_hash",
+          "workspace_id",
+          "body_md",
+          "version_id",
+          "created_at"
+        ],
+        "title": "BeginContextEditResult",
+        "type": "object"
+      },
       "DraftReviewReason": {
         "additionalProperties": false,
         "description": "One reason a write did not simply publish.\n\nLives here rather than beside either write surface because both use it: the\nMCP result names why a draft went to review, and the REST page payload names\nwhy a save was held from publication.",
@@ -106,6 +444,7 @@
           "code": {
             "description": "Stable warning code; must be drawn from WARNING_CODES.",
             "enum": [
+              "metadata_frontmatter_overridden",
               "stale",
               "permission_limited",
               "citation_missing",
@@ -500,343 +839,6 @@
         "title": "MCPResultEnvelope",
         "type": "object"
       },
-      "PagePayload": {
-        "additionalProperties": false,
-        "properties": {
-          "aliases": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Aliases",
-            "type": "array"
-          },
-          "alternative_draft_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Alternative Draft Id"
-          },
-          "block_map_stale": {
-            "default": false,
-            "description": "Whether the stored block map is missing or differs from the body; a whole-body save rebuilds it.",
-            "title": "Block Map Stale",
-            "type": "boolean"
-          },
-          "body_md": {
-            "title": "Body Md",
-            "type": "string"
-          },
-          "change_set_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Change Set Id"
-          },
-          "content_hash": {
-            "pattern": "^[a-f0-9]{64}$",
-            "title": "Content Hash",
-            "type": "string"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "current_published_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Current Published Version Id"
-          },
-          "current_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Current Version Id"
-          },
-          "draft_saved_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Draft Saved At"
-          },
-          "editing_revision": {
-            "default": 1,
-            "title": "Editing Revision",
-            "type": "integer"
-          },
-          "graph_status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Graph Status"
-          },
-          "history_status": {
-            "anyOf": [
-              {
-                "enum": [
-                  "state_inconsistent",
-                  "current_editing",
-                  "current_draft",
-                  "published_snapshot",
-                  "alternative_draft",
-                  "discarded_draft",
-                  "superseded_snapshot",
-                  "superseded_draft"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "History Status"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "inconsistency_reasons": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Inconsistency Reasons",
-            "type": "array"
-          },
-          "is_alternative": {
-            "default": false,
-            "title": "Is Alternative",
-            "type": "boolean"
-          },
-          "is_discarded": {
-            "default": false,
-            "title": "Is Discarded",
-            "type": "boolean"
-          },
-          "is_draft_head": {
-            "default": false,
-            "title": "Is Draft Head",
-            "type": "boolean"
-          },
-          "is_public": {
-            "default": false,
-            "title": "Is Public",
-            "type": "boolean"
-          },
-          "is_published_head": {
-            "default": false,
-            "title": "Is Published Head",
-            "type": "boolean"
-          },
-          "is_visible_head": {
-            "default": false,
-            "title": "Is Visible Head",
-            "type": "boolean"
-          },
-          "lint_report": {
-            "additionalProperties": true,
-            "description": "Save-time fixes and findings for the final stored body.",
-            "title": "Lint Report",
-            "type": "object"
-          },
-          "page_type": {
-            "default": "overview",
-            "enum": [
-              "overview",
-              "source",
-              "entity",
-              "concept",
-              "synthesis",
-              "comparison",
-              "decision",
-              "contradiction",
-              "query",
-              "guide"
-            ],
-            "title": "Page Type",
-            "type": "string"
-          },
-          "parent_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Parent Version Id"
-          },
-          "preserved_as_alternative": {
-            "default": false,
-            "title": "Preserved As Alternative",
-            "type": "boolean"
-          },
-          "publish_blocked_reasons": {
-            "items": {
-              "$ref": "#/$defs/DraftReviewReason"
-            },
-            "title": "Publish Blocked Reasons",
-            "type": "array"
-          },
-          "published_version_no": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Published Version No"
-          },
-          "references": {
-            "items": {
-              "$ref": "#/$defs/ReferenceView"
-            },
-            "title": "References",
-            "type": "array"
-          },
-          "references_hash": {
-            "default": "",
-            "pattern": "^(?:[a-f0-9]{64})?$",
-            "title": "References Hash",
-            "type": "string"
-          },
-          "review_item_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Review Item Id"
-          },
-          "slug": {
-            "title": "Slug",
-            "type": "string"
-          },
-          "superseded_review_count": {
-            "default": 0,
-            "title": "Superseded Review Count",
-            "type": "integer"
-          },
-          "tags": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Tags",
-            "type": "array"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "title": "Updated At",
-            "type": "string"
-          },
-          "version_id": {
-            "format": "uuid",
-            "title": "Version Id",
-            "type": "string"
-          },
-          "version_status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Version Status"
-          },
-          "visible_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Visible Version Id"
-          },
-          "workspace_id": {
-            "format": "uuid",
-            "title": "Workspace Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "slug",
-          "title",
-          "updated_at",
-          "content_hash",
-          "workspace_id",
-          "body_md",
-          "version_id",
-          "created_at"
-        ],
-        "title": "PagePayload",
-        "type": "object"
-      },
       "ReferenceOccurrence": {
         "properties": {
           "end": {
@@ -1062,7 +1064,7 @@
       "data": {
         "anyOf": [
           {
-            "$ref": "#/$defs/PagePayload"
+            "$ref": "#/$defs/BeginContextEditResult"
           },
           {
             "type": "null"

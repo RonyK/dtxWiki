@@ -118,6 +118,7 @@ WORKSPACE_PLANE_TABLES: frozenset[str] = frozenset(
         "mcp_chat_tool_call_artifact",
         "mcp_client",
         "mcp_tool_call",
+        "mcp_operation_attempt",
         "mcp_write_idempotency",
         "media_deletion_receipt",
         "media_blob_gc_candidate",

@@ -171,6 +171,7 @@ def _write_call(
                     "title": "Singular PAT scope regression",
                     "page_type": "overview",
                     "body_md": "# Singular PAT scope regression",
+                    "idempotency_key": str(uuid4()),
                     "conversation_token": "new",
                 },
             },

@@ -2705,8 +2705,6 @@ def _version_hidden_input(input_summary: Any) -> dict[str, Any]:
     revision = input_summary.get("expected_editing_revision")
     if type(revision) is int:
         projected["expected_editing_revision"] = revision
-    if type(input_summary.get("retry_only")) is bool:
-        projected["retry_only"] = input_summary["retry_only"]
     operations = input_summary.get("operations")
     if isinstance(operations, list):
         projected["operations"] = [

@@ -66,6 +66,7 @@ class AgentPageDraftResult(BaseModel):
     draft_version_id: UUID
     change_set_id: UUID
     review_item_id: UUID | None = None
+    replayed: bool = False
     next_action: Literal["owner_activation_required", "review_required"]
     normalization_report: IndexRefNormalizationReport = Field(
         default_factory=IndexRefNormalizationReport

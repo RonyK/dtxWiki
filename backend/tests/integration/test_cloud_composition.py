@@ -1184,7 +1184,7 @@ def test_split_provider_persists_trace_and_conversation_in_data_db(tmp_path):
         {
             "workspace_id": str(workspace_id),
             "page_id": str(page.id),
-            "editing_version_id": str(page.version_id),
+            "version_id": str(page.version_id),
             "filename": "page-only.png",
             "mime_type": "image/png",
             "content_base64": base64.b64encode(PNG_BYTES).decode("ascii"),

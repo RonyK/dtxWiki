@@ -239,7 +239,7 @@ def get_dtxwiki_prompt(
                             "data.markdown or data.logical_ref, never data.content_url "
                             "or another /api/v1 transport URL. upload_image always "
                             "requires an existing page_id and your own open "
-                            "editing_version_id -- for a new page, create it first, "
+                            "version_id -- for a new page, create it first, "
                             "then upload into it and call update_context_edit. Never "
                             "fall back to a data: "
                             "URI. A new "

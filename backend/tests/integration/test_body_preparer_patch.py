@@ -2,11 +2,13 @@
 
 from sqlalchemy import select
 
-from backend.models.context import ContextPageVersion
+from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.mcp_trace import MCPWriteIdempotency
 from backend.models.workspace import Workspace
-from backend.schemas.context_edit import ReplaceBlockOperation
+from backend.schemas.context_edit import ReplaceBlockOperation, ReplaceTextOperation
+from backend.services.page_service import pending_page_metadata_patch
 from backend.utils.content_hash import content_hash
+from backend.utils.page_frontmatter import parse_page_frontmatter
 
 ACTOR_ID = "00000000-0000-0000-0000-000000000010"
 
@@ -167,3 +169,83 @@ def test_context_edit_patch_fixes_final_body_and_replays_matching_receipt(
     assert next_patch.editing_revision == final_revision + 1
     assert next_patch._edit_receipt is not None
     assert next_patch._edit_receipt.operations[0].affected_block_ids == [target["id"]]
+
+    # Continue the same edit through managed and partial writes. This exposes
+    # the independent failure where body bytes, staged metadata and page title
+    # diverge even though both writers return successful receipts.
+    save_command = dict(
+        page_id=created.id,
+        workspace_id=workspace_id,
+        actor_kind="human",
+        actor_id=ACTOR_ID,
+        actor_provenance="mcp_client",
+        base_version_id=None,
+        base_content_hash=None,
+        editing_version_id=created.version_id,
+        title=None,
+    )
+    staged = page_service.autosave_page(
+        **save_command,
+        body_md=next_patch.body_md,
+        tags=["staged"],
+        aliases=["Staged alias"],
+        expected_editing_revision=next_patch.editing_revision,
+        idempotency_key="metadata-staged",
+    )
+    with session_factory.begin() as session:
+        session.get(ContextPage, created.id).title = "External title"
+    unchanged_frontmatter = page_service.autosave_page(
+        **save_command,
+        body_md=staged.body_md.replace("Keep this paragraph.", "Keep this content."),
+        expected_editing_revision=staged.editing_revision,
+        idempotency_key="metadata-retain-external-title",
+    )
+    assert unchanged_frontmatter.title == "External title"
+    retained = page_service.autosave_page(
+        **save_command,
+        body_md=parse_page_frontmatter(unchanged_frontmatter.body_md).body,
+        expected_editing_revision=unchanged_frontmatter.editing_revision,
+        idempotency_key="metadata-retain-staged",
+    )
+    assert (retained.title, retained.tags, retained.aliases) == (
+        "External title",
+        ["staged"],
+        ["Staged alias"],
+    )
+    metadata_patch = page_service.patch_context_edit(
+        **{
+            **command,
+            "operations": [
+                ReplaceTextOperation(
+                    op="replace_text",
+                    old_text='title: "External title"',
+                    new_text='title: "Patched title"',
+                ),
+                ReplaceTextOperation(
+                    op="replace_text", old_text='tags: ["staged"]', new_text="tags: []"
+                ),
+                ReplaceTextOperation(
+                    op="replace_text",
+                    old_text='aliases: ["Staged alias"]',
+                    new_text="aliases: []",
+                ),
+            ],
+            "expected_editing_revision": retained.editing_revision,
+            "idempotency_key": "metadata-patch-managed-frontmatter",
+        }
+    )
+    assert (metadata_patch.title, metadata_patch.tags, metadata_patch.aliases) == (
+        "Patched title",
+        [],
+        [],
+    )
+    parsed = parse_page_frontmatter(metadata_patch.body_md)
+    assert (parsed.title, parsed.tags, parsed.aliases) == ("Patched title", [], [])
+    with session_factory() as session:
+        page = session.get(ContextPage, created.id)
+        pending = pending_page_metadata_patch(
+            session, page=page, version_id=metadata_patch.version_id
+        )
+        assert pending["title"] == "Patched title"
+        assert pending["tags"] == pending["aliases"] == []
+        assert page.title == "External title"

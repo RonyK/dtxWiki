@@ -627,6 +627,7 @@ def _prune_background_history(
             if (
                 batch.next_job_cursor is not None
                 or batch.receipts_deleted == _HISTORY_BATCH_SIZE
+                or batch.attempts_deleted == _HISTORY_BATCH_SIZE
             ):
                 pending.append(workspace_id)
         except Exception:

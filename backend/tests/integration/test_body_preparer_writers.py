@@ -327,7 +327,7 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
         base = _published(page_service, f"w9-{suffix}")
         structure = dispatch(
             "read_structure_map",
-            {"workspace_id": str(workspace_id), "target": {"page_id": str(base.id)}},
+            {"workspace_id": str(workspace_id), "page_id": str(base.id)},
             actor=reader,
             page_service=page_service,
         )

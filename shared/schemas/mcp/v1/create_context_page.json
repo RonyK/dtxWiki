@@ -44,6 +44,14 @@
         "description": "Opaque MCP conversation token. Omit or pass 'new' to start a new dtxWiki MCP chat; echo the returned envelope value to append.",
         "title": "Conversation Token"
       },
+      "idempotency_key": {
+        "description": "24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.",
+        "maxLength": 160,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9._:-]+$",
+        "title": "Idempotency Key",
+        "type": "string"
+      },
       "page_type": {
         "anyOf": [
           {
@@ -122,7 +130,8 @@
       }
     },
     "required": [
-      "workspace_id"
+      "workspace_id",
+      "idempotency_key"
     ],
     "title": "CreateContextPageInput",
     "type": "object"
@@ -131,7 +140,7 @@
     "$defs": {
       "ContextEditResult": {
         "additionalProperties": false,
-        "description": "What an edit command saved: the version to address next and what changed.\n\nThe body is not repeated. edit_receipt.changes quotes the replaced\nregions; when you need text the receipt does not show, read this version\nby version_id (target.version_id), which still names it after a submit.",
+        "description": "What an edit command saved: the version to address next and what changed.\n\nThe body is not repeated. edit_receipt.changes quotes the replaced\nregions; when you need text the receipt does not show, read this version\nby page_id and version_id, which still name it after a submit.",
         "properties": {
           "change_set_id": {
             "anyOf": [
@@ -167,16 +176,29 @@
             "title": "Editing Revision",
             "type": "integer"
           },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
           "lint_report": {
             "additionalProperties": true,
             "description": "Save-time fixes and findings for the final stored body.",
             "title": "Lint Report",
             "type": "object"
+          },
+          "page_id": {
+            "format": "uuid",
+            "title": "Page Id",
+            "type": "string"
+          },
+          "placement_parent_node_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Placement Parent Node Id"
           },
           "publish_blocked_reasons": {
             "items": {
@@ -184,6 +206,11 @@
             },
             "title": "Publish Blocked Reasons",
             "type": "array"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
           },
           "review_item_id": {
             "anyOf": [
@@ -225,7 +252,7 @@
           }
         },
         "required": [
-          "id",
+          "page_id",
           "version_id",
           "editing_revision",
           "content_hash",
@@ -594,6 +621,7 @@
           "code": {
             "description": "Stable warning code; must be drawn from WARNING_CODES.",
             "enum": [
+              "metadata_frontmatter_overridden",
               "stale",
               "permission_limited",
               "citation_missing",
