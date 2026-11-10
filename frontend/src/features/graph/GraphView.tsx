@@ -111,6 +111,7 @@ export function GraphView({
   const actionGenerationRef = useRef(0);
   const frameRef = useRef<HTMLDivElement>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [detailsBelow, setDetailsBelow] = useState(false);
   const [canvasRatio, setCanvasRatio] = useState<GraphCanvasRatio>(readCanvasRatio);
   const [showFuture, setShowFuture] = useState(false);
   const [hoveredEventId, setHoveredEventId] = useState<string | null>(null);
@@ -366,13 +367,21 @@ export function GraphView({
       if (!effectiveSelectedId && !effectiveFocusedId) return;
       event.preventDefault();
       event.stopPropagation();
+      const closedId = effectiveSelectedId;
       setSelectedId(null);
       setFocusedId(null);
-      requestAnimationFrame(() => region.focus());
+      requestAnimationFrame(() => {
+        if (closedId && detailsBelow && listOpen) {
+          region.focus({ preventScroll: true });
+          returnToListRow(region, closedId);
+        } else {
+          region.focus();
+        }
+      });
     };
     region.addEventListener("keydown", handleEscape);
     return () => region.removeEventListener("keydown", handleEscape);
-  }, [effectiveFocusedId, effectiveSelectedId]);
+  }, [detailsBelow, effectiveFocusedId, effectiveSelectedId, listOpen]);
 
   useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
@@ -545,10 +554,13 @@ export function GraphView({
   }, []);
 
   function clearSelection() {
+    const closedId = effectiveSelectedId;
+    const region = graphRegionRef.current;
     selectionOriginRef.current = null;
     setSelectedId(null);
     setFocusedId(null);
-    graphRegionRef.current?.focus({ preventScroll: true });
+    region?.focus({ preventScroll: true });
+    if (closedId && detailsBelow && listOpen) requestAnimationFrame(() => returnToListRow(region, closedId));
   }
 
   function selectCanvasItem(id: string | null) {
@@ -745,7 +757,6 @@ export function GraphView({
   }, [coverageShown, historical, listOpen]);
   // A narrow page frame shows Details after the canvas and timeline: a phone
   // canvas is too short to carry it. Same 760px reader boundary as the sheet CSS.
-  const [detailsBelow, setDetailsBelow] = useState(false);
   useLayoutEffect(() => {
     const region = graphRegionRef.current;
     if (!region || typeof ResizeObserver === "undefined") return undefined;
@@ -1459,6 +1470,12 @@ function GraphDetails({
   );
 }
 
+
+/** Details closed below a full-length List: bring the reader back to the row it came from. */
+function returnToListRow(region: HTMLElement | null, id: string) {
+  const rows = region?.querySelectorAll<HTMLElement>(".graph-list-view button[data-local-graph-id]") ?? [];
+  Array.from(rows).find((row) => row.dataset.localGraphId === id)?.scrollIntoView?.({ block: "center" });
+}
 
 /** More opens upward from the footer; it stops under the title row so it never covers Clear selection. */
 function fitDetailsMenu(details: HTMLElement | null, more: HTMLDetailsElement, below: boolean) {

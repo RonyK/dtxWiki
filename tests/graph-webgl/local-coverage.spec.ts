@@ -865,7 +865,9 @@ for (const { locale, viewport } of LOCAL_LAYOUT_CASES) {
     await graph.locator(".graph-local-stage").scrollIntoViewIfNeeded();
     await evidenceScreenshot(page, testInfo, `local-${locale}-${viewport.width}-keyboard-selected-relation.png`);
     expect(await native!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
-    expect(await localStageGeometry(graph)).toEqual(idleGeometry);
+    // A narrow List grows in the page with its opened groups; the canvas under it does not.
+    const { frame, backing } = await localStageGeometry(graph);
+    expect({ frame, backing }).toEqual({ frame: idleGeometry.frame, backing: idleGeometry.backing });
     expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(idleState);
 
     // Text fallback preserves all original rows and does not attempt a

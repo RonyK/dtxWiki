@@ -7269,9 +7269,10 @@ button.graph-seed-pill:focus-visible { outline: 2px solid var(--context); outlin
   .graph-scope-short { display: inline; }
   .graph-frame-header { gap: 5px; }
   .graph-frame-header .graph-local-relation-chips { display: none; }
-  .graph-view .graph-frame-filters { position: absolute; right: 132px; top: calc(100% + 11px); }
+  .graph-view .graph-frame-filters { position: absolute; right: 100px; top: calc(100% + 11px); }
   .graph-frame-filters > summary { width: 44px; height: 44px; padding: 0; background: var(--surface); }
-  .graph-filter-popover { width: min(310px, 78vw); right: -122px; }
+  /* 8px from both reader edges: the anchor sits 100px inside the header, itself inside the frame's 1px border. */
+  .graph-filter-popover { width: calc(100cqi - 16px); right: -93px; }
   .graph-canvas-utilities { top: 10px; right: 6px; }
   .graph-canvas-utilities > button, .graph-camera-controls > button, .graph-canvas-more > summary { width: 44px; min-width: 44px; height: 44px; min-height: 44px; }
   .graph-canvas-context { max-width: calc(100% - 180px); left: 7px; }
@@ -7466,7 +7467,6 @@ button.graph-seed-path-node:hover { background: var(--surface-hover); }
 @container graph-view (max-width: 620px) {
   .graph-canvas-utilities .graph-fullscreen-control { display: none; }
   .graph-canvas-more .graph-mobile-fullscreen { display: flex; }
-  .graph-view .graph-frame-filters { right: 100px; }
   .graph-canvas-context { max-width: calc(100% - 150px); }
 }
 .graph-details-sheet-toggle { display: none; }
@@ -7502,11 +7502,17 @@ button.graph-seed-path-node:hover { background: var(--surface-hover); }
    Its canvas is short, so popovers may extend past the stage instead of being cut off. */
 @container graph-view (max-width: 760px) {
   .graph-frame:not(:fullscreen) .graph-local-stage { overflow: visible; }
+  /* The List takes its full length in the page, so a swipe on it scrolls the
+     page. The canvas stays mounted behind it, out of flow. */
+  .graph-frame:not(:fullscreen) .graph-local-stage.is-list-view .graph-canvas-frame { position: absolute; inset: 0 0 auto; opacity: 0; pointer-events: none; }
+  .graph-frame:not(:fullscreen) .graph-list-layer { position: static; overflow: visible; overscroll-behavior: auto; scrollbar-gutter: auto; }
+  .graph-frame:not(:fullscreen) .graph-list-layer::before { content: none; }
 }
 .graph-frame > .graph-details[hidden] { display: none; }
 .graph-frame > .graph-details { --graph-details-padding: 12px; padding-inline: 12px; border: 0; border-top: 1px solid var(--border); border-radius: 0; box-shadow: none; }
 .graph-frame > .graph-details .graph-details-title-row { position: static; scroll-margin-bottom: 76px; }
-.graph-frame > .graph-details .graph-details-footer { margin-inline: -12px; padding-inline: 12px; }
+/* Sticks to the reader's bottom edge, not above its reserved bottom padding. */
+.graph-frame > .graph-details .graph-details-footer { bottom: calc(-1 * var(--feature-main-bottom-padding, 0px)); margin-inline: -12px; padding-inline: 12px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
 /* Short content still leaves room for More between the title and the footer. */
 .graph-frame > .graph-details:has(.graph-details-more[open]) { min-height: 300px; }
 /* A wide fullscreen frame keeps Details as a top-right panel; a narrow one

@@ -105,15 +105,22 @@ for (const viewport of viewports) {
           painted: element.querySelector(".graph-details")!.contains(document.elementFromPoint(panel.left + 4, panel.top + 4)) };
       });
       expect(selectedGeometry.stageWidth).toBe(geometry.stageWidth);
-      expect(selectedGeometry.stageHeight).toBe(geometry.stageHeight);
+      // A narrow List takes its full length in the page; only its canvas keeps a size.
+      if (selectedGeometry.stageWidth > 760) expect(selectedGeometry.stageHeight).toBe(geometry.stageHeight);
       expect(selectedGeometry.canvasWidth).toBe(geometry.canvasWidth);
       expect(selectedGeometry.canvasHeight).toBe(geometry.canvasHeight);
       expect(selectedGeometry.panelLeft).toBeGreaterThanOrEqual(0);
       expect(selectedGeometry.panelRight).toBeLessThanOrEqual(0);
       expect(selectedGeometry.painted).toBe(true);
       if (selectedGeometry.stageWidth <= 760) {
-        // Details follows the canvas in the page and leaves it uncovered.
-        expect(selectedGeometry.panelTop).toBeGreaterThanOrEqual(geometry.stageHeight);
+        // Details follows the canvas in the page and leaves it uncovered;
+        // the pinned actions stay clear of its title row and close control.
+        expect(selectedGeometry.panelTop).toBeGreaterThanOrEqual(selectedGeometry.stageHeight);
+        const closeHit = await details.getByRole("button", { name: "Clear selection", exact: true }).evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          return element.contains(document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2));
+        });
+        expect(closeHit).toBe(true);
       } else {
         expect(selectedGeometry.panelBottom).toBeLessThanOrEqual(1);
         expect(selectedGeometry.panelTop).toBe(60);
