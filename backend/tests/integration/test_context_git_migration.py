@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.context_versions.adapters.git_libgit2 import GitSnapshotStore
 from backend.context_versions.codecs import MarkdownCodec
+from backend.context_versions.domain import ContentPayload
 from backend.models.context import ContextPage
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.tests.utils.postgres import drop_reflected_postgres_metadata
@@ -269,6 +270,37 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
             }
         assert restored == {item: row["commit_oid"] for item, row in converted.items()}
 
+        # Mix new body+identity snapshots with the immutable content-only
+        # history created above. Only an exact archived map can release SQL.
+        snapshots = GitSnapshotStore(root)
+        archived_history_oid = snapshots.commit(
+            workspace_id=workspace_id,
+            page_id=other_page_id,
+            version_id=other_history_id,
+            created_at=now,
+            payload=ContentPayload(b"reconcile base", block_map=block_map),
+            parents=[],
+        )
+        archived_current_oid = snapshots.commit(
+            workspace_id=workspace_id,
+            page_id=other_page_id,
+            version_id=other_id,
+            created_at=now,
+            payload=ContentPayload(b"other", block_map=block_map),
+            parents=[archived_history_oid],
+        )
+        snapshots.set_head(workspace_id, other_page_id, archived_current_oid)
+        restored.update(
+            {other_history_id: archived_history_oid, other_id: archived_current_oid}
+        )
+        with engine.begin() as connection:
+            for version_id in (other_history_id, other_id):
+                connection.execute(
+                    table.update()
+                    .where(table.c.id == key(version_id))
+                    .values(commit_oid=restored[version_id])
+                )
+
         # The same populated traversal exercises the destructive second
         # revision. A corrupt SQL copy must abort before nullable DDL or body
         # removal, even though an earlier row has already verified successfully.
@@ -294,6 +326,26 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
                 .where(table.c.id == key(historical_id))
                 .values(body_md=converted[historical_id]["body_md"])
             )
+            connection.execute(
+                table.update()
+                .where(table.c.id == key(other_history_id))
+                .values(block_map=[{"id": "not-the-archived-identity", "kind": "p"}])
+            )
+        # A matching body cannot detect identity loss: this independent guard
+        # must also refuse before DDL, using the same migration/DB traversal.
+        with pytest.raises(RuntimeError, match="verification failed"):
+            command.upgrade(config, BODY_REVISION)
+        assert not next(
+            item
+            for item in sa.inspect(engine).get_columns("context_page_version")
+            if item["name"] == "body_md"
+        )["nullable"]
+        with engine.begin() as connection:
+            connection.execute(
+                table.update()
+                .where(table.c.id == key(other_history_id))
+                .values(block_map=block_map)
+            )
         command.upgrade(config, BODY_REVISION)
 
         def stored_versions():
@@ -308,9 +360,9 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
 
         released = stored_versions()
         assert released[historical_id]["body_md"] is None
-        assert released[historical_id]["block_map"] is None
+        assert released[historical_id]["block_map"] == block_map
         assert released[other_history_id]["body_md"] is None
-        assert released[other_history_id]["block_map"] == block_map
+        assert released[other_history_id]["block_map"] is None
         for item in (
             current_id,
             other_id,
@@ -368,7 +420,7 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
             hydrated[item]["body_md"] == original["body_md"]
             for item, original in converted.items()
         )
-        assert hydrated[historical_id]["block_map"] is None
+        assert hydrated[historical_id]["block_map"] == block_map
         assert hydrated[other_history_id]["block_map"] == block_map
         assert not next(
             item
@@ -378,7 +430,8 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
         command.upgrade(config, BODY_REVISION)
         rereleased = stored_versions()
         assert rereleased[historical_id]["body_md"] is None
-        assert rereleased[other_history_id]["block_map"] == block_map
+        assert rereleased[historical_id]["block_map"] == block_map
+        assert rereleased[other_history_id]["block_map"] is None
         assert {item: row["commit_oid"] for item, row in rereleased.items()} == restored
     finally:
         if dialect == "postgresql":

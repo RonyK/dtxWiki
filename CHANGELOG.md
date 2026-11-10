@@ -21,9 +21,11 @@
 - Read past published Context bodies from workspace Git repositories while
   keeping the current approved body and work in progress in the database.
   Verify exact Git bytes before removing the previous head's database copy;
-  approval undo restores the selected head's body to the database.
-- Remove historical database bodies in a verified migration. Preserve maps
-  needed by existing reconciliation branches. Back up DB, Library and Git
+  new snapshots preserve block identities in `metadata.json` beside the body,
+  and approval undo restores both from the same commit.
+- Remove historical database bodies in a verified migration. Preserve database
+  maps for legacy content-only snapshots; release a map only after verifying its
+  exact Git copy. Back up DB, Library and Git
   together: losing `repositories/` loses the historical bodies.
 - Add `dtxwiki backup` to create the existing verified SQLite checkpoint without
   upgrading. Pause only running managed services and restore those services

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import unicodedata
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -78,7 +79,7 @@ def _repository(root: Path, workspace_id):
         repository.free()
 
 
-def _read(root: Path, row) -> str:
+def _read(root: Path, row) -> tuple[str, list[dict] | None]:
     """Prove the original version identity, descriptor and exact stored content."""
     try:
         descriptor = tuple(
@@ -101,16 +102,47 @@ def _read(root: Path, row) -> str:
             page_tree = repository[page_entry.id]
             content_entry = page_tree["content.md"]
             blob = repository[content_entry.id]
+            names = {entry.name for entry in page_tree}
             if (
                 len(commit.tree) != 1
                 or len(context_tree) != 1
-                or len(page_tree) != 1
+                or names
+                not in (
+                    {"content.md"},
+                    {"content.md", "metadata.json"},
+                )
                 or context_entry.filemode != pygit2.GIT_FILEMODE_TREE
                 or page_entry.filemode != pygit2.GIT_FILEMODE_TREE
                 or content_entry.filemode != pygit2.GIT_FILEMODE_BLOB
                 or not isinstance(blob, pygit2.Blob)
             ):
                 raise ValueError("snapshot tree does not belong to this page")
+            block_map = None
+            if "metadata.json" in names:
+                metadata_entry = page_tree["metadata.json"]
+                metadata_blob = repository[metadata_entry.id]
+                if (
+                    metadata_entry.filemode != pygit2.GIT_FILEMODE_BLOB
+                    or not isinstance(metadata_blob, pygit2.Blob)
+                ):
+                    raise ValueError("snapshot metadata is not a file")
+                metadata = json.loads(metadata_blob.data.decode("utf-8"))
+                if (
+                    not isinstance(metadata, dict)
+                    or set(metadata) != {"schema_version", "block_map"}
+                    or type(metadata["schema_version"]) is not int
+                    or metadata["schema_version"] != 1
+                    or not isinstance(metadata["block_map"], list)
+                    or not all(
+                        isinstance(entry, dict) for entry in metadata["block_map"]
+                    )
+                ):
+                    raise ValueError("snapshot metadata schema is invalid")
+                block_map = metadata["block_map"]
+                if row["block_map"] is not None and json.dumps(
+                    block_map, sort_keys=True, allow_nan=False
+                ) != json.dumps(row["block_map"], sort_keys=True, allow_nan=False):
+                    raise ValueError("snapshot block map differs from SQL")
             data = blob.data
             body = data.decode("utf-8")
             signature = (
@@ -143,7 +175,7 @@ def _read(root: Path, row) -> str:
                 )
             ):
                 raise ValueError("snapshot metadata or exact bytes differ")
-            return body
+            return body, block_map
     except (
         KeyError,
         ValueError,
@@ -214,25 +246,23 @@ def verify(
                 )
 
 
-def release_historical_bodies(connection: Connection) -> None:
+def release_historical_bodies(connection: Connection, root: Path) -> None:
     _pages, versions = _tables(connection)
-    branches = versions.alias("reconcile_branch")
-    preserve_map = sa.exists(
-        sa.select(branches.c.id).where(
-            branches.c.page_id == versions.c.page_id,
-            branches.c.workspace_id == versions.c.workspace_id,
-            branches.c.graph_status == "branched",
-            branches.c.reconcile_manifest.is_not(None),
-        )
-    )
-    connection.execute(
-        versions.update()
+    historical = (
+        sa.select(versions)
         .where(versions.c.version_status == "superseded_snapshot")
-        .values(
-            body_md=None,
-            block_map=sa.case((preserve_map, versions.c.block_map), else_=None),
-        )
+        .execution_options(yield_per=100)
     )
+    for row in connection.execute(historical).mappings():
+        _body, archived_map = _read(root, row)
+        # Existing content-only commits are immutable. Their SQL map remains
+        # the only exact identity copy, regardless of current branch activity.
+        changes = {"body_md": None}
+        if archived_map is not None:
+            changes["block_map"] = None
+        connection.execute(
+            versions.update().where(versions.c.id == row["id"]).values(**changes)
+        )
 
 
 def restore_database_bodies(connection: Connection, root: Path) -> None:
@@ -244,8 +274,10 @@ def restore_database_bodies(connection: Connection, root: Path) -> None:
         .execution_options(yield_per=100)
     )
     for row in connection.execute(missing).mappings():
+        body, archived_map = _read(root, row)
+        changes = {"body_md": body}
+        if archived_map is not None:
+            changes["block_map"] = archived_map
         connection.execute(
-            versions.update()
-            .where(versions.c.id == row["id"])
-            .values(body_md=_read(root, row))
+            versions.update().where(versions.c.id == row["id"]).values(**changes)
         )

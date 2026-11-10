@@ -1,6 +1,6 @@
 """SQL publication bridge; callers hold the existing publication transaction."""
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.context_versions.application import ContextVersionWriter
@@ -80,13 +80,23 @@ def prepare_publication(
             )
             if has_objects is not None:
                 raise ContextStorageServiceError("context_snapshot_invalid")
+        block_map = version.block_map
+        if block_map is None and version.commit_oid is None:
+            from backend.utils.block_identity import heal_block_map
+
+            block_map, _ = heal_block_map(
+                version.body_md, None, identity_seed=str(version.id)
+            )
+            version.block_map = block_map
         return writer.prepare_snapshot(
             workspace_id=page.workspace_id,
             page_id=page.id,
             version_id=version.id,
             created_at=version.created_at,
             payload=ContentPayload(
-                data=version.body_md.encode("utf-8"), descriptor=descriptor_for(version)
+                data=version.body_md.encode("utf-8"),
+                descriptor=descriptor_for(version),
+                block_map=block_map,
             ),
             parents=[previous.commit_oid]
             if previous is not None and previous.id != version.id
@@ -146,21 +156,19 @@ def _align_database_bodies(session, page, commit_oid, reader) -> None:
     if current._body_md is None:
         preserved.append((current, current.last_saved_at))
         current.body_md = codec_for(descriptor_for(current)).decode(data)
-    keep_maps = (
-        session.scalar(
-            select_projection_in_workspace(
-                ContextPageVersion,
-                workspace_id=page.workspace_id,
-                columns=(ContextPageVersion.id,),
-                predicates=(
-                    ContextPageVersion.page_id == page.id,
-                    ContextPageVersion.graph_status == "branched",
-                    ContextPageVersion.reconcile_manifest.is_not(None),
-                ),
-            ).limit(1)
-        )
-        is not None
+    archived_map = reader.read_block_map(
+        workspace_id=page.workspace_id,
+        page_id=page.id,
+        commit_oid=commit_oid,
+        descriptor=descriptor_for(current),
     )
+    if archived_map is not None:
+        if current._block_map is not None and current._block_map != archived_map:
+            raise ContextStorageServiceError("context_snapshot_invalid")
+        if current._block_map is None:
+            if not any(version is current for version, _ in preserved):
+                preserved.append((current, current.last_saved_at))
+            current.block_map = archived_map
     historical = session.scalars(
         select_in_workspace(
             ContextPageVersion,
@@ -168,17 +176,12 @@ def _align_database_bodies(session, page, commit_oid, reader) -> None:
             conditions=(
                 ContextPageVersion.page_id == page.id,
                 ContextPageVersion.version_status == "superseded_snapshot",
-                or_(
-                    ContextPageVersion.body_md.is_not(None),
-                    ContextPageVersion.block_map.is_not(None),
-                ),
+                ContextPageVersion.body_md.is_not(None),
             ),
         )
     )
     for version in historical:
         stored = version._body_md
-        if stored is None and (keep_maps or version.block_map is None):
-            continue
         if stored is not None:
             if version.commit_oid is None:
                 raise ContextStorageServiceError("context_snapshot_invalid")
@@ -190,9 +193,21 @@ def _align_database_bodies(session, page, commit_oid, reader) -> None:
             )
             if data != stored.encode("utf-8") or len(data) != version.content_byte_size:
                 raise ContextStorageServiceError("context_snapshot_invalid")
+        archived_map = reader.read_block_map(
+            workspace_id=page.workspace_id,
+            page_id=page.id,
+            commit_oid=version.commit_oid,
+            descriptor=descriptor_for(version),
+        )
+        if archived_map is not None and (
+            version._block_map is not None and version._block_map != archived_map
+        ):
+            raise ContextStorageServiceError("context_snapshot_invalid")
         preserved.append((version, version.last_saved_at))
         version.body_md = None
-        if not keep_maps:
+        # Legacy content-only commits cannot recover the original identities.
+        # Release the SQL copy only after verifying the exact archived map.
+        if archived_map is not None:
             version.block_map = None
     if preserved:
         session.flush()
@@ -242,6 +257,23 @@ def _verify_workspace(session: Session, store, workspace_id) -> int:
             )
         except ContextVersionStorageError as exc:
             raise ContextStorageServiceError(exc.code) from exc
+        try:
+            archived_map = store.read_block_map(
+                workspace_id=workspace_id,
+                page_id=version.page_id,
+                commit_oid=version.commit_oid,
+                descriptor=descriptor_for(version),
+            )
+        except ContextVersionStorageError as exc:
+            raise ContextStorageServiceError(exc.code) from exc
+        if archived_map is not None and (
+            (version._block_map is not None and version._block_map != archived_map)
+            or (
+                version.version_status == "published_snapshot"
+                and version._block_map is None
+            )
+        ):
+            raise ContextStorageServiceError("context_snapshot_invalid")
         if len(data) != version.content_byte_size:
             raise ContextStorageServiceError("context_snapshot_invalid")
         if version._body_md is not None:

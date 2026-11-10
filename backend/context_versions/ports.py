@@ -27,6 +27,15 @@ class SnapshotReader(Protocol):
         descriptor: ContentDescriptor,
     ) -> bytes: ...
 
+    def read_block_map(
+        self,
+        *,
+        workspace_id: UUID,
+        page_id: UUID,
+        commit_oid: str,
+        descriptor: ContentDescriptor,
+    ) -> list[dict] | None: ...
+
 
 class SnapshotWriter(Protocol):
     def commit(

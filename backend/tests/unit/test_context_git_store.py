@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime
 from threading import Barrier
 from uuid import uuid4
@@ -13,6 +14,7 @@ from backend.context_versions.adapters.git_libgit2 import GitSnapshotStore
 from backend.context_versions.application import ContextVersionWriter
 from backend.context_versions.codecs import MarkdownCodec
 from backend.context_versions.domain import ContextVersionStorageError
+from backend.utils.block_identity import compute_block_map_with_ids
 
 
 def test_independent_context_writes_overlap_without_shared_tree_or_ref(tmp_path):
@@ -47,6 +49,15 @@ def test_independent_context_writes_overlap_without_shared_tree_or_ref(tmp_path)
     payload_a, payload_b = (
         codec.encode("CRLF\r\ntrailing  \n"),
         codec.encode("e\u0301\x00"),
+    )
+    payload_a = replace(
+        payload_a,
+        block_map=compute_block_map_with_ids(
+            codec.decode(payload_a.data),
+            previous_body_md=None,
+            previous_block_map=None,
+            identity_seed="independent-context-a",
+        ),
     )
     version_a, version_b = uuid4(), uuid4()
     store.rendezvous = Barrier(2)
@@ -90,6 +101,48 @@ def test_independent_context_writes_overlap_without_shared_tree_or_ref(tmp_path)
         )
         == payload_b.data
     )
+    read_a = {
+        "workspace_id": workspace,
+        "page_id": page_a,
+        "commit_oid": record_a.commit_oid,
+        "descriptor": codec.descriptor,
+    }
+    assert store.read_block_map(**read_a) == payload_a.block_map
+    assert (
+        store.read_block_map(
+            workspace_id=workspace,
+            page_id=page_b,
+            commit_oid=record_b.commit_oid,
+            descriptor=codec.descriptor,
+        )
+        is None
+    )
+    replay_a = {
+        "workspace_id": workspace,
+        "page_id": page_a,
+        "version_id": version_a,
+        "created_at": created_at,
+        "parents": [seed.commit_oid],
+        "existing_oid": record_a.commit_oid,
+    }
+    assert writer.prepare_snapshot(**replay_a, payload=payload_a) == record_a
+    # Independent snapshot-format failure: a matching body must not permit
+    # replay with different archived identities. This adapter unit is the
+    # lowest boundary that distinguishes body equality from metadata equality.
+    with pytest.raises(ContextVersionStorageError, match="context_snapshot_invalid"):
+        writer.prepare_snapshot(**replay_a, payload=replace(payload_a, block_map=[]))
+    assert (
+        writer.prepare_snapshot(
+            workspace_id=workspace,
+            page_id=page_b,
+            version_id=version_b,
+            created_at=created_at,
+            payload=replace(payload_b, block_map=[]),
+            parents=[],
+            existing_oid=record_b.commit_oid,
+        )
+        == record_b
+    )
     with pytest.raises(ContextVersionStorageError, match="context_snapshot_invalid"):
         store.read(
             workspace_id=workspace,
@@ -107,8 +160,41 @@ def test_independent_context_writes_overlap_without_shared_tree_or_ref(tmp_path)
         )
         assert commit.author.offset == commit.committer.offset == 0
         assert commit.author.time == int(created_at.timestamp())
+        context_tree = repository[commit.tree["context"].id]
+        page_tree = repository[context_tree[str(page_a)].id]
+        assert {entry.name for entry in page_tree} == {"content.md", "metadata.json"}
+        # Malformed metadata is another independent storage failure: even a
+        # body-only reader must reject it, rather than silently lose identities.
+        damaged_page = repository.TreeBuilder(page_tree)
+        damaged_page.insert(
+            "metadata.json",
+            repository.create_blob(b'{"schema_version":2,"block_map":[]}'),
+            pygit2.GIT_FILEMODE_BLOB,
+        )
+        damaged_context = repository.TreeBuilder(context_tree)
+        damaged_context.insert(
+            str(page_a), damaged_page.write(), pygit2.GIT_FILEMODE_TREE
+        )
+        damaged_root = repository.TreeBuilder(commit.tree)
+        damaged_root.insert(
+            "context", damaged_context.write(), pygit2.GIT_FILEMODE_TREE
+        )
+        damaged_oid = str(
+            repository.create_commit(
+                None,
+                commit.author,
+                commit.committer,
+                commit.message,
+                damaged_root.write(),
+                commit.parent_ids,
+            )
+        )
     finally:
         repository.free()
+    with pytest.raises(ContextVersionStorageError, match="context_snapshot_invalid"):
+        store.read(**{**read_a, "commit_oid": damaged_oid})
+    with pytest.raises(ContextVersionStorageError, match="context_snapshot_invalid"):
+        store.read_block_map(**{**read_a, "commit_oid": damaged_oid})
     other = GitSnapshotStore(tmp_path / "independent")
     assert (
         other.commit(
@@ -136,7 +222,14 @@ def test_pack_pruning_preserves_reused_pack_and_objects_outside_captured_roots(
             page_id=page,
             version_id=uuid4(),
             created_at=datetime(2026, 11, 9, tzinfo=UTC),
-            payload=codec.encode(body),
+            payload=replace(
+                codec.encode(body),
+                block_map=compute_block_map_with_ids(
+                    body,
+                    previous_body_md=None,
+                    previous_block_map=None,
+                ),
+            ),
             parents=parents,
         )
 
@@ -186,6 +279,14 @@ def test_pack_pruning_preserves_reused_pack_and_objects_outside_captured_roots(
                 descriptor=codec.descriptor,
             )
             == b"new"
+        )
+        assert store.read_block_map(
+            workspace_id=workspace,
+            page_id=page,
+            commit_oid=tip,
+            descriptor=codec.descriptor,
+        ) == compute_block_map_with_ids(
+            "new", previous_body_md=None, previous_block_map=None
         )
         # Native ODB iteration can report zero objects without inspecting a
         # malformed pack when its native index is empty. That is not proof

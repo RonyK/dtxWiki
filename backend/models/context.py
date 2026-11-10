@@ -327,8 +327,8 @@ class ContextPageVersion(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     # Persisted identity/provenance sidecars for block-addressed edits. Existing
     # versions remain NULL and are derived lazily; new writes preserve the IDs
     # and exact reconciliation evidence that content alone cannot reconstruct.
-    block_map: Mapped[list | None] = mapped_column(
-        JSON(none_as_null=True), nullable=True
+    _block_map: Mapped[list | None] = mapped_column(
+        "block_map", JSON(none_as_null=True), nullable=True
     )
     reconcile_manifest: Mapped[dict | None] = mapped_column(
         JSON(none_as_null=True), nullable=True
@@ -399,6 +399,51 @@ class ContextPageVersion(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
 
     body_md: Mapped[str] = synonym(
         "_body_md", descriptor=property(_read_body_md, _write_body_md)
+    )
+
+    def _read_block_map(self) -> list | None:
+        """Read archived identities from the same immutable snapshot as the body."""
+        from backend.context_versions.domain import ContextVersionStorageError
+        from backend.services.context_version_storage import (
+            ContextStorageServiceError,
+            descriptor_for,
+        )
+
+        try:
+            stored = self._block_map
+        except DetachedInstanceError as exc:
+            raise ContextStorageServiceError("context_repository_unavailable") from exc
+        if stored is not None or self.commit_oid is None:
+            return stored
+        session = object_session(self)
+        reader = (
+            session.info.get("context_snapshot_store") if session is not None else None
+        )
+        if reader is None:
+            raise ContextStorageServiceError("context_repository_unavailable")
+        descriptor = descriptor_for(self)
+        key = (self.commit_oid, descriptor)
+        cached = self.__dict__.get("_git_block_map")
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        try:
+            block_map = reader.read_block_map(
+                workspace_id=self.workspace_id,
+                page_id=self.page_id,
+                commit_oid=self.commit_oid,
+                descriptor=descriptor,
+            )
+        except ContextVersionStorageError as exc:
+            raise ContextStorageServiceError(exc.code) from exc
+        self.__dict__["_git_block_map"] = (key, block_map)
+        return block_map
+
+    def _write_block_map(self, value: list | None) -> None:
+        self.__dict__.pop("_git_block_map", None)
+        self._block_map = value
+
+    block_map: Mapped[list | None] = synonym(
+        "_block_map", descriptor=property(_read_block_map, _write_block_map)
     )
 
     @property
