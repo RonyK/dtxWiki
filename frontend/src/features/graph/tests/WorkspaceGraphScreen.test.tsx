@@ -1857,6 +1857,27 @@ describe("WorkspaceGraphScreen", () => {
     expect(canvasCenterOnMock).not.toHaveBeenCalled();
   });
 
+  it("drops the previous FA2 camera and pins on reload while preserving selection", async () => {
+    const payload = baseScene();
+    const saved = { ...freshWorkspaceGraphState(), viewerId: "actor-one",
+      viewportEngine: "cosmos", selectedId: "context:alpha",
+      pinnedIds: ["context:alpha"], pinnedPositions: { "context:alpha": { x: 2100, y: 2300 } },
+      viewport: { zoom: .004117, pan: { x: 2048, y: 2048 } },
+      display: { show_edges: false, show_labels: false, show_orphans: true } };
+    const record = JSON.stringify({ revision: payload.graph_revision, mapScale: "2k", state: saved });
+    const scope = workspaceGraphStorageScope("workspace-one", "actor-one");
+    window.sessionStorage.setItem(`${scope}latest`, record);
+    window.sessionStorage.setItem(`${scope}${payload.graph_revision}`, record);
+    queryWorkspaceGraphMock.mockResolvedValue(payload);
+    renderScreen();
+    const canvas = await screen.findByTestId("workspace-graph-canvas");
+    expect(canvas).toHaveAttribute("data-selected-id", "context:alpha");
+    expect(canvas).toHaveAttribute("data-viewport", "null");
+    expect(canvas).toHaveAttribute("data-pinned-ids", "");
+    expect(canvas).toHaveAttribute("data-pinned-positions", "{}");
+    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
+  });
+
   it("restores an ordinary non-focus Map selection and camera without a navigation target", async () => {
     const payload = baseScene();
     const viewport = { zoom: 3, pan: { x: 39_000, y: 25_000 } };

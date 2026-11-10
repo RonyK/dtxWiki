@@ -74,6 +74,17 @@ for (const mobile of [false, true]) {
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
     await page.addInitScript(() => {
+      // A reloaded pre-D3 tab has the same actor, revision, renderer and scale.
+      // Only the persisted coordinate version distinguishes its old FA2 view.
+      const revision = "screen-focus-0000000000000001";
+      const prefix = "dtxwiki:workspace-graph:v2:focus-actor:focus-workspace:";
+      const legacy = JSON.stringify({ revision, mapScale: "2k", state: {
+        viewerId: "focus-actor", viewportEngine: "cosmos",
+        viewport: { zoom: .004117, pan: { x: 2048, y: 2048 } },
+        pinnedIds: ["context:0000"], pinnedPositions: { "context:0000": { x: 2100, y: 2300 } },
+      } });
+      sessionStorage.setItem(`${prefix}latest`, legacy);
+      sessionStorage.setItem(`${prefix}${revision}`, legacy);
       window.__mapLayoutGate = { hold: true, blockedFrames: 0, pending: [] };
       const NativeWorker = window.Worker;
       window.Worker = class LayoutGateWorker extends NativeWorker {
@@ -130,6 +141,8 @@ for (const mobile of [false, true]) {
     await expect(notice).toHaveAttribute("data-layout-state", "paused");
     await expect(canvas).toHaveAttribute("data-map-layout-running", "false");
     const paused = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
+    expect(paused.pinned).toEqual([]);
+    expect(paused.zoom).not.toBeCloseTo(.004117, 5);
     await page.evaluate(() => {
       window.__mapLayoutGate.hold = false;
       for (const deliver of window.__mapLayoutGate.pending.splice(0)) deliver();

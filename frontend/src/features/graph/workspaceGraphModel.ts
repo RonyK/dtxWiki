@@ -46,13 +46,18 @@ export type WorkspaceGraphRestorableState = {
  * per scale and are never applied to the other one; selection stays shared.
  */
 type WorkspaceGraphScaleView = Pick<WorkspaceGraphRestorableState, "viewport" | "pinnedIds" | "pinnedPositions">;
-type WorkspaceGraphScaleViews = Partial<Record<WorkspaceMapScale, WorkspaceGraphScaleView>>;
+type VersionedWorkspaceGraphScaleView = WorkspaceGraphScaleView & { coordinateVersion: number };
+type WorkspaceGraphScaleViews = Partial<Record<WorkspaceMapScale, VersionedWorkspaceGraphScaleView>>;
 const WORKSPACE_MAP_SCALES: readonly WorkspaceMapScale[] = ["2k", "10k"];
+// Coordinate compatibility belongs to the selected layout, not the renderer
+// or backend graph revision. D3 replaces the previous 2K coordinate frame;
+// native 10K keeps its existing frame, including records without a version.
+const COORDINATE_VERSIONS: Readonly<Record<WorkspaceMapScale, number>> = { "2k": 2, "10k": 1 };
 // Records written before scale keying carry no scale. 2K was the only layout
 // then; a wrong guess would put a 2K camera on the 10K scene again.
 const LEGACY_VIEW_SCALE: WorkspaceMapScale = "2k";
-// Cosmos clamps its own zoom to [1e-3, ∞). A 2K fit sits near 4e-3, so the old
-// 0.05 floor restored that camera about twelve times too close.
+// Cosmos accepts zooms down to 1e-3. Preserve valid wide-layout fits below the
+// legacy 0.05 storage floor rather than restoring them too close.
 const MIN_VIEWPORT_ZOOM = 0.001;
 
 export const DEFAULT_WORKSPACE_GRAPH_FILTERS: WorkspaceGraphDataFilters = {
@@ -363,7 +368,8 @@ export function removeFacetRule(
 /**
  * With `mapScale`, camera and pins come only from the view that scale captured;
  * the other scale's view stays parked in the record. Without it, the record's
- * top-level view is returned as before.
+ * top-level view is returned. Incompatible coordinate versions clear only
+ * camera and pins, preserving scale-neutral settings and selection.
  */
 export function loadWorkspaceGraphState(
   workspaceId: string,
@@ -386,7 +392,8 @@ export function loadWorkspaceGraphState(
       return freshWorkspaceGraphState();
     }
     if (revision && parsed.revision === revision) {
-      return mapScale ? { ...normalized, ...storedScaleView(parsed, normalized, mapScale) } : normalized;
+      const scale = mapScale ?? normalizeScale(parsed.mapScale) ?? LEGACY_VIEW_SCALE;
+      return { ...normalized, ...storedScaleView(parsed, normalized, scale) };
     }
     return {
       ...normalized,
@@ -400,7 +407,7 @@ export function loadWorkspaceGraphState(
   }
 }
 
-/** With `mapScale`, `state`'s camera and pins are stored as that scale's view. */
+/** Store camera and pins with their scale's coordinate version; default to 2K. */
 export function saveWorkspaceGraphState(
   workspaceId: string,
   actorId: string,
@@ -413,7 +420,7 @@ export function saveWorkspaceGraphState(
     const serialized = JSON.stringify({
       revision,
       state: { ...state, viewerId: actorId },
-      ...(mapScale ? scaleFields(readStoredRecord(workspaceId, actorId, revision), mapScale) : {}),
+      ...scaleFields(readStoredRecord(workspaceId, actorId, revision), mapScale ?? LEGACY_VIEW_SCALE),
     });
     window.sessionStorage.setItem(storageKey(workspaceId, actorId, revision), serialized);
     window.sessionStorage.setItem(storageKey(workspaceId, actorId, "latest"), serialized);
@@ -432,6 +439,7 @@ type StoredWorkspaceGraphState = Partial<WorkspaceGraphRestorableState> & {
   state?: Partial<WorkspaceGraphRestorableState>;
   /** Scale that owns the record's own camera and pins. */
   mapScale?: unknown;
+  coordinateVersion?: unknown;
   /** The other scale's camera and pins, kept so a visit cannot erase them. */
   scaleViews?: unknown;
 };
@@ -440,7 +448,7 @@ function emptyScaleView(): WorkspaceGraphScaleView {
   return { viewport: null, pinnedIds: [], pinnedPositions: {} };
 }
 
-function ownScaleView(state: WorkspaceGraphRestorableState): WorkspaceGraphScaleView {
+function ownScaleView(state: WorkspaceGraphScaleView): WorkspaceGraphScaleView {
   return { viewport: state.viewport, pinnedIds: state.pinnedIds, pinnedPositions: state.pinnedPositions };
 }
 
@@ -462,9 +470,16 @@ function normalizeScaleViews(value: unknown): WorkspaceGraphScaleViews {
   if (!isRecord(value)) return views;
   for (const scale of WORKSPACE_MAP_SCALES) {
     const view = value[scale];
-    if (isRecord(view)) views[scale] = normalizeScaleView(view);
+    if (isRecord(view) && compatibleCoordinateVersion(view, scale)) {
+      views[scale] = { ...normalizeScaleView(view), coordinateVersion: COORDINATE_VERSIONS[scale] };
+    }
   }
   return views;
+}
+
+function compatibleCoordinateVersion(value: { coordinateVersion?: unknown }, scale: WorkspaceMapScale): boolean {
+  return value.coordinateVersion === COORDINATE_VERSIONS[scale]
+    || scale === "10k" && value.coordinateVersion === undefined;
 }
 
 function storedScaleView(
@@ -472,8 +487,11 @@ function storedScaleView(
   state: WorkspaceGraphRestorableState,
   scale: WorkspaceMapScale,
 ): WorkspaceGraphScaleView {
-  if ((normalizeScale(record.mapScale) ?? LEGACY_VIEW_SCALE) === scale) return ownScaleView(state);
-  return normalizeScaleViews(record.scaleViews)[scale] ?? emptyScaleView();
+  if ((normalizeScale(record.mapScale) ?? LEGACY_VIEW_SCALE) === scale) {
+    return compatibleCoordinateVersion(record, scale) ? ownScaleView(state) : emptyScaleView();
+  }
+  const parked = normalizeScaleViews(record.scaleViews)[scale];
+  return parked ? ownScaleView(parked) : emptyScaleView();
 }
 
 /** The same-revision record this actor already saved, or null when none is trustworthy. */
@@ -494,15 +512,18 @@ function readStoredRecord(workspaceId: string, actorId: string, revision: string
 function scaleFields(
   previous: ReturnType<typeof readStoredRecord>,
   scale: WorkspaceMapScale,
-): { mapScale: WorkspaceMapScale; scaleViews?: WorkspaceGraphScaleViews } {
+): { mapScale: WorkspaceMapScale; coordinateVersion: number; scaleViews?: WorkspaceGraphScaleViews } {
   const parked = previous ? normalizeScaleViews(previous.record.scaleViews) : {};
   const previousScale = normalizeScale(previous?.record.mapScale) ?? LEGACY_VIEW_SCALE;
   if (previous && previousScale !== scale) {
-    const view = ownScaleView(previous.state);
-    if (view.viewport || view.pinnedIds.length) parked[previousScale] = view;
+    const view = storedScaleView(previous.record, previous.state, previousScale);
+    if (view.viewport || view.pinnedIds.length) {
+      parked[previousScale] = { ...view, coordinateVersion: COORDINATE_VERSIONS[previousScale] };
+    }
   }
   delete parked[scale];
-  return { mapScale: scale, ...(Object.keys(parked).length ? { scaleViews: parked } : {}) };
+  return { mapScale: scale, coordinateVersion: COORDINATE_VERSIONS[scale],
+    ...(Object.keys(parked).length ? { scaleViews: parked } : {}) };
 }
 
 export function freshWorkspaceGraphState(): WorkspaceGraphRestorableState {
